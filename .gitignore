@@ -16,3 +16,5 @@ host/
 state/
 *.log
 __pycache__/
+qt/**/__pycache__/
+.pytest_cache/
