@@ -1,13 +1,13 @@
 """A title bar of our own, for a frameless window.
 
 On Linux the window manager's bar is a grey strip that does not know the theme; the WebKit shell
-drew its own (a GTK HeaderBar) and the Windows host too. This one is the same idea in Qt: the mark,
+drew its own (a GTK HeaderBar) and the Windows host too. This one is the same idea in Qt:
 the title, the window buttons, dragging by the bar, double-click to maximise, and resizing from
 the window's edges through the platform (``startSystemMove`` / ``startSystemResize``, which work on
 X11 and Wayland alike).
 
-It is one surface with the sidebar: the same chrome, no line under it, the mark in the sidebar's
-brand column (18px in, like ``.brand``), the window buttons as quiet as the sidebar's own icons.
+It is one surface with the sidebar: the same chrome, no line under it, the title starting in the
+sidebar's brand column (18px in, like ``.brand``; no mark, the sidebar's brand row has it), the window buttons as quiet as the sidebar's own icons.
 """
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 from ... import theme
 from ..sidebar import IconBtn
-from .bits import Mark
 from .signals import bind
 
 HEIGHT = 38
@@ -37,7 +36,6 @@ class TitleBar(QWidget):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(18, 0, 6, 0)
         lay.setSpacing(9)
-        lay.addWidget(Mark(15))
         self.title = QLabel(window.windowTitle() or "Pilcrow")
         self.title.setObjectName("titlebar-title")
         lay.addWidget(self.title, 1)

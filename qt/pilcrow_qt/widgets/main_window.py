@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, Qt, QTimer, QVariantAnimation, Signal
-from PySide6.QtGui import QColor, QKeySequence, QPainter, QPainterPath, QPen, QShortcut
+from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
+from PySide6.QtGui import QColor, QFontMetrics, QKeySequence, QPainter, QPainterPath, QPen, QShortcut
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QStackedWidget, QVBoxLayout, QWidget
 
 from .. import icons, theme
@@ -574,6 +574,14 @@ class Resizer(QWidget):
 # ---------------------------------------------------------------- bars and the boot screen
 
 
+class _ElideLabel(QLabel):
+    """A label a layout may squeeze: its text is elided to the room it gets (OfflineBar._fit), so its
+    full text must not become the sheet's minimum width."""
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        return QSize(0, super().minimumSizeHint().height())
+
+
 class OfflineBar(QWidget):
     """``.offline``: the line across the top of the sheet while the background process is away."""
 
@@ -587,11 +595,29 @@ class OfflineBar(QWidget):
         lay.addStretch(1)
         self.ico = QLabel()
         lay.addWidget(self.ico)
-        self.text = QLabel("Lost the connection to Pilcrow's background process. Reconnecting…")
-        self.text.setWordWrap(True)  # a long notice (an update waiting) wraps instead of being cut
-        lay.addWidget(self.text, 1)  # the whole width, so a long notice wraps only when it must
+        self.text = _ElideLabel()
+        lay.addWidget(self.text)
+        lay.addStretch(1)  # centred, like the web's justify-content: center
+        self._full = ""
         bind(theme.theme.changed, self, lambda _t: self._paint())
         self._paint()
+        self.set_text("Lost the connection to Pilcrow's background process. Reconnecting…")
+
+    def set_text(self, text: str) -> None:
+        self._full = text
+        self._fit()
+
+    def _fit(self) -> None:
+        # One centred line; a notice wider than the bar is elided rather than wrapped or cut.
+        room = self.width() - 14 * 2 - 14 - 8
+        fm = QFontMetrics(self.text.font())
+        self.text.setText(
+            fm.elidedText(self._full, Qt.TextElideMode.ElideRight, max(40, room)) if room > 0 else self._full
+        )
+
+    def resizeEvent(self, e) -> None:  # noqa: N802
+        super().resizeEvent(e)
+        self._fit()
 
     def _paint(self) -> None:
         t = theme.tokens()
@@ -616,7 +642,7 @@ class UpdateNotice(OfflineBar):
             self.hide()
             return
         newer = _compare_versions(str(server), __version__) > 0
-        self.text.setText(
+        self.set_text(
             f"Pilcrow {server} is installed. Quit Pilcrow and open it again to use it."
             if newer
             else f"Pilcrow {__version__} is installed, but its background process is still {server}. Quit Pilcrow and open it again to finish updating."

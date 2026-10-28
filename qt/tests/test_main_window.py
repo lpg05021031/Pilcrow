@@ -192,8 +192,8 @@ def test_custom_title_bar_is_one_surface_with_the_sidebar(mock_server):
         assert c.win.main.mapTo(c.win, QPoint(0, Card.TOP)).y() == 38 + 8, "the sheet starts 8px under the bar"
         from pilcrow_qt.widgets.ui.bits import Mark
 
-        mark = [m for m in tb.findChildren(Mark)][0]
-        assert mark.mapTo(c.win, QPoint(0, 0)).x() == 18, "the mark sits in the sidebar's brand column"
+        assert not tb.findChildren(Mark), "no mark in the bar: the sidebar's brand row has it"
+        assert tb.title.mapTo(c.win, QPoint(0, 0)).x() == 18, "the title starts in the sidebar's brand column"
         assert tb.title.text().endswith("Pilcrow")
         assert c.shot("titlebar").exists()
     finally:
