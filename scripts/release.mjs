@@ -83,6 +83,7 @@ if (flags.has('--skip-tests')) {
   run('npm', ['run', 'check']);
   run('npm', ['run', 'lint']);
   run('npm', ['run', 'test:unit']);
+  if (existsSync(join(ROOT, 'qt', 'tests'))) run(python, ['-m', 'pytest', 'qt/tests', '-q', '-p', 'no:cacheprovider']);
 }
 
 // ---- build

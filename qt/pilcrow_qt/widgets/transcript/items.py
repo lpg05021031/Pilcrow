@@ -17,8 +17,20 @@ import time
 from typing import Callable, List, Optional
 from urllib.parse import quote, unquote
 
-from PySide6.QtCore import QByteArray, QSize, Qt, QTimer, QUrl, QUrlQuery, Signal
-from PySide6.QtGui import QPixmap, QTextDocument
+from PySide6.QtCore import QByteArray, QPointF, QRectF, QSize, Qt, QTimer, QUrl, QUrlQuery, Signal
+from PySide6.QtGui import (
+    QColor,
+    QFontMetrics,
+    QFontMetricsF,
+    QPainter,
+    QPalette,
+    QPen,
+    QPixmap,
+    QTextCharFormat,
+    QTextCursor,
+    QTextDocument,
+    QTextTable,
+)
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -26,6 +38,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QTextBrowser,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -48,6 +61,7 @@ from ..ui.signals import bind
 from .ctx import ToolCtx
 
 BUSY = ("running", "starting", "requires_action")
+BUBBLE_LINE = markdown.px(theme.FS_BODY * 1.55)  # .msg-bubble line-height
 HAN = re.compile(r"[㐀-鿿豈-﫿]")
 MENTION = re.compile(r"(@[\w./~-]+[\w/-])")
 # Words from the composing room, since the mark is a pilcrow: what an editor does while a page takes shape.
@@ -174,19 +188,31 @@ def row_margins(w: QWidget) -> tuple:
 class MarkdownView(QTextBrowser):
     """Prose from Markdown (Markdown.tsx): a frameless read-only text browser that takes the height of
     its document. While a reply streams only the block being written is rendered again; finished
-    blocks keep their HTML. Links open outside; a code span that looks like a path opens in Files."""
+    blocks keep their HTML. Links open outside; a code span that looks like a path opens in Files.
+
+    Lines are set at the web's pixel heights (``.md``: 14.5px on 24px lines) and the decorations
+    QTextDocument cannot draw from HTML are painted under the text: the pill behind inline code, the
+    rule beside a blockquote, the rounded well of a code block, the hairlines of a table."""
 
     def __init__(
-        self, cwd: str = "", compact: bool = False, quiet: bool = False, parent: Optional[QWidget] = None
+        self,
+        cwd: str = "",
+        compact: bool = False,
+        quiet: bool = False,
+        parent: Optional[QWidget] = None,
+        line_height: Optional[int] = None,
     ) -> None:
         super().__init__(parent)
         self.cwd = cwd
         self._compact = compact
         self._quiet = quiet
+        self._m = markdown.metrics(compact or quiet)
+        self._line = line_height or self._m.line
         self._blocks: List[str] = []
         self._html: List[str] = []
         self._open: List[bool] = []
         self._text = ""
+        self._raw: Optional[str] = None  # HTML given straight (the person's message), not Markdown
         self.setReadOnly(True)
         self.setFrameShape(QTextBrowser.Shape.NoFrame)
         self.setOpenLinks(False)
@@ -196,6 +222,7 @@ class MarkdownView(QTextBrowser):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.viewport().setAutoFillBackground(False)
         self.document().setDocumentMargin(0)
+        self.document().setIndentWidth(self._m.list_indent)
         self.setFixedHeight(1)
         self.document().documentLayout().documentSizeChanged.connect(self._fit)
         self.anchorClicked.connect(self._on_anchor)
@@ -204,21 +231,36 @@ class MarkdownView(QTextBrowser):
 
     def _paint(self) -> None:
         t = theme.tokens()
-        size = theme.FS_UI if (self._compact or self._quiet) else theme.FS_BODY
+        m = self._m
         color = t.text_2 if self._quiet else t.text
+        font = theme.font_ui(m.base)
+        self.document().setDefaultFont(font)
+        # A fixed line box in QTextDocument sits its text at the bottom; the web centres it. Pulling
+        # the viewport up by the half-leading puts the glyphs where the browser puts them.
+        natural = QFontMetrics(font).height()
+        self._lead = max(0, (self._line - natural) // 2)
+        self.setViewportMargins(0, -self._lead, 0, 0)
         self.setStyleSheet(
-            f"MarkdownView {{ font-size: {pt(size)}; color: {color}; background: transparent; border: none; padding: 0; "
+            f"MarkdownView {{ font-size: {pt(m.base)}; color: {color}; background: transparent; border: none; padding: 0; "
             f"selection-background-color: {theme.blend(t.selection, t.canvas).name()}; }}"
         )
-        self.document().setDefaultStyleSheet(
-            f"p {{ margin-top: 0; margin-bottom: {4 if self._compact else 8}px; line-height: 160%; }} li {{ line-height: 150%; }}"
-        )
+        css = markdown.stylesheet(t, m)
+        if self._line != m.line:
+            css += f" p {{ line-height: {self._line}px; }}"
+        self.document().setDefaultStyleSheet(css)
+        pal = self.palette()
+        pal.setColor(QPalette.ColorRole.Dark, theme.blend(t.hair, t.canvas))  # what <hr> is drawn with
+        pal.setColor(QPalette.ColorRole.Text, QColor(color))
+        self.setPalette(pal)
 
     def _on_theme(self) -> None:
         self._paint()
         self._html = []
         self._blocks = []
-        self.set_text(self._text, False, force=True)
+        if self._raw is not None:
+            self.set_html(self._raw, force=True)
+        else:
+            self.set_text(self._text, False, force=True)
 
     def _fit(self, size) -> None:
         h = max(1, int(math.ceil(size.height())))
@@ -230,6 +272,7 @@ class MarkdownView(QTextBrowser):
         if text == self._text and not force and not streaming:
             return
         self._text = text
+        self._raw = None
         blocks = markdown.split_blocks(text) if text else []
         out: List[str] = []
         opens: List[bool] = []
@@ -240,15 +283,77 @@ class MarkdownView(QTextBrowser):
             out.append(self._html[i] if cached else self._render(b, open_))
             opens.append(open_)
         self._blocks, self._html, self._open = blocks, out, opens
-        self.setHtml("".join(out))
-        self.document().documentLayout().documentSizeChanged.emit(self.document().size())
+        self._set_html("".join(out))
+
+    def set_html(self, body: str, force: bool = False) -> None:
+        """Rich text that is not Markdown (the person's own words with their mentions)."""
+        if body == self._raw and not force:
+            return
+        self._raw = body
+        self._text = ""
+        self._blocks, self._html, self._open = [], [], []
+        self._set_html(body)
+
+    def _set_html(self, body: str) -> None:
+        doc = self.document()
+        doc.setHtml(body)
+        self._tidy(doc)
+        doc.documentLayout().documentSizeChanged.emit(doc.size())
+
+    @staticmethod
+    def _tidy(doc: QTextDocument) -> None:
+        """What the CSS says with ``:first-child``/``:last-child``: no margin above the first block or
+        under the last; and the empty paragraph QTextDocument leaves after a code block's table takes
+        no room (the table's own bottom margin is the gap)."""
+        first, last = doc.firstBlock(), doc.lastBlock()
+        if first.blockFormat().topMargin():
+            cur = QTextCursor(first)
+            bf = cur.blockFormat()
+            bf.setTopMargin(0)
+            cur.setBlockFormat(bf)
+        if last.blockFormat().bottomMargin():
+            cur = QTextCursor(last)
+            bf = cur.blockFormat()
+            bf.setBottomMargin(0)
+            cur.setBlockFormat(bf)
+        for frame in doc.rootFrame().childFrames():
+            b = doc.findBlock(frame.lastPosition() + 1)
+            if b.isValid() and not b.text() and b != last and b.charFormat().fontPointSize() != 1:
+                # an empty line is as tall as its font whatever its line height says: make the font tiny
+                cur = QTextCursor(b)
+                cf = QTextCharFormat()
+                cf.setFontPointSize(1)
+                cur.setBlockCharFormat(cf)
+                bf = cur.blockFormat()
+                bf.setTopMargin(0)
+                bf.setBottomMargin(0)
+                cur.setBlockFormat(bf)
 
     def _render(self, block: str, streaming: bool) -> str:
         try:
-            out = markdown.render_html(block, streaming=streaming, compact=self._compact)
+            out = markdown.render_html(block, streaming=streaming, compact=self._compact or self._quiet)
         except Exception:  # noqa: BLE001 - a Markdown failure must not take the row down
             out = f"<p>{html.escape(block)}</p>"
         return _link_paths(out)
+
+    def measure(self, body: str, width: int) -> tuple:
+        """(ideal width, height) of a rich-text body laid out like this view, for sizing a bubble."""
+        doc = QTextDocument()
+        doc.setDocumentMargin(0)
+        doc.setDefaultFont(self.document().defaultFont())
+        doc.setDefaultStyleSheet(self.document().defaultStyleSheet())
+        doc.setHtml(body)
+        self._tidy(doc)
+        doc.setTextWidth(width)
+        h = int(math.ceil(doc.size().height()))  # lays the text out
+        lines = 0
+        b = doc.firstBlock()
+        while b.isValid() and lines < 2:
+            lines += b.layout().lineCount() if b.layout() is not None else 1
+            b = b.next()
+        # a block that wraps is as wide as it may be (the web's max-width), a one-liner hugs its words
+        w = width if lines > 1 else min(width, int(math.ceil(doc.idealWidth())))
+        return w, h
 
     def _on_anchor(self, url: QUrl) -> None:
         if url.scheme() == "pilcrow-path":
@@ -267,6 +372,163 @@ class MarkdownView(QTextBrowser):
 
     def wheelEvent(self, e) -> None:  # noqa: N802
         e.ignore()  # the conversation scrolls, never the row
+
+    def set_find(self, needle: str, current: int = -1) -> bool:
+        """Light every occurrence of ``needle`` (the find wash) and the ``current``-th one in full
+        (accent on white), as the web's ::highlight(find) and ::highlight(find-current). An empty
+        needle clears them. Returns whether anything was lit."""
+        sels = []
+        if needle:
+            t = theme.tokens()
+            # Inline code carries word joiners (U+2060) so it never wraps; the search sees the text
+            # without them, and ``pos`` maps a clean offset back to a document position.
+            raw = self.document().toPlainText()
+            pos = [i for i, ch in enumerate(raw) if ch != "\u2060"]
+            text = "".join(raw[i] for i in pos).lower()
+            wash = QTextCharFormat()
+            wash.setBackground(theme.blend("rgba(217, 119, 87, 0.28)", t.canvas))
+            full = QTextCharFormat()
+            full.setBackground(QColor(t.accent))
+            full.setForeground(QColor("#ffffff"))
+            n = needle.lower()
+            i = text.find(n)
+            k = 0
+            while i >= 0 and len(sels) < 2000:
+                cur = QTextCursor(self.document())
+                cur.setPosition(pos[i])
+                cur.setPosition(pos[i + len(n) - 1] + 1, QTextCursor.MoveMode.KeepAnchor)
+                sel = QTextEdit.ExtraSelection()
+                sel.cursor = cur
+                sel.format = full if k == current else wash
+                sels.append(sel)
+                k += 1
+                i = text.find(n, i + len(n))
+        self.setExtraSelections(sels)
+        return bool(sels)
+
+    def createMimeDataFromSelection(self):  # noqa: N802
+        """Copied text loses the thin spaces that pad the code pills."""
+        md = super().createMimeDataFromSelection()
+        if md is not None and md.hasText():
+            md.setText(md.text().replace("\u2009", "").replace("\u2060", ""))
+        return md
+
+    # ---- decorations under the text
+    def paintEvent(self, e) -> None:  # noqa: N802
+        self._paint_decor(e.rect())
+        super().paintEvent(e)
+
+    def _paint_decor(self, rect) -> None:
+        doc = self.document()
+        lay = doc.documentLayout()
+        t = theme.tokens()
+        p = QPainter(self.viewport())
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        pill = theme.blend(t.fill_2, t.canvas)
+        quote = theme.blend(t.hair_2, t.canvas)
+        inset = QColor(t.inset)
+        hair, hair2 = theme.blend(t.hair, t.canvas), theme.blend(t.hair_2, t.canvas)
+        view = QRectF(rect)
+        for frame in doc.rootFrame().childFrames():
+            if not isinstance(frame, QTextTable):
+                continue
+            fr = self._table_rect(doc, lay, frame)
+            if not fr.intersects(view):
+                continue
+            if frame.format().borderCollapse():
+                # .md-code: the inset well, with a hairline only on a light page
+                p.setBrush(inset)
+                p.setPen(Qt.PenStyle.NoPen if t.dark else QPen(hair, 1))
+                p.drawRoundedRect(fr.adjusted(0.5, 0.5, -0.5, -0.5) if not t.dark else fr, theme.R3, theme.R3)
+                p.setPen(Qt.PenStyle.NoPen)
+            else:
+                self._table_rules(p, doc, lay, frame, fr, hair, hair2)  # .md table
+        pos = lay.hitTest(QPointF(0, view.top()), Qt.HitTestAccuracy.FuzzyHit)
+        b = doc.findBlock(pos) if pos >= 0 else doc.firstBlock()
+        while b.isValid():
+            br = lay.blockBoundingRect(b)
+            if br.top() > view.bottom():
+                break
+            if br.bottom() >= view.top():
+                bf = b.blockFormat()
+                if bf.leftMargin() == markdown.QUOTE_INDENT and b.textList() is None:
+                    h = self._block_height(b, br)
+                    nxt = b.next()
+                    if nxt.isValid() and nxt.blockFormat().leftMargin() == markdown.QUOTE_INDENT:
+                        h += bf.bottomMargin()  # one rule down a quote of several paragraphs
+                    p.fillRect(QRectF(br.left(), br.top(), 2, h), quote)
+                self._pills(p, b, br, pill)
+            b = b.next()
+        p.end()
+
+    @staticmethod
+    def _pills(p: QPainter, b, br, color) -> None:
+        tl = b.layout()
+        if tl is None or tl.lineCount() == 0:
+            return
+        it = b.begin()
+        while not it.atEnd():
+            fr = it.fragment()
+            it += 1
+            bg = fr.charFormat().background()
+            if bg.style() == Qt.BrushStyle.NoBrush or bg.color().alpha() != 0:
+                continue
+            fm = QFontMetricsF(fr.charFormat().font())
+            asc, desc = fm.ascent(), fm.descent()
+            start = fr.position() - b.position()
+            end = start + fr.length()
+            line = tl.lineForTextPosition(start)
+            while line.isValid() and line.textStart() < end:
+                a = max(start, line.textStart())
+                z = min(end, line.textStart() + line.textLength())
+                x1 = line.cursorToX(a)[0]
+                x2 = line.cursorToX(z)[0]
+                base = br.top() + line.y() + line.ascent()
+                p.setBrush(color)
+                p.drawRoundedRect(QRectF(br.left() + x1, base - asc - 2, x2 - x1, asc + desc + 4), 5, 5)
+                if line.lineNumber() + 1 >= tl.lineCount():
+                    break
+                line = tl.lineAt(line.lineNumber() + 1)
+
+    @staticmethod
+    def _block_height(b, br) -> float:
+        """A block's drawn height: its bounding rect stops at the glyphs, not at its fixed line boxes."""
+        tl = b.layout()
+        n = tl.lineCount() if tl is not None else 0
+        if not n:
+            return br.height()
+        last = tl.lineAt(n - 1)
+        return max(br.height(), last.y() + last.height())
+
+    def _table_rect(self, doc, lay, table: QTextTable) -> QRectF:
+        """The box a table occupies. The layout reports a table's rect from its first cell's content and
+        with its margins folded in, so the box is read off the cells: the first one's padding above its
+        first line, the frame's bottom margin under the block that follows."""
+        first = table.cellAt(0, 0)
+        cf = first.format().toTableCellFormat()
+        top_block = lay.blockBoundingRect(first.firstCursorPosition().block())
+        top = top_block.top() - cf.topPadding()
+        left = top_block.left() - cf.leftPadding()
+        fr = lay.frameBoundingRect(table)
+        after = doc.findBlock(table.lastPosition() + 1)
+        if after.isValid() and after.position() > table.lastPosition():
+            bottom = lay.blockBoundingRect(after).top() - table.format().bottomMargin()
+        else:
+            bottom = top + fr.height()
+        return QRectF(left, top, fr.width(), max(0.0, bottom - top))
+
+    def _table_rules(self, p: QPainter, doc, lay, table: QTextTable, fr: QRectF, hair, hair2) -> None:
+        """``.md th, .md td``: a hairline under every row (a stronger one under the header)."""
+        rows = table.rows()
+        for r in range(rows):
+            if r + 1 < rows:
+                nxt = table.cellAt(r + 1, 0)
+                pad = nxt.format().toTableCellFormat().topPadding()
+                bottom = lay.blockBoundingRect(nxt.firstCursorPosition().block()).top() - pad
+            else:
+                bottom = fr.bottom()
+            p.fillRect(QRectF(fr.left(), bottom - 1, fr.width(), 1), hair2 if r == 0 else hair)
 
 
 _CODE_RE = re.compile(r"<code( style=\"[^\"]*\")>([^<]*)</code>")
@@ -353,17 +615,14 @@ class UserMessage(Row):
         bl.setSpacing(0)
         if item.images or item.files:
             bl.addWidget(self._attachments())
-        self.text = QLabel()
-        self.text.setWordWrap(True)
-        self.text.setTextFormat(Qt.TextFormat.RichText)
-        self.text.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        # ``.msg-bubble``: 14.5px on 1.55 lines, like the prose but tighter
+        self.text = MarkdownView(line_height=BUBBLE_LINE)
         self.text.setVisible(bool(item.text))
-        self.text.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         bl.addWidget(self.text)
         lay.addWidget(self.bubble, 0, Qt.AlignmentFlag.AlignRight)
         # the actions keep their room (the web fades them in), so a hover never moves the page
         self.actions = QWidget()
-        self.actions.setFixedHeight(29)
+        self.actions.setFixedHeight(28)  # .msg-actions: margin-top 4px over 24px icon buttons
         al = QHBoxLayout(self.actions)
         al.setContentsMargins(0, 4, 0, 0)
         al.setSpacing(2)
@@ -373,6 +632,7 @@ class UserMessage(Row):
         self.rewind_btn = IconButton("history", "Restore files to how they were before this message", 13)
         self.rewind_btn.clicked.connect(self._rewind)
         for b in (self.copy_btn, self.edit_btn, self.rewind_btn):
+            b.setFixedSize(24, 24)  # .icon-btn.sm
             al.addWidget(b)
             b.setVisible(False)
         lay.addWidget(self.actions, 0, Qt.AlignmentFlag.AlignRight)
@@ -424,13 +684,7 @@ class UserMessage(Row):
             return
         pad_w, pad_h = 28, 18
         avail = max(80, int(self.width() * 0.84)) - pad_w
-        doc = QTextDocument()
-        doc.setDefaultFont(theme.font_ui(theme.FS_BODY))
-        doc.setDocumentMargin(0)
-        doc.setHtml(render_mentions(self.item.text))
-        doc.setTextWidth(avail)
-        text_w = min(avail, int(math.ceil(doc.idealWidth())))
-        text_h = int(math.ceil(doc.size().height()))
+        text_w, text_h = self.text.measure(render_mentions(self.item.text), avail)
         attach = self.bubble.layout().itemAt(0).widget() if self.bubble.layout().count() > 1 else None
         w = text_w
         h = text_h if self.item.text else 0
@@ -438,12 +692,13 @@ class UserMessage(Row):
             w = max(w, attach.sizeHint().width())
             h += attach.sizeHint().height()
         self.text.setFixedWidth(max(1, text_w if self.item.text else 1))
+        self.text.setFixedHeight(max(1, text_h if self.item.text else 1))
         self.bubble.setFixedSize(w + pad_w, h + pad_h)
 
     def _draw(self) -> None:
         if self.bubble is None:
             return
-        self.text.setText(render_mentions(self.item.text))
+        self.text.set_html(render_mentions(self.item.text))
         self.text.setVisible(bool(self.item.text))
         self._size_bubble()
         self.sync_state()
@@ -493,7 +748,11 @@ class UserMessage(Row):
         self.bubble.setStyleSheet(
             f"#bubble {{ background: {bg}; border-radius: 16px; }} #file-chip {{ background: {theme.blend(t.fill_2, bg).name()}; border-radius: {theme.R2}px; font-size: {pt(theme.FS_SMALL)}; }}"
         )
-        style_label(self.text, theme.FS_BODY, t.text_3 if self._queued else t.text, extra="line-height: 155%;")
+        self.text.setStyleSheet(
+            f"MarkdownView {{ font-size: {pt(theme.FS_BODY)}; color: {t.text_3 if self._queued else t.text}; "
+            f"background: transparent; border: none; padding: 0; "
+            f"selection-background-color: {theme.blend(t.selection, bg).name()}; }}"
+        )
         style_label(self.queued_note, theme.FS_MICRO, t.text_3, extra="margin-top: 6px;")
 
     def find_text(self) -> str:
@@ -584,7 +843,7 @@ def render_mentions(text: str) -> str:
             )
         else:
             out.append(esc)
-    return f'<span style="white-space:pre-wrap">{"".join(out)}</span>'
+    return f'<p style="white-space:pre-wrap;margin:0">{"".join(out)}</p>'
 
 
 # ---------------------------------------------------------------- Claude's prose
@@ -613,7 +872,7 @@ class AssistantText(Row):
 
 
 class Thinking(Row):
-    TOP, BOTTOM = 6, 6
+    TOP, BOTTOM = 8, 8
 
     def __init__(self, item: ThinkingItem, view: str = "normal", parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -627,8 +886,10 @@ class Thinking(Row):
         self.head.setFixedHeight(26)
         self.head.setAccessibleName("Thinking")
         hl = QHBoxLayout(self.head)
-        hl.setContentsMargins(0, 0, 6, 0)
-        hl.setSpacing(4)
+        # .thinking-head: margin-left -8px, padding 0 9px 0 7px, gap 7px; a layout has no negative
+        # margin, so the icon sits on the text edge (1px right of the web's) and the hover tint starts there
+        hl.setContentsMargins(0, 0, 9, 0)
+        hl.setSpacing(7)
         self.ico = icon_label("sparkles", theme.tokens().think, 13)
         hl.addWidget(self.ico)
         self.title = QLabel()
@@ -1161,7 +1422,7 @@ class WorkingLine(Row):
 
     def _paint(self) -> None:
         t = theme.tokens()
-        style_label(self.text, theme.FS_UI, t.text_2, 500)
+        style_label(self.text, theme.FS_UI, t.text_3, 500)  # .working: text-3, the verb at 500
         style_label(self.meta, theme.FS_SMALL, t.text_3)
 
 

@@ -6,7 +6,7 @@ import time
 from typing import Any, Dict
 
 from harness import app_client, mock_server  # noqa: F401
-from PySide6.QtWidgets import QLabel, QPushButton
+from PySide6.QtWidgets import QLabel
 
 MOCK_PORT = 5391
 SID = "sess-login"
@@ -126,7 +126,7 @@ def test_changes_diff_rows_and_notes(app_client, monkeypatch):
     c.wait_until(lambda: len(page.view.rows()) == 2, 5, "two file rows")
     rows = page.view.rows()
     assert rows[0].name.text() == "auth.ts" and rows[0].dir.text() == "web/src/lib"
-    assert rows[1].dir.text().startswith("server/routes/login.js →")  # the rename shows where it came from
+    assert rows[1].dir.text() == "server/routes" and "login.js" in rows[1].dir.toolTip()  # the rename's origin
     assert page.stat_add.text() == "+3" and page.stat_del.text() == "−2" and page.stat_files.text() == "· 2 files"
     assert page.pr_btn.isVisible() and page.commit_btn.isVisible()
     c.wait_until(lambda: rows[0].grid is not None, 3, "grid built")
@@ -175,7 +175,7 @@ def test_changes_diff_rows_and_notes(app_client, monkeypatch):
 
 def test_changes_send_notes_and_review(app_client, monkeypatch):
     c = app_client
-    _fake_calls(c, monkeypatch, {"git.diff": DIFF_FILES})  # a bare list is accepted too
+    _fake_calls(c, monkeypatch, {"git.diff": {"isRepo": True, "root": "/r", "branch": "main", "files": DIFF_FILES}})
     page = _open_tab(c, "changes", 800)
     c.wait_until(lambda: len(page.view.rows()) == 2 and page.view.rows()[1].grid is not None, 5, "rows")
     grid = page.view.rows()[1].grid
@@ -254,7 +254,7 @@ def test_tasks_panel_shows_workflow_counts(app_client):
     c.store.rt[SID].st["tasks"] = [workflow, bash, done]
     c.store.rt_changed.emit(SID)
     page = _open_tab(c, "tasks", 800)
-    from pilcrow_qt.widgets.panels.right_panel import TabStrip
+    from pilcrow_qt.widgets.panels.right_panel import Btn, TabStrip
     from pilcrow_qt.widgets.panels.tasks import TaskRow
 
     c.wait_until(lambda: page.workflow_cards(), 5, "workflow card")
@@ -266,7 +266,7 @@ def test_tasks_panel_shows_workflow_counts(app_client):
     rows = c.find(TaskRow, page)
     assert [r.task["id"] for r in rows] == ["task-bash", "task-done"]
     assert "listening on 3000" in rows[0].sub.text()
-    assert "Stop" in c.texts(QPushButton, rows[0])
+    assert "Stop" in c.texts(Btn, rows[0])
     strip = c.find(TabStrip)[0]
     assert strip.buttons["tasks"]._count == 2  # the workflow and the command are running
     c.sleep(100)
@@ -287,7 +287,7 @@ def test_info_panel_model_and_ring(app_client):
     )  # gateway display name, "Claude " trimmed
     rings = c.find(ContextRing, page)
     assert rings and rings[0].used == 21280 and rings[0].total == 200000 and rings[0].text == "11%"
-    assert "<b>21k</b>" in page.gauge_line.text() and "200k tokens" in page.gauge_line.text()
+    assert ">21k</b>" in page.gauge_line.text() and "200k tokens" in page.gauge_line.text()
     texts = c.texts(QLabel, page)
     assert "Context window" in texts and "Claude Code" in texts and "MCP servers" in texts and "Project memory" in texts
     assert "Starts with your next message" in texts and "Shown after Claude Code starts." in texts

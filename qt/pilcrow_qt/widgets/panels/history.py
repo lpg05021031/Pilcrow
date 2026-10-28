@@ -1,7 +1,7 @@
 """The Timeline tab, the time machine (a port of web/src/components/panels/HistoryPanel.tsx): every
 step that could have changed files is a point on the scrubber at the top; the list under it is the
 same timeline in words. Pick a point to see what that step changed and what has changed since, and
-put files back the way they were there."""
+put files back the way they were there. Measurements are panels.css's ``.tl-*`` rules."""
 
 from __future__ import annotations
 
@@ -9,18 +9,18 @@ import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
-from PySide6.QtCore import QRect, Qt, Signal
-from PySide6.QtGui import QColor, QKeyEvent, QPainter, QPen
+from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtGui import QColor, QKeyEvent, QMouseEvent, QPainter, QPen
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QSlider, QVBoxLayout, QWidget
 
 from ... import icons, theme
 from ...lib.fmt import basename, duration, err_text, plural
 from ...store import ConfirmSpec, store
-from ..ui.bits import Clickable, IconButton, Mark, Spinner, button, hairline, label
+from ..ui.bits import Clickable, Mark, Spinner
 from ..ui.collapse import Collapse
 from ..ui.signals import bind
 from .diff_view import DiffView, Num
-from .right_panel import EmptyState, Refresher, Toolbar
+from .right_panel import Btn, EmptyState, Hairline, Refresher, Toolbar, elide, icon_btn, lbl
 
 Json = Dict[str, Any]
 
@@ -66,6 +66,32 @@ def off_reason(reason: Optional[str]) -> str:
     return reason or "Turn it on in Settings → General."
 
 
+def scrub_positions(steps: List[Json], now: float, track_w: int) -> List[float]:
+    """Where each step sits on the scrubber, 0..96 (% of the track): by time, with long pauses squeezed
+    so the busy stretches keep their shape, and steps nudged apart so each can still be picked."""
+    times = [float(s.get("at") or now) for s in steps] + [now]
+    gaps = [max(0.0, times[i + 1] - times[i]) for i in range(len(times) - 1)]
+    sorted_gaps = sorted(gaps)
+    median = sorted_gaps[len(sorted_gaps) // 2] if sorted_gaps else 1000.0
+    cap = max(median * 4, 20_000.0)
+    w = [min(g, cap) for g in gaps]
+    total = max(1.0, sum(w))
+    raw: List[float] = []
+    acc = 0.0
+    for i in range(len(steps)):
+        raw.append(acc / total * 96)
+        acc += w[i]
+    min_gap = 6 / max(1, track_w) * 100 if track_w else 1.2
+    for i in range(1, len(raw)):
+        if raw[i] < raw[i - 1] + min_gap:
+            raw[i] = raw[i - 1] + min_gap
+    over = (raw[-1] - 96) if raw else 0
+    if over > 0:
+        n = max(1, len(raw) - 1)
+        raw = [max(0.0, x - over * (i / n)) for i, x in enumerate(raw)]
+    return raw
+
+
 def do_restore(sid: str, step: Json, paths: Optional[List[str]] = None) -> None:
     """Put files back as they were after ``step`` (all of them, or ``paths``), with an Undo on the toast."""
 
@@ -95,8 +121,136 @@ def do_restore(sid: str, step: Json, paths: Optional[List[str]] = None) -> None:
 # ---------------------------------------------------------------- the scrubber
 
 
+class TickSlider(QSlider):
+    """The track (``.tl-scrub-track``): one tick per step where it happened in time, taller for
+    messages, amber for outside changes; the accent cursor on the chosen one; "now" at the right end.
+    A QSlider for its value/range API; it paints and picks itself."""
+
+    hovered = Signal(int)  # index under the pointer, or -1
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(Qt.Orientation.Horizontal, parent)
+        self._steps: List[Json] = []
+        self._pos: List[float] = []
+        self._now = time.time() * 1000
+        self._drag = False
+        self._hover = -1
+        self.setFixedHeight(28)
+        self.pad = 20  # .tl-scrub padding: the end marks spill into it
+        self.setCursor(Qt.CursorShape.SizeHorCursor)
+        self.setTracking(True)
+        self.setMouseTracking(True)
+        self.setStyleSheet("QSlider { background: transparent; }")
+        bind(theme.theme.changed, self, lambda _t: self.update())
+
+    def set_steps(self, steps: List[Json], now: float) -> None:
+        self._steps = steps
+        self._now = now
+        self._pos = scrub_positions(steps, now, self.track_w)
+        self.update()
+
+    @property
+    def track_w(self) -> int:
+        return max(1, self.width() - 2 * self.pad)
+
+    def resizeEvent(self, e) -> None:  # noqa: N802
+        super().resizeEvent(e)
+        self._pos = scrub_positions(self._steps, self._now, self.track_w)
+
+    def x_at(self, i: int) -> float:
+        """Pixel x of step ``i`` (``len(steps)`` is "now", the right end of the track)."""
+        pct = 100.0 if i >= len(self._steps) else (self._pos[i] if i < len(self._pos) else 0.0)
+        return self.pad + pct / 100 * self.track_w
+
+    def nearest(self, x: float) -> int:
+        n = len(self._steps)
+        best, dist = n, abs(self.x_at(n) - x)
+        for i in range(n):
+            d = abs(self.x_at(i) - x)
+            if d < dist:
+                best, dist = i, d
+        return best
+
+    @property
+    def dragging(self) -> bool:
+        return self._drag
+
+    def mousePressEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+        if e.button() == Qt.MouseButton.LeftButton:
+            self._drag = True
+            self.setValue(self.nearest(e.position().x()))
+            self.update()
+            e.accept()
+
+    def mouseMoveEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+        i = self.nearest(e.position().x())
+        if self._drag:
+            self.setValue(i)
+        if i != self._hover:
+            self._hover = i
+            self.hovered.emit(i)
+            self.update()
+        e.accept()
+
+    def mouseReleaseEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+        self._drag = False
+        self.update()
+        e.accept()
+
+    def leaveEvent(self, e) -> None:  # noqa: N802
+        self._hover = -1
+        self.hovered.emit(-1)
+        self.update()
+        super().leaveEvent(e)
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        t = theme.tokens()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        mid = self.height() / 2
+        sel = self.value()
+        # the track, and the part before the cursor
+        p.fillRect(QRectF(self.pad, mid - 1, self.track_w, 2), theme.blend(t.fill_2, t.canvas))
+        p.fillRect(QRectF(self.pad, mid - 1, self.x_at(sel) - self.pad, 2), QColor(t.text_3))
+        for i, s in enumerate(self._steps):
+            x = self.x_at(i)
+            kind = s.get("kind")
+            tall = kind in ("message", "start", "restore", "external")
+            past = i <= sel
+            if kind == "external":
+                color = QColor(t.warn)
+            elif kind == "message":
+                color = QColor(t.text_3)
+            elif kind == "restore":
+                color = QColor(t.text_2)
+            elif s.get("changed"):
+                color = QColor(t.text_2 if past else t.text_4)
+            else:
+                color = theme.blend(t.hair_3, t.canvas)
+            h = 14 if tall else 8
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(color)
+            p.drawRoundedRect(QRectF(x - 1, mid - h / 2, 2, h), 1, 1)
+        # "now": a hollow dot at the right end
+        p.setPen(QPen(QColor(t.text_3), 2))
+        p.setBrush(theme.qcolor(t.raised))
+        p.drawEllipse(QPointF(self.x_at(len(self._steps)), mid), 3, 3)
+        # the cursor: accent, ringed in chrome then accent, with a stem up to the label
+        cx = self.x_at(sel)
+        scale = 1.25 if self._drag else 1.0
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(theme.blend(t.hair_3, t.canvas))
+        p.drawRect(QRectF(cx - 0.5, mid - 6 * scale - 4 - 14, 1, 14))
+        p.setBrush(QColor(t.accent))
+        p.drawEllipse(QPointF(cx, mid), 10 * scale, 10 * scale)
+        p.setBrush(theme.qcolor(t.chrome))
+        p.drawEllipse(QPointF(cx, mid), 9 * scale, 9 * scale)
+        p.setBrush(QColor(t.accent))
+        p.drawEllipse(QPointF(cx, mid), 6 * scale, 6 * scale)
+
+
 class Scrubber(QWidget):
-    """One tick per step along a thin slider, "now" at the right end; drag or click to pick a point."""
+    """``.tl-scrub``: the label pill, the track and the axis under it."""
 
     picked = Signal(object)  # step n, or None for now
 
@@ -105,37 +259,61 @@ class Scrubber(QWidget):
         self.steps: List[Json] = []
         self._sel: Optional[int] = None
         self._quiet = False
+        self._hover = -1
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(20, 8, 20, 8)
-        lay.setSpacing(2)
-        self.label = label("Now", tone="muted", size="micro")
-        self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(self.label)
-        self.slider = TickSlider(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        inner = QWidget()
+        il = QVBoxLayout(inner)
+        il.setContentsMargins(0, 28, 0, 8)
+        il.setSpacing(0)
+        self.slider = TickSlider()
         self.slider.setAccessibleName("Timeline")
         self.slider.valueChanged.connect(self._on_value)
-        lay.addWidget(self.slider)
-        axis = QHBoxLayout()
-        axis.setContentsMargins(4, 0, 4, 0)
-        self.first = label("", tone="faint", size="micro")
-        self.now = label("", tone="faint", size="micro")
-        axis.addWidget(self.first)
-        axis.addStretch(1)
-        axis.addWidget(self.now)
-        lay.addLayout(axis)
-        lay.addWidget(hairline())
+        self.slider.hovered.connect(self._on_hover)
+        il.addWidget(self.slider)
+        axis = QWidget()
+        al = QHBoxLayout(axis)
+        al.setContentsMargins(24, 2, 24, 0)
+        al.setSpacing(0)
+        self.first = lbl("", 10, color="text_4")
+        self.note = lbl("", 10, color="text_4")
+        self.now = lbl("", 10, color="text_4")
+        al.addWidget(self.first)
+        al.addStretch(1)
+        al.addWidget(self.note)
+        al.addStretch(1)
+        al.addWidget(self.now)
+        il.addWidget(axis)
+        lay.addWidget(inner)
+        lay.addWidget(Hairline())
+        self.label = QLabel(self)
+        self.label.setFixedHeight(18)
+        self._paint_label()
+        bind(theme.theme.changed, self, lambda _t: self._paint_label())
+
+    def _paint_label(self) -> None:
+        t = theme.tokens()
+        f = theme.font_ui(theme.FS_MICRO)
+        self.label.setStyleSheet(
+            f'font-family: "{f.family()}"; font-size: {theme.FS_MICRO}px; color: {t.text_2}; background: {t.raised_2}; '
+            f"border-radius: 9px; padding: 0 7px;"
+        )
 
     def set_steps(self, steps: List[Json], sel: Optional[int]) -> None:
         self.steps = steps
         self._sel = sel
-        self.slider.set_steps(steps)
+        now = time.time() * 1000
+        self.slider.set_steps(steps, now)
         self._quiet = True
         self.slider.setRange(0, len(steps))
         self.slider.setValue(self._index(sel))
         self._quiet = False
         if steps:
-            self.first.setText(_clock(float(steps[0].get("at") or 0)))
-        self.now.setText(f"now · {_clock(time.time() * 1000)}")
+            first = float(steps[0].get("at") or 0)
+            self.first.setText(_clock(first))
+            self.note.setText("pauses shortened" if now - first > 4 * 60e3 else "")
+        self.now.setText(f"now · {_clock(now)}")
         self._relabel()
 
     def _index(self, sel: Optional[int]) -> int:
@@ -146,10 +324,29 @@ class Scrubber(QWidget):
                 return i
         return len(self.steps)
 
+    def _on_hover(self, i: int) -> None:
+        self._hover = i
+        self._relabel()
+
     def _relabel(self) -> None:
-        i = self.slider.value()
+        i = self._hover if self._hover >= 0 else self.slider.value()
         s = self.steps[i] if i < len(self.steps) else None
         self.label.setText(f"{_clock_s(float(s.get('at') or 0))} · {step_title(s)}" if s else "Now")
+        self.label.adjustSize()
+        x = self.slider.x_at(i)
+        pct = (x - 20) / max(1, self.width() - 40) * 100
+        w = self.label.width()
+        if pct > 80:
+            left = self.width() - 20 - w
+        elif pct < 20:
+            left = 20
+        else:
+            left = int(x - w / 2)
+        self.label.move(int(left), 6)
+
+    def resizeEvent(self, e) -> None:  # noqa: N802
+        super().resizeEvent(e)
+        self._relabel()
 
     def _on_value(self, v: int) -> None:
         self._relabel()
@@ -158,76 +355,12 @@ class Scrubber(QWidget):
         self.picked.emit(None if v >= len(self.steps) else self.steps[v].get("n"))
 
 
-class TickSlider(QSlider):
-    """A QSlider drawn thin, with a tick per step (taller for messages, amber for outside changes)."""
-
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(Qt.Orientation.Horizontal, parent)
-        self._steps: List[Json] = []
-        self.setFixedHeight(28)
-        self.setCursor(Qt.CursorShape.SizeHorCursor)
-        self.setTracking(True)
-        self._paint_style()
-        bind(theme.theme.changed, self, lambda _t: self._paint_style())
-
-    def set_steps(self, steps: List[Json]) -> None:
-        self._steps = steps
-        self.update()
-
-    def _paint_style(self) -> None:
-        t = theme.tokens()
-        self.setStyleSheet(
-            f"QSlider::groove:horizontal {{ height: 2px; background: {theme.blend(t.fill_2, t.chrome).name()}; border-radius: 1px; margin: 0 6px; }}"
-            f"QSlider::sub-page:horizontal {{ background: {t.text_3}; border-radius: 1px; }}"
-            f"QSlider::handle:horizontal {{ width: 12px; height: 12px; margin: -5px -6px; border-radius: 6px; background: {t.accent}; border: 2px solid {t.chrome}; }}"
-        )
-
-    def mousePressEvent(self, e) -> None:  # noqa: N802
-        # Jump to where the pointer is, then let the drag take over, so a click picks a point too.
-        if e.button() == Qt.MouseButton.LeftButton and self.maximum() > 0:
-            x = e.position().x() - 6
-            w = max(1, self.width() - 12)
-            self.setValue(int(round(max(0.0, min(1.0, x / w)) * self.maximum())))
-        super().mousePressEvent(e)
-
-    def paintEvent(self, e) -> None:  # noqa: N802
-        t = theme.tokens()
-        p = QPainter(self)
-        n = max(1, self.maximum())
-        mid = self.height() // 2
-        w = max(1, self.width() - 12)
-        for i, s in enumerate(self._steps):
-            x = 6 + int(w * i / n)
-            kind = s.get("kind")
-            tall = kind in ("message", "start", "restore", "external")
-            past = i <= self.value()
-            if kind == "external":
-                color = QColor(t.warn)
-            elif kind == "message":
-                color = QColor(t.text_3)
-            elif kind == "restore":
-                color = QColor(t.text_2)
-            elif s.get("changed"):
-                color = QColor(t.text_2 if past else t.text_4)
-            else:
-                color = theme.blend(t.hair_3, t.chrome)
-            h = 14 if tall else 8
-            p.fillRect(QRect(x - 1, mid - h // 2, 2, h), color)
-        # the "now" dot at the right end
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(QPen(QColor(t.text_3), 2))
-        p.setBrush(QColor(t.raised))
-        p.drawEllipse(QRect(self.width() - 10, mid - 4, 8, 8))
-        p.end()
-        super().paintEvent(e)
-
-
 # ---------------------------------------------------------------- steps
 
 
 class RailDot(QWidget):
-    """The mark on the rail: hollow = nothing changed, filled = files changed, a square = you spoke,
-    amber = changed outside the conversation, a ring = restored; the chosen one is the accent."""
+    """The mark on the rail (``.tl-dot``): hollow = nothing changed, filled = files changed, a square =
+    you spoke, amber = changed outside the conversation, a ring = restored; the chosen one is the accent."""
 
     def __init__(self, step: Json, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -242,41 +375,41 @@ class RailDot(QWidget):
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        cx, cy = 9, 14
+        cx, cy = 9.0, 11 + 3.5  # margin-top 11px, a 7px dot
         if not self.last:
-            p.setPen(QPen(theme.blend(t.hair_2, t.chrome), 1))
-            p.drawLine(cx, cy + 6, cx, self.height())
+            p.fillRect(QRectF(cx - 0.5, 19 - 5, 1, self.height() - (19 - 5) + 11), theme.blend(t.hair_2, t.canvas))
         kind = self.step.get("kind")
         p.setPen(Qt.PenStyle.NoPen)
         if self.selected:
             halo = QColor(t.accent)
             halo.setAlphaF(0.22)
             p.setBrush(halo)
-            p.drawEllipse(QRect(cx - 7, cy - 7, 14, 14))
+            r = 3.5 * 1.3 + 3
+            p.drawEllipse(QPointF(cx, cy), r, r)
             p.setBrush(QColor(t.accent))
-            p.drawEllipse(QRect(cx - 4, cy - 4, 9, 9))
+            p.drawEllipse(QPointF(cx, cy), 3.5 * 1.3, 3.5 * 1.3)
             return
         if kind in ("message", "start"):
             p.setBrush(QColor(t.text_2))
-            p.drawRoundedRect(QRect(cx - 4, cy - 4, 8, 8), 2, 2)
+            p.drawRoundedRect(QRectF(cx - 4, cy - 4, 8, 8), 2, 2)
         elif kind == "external":
             p.setBrush(QColor(t.warn))
-            p.drawEllipse(QRect(cx - 3, cy - 3, 7, 7))
+            p.drawEllipse(QPointF(cx, cy), 3.5, 3.5)
         elif kind == "restore":
             p.setPen(QPen(QColor(t.text_2), 2))
-            p.setBrush(QColor(t.raised))
-            p.drawEllipse(QRect(cx - 3, cy - 3, 7, 7))
+            p.setBrush(theme.qcolor(t.raised))
+            p.drawEllipse(QPointF(cx, cy), 2.5, 2.5)
         elif self.step.get("changed"):
             p.setBrush(QColor(t.text_3))
-            p.drawEllipse(QRect(cx - 3, cy - 3, 7, 7))
+            p.drawEllipse(QPointF(cx, cy), 3.5, 3.5)
         else:
-            p.setPen(QPen(theme.blend(t.hair_3, t.chrome), 1.5))
-            p.setBrush(QColor(t.raised))
-            p.drawEllipse(QRect(cx - 3, cy - 3, 7, 7))
+            p.setPen(QPen(theme.blend(t.hair_3, t.canvas), 1.5))
+            p.setBrush(theme.qcolor(t.raised))
+            p.drawEllipse(QPointF(cx, cy), 2.75, 2.75)
 
 
 class RestoreButton(QWidget):
-    """ "Restore to here": asks what would change since this step, then confirms before putting it back."""
+    """ "Restore to here" (``.btn.xs``): asks what would change since this step, then confirms."""
 
     def __init__(self, step: Json, sid: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -288,14 +421,14 @@ class RestoreButton(QWidget):
         self.spinner = Spinner(11)
         self.spinner.hide()
         lay.addWidget(self.spinner)
-        self.btn = button(
+        self.btn = Btn(
             "Restore to here",
-            size="sm",
             icon="rotate-ccw",
+            size="xs",
+            icon_size=11,
             on_click=self.click,
             tooltip="Put every file back to how it was right after this step",
         )
-        self.btn.setText("Restore to here")
         lay.addWidget(self.btn)
 
     def click(self) -> None:
@@ -334,14 +467,27 @@ class RestoreButton(QWidget):
         )
 
 
+class FileCard(QWidget):
+    """``.tl-file``: a raised surface for one changed file's header and diff."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        bind(theme.theme.changed, self, lambda _t: self.update())
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(theme.qcolor(theme.tokens().raised))
+        p.drawRoundedRect(QRectF(self.rect()), theme.R2, theme.R2)
+
+
 class StepDetail(QWidget):
-    """What a step changed: its diff, file by file, each with open and restore."""
+    """What a step changed (``.tl-detail``): its diff, file by file, each with open and restore."""
 
     def __init__(self, step: Json, sid: str, cwd: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.step, self.sid, self.cwd = step, sid, cwd
-        self.setObjectName("tlDetail")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(10, 8, 8, 8)
         lay.setSpacing(6)
@@ -355,11 +501,12 @@ class StepDetail(QWidget):
                 if kind == "start"
                 else "No files changed in this step."
             )
-            lay.addWidget(label(note, tone="faint", size="small", wrap=True))
+            lay.addWidget(lbl(note, theme.FS_SMALL, tone="faint", wrap=True))
             lay.addWidget(RestoreButton(step, sid), 0, Qt.AlignmentFlag.AlignLeft)
         else:
             head = QHBoxLayout()
-            head.addWidget(label("Changed in this step", tone="faint", size="micro"))
+            head.setSpacing(8)
+            head.addWidget(lbl("Changed in this step", theme.FS_MICRO, 600, tone="faint"))
             head.addStretch(1)
             head.addWidget(RestoreButton(step, sid))
             lay.addLayout(head)
@@ -368,32 +515,42 @@ class StepDetail(QWidget):
             ll.setContentsMargins(0, 0, 0, 0)
             ll.setSpacing(6)
             ll.addWidget(Spinner(12))
-            ll.addWidget(label("Loading the diff…", tone="faint", size="small"), 1)
+            ll.addWidget(lbl("Loading the diff…", theme.FS_SMALL, tone="faint"), 1)
             lay.addWidget(self.loading)
-            self.view = DiffView(mode="unified", wrap=True, can_comment=False, max_rows=400, open_threshold=3)
+            self.card = FileCard()
+            cl = QVBoxLayout(self.card)
+            cl.setContentsMargins(0, 0, 0, 0)
+            self.view = DiffView(
+                mode="unified", wrap=True, can_comment=False, max_rows=400, open_threshold=3, head_pad_left=4
+            )
             self.view.set_actions(
                 [
                     ("arrow-up-right", lambda _f: "Open the file as it is now", self._open),
                     ("undo-2", lambda _f: "Put this file back to how it was after this step", self._restore),
                 ]
             )
-            lay.addWidget(self.view)
+            cl.addWidget(self.view)
+            self.card.hide()
+            lay.addWidget(self.card)
             store.call("timeline.stepDiff", {"id": sid, "n": step.get("n")}, quiet=True).then(self._got).catch(
                 lambda _e: self._got({"files": []})
             )
-        self._paint()
-        bind(theme.theme.changed, self, lambda _t: self._paint())
+        bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def _paint(self) -> None:
+    def paintEvent(self, _e) -> None:  # noqa: N802
         t = theme.tokens()
-        self.setStyleSheet(
-            f"#tlDetail {{ background: {theme.blend(t.fill_1, t.chrome).name()}; border-bottom-left-radius: {theme.R2}px; border-bottom-right-radius: {theme.R2}px; }}"
-        )
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(theme.blend(t.fill_1, t.canvas))
+        p.drawRoundedRect(QRectF(0, -theme.R2, self.width(), self.height() + theme.R2), theme.R2, theme.R2)
 
     def _got(self, r: Any) -> None:
         self.loading.hide()
+        files = list((r or {}).get("files") or [])
         if self.view is not None:
-            self.view.set_files(list((r or {}).get("files") or []))
+            self.view.set_files(files)
+            self.card.setVisible(bool(files))
 
     def _open(self, f: Json) -> None:
         store.open_file(f"{self.cwd}/{f.get('path')}")
@@ -410,8 +567,44 @@ class StepDetail(QWidget):
         )
 
 
+class RowButton(QWidget):
+    """``.tl-row-btn`` / ``.tl-now``: lights up on hover and while chosen (square-bottomed over a detail)."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._hover = False
+        self.on = False
+        self.open_below = False
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        bind(theme.theme.changed, self, lambda _t: self.update())
+
+    def enterEvent(self, e) -> None:  # noqa: N802
+        self._hover = True
+        self.update()
+        super().enterEvent(e)
+
+    def leaveEvent(self, e) -> None:  # noqa: N802
+        self._hover = False
+        self.update()
+        super().leaveEvent(e)
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        if not (self._hover or self.on):
+            return
+        t = theme.tokens()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(theme.blend(t.fill_1, t.canvas))
+        r = theme.R2
+        extra = r if (self.on and self.open_below) else 0
+        p.drawRoundedRect(QRectF(0, 0, self.width(), self.height() + extra), r, r)
+
+
 class StepRow(QWidget):
-    """One step in the list: the rail, title and time, +add −del, a way to the conversation; opens to its detail."""
+    """One step in the list (``.tl-row``): the rail, title and time, +add −del, a way to the
+    conversation; opens to its detail."""
 
     def __init__(
         self, step: Json, sid: str, cwd: str, on_pick: Callable[[], None], last: bool, parent: Optional[QWidget] = None
@@ -423,10 +616,8 @@ class StepRow(QWidget):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
-        self.btn = QWidget()
-        self.btn.setObjectName("tlRow")
-        self.btn.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn = RowButton()
+        self.btn.open_below = True
         self.btn.setAccessibleName(step_title(step))
         bl = QHBoxLayout(self.btn)
         bl.setContentsMargins(4, 5, 6, 5)
@@ -440,34 +631,42 @@ class StepRow(QWidget):
         ml.setSpacing(1)
         title = step_title(step)
         is_msg = step.get("kind") == "message"
-        self.title = label(f"“{title}”" if is_msg else title, tone="muted" if is_msg else "", size="small")
-        if is_msg:
-            self.title.setFont(theme.font_ui(theme.FS_SMALL, italic=True))
-        self.title.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.title = elide(
+            lbl(f"“{title}”" if is_msg else title, theme.FS_SMALL, tone="muted" if is_msg else "", italic=is_msg)
+        )
         ml.addWidget(self.title)
         sub = QHBoxLayout()
         sub.setSpacing(8)
-        sub.addWidget(label(step_sub(step), tone="faint", size="micro"))
-        sub.addWidget(label(_clock_s(float(step.get("at") or 0)), tone="faint", size="micro"))
+        sub.addWidget(lbl(step_sub(step), theme.FS_MICRO, color="text_4"))
+        sub.addWidget(lbl(_clock_s(float(step.get("at") or 0)), theme.FS_MICRO, color="text_4"))
         sub.addStretch(1)
         ml.addLayout(sub)
         bl.addWidget(main, 1)
         if step.get("changed"):
-            bl.addWidget(Num("add", int(step.get("add") or 0)))
-            bl.addWidget(Num("del", int(step.get("del") or 0)))
+            stat = QHBoxLayout()
+            stat.setSpacing(5)
+            stat.addWidget(Num("add", int(step.get("add") or 0)))
+            stat.addWidget(Num("del", int(step.get("del") or 0)))
+            bl.addLayout(stat)
         else:
-            bl.addWidget(label("—", tone="faint", size="micro"))
+            bl.addWidget(lbl("—", theme.FS_MICRO, tone="faint"))
+        self.jump: Optional[QWidget] = None
         if step.get("toolUseId") or step.get("uuid"):
-            jump = IconButton("arrow-up-right", "Show in the conversation", 13)
-            jump.clicked.connect(lambda: store.toast("That step is not in the conversation view.", "info"))
-            bl.addWidget(jump)
+            self.jump = icon_btn("arrow-up-right", "Show in the conversation", 13)
+            self.jump.clicked.connect(lambda: store.toast("That step is not in the conversation view.", "info"))
+            self.jump.hide()
+            bl.addWidget(self.jump)
         Clickable(self.btn).clicked.connect(on_pick)
+        self.btn.installEventFilter(self)
         lay.addWidget(self.btn)
         self.detail = Collapse(lambda: StepDetail(step, sid, cwd), False)
         self.detail.setContentsMargins(22, 0, 0, 6)
         lay.addWidget(self.detail)
-        self._paint()
-        bind(theme.theme.changed, self, lambda _t: self._paint())
+
+    def eventFilter(self, obj, e) -> bool:  # noqa: N802
+        if obj is self.btn and self.jump is not None and e.type() in (e.Type.Enter, e.Type.Leave):
+            self.jump.setVisible(self._selected or e.type() == e.Type.Enter)
+        return super().eventFilter(obj, e)
 
     def set_selected(self, on: bool) -> None:
         if on == self._selected:
@@ -475,31 +674,22 @@ class StepRow(QWidget):
         self._selected = on
         self.dot.selected = on
         self.dot.update()
+        self.btn.on = on
+        self.btn.update()
+        if self.jump is not None:
+            self.jump.setVisible(on)
         self.detail.set_open(on)
-        self._paint()
-
-    def _paint(self) -> None:
-        t = theme.tokens()
-        bg = theme.blend(t.fill_1, t.chrome).name() if self._selected else "transparent"
-        radius = (
-            f"border-top-left-radius: {theme.R2}px; border-top-right-radius: {theme.R2}px;"
-            if self._selected
-            else f"border-radius: {theme.R2}px;"
-        )
-        self.btn.setStyleSheet(
-            f"#tlRow {{ background: {bg}; {radius} }} #tlRow:hover {{ background: {theme.blend(t.fill_1, t.chrome).name()}; }}"
-        )
 
 
 class SinceBar(QWidget):
-    """The footer while a past step is picked: how far the folder has moved since then."""
+    """The footer while a past step is picked (``.tl-since``): how far the folder has moved since then."""
 
     def __init__(self, step: Json, steps: List[Json], parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
-        lay.addWidget(hairline())
+        lay.addWidget(Hairline())
         later = [s for s in steps if int(s.get("n") or 0) > int(step.get("n") or 0) and s.get("changed")]
         files: Dict[str, Dict[str, int]] = {}
         for s in later:
@@ -508,7 +698,7 @@ class SinceBar(QWidget):
                 cur["add"] += int(f.get("add") or 0)
                 cur["del"] += int(f.get("del") or 0)
         if not later:
-            lb = label("Nothing has changed since this point.", tone="faint", size="small")
+            lb = lbl("Nothing has changed since this point.", theme.FS_SMALL, tone="faint")
             lb.setContentsMargins(14, 10, 14, 10)
             lay.addWidget(lb)
             return
@@ -520,17 +710,21 @@ class SinceBar(QWidget):
         hl.setContentsMargins(12, 8, 12, 8)
         hl.setSpacing(6)
         self.chev = QLabel()
+        self.chev.setFixedSize(12, 12)
         hl.addWidget(self.chev)
         hl.addWidget(
-            label(
+            lbl(
                 f"Since this point: {plural(len(later), 'step')} changed {plural(len(files), 'file')}",
+                theme.FS_SMALL,
                 tone="muted",
-                size="small",
             ),
             1,
         )
-        hl.addWidget(Num("add", add))
-        hl.addWidget(Num("del", dele))
+        stat = QHBoxLayout()
+        stat.setSpacing(5)
+        stat.addWidget(Num("add", add))
+        stat.addWidget(Num("del", dele))
+        hl.addLayout(stat)
         lay.addWidget(head)
         self.body = Collapse(lambda: self._build(files), False)
         lay.addWidget(self.body)
@@ -545,7 +739,7 @@ class SinceBar(QWidget):
     def _paint(self) -> None:
         if hasattr(self, "chev"):
             self.chev.setPixmap(
-                icons.pixmap("chevron-down" if self.body.is_open else "chevron-right", theme.tokens().text_3, 12)
+                icons.pixmap("chevron-down" if self.body.is_open else "chevron-right", theme.tokens().text_2, 12)
             )
 
     def _build(self, files: Dict[str, Dict[str, int]]) -> QWidget:
@@ -556,9 +750,12 @@ class SinceBar(QWidget):
         for path, s in files.items():
             row = QHBoxLayout()
             row.setSpacing(8)
-            row.addWidget(label(path, tone="muted", size="micro", mono=True), 1)
-            row.addWidget(Num("add", s["add"]))
-            row.addWidget(Num("del", s["del"]))
+            row.addWidget(elide(lbl(path, theme.FS_MICRO, tone="muted", mono=True)), 1)
+            stat = QHBoxLayout()
+            stat.setSpacing(5)
+            stat.addWidget(Num("add", s["add"]))
+            stat.addWidget(Num("del", s["del"]))
+            row.addLayout(stat)
             lay.addLayout(row)
         sc = QScrollArea()
         sc.setWidgetResizable(True)
@@ -571,7 +768,7 @@ class SinceBar(QWidget):
 
 
 class HistoryPanel(QWidget):
-    """The timeline of one session's folder."""
+    """The timeline of one session's folder (``.history``)."""
 
     def __init__(self, session_id: str, cwd: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -589,21 +786,18 @@ class HistoryPanel(QWidget):
         lay.setSpacing(0)
         self._lay = lay
         self.bar = Toolbar()
-        scope = label("Timeline")
-        scope.setStyleSheet("font-weight: 600;")
-        self.bar.add(scope)
-        self.summary = label("", tone="faint", size="small")
+        self.bar.add(lbl("Timeline", theme.FS_SMALL, 550))
+        self.summary = lbl("", theme.FS_SMALL, tone="faint")
         self.bar.add(self.summary)
         self.bar.stretch()
-        self.now_btn = button(
+        self.now_btn = Btn(
             "Now",
+            icon="arrow-down-to-line",
             kind="ghost",
             size="sm",
-            icon="arrow-down-to-line",
             on_click=lambda: self.pick(None),
             tooltip="Back to the present (End)",
         )
-        self.now_btn.setText("Now")
         self.now_btn.hide()
         self.bar.add(self.now_btn)
         lay.addWidget(self.bar)
@@ -617,7 +811,7 @@ class HistoryPanel(QWidget):
         self._list = QVBoxLayout(self.host)
         self._list.setContentsMargins(8, 10, 12, 12)
         self._list.setSpacing(0)
-        self.loading = label("Loading the timeline…", tone="faint", size="small")
+        self.loading = lbl("Loading the timeline…", theme.FS_SMALL, tone="faint")
         self.loading.setContentsMargins(6, 6, 6, 6)
         self._list.addWidget(self.loading)
         self.empty = EmptyState(
@@ -713,6 +907,7 @@ class HistoryPanel(QWidget):
                     "history", "The timeline is off for this folder.", off_reason(meta.get("reason"))
                 )
                 self._lay.insertWidget(1, self._off)
+                self._lay.addStretch(1)
             return
         steps = self.steps
         self.loading.setVisible(meta is None)
@@ -757,10 +952,7 @@ class HistoryPanel(QWidget):
             self._lay.addWidget(self._since)
 
     def _make_now_row(self) -> QWidget:
-        w = QWidget()
-        w.setObjectName("tlNow")
-        w.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        w.setCursor(Qt.CursorShape.PointingHandCursor)
+        w = RowButton()
         w.setAccessibleName("Now")
         lay = QHBoxLayout(w)
         lay.setContentsMargins(4, 5, 6, 5)
@@ -770,12 +962,13 @@ class HistoryPanel(QWidget):
         rl = QVBoxLayout(rail)
         rl.setContentsMargins(0, 8, 0, 0)
         rl.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
-        rl.addWidget(Mark(14))
+        self.now_mark = Mark(14)
+        rl.addWidget(self.now_mark)
         lay.addWidget(rail)
         main = QVBoxLayout()
         main.setSpacing(1)
-        main.addWidget(label("Now", size="small"))
-        self.now_sub = label("The folder as it is right now", tone="faint", size="micro", wrap=True)
+        main.addWidget(lbl("Now", theme.FS_SMALL))
+        self.now_sub = lbl("The folder as it is right now", theme.FS_MICRO, tone="faint", wrap=True)
         main.addWidget(self.now_sub)
         lay.addLayout(main, 1)
         Clickable(w).clicked.connect(lambda: self.pick(None))
@@ -787,8 +980,9 @@ class HistoryPanel(QWidget):
         self.now_sub.setText(
             "Claude is working — new steps appear as they happen" if busy else "The folder as it is right now"
         )
-        t = theme.tokens()
         on = self.sel is None
-        self.now_row.setStyleSheet(
-            f"#tlNow {{ background: {theme.blend(t.fill_1, t.chrome).name() if on else 'transparent'}; border-radius: {theme.R2}px; }} #tlNow:hover {{ background: {theme.blend(t.fill_1, t.chrome).name()}; }}"
-        )
+        self.now_row.on = on
+        self.now_row.update()
+        t = theme.tokens()
+        self.now_mark._color = t.text if on else t.text_2
+        self.now_mark.update()

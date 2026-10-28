@@ -13,12 +13,10 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from PySide6.QtCore import QEvent, QObject, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QKeyEvent, QPainter
+from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QKeyEvent, QPainter
 from PySide6.QtWidgets import (
-    QAbstractButton,
     QButtonGroup,
-    QComboBox,
     QDialog,
     QFrame,
     QHBoxLayout,
@@ -35,7 +33,10 @@ from PySide6.QtWidgets import (
 from ... import icons, theme
 from ...store import store
 from ..ui.bits import IconButton, hairline, label
+from ..ui.menu import Menu, Popover, host_for
 from ..ui.signals import bind
+from .parts import Backdrop, Text, sheet_bg, sheet_css, well_bg
+from .parts import Switch as _Switch
 
 Json = Dict[str, Any]
 
@@ -162,7 +163,7 @@ class ElidedLabel(QLabel):
 def elide(lb: QLabel) -> QLabel:
     """``lb``'s text and look on an :class:`ElidedLabel`; the original is discarded."""
     out = ElidedLabel(lb.text())
-    for name in ("tone", "size", "mono"):
+    for name in ("tone", "fs", "mono"):
         if lb.property(name) is not None:
             out.setProperty(name, lb.property(name))
     out.setStyleSheet(lb.styleSheet())
@@ -174,27 +175,254 @@ def elide(lb: QLabel) -> QLabel:
 def line_edit(placeholder: str = "", mono: bool = False, name: str = "") -> QLineEdit:
     """``.input``: the global stylesheet draws it; ``mono`` is ``.input.mono``."""
     e = QLineEdit()
+    e.setObjectName("input")
     e.setPlaceholderText(placeholder)
     e.setClearButtonEnabled(False)
-    if mono:
-        e.setFont(theme.font_mono())
-    e.setMinimumHeight(32)
+    e.setFixedHeight(34)
     e.setAccessibleName(name or placeholder)
+    styled(e, lambda t: input_css("#input", t, mono, "0 10px"))
     return e
+
+
+def input_css(sel: str, t: theme.Tokens, mono: bool = False, padding: str = "0 10px") -> str:
+    """``.input`` / ``.textarea``: a quiet fill with a hairline, the page colour and a stronger line on focus."""
+    surface = sheet_bg(t).name()
+    bg = theme.blend(t.fill_1, surface).name()
+    font = (
+        f'font-family: "{theme._MONO_FAMILY or "monospace"}"; font-size: 12.5px;'
+        if mono
+        else f"font-size: {theme.FS_UI}px;"
+    )
+    return (
+        f"{sel} {{ background: {bg}; border: 1px solid {theme.blend(t.hair, bg).name()}; border-radius: {theme.R2}px; padding: {padding}; color: {t.text}; {font} selection-background-color: {theme.blend(t.selection, bg).name()}; }}"
+        f" {sel}:hover {{ border-color: {theme.blend(t.hair_2, bg).name()}; }}"
+        f" {sel}:focus {{ background: {t.canvas}; border-color: {theme.blend(t.hair_3, t.canvas).name()}; }}"
+    )
 
 
 def text_area(placeholder: str = "", rows: int = 2, mono: bool = False, name: str = "") -> QPlainTextEdit:
     """``.textarea``: a plain text box ``rows`` lines tall that does not grow with its content."""
     t = QPlainTextEdit()
+    t.setObjectName("textarea")
     t.setPlaceholderText(placeholder)
     t.setTabChangesFocus(True)
-    if mono:
-        t.setFont(theme.font_mono())
-    fm = t.fontMetrics()
-    t.setFixedHeight(int(fm.lineSpacing() * rows * 1.3) + 22)
+    t.setFixedHeight(int(round(rows * (12.5 if mono else theme.FS_UI) * 1.55)) + 18)
     t.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
     t.setAccessibleName(name or placeholder)
+    styled(t, lambda tk: input_css("#textarea", tk, mono, "6px 8px"))
     return t
+
+
+class Select(QPushButton):
+    """``Select`` (web/src/components/ui/Select.tsx): a ``.select-btn`` that opens the app's own menu in a
+    popover. The item API follows QComboBox (``addItem``, ``count``, ``itemText``, ``findData``,
+    ``setCurrentIndex``, ``currentData``, ``currentIndexChanged``) so forms can treat it as one.
+    ``popup_width`` is the web's ``width`` prop: the list's width when it differs from the button's."""
+
+    currentIndexChanged = Signal(int)  # noqa: N815 — the QComboBox name, so forms treat both alike
+
+    def __init__(
+        self, name: str = "", popup_width: int = 0, ghost: bool = False, parent: Optional[QWidget] = None
+    ) -> None:
+        super().__init__(parent)
+        self.items: List[Json] = []
+        self._index = -1
+        self._popup_width = popup_width
+        self._ghost = ghost
+        self._popover: Optional[Popover] = None
+        self.setObjectName("select")
+        self.setAutoDefault(False)
+        self.setAccessibleName(name)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        self.setFixedHeight(26 if ghost else 34)
+        self.setSizePolicy(
+            QSizePolicy.Policy.Fixed if ghost else QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(8 if ghost else 11, 0, 6 if ghost else 10, 0)
+        lay.setSpacing(8)
+        self.ico = QLabel()
+        self.ico.setFixedSize(14, 14)
+        self.ico.hide()
+        lay.addWidget(self.ico)
+        self.label_w = Text("", theme.FS_SMALL if ghost else theme.FS_UI, 600 if ghost else 400, wrap=False)
+        self.label_w.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        lay.addWidget(self.label_w, 1)
+        self.chev = QLabel()
+        self.chev.setFixedSize(13, 13)
+        lay.addWidget(self.chev)
+        for w in (self.ico, self.label_w, self.chev):
+            w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.clicked.connect(self.toggle_popup)
+        bind(theme.theme.changed, self, lambda _t: self._paint())
+        self._paint()
+
+    # ---- the QComboBox-shaped item API
+    def addItem(  # noqa: N802
+        self, text: str, data: Any = None, hint: str = "", icon: str = "", mono: bool = False
+    ) -> None:
+        self.items.append({"label": text, "value": data, "hint": hint, "icon": icon, "mono": mono, "disabled": False})
+        if self._index < 0:
+            self.setCurrentIndex(0)
+        elif len(self.items) - 1 == self._index:
+            self._show_current()
+
+    def setItemData(self, i: int, value: Any, role: Any = None) -> None:  # noqa: N802
+        if 0 <= i < len(self.items):
+            self.items[i]["hint"] = str(value or "")
+            if i == self._index:
+                self._show_current()
+
+    def set_item_enabled(self, i: int, on: bool) -> None:
+        if 0 <= i < len(self.items):
+            self.items[i]["disabled"] = not on
+
+    def count(self) -> int:
+        return len(self.items)
+
+    def itemText(self, i: int) -> str:  # noqa: N802
+        return str(self.items[i]["label"]) if 0 <= i < len(self.items) else ""
+
+    def itemData(self, i: int) -> Any:  # noqa: N802
+        return self.items[i]["value"] if 0 <= i < len(self.items) else None
+
+    def findData(self, value: Any) -> int:  # noqa: N802
+        return next((i for i, it in enumerate(self.items) if it["value"] == value), -1)
+
+    def findText(self, text: str) -> int:  # noqa: N802
+        return next((i for i, it in enumerate(self.items) if it["label"] == text), -1)
+
+    def currentIndex(self) -> int:  # noqa: N802
+        return self._index
+
+    def setCurrentIndex(self, i: int) -> None:  # noqa: N802
+        i = i if 0 <= i < len(self.items) else (0 if self.items else -1)
+        changed = i != self._index
+        self._index = i
+        self._show_current()
+        if changed:
+            self.currentIndexChanged.emit(i)
+
+    def currentData(self) -> Any:  # noqa: N802
+        return self.items[self._index]["value"] if 0 <= self._index < len(self.items) else None
+
+    def currentText(self) -> str:  # noqa: N802
+        return self.itemText(self._index)
+
+    def text(self) -> str:
+        """What the button shows (QPushButton's ``text``): the chosen item's label."""
+        return self.currentText()
+
+    def clear(self) -> None:
+        self.items = []
+        self._index = -1
+        self._show_current()
+
+    # ---- looks
+    def _show_current(self) -> None:
+        it = self.items[self._index] if 0 <= self._index < len(self.items) else None
+        self.label_w.setText(str(it["label"]) if it else "Choose…")
+        self.label_w.set_color("text" if it else "text_3")
+        t = theme.tokens()
+        if it and it.get("icon"):
+            self.ico.setPixmap(icons.pixmap(str(it["icon"]), t.text_3, 14))
+            self.ico.show()
+        else:
+            self.ico.hide()
+
+    def _paint(self) -> None:
+        t = theme.tokens()
+        surface = sheet_bg(t).name()
+        bg = theme.blend(t.fill_1, surface)
+        hover = theme.blend(t.fill_2, surface)
+        if self._ghost:
+            self.setStyleSheet(
+                f"#select {{ background: transparent; border: none; border-radius: {theme.R2}px; padding: 0; min-height: 26px; max-height: 26px; text-align: left; }}"
+                f' #select:hover, #select[open="true"] {{ background: {hover.name()}; }}'
+            )
+        else:
+            self.setStyleSheet(
+                f"#select {{ background: {bg.name()}; border: 1px solid {theme.blend(t.hair, bg.name()).name()}; border-radius: {theme.R2}px; padding: 0; min-height: 32px; max-height: 32px; text-align: left; }}"
+                f' #select:hover, #select[open="true"] {{ background: {hover.name()}; border-color: {theme.blend(t.hair_2, hover.name()).name()}; }}'
+            )
+        self.chev.setPixmap(icons.pixmap("chevrons-up-down", t.text_3, 13))
+        self._show_current()
+
+    # ---- the popup
+    def showPopup(self) -> None:  # noqa: N802
+        if self._popover is not None and self._popover.is_open:
+            return
+        host = host_for(self)
+        if host is None:
+            return
+        items: List[Json] = []
+        for i, it in enumerate(self.items):
+            items.append(
+                {
+                    "label": it["label"],
+                    "hint": it.get("hint") or "",
+                    "icon": it.get("icon") or "",
+                    "mono": bool(it.get("mono")),
+                    "checked": i == self._index,
+                    "disabled": bool(it.get("disabled")),
+                    "on_select": (lambda k=i: self.setCurrentIndex(k)),
+                }
+            )
+        pop = Popover(host, self._popup_width or self.width())
+        menu = Menu(items)
+        menu.picked.connect(self._picked)
+        pop.set_content(menu)
+        pop.menu = menu  # type: ignore[attr-defined]
+        pop.closed.connect(self._popup_closed)
+        self._popover = pop
+        pop.open_at(self, "bottom-start")
+        set_prop(self, "open", "true")
+
+    def _picked(self, it: Json) -> None:
+        pop = self._popover
+        fn = it.get("on_select")
+        if pop is not None:
+            pop.dismiss()
+        if callable(fn):
+            fn()
+
+    def _popup_closed(self) -> None:
+        self._popover = None
+        set_prop(self, "open", "false")
+
+    def hidePopup(self) -> None:  # noqa: N802
+        if self._popover is not None:
+            self._popover.dismiss()
+
+    def toggle_popup(self) -> None:
+        if self._popover is not None and self._popover.is_open:
+            self.hidePopup()
+        else:
+            self.showPopup()
+
+    @property
+    def popup(self) -> Optional[Popover]:
+        return self._popover if self._popover is not None and self._popover.is_open else None
+
+    def keyPressEvent(self, e: QKeyEvent) -> None:  # noqa: N802
+        pop = self.popup
+        if pop is not None:
+            m = getattr(pop, "menu", None)
+            if e.key() == Qt.Key.Key_Down and m is not None:
+                m.step(1)
+                return
+            if e.key() == Qt.Key.Key_Up and m is not None:
+                m.step(-1)
+                return
+            if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and m is not None:
+                if not m.choose_active():
+                    pop.dismiss()
+                return
+        elif e.key() in (Qt.Key.Key_Down, Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.showPopup()
+            return
+        super().keyPressEvent(e)
 
 
 def combo(
@@ -203,29 +431,27 @@ def combo(
     hints: Optional[Dict[str, str]] = None,
     name: str = "",
     width: int = 0,
-) -> QComboBox:
-    """``Select``: value/label pairs; ``hints`` become the items' tooltips. ``name`` is the accessible name."""
-    c = QComboBox()
-    c.setAccessibleName(name)
-    c.setMinimumHeight(32)
-    c.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
+    icons_: Optional[Dict[str, str]] = None,
+    popup_width: int = 0,
+) -> Select:
+    """``Select``: value/label pairs; ``hints`` go under the labels in the list, ``icons_`` before them.
+    ``name`` is the accessible name; ``width`` fixes the button, ``popup_width`` the list."""
+    c = Select(name, popup_width)
     for v, text in options:
-        c.addItem(text, v)
-        if hints and hints.get(v):
-            c.setItemData(c.count() - 1, hints[v], Qt.ItemDataRole.ToolTipRole)
+        c.addItem(text, v, hint=(hints or {}).get(v, ""), icon=(icons_ or {}).get(v, ""))
     select_value(c, value)
     if width:
         c.setFixedWidth(width)
-    c.setCursor(Qt.CursorShape.PointingHandCursor)
+        c.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
     return c
 
 
-def select_value(c: QComboBox, value: str) -> None:
+def select_value(c: Select, value: str) -> None:
     i = c.findData(value)
     c.setCurrentIndex(i if i >= 0 else 0)
 
 
-def combo_value(c: QComboBox) -> str:
+def combo_value(c: Select) -> str:
     return str(c.currentData() if c.currentData() is not None else "")
 
 
@@ -366,10 +592,10 @@ class Intro(QFrame):
         self.setObjectName("intro")
         styled(self, lambda t: f"#intro {{ background: {t.inset}; border-radius: 12px; }}")
         lay = vbox(self, 8, (20, 18, 20, 18))
-        self.title = label(title)
-        self.title.setStyleSheet(f"font-size: {theme.FS_BODY}px; font-weight: 600;")
+        self.title = Text(title, theme.FS_BODY, 600)
         lay.addWidget(self.title)
-        self.body = label(body, tone="muted", wrap=True)
+        self.body = Text(body, theme.FS_UI, 400, "text_2", 1.55)
+        self.body.set_max_width(516)  # max-width: 62ch
         lay.addWidget(self.body)
         self.actions = QHBoxLayout()
         self.actions.setSpacing(8)
@@ -408,7 +634,8 @@ class Panel(QFrame):
 
 
 class Seg(QWidget):
-    """Segmented control (``Seg`` in bits.tsx): one of a few short choices."""
+    """Segmented control (``Seg`` in bits.tsx / ``.seg``): one of a few short choices. The chosen
+    segment carries the thumb (fill-3 on dark, raised with a shadow on light)."""
 
     changed = Signal(str)
 
@@ -444,18 +671,21 @@ class Seg(QWidget):
             self.buttons[v] = b
         h = 22 if small else 24
         pad = 7 if small else 10
-        styled(
-            self,
-            lambda t: (
-                f"""
-            #seg {{ background: {theme.blend(t.fill_1, t.raised).name()}; border: 1px solid {theme.blend(t.hair, t.raised).name()}; border-radius: 8px; }}
-            QPushButton {{ border: none; background: transparent; color: {t.text_3}; padding: 0 {pad}px; min-height: {h}px; max-height: {h}px; border-radius: 6px; font-size: {theme.FS_SMALL}px; font-weight: 500; }}
+
+        def css(t: theme.Tokens) -> str:
+            surface = sheet_bg(t).name()
+            bg = theme.blend(t.fill_1, surface)
+            on_bg = theme.blend(t.fill_3, surface).name() if t.dark else t.raised
+            on_border = "transparent" if t.dark else theme.blend(t.hair, t.raised).name()
+            return f"""
+            #seg {{ background: {bg.name()}; border: 1px solid {theme.blend(t.hair, bg.name()).name()}; border-radius: 8px; }}
+            QPushButton {{ border: 1px solid transparent; background: transparent; color: {t.text_3}; padding: 0 {pad - 1}px; min-height: {h - 2}px; max-height: {h - 2}px; border-radius: 6px; font-size: {theme.FS_SMALL}px; font-weight: 500; }}
             QPushButton:hover {{ color: {t.text}; }}
-            QPushButton:checked {{ background: {theme.blend(t.fill_3, t.raised).name() if t.dark else t.raised}; color: {t.text}; border: 1px solid {theme.blend(t.hair, t.raised).name() if not t.dark else "transparent"}; }}
+            QPushButton:checked {{ background: {on_bg}; color: {t.text}; border-color: {on_border}; }}
             QPushButton:disabled {{ color: {t.text_4}; }}
-        """
-            ),
-        )
+            """
+
+        styled(self, css)
         self.set_value(value)
 
     @property
@@ -476,38 +706,11 @@ class Seg(QWidget):
         self.changed.emit(v)
 
 
-class Switch(QAbstractButton):
-    """The iOS-style switch (``Switch`` in bits.tsx): 34×20, accent when on."""
+class Switch(_Switch):
+    """The iOS-style switch (``Switch`` in bits.tsx); ``name`` is the accessible name."""
 
     def __init__(self, on: bool = False, name: str = "", parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self.setCheckable(True)
-        self.setChecked(on)
-        self.setFixedSize(34, 20)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setAccessibleName(name)
-        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
-        bind(theme.theme.changed, self, lambda _t: self.update())
-
-    def paintEvent(self, _e) -> None:  # noqa: N802
-        t = theme.tokens()
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        on = self.isChecked()
-        track = QColor(t.accent) if on else theme.blend(t.fill_2, t.raised)
-        if not self.isEnabled():
-            track.setAlphaF(0.5)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(track)
-        p.drawRoundedRect(QRectF(0, 0, 34, 20), 10, 10)
-        if not on:
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            p.setPen(theme.blend(t.hair_2, t.raised))
-            p.drawRoundedRect(QRectF(0.5, 0.5, 33, 19), 9.5, 9.5)
-            p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(t.accent_ink if on else t.text_2))
-        x = 16 if on else 2
-        p.drawEllipse(QRectF(x, 2, 16, 16))
+        super().__init__(on, name, parent)
 
 
 class RadioRow(QPushButton):
@@ -522,15 +725,16 @@ class RadioRow(QPushButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setObjectName("radio")
-        self.setMinimumHeight(35)
+        self.setFixedHeight(35)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(12, 0, 12, 0)
         lay.setSpacing(10)
         self.ico = QLabel()
         self.ico.setFixedSize(18, 18)
+        self.ico.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(self.ico)
         self.lb = QLabel(str(mode["label"]))
-        self.lb.setStyleSheet("font-weight: 600;")
+        self.lb.setFont(theme.font_ui(theme.FS_UI, 600))
         lay.addWidget(self.lb)
         self.hint = elide(label(str(mode["hint"]), tone="faint", size="small"))
         lay.addWidget(self.hint, 1)
@@ -542,9 +746,9 @@ class RadioRow(QPushButton):
             self,
             lambda t: (
                 f"""
-            #radio {{ background: transparent; border: none; border-radius: 0; padding: 0; text-align: left; }}
-            #radio:hover {{ background: {theme.blend(t.fill_1, t.raised).name()}; }}
-            #radio:checked {{ background: {theme.blend(t.fill_2, t.raised).name()}; }}
+            #radio {{ background: transparent; border: none; border-radius: 0; padding: 0; min-height: 35px; max-height: 35px; text-align: left; }}
+            #radio:hover {{ background: {theme.blend(t.fill_1, well_bg(t).name()).name()}; }}
+            #radio:checked {{ background: {theme.blend(t.fill_2, well_bg(t).name()).name()}; }}
             #radio QLabel {{ background: transparent; }}
         """
             ),
@@ -559,7 +763,8 @@ class RadioRow(QPushButton):
         on = self.isChecked()
         color = t.err if self._danger else (t.text if on else t.text_3)
         self.ico.setPixmap(icons.pixmap(str(self.mode["icon"]), color, 15))
-        self.lb.setStyleSheet(f"font-weight: 600; color: {t.err if self._danger else (t.text if on else t.text_2)};")
+        self.hint.setStyleSheet(f"color: {t.text_3}; font-size: {theme.FS_SMALL}px;")
+        self.lb.setStyleSheet(f"color: {t.err if self._danger else (t.text if on else t.text_2)};")
         self.check.setPixmap(icons.pixmap("check", t.text, 14) if on else icons.pixmap("check", "transparent", 14))
 
 
@@ -575,7 +780,7 @@ class RadioList(QFrame):
         styled(
             self,
             lambda t: (
-                f"#radiolist {{ background: {theme.blend(t.fill_1, t.raised).name()}; border: 1px solid {theme.blend(t.hair, t.raised).name()}; border-radius: {theme.R3}px; }}"
+                f"#radiolist {{ background: {well_bg(t).name()}; border: 1px solid {theme.blend(t.hair, well_bg(t).name()).name()}; border-radius: {theme.R3}px; }}"
             ),
         )
         lay = vbox(self, 0, (0, 0, 0, 0))
@@ -621,9 +826,9 @@ class FolderChip(QPushButton):
             self,
             lambda t: (
                 f"""
-            #fchip {{ min-height: 24px; max-height: 24px; padding: 0 11px; border-radius: 13px; font-size: {theme.FS_SMALL}px; color: {t.text_2}; background: {theme.blend(t.fill_1, t.raised).name()}; border: 1px solid {theme.blend(t.hair, t.raised).name()}; }}
-            #fchip:hover {{ background: {theme.blend(t.fill_2, t.raised).name()}; color: {t.text}; }}
-            #fchip[on="true"] {{ color: {t.text}; background: {theme.blend(t.fill_2, t.raised).name()}; border-color: {theme.blend(t.hair_3, t.raised).name()}; }}
+            #fchip {{ min-height: 24px; max-height: 24px; padding: 0 10px; border-radius: 13px; font-size: {theme.FS_SMALL}px; color: {t.text_2}; background: {theme.blend(t.fill_1, sheet_bg(t).name()).name()}; border: 1px solid {theme.blend(t.hair, theme.blend(t.fill_1, sheet_bg(t).name()).name()).name()}; }}
+            #fchip:hover {{ background: {theme.blend(t.fill_2, sheet_bg(t).name()).name()}; color: {t.text}; }}
+            #fchip[on="true"] {{ color: {t.text}; background: {theme.blend(t.fill_2, sheet_bg(t).name()).name()}; border-color: {theme.blend(t.hair_3, sheet_bg(t).name()).name()}; }}
         """
             ),
         )
@@ -732,10 +937,7 @@ class ModelSelect(QWidget):
         super().__init__(parent)
         self._value = value
         lay = vbox(self, 6)
-        self.box = QComboBox()
-        self.box.setAccessibleName(name)
-        self.box.setMinimumHeight(32)
-        self.box.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.box = Select(name, popup_width=320)
         lay.addWidget(self.box)
         self.edit = line_edit("claude-opus-5-5", mono=True, name=f"{name} ID")
         self.edit.hide()
@@ -765,11 +967,8 @@ class ModelSelect(QWidget):
         self.box.blockSignals(True)
         self.box.clear()
         for v, text, h in opts:
-            self.box.addItem(text, v)
-            if h:
-                self.box.setItemData(self.box.count() - 1, h, Qt.ItemDataRole.ToolTipRole)
-        self.box.addItem("Custom model ID…", CUSTOM)
-        self.box.setItemData(self.box.count() - 1, note, Qt.ItemDataRole.ToolTipRole)
+            self.box.addItem(text, v, hint=h, mono=bool(v))
+        self.box.addItem("Custom model ID…", CUSTOM, hint=note)
         if known:
             select_value(self.box, self._value)
             self.edit.hide()
@@ -873,17 +1072,19 @@ class Sheet(QDialog):
         self.frame = QFrame(self)
         self.frame.setObjectName("sheet")
         self.frame.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        styled(self.frame, sheet_css)
         fl = vbox(self.frame, 0)
         self.head = QWidget()
+        self.head.setFixedHeight(48)
         hl = QHBoxLayout(self.head)
         hl.setContentsMargins(22, 18, 16, 6)
         hl.setSpacing(10)
         if title_icon:
             hl.addWidget(icon_label(title_icon, lambda t: t.text_2, 15))
-        self.title_lb = QLabel(title)
-        self.title_lb.setStyleSheet(f"font-size: {theme.FS_H}px; font-weight: 600;")
+        self.title_lb = Text(title, theme.FS_H, 600, wrap=False)
         hl.addWidget(self.title_lb, 1)
         self.close_btn = IconButton("x", "Close (Esc)", 15)
+        self.close_btn.setFixedSize(24, 24)
         self.close_btn.clicked.connect(self.dismiss)
         hl.addWidget(self.close_btn)
         fl.addWidget(self.head)
@@ -938,6 +1139,7 @@ class Sheet(QDialog):
             _open[self.key] = self
         app_focus = self.parentWidget().window().focusWidget() if self.parentWidget() is not None else None
         self._prev_focus = app_focus
+        self.backdrop = Backdrop(self.parentWidget())
         self.show()
         self.raise_()
         self.relayout()
@@ -946,7 +1148,7 @@ class Sheet(QDialog):
     def _focus_first(self) -> None:
         if self._closing:
             return
-        for cls in (QLineEdit, QPlainTextEdit, QComboBox):
+        for cls in (QLineEdit, QPlainTextEdit, Select):
             for w in self.frame.findChildren(cls):
                 if w.isVisible() and w.isEnabled() and w.focusPolicy() != Qt.FocusPolicy.NoFocus:
                     w.setFocus(Qt.FocusReason.TabFocusReason)
@@ -1012,7 +1214,11 @@ class Sheet(QDialog):
     # ---- painting and input
     def paintEvent(self, _e) -> None:  # noqa: N802
         p = QPainter(self)
-        p.fillRect(self.rect(), theme.qcolor(theme.tokens().scrim))
+        bd = getattr(self, "backdrop", None)
+        if bd is not None:
+            bd.paint(p, self)
+        else:
+            p.fillRect(self.rect(), theme.qcolor(theme.tokens().scrim))
 
     def mousePressEvent(self, e) -> None:  # noqa: N802
         if not self.frame.geometry().contains(e.position().toPoint()):
@@ -1042,9 +1248,17 @@ class Sheet(QDialog):
 
 
 def open_sheet(key: str) -> Optional[Sheet]:
-    """The sheet open for a store key, if any."""
+    """The sheet open for a store key, if any (one whose window went away without closing it is forgotten)."""
     s = _open.get(key)
-    return s if s is not None and not s._closing else None
+    if s is None:
+        return None
+    try:
+        if s._closing or s.isHidden() and not s.isVisibleTo(s.parentWidget()):
+            return None
+    except RuntimeError:  # the C++ side is gone with its window
+        _open.pop(key, None)
+        return None
+    return s
 
 
 def close_sheet(key: str) -> None:

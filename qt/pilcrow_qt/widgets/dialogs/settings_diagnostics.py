@@ -11,8 +11,9 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 from ... import icons, theme
 from ...lib.fmt import tildify
 from ...store import store
-from ..ui.bits import button, copy_text, hairline, label
+from ..ui.bits import button, copy_text, hairline
 from ..ui.signals import bind
+from .parts import Text
 from .settings_ui import clear_layout, hint, vbox
 
 Json = Dict[str, Any]
@@ -83,9 +84,9 @@ class DiagnosticsPage(QWidget):
         super().__init__(parent)
         self.sheet = sheet
         self.info: Json = dict(store.info or {})
-        self.lay = vbox(self, 14, (0, 6, 0, 0))
+        self.lay = vbox(self, 0, (0, 0, 0, 0))
         self.list_w = QWidget()
-        self.list_lay = vbox(self.list_w, 2)
+        self.list_lay = vbox(self.list_w, 2, (0, 0, 0, 14))
         self.lay.addWidget(self.list_w)
         bar = QWidget()
         bl = QHBoxLayout(bar)
@@ -101,7 +102,7 @@ class DiagnosticsPage(QWidget):
         self.window_lb = hint("", wrap=False)
         bl.addWidget(self.window_lb)
         self.lay.addWidget(bar)
-        self.logs = hint("")
+        self.logs = Text("", theme.FS_SMALL, 400, "text_3", 1.5)
         self.lay.addWidget(self.logs)
         bind(store.info_changed, self, lambda i: self.set_info(i))
         self.render()
@@ -117,12 +118,12 @@ class DiagnosticsPage(QWidget):
             return
         t = theme.tokens()
         for n, (k, ok, v) in enumerate(checks_of(i)):
-            if n:
-                self.list_lay.addWidget(hairline())
             r = QWidget()
             rl = QHBoxLayout(r)
             rl.setContentsMargins(0, 10, 0, 10)
             rl.setSpacing(11)
+            if n:
+                self.list_lay.addWidget(hairline())
             ico = QLabel()
             ico.setPixmap(icons.pixmap("circle-check" if ok else "circle-alert", t.ok if ok else t.warn, 15))
             ico.setFixedSize(15, 17)
@@ -130,10 +131,8 @@ class DiagnosticsPage(QWidget):
             rl.addWidget(ico, 0, Qt.AlignmentFlag.AlignTop)
             col = QWidget()
             cl = vbox(col, 2)
-            key = label(k)
-            key.setStyleSheet("font-weight: 500;")
-            cl.addWidget(key)
-            cl.addWidget(hint(v))
+            cl.addWidget(Text(k, theme.FS_UI, 500))
+            cl.addWidget(Text(v, theme.FS_SMALL, 400, "text_3", 1.5))
             rl.addWidget(col, 1)
             self.list_lay.addWidget(r)
         self.window_lb.setText(f"{WINDOW_LABEL.get(str(i.get('shell')), str(i.get('shell')))} · Node {i.get('node')}")

@@ -12,21 +12,22 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Tuple
 
-from PySide6.QtCore import QRect, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QPointF, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QFont,
     QKeyEvent,
     QPainter,
     QSyntaxHighlighter,
+    QTextBlockFormat,
     QTextCharFormat,
     QTextCursor,
     QTextDocument,
     QTextFormat,
 )
-from PySide6.QtWidgets import QPlainTextEdit, QTextEdit, QWidget
+from PySide6.QtWidgets import QTextEdit, QWidget
 
-from ... import theme
+from ... import icons, theme
 from ...lib.fmt import lang_from_path
 from ..ui.signals import bind
 
@@ -58,6 +59,8 @@ _LEXER_ALIAS: Dict[str, str] = {
 # Past this many characters the file is lexed line by line (stateless) to keep typing responsive.
 WHOLE_DOC_LIMIT = 300_000
 INDENT = "  "
+LINE_HEIGHT = int(round(theme.MONO_SIZE * 1.6))  # .cm-scroller line-height 1.6 of the 12.5px size: 20px lines
+FOLD_W = 12  # the fold gutter's column
 
 Run = Tuple[int, int, object]  # (column, length, token type)
 
@@ -76,47 +79,52 @@ def lexer_for_path(path: str):
         return None
 
 
-def _format_for(ttype, t: theme.Tokens) -> Optional[QTextCharFormat]:
-    """The text format for a token type: the HighlightStyle in Editor.tsx, in theme tokens."""
-    f = QTextCharFormat()
+def token_color(ttype, t: theme.Tokens) -> Tuple[Optional[QColor], bool]:
+    """The (colour, italic) for a token type: the HighlightStyle in Editor.tsx, in theme tokens;
+    (None, False) for plain text."""
     if ttype in Comment:
-        f.setForeground(QColor(t.cm_comment))
-        f.setFontItalic(True)
-    elif ttype in Keyword or ttype in Operator.Word:
-        f.setForeground(QColor(t.cm_keyword))
-    elif ttype in String.Regex:
-        f.setForeground(QColor(t.cm_regex))
-    elif ttype in String.Escape:
-        f.setForeground(QColor(t.cm_regex))
-    elif ttype in String:
-        f.setForeground(QColor(t.cm_string))
-    elif ttype in Number:
-        f.setForeground(QColor(t.cm_number))
-    elif ttype in Name.Function:
-        f.setForeground(QColor(t.cm_function))
-    elif ttype in Name.Class or ttype in Name.Builtin or ttype in Name.Exception or ttype in Name.Namespace:
-        f.setForeground(QColor(t.cm_type))
-    elif ttype in Name.Tag:
-        f.setForeground(QColor(t.cm_tag))
-    elif ttype in Name.Attribute or ttype in Name.Property or ttype in Name.Variable or ttype in Name.Decorator:
-        f.setForeground(QColor(t.cm_property))
-    elif ttype in Generic.Heading or ttype in Generic.Subheading:
-        f.setForeground(QColor(t.cm_function))
-        f.setFontWeight(QFont.Weight.DemiBold)
-    elif ttype in Generic.Strong:
+        return QColor(t.cm_comment), True
+    if ttype in Keyword or ttype in Operator.Word:
+        return QColor(t.cm_keyword), False
+    if ttype in String.Regex or ttype in String.Escape:
+        return QColor(t.cm_regex), False
+    if ttype in String:
+        return QColor(t.cm_string), False
+    if ttype in Number:
+        return QColor(t.cm_number), False
+    if ttype in Name.Function:
+        return QColor(t.cm_function), False
+    if ttype in Name.Class or ttype in Name.Builtin or ttype in Name.Exception or ttype in Name.Namespace:
+        return QColor(t.cm_type), False
+    if ttype in Name.Tag:
+        return QColor(t.cm_tag), False
+    if ttype in Name.Attribute or ttype in Name.Property or ttype in Name.Variable or ttype in Name.Decorator:
+        return QColor(t.cm_property), False
+    if ttype in Generic.Heading or ttype in Generic.Subheading:
+        return QColor(t.cm_function), False
+    if ttype in Generic.Inserted:
+        return QColor(t.ok), False
+    if ttype in Generic.Deleted or ttype in Error:
+        return QColor(t.err), False
+    if ttype in Punctuation or ttype in Operator:
+        return QColor(t.cm_punct), False
+    return None, False
+
+
+def _format_for(ttype, t: theme.Tokens) -> Optional[QTextCharFormat]:
+    """The text format for a token type (``token_color`` plus the weights Pygments marks)."""
+    f = QTextCharFormat()
+    color, italic = token_color(ttype, t)
+    if ttype in Generic.Heading or ttype in Generic.Subheading or ttype in Generic.Strong:
         f.setFontWeight(QFont.Weight.DemiBold)
     elif ttype in Generic.Emph:
         f.setFontItalic(True)
-    elif ttype in Generic.Inserted:
-        f.setForeground(QColor(t.ok))
-    elif ttype in Generic.Deleted:
-        f.setForeground(QColor(t.err))
-    elif ttype in Error:
-        f.setForeground(QColor(t.err))
-    elif ttype in Punctuation or ttype in Operator:
-        f.setForeground(QColor(t.cm_punct))
-    else:
+    elif color is None:
         return None
+    if color is not None:
+        f.setForeground(color)
+    if italic:
+        f.setFontItalic(True)
     return f
 
 
@@ -241,8 +249,9 @@ class LineNumberArea(QWidget):
         self._editor.paint_gutter(e)
 
 
-class CodeEditor(QPlainTextEdit):
-    """A source editor for one file. ``save_requested`` fires on Ctrl+S."""
+class CodeEditor(QTextEdit):
+    """A source editor for one file. ``save_requested`` fires on Ctrl+S. A QTextEdit rather than a
+    QPlainTextEdit: only the full document layout honours the 1.6 line height CodeMirror sets."""
 
     save_requested = Signal()
 
@@ -251,15 +260,18 @@ class CodeEditor(QPlainTextEdit):
         self._path = path
         self.setObjectName("code-editor")
         self.setFont(theme.font_mono())
-        self.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+        self.setAcceptRichText(False)
+        self.setLineWrapMode(QTextEdit.LineWrapMode.NoWrap)
         self.setTabStopDistance(self.fontMetrics().horizontalAdvance(" ") * 4)
-        self.setFrameShape(QPlainTextEdit.Shape.NoFrame)
+        self.setFrameShape(QTextEdit.Shape.NoFrame)
         self.setCursorWidth(2)
         self.setAccessibleName("Editor")
+        self.document().setDocumentMargin(4)  # .cm-content padding 4px 0 (+ the viewport's 2px: .cm-line's 6px)
         self.gutter = LineNumberArea(self)
         self.highlighter = PygmentsHighlighter(self.document(), path)
-        self.blockCountChanged.connect(lambda _n: self._update_gutter_width())
-        self.updateRequest.connect(self._update_gutter)
+        self.document().blockCountChanged.connect(lambda _n: (self._update_gutter_width(), self._apply_line_height()))
+        self.document().contentsChanged.connect(self.gutter.update)
+        self.verticalScrollBar().valueChanged.connect(lambda _v: self.gutter.update())
         self.cursorPositionChanged.connect(self._tint_current_line)
         self._update_gutter_width()
         self._tint_current_line()
@@ -287,6 +299,28 @@ class CodeEditor(QPlainTextEdit):
         self.setTextCursor(cur)
         self.highlighter.rehighlight()
 
+    def setPlainText(self, text: str) -> None:  # noqa: N802
+        super().setPlainText(text)
+        self._apply_line_height()
+
+    def _apply_line_height(self) -> None:
+        """Every block 20px tall (1.6 × the 12.5px size), the way CodeMirror sets the scroller's line height."""
+        doc = self.document()
+        block = doc.firstBlock()
+        fmt = QTextBlockFormat()
+        fmt.setLineHeight(LINE_HEIGHT, QTextBlockFormat.LineHeightTypes.FixedHeight.value)
+        cur = QTextCursor(doc)
+        cur.beginEditBlock()
+        while block.isValid():
+            if block.blockFormat().lineHeight() != LINE_HEIGHT:
+                cur.setPosition(block.position())
+                cur.mergeBlockFormat(fmt)
+            block = block.next()
+        cur.endEditBlock()
+
+    def blockCount(self) -> int:  # noqa: N802
+        return self.document().blockCount()
+
     def goto_line(self, line: int) -> None:
         """Put the caret on a 1-based line, centred in view, and take focus."""
         doc = self.document()
@@ -294,7 +328,9 @@ class CodeEditor(QPlainTextEdit):
         block = doc.findBlockByNumber(ln - 1)
         cur = QTextCursor(block)
         self.setTextCursor(cur)
-        self.centerCursor()
+        top = doc.documentLayout().blockBoundingRect(block).top()
+        sb = self.verticalScrollBar()
+        sb.setValue(int(max(0, top - self.viewport().height() / 2)))
         self.setFocus()
 
     def line_formats(self, line: int) -> List[Tuple[int, int, QTextCharFormat]]:
@@ -356,19 +392,25 @@ class CodeEditor(QPlainTextEdit):
 
     # ---------------------------------------------------------------- gutter and tint
     def gutter_width(self) -> int:
-        digits = max(2, len(str(max(1, self.blockCount()))))
-        return 14 + self.fontMetrics().horizontalAdvance("9") * digits
+        """.cm-lineNumbers (padding 0 3px 0 5px, at least 20px) plus the fold gutter and its border."""
+        digits = max(1, len(str(max(1, self.blockCount()))))
+        return max(20, 5 + self.fontMetrics().horizontalAdvance("9") * digits + 3) + FOLD_W + 1
 
     def _update_gutter_width(self) -> None:
-        self.setViewportMargins(self.gutter_width(), 0, 0, 0)
+        self.setViewportMargins(self.gutter_width() + 2, 0, 0, 0)
 
-    def _update_gutter(self, rect: QRect, dy: int) -> None:
-        if dy:
-            self.gutter.scroll(0, dy)
-        else:
-            self.gutter.update(0, rect.y(), self.gutter.width(), rect.height())
-        if rect.contains(self.viewport().rect()):
-            self._update_gutter_width()
+    def _foldable(self, block) -> bool:
+        """Where CodeMirror would show a fold marker: a line whose next line is indented further."""
+        text = block.text()
+        if not text.strip():
+            return False
+        indent = len(text) - len(text.lstrip())
+        nxt = block.next()
+        while nxt.isValid() and not nxt.text().strip():
+            nxt = nxt.next()
+        if not nxt.isValid():
+            return False
+        return len(nxt.text()) - len(nxt.text().lstrip()) > indent
 
     def resizeEvent(self, e) -> None:  # noqa: N802
         super().resizeEvent(e)
@@ -382,27 +424,43 @@ class CodeEditor(QPlainTextEdit):
         p.setPen(theme.blend(t.hair, t.chrome))
         p.drawLine(self.gutter.width() - 1, e.rect().top(), self.gutter.width() - 1, e.rect().bottom())
         p.setFont(self.font())
-        fm = self.fontMetrics()
         cur_line = self.textCursor().blockNumber()
-        block = self.firstVisibleBlock()
-        top = int(self.blockBoundingGeometry(block).translated(self.contentOffset()).top())
-        bottom = top + int(self.blockBoundingRect(block).height())
-        w = self.gutter.width() - 8
-        while block.isValid() and top <= e.rect().bottom():
+        doc = self.document()
+        layout = doc.documentLayout()
+        off = self.verticalScrollBar().value()
+        # the first block in view: the layout's hit test at the top edge finds it without a walk
+        block = doc.findBlock(layout.hitTest(QPointF(0, off), Qt.HitTestAccuracy.FuzzyHit))
+        if not block.isValid():
+            block = doc.firstBlock()
+        num_w = self.gutter.width() - 1 - FOLD_W - 3
+        while block.isValid():
+            r = layout.blockBoundingRect(block)
+            nxt = block.next()
+            top = int(r.top() - off)
+            # the block's own rect is the glyph box; the 1.6 line runs to where the next block starts
+            bottom = int((layout.blockBoundingRect(nxt).top() if nxt.isValid() else r.bottom() + 4) - off)
+            if top > e.rect().bottom():
+                break
             if block.isVisible() and bottom >= e.rect().top():
                 n = block.blockNumber()
                 if n == cur_line:
-                    p.fillRect(0, top, self.gutter.width() - 1, bottom - top, theme.qcolor(t.raised_2))
+                    p.fillRect(0, top, self.gutter.width() - 1, bottom - top, theme.qcolor(t.raised))
                 p.setPen(theme.qcolor(t.text_2 if n == cur_line else t.text_3))
-                p.drawText(0, top, w, fm.height(), Qt.AlignmentFlag.AlignRight, str(n + 1))
+                p.drawText(
+                    QRect(0, top, num_w, bottom - top),
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                    str(n + 1),
+                )
+                if self._foldable(block):
+                    p.drawPixmap(
+                        num_w + 4, top + (bottom - top - 10) // 2 + 1, icons.pixmap("chevron-down", t.text_3, 10)
+                    )
             block = block.next()
-            top = bottom
-            bottom = top + int(self.blockBoundingRect(block).height())
 
     def _tint_current_line(self) -> None:
         t = theme.tokens()
         sel = QTextEdit.ExtraSelection()
-        c = theme.qcolor(t.raised_2)
+        c = theme.qcolor(t.raised)
         c.setAlphaF(0.7)
         sel.format.setBackground(c)
         sel.format.setProperty(QTextFormat.Property.FullWidthSelection, True)
@@ -417,7 +475,7 @@ class CodeEditor(QPlainTextEdit):
         # The font goes in the stylesheet too: the app stylesheet's ``*`` rule would override setFont.
         mono = theme._MONO_FAMILY or "monospace"
         self.setStyleSheet(
-            f"QPlainTextEdit#code-editor {{ background: {t.canvas}; color: {t.text}; border: none; padding: 0; "
+            f"QTextEdit#code-editor {{ background: {t.canvas}; color: {t.text}; border: none; padding: 0; "
             f'font-family: "{mono}"; font-size: {theme.MONO_SIZE}px; '
             f"selection-background-color: {theme.blend(t.selection, t.canvas).name()}; selection-color: {t.text}; }}"
         )

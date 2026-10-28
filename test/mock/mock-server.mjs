@@ -29,6 +29,8 @@ const uuid = () => `m-${(++seq).toString(36).padStart(5, '0')}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** How long the scripted Claude lingers between streamed pieces (ms); tests may turn it down. */
 let pace = 24;
+/** Canned results for RPC methods (mock.answer): a screenshot or test can show any state without a real backend. */
+const overrides = new Map();
 
 // ---------------------------------------------------------------- sessions and their transcripts
 
@@ -100,6 +102,7 @@ class Sess {
     this.outbox = [];
     this.flushTimer = null;
     this.turnSeq = 0;
+    this.extra = {}; // fields the tests lay over state() (mock.patch): tasks, mcp, …
   }
   summary() {
     return { id: this.id, title: this.title, firstPrompt: this.messages[0]?.message?.content?.[0]?.text, cwd: this.cwd, project: this.cwd, gitBranch: 'main', lastModified: this.touched, createdAt: this.createdAt, archived: this.archived, pinned: this.pinned, worktree: null, scheduled: null, status: this.status, live: this.live, pending: this.pending.size };
@@ -110,6 +113,7 @@ class Sess {
       usage: this.usage, error: null, suggestion: null, compacting: false, mcp: [], activity: this.activity, lastActivity: this.lastActivity, turnStartedAt: this.turnStartedAt, processStartedAt: this.live ? this.createdAt : null, lastReply: this.lastReply,
       unattended: false, unattendedDenials: 0, pending: [...this.pending.values()].map((p) => p.req), tasks: [], bgTasks: [], queued: [], held: this.held.map((h) => ({ uuid: h.uuid, text: h.text, images: 0, files: [], at: h.at })),
       init: this.init, commands: null, models: null,
+      ...this.extra,
     };
   }
   emitState() {
@@ -500,8 +504,28 @@ const methods = {
   // ---- test controls
   'mock.reset': () => {
     seed();
+    overrides.clear();
     listChanged();
     return true;
+  },
+  /** Answer `method` with `result` from now on (null forgets it); the real handler is used for everything else. */
+  'mock.answer': ({ method, result = null }) => {
+    if (result === null) overrides.delete(method);
+    else overrides.set(method, result);
+    return overrides.size;
+  },
+  /** Lay fields over a session's state (tasks, mcp, usage…) and broadcast it. */
+  'mock.patch': ({ id, state = {} }) => {
+    const s = S(id);
+    Object.assign(s.extra, state);
+    s.emitState();
+    return s.state();
+  },
+  /** Append raw transcript messages (the SDK shapes above) to a session, as if Claude had just sent them. */
+  'mock.messages': ({ id, msgs = [] }) => {
+    const s = S(id);
+    for (const m of msgs) s.record({ uuid: uuid(), session_id: id, timestamp: new Date().toISOString(), ...m });
+    return s.messages.length;
   },
   'mock.pace': ({ ms }) => {
     pace = Math.max(0, Number(ms) || 0);
@@ -556,7 +580,7 @@ wss.on('connection', (ws) => {
       return;
     }
     if (m.t !== 'req') return;
-    const fn = methods[m.m];
+    const fn = overrides.has(m.m) ? () => overrides.get(m.m) : methods[m.m];
     const send = (obj) => ws.readyState === 1 && ws.send(JSON.stringify(obj));
     if (!fn) {
       console.log(`[mock] unknown method ${m.m}`);

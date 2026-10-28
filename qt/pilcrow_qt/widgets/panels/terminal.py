@@ -16,16 +16,16 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import pyte
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QGuiApplication, QKeyEvent, QMouseEvent, QPainter, QWheelEvent
-from PySide6.QtWidgets import QAbstractScrollArea, QFrame, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QAbstractScrollArea, QFrame, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget
 
 from ... import icons, theme
 from ...lib.fmt import basename, err_text
 from ...rpc import rpc
 from ...store import store
-from ..ui.bits import IconButton, Row, hairline
+from ..ui.bits import IconButton, Row
 from ..ui.menu import show_menu_at
 from ..ui.signals import bind
-from .files import empty_state
+from .right_panel import EmptyState, Hairline
 
 Json = Dict[str, Any]
 
@@ -188,7 +188,7 @@ class TerminalView(QAbstractScrollArea):
         self._font = theme.font_mono()
         fm = QFontMetricsF(self._font)
         self._cell_w = max(1.0, fm.horizontalAdvance("M"))
-        self._cell_h = max(1, int(round(fm.height() * 1.2)))
+        self._cell_h = max(1, int(round(fm.height() * 1.3)))  # xterm lineHeight 1.3
         self._ascent = fm.ascent() + (self._cell_h - fm.height()) / 2
         self.setFont(self._font)
 
@@ -661,7 +661,7 @@ class TerminalPanel(QWidget):
         self.bar.add(self.add_btn)
         self.bar.stretch()
         root.addWidget(self.bar)
-        root.addWidget(hairline())
+        root.addWidget(Hairline())
         self.host = QWidget()
         self.host.setObjectName("chrome")
         self.host.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
@@ -681,7 +681,16 @@ class TerminalPanel(QWidget):
 
     @staticmethod
     def _empty_state() -> QWidget:
-        return empty_state("square-terminal", "The terminal needs python3 (or util-linux `script`) on this machine.")
+        """The web's ``.empty`` here fills the tab (a stretched grid), so its icon sits in the middle of
+        the top half and the sentence in the middle of the bottom half."""
+        e = EmptyState("square-terminal", "The terminal needs python3 (or util-linux `script`) on this machine.")
+        lay = e.layout()
+        lay.setContentsMargins(28, 40, 28, 40)
+        lay.insertStretch(0, 1)
+        lay.insertStretch(2, 2)
+        lay.addStretch(1)
+        e.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        return e
 
     # ---------------------------------------------------------------- state
     @property

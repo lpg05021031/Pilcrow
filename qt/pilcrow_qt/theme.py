@@ -431,11 +431,16 @@ def stylesheet(t: Tokens) -> str:
     fill1_on_chrome = blend(t.fill_1, t.chrome).name()
     fill1_on_canvas = blend(t.fill_1, t.canvas).name()
     fill2_on_chrome = blend(t.fill_2, t.chrome).name()
+    fill2_on_canvas = blend(t.fill_2, t.canvas).name()
+    fill3_on_canvas = blend(t.fill_3, t.canvas).name()
+    sheet_on_scrim = blend(t.glass_2, blend(t.scrim, t.canvas).name()).name()
+    popover_on_sheet = blend(t.glass, sheet_on_scrim).name()
     return f"""
     * {{ font-family: "{ui}"; font-size: {FS_UI}px; color: {t.text}; outline: none; }}
     QWidget {{ background: transparent; }}
     QMainWindow, #canvas {{ background: {t.canvas}; }}
-    #chrome, #sidebar, #panel {{ background: {t.chrome}; }}
+    /* the shell: sidebar and ground are chrome; the conversation and the side panel are canvas sheets (Card) */
+    #shell, #chrome, #sidebar {{ background: {t.chrome}; }}
     QToolTip {{ background: {t.raised_2}; color: {t.text}; border: 1px solid {hair2_on_raised}; padding: 4px 8px; border-radius: {R2}px; font-size: {FS_SMALL}px; }}
 
     /* text */
@@ -446,41 +451,47 @@ def stylesheet(t: Tokens) -> str:
     QLabel[tone="err"] {{ color: {t.err}; }}
     QLabel[tone="ok"] {{ color: {t.ok}; }}
     QLabel[mono="true"] {{ font-family: "{mono}"; font-size: {MONO_SIZE}px; }}
-    QLabel[size="small"] {{ font-size: {FS_SMALL}px; }}
-    QLabel[size="micro"] {{ font-size: {FS_MICRO}px; }}
-    QLabel[size="title"] {{ font-size: {FS_TITLE}px; font-weight: 600; }}
-    QLabel[size="h"] {{ font-size: {FS_H}px; font-weight: 600; }}
+    QLabel[fs="small"] {{ font-size: {FS_SMALL}px; }}
+    QLabel[fs="micro"] {{ font-size: {FS_MICRO}px; }}
+    QLabel[fs="title"] {{ font-size: {FS_TITLE}px; font-weight: 600; }}
+    QLabel[fs="h"] {{ font-size: {FS_H}px; font-weight: 600; }}
 
     /* buttons: quiet by default; the primary action is the only orange one */
-    QPushButton {{ background: transparent; border: 1px solid {hair2_on_raised}; border-radius: {R2}px; padding: 5px 11px; color: {t.text}; }}
-    QPushButton:hover {{ background: {fill1_on_canvas}; }}
-    QPushButton:pressed {{ background: {fill2_on_chrome}; }}
-    QPushButton:disabled {{ color: {t.text_4}; border-color: {hair_on_canvas}; }}
-    QPushButton[kind="primary"] {{ background: {t.accent}; color: {t.accent_ink}; border: none; font-weight: 600; }}
+    QPushButton {{ background: {fill2_on_canvas}; border: none; border-radius: {R2}px; padding: 7px 12px; color: {t.text}; font-weight: 500; }}
+    QPushButton:hover {{ background: {fill3_on_canvas}; }}
+    QPushButton:pressed {{ background: {fill3_on_canvas}; }}
+    QPushButton:disabled {{ color: {t.text_4}; background: {fill1_on_canvas}; }}
+    QPushButton[kind="primary"] {{ background: {t.accent}; color: {t.accent_ink}; border: none; border-top: 1px solid {blend("rgba(255, 255, 255, 0.18)", t.accent).name()}; }}
     QPushButton[kind="primary"]:hover {{ background: {t.accent_2}; }}
-    QPushButton[kind="primary"]:disabled {{ background: {fill2_on_chrome}; color: {t.text_4}; }}
-    QPushButton[kind="ghost"] {{ border: none; color: {t.text_2}; }}
-    QPushButton[kind="ghost"]:hover {{ background: {fill1_on_canvas}; color: {t.text}; }}
-    QPushButton[kind="danger"] {{ background: {t.err}; color: white; border: none; }}
-    QPushButton[kind="link"] {{ border: none; padding: 0; color: {t.text_2}; text-decoration: underline; }}
+    QPushButton[kind="primary"]:disabled {{ background: {fill2_on_canvas}; color: {t.text_4}; border-top: none; }}
+    QPushButton[kind="ghost"] {{ background: transparent; color: {t.text_2}; }}
+    QPushButton[kind="ghost"]:hover, QPushButton[kind="ghost"][active="true"] {{ background: {fill2_on_canvas}; color: {t.text}; }}
+    QPushButton[kind="outline"] {{ background: transparent; border: 1px solid {hair2_on_raised}; }}
+    QPushButton[kind="outline"]:hover {{ background: {fill1_on_canvas}; }}
+    QPushButton[kind="danger"] {{ background: {t.err}; color: white; }}
+    QPushButton[kind="danger-text"] {{ background: transparent; color: {t.err}; }}
+    QPushButton[kind="danger-text"]:hover {{ background: {blend(t.err_wash, t.canvas).name()}; }}
+    QPushButton[kind="link"] {{ background: transparent; border: none; padding: 0; color: {t.text_2}; font-weight: 400; }}
     QPushButton[kind="link"]:hover {{ color: {t.text}; background: transparent; }}
-    QPushButton[size="sm"] {{ padding: 3px 9px; font-size: {FS_SMALL}px; }}
-    QPushButton[icon-only="true"] {{ border: none; padding: 4px; border-radius: {R2}px; color: {t.text_2}; }}
-    QPushButton[icon-only="true"]:hover {{ background: {fill1_on_chrome}; color: {t.text}; }}
-    QPushButton[icon-only="true"][active="true"] {{ background: {fill2_on_chrome}; color: {t.text}; }}
+    QPushButton[fs="sm"] {{ padding: 5px 10px; font-size: {FS_SMALL}px; }}
+    QPushButton[fs="xs"] {{ padding: 4px 9px; font-size: {FS_SMALL}px; }}
+    QPushButton[fs="lg"] {{ padding: 10px 16px; font-size: 13.5px; border-radius: {R3}px; }}
+    QPushButton[icon-only="true"] {{ background: transparent; border: none; padding: 0; border-radius: {R2}px; color: {t.text_3}; }}
+    QPushButton[icon-only="true"]:hover {{ background: {fill2_on_canvas}; color: {t.text}; }}
+    QPushButton[icon-only="true"][active="true"] {{ background: {fill2_on_canvas}; color: {t.text}; }}
 
     /* fields */
     QLineEdit, QPlainTextEdit, QTextEdit {{ background: {t.inset}; border: 1px solid {hair_on_canvas}; border-radius: {R2}px; padding: 5px 8px; selection-background-color: {blend(t.selection, t.inset).name()}; color: {t.text}; }}
     QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus {{ border-color: {blend(t.accent_line, t.inset).name()}; }}
     QLineEdit[quiet="true"] {{ background: transparent; border: none; padding: 2px 4px; }}
-    QComboBox {{ background: {t.raised}; border: 1px solid {hair2_on_raised}; border-radius: {R2}px; padding: 5px 28px 5px 10px; min-height: 18px; combobox-popup: 0; }}
-    QComboBox:hover {{ border-color: {blend(t.hair_3, t.raised).name()}; }}
-    QComboBox:focus {{ border-color: {blend(t.accent_line, t.raised).name()}; }}
+    QComboBox {{ background: {blend(t.fill_1, sheet_on_scrim).name()}; border: 1px solid {blend(t.hair, blend(t.fill_1, sheet_on_scrim).name()).name()}; border-radius: {R2}px; padding: 0 8px 0 10px; min-height: 32px; max-height: 32px; color: {t.text}; combobox-popup: 0; }}
+    QComboBox:hover, QComboBox:on {{ background: {blend(t.fill_2, sheet_on_scrim).name()}; border-color: {blend(t.hair_2, blend(t.fill_2, sheet_on_scrim).name()).name()}; }}
+    QComboBox:focus {{ border-color: {blend(t.hair_2, sheet_on_scrim).name()}; }}
     QComboBox::drop-down {{ subcontrol-origin: padding; subcontrol-position: center right; width: 24px; border: none; background: transparent; }}
-    QComboBox::down-arrow {{ image: url("{_arrow_file(t)}"); width: 12px; height: 12px; }}
-    QComboBox QAbstractItemView {{ background: {t.raised_2}; border: 1px solid {hair2_on_raised}; border-radius: {R2}px; padding: 4px; outline: none; selection-background-color: {fill2_on_chrome}; selection-color: {t.text}; }}
-    QComboBox QAbstractItemView::item {{ min-height: 26px; padding: 4px 8px; border-radius: {R1}px; }}
-    QComboBox QAbstractItemView::item:hover {{ background: {fill1_on_canvas}; }}
+    QComboBox::down-arrow {{ image: url("{_arrow_file(t)}"); width: 13px; height: 13px; }}
+    QComboBox QAbstractItemView {{ background: {popover_on_sheet}; border: 1px solid {blend(t.hair_2, popover_on_sheet).name()}; border-radius: {R3}px; padding: 5px; outline: none; selection-background-color: {blend(t.fill_2, popover_on_sheet).name()}; selection-color: {t.text}; }}
+    QComboBox QAbstractItemView::item {{ min-height: 30px; padding: 0 9px; border-radius: {R2}px; color: {t.text}; }}
+    QComboBox QAbstractItemView::item:hover, QComboBox QAbstractItemView::item:selected {{ background: {blend(t.fill_2, popover_on_sheet).name()}; }}
     QSpinBox, QDoubleSpinBox {{ background: {t.inset}; border: 1px solid {hair_on_canvas}; border-radius: {R2}px; padding: 4px 8px; min-height: 18px; }}
     QSpinBox::up-button, QSpinBox::down-button {{ width: 16px; border: none; background: transparent; }}
     QCheckBox {{ spacing: 8px; }}
@@ -499,12 +510,13 @@ def stylesheet(t: Tokens) -> str:
     QAbstractScrollArea {{ background: transparent; }}
 
     /* menus and dialogs: floating material */
-    QMenu {{ background: {blend(t.glass, t.canvas).name()}; border: 1px solid {hair2_on_raised}; border-radius: {R3}px; padding: 6px; }}
-    QMenu::item {{ padding: 6px 10px 6px 30px; border-radius: {R2}px; }}
-    QMenu::item:selected {{ background: {fill1_on_canvas}; }}
-    QMenu::separator {{ height: 1px; background: {hair_on_canvas}; margin: 6px 4px; }}
+    QMenu {{ background: {blend(t.glass, t.canvas).name()}; border: 1px solid {blend(t.hair_2, blend(t.glass, t.canvas).name()).name()}; border-radius: {R3}px; padding: 5px; }}
+    QMenu::item {{ padding: 6px 9px 6px 34px; min-height: 18px; border-radius: {R2}px; color: {t.text}; }}
+    QMenu::item:selected {{ background: {blend(t.fill_2, blend(t.glass, t.canvas).name()).name()}; }}
+    QMenu::item:disabled {{ color: {t.text_3}; }}
+    QMenu::separator {{ height: 1px; background: {hair_on_canvas}; margin: 4px 6px; }}
     QDialog {{ background: {t.raised}; }}
-    #sheet {{ background: {blend(t.glass_2, t.canvas).name()}; border: 1px solid {hair2_on_raised}; border-radius: {R4}px; }}
+    #sheet {{ background: {sheet_on_scrim}; border: 1px solid {blend(t.hair, sheet_on_scrim).name()}; border-radius: {R4}px; }}
 
     /* splitters and hairlines */
     QSplitter::handle {{ background: {hair_on_chrome}; }}
@@ -529,12 +541,12 @@ def _arrow_file(t: Tokens) -> str:
         os.path.expanduser("~"), ".cache", "pilcrow"
     )
     os.makedirs(d, exist_ok=True)
-    path = os.path.join(d, f"chevron-down-{t.name}.svg")
+    path = os.path.join(d, f"chevrons-up-down-{t.name}.svg")
     if not os.path.exists(path):
-        src = os.path.join(os.path.dirname(__file__), "assets", "icons", "chevron-down.svg")
+        src = os.path.join(os.path.dirname(__file__), "assets", "icons", "chevrons-up-down.svg")
         try:
             with open(src, encoding="utf-8") as f:
-                svg = f.read().replace("currentColor", t.text_2)
+                svg = f.read().replace("currentColor", t.text_3)
             with open(path, "w", encoding="utf-8") as f:
                 f.write(svg)
         except OSError:

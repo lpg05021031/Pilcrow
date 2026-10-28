@@ -482,11 +482,8 @@ class AddMcpSheet(Sheet):
             name="Available in",
         )
         if not cwd:
-            model = self.scope.model()
             for i in (1, 2):
-                item = model.item(i)
-                if item is not None:
-                    item.setEnabled(False)
+                self.scope.set_item_enabled(i, False)
         fl.addWidget(field("Available in", self.scope))
         self.stack.addWidget(form)
 

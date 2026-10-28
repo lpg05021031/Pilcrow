@@ -1,7 +1,14 @@
-"""Markdown → HTML for QTextDocument (a port of web/src/lib/markdown.ts).
+"""Markdown → HTML for QTextDocument (a port of web/src/lib/markdown.ts and the ``.md`` rules of
+transcript.css).
 
 GitHub-flavoured Markdown through markdown-it-py; fenced code is highlighted with Pygments into
 inline-styled spans using the theme's ``cm_*`` colours, since QTextDocument knows no stylesheets.
+Every size here is a whole pixel computed from the CSS (14.5px prose, line-height 1.65, headings at
+1.32/1.16/1.04em…), because QTextDocument rounds ``font-size`` to a pixel and ignores ``em``.
+What QTextDocument cannot draw from HTML — the rounded pill behind inline code, the rule beside a
+blockquote, the rounded well of a code block, the hairlines of a table — is marked here (a
+transparent background on the code span, a 14px left margin on the quote, a 100% wide table for the
+fence) and painted by the view (widgets/transcript/items.py MarkdownView).
 Tables, lists, links, images and task lists come through; raw HTML is dropped (QTextDocument would
 render only some of it, and the web version sanitises it too).
 """
@@ -10,6 +17,7 @@ from __future__ import annotations
 
 import html
 import re
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Optional
 
@@ -114,9 +122,74 @@ LEXER_ALIAS = {
     "plaintext": "text",
 }
 
+# The padding of an inline code pill (``.md :not(pre) > code { padding: 0.14em 0.38em }``): QTextDocument
+# cannot pad a span, so two thin spaces on either side make the room and the view paints the pill
+# under them. They are stripped again when the text is copied.
+PILL_PAD = "  "
+# The left margin that marks a blockquote block for the view (``padding-left: 14px`` plus the 2px rule).
+QUOTE_INDENT = 14
+
+
+# Inline code never wraps inside on the web (``white-space: nowrap``); QTextDocument has no span-level
+# nowrap, so a word joiner (U+2060, a UAX #14 "no break" class) goes between the characters. Entities
+# stay whole. The view strips the joiners again when the text is copied.
+_UNIT_RE = re.compile(r"(&[#\w]+;|.)(?=.)", re.S)
+NO_BREAK = "\u2060"
+
+
+def _no_break(code_html: str) -> str:
+    return _UNIT_RE.sub(lambda mt: mt.group(1) + NO_BREAK, code_html)
+
 
 def lang_label(lang: str) -> str:
     return LANG_NAMES.get(lang.lower(), lang) if lang else "Text"
+
+
+def px(v: float) -> int:
+    """A CSS length rounded half up to the whole pixel QTextDocument draws with."""
+    return int(v + 0.5)
+
+
+@dataclass(frozen=True)
+class Metrics:
+    """The pixel sizes of one Markdown style: ``.md`` (14.5px, line-height 1.65) or ``.md-compact``/the
+    quiet notes inside a fold (13px, line-height 1.6–1.65)."""
+
+    size: float  # the CSS prose size (14.5px), which the em sizes below derive from
+    base: int  # prose font size as drawn
+    line: int  # prose line height
+    para: int  # paragraph bottom margin (0.75em)
+    code: int  # inline code font size (0.86em)
+    list_indent: int  # text start of a list item (padding-left 1.45em + li padding 0.15em)
+    li_gap: int  # li margin (0.22em)
+    table: int  # table font size (0.93em)
+
+    @staticmethod
+    def of(size: float, line_height: float) -> Metrics:
+        return Metrics(
+            size=size,
+            base=px(size),
+            line=px(size * line_height),
+            para=px(size * 0.75),
+            code=px(size * 0.86),
+            list_indent=px(size * 1.6),
+            li_gap=px(size * 0.22),
+            table=px(size * 0.93),
+        )
+
+    def heading(self, level: int) -> tuple:
+        """(font px, line height px, margin top px, margin bottom px) for h1–h4 (h5/h6 read as h4)."""
+        em = {1: 1.32, 2: 1.16, 3: 1.04}.get(level, 1.0)
+        size = self.size * em
+        return px(size), px(size * 1.3), px(size * 1.35), px(size * 0.45)
+
+
+PROSE = Metrics.of(theme.FS_BODY, 1.65)
+COMPACT = Metrics.of(theme.FS_UI, 1.65)
+
+
+def metrics(compact: bool) -> Metrics:
+    return COMPACT if compact else PROSE
 
 
 def _md() -> MarkdownIt:
@@ -143,27 +216,47 @@ def parser() -> MarkdownIt:
 
 
 def _style_for(ttype, t: theme.Tokens) -> Optional[str]:
+    """The theme's syntax colours for a Pygments token type, after the web's Shiki theme (lib/highlight.ts)."""
     if ttype in Comment:
         return f"color:{t.cm_comment};font-style:italic"
+    if ttype in Keyword.Constant:
+        return f"color:{t.cm_number}"  # true, false, null: constant.language
+    if ttype in Keyword.Type:
+        return f"color:{t.cm_type}"
     if ttype in Keyword or ttype in Operator.Word:
         return f"color:{t.cm_keyword}"
+    if ttype in String.Regex or ttype in String.Escape:
+        return f"color:{t.cm_regex}"
     if ttype in String:
         return f"color:{t.cm_string}"
     if ttype in Number:
         return f"color:{t.cm_number}"
-    if ttype in Name.Function or ttype in Name.Function.Magic:
+    if ttype in Name.Function or ttype in Name.Builtin or ttype in Name.Decorator:
         return f"color:{t.cm_function}"
-    if ttype in Name.Class or ttype in Name.Builtin or ttype in Keyword.Type or ttype in Name.Exception:
+    if ttype in Name.Class or ttype in Name.Exception or ttype in Name.Namespace:
         return f"color:{t.cm_type}"
     if ttype in Name.Tag:
         return f"color:{t.cm_tag}"
-    if ttype in Name.Attribute or ttype in Name.Property or ttype in Name.Variable:
+    if ttype in Name.Attribute or ttype in Name.Property or ttype in Name.Variable or ttype in Name.Constant:
         return f"color:{t.cm_property}"
-    if ttype in String.Regex:
-        return f"color:{t.cm_regex}"
     if ttype in Punctuation or ttype in Operator:
         return f"color:{t.cm_punct}"
     return None
+
+
+def _call_names(tokens: list) -> set:
+    """Indexes of plain names that are followed by ``(``: calls and declarations, which the web's
+    grammar-based highlighter colours as functions (meta.function-call) and Pygments leaves plain."""
+    out = set()
+    for i, (ttype, value) in enumerate(tokens):
+        if ttype not in Name or ttype in Name.Function or ttype in Name.Builtin or not value.strip():
+            continue
+        j = i + 1
+        while j < len(tokens) and not tokens[j][1].strip():
+            j += 1
+        if j < len(tokens) and tokens[j][1].startswith("("):
+            out.add(i)
+    return out
 
 
 @lru_cache(maxsize=512)
@@ -185,10 +278,12 @@ def highlight_html(code: str, lang: str, theme_name: str) -> str:
                 lexer = None
         if lexer is None:
             return html.escape(code)
+    tokens = list(lex(code, lexer))
+    calls = _call_names(tokens)
     out = []
-    for ttype, value in lex(code, lexer):
+    for i, (ttype, value) in enumerate(tokens):
         esc = html.escape(value)
-        st = _style_for(ttype, t)
+        st = f"color:{t.cm_function}" if i in calls else _style_for(ttype, t)
         out.append(f'<span style="{st}">{esc}</span>' if st else esc)
     return "".join(out)
 
@@ -214,63 +309,113 @@ def render_html(src: str, streaming: bool = False, base_dir: Optional[str] = Non
             lang = (tok.info or "").strip().split(" ")[0] if tok.type == "fence" else ""
             tok.attrSet("data-lang", lang)
     out = md.renderer.render(tokens, md.options, {})
-    out = _post_process(out, t, base_dir, compact)
+    out = _post_process(out, t, base_dir, metrics(compact))
     return out
 
 
-_FENCE_RE = re.compile(r'<pre><code(?: class="language-([^"]*)")?>(.*?)</code></pre>', re.S)
-
-
-def _post_process(body: str, t: theme.Tokens, base_dir: Optional[str], compact: bool) -> str:
-    mono = theme._MONO_FAMILY or "monospace"
-    inset = t.inset
+def stylesheet(t: theme.Tokens, m: Metrics) -> str:
+    """The document stylesheet for one style: what the HTML's own ``style`` attributes do not say."""
+    ui = theme._UI_FAMILY or "sans-serif"
     hair = theme.blend(t.hair, t.canvas).name()
+    return (
+        f"p {{ margin-top: 0; margin-bottom: {m.para}px; line-height: {m.line}px; }} "
+        f"li {{ margin-top: {m.li_gap}px; margin-bottom: {m.li_gap}px; line-height: {m.line}px; }} "
+        f"ul, ol {{ margin-top: 0; margin-bottom: {m.para}px; }} "
+        f"blockquote {{ margin-left: {QUOTE_INDENT}px; margin-right: 0; margin-top: 0; margin-bottom: {m.para}px; "
+        f"color: {t.text_2}; }} "
+        f"a {{ color: {t.info}; text-decoration: none; }} "
+        f"strong, b {{ font-weight: 620; }} "
+        f"hr {{ margin-top: {px(m.base * 1.4) - 9}px; margin-bottom: {px(m.base * 1.4) - 9}px; color: {hair}; }} "
+        f"th {{ font-weight: 600; color: {t.text_2}; }} "
+        f"pre {{ font-family: '{theme._MONO_FAMILY or 'monospace'}'; margin: 0; }} "
+        f"body {{ font-family: '{ui}'; }}"
+    )
 
-    def fence(m: re.Match) -> str:
-        lang = html.unescape(m.group(1) or "")
-        code = html.unescape(m.group(2)).rstrip("\n")
+
+_FENCE_RE = re.compile(r"<pre><code([^>]*)>(.*?)</code></pre>", re.S)
+_LANG_RE = re.compile(r'class="language-([^"]*)"')
+_HEAD_RE = re.compile(r"<h([1-6])>(.*?)</h\1>", re.S)
+_TABLE_RE = re.compile(r"<table>(.*?)</table>", re.S)
+_BLOCK_NL_RE = re.compile(r"(</(?:p|ul|ol|li|table|thead|tbody|tr|th|td|blockquote)>|<hr[^>]*>)\n")
+
+
+def _post_process(body: str, t: theme.Tokens, base_dir: Optional[str], m: Metrics) -> str:
+    mono = theme._MONO_FAMILY or "monospace"
+    code_px = px(theme.MONO_SIZE)
+    code_line = px(theme.MONO_SIZE * 1.6)
+
+    def fence(mt: re.Match) -> str:
+        lm = _LANG_RE.search(mt.group(1) or "")
+        lang = html.unescape(lm.group(1)) if lm else ""
+        code = html.unescape(mt.group(2)).rstrip("\n")
         body_html = highlight_html(code, lang, t.name)
         label = html.escape(lang_label(lang))
+        # ``.md-code``: a collapsed 100%-wide table marks the well (the view paints its rounded
+        # background); the head row is 30px with the language in micro text; the code sits in
+        # padding 0 14px 13px.
         return (
-            f'<table width="100%" cellpadding="0" cellspacing="0" style="margin:6px 0"><tr><td style="background:{inset};border:1px solid {hair};border-radius:{theme.R2}px;padding:0">'
-            f'<table width="100%" cellpadding="0" cellspacing="0"><tr><td style="padding:4px 10px;color:{t.text_3};font-size:{theme.FS_MICRO}px;border-bottom:1px solid {hair}">{label}</td></tr>'
-            f'<tr><td style="padding:8px 10px"><pre style="font-family:\'{mono}\';font-size:{theme.MONO_SIZE}px;margin:0;white-space:pre-wrap">{body_html}</pre></td></tr></table></td></tr></table>'
+            f'<table width="100%" cellpadding="0" cellspacing="0" '
+            f'style="border-collapse:collapse;margin-top:{px(m.base * 0.6)}px;margin-bottom:{m.base}px">'
+            f'<tr><td style="padding-left:14px;padding-right:10px;padding-top:8px;padding-bottom:8px">'
+            f'<p style="margin:0;line-height:14px;font-size:{theme.FS_MICRO}px;color:{t.text_3}">{label}</p></td></tr>'
+            f'<tr><td style="padding-left:14px;padding-right:14px;padding-top:0;padding-bottom:13px">'
+            f"<pre style=\"font-family:'{mono}';font-size:{code_px}px;line-height:{code_line}px;margin:0;"
+            f'white-space:pre-wrap">{body_html}</pre></td></tr></table>'
         )
 
     body = _FENCE_RE.sub(fence, body)
-    body = body.replace(
-        "<code>",
-        f"<code style=\"font-family:'{mono}';font-size:{theme.MONO_SIZE}px;background:{theme.blend(t.fill_1, t.canvas).name()};border-radius:3px\">",
-    )
-    body = re.sub(r"<a href=", f'<a style="color:{t.accent_text};text-decoration:none" href=', body)
-    body = body.replace(
-        "<blockquote>",
-        f'<blockquote style="border-left:2px solid {theme.blend(t.hair_3, t.canvas).name()};margin:6px 0;padding-left:10px;color:{t.text_2}">',
-    )
-    body = body.replace(
-        "<table>", f'<table cellpadding="5" cellspacing="0" style="border:1px solid {hair};margin:6px 0">'
-    )
-    body = body.replace(
-        "<th>",
-        f'<th style="border-bottom:1px solid {hair};background:{theme.blend(t.fill_1, t.canvas).name()};text-align:left">',
-    )
-    body = body.replace("<hr>", f'<hr style="border:none;border-top:1px solid {hair}">')
+    # Inline code: mono at 0.86em on a pill the view paints; the transparent background is its marker.
     body = re.sub(
-        r"<h([1-6])>",
-        lambda m: (
-            f'<h{m.group(1)} style="font-size:{[theme.FS_DISPLAY, theme.FS_TITLE, theme.FS_H, theme.FS_H, theme.FS_UI, theme.FS_UI][int(m.group(1)) - 1]}px;font-weight:600;margin:10px 0 4px">'
+        r"<code>(.*?)</code>",
+        lambda mt: (
+            f"<code style=\"font-family:'{mono}';font-size:{m.code}px;background-color:rgba(0,0,0,0);white-space:pre\">"
+            f"{_no_break(PILL_PAD + mt.group(1) + PILL_PAD)}</code>"  # the pads stay with the code
         ),
         body,
+        flags=re.S,
     )
-    if base_dir:
-        body = re.sub(
-            r'<img src="(?!https?:|data:|/)([^"]+)"',
-            lambda m: f'<img src="{html.escape(_join(base_dir, html.unescape(m.group(1))))}"',
-            body,
-        )
-    if compact:
-        body = body.replace("<p>", '<p style="margin:0">')
-    return body
+    body = _HEAD_RE.sub(lambda mt: _heading(mt, t, m), body)
+    body = _TABLE_RE.sub(lambda mt: _table(mt, t, m), body)
+    body = body.replace("<hr>", '<hr width="100%">')
+    body = re.sub(r"<img src=\"(?!https?:|data:|/)([^\"]+)\"", lambda mt: _img(mt, base_dir), body)
+    body = body.replace("<p>", f'<p style="line-height:{m.line}px">')
+    # the newline markdown-it puts after a block would end its paragraph with a space in QTextDocument
+    return _BLOCK_NL_RE.sub(r"\1", body).rstrip("\n")
+
+
+def _heading(mt: re.Match, t: theme.Tokens, m: Metrics) -> str:
+    # Headings are paragraphs with explicit sizes: QTextDocument's <h1>–<h6> scale the font again on top
+    # of a font-size, and the web's sizes are em multiples of the prose.
+    level = int(mt.group(1))
+    size, line, top, bottom = m.heading(level)
+    color = f";color:{t.text_2}" if level >= 4 else ""
+    return (
+        f'<p style="font-size:{size}px;font-weight:600;line-height:{line}px;margin-top:{top}px;'
+        f'margin-bottom:{bottom}px;letter-spacing:-{size * 0.012:.2f}px{color}">{mt.group(2)}</p>'
+    )
+
+
+def _table(mt: re.Match, t: theme.Tokens, m: Metrics) -> str:
+    # ``.md table``: 0.93em, cells padded 7px 14px 7px 0; the hairline under each row is painted by the view.
+    inner = mt.group(1)
+    inner = re.sub(
+        r"<(t[hd])( style=\"[^\"]*\")?>",
+        lambda c: (
+            f'<{c.group(1)} style="padding-left:0;padding-right:14px;padding-top:7px;padding-bottom:7px;'
+            f'font-size:{m.table}px;text-align:left;{(c.group(2) or "")[8:-1]}">'
+        ),
+        inner,
+    )
+    return (
+        f'<table width="60%" cellpadding="0" cellspacing="0" '
+        f'style="margin-top:{px(m.base * 0.4)}px;margin-bottom:{m.base}px">{inner}</table>'
+    )
+
+
+def _img(mt: re.Match, base_dir: Optional[str]) -> str:
+    if not base_dir:
+        return mt.group(0)
+    return f'<img src="{html.escape(_join(base_dir, html.unescape(mt.group(1))))}"'
 
 
 def _join(base: str, rel: str) -> str:

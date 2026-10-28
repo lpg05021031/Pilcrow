@@ -337,8 +337,13 @@ node test/mock/mock-server.mjs 5300   # 假伺服器
 python -m pilcrow_qt --url http://127.0.0.1:5300/     # PYTHONPATH=qt
 python -m pytest qt/tests -q          # 純邏輯移植的單元測試 + 離線（offscreen）的視窗測試，接 mock server
 python qt/tests/snap.py --scenario session            # 離線截圖到 test/out/qt-*.png
+python qt/tests/panel_probe.py                        # 右側面板逐頁截圖 test/out/qt-tab-*.png
 python qt/tests/perf.py --turns 400                   # 開啟時間、重畫成本、閒置 CPU
+node test/e2e/shots.mjs                               # 網頁版同樣場景的截圖 test/out/web-*.png，拿來對照
 ```
+
+測試與截圖預設關閉動畫；`PILCROW_MOTION=1` 把彈簧動畫打開跑一遍（送訊息、開面板、展開工具卡都會動），
+發佈前兩種都要綠。
 
 沒有 Linux 機器時，`test/linux/` 用 Docker 跑一台 Ubuntu 24.04：真的執行安裝檔（含 PEP 668 的 venv 路徑）、
 在 Xvfb 上開 Qt 視窗逐頁操作，截圖與記錄回寫到 `test/out/linux-*`：

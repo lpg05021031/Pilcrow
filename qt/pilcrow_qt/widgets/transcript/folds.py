@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set, Union
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QColor, QPainter, QPixmap
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from ... import icons, theme
@@ -46,6 +46,22 @@ from .items import (
     set_icon,
     style_label,
 )
+
+
+def faded_pixmap(name: str, color: str, size: int, alpha: float):
+    """A tinted icon drawn at an opacity (the chevrons of transcript.css sit at 0.7 until hovered)."""
+    pm = icons.pixmap(name, color, size)
+    if alpha >= 1.0:
+        return pm
+    out = QPixmap(pm.size())
+    out.setDevicePixelRatio(pm.devicePixelRatio())
+    out.fill(Qt.GlobalColor.transparent)
+    p = QPainter(out)
+    p.setOpacity(alpha)
+    p.drawPixmap(0, 0, pm)
+    p.end()
+    return out
+
 
 # Which folds you opened in the conversation on screen. Opening a conversation starts clean.
 turn_open: Dict[str, bool] = {}
@@ -490,12 +506,16 @@ class Explore(Row):
         self.head.setMinimumHeight(28)
         self.head.setAccessibleName("Explored")
         hl = QHBoxLayout(self.head)
-        hl.setContentsMargins(6, 0, 6, 0)
+        hl.setContentsMargins(0, 0, 0, 0)
         hl.setSpacing(10)
-        self.ico = icon_label("telescope", theme.tokens().text_3, 14)
-        hl.addWidget(self.ico)
+        self.ico_host = QWidget()  # .tool-ico: an 18px column
+        self.ico_host.setFixedSize(18, 20)
+        self.ico = icon_label("telescope", theme.tokens().text_3, 14, self.ico_host)
+        self.ico.move(2, 3)
+        hl.addWidget(self.ico_host)
         self.label = QLabel(explore_label(items))
         hl.addWidget(self.label)
+        hl.addSpacing(-3)  # .tool-line gap 7px, chevron margin-left -3px
         self.chev = icon_label("chevron-right", theme.tokens().text_3, 13)
         hl.addWidget(self.chev)
         hl.addStretch(1)
@@ -545,7 +565,8 @@ class Explore(Row):
         t = theme.tokens()
         set_icon(self.ico, "telescope", t.text_3, 14)
         set_icon(self.chev, "chevron-down" if self.body.is_open else "chevron-right", t.text_3, 13)
-        style_label(self.label, theme.FS_UI, t.text_2)
+        self.chev.setVisible(self.body.is_open or self.head.hover)  # .tool-chev shows on hover or open
+        style_label(self.label, theme.FS_UI, t.text)  # .steps .tool-target
         self.head.setStyleSheet(
             f"Head {{ background: {theme.blend(t.fill_1, t.canvas).name() if self.head.hover else 'transparent'}; border-radius: {theme.R2}px; }}"
         )
@@ -1079,7 +1100,8 @@ class WorkFold(Row):
         hl = QHBoxLayout(self.head)
         hl.setContentsMargins(0, 0, 0, 0)
         hl.setSpacing(6)
-        self.mark = WorkingMark(15)
+        self.mark = WorkingMark(16)
+        self.mark.setFixedSize(20, 16)  # .work-mark: 16px wide, margin-right 4px
         hl.addWidget(self.mark)
         self.sum = QLabel()
         self.sum.setSizePolicy(self.sum.sizePolicy().horizontalPolicy(), self.sum.sizePolicy().verticalPolicy())
@@ -1200,11 +1222,14 @@ class WorkFold(Row):
         style_label(self.sum, theme.FS_UI, color, 500 if live else 400)
         style_label(self.fail, theme.FS_UI, t.err)
         style_label(self.n, theme.FS_MICRO, t.text_4)
-        set_icon(
-            self.chev,
-            "chevron-down" if self.is_open else "chevron-right",
-            t.text_2 if self.head.hover else t.text_3,
-            14,
+        # .work-head .tool-chev: opacity 0.7, 1 on hover
+        self.chev.setPixmap(
+            faded_pixmap(
+                "chevron-down" if self.is_open else "chevron-right",
+                t.text_2 if self.head.hover else t.text_3,
+                14,
+                1.0 if self.head.hover else 0.7,
+            )
         )
         body = self.body.body()
         if body is not None:

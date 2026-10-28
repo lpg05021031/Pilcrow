@@ -8,14 +8,23 @@ import time
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
 
-from PySide6.QtCore import QEvent, QRectF, Qt, QTimer
+from PySide6.QtCore import QEvent, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QScrollArea,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
 from .. import icons, theme
 from ..lib.fmt import basename, cost, duration, plural, tildify, time_ago
 from ..store import ConfirmSpec, store
-from .dialogs.parts import Badge, Card, ElideLabel, LayoutButton, Switch, hint
+from .dialogs.parts import Badge, Card, ElideLabel, LayoutButton, Switch, Text, hint, page_column
 from .ui.bits import IconButton, Mark, Spinner, button
 from .ui.menu import show_menu
 from .ui.signals import bind
@@ -56,15 +65,14 @@ def until(ms: float, now: float) -> str:
 
 
 class SectionTitle(QWidget):
-    """``.inbox-day-h`` / ``.inbox-rail-h``: a heading with a count and room at the end."""
+    """``.inbox-day-h`` / ``.inbox-rail-h``: a 15px heading with a count and room at the end."""
 
     def __init__(self, text: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 4, 0, 2)
         lay.setSpacing(8)
-        self.title = QLabel(text)
-        self.title.setProperty("size", "h")
+        self.title = Text(text, theme.FS_H, 600, "text", wrap=False, letter_spacing=-0.01)
         lay.addWidget(self.title)
         self.count = Badge(0)
         lay.addWidget(self.count)
@@ -115,8 +123,7 @@ class RunCard(Card):
         )
         self.dot.setVisible(not it.get("read"))
         head.addWidget(self.dot)
-        self.name = ElideLabel(str(it.get("scheduleName") or ""))
-        self.name.setStyleSheet(f"color: {t.text}; font-weight: {600 if not it.get('read') else 560};")
+        self.name = Text(str(it.get("scheduleName") or ""), theme.FS_UI, 600, "text", wrap=False)
         head.addWidget(self.name, 1)
         if it.get("manual"):
             chip = QLabel("by hand")
@@ -124,8 +131,13 @@ class RunCard(Card):
                 f"QLabel {{ background: {theme.blend(t.fill_1, t.raised).name()}; color: {t.text_3}; border-radius: 999px; padding: 1px 7px; font-size: {theme.FS_MICRO}px; }}"
             )
             head.addWidget(chip)
-        when = QLabel(f"{clock(float(it.get('endedAt') or 0))} · {duration(float(it.get('durationMs') or 0))}")
-        when.setStyleSheet(f"color: {t.text_4}; font-size: {theme.FS_MICRO}px;")
+        when = Text(
+            f"{clock(float(it.get('endedAt') or 0))} · {duration(float(it.get('durationMs') or 0))}",
+            theme.FS_MICRO,
+            400,
+            "text_4",
+            wrap=False,
+        )
         head.addWidget(when)
         main.addLayout(head)
         self.summary = str(
@@ -134,13 +146,10 @@ class RunCard(Card):
             or ("Finished without a written summary." if status == "completed" else "No output.")
         )
         self.long = len(self.summary) > 280
-        self.sum = QLabel()
-        self.sum.setWordWrap(True)
-        self.sum.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        self.sum.setStyleSheet(f"color: {t.text_2}; font-size: {theme.FS_SMALL}px;")
+        self.sum = Text("", theme.FS_SMALL, 400, "text_2", 1.55)
         main.addWidget(self.sum)
         self.more = button("Read more", kind="link")
-        self.more.setStyleSheet(f"color: {t.text_3}; font-size: {theme.FS_MICRO}px;")
+        self.more.setStyleSheet(f"color: {t.text_3}; font-size: {theme.FS_MICRO}px; text-decoration: none;")
         self.more.clicked.connect(self.toggle)
         self.more.setVisible(self.long)
         main.addWidget(self.more, 0, Qt.AlignmentFlag.AlignLeft)
@@ -174,22 +183,34 @@ class RunCard(Card):
         foot.addWidget(folder)
         foot.addStretch(1)
         self.rerun_btn = button(
-            "Run now", kind="ghost", size="sm", icon="rotate-cw", tooltip="Run this schedule again now"
+            "Run now", kind="ghost", size="xs", icon="rotate-cw", tooltip="Run this schedule again now"
         )
+        self.rerun_btn.setIconSize(QSize(11, 11))
         self.rerun_btn.clicked.connect(self.rerun)
         foot.addWidget(self.rerun_btn)
         self.open_btn = button(
-            "Open session", size="sm", icon="arrow-up-right", tooltip="Open the session and continue by hand"
+            "Open session", size="xs", icon="arrow-up-right", tooltip="Open the session and continue by hand"
         )
+        self.open_btn.setIconSize(QSize(11, 11))
         self.open_btn.clicked.connect(lambda _c=False: on_open())
         self.open_btn.setVisible(bool(it.get("sessionId")))
         foot.addWidget(self.open_btn)
         self.x_btn = IconButton("x", "Dismiss", 13)
+        self.x_btn.setFixedSize(24, 24)
         self.x_btn.clicked.connect(lambda _c=False: on_remove())
         foot.addWidget(self.x_btn)
         main.addLayout(foot)
         lay.addLayout(main, 1)
         self._render()
+        self.x_btn.setVisible(False)  # ``.run-x { opacity: 0 }`` until the card is hovered
+
+    def enterEvent(self, e) -> None:  # noqa: N802
+        self.x_btn.setVisible(True)
+        super().enterEvent(e)
+
+    def leaveEvent(self, e) -> None:  # noqa: N802
+        self.x_btn.setVisible(False)
+        super().leaveEvent(e)
 
     def _render(self) -> None:
         self.sum.setText(self.summary if self._open or not self.long else self.summary[:280] + "…")
@@ -223,7 +244,6 @@ class ScheduleCard(Card):
         self._busy = False
         self._active = active
         self.setFocused_ = active
-        t = theme.tokens()
         off = not s.get("enabled")
         lay = QHBoxLayout(self)
         lay.setContentsMargins(12, 10, 8, 12)
@@ -239,13 +259,15 @@ class ScheduleCard(Card):
         ml = QVBoxLayout(self.main)
         ml.setContentsMargins(0, 0, 0, 0)
         ml.setSpacing(2)
-        self.name = ElideLabel(str(s.get("name") or ""))
-        self.name.setStyleSheet(
-            f"color: {t.text_3 if off else t.text}; font-size: {theme.FS_SMALL}px; font-weight: 560;"
-        )
+        self.name = Text(str(s.get("name") or ""), theme.FS_SMALL, 600, "text_3" if off else "text", wrap=False)
         ml.addWidget(self.name)
-        self.sub = ElideLabel(f"{s.get('cadenceLabel') or ''} · {basename(str(s.get('cwd') or ''))}")
-        self.sub.setStyleSheet(f"color: {t.text_3}; font-size: {theme.FS_MICRO}px;")
+        self.sub = Text(
+            f"{s.get('cadenceLabel') or ''} · {basename(str(s.get('cwd') or ''))}",
+            theme.FS_MICRO,
+            400,
+            "text_3",
+            wrap=False,
+        )
         ml.addWidget(self.sub)
         self.next = QLabel()
         self.next.setWordWrap(True)
@@ -258,10 +280,12 @@ class ScheduleCard(Card):
         end.addWidget(self.switch)
         end.addSpacing(4)
         self.run_btn = IconButton("play", "Run now", 13)
+        self.run_btn.setFixedSize(24, 24)
         self.run_btn.clicked.connect(self.run)
         self.run_btn.setEnabled(not s.get("running"))
         end.addWidget(self.run_btn)
         self.menu_btn = IconButton("ellipsis", "Schedule actions", 14)
+        self.menu_btn.setFixedSize(24, 24)
         self.menu_btn.clicked.connect(self.open_menu)
         end.addWidget(self.menu_btn)
         lay.addLayout(end)
@@ -379,6 +403,32 @@ class ScheduleCard(Card):
         )
 
 
+class EmptyHero(QWidget):
+    """The hero's ground: on dark the mark casts an orange glow
+    (``[data-theme='dark'] .inbox-empty-mark { filter: drop-shadow(0 12px 30px rgba(217,119,87,.3)) }``)."""
+
+    mark: Optional[QWidget] = None
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        t = theme.tokens()
+        if not t.dark or self.mark is None:
+            return
+        from PySide6.QtGui import QRadialGradient
+
+        c = self.mark.geometry().center()
+        cx, cy = c.x() + 0.5, c.y() + 12.5
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        g = QRadialGradient(cx, cy, 70)
+        glow = QColor(t.accent)
+        for stop, a in ((0.0, 0.3), (0.3, 0.16), (0.6, 0.05), (1.0, 0.0)):
+            glow.setAlphaF(a)
+            g.setColorAt(stop, QColor(glow))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(g)
+        p.drawEllipse(QRectF(cx - 70, cy - 70, 140, 140))
+
+
 class InboxPage(QWidget):
     def __init__(self) -> None:
         super().__init__()
@@ -401,14 +451,15 @@ class InboxPage(QWidget):
         self.side_btn.clicked.connect(lambda: store.set_ui(sidebar=True))
         hl.addWidget(self.side_btn)
         self.title = QLabel("Inbox")
-        self.title.setProperty("size", "title")
+        self.title.setProperty("fs", "title")
         hl.addWidget(self.title)
         self.summary = QLabel()
         self.summary.setProperty("tone", "faint")
-        self.summary.setProperty("size", "small")
+        self.summary.setProperty("fs", "small")
         hl.addWidget(self.summary)
         hl.addStretch(1)
         self.mark_all = button("Mark all read", kind="ghost", size="sm", icon="mail-open", on_click=self.mark_all_read)
+        self.mark_all.setIconSize(QSize(13, 13))
         self.mark_all.setAccessibleName("Mark all read")
         self.mark_all.hide()
         hl.addWidget(self.mark_all)
@@ -423,10 +474,11 @@ class InboxPage(QWidget):
         hh.setContentsMargins(0, 0, 0, 0)
         hh.addStretch(1)
         self.body = QWidget()
-        bl = QHBoxLayout(self.body)
+        bl = QGridLayout(self.body)
         bl.setContentsMargins(20, 4, 20, 48)
         bl.setSpacing(28)
-        bl.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.grid = bl
+        self._cols = 0
         hh.addWidget(self.body)
         hh.addStretch(1)
         self.scroll.setWidget(host)
@@ -439,7 +491,6 @@ class InboxPage(QWidget):
         self.main_lay.setContentsMargins(0, 0, 0, 0)
         self.main_lay.setSpacing(24)
         self.main_lay.setAlignment(Qt.AlignmentFlag.AlignTop)
-        bl.addWidget(self.main, 1, Qt.AlignmentFlag.AlignTop)
 
         # the rail
         self.rail = QWidget()
@@ -449,7 +500,8 @@ class InboxPage(QWidget):
         self.rail_lay.setSpacing(8)
         self.rail_lay.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.rail_head = SectionTitle("Schedules")
-        self.new_btn = button("New", size="sm", icon="plus", on_click=lambda: store.set_dialog("schedule", {}))
+        self.new_btn = button("New", size="xs", icon="plus", on_click=lambda: store.set_dialog("schedule", {}))
+        self.new_btn.setIconSize(QSize(12, 12))
         self.new_btn.setAccessibleName("New schedule")
         self.rail_head.end.addWidget(self.new_btn)
         self.rail_lay.addWidget(self.rail_head)
@@ -461,7 +513,7 @@ class InboxPage(QWidget):
         self.rail_empty = hint("No schedules yet.")
         self.rail_empty.hide()
         self.rail_lay.addWidget(self.rail_empty)
-        bl.addWidget(self.rail, 0, Qt.AlignmentFlag.AlignTop)
+        self._place(2)
 
         self._clock = QTimer(self)
         self._clock.setInterval(30_000)
@@ -484,8 +536,38 @@ class InboxPage(QWidget):
 
     def eventFilter(self, obj, e) -> bool:  # noqa: N802
         if obj is self.scroll.viewport() and e.type() == QEvent.Type.Resize:
-            self.body.setFixedWidth(max(320, min(theme.COL + 300, self.scroll.viewport().width())))
+            vw = self.scroll.viewport().width()
+            self.body.setFixedWidth(max(320, min(page_column(vw), vw)))
+            self._place(1 if self.body.width() - 40 <= 760 else 2)
         return False
+
+    def _place(self, cols: int) -> None:
+        """``.inbox-body``: runs | a 300px rail of schedules; under 760px of content the rail comes first,
+        in one column (the web's ``@container (max-width: 760px)`` rule)."""
+        if cols == self._cols:
+            return
+        self._cols = cols
+        g = self.grid
+        while g.count():
+            g.takeAt(0)
+        if cols == 2:
+            g.addWidget(self.main, 0, 0, Qt.AlignmentFlag.AlignTop)
+            g.addWidget(self.rail, 0, 1, Qt.AlignmentFlag.AlignTop)
+            g.setColumnStretch(0, 1)
+            g.setColumnStretch(1, 0)
+            g.setRowStretch(1, 1)
+            g.setRowStretch(2, 0)
+            self.rail.setFixedWidth(300)
+        else:
+            g.addWidget(self.rail, 0, 0, Qt.AlignmentFlag.AlignTop)
+            g.addWidget(self.main, 1, 0, Qt.AlignmentFlag.AlignTop)
+            g.setColumnStretch(0, 1)
+            g.setColumnStretch(1, 0)
+            g.setRowStretch(1, 0)
+            g.setRowStretch(2, 1)
+            self.rail.setMinimumWidth(0)
+            self.rail.setMaximumWidth(16777215)
+            self.rail.setFixedWidth(self.body.width() - 40)
 
     # ---- data
     def load(self) -> None:
@@ -618,30 +700,39 @@ class InboxPage(QWidget):
         self.rail_empty.setVisible(scheds is not None and not scheds)
 
     def _empty(self, has_schedules: bool) -> QWidget:
-        box = QWidget()
-        box.setFixedWidth(440)
+        """``.inbox-empty``: the mark in its glow, a line, a hint and the one button, 440px wide at most."""
+        box = EmptyHero()
+        box_w = min(440, max(200, self.body.width() - 40))
+        box.setFixedWidth(box_w)
         lay = QVBoxLayout(box)
         lay.setContentsMargins(24, 56, 24, 56)
         lay.setSpacing(8)
-        lay.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         mark = Mark(32)
+        box.mark = mark
         lay.addWidget(mark, 0, Qt.AlignmentFlag.AlignHCenter)
-        title = QLabel("No runs yet." if has_schedules else "Nothing runs on its own yet.")
-        title.setStyleSheet("font-weight: 560;")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(title)
-        h = hint(
+        lay.addSpacing(6)
+        self.hero_title = Text(
+            "No runs yet." if has_schedules else "Nothing runs on its own yet.",
+            theme.FS_UI,
+            600,
+            "text",
+            align=Qt.AlignmentFlag.AlignHCenter,
+        )
+        lay.addWidget(self.hero_title)
+        h = Text(
             "The first result lands here when a schedule fires. You can also run one now from the list on the right."
             if has_schedules
-            else "A schedule runs a prompt in a folder at a set time — a nightly dependency audit, a Monday test sweep — and leaves the result here with a link back to the full session."
+            else "A schedule runs a prompt in a folder at a set time — a nightly dependency audit, a Monday test sweep — and leaves the result here with a link back to the full session.",
+            theme.FS_SMALL,
+            400,
+            "text_3",
+            1.5,
+            align=Qt.AlignmentFlag.AlignHCenter,
         )
-        h.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        # A wrapped label in a centred column is not asked for its height-for-width; give it the
-        # width it will have and the height that needs, or the last line is cut off.
-        h.setFixedWidth(440 - 48)
-        h.setMinimumHeight(h.heightForWidth(440 - 48))
+        h.setFixedSize(box_w - 48, h.heightForWidth(box_w - 48))
         lay.addWidget(h)
         if not has_schedules:
+            lay.addSpacing(6)
             b = button(
                 "New schedule",
                 kind="primary",
@@ -649,6 +740,7 @@ class InboxPage(QWidget):
                 icon="plus",
                 on_click=lambda: store.set_dialog("schedule", {}),
             )
+            b.setIconSize(QSize(13, 13))
             b.setAccessibleName("New schedule")
             lay.addWidget(b, 0, Qt.AlignmentFlag.AlignHCenter)
         return box

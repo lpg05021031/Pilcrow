@@ -31,6 +31,7 @@ except ImportError:  # pragma: no cover
     lex = None  # type: ignore[assignment]
 
 Range = Tuple[int, int]
+LINE = int(12 * 1.6 + 0.5)  # .code-view / .diff: 12px mono on 1.6 lines
 
 
 # ---------------------------------------------------------------- hunks
@@ -274,7 +275,7 @@ class CodeView(QWidget):
         self.highlight_line = highlight_line
         self._all = False
         lay = vbox(self, spacing=4)
-        self.surface = Surface("inset", "hair", theme.R3, margins=(0, 8, 0, 8))
+        self.surface = Surface("inset", "light:hair", theme.R3, margins=(0, 8, 0, 8))
         self.label: QLabel = rich("", mono=True, size=12)
         self.surface.add(self.label)
         lay.addWidget(self.surface)
@@ -305,7 +306,8 @@ class CodeView(QWidget):
             bg = f' bgcolor="{hit_bg}"' if self.highlight_line == n else ""
             rows.append(
                 f'<tr><td width="1" align="right" style="color:{t.text_4};padding-left:14px;padding-right:12px"{bg}>'
-                f'{n}</td><td style="white-space:pre-wrap;padding-right:16px"{bg}>{body or "&nbsp;"}</td></tr>'
+                f'<p style="margin:0;line-height:{LINE}px">{n}</p></td><td style="padding-right:16px"{bg}>'
+                f'<p style="margin:0;white-space:pre-wrap;line-height:{LINE}px">{body or "&nbsp;"}</p></td></tr>'
             )
         self.label.setText(f'<table cellspacing="0" cellpadding="0" width="100%">{"".join(rows)}</table>')
         self.more.setVisible(len(shown) < len(self.lines))
@@ -350,7 +352,7 @@ class DiffView(QWidget):
             for ln in h.lines:
                 self.rows.append(DiffRow("line", line=ln))
         lay = vbox(self, spacing=4)
-        self.surface = Surface("inset", "hair", theme.R3, margins=(0, 6, 0, 6))
+        self.surface = Surface("inset", "light:hair", theme.R3, margins=(0, 6, 0, 6))
         self.label: QLabel = rich("", mono=True, size=12)
         self.surface.add(self.label)
         lay.addWidget(self.surface)
@@ -381,6 +383,8 @@ class DiffView(QWidget):
         del_bg = theme.blend(t.diff_del, t.inset).name()
         add_hl = theme.blend(t.diff_add_hl, add_bg).name()
         del_hl = theme.blend(t.diff_del_hl, del_bg).name()
+        hunk_bg = theme.blend(t.fill_1, t.inset).name()
+        ui = theme.font_ui().family()
         cols = 3 if self.numbers else 2
         rows: List[str] = []
         for r in self.shown:
@@ -394,9 +398,11 @@ class DiffView(QWidget):
                     f' <span style="color:{t.text_4};font-size:11px">{html.escape(h.header)}</span>' if h.header else ""
                 )
                 rows.append(
-                    f'<tr><td colspan="{cols}" style="padding:4px 14px;color:{t.text_3}">'
+                    f'<tr><td colspan="{cols}" style="padding-left:14px;padding-right:14px;padding-top:4px;'
+                    f"padding-bottom:4px\"><p style=\"margin:0;line-height:26px;font-family:'{ui}';"
+                    f'font-size:{theme.FS_MICRO}px;color:{t.text_3};background-color:{hunk_bg}">'
                     f'<span style="color:{t.text_4};letter-spacing:1px">⋯</span>&nbsp;&nbsp;'
-                    f"{html.escape(text)}{ctx}</td></tr>"
+                    f"{html.escape(text)}{ctx}</p></td></tr>"
                 )
                 continue
             ln = r.line
@@ -411,18 +417,22 @@ class DiffView(QWidget):
             ranges = words.get(ln)
             body = mark_html(ln.s, ranges, hl_c) if ranges else toks.get(ln, html.escape(ln.s))
             cells = ""
+            line = f'<p style="margin:0;line-height:{LINE}px">'
             if self.numbers:
                 num = ln.o if ln.t == "-" else ln.n
                 cells += (
                     f'<td width="1" align="right" style="color:{num_c};padding-left:14px;padding-right:8px"{bga}>'
-                    f"{num if num is not None else ''}</td>"
+                    f"{line}{num if num is not None else '&nbsp;'}</p></td>"
                 )
-            pad = 4 if self.numbers else 12
+            # .ds: an 18px column with the sign centred
             cells += (
-                f'<td width="1" align="center" style="color:{sign_c};padding-left:{pad}px;padding-right:4px"{bga}>'
-                f"{sign}</td>"
+                f'<td width="1" align="center" style="color:{sign_c};padding-left:5px;padding-right:5px"{bga}>'
+                f"{line}{sign}</p></td>"
             )
-            cells += f'<td style="white-space:pre-wrap;padding-right:18px"{bga}>{body or "&nbsp;"}</td>'
+            cells += (
+                f'<td style="padding-right:18px"{bga}>'
+                f'<p style="margin:0;white-space:pre-wrap;line-height:{LINE}px">{body or "&nbsp;"}</p></td>'
+            )
             rows.append(f"<tr>{cells}</tr>")
         self.label.setText(f'<table cellspacing="0" cellpadding="0" width="100%">{"".join(rows)}</table>')
         self.more.setVisible(len(self.shown) < len(self.rows))
@@ -458,7 +468,7 @@ def ansi_html(text: str) -> str:
         if "a-d" in cls and not any(s.startswith("color:") for s in styles):
             styles.append(f"color:{t.text_3}")
         out.append(f'<span style="{";".join(styles)}">{esc}</span>' if styles else esc)
-    return f'<div style="white-space:pre-wrap">{"".join(out) or "&nbsp;"}</div>'
+    return f'<div style="white-space:pre-wrap;line-height:{int(12 * 1.55 + 0.5)}px">{"".join(out) or "&nbsp;"}</div>'
 
 
 def ansi_label(text: str, color: str = "text_2") -> QLabel:

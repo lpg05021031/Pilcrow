@@ -161,23 +161,30 @@ class ToolHead(QWidget):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        # .tool-head: an 18px icon column, a 10px gap, the line (verb · target · chevron) and the meta
+        # at the right. The web pulls the row 6px left and pads it 6px, so its content sits on the
+        # text edge: here the row simply starts there.
         self.setMinimumHeight(28)
-        self.row = Row(spacing=10, margins=(6, 2, 6, 2))
+        self.row = Row(spacing=10, margins=(0, 0, 0, 0))
         vbox(self).addWidget(self.row)
         self.ico_host = QWidget()
         self.ico_host.setFixedSize(18, 20)
         self.ico_lay = vbox(self.ico_host)
         self.ico_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.row.add(self.ico_host)
+        self.line = Row(spacing=7)  # .tool-line
         self.verb = bits.label("", tone="faint")
-        self.row.add(self.verb)
+        self.line.add(self.verb)
         self.target = ElideLabel("")
-        self.row.add(self.target, 1)
+        self.line.add(self.target)
         self.chev = IconLabel("chevron-right", "text_3", 13)
-        self.row.add(self.chev)
+        self.line.add(self.chev)
         self.open_btn = bits.IconButton("arrow-up-right", "Open in Files", 13)
+        self.open_btn.setFixedSize(22, 22)  # .tool-open
         self.open_btn.clicked.connect(self._open_file)
-        self.row.add(self.open_btn)
+        self.line.add(self.open_btn)
+        self.line.stretch()
+        self.row.add(self.line, 1)
         self.meta = Row(spacing=8)
         self.row.add(self.meta)
         bind(theme.theme.changed, self, lambda _t: self.update())
@@ -382,12 +389,10 @@ class ToolCard(QWidget):
         if self.awaiting:
             self.lay.setContentsMargins(10, 4, 10, 0)
             self.body_lay.setContentsMargins(22, 0, 0, 8)
-            self.head.row.lay.setContentsMargins(4, 2, 4, 2)
             self.head.setMinimumHeight(32)
         else:
             self.lay.setContentsMargins(0, 0, 0, 0)
             self.body_lay.setContentsMargins(28, 4, 0, 10)
-            self.head.row.lay.setContentsMargins(6, 2, 6, 2)
             self.head.setMinimumHeight(28)
         self.update()
 

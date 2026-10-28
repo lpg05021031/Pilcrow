@@ -29,7 +29,7 @@ def label(text: str = "", tone: str = "", size: str = "", mono: bool = False, wr
     if tone:
         lb.setProperty("tone", tone)
     if size:
-        lb.setProperty("size", size)
+        lb.setProperty("fs", size)
     if mono:
         lb.setProperty("mono", "true")
     lb.setWordWrap(wrap)
@@ -51,7 +51,7 @@ def button(
     if kind:
         b.setProperty("kind", kind)
     if size:
-        b.setProperty("size", size)
+        b.setProperty("fs", size)
     if icon:
         t = theme.tokens()
         b.setIcon(icons.icon(icon, t.accent_ink if kind == "primary" else t.text_2, 14, hover=t.text))

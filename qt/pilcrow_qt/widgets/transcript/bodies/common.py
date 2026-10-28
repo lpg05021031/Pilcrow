@@ -90,7 +90,9 @@ class Row(QWidget):
 
 
 class Surface(QFrame):
-    """A flat rounded panel painted from tokens; ``bg`` and ``border`` are token names ('inset', 'hair')."""
+    """A flat rounded panel painted from tokens; ``bg`` and ``border`` are token names ('inset', 'hair').
+    A border of ``"light:hair"`` is drawn in the light theme only (the inset wells of transcript.css
+    carry their hairline only on a white page)."""
 
     def __init__(
         self,
@@ -116,9 +118,12 @@ class Surface(QFrame):
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        if self.border:
-            p.setPen(QPen(t.color(self.border), 1))
+        border = self.border
+        if border.startswith("light:"):
+            border = "" if t.dark else border[6:]
+        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5) if border else QRectF(self.rect())
+        if border:
+            p.setPen(QPen(t.color(border), 1))
         else:
             p.setPen(Qt.PenStyle.NoPen)
         if self.bg:
@@ -189,13 +194,17 @@ def rich(body: str, mono: bool = False, size: float = 0, color: str = "", wrap: 
     return lb
 
 
-def pre_html(text: str, limit: int = 60000) -> str:
-    return f'<div style="white-space:pre-wrap">{html.escape(truncate(text, limit)) or "&nbsp;"}</div>'
+def pre_html(text: str, limit: int = 60000, line_height: float = 1.55, size: int = 12) -> str:
+    """Preformatted text on the web's line pitch (``.tool-pre``/``.bash-out``: 12px on 1.55 lines)."""
+    lh = int(size * line_height + 0.5)
+    return (
+        f'<div style="white-space:pre-wrap;line-height:{lh}px">{html.escape(truncate(text, limit)) or "&nbsp;"}</div>'
+    )
 
 
 def pre(text: str, err: bool = False, limit: int = 60000) -> Surface:
     """`.tool-pre`: mono text on an inset panel; errors read in text_2 (the head already says it failed)."""
-    s = Surface("inset", "hair", theme.R3, margins=(12, 10, 12, 10))
+    s = Surface("inset", "light:hair", theme.R3, margins=(12, 10, 12, 10))
     s.add(rich(pre_html(text, limit), mono=True, size=12, color="text_2" if err else "text"))
     return s
 
@@ -385,8 +394,8 @@ class Toggle(QWidget):
         restyle(
             self.btn,
             lambda t: (
-                f"QPushButton {{ border: none; color: {t.text_3}; padding: 2px 6px 2px 2px; text-align: left; "
-                f"font-size: {theme.FS_SMALL}px; }} "
+                f"QPushButton {{ border: none; background: transparent; color: {t.text_3}; "
+                f"padding: 2px 6px 2px 2px; text-align: left; font-size: {theme.FS_SMALL}px; }} "
                 f"QPushButton:hover {{ color: {t.text}; background: {theme.blend(t.fill_1, t.canvas).name()}; }}"
             ),
         )

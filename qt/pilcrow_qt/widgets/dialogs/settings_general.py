@@ -8,10 +8,12 @@ from typing import Any, Dict, Optional
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 
+from ... import theme
 from ...store import store
-from ..ui.bits import hairline, label
+from ..ui.bits import hairline
 from ..ui.signals import bind
-from .settings_ui import Seg, Switch, hint, vbox
+from .parts import Text, sheet_bg
+from .settings_ui import Seg, Switch, vbox
 
 Json = Dict[str, Any]
 SIZES = [13.5, 14.5, 16]
@@ -33,16 +35,17 @@ class SetRow(QWidget):
         lay.setSpacing(20)
         left = QWidget()
         ll = vbox(left, 2)
-        self.title = label(title)
-        self.title.setStyleSheet("font-weight: 500;")
+        ll.addStretch(1)
+        self.title = Text(title, theme.FS_UI, 500)
         ll.addWidget(self.title)
-        self.hint = hint(hint_text)
+        self.hint = Text(hint_text, theme.FS_SMALL, 400, "text_3", 1.5)
         self.hint.setVisible(bool(hint_text))
         ll.addWidget(self.hint)
+        ll.addStretch(1)
         left.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        lay.addWidget(left, 54)
-        right = QWidget()
-        rl = QHBoxLayout(right)
+        lay.addWidget(left, 1)
+        self.right = QWidget()
+        rl = QHBoxLayout(self.right)
         rl.setContentsMargins(0, 0, 0, 0)
         rl.setSpacing(0)
         if fill:
@@ -51,9 +54,15 @@ class SetRow(QWidget):
         else:
             rl.addStretch(1)
             rl.addWidget(control, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        right.setMinimumWidth(180)
-        lay.addWidget(right, 46)
+        self.right.setFixedWidth(180)
+        lay.addWidget(self.right, 0)
         self.control = control
+        self.lined = False
+
+    def resizeEvent(self, e) -> None:  # noqa: N802
+        # the web grid: 1fr | minmax(180px, 46%) of the row
+        self.right.setFixedWidth(max(180, int(round(self.width() * 0.46))))
+        super().resizeEvent(e)
 
     def set_hint(self, text: str) -> None:
         self.hint.setText(text)
@@ -71,11 +80,26 @@ class Rows(QWidget):
         self._n = 0
 
     def add(self, r: QWidget) -> QWidget:
-        if self._n:
+        if self._n and hasattr(r, "lined"):
+            r.lined = True
+        elif self._n:
             self.lay.addWidget(hairline())
         self.lay.addWidget(r)
         self._n += 1
         return r
+
+    def paintEvent(self, e) -> None:  # noqa: N802
+        # ``.set-row + .set-row { box-shadow: 0 -1px 0 var(--hair) }``: the line sits just above the row
+        super().paintEvent(e)
+        from PySide6.QtGui import QPainter
+
+        t = theme.tokens()
+        p = QPainter(self)
+        line = theme.blend(t.hair, sheet_bg(t).name())
+        for i in range(self.lay.count()):
+            w = self.lay.itemAt(i).widget()
+            if w is not None and getattr(w, "lined", False) and w.isVisible():
+                p.fillRect(0, w.y() - 1, self.width(), 1, line)
 
 
 def config() -> Json:
@@ -129,10 +153,6 @@ class GeneralPage(Rows):
             SetRow("Suggest a next message", self.suggest, "Claude Code predicts a likely follow-up after each turn")
         )
 
-        self.thinking = Switch(bool(c.get("showThinking")), name="Show thinking")
-        self.thinking.toggled.connect(lambda v: save({"showThinking": bool(v)}))
-        self.add(SetRow("Show thinking", self.thinking, "Open Claude's reasoning in the conversation by default"))
-
         self.timeline = Switch(c.get("timeline") is not False, name="Timeline")
         self.timeline.toggled.connect(lambda v: save({"timeline": bool(v)}))
         self.add(
@@ -153,7 +173,6 @@ class GeneralPage(Rows):
         for sw, v in (
             (self.notif, bool(c.get("notifications"))),
             (self.suggest, bool(c.get("promptSuggestions"))),
-            (self.thinking, bool(c.get("showThinking"))),
             (self.timeline, c.get("timeline") is not False),
         ):
             sw.blockSignals(True)

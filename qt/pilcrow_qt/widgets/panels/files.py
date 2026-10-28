@@ -27,7 +27,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QScrollArea,
-    QSizePolicy,
     QStackedWidget,
     QTextBrowser,
     QVBoxLayout,
@@ -42,6 +41,7 @@ from ..ui.bits import IconButton, Row, button, hairline, label
 from ..ui.menu import show_menu, show_menu_at
 from ..ui.signals import bind
 from .editor import CodeEditor
+from .right_panel import EmptyState, Hairline, Seg, Toolbar, elide, icon_btn, lbl
 
 Json = Dict[str, Any]
 
@@ -438,28 +438,23 @@ def _browser_qss(t: theme.Tokens, size: float) -> str:
     return f'QTextBrowser {{ background: {t.canvas}; color: {t.text}; border: none; padding: 0; font-family: "{ui}"; font-size: {size}px; }}'
 
 
+def _top(w: QWidget) -> QWidget:
+    """A block kept at the top of its page, the way ``.empty`` sits in the ``.files-editor`` column."""
+    host = QWidget()
+    lay = QVBoxLayout(host)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.setSpacing(0)
+    lay.addWidget(w)
+    lay.addStretch(1)
+    return host
+
+
 def empty_state(icon: str, text: str, hint: str = "", action: Optional[QWidget] = None) -> QWidget:
-    """The centred ``.empty`` block: an icon, a line, a fainter hint, maybe a button."""
-    w = QWidget()
-    lay = QVBoxLayout(w)
-    lay.setContentsMargins(28, 40, 28, 40)
-    lay.setSpacing(8)
-    lay.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-    if icon:
-        ic = QLabel()
-        ic.setPixmap(icons.pixmap(icon, theme.tokens().text_3, 22))
-        ic.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(ic)
-    tl = label(text, tone="muted", wrap=True)
-    tl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    lay.addWidget(tl)
-    if hint:
-        hl = label(hint, tone="faint", size="small", wrap=True)
-        hl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(hl)
+    """The ``.empty`` block at the top of a page: an icon, a line, a fainter hint, maybe a button."""
+    e = EmptyState(icon, text, hint)
     if action is not None:
-        lay.addWidget(action, 0, Qt.AlignmentFlag.AlignHCenter)
-    return w
+        e.layout().addWidget(action, 0, Qt.AlignmentFlag.AlignHCenter)
+    return _top(e)
 
 
 class MarkdownView(QTextBrowser):
@@ -696,42 +691,41 @@ class FilesPanel(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # ---- toolbar
-        bar = Row(4, (12, 6, 10, 6))
-        bar.setMinimumHeight(42)
-        self.tree_btn = IconButton("panel-left", "Toggle file tree", 14)
+        # ---- toolbar (.panel-toolbar)
+        bar = Toolbar()
+        self.tree_btn = icon_btn("panel-left", "Toggle file tree", 14)
         self.tree_btn.clicked.connect(self._toggle_tree)
         bar.add(self.tree_btn)
-        self.path_lb = label("", tone="faint", mono=True)
-        self.path_lb.setProperty("size", "small")
-        self.path_lb.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.path_lb = elide(lbl("", theme.FS_SMALL, tone="faint", mono=True))
         bar.add(self.path_lb, 1)
-        self.mention_btn = IconButton("at-sign", "Mention this file in the message", 13)
+        self.mention_btn = icon_btn("at-sign", "Mention this file in the message", 13)
         self.mention_btn.clicked.connect(self._mention)
         bar.add(self.mention_btn)
-        self.seg = SegButtons(
+        self.seg = Seg(
             [
                 {"value": "preview", "icon": "book-open", "title": "Read"},
                 {"value": "edit", "icon": "pencil-line", "title": "Edit"},
                 {"value": "split", "icon": "columns-2", "title": "Side by side"},
             ]
         )
+        self.seg.setAccessibleName("Document view")
         self.seg.changed.connect(self._set_view)
         bar.add(self.seg)
-        self.save_btn = IconButton("save", "Save (Ctrl+S)", 14)
+        self.save_btn = icon_btn("save", "Save (Ctrl+S)", 14)
         self.save_btn.clicked.connect(lambda: self._save_active())
         bar.add(self.save_btn)
-        self.new_btn = IconButton("plus", "New file or folder", 14)
+        # New file / folder lives in the tree's context menu (the web has no button for it either).
+        self.new_btn = icon_btn("plus", "New file or folder", 14)
         self.new_btn.clicked.connect(self._new_menu)
+        self.new_btn.hide()
         bar.add(self.new_btn)
-        self.hidden_btn = IconButton("eye-off", "Show dotfiles", 14)
+        self.hidden_btn = icon_btn("eye-off", "Show dotfiles", 14)
         self.hidden_btn.clicked.connect(self._toggle_hidden)
         bar.add(self.hidden_btn)
-        self.refresh_btn = IconButton("refresh-cw", "Refresh", 13)
+        self.refresh_btn = icon_btn("refresh-cw", "Refresh", 13)
         self.refresh_btn.clicked.connect(self.refresh)
         bar.add(self.refresh_btn)
         root.addWidget(bar)
-        root.addWidget(hairline())
 
         # ---- body: tree | editor
         body = QWidget()
@@ -751,15 +745,18 @@ class FilesPanel(QWidget):
         self.filter.addAction(icons.icon("search", theme.tokens().text_3, 13), QLineEdit.ActionPosition.LeadingPosition)
         self.filter.textChanged.connect(self._on_filter)
         self.filter.setFixedHeight(30)
+        self.filter.hide()
         tl.addWidget(self.filter)
-        tl.addWidget(hairline())
         self.tree = FileTree()
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._tree_menu)
         self.tree.on_toggle = self._toggle_dir
         self.tree.opened.connect(lambda p: self.open_tab(p))
         self.tree.touches_clicked.connect(self._show_touches)
         tl.addWidget(self.tree, 1)
         bl.addWidget(self.tree_wrap)
-        bl.addWidget(hairline(vertical=True))
+        self.tree_line = Hairline(vertical=True)
+        bl.addWidget(self.tree_line)
 
         self.editor_host = QWidget()
         self.editor_host.setObjectName("canvas")
@@ -773,13 +770,14 @@ class FilesPanel(QWidget):
         self.tabs.hide()
         el.addWidget(self.tabs)
         self.stack = QStackedWidget()
-        self.empty = empty_state(
-            "file", "Pick a file to view or edit it.", "File paths in Claude's replies open here too."
+        self.empty = _top(
+            EmptyState("file", "Pick a file to view or edit it.", "File paths in Claude's replies open here too.")
         )
         self.stack.addWidget(self.empty)
-        self.loading_w = empty_state("", "Opening…")
+        self.loading_w = _top(EmptyState("", "Opening…"))
         self.stack.addWidget(self.loading_w)
-        self.error_w = empty_state("", "")
+        self.error_state = EmptyState("", "")
+        self.error_w = _top(self.error_state)
         self.stack.addWidget(self.error_w)
         el.addWidget(self.stack, 1)
         bl.addWidget(self.editor_host, 1)
@@ -1177,8 +1175,20 @@ class FilesPanel(QWidget):
         self._refetch_expanded()
 
     # ---------------------------------------------------------------- render
+    def _tree_menu(self, pos: QPoint) -> None:
+        show_menu_at(
+            [
+                {"label": "New file…", "icon": "file-plus", "on_select": lambda: self._new("file")},
+                {"label": "New folder…", "icon": "folder", "on_select": lambda: self._new("dir")},
+            ],
+            self.tree.viewport().mapToGlobal(pos),
+            self,
+            180,
+        )
+
     def render(self) -> None:
         self.tree_wrap.setVisible(self.st.show_tree)
+        self.tree_line.setVisible(self.st.show_tree)
         self.hidden_btn.set_icon_name("eye" if self.st.show_hidden else "eye-off")
         self.hidden_btn.setToolTip("Hide dotfiles" if self.st.show_hidden else "Show dotfiles")
         self.hidden_btn.setAccessibleName(self.hidden_btn.toolTip())
@@ -1194,7 +1204,7 @@ class FilesPanel(QWidget):
             self.stack.setCurrentWidget(self.loading_w)
             return
         if t.error:
-            self.error_w.findChild(QLabel).setText(t.error)
+            self.error_state.set_text(t.error)
             self.stack.setCurrentWidget(self.error_w)
             return
         w = self._areas.get(t.path)

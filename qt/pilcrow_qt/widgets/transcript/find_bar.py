@@ -18,7 +18,7 @@ from ... import theme
 from ...store import store
 from ..ui.bits import IconButton
 from ..ui.signals import bind
-from .items import icon_label, pt, set_icon, style_label
+from .items import MarkdownView, icon_label, pt, set_icon, style_label
 from .view import Transcript
 
 _last_query = ""
@@ -51,12 +51,16 @@ class FindBar(QWidget):
         self.matches: List[Tuple[int, str, int]] = []  # (unit index, item id, offset)
         self.index = 0
         self._row: Optional[QWidget] = None
+        self._lit: List[QWidget] = []  # the prose views carrying match highlights
         self.setAccessibleName("Find in conversation")
+        # .findbar: 38px tall, padding 0 5px 0 11px, radius 11, a 2px gap; the icon 6px before the field
+        self.setFixedHeight(38)
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(10, 6, 6, 6)
-        lay.setSpacing(6)
+        lay.setContentsMargins(11, 0, 5, 0)
+        lay.setSpacing(2)
         self.ico = icon_label("search", theme.tokens().text_3, 14)
         lay.addWidget(self.ico)
+        lay.addSpacing(6)
         self.field = QLineEdit()
         self.field.setProperty("quiet", "true")
         self.field.setPlaceholderText("Find in conversation")
@@ -67,7 +71,9 @@ class FindBar(QWidget):
         self.field.installEventFilter(self)
         lay.addWidget(self.field, 1)
         self.count = QLabel()
-        lay.addWidget(self.count)
+        lay.addSpacing(6)
+        lay.addWidget(self.count)  # .findbar-count: margin 0 6px
+        lay.addSpacing(6)
         self.prev_btn = IconButton("chevron-up", "Previous match (Shift+Enter)", 14)
         self.prev_btn.clicked.connect(lambda: self.step(-1))
         self.next_btn = IconButton("chevron-down", "Next match (Enter)", 14)
@@ -75,6 +81,7 @@ class FindBar(QWidget):
         self.close_btn = IconButton("x", "Close (Esc)", 14)
         self.close_btn.clicked.connect(self.close_bar)
         for b in (self.prev_btn, self.next_btn, self.close_btn):
+            b.setFixedSize(24, 24)  # .icon-btn.sm
             lay.addWidget(b)
         self.highlight = Highlight(transcript.widget())
         self._refresh = QTimer(self)
@@ -153,6 +160,7 @@ class FindBar(QWidget):
         if not self.matches:
             self.highlight.hide()
             self._row = None
+            self._light_matches("", "", -1)
             return
         _unit, item_id, _off = self.matches[self.index]
         row = self.transcript.reveal_item(item_id)
@@ -160,11 +168,40 @@ class FindBar(QWidget):
             self.highlight.hide()
             return
         self._row = row
-        self._place_highlight()
+        # which of this item's matches is the current one, counted the way the row counts them
+        k = sum(1 for u, i, o in self.matches[: self.index] if i == item_id)
+        lit = self._light_matches(self.field.text().strip(), item_id, k)
+        if lit:
+            self.highlight.hide()  # the words themselves are lit, as on the web
+        else:
+            self._place_highlight()
         if reveal:
             # a row in a page far off screen has no layout yet: place it after the layout has run
-            QTimer.singleShot(0, lambda: (self._place_highlight(), self.transcript.scroll_to_row(row)))
+            QTimer.singleShot(0, lambda: (None if lit else self._place_highlight(), self.transcript.scroll_to_row(row)))
             self.transcript.scroll_to_row(row)
+
+    def _light_matches(self, needle: str, current_id: str, k: int) -> bool:
+        """Light every match in the prose views on screen (``::highlight(find)``) and the current one
+        in full (``::highlight(find-current)``). Returns whether the current match's row could."""
+        for v in self._lit:
+            try:
+                v.set_find("", -1)
+            except RuntimeError:
+                pass
+        self._lit = []
+        if not needle:
+            return False
+        lit_current = False
+        for item_id in {i for _u, i, _o in self.matches}:
+            row = self.transcript.row_widget(item_id)
+            if row is None:
+                continue
+            for v in row.findChildren(MarkdownView) + ([row] if isinstance(row, MarkdownView) else []):
+                if v.set_find(needle, k if item_id == current_id else -1):
+                    self._lit.append(v)
+                    if item_id == current_id:
+                        lit_current = True
+        return lit_current
 
     def _place_highlight(self) -> None:
         row = self._row
@@ -190,6 +227,7 @@ class FindBar(QWidget):
         return super().eventFilter(obj, e)
 
     def close_bar(self) -> None:
+        self._light_matches("", "", -1)
         self.highlight.hide()
         self.highlight.deleteLater()
         if self.transcript.find_bar is self:
@@ -202,8 +240,12 @@ class FindBar(QWidget):
         set_icon(self.ico, "search", t.text_3, 14)
         self.setObjectName("findbar")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        # a floating sheet: raised (a shade lighter on dark), 11px corners, a hairline for the shadow
+        bg = "#252528" if t.dark else t.raised
         self.setStyleSheet(
-            f"#findbar {{ background: {t.chrome}; border-bottom: 1px solid {theme.blend(t.hair, t.chrome).name()}; }} QLineEdit {{ font-size: {pt(theme.FS_UI)}; }}"
+            f"#findbar {{ background: {bg}; border: 1px solid {theme.blend(t.hair_2, bg).name()}; border-radius: 11px; }} "
+            f"QLineEdit {{ font-size: {pt(theme.FS_UI)}; color: {t.text}; background: transparent; border: none; padding: 0; "
+            f"selection-background-color: {theme.blend(t.selection, bg).name()}; }}"
         )
         self._paint_count()
 

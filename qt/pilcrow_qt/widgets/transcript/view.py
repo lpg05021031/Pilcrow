@@ -35,6 +35,13 @@ EST = {"items": 260, "work": 44}  # stand-in heights, matching transcript.css
 NEAR = 1600  # how far ahead of the viewport pages are drawn
 
 
+def column_width(pane: int) -> int:
+    """``--col: clamp(640px, min(61.8%, 100% - 48px), 1080px)`` of the pane's width (app.css .main):
+    the reading column is the golden section of the pane, never under 640px (the margins give way
+    first, down to 24px) and never over 1080px."""
+    return int(max(640, min(pane * 0.618, pane - 48, 1080)))
+
+
 @dataclass
 class ScrollPos:
     index: int
@@ -123,8 +130,10 @@ class PageBox(QWidget):
             super().paintEvent(e)
             return
         # faint lines where rows will be, so a fast fling shows pages taking shape rather than nothing
+        # (.page.far: fill-1 bars, 38% wide, every 200px, at opacity 0.7)
         p = QPainter(self)
-        c = theme.blend(theme.tokens().fill_1, theme.tokens().canvas)
+        c = theme.tokens().color("fill_1")
+        c.setAlphaF(c.alphaF() * 0.7)
         w = int(self.width() * 0.38)
         y = 10
         while y < self.height() - 8:
@@ -173,7 +182,7 @@ class Transcript(QScrollArea):
         ol.setContentsMargins(0, 0, 0, 0)
         ol.setSpacing(0)
         self.inner = QWidget()
-        self.inner.setMaximumWidth(theme.COL + 48)
+        self.inner.setMaximumWidth(column_width(1480 - 268) + 48)
         self.inner.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         ol.addStretch(1)
         ol.addWidget(self.inner, 100)
@@ -284,10 +293,35 @@ class Transcript(QScrollArea):
         self._scrolled_cb = fn
 
     def open_find(self) -> None:
+        """The find bar floats over the top right of the conversation (``.findbar``), as on the web."""
         store.set_find_open(True)
         self.find_requested.emit()
-        if self.find_bar is not None:
-            self.find_bar.setFocus()
+        if self.find_bar is None:
+            from .find_bar import FindBar
+
+            bar = FindBar(self, on_close=self._close_find, parent=self.viewport())
+            self.find_bar = bar
+            self._place_find()
+            bar.show()
+            bar.raise_()
+        self.find_bar.setFocus()
+
+    def _close_find(self) -> None:
+        bar = self.find_bar
+        self.find_bar = None
+        if bar is not None:
+            bar.hide()
+            bar.deleteLater()
+        store.set_find_open(False)
+        self.setFocus()
+
+    def _place_find(self) -> None:
+        bar = self.find_bar
+        if bar is None:
+            return
+        vp = self.viewport()
+        bar.setFixedWidth(min(380, max(120, vp.width() - 36)))
+        bar.move(vp.width() - 18 - bar.width(), 10)
 
     def scroll_to_bottom(self) -> None:
         """Your own message goes to the end of the conversation, and so do you."""
@@ -334,6 +368,16 @@ class Transcript(QScrollArea):
             turn_open[fold.key] = True
             fold.open(animate=False)
         return box.row_for(item_id) or box
+
+    def row_widget(self, item_id: str) -> Optional[QWidget]:
+        """The row drawn for an item, if its page is drawn and its fold open; nothing is revealed."""
+        for page in self._pages:
+            if page.far:
+                continue
+            for box in page.boxes:
+                if any(it.id == item_id for it in box.items()):
+                    return box.row_for(item_id)
+        return None
 
     def scroll_to_row(self, w: QWidget) -> None:
         """Bring a row into the upper part of the view unless it is already comfortably visible."""
@@ -629,6 +673,8 @@ class Transcript(QScrollArea):
 
     def _initial_place(self) -> None:
         self._placing = False
+        if not self._alive():  # the view can be torn down before the deferred call runs
+            return
         r = store.rt.get(self.sid)
         if not (r and r.loaded):
             return
@@ -687,9 +733,18 @@ class Transcript(QScrollArea):
         self.jump.adjustSize()
         self.jump.move((vp.width() - self.jump.width()) // 2, vp.height() - 18 - self.jump.height())
 
+    def resizeEvent(self, e) -> None:  # noqa: N802
+        # ``--col`` is the golden section of the pane (app.css .main): the column follows the window
+        self.inner.setMaximumWidth(column_width(self.width()) + 48)
+        super().resizeEvent(e)
+
     def eventFilter(self, obj, e) -> bool:  # noqa: N802
         if obj is self.viewport() and e.type() == QEvent.Type.Resize:
             self._place_jump()
+            self._place_find()
+            # the column is centred on the whole pane, as under the web's overlay scrollbar
+            sb = self.verticalScrollBar()
+            self.widget().layout().setContentsMargins(sb.width() if sb.isVisible() else 0, 0, 0, 0)
             # the view shrinking (a panel opening, the composer growing) is kept in step at once
             if self._at_bottom:
                 self._set(self.verticalScrollBar().maximum())

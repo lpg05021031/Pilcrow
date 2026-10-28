@@ -7,15 +7,17 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QWidget
 
 from ... import icons, theme
 from ...lib.fmt import basename, err_text, tildify
 from ...store import store
+from ..folder_picker import Browser
 from ..ui.bits import Spinner, button, label
 from ..ui.collapse import Collapse
 from ..ui.signals import bind
+from .parts import Keys, Text, sheet_bg
 from .settings_ui import (
     EFFORTS,
     MODES,
@@ -27,10 +29,7 @@ from .settings_ui import (
     Switch,
     combo,
     combo_value,
-    elide,
     field,
-    folder_picker,
-    hint,
     home,
     modes_for,
     open_sheet,
@@ -81,18 +80,25 @@ class NewSessionSheet(Sheet):
         box.setObjectName("nsfolder")
         box.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         box.setFixedHeight(40)
-        styled(
-            box,
-            lambda t: (
-                f"#nsfolder {{ background: {theme.blend(t.fill_1, t.raised).name()}; border: 1px solid {theme.blend(t.hair, t.raised).name()}; border-radius: {theme.R3}px; }} #nsfolder QLineEdit {{ background: transparent; border: none; padding: 2px 4px; }}"
-            ),
-        )
+        self.folder_box = box
+
+        def folder_css(t: theme.Tokens) -> str:
+            bg = theme.blend(t.fill_1, sheet_bg(t).name()).name()
+            return (
+                f"#nsfolder {{ background: {bg}; border: 1px solid {theme.blend(t.hair, bg).name()}; border-radius: {theme.R3}px; }}"
+                f' #nsfolder[focus="true"] {{ background: {t.canvas}; border-color: {theme.blend(t.hair_3, t.canvas).name()}; }}'
+                f" #nsfolder QLineEdit {{ background: transparent; border: none; padding: 0; font-size: 12.5px; color: {t.text}; }}"
+            )
+
+        styled(box, folder_css)
         bl = QHBoxLayout(box)
         bl.setContentsMargins(12, 0, 5, 0)
         bl.setSpacing(4)
         self.folder_ico = QLabel()
         self.folder_ico.setPixmap(icons.pixmap("folder-open", theme.tokens().text_3, 16))
+        self.folder_ico.setFixedSize(16, 16)
         bl.addWidget(self.folder_ico)
+        bl.addSpacing(4)
         from PySide6.QtWidgets import QLineEdit
 
         self.path = QLineEdit(self.cwd)
@@ -100,6 +106,7 @@ class NewSessionSheet(Sheet):
         self.path.setFont(theme.font_mono())
         self.path.setAccessibleName("Folder")
         self.path.textChanged.connect(self._path_typed)
+        self.path.installEventFilter(self)
         bl.addWidget(self.path, 1)
         self.browse_btn = button("Browse", kind="ghost", size="sm", on_click=self._toggle_browser)
         self.browse_btn.setAccessibleName("Browse")
@@ -118,14 +125,13 @@ class NewSessionSheet(Sheet):
         self.chips = Flow(6)
         cl.addWidget(self.chips, 1)
         sl.addWidget(self.chips_w)
-        self.picker = folder_picker(self.cwd, self._picked)
-        self.show_browser = not opts.get("cwd") and not rec and self.picker is not None
-        if self.picker is not None:
-            self.picker.setVisible(self.show_browser)
-            sl.addWidget(self.picker)
-        else:
-            self.browse_btn.setText("Browse…")
-            self.system_btn.hide()
+        self.picker = Browser(self._browse_to, self._picked)
+        self.browse_listing: Optional[Json] = None
+        self.show_browser = not opts.get("cwd") and not rec
+        self.picker.setVisible(self.show_browser)
+        sl.addWidget(self.picker)
+        if self.show_browser:
+            self._browse_to(self.cwd or home())
         self.add(sec)
 
         # ---- options
@@ -134,22 +140,24 @@ class NewSessionSheet(Sheet):
         self.disclose.setObjectName("disclose")
         self.disclose.setAccessibleName("Options")
         self.disclose.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.disclose.setFixedHeight(36)
         styled(
             self.disclose,
             lambda t: (
-                f"#disclose {{ border: none; background: transparent; text-align: left; padding: 4px 2px; }} #disclose:hover {{ background: {theme.blend(t.fill_1, t.raised).name()}; border-radius: {theme.R2}px; }} #disclose QLabel {{ background: transparent; }}"
+                f"#disclose {{ border: none; background: transparent; border-radius: {theme.R2}px; text-align: left; padding: 0; min-height: 36px; max-height: 36px; }}"
+                f" #disclose:hover {{ background: {theme.blend(t.fill_1, sheet_bg(t).name()).name()}; }}"
+                f" #disclose QLabel {{ background: transparent; }}"
             ),
         )
         dl = QHBoxLayout(self.disclose)
-        dl.setContentsMargins(2, 0, 6, 0)
-        dl.setSpacing(6)
+        dl.setContentsMargins(8, 0, 8, 0)
+        dl.setSpacing(8)
         self.chev = QLabel()
         self.chev.setFixedSize(14, 14)
         dl.addWidget(self.chev)
-        t = label("Options", tone="muted", size="small")
-        t.setStyleSheet("font-weight: 600;")
-        dl.addWidget(t)
-        self.summary = elide(label("", tone="faint", size="small"))
+        self.disclose_title = Text("Options", theme.FS_UI, 600, "text_2", wrap=False)
+        dl.addWidget(self.disclose_title)
+        self.summary = Text("", theme.FS_SMALL, 400, "text_3", wrap=False)
         dl.addWidget(self.summary, 1)
         self.disclose.clicked.connect(self._toggle_options)
         self.add(self.disclose)
@@ -166,7 +174,8 @@ class NewSessionSheet(Sheet):
         sec2 = QWidget()
         s2 = vbox(sec2, 8)
         s2.addWidget(_ns_label("First message"))
-        self.prompt = text_area("", rows=3, name="First message")
+        self.prompt = text_area("", rows=2, name="First message")
+        self.prompt.setFixedHeight(76)
         self.prompt.setPlainText(str(opts.get("prompt") or ""))
         self.prompt.textChanged.connect(self._prompt_changed)
         s2.addWidget(self.prompt)
@@ -176,7 +185,14 @@ class NewSessionSheet(Sheet):
         self.err = label("", tone="err", size="small", wrap=True)
         self.err.hide()
         self.add_foot(self.err, 1)
-        self.keys = hint("Ctrl Enter to start", wrap=False)
+        self.keys = QWidget()
+        kl = QHBoxLayout(self.keys)
+        kl.setContentsMargins(0, 0, 0, 0)
+        kl.setSpacing(4)
+        kl.addWidget(Keys("Ctrl"))
+        kl.addWidget(Keys("Enter"))
+        kl.addWidget(Text("to start", theme.FS_SMALL, 400, "text_3", wrap=False))
+        kl.addStretch(1)
         self.add_foot(self.keys, 1)
         self.add_foot(button("Cancel", kind="ghost", on_click=self.dismiss))
         self.spinner = Spinner(13)
@@ -193,6 +209,11 @@ class NewSessionSheet(Sheet):
         self._prompt_changed()
         self._summary()
         self._git_timer.start()
+
+    def eventFilter(self, obj, e) -> bool:  # noqa: N802
+        if obj is getattr(self, "path", None) and e.type() in (QEvent.Type.FocusIn, QEvent.Type.FocusOut):
+            set_prop(self.folder_box, "focus", "true" if e.type() == QEvent.Type.FocusIn else "false")
+        return super().eventFilter(obj, e)
 
     # ---- folder
     def _path_typed(self, text: str) -> None:
@@ -212,15 +233,26 @@ class NewSessionSheet(Sheet):
 
     def _picked(self, cwd: str) -> None:
         self.set_cwd(cwd)
-        if self.picker is not None and self.show_browser:
+        if self.show_browser:
             self._toggle_browser()
 
+    def _browse_to(self, d: str) -> None:
+        """Ask ``fs.browse`` for a folder and show it; entering a folder also makes it the choice."""
+
+        def ok(r: Any) -> None:
+            if isinstance(r, dict) and self.show_browser:
+                self.browse_listing = r
+                self.picker.show_listing(r)
+                self.set_cwd(str(r.get("dir") or d))
+                self.schedule_relayout()
+
+        store.call("fs.browse", {"dir": d}, quiet=True).then(ok).catch(lambda _e: None)
+
     def _toggle_browser(self) -> None:
-        if self.picker is None:
-            self._pick_native()
-            return
         self.show_browser = not self.show_browser
         self.picker.setVisible(self.show_browser)
+        if self.show_browser and self.browse_listing is None:
+            self._browse_to(self.cwd or home())
         set_prop(self.browse_btn, "active", "true" if self.show_browser else "false")
         self._chips()
         self.schedule_relayout()
@@ -285,10 +317,16 @@ class NewSessionSheet(Sheet):
         rl.setSpacing(16)
         col = QWidget()
         cl = vbox(col, 2)
-        t = label("Isolated worktree")
-        t.setStyleSheet("font-weight: 600;")
-        cl.addWidget(t)
-        cl.addWidget(hint("Claude works on its own branch and checkout, so parallel sessions never collide."))
+        cl.addWidget(Text("Isolated worktree", theme.FS_UI, 600))
+        cl.addWidget(
+            Text(
+                "Claude works on its own branch and checkout, so parallel sessions never collide.",
+                theme.FS_SMALL,
+                400,
+                "text_3",
+                1.5,
+            )
+        )
         rl.addWidget(col, 1)
         self.wt_switch = Switch(self.use_worktree, name="Use a worktree")
         self.wt_switch.toggled.connect(self._wt_toggled)
@@ -304,7 +342,7 @@ class NewSessionSheet(Sheet):
         self.wt_fields = two(field("Start from", self.base, icon="git-branch"), field("Branch name", self.wt_name_edit))
         self.wt_fields.hide()
         wl.addWidget(self.wt_fields)
-        self.changed_hint = hint("")
+        self.changed_hint = Text("", theme.FS_SMALL, 400, "text_3", 1.5)
         self.changed_hint.hide()
         wl.addWidget(self.changed_hint)
         lay.addWidget(self.wt_sec)
@@ -380,7 +418,7 @@ class NewSessionSheet(Sheet):
 
     def _paint(self) -> None:
         t = theme.tokens()
-        self.chev.setPixmap(icons.pixmap("chevron-down" if not self.options.is_open else "chevron-up", t.text_3, 14))
+        self.chev.setPixmap(icons.pixmap("chevron-down" if self.options.is_open else "chevron-right", t.text_4, 14))
         self.folder_ico.setPixmap(icons.pixmap("folder-open", t.text_3, 16))
 
     # ---- prompt and start
@@ -422,10 +460,9 @@ class NewSessionSheet(Sheet):
         ).then(made).catch(bad)
 
 
-def _ns_label(text: str) -> QLabel:
-    lb = label(text, tone="muted", size="small")
-    lb.setStyleSheet("font-weight: 600;")
-    return lb
+def _ns_label(text: str) -> QWidget:
+    """``.ns-label``: 12px, 600, text-2."""
+    return Text(text, theme.FS_SMALL, 600, "text_2", wrap=False)
 
 
 def open_new_session(window: QWidget, opts: Any) -> Optional[NewSessionSheet]:

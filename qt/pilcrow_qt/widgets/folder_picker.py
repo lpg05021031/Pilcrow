@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from typing import Any, Callable, Dict, List, Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -172,56 +172,8 @@ class FolderPicker(QWidget):
         b = self.browse
         if b is None:
             return
-        browser = QFrame()
-        browser.setObjectName("browser")
-        browser.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        browser.setStyleSheet(f"#browser {{ background: {t.inset}; }}")
-        bl = QVBoxLayout(browser)
-        bl.setContentsMargins(0, 0, 0, 0)
-        bl.setSpacing(0)
-        head = QWidget()
-        head.setObjectName("browser-head")
-        head.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        head.setStyleSheet(f"#browser-head {{ border-bottom: 1px solid {theme.blend(t.hair, t.inset).name()}; }}")
-        hl = QHBoxLayout(head)
-        hl.setContentsMargins(6, 6, 10, 6)
-        hl.setSpacing(4)
-        home_btn = IconButton("home", "Home", 13)
-        home_btn.clicked.connect(lambda: self._nav(str(home or "/")))
-        hl.addWidget(home_btn)
-        up = IconButton("corner-left-up", "Up one level", 13)
-        up.setEnabled(bool(b.get("parent")))
-        up.clicked.connect(lambda: b.get("parent") and self._nav(str(b["parent"])))
-        hl.addWidget(up)
-        display = label(
-            str(b.get("display") or tildify(str(b.get("dir") or ""), home)), tone="muted", size="small", mono=True
-        )
-        display.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        hl.addWidget(display, 1)
-        if b.get("repo"):
-            badge = label("git", tone="faint", size="micro")
-            hl.addWidget(badge)
-        bl.addWidget(head)
-        lst = _list_area(240)
-        if b.get("error"):
-            note = label(str(b["error"]), tone="faint", size="small", wrap=True)
-            note.setContentsMargins(10, 10, 10, 10)
-            lst.lay.addWidget(note)
-        for d in b.get("dirs") or []:
-            row = _Row(height=30)
-            row.add_icon("folder-git-2" if d.get("repo") else "folder", t.text_3, 14)
-            row.add_text(str(d.get("name") or ""), t.text_2, theme.FS_UI, stretch=1)
-            row.add_icon("chevron-right", t.text_3, 13)
-            row.setAccessibleName(str(d.get("name") or ""))
-            row.clicked.connect(lambda _c=False, x=str(d.get("path") or ""): self._nav(x))
-            row.double_clicked = lambda x=str(d.get("path") or ""): self.on_pick(x)
-            lst.lay.addWidget(row)
-        if not (b.get("dirs") or []) and not b.get("error"):
-            note = label("No subfolders", tone="faint", size="small")
-            note.setContentsMargins(10, 10, 10, 10)
-            lst.lay.addWidget(note)
-        lst.lay.addStretch(1)
-        bl.addWidget(lst)
+        browser = Browser(self._nav, self.on_pick, flat=True)
+        browser.show_listing(b)
         self.body.addWidget(browser)
         foot = _Foot()
         foot.lay.addWidget(button("Recent", kind="ghost", size="sm", on_click=self._back_to_recent))
@@ -237,6 +189,108 @@ class FolderPicker(QWidget):
         self._render()
 
 
+class Browser(QFrame):
+    """``.browser``: a small folder browser over ``fs.browse``. A head with home and up, the path in the
+    code font and a ``git`` badge; a 30px row per subfolder (click to enter, double-click to pick).
+    ``nav(dir)`` is asked for a listing; ``show_listing`` draws one. ``flat`` drops the corners and ring
+    for the picker, where it fills the popover."""
+
+    def __init__(
+        self,
+        nav: Callable[[str], None],
+        pick: Callable[[str], None],
+        flat: bool = False,
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__(parent)
+        self._nav, self._pick = nav, pick
+        self.listing: Optional[Json] = None
+        self.setObjectName("browser")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._flat = flat
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        self.head = QWidget()
+        self.head.setObjectName("browser-head")
+        self.head.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        hl = QHBoxLayout(self.head)
+        hl.setContentsMargins(6, 6, 10, 6)
+        hl.setSpacing(4)
+        self.home_btn = IconButton("home", "Home", 13)
+        self.home_btn.setFixedSize(24, 24)
+        self.home_btn.clicked.connect(lambda: self._nav(str((store.info or {}).get("home") or "/")))
+        hl.addWidget(self.home_btn)
+        self.up_btn = IconButton("corner-left-up", "Up one level", 13)
+        self.up_btn.setFixedSize(24, 24)
+        self.up_btn.clicked.connect(self._up)
+        hl.addWidget(self.up_btn)
+        self.display = label("", tone="muted", size="small", mono=True)
+        self.display.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        hl.addWidget(self.display, 1)
+        self.badge = QLabel("git")
+        self.badge.setObjectName("badge")
+        self.badge.setFixedHeight(19)
+        self.badge.hide()
+        hl.addWidget(self.badge)
+        lay.addWidget(self.head)
+        self.list = _ListArea(220 if not flat else 240)
+        self.list.lay.setContentsMargins(4, 4, 4, 4)
+        lay.addWidget(self.list)
+        bind(theme.theme.changed, self, lambda _t: self._paint())
+        self._paint()
+
+    def _paint(self) -> None:
+        t = theme.tokens()
+        from .dialogs.parts import well_bg
+
+        bg = well_bg(t).name()
+        ring = "" if self._flat else f"border: 1px solid {theme.blend(t.hair, bg).name()}; border-radius: {theme.R3}px;"
+        self.setStyleSheet(
+            f"#browser {{ background: {bg}; {ring} }}"
+            f" #browser-head {{ border-bottom: 1px solid {theme.blend(t.hair, bg).name()}; }}"
+            f" #badge {{ background: {theme.blend(t.fill_2, bg).name()}; color: {t.text_2}; border-radius: 999px; padding: 0 7px; font-size: 11px; font-weight: 600; }}"
+        )
+
+    def _up(self) -> None:
+        if self.listing and self.listing.get("parent"):
+            self._nav(str(self.listing["parent"]))
+
+    def show_listing(self, b: Json) -> None:
+        self.listing = b
+        t = theme.tokens()
+        home = (store.info or {}).get("home")
+        self.up_btn.setEnabled(bool(b.get("parent")))
+        self.display.setText(str(b.get("display") or ""))
+        _ = home
+        self.badge.setVisible(bool(b.get("repo")))
+        lay = self.list.lay
+        while lay.count():
+            it = lay.takeAt(0)
+            w = it.widget()
+            if w is not None:
+                w.deleteLater()
+        if b.get("error"):
+            note = label(str(b["error"]), tone="faint", size="small", wrap=True)
+            note.setContentsMargins(10, 10, 10, 10)
+            lay.addWidget(note)
+        for d in b.get("dirs") or []:
+            row = _Row(height=30)
+            row.add_icon("folder-git-2" if d.get("repo") else "folder", t.text_3, 14)
+            row.add_text(str(d.get("name") or ""), t.text_2, theme.FS_UI, stretch=1)
+            row.add_icon("chevron-right", t.text_3, 13)
+            row.setAccessibleName(str(d.get("name") or ""))
+            row.clicked.connect(lambda _c=False, x=str(d.get("path") or ""): self._nav(x))
+            row.double_clicked = lambda x=str(d.get("path") or ""): self._pick(x)
+            lay.addWidget(row)
+        if not (b.get("dirs") or []) and not b.get("error"):
+            note = label("No subfolders", tone="faint", size="small")
+            note.setContentsMargins(10, 10, 10, 10)
+            lay.addWidget(note)
+        lay.addStretch(1)
+        self.updateGeometry()
+
+
 class _ListArea(QScrollArea):
     def __init__(self, max_h: int) -> None:
         super().__init__()
@@ -244,11 +298,17 @@ class _ListArea(QScrollArea):
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setMaximumHeight(max_h)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         host = QWidget()
         self.lay = QVBoxLayout(host)
         self.lay.setContentsMargins(6, 6, 6, 6)
         self.lay.setSpacing(0)
         self.setWidget(host)
+
+    def sizeHint(self):  # noqa: N802
+        w = self.widget()
+        h = w.sizeHint().height() if w is not None else 0
+        return QSize(super().sizeHint().width(), min(self.maximumHeight(), h))
 
 
 def _list_area(max_h: int = 300) -> _ListArea:

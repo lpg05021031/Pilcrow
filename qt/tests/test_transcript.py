@@ -103,8 +103,10 @@ def test_login_shows_bubbles_text_and_closed_folds(app_client):
         assert folds[1].sum.text() == "Edited a file, ran a command", folds[1].sum.text()
         assert folds[0].n.text() == "3 steps"
         assert not _cards(c, tr)  # closed folds draw no tool cards
-        # the column is centred and no wider than the conversation column
-        assert tr.inner.width() <= 748 and tr.inner.x() > 0
+        # the column is centred and is the golden section of the pane plus its 24px paddings (app.css --col)
+        from pilcrow_qt.widgets.transcript.view import column_width
+
+        assert tr.inner.width() == column_width(tr.width()) + 48 and tr.inner.x() > 0
         # thinking/verbose open every fold; normal closes them again (a remembered toggle would win)
         c.store.set_ui(view="verbose")
         c.sleep(300)
@@ -261,7 +263,13 @@ def test_find_counts_and_reveals(app_client):
         assert all(not p.far for p in tr._pages), "find draws every page"
         bar.step(1)
         c.sleep(200)
-        assert bar.highlight.isVisible()
+        # the words themselves are lit in prose rows (::highlight(find)); other rows get the wash
+        lit = [v for v in bar._lit if v.extraSelections()]
+        assert lit or bar.highlight.isVisible()
+        if lit:
+            assert any(s.format.background().color().name() == "#d97757" for v in lit for s in v.extraSelections()), (
+                "the current match is lit in full"
+            )
         row = bar._row
         assert row is not None and row.isVisible()
         vb = tr.verticalScrollBar()

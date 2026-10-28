@@ -106,7 +106,7 @@ def test_inbox_page(app_client):
     ib = c.win.inbox
     c.wait_until(lambda: ib.items is not None and ib.schedules is not None, 5, "inbox.list and schedules.list")
     assert not ib.run_cards and not ib.sched_cards and ib.rail_empty.isVisible()
-    assert "Nothing runs on its own yet." in c.texts(type(ib.title), ib.main)
+    assert ib.hero_title.text() == "Nothing runs on its own yet."
     now = time.time() * 1000
     sched = {
         "cwd": "/home/tester/code/pilcrow",

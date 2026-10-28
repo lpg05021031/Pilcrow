@@ -35,8 +35,8 @@ from ..lib.fmt import basename, cost, duration, plural, rel_path, time_ago
 from ..lib.tools_meta import str_
 from ..lib.workflow import workflow_counts
 from ..store import Runtime, store
-from .dialogs.parts import Badge, Card, ElideLabel, Kbd, LayoutButton, Well
-from .ui.bits import ContextRing, IconButton, Mark, Spinner, WorkingMark, button, hairline
+from .dialogs.parts import Badge, Card, ElideLabel, Kbd, LayoutButton, Text, Well, half_hairline, page_column
+from .ui.bits import ContextRing, IconButton, Mark, Spinner, WorkingMark, button
 from .ui.signals import bind
 
 Json = Dict[str, Any]
@@ -178,9 +178,10 @@ class Tile(LayoutButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAccessibleName(label)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setFixedHeight(68)
         self.clicked.connect(on_click)
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setContentsMargins(13, 0, 13, 0)
         lay.setSpacing(12)
         self.ico_box = QFrame()
         self.ico_box.setObjectName("tile-ico")
@@ -198,10 +199,17 @@ class Tile(LayoutButton):
         col = QVBoxLayout()
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(1)
-        self.value = QLabel("0")
+        self.value = Text("0", theme.FS_DISPLAY, 600, "text", 1.1, wrap=False, letter_spacing=-0.02)
         col.addWidget(self.value)
-        self.key = ElideLabel(label)
-        col.addWidget(self.key)
+        krow = QHBoxLayout()
+        krow.setContentsMargins(0, 0, 0, 0)
+        krow.setSpacing(0)
+        self.key = Text(label, theme.FS_MICRO, 400, "text_3", wrap=False)
+        self.key.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        krow.addWidget(self.key)
+        self.sub = Text("", theme.FS_MICRO, 400, "text_4", wrap=False)
+        krow.addWidget(self.sub, 1)
+        col.addLayout(krow)
         lay.addLayout(col, 1)
         bind(theme.theme.changed, self, lambda _t: self._paint())
         self._label = label
@@ -227,11 +235,9 @@ class Tile(LayoutButton):
         )
         self.ico.setVisible(not self._live)
         self.mark.setVisible(self._live)
-        self.value.setStyleSheet(
-            f"color: {t.accent_text if accent else t.text}; font-size: {theme.FS_DISPLAY}px; font-weight: 600;"
-        )
-        self.key.setText(f"{self._label} · {self._sub}" if self._sub else self._label)
-        self.key.setStyleSheet(f"color: {t.text_3}; font-size: {theme.FS_MICRO}px;")
+        self.value.set_color("accent_text" if accent else "text")
+        self.key.setText(self._label)
+        self.sub.setText(f" · {self._sub}" if self._sub else "")
 
 
 class SectionHead(QWidget):
@@ -246,15 +252,12 @@ class SectionHead(QWidget):
         self.glyph.setFixedSize(12, 12)
         self.glyph.setVisible(glyph)
         lay.addWidget(self.glyph)
-        self.title = QLabel(title)
-        self.title.setProperty("size", "h")
+        self.title = Text(title, theme.FS_H, 600, "text", wrap=False, letter_spacing=-0.01)
         lay.addWidget(self.title)
         self.count = Badge(0)
         lay.addWidget(self.count)
         lay.addStretch(1)
-        self.end = QLabel(end_text)
-        self.end.setProperty("tone", "faint")
-        self.end.setProperty("size", "small")
+        self.end = Text(end_text, theme.FS_SMALL, 400, "text_3", wrap=False)
         lay.addWidget(self.end)
         self._glyph_on = glyph
         bind(theme.theme.changed, self, lambda _t: self._paint())
@@ -278,13 +281,12 @@ class EmptyNote(QFrame):
         lay.setContentsMargins(16, 14, 16, 14)
         lay.setSpacing(12)
         if mark:
-            lay.addWidget(Mark(18), 0, Qt.AlignmentFlag.AlignTop)
+            lay.addWidget(Mark(18), 0, Qt.AlignmentFlag.AlignVCenter)
         elif icon:
             ico = QLabel()
             ico.setPixmap(icons.pixmap(icon, theme.tokens().text_4, 16))
-            lay.addWidget(ico, 0, Qt.AlignmentFlag.AlignTop)
-        self.text = QLabel(text)
-        self.text.setWordWrap(True)
+            lay.addWidget(ico, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.text = Text(text, theme.FS_SMALL, 400, "text_3", 1.5)
         lay.addWidget(self.text, 1)
         bind(theme.theme.changed, self, lambda _t: self._paint())
         self._paint()
@@ -294,7 +296,6 @@ class EmptyNote(QFrame):
         self.setStyleSheet(
             f"EmptyNote {{ background: {theme.blend(t.fill_1, t.canvas).name()}; border-radius: 12px; }}"
         )
-        self.text.setStyleSheet(f"color: {t.text_3}; font-size: {theme.FS_SMALL}px;")
 
 
 class CardHead(QWidget):
@@ -361,7 +362,7 @@ class WorkflowBar(QWidget):
 def _micro(text: str = "") -> QLabel:
     lb = QLabel(text)
     lb.setProperty("tone", "faint")
-    lb.setProperty("size", "micro")
+    lb.setProperty("fs", "micro")
     return lb
 
 
@@ -399,7 +400,7 @@ class WorkingCard(Card):
         self.wf_ico = QLabel()
         wl.addWidget(self.wf_ico)
         self.wf_name = ElideLabel()
-        self.wf_name.setProperty("size", "micro")
+        self.wf_name.setProperty("fs", "micro")
         wl.addWidget(self.wf_name)
         self.wf_bar = WorkflowBar()
         wl.addWidget(self.wf_bar, 1)
@@ -497,7 +498,7 @@ class KeyButton(LayoutButton):
 
     def __init__(self, text: str, kind: str = "", parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setProperty("size", "sm")
+        self.setProperty("fs", "sm")
         if kind:
             self.setProperty("kind", kind)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -771,14 +772,14 @@ class FinishedRow(LayoutButton):
         col = QVBoxLayout()
         col.setContentsMargins(0, 0, 0, 0)
         col.setSpacing(1)
-        self.title = ElideLabel()
-        self.sub = ElideLabel()
+        self.title = Text("", theme.FS_SMALL, 400, "text", wrap=False)
+        self.sub = Text("", theme.FS_MICRO, 400, "text_3", wrap=False)
         col.addWidget(self.title)
         col.addWidget(self.sub)
         lay.addLayout(col, 1)
-        self.cost = _micro()
+        self.cost = Text("", theme.FS_MICRO, 400, "text_4", wrap=False)
         lay.addWidget(self.cost)
-        self.when = _micro()
+        self.when = Text("", theme.FS_MICRO, 400, "text_4", wrap=False)
         lay.addWidget(self.when)
         bind(theme.theme.changed, self, lambda _t: self._paint())
         self._paint()
@@ -795,12 +796,7 @@ class FinishedRow(LayoutButton):
             f"FinishedRow {{ background: {bg if self._focused else 'transparent'}; border: none; border-radius: 8px; text-align: left; padding: 0; }} "
             f"FinishedRow:hover {{ background: {bg}; }}"
         )
-        self.title.setStyleSheet(
-            f"color: {t.text if self._unread else t.text_2}; font-size: {theme.FS_SMALL}px; font-weight: {560 if self._unread else 400};"
-        )
-        self.sub.setStyleSheet(f"color: {t.text_3}; font-size: {theme.FS_MICRO}px;")
-        for lb in (self.cost, self.when):
-            lb.setStyleSheet(f"color: {t.text_4}; font-size: {theme.FS_MICRO}px;")
+        self.title.set_font(weight=600 if self._unread else 400)
         s = self._s
         if s.get("status") == "error":
             self.mark.setPixmap(icons.pixmap("circle-alert", t.err, 14))
@@ -886,22 +882,19 @@ class SpendRow(LayoutButton):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 2, 0, 2)
         lay.setSpacing(10)
-        self.title = ElideLabel(title)
+        self.title = Text(title, theme.FS_MICRO, 400, "text_2", wrap=False)
         lay.addWidget(self.title, 1)
         self.bar = QWidget()
         self.bar.setFixedSize(88, 4)
         self.bar.paintEvent = self._paint_bar  # type: ignore[method-assign]
         lay.addWidget(self.bar)
-        self.amount = QLabel(cost(amount))
+        self.amount = Text(cost(amount), theme.FS_MICRO, 400, "text_2", wrap=False)
         lay.addWidget(self.amount)
         bind(theme.theme.changed, self, lambda _t: self._paint())
         self._paint()
 
     def _paint(self) -> None:
-        t = theme.tokens()
         self.setStyleSheet("SpendRow { background: transparent; border: none; padding: 0; text-align: left; }")
-        self.title.setStyleSheet(f"color: {t.text_2}; font-size: {theme.FS_MICRO}px;")
-        self.amount.setStyleSheet(f"color: {t.text_2}; font-size: {theme.FS_MICRO}px;")
 
     def _paint_bar(self, _e) -> None:
         t = theme.tokens()
@@ -925,17 +918,17 @@ class Spend(Card):
         hour = QVBoxLayout()
         hour.setSpacing(8)
         top = QHBoxLayout()
-        self.hour_lb = QLabel("Last hour")
+        self.hour_lb = Text("Last hour", theme.FS_MICRO, 400, "text_3", wrap=False)
         top.addWidget(self.hour_lb)
         top.addStretch(1)
-        self.hour_v = QLabel(cost(0))
+        self.hour_v = Text(cost(0), theme.FS_SMALL, 600, "text", wrap=False)
         top.addWidget(self.hour_v)
         hour.addLayout(top)
         self.bars = SpendBars()
         hour.addWidget(self.bars)
         axis = QHBoxLayout()
-        self.ax0 = QLabel("60 min ago")
-        self.ax1 = QLabel("now")
+        self.ax0 = Text("60 min ago", 10, 400, "text_4", wrap=False)
+        self.ax1 = Text("now", 10, 400, "text_4", wrap=False)
         axis.addWidget(self.ax0)
         axis.addStretch(1)
         axis.addWidget(self.ax1)
@@ -955,11 +948,7 @@ class Spend(Card):
         self._paint_text()
 
     def _paint_text(self) -> None:
-        t = theme.tokens()
-        self.hour_lb.setStyleSheet(f"color: {t.text_3}; font-size: {theme.FS_MICRO}px;")
-        self.hour_v.setStyleSheet(f"color: {t.text}; font-size: {theme.FS_SMALL}px; font-weight: 600;")
-        for lb in (self.ax0, self.ax1):
-            lb.setStyleSheet(f"color: {t.text_4}; font-size: 10px;")
+        self.update()
 
     def update_from(self, fleet: Json, by_id: Dict[str, Json], now: float) -> None:
         n, w = 12, 5 * 60e3
@@ -993,6 +982,31 @@ class Spend(Card):
 # ---------------------------------------------------------------- the page
 
 
+class _KeyWatch(QObject):
+    """An app-wide event filter owned by the page: it is removed with its owner."""
+
+    def __init__(self, page: Overview) -> None:
+        super().__init__(page)
+        self._page = page
+        self._on = False
+
+    def watch(self, on: bool) -> None:
+        app = QApplication.instance()
+        if app is None or on == self._on:
+            return
+        self._on = on
+        if on:
+            app.installEventFilter(self)
+        else:
+            app.removeEventFilter(self)
+
+    def eventFilter(self, _obj: QObject, e: QEvent) -> bool:  # noqa: N802
+        try:
+            return self._page.key_event(e)
+        except RuntimeError:  # the page is gone; the filter is on its way out with it
+            return False
+
+
 class Overview(QWidget):
     fleet_changed = Signal(object)
 
@@ -1004,9 +1018,12 @@ class Overview(QWidget):
         self.needs_cards: Dict[str, NeedsCard] = {}
         self.working_cards: Dict[str, WorkingCard] = {}
         self.finished_rows: List[FinishedRow] = []
-        self._filter_on = False
         self._laid_cols = 0
+        self._laid_tiles = 0
+        self._laid_two = 0
         self.now = now_ms()
+        self._alive = {"on": True}
+        self.destroyed.connect(lambda: self._alive.__setitem__("on", False))
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -1020,11 +1037,11 @@ class Overview(QWidget):
         self.side_btn.clicked.connect(lambda: store.set_ui(sidebar=True))
         hl.addWidget(self.side_btn)
         self.title = QLabel("Control room")
-        self.title.setProperty("size", "title")
+        self.title.setProperty("fs", "title")
         hl.addWidget(self.title)
         self.summary = QLabel()
         self.summary.setProperty("tone", "faint")
-        self.summary.setProperty("size", "small")
+        self.summary.setProperty("fs", "small")
         hl.addWidget(self.summary)
         hl.addStretch(1)
         root.addWidget(head)
@@ -1050,9 +1067,10 @@ class Overview(QWidget):
 
         # the four tiles
         stats = QWidget()
-        sl = QHBoxLayout(stats)
+        sl = QGridLayout(stats)
         sl.setContentsMargins(0, 0, 0, 0)
         sl.setSpacing(10)
+        self.stats_grid = sl
         self.tile_working = Tile("activity", "Working", lambda: self.jump(self.working_sec))
         self.tile_needs = Tile(
             "hourglass",
@@ -1062,8 +1080,8 @@ class Overview(QWidget):
         self.tile_finished = Tile("circle-check", "Finished today", lambda: self.jump(self.finished_sec))
         self.tile_spent = Tile("circle-dollar-sign", "Spent today", lambda: self.jump(self.spend_sec))
         self.tiles = [self.tile_working, self.tile_needs, self.tile_finished, self.tile_spent]
-        for tl in self.tiles:
-            sl.addWidget(tl, 1)
+        for i, tl in enumerate(self.tiles):
+            sl.addWidget(tl, 0, i)
         bl.addWidget(stats)
 
         # needs you
@@ -1098,11 +1116,12 @@ class Overview(QWidget):
         wl.addWidget(self.working_empty)
         bl.addWidget(self.working_sec)
 
-        # finished today | spend
+        # finished today | spend (one column under 760px of content, like the web)
         two = QWidget()
-        tl2 = QHBoxLayout(two)
+        tl2 = QGridLayout(two)
         tl2.setContentsMargins(0, 0, 0, 0)
         tl2.setSpacing(28)
+        self.two_grid = tl2
         self.finished_sec = QWidget()
         fl = QVBoxLayout(self.finished_sec)
         fl.setContentsMargins(0, 0, 0, 0)
@@ -1116,9 +1135,8 @@ class Overview(QWidget):
         fl.addWidget(self.finished_list)
         self.finished_empty = EmptyNote("No sessions have finished today.", icon="circle-check")
         fl.addWidget(self.finished_empty)
-        fl.addStretch(1)
         self.finished_sec.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        tl2.addWidget(self.finished_sec, 3)
+        tl2.addWidget(self.finished_sec, 0, 0)
         self.spend_sec = QWidget()
         spl = QVBoxLayout(self.spend_sec)
         spl.setContentsMargins(0, 0, 0, 0)
@@ -1131,11 +1149,11 @@ class Overview(QWidget):
         spl.addWidget(self.spend)
         self.spend_spinner = Spinner(14)
         spl.addWidget(self.spend_spinner)
-        spl.addStretch(1)
         self.spend_sec.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        tl2.addWidget(self.spend_sec, 2)
+        tl2.addWidget(self.spend_sec, 1, 0)
         bl.addWidget(two)
         bl.addStretch(1)
+        self._place_two(1)
 
         # live state: the store for sessions and runtimes, fleet.state for the rest, a clock for elapsed times
         self._tick_timer = QTimer(self)
@@ -1150,6 +1168,9 @@ class Overview(QWidget):
         bind(store.ui_changed, self, lambda _u: self.side_btn.setVisible(not store.ui.sidebar))
         bind(store.connected_changed, self, lambda on: on and self.load_fleet())
         self.side_btn.setVisible(not store.ui.sidebar)
+        # The keys (j/k, Enter, 1/2/3) are watched app-wide through a child object: it goes when the
+        # page goes, so no filter ever points at a widget that has been torn down.
+        self._keys = _KeyWatch(self)
         self.refresh()
         self.load_fleet()
 
@@ -1158,34 +1179,65 @@ class Overview(QWidget):
         super().showEvent(e)
         self._tick_timer.start()
         self._fleet_timer.start()
-        if not self._filter_on:
-            QApplication.instance().installEventFilter(self)
-            self._filter_on = True
+        self._keys.watch(True)
         self.load_fleet()
 
     def hideEvent(self, e) -> None:  # noqa: N802
         self._tick_timer.stop()
         self._fleet_timer.stop()
-        if self._filter_on:
-            QApplication.instance().removeEventFilter(self)
-            self._filter_on = False
+        self._keys.watch(False)
         super().hideEvent(e)
 
     def _fit_body(self) -> None:
-        self.body.setFixedWidth(max(320, min(theme.COL, self.scroll.viewport().width())))
+        vw = self.scroll.viewport().width()
+        self.body.setFixedWidth(max(320, min(page_column(vw), vw)))
+        content = self.body.width() - 40
+        tiles = 2 if content <= 640 else 4
+        if tiles != self._laid_tiles:
+            self._laid_tiles = tiles
+            while self.stats_grid.count():
+                self.stats_grid.takeAt(0)
+            for i, tl in enumerate(self.tiles):
+                self.stats_grid.addWidget(tl, i // tiles, i % tiles)
+        self._place_two(1 if content <= 760 else 2)
         if self._cols() != self._laid_cols and self.working_cards:
             self.refresh()
 
+    def _place_two(self, cols: int) -> None:
+        """``.ov-two``: finished | spend side by side (3fr / minmax(260px, 2fr)), or stacked under 760px."""
+        if cols == self._laid_two:
+            return
+        self._laid_two = cols
+        g = self.two_grid
+        while g.count():
+            g.takeAt(0)
+        if cols == 2:
+            g.addWidget(self.finished_sec, 0, 0)
+            g.addWidget(self.spend_sec, 0, 1)
+            g.setColumnStretch(0, 3)
+            g.setColumnStretch(1, 2)
+            self.spend_sec.setMinimumWidth(260)
+        else:
+            g.addWidget(self.finished_sec, 0, 0)
+            g.addWidget(self.spend_sec, 1, 0)
+            g.setColumnStretch(0, 1)
+            g.setColumnStretch(1, 0)
+            self.spend_sec.setMinimumWidth(0)
+
     def _cols(self) -> int:
-        return max(1, (self.body.width() + 10) // 300)
+        """``.ov-grid``: repeat(auto-fill, minmax(290px, 1fr)) with a 10px gap."""
+        return max(1, (self.body.width() - 40 + 10) // 300)
 
     # ---- data
     def load_fleet(self) -> None:
         if not store.connected:
             return
 
+        alive = self._alive
+
         def got(f: Any) -> None:
-            if not isinstance(f, dict):
+            # The answer can land after the page is gone (a test tearing down, a window closing).
+            if not alive["on"] or not isinstance(f, dict):
                 return
             self.fleet = f
             for sid, st in (f.get("live") or {}).items():
@@ -1302,7 +1354,7 @@ class Overview(QWidget):
         for i, s in enumerate(finished):
             sid = str(s.get("id"))
             if i:
-                self.finished_lay.addWidget(hairline())
+                self.finished_lay.addWidget(half_hairline("raised"))
             row = FinishedRow(sid)
             row.update_from(s, self.state_of(sid), bool(store.unread.get(sid)), self.now)
             row.set_focused(sid == focus_id)
@@ -1356,11 +1408,13 @@ class Overview(QWidget):
         return self._focus
 
     def eventFilter(self, obj: QObject, e: QEvent) -> bool:  # noqa: N802
+        if obj is self.scroll.viewport() and e.type() == QEvent.Type.Resize:
+            self._fit_body()
+        return False
+
+    def key_event(self, e: QEvent) -> bool:
+        """A key press anywhere in the app while the page is up (``window.addEventListener('keydown')``)."""
         t = e.type()
-        if obj is self.scroll.viewport():
-            if t == QEvent.Type.Resize:
-                self._fit_body()
-            return False
         if t not in (QEvent.Type.KeyPress, QEvent.Type.ShortcutOverride):
             return False
         if not self.isVisible() or store.page != "overview" or any(store.dialogs.values()) or store.lightbox:

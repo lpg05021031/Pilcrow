@@ -51,6 +51,7 @@ def start_mock(port: int, long: int = 60) -> subprocess.Popen:
 
 class Client:
     def __init__(self, port: int) -> None:
+        from PySide6.QtCore import QCoreApplication, QEvent
         from PySide6.QtWidgets import QApplication
 
         from pilcrow_qt import fonts
@@ -69,6 +70,12 @@ class Client:
             store._inited = True  # type: ignore[attr-defined]
         self.store = store
         self.rpc = rpc
+        # A widget a test showed on its own (a label, a view) is a top-level window at (0, 0): left
+        # open, it sits over the next client's window and takes the simulated pointer's enter events.
+        for w in QApplication.topLevelWidgets():
+            w.close()
+            w.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         self.win = MainWindow()
         self.win.resize(1480, 940)
         self.win.show()
@@ -150,6 +157,10 @@ class Client:
         for k in list(st.dialogs):
             st.dialogs[k] = None if k not in ("settings", "palette", "shortcuts") else False
         st.toasts = []
+        # The layout a test dragged or opened (panel, widths) must not leak into the next one.
+        for k, v in (("panel", False), ("sidebar", True), ("sidebar_w", 268), ("panel_w", 560)):
+            if hasattr(st.ui, k):
+                setattr(st.ui, k, v)
         st.unread.clear()
         st.timeline.clear()
         st._buffered.clear()

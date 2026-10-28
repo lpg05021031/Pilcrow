@@ -6,13 +6,14 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QHBoxLayout, QPushButton, QSizePolicy, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QPushButton, QSizePolicy, QWidget
 
 from ... import icons, theme
 from ...lib.fmt import basename, tildify, time_ago
 from ...store import ConfirmSpec, store
 from ..ui.bits import IconButton, Spinner, button, label
 from ..ui.signals import bind
+from .parts import Text
 from .settings_general import save
 from .settings_ui import (
     ModelSelect,
@@ -63,24 +64,28 @@ class MemoryPage(QWidget):
         self.busy = False
         self.lay = vbox(self, 14, (0, 6, 0, 0))
 
-        intro = QWidget()
-        il = QHBoxLayout(intro)
-        il.setContentsMargins(0, 0, 0, 0)
-        il.setSpacing(10)
+        intro = QFrame()
+        intro.setObjectName("intro")
+        intro.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        styled(intro, lambda t: f"#intro {{ background: {t.inset}; border-radius: 12px; }}")
+        il = vbox(intro, 8, (20, 18, 20, 18))
         ico = label()
-        ico.setPixmap(icons.pixmap("book-marked", theme.tokens().text_2, 16))
-        il.addWidget(ico, 0, Qt.AlignmentFlag.AlignTop)
+        ico.setFixedSize(16, 16)
+        ico.setPixmap(icons.pixmap("book-marked", theme.tokens().text, 16))
+        il.addWidget(ico)
         col = QWidget()
-        cl = vbox(col, 2)
-        t = label("Project memory")
-        t.setStyleSheet("font-weight: 600;")
-        cl.addWidget(t)
+        cl = vbox(col, 0)
+        cl.addWidget(Text("Project memory", theme.FS_BODY, 600))
         cl.addWidget(
-            hint(
-                "What earlier sessions learned about a folder — decisions, dead ends, conventions — handed to every new session there. Pin what must never be forgotten; edit anything that drifts."
+            Text(
+                "What earlier sessions learned about a folder — decisions, dead ends, conventions — handed to every new session there. Pin what must never be forgotten; edit anything that drifts.",
+                theme.FS_SMALL,
+                400,
+                "text_3",
+                1.5,
             )
         )
-        il.addWidget(col, 1)
+        il.addWidget(col)
         self.lay.addWidget(intro)
 
         settings = Panel()
@@ -365,10 +370,10 @@ def _setting(title: str, hint_text: str, control: QWidget) -> QWidget:
     lay.setSpacing(16)
     col = QWidget()
     cl = vbox(col, 2)
-    t = label(title, size="small")
-    t.setStyleSheet("font-weight: 600;")
-    cl.addWidget(t)
-    cl.addWidget(hint(hint_text))
+    cl.addStretch(1)
+    cl.addWidget(Text(title, theme.FS_SMALL, 600))
+    cl.addWidget(Text(hint_text, theme.FS_SMALL, 400, "text_3", 1.5))
+    cl.addStretch(1)
     lay.addWidget(col, 1)
     lay.addWidget(control, 0, Qt.AlignmentFlag.AlignVCenter)
     return w

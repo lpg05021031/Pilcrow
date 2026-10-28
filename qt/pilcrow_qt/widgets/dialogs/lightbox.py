@@ -8,14 +8,15 @@ import base64
 from typing import Optional
 from urllib.parse import unquote
 
-from PySide6.QtCore import QEvent, QObject, Qt, QUrl
-from PySide6.QtGui import QColor, QPainter, QPixmap
+from PySide6.QtCore import QEvent, QObject, QRectF, Qt, QUrl
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import QLabel, QWidget
 
 from ... import theme
 from ...store import store
 from ..ui.bits import IconButton
 from ..ui.signals import bind
+from .parts import Backdrop
 from .sheet import host_of
 
 
@@ -37,6 +38,23 @@ def pixmap_from_src(src: str) -> QPixmap:
         return pm
     pm.load(src)
     return pm
+
+
+def _rounded(pm: QPixmap, radius: int) -> QPixmap:
+    """The pixmap with its corners cut to ``radius``."""
+    out = QPixmap(pm.size())
+    out.setDevicePixelRatio(pm.devicePixelRatio())
+    out.fill(Qt.GlobalColor.transparent)
+    p = QPainter(out)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    path = QPainterPath()
+    path.addRoundedRect(
+        QRectF(0, 0, pm.width() / pm.devicePixelRatio(), pm.height() / pm.devicePixelRatio()), radius, radius
+    )
+    p.setClipPath(path)
+    p.drawPixmap(0, 0, pm)
+    p.end()
+    return out
 
 
 class Lightbox(QWidget):
@@ -68,6 +86,7 @@ class Lightbox(QWidget):
         self.src = src
         self._pm = pixmap_from_src(src)
         self.setGeometry(self._host.rect())
+        self.backdrop = Backdrop(self._host)
         self._layout()
         self.show()
         self.raise_()
@@ -80,15 +99,14 @@ class Lightbox(QWidget):
             self.image.setPixmap(QPixmap())
             self.image.setText("The image could not be shown.")
         else:
-            pad = 48
-            self.image.setPixmap(
-                self._pm.scaled(
-                    max(1, r.width() - 2 * pad),
-                    max(1, r.height() - 2 * pad),
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
+            pad = 36
+            scaled = self._pm.scaled(
+                max(1, r.width() - 2 * pad),
+                max(1, r.height() - 2 * pad),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
             )
+            self.image.setPixmap(_rounded(scaled, 10))
         self.image.adjustSize()
         self.image.move((r.width() - self.image.width()) // 2, (r.height() - self.image.height()) // 2)
 
@@ -115,8 +133,20 @@ class Lightbox(QWidget):
             store.close_lightbox()
 
     def paintEvent(self, _e) -> None:  # noqa: N802
+        # .lightbox: rgba(8, 8, 8, 0.72) over blur(18px); the image on 10px corners with a 0.5px light ring
         t = theme.tokens()
-        c = QColor(t.canvas)
-        c.setAlphaF(0.92)
         p = QPainter(self)
+        bd = getattr(self, "backdrop", None)
+        if bd is not None and bd.pixmap is not None:
+            p.drawPixmap(0, 0, bd.pixmap)
+        c = QColor(t.inset)
+        c.setAlphaF(0.72)
         p.fillRect(self.rect(), c)
+        if not self._pm.isNull() and self.image.pixmap() is not None:
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            r = self.image.geometry()
+            ring = QColor(t.edge_hi)
+            ring.setAlphaF(0.14)
+            p.setPen(ring)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawRoundedRect(QRectF(r.x() - 0.5, r.y() - 0.5, r.width() + 1, r.height() + 1), 10.5, 10.5)

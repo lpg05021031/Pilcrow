@@ -11,15 +11,16 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QRectF, Qt, QUrl
+from PySide6.QtGui import QColor, QDesktopServices, QFontMetricsF, QPainter, QPen
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
-from ... import icons, theme
+from ... import theme
 from ...store import store
-from ..ui.bits import IconButton, Row, button, hairline, label
+from ..ui.bits import Row
 from ..ui.signals import bind
+from .right_panel import Btn, EmptyState, Hairline, icon_btn, lbl
 
 Json = Dict[str, Any]
 
@@ -46,23 +47,36 @@ def find_urls(session_id: str) -> List[str]:
 
 
 class Chip(QPushButton):
-    """A detected address as a shortcut (``.chip.mono``)."""
+    """A detected address as a shortcut (``.chip.mono``): a 24px pill, 11.5px mono, lit when chosen."""
 
     def __init__(self, url: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(re.sub(r"^https?://", "", url), parent)
         self.url = url
-        self.setProperty("size", "sm")
-        mono = theme._MONO_FAMILY or "monospace"
-        self.setStyleSheet(f'QPushButton {{ font-family: "{mono}"; font-size: {theme.FS_SMALL}px; }}')
+        self.on = False
+        self.setFlat(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAccessibleName(url)
         self.setToolTip(url)
+        self.setFixedHeight(24)
+        self.setFixedWidth(9 + int(QFontMetricsF(theme.font_mono(11.5)).horizontalAdvance(self.text())) + 9 + 1)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        bind(theme.theme.changed, self, lambda _t: self.update())
 
     def set_on(self, on: bool) -> None:
-        self.setProperty("kind", "" if on else "ghost")
-        self.setProperty("active", "true" if on else "false")
-        self.style().unpolish(self)
-        self.style().polish(self)
+        self.on = on
+        self.update()
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        t = theme.tokens()
+        hover = self.underMouse()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(QPen(theme.blend(t.hair_3 if self.on else t.hair, t.canvas), 1))
+        p.setBrush(theme.blend(t.fill_2 if (self.on or hover) else t.fill_1, t.canvas))
+        p.drawRoundedRect(QRectF(0.5, 0.5, self.width() - 1, self.height() - 1), 12, 12)
+        p.setFont(theme.font_mono(11.5))
+        p.setPen(QColor(t.text if (self.on or hover) else t.text_2))
+        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.text())
 
 
 class PreviewPanel(QWidget):
@@ -89,17 +103,17 @@ class PreviewPanel(QWidget):
         self.field.setAccessibleName("Address")
         self.field.returnPressed.connect(lambda: self.go(self.field.text()))
         bar.add(self.field, 1)
-        self.go_btn = IconButton("arrow-right", "Open", 14)
+        self.go_btn = icon_btn("arrow-right", "Open", 14)
         self.go_btn.clicked.connect(lambda: self.go(self.field.text()))
         bar.add(self.go_btn)
-        self.reload_btn = IconButton("rotate-cw", "Reload", 13)
+        self.reload_btn = icon_btn("rotate-cw", "Reload", 13)
         self.reload_btn.clicked.connect(self.reload)
         bar.add(self.reload_btn)
-        self.open_btn = IconButton("external-link", "Open in your browser", 13)
+        self.open_btn = icon_btn("external-link", "Open in your browser", 13)
         self.open_btn.clicked.connect(self.open_in_browser)
         bar.add(self.open_btn)
         root.addWidget(bar)
-        root.addWidget(hairline())
+        root.addWidget(Hairline())
 
         self.chips = QWidget()
         self.chips_box = QHBoxLayout(self.chips)
@@ -107,37 +121,24 @@ class PreviewPanel(QWidget):
         self.chips_box.setSpacing(6)
         self.chips_box.addStretch(1)
         root.addWidget(self.chips)
-        self.chips_line = hairline()
+        self.chips_line = Hairline()
         root.addWidget(self.chips_line)
 
-        # The body: the address card when one is set, the empty state otherwise.
-        self.body = QWidget()
-        bl = QVBoxLayout(self.body)
-        bl.setContentsMargins(28, 40, 28, 40)
-        bl.setSpacing(8)
-        bl.setAlignment(Qt.AlignmentFlag.AlignVCenter)
-        self.icon = QLabel()
-        self.icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        bl.addWidget(self.icon)
-        self.title = label("", tone="muted", wrap=True)
-        self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        bl.addWidget(self.title)
-        self.hint = label("", tone="faint", size="small", wrap=True)
-        self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        bl.addWidget(self.hint)
-        self.status = label("", tone="faint", size="small")
-        self.status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # The body: the ``.empty`` block at the top — the address card when one is set, the invitation otherwise.
+        self.body = EmptyState("app-window", "", "")
+        bl = self.body.layout()
+        self.icon = self.body.ico
+        self.title = self.body.text
+        self.hint = self.body.hint
+        self.status = lbl("", theme.FS_SMALL, tone="faint")
+        self.status.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         bl.addWidget(self.status)
-        self.browser_btn = button(
-            "Open in browser",
-            kind="primary",
-            icon="external-link",
-            on_click=self.open_in_browser,
-            tooltip="Open in your browser",
+        self.browser_btn = Btn(
+            "Open in browser", icon="external-link", kind="primary", size="", on_click=self.open_in_browser
         )
-        self.browser_btn.setText("Open in browser")
         bl.addWidget(self.browser_btn, 0, Qt.AlignmentFlag.AlignHCenter)
-        root.addWidget(self.body, 1)
+        root.addWidget(self.body)
+        root.addStretch(1)
 
         bind(store.rt_changed, self, self._on_rt)
         bind(theme.theme.changed, self, lambda _t: self._apply_theme())
@@ -145,9 +146,18 @@ class PreviewPanel(QWidget):
         self.refresh()
 
     def _apply_theme(self) -> None:
-        # The address is in the mono face; it goes in a stylesheet because the app's ``*`` rule beats setFont.
-        mono = theme._MONO_FAMILY or "monospace"
-        self.field.setStyleSheet(f'QLineEdit {{ font-family: "{mono}"; font-size: {theme.FS_SMALL}px; }}')
+        # .input.mono: a quiet fill with a hairline, 12.5px mono; focus lifts it onto the canvas.
+        t = theme.tokens()
+        f = theme.font_mono(12.5)
+        self.field.setStyleSheet(
+            f'QLineEdit {{ font-family: "{f.family()}"; font-size: 12px; background: {theme.blend(t.fill_1, t.canvas).name()}; '
+            f"border: 1px solid {theme.blend(t.hair, t.canvas).name()}; border-radius: {theme.R2}px; padding: 0 10px; color: {t.text}; }}"
+            f"QLineEdit:hover {{ border-color: {theme.blend(t.hair_2, t.canvas).name()}; }}"
+            f"QLineEdit:focus {{ background: {t.canvas}; border-color: {theme.blend(t.hair_3, t.canvas).name()}; }}"
+        )
+        pal = self.field.palette()
+        pal.setColor(pal.ColorRole.PlaceholderText, theme.qcolor(t.text_3))
+        self.field.setPalette(pal)
         self.render()
 
     # ---------------------------------------------------------------- state
@@ -239,23 +249,21 @@ class PreviewPanel(QWidget):
         self.chips_line.setVisible(bool(self.detected))
         self.reload_btn.setEnabled(bool(self.url))
         self.open_btn.setEnabled(bool(self.url))
+        _ = t
         if self.url:
-            self.icon.setPixmap(icons.pixmap("globe", t.text_3, 22))
-            self.title.setText(self.url)
-            self.title.setProperty("mono", "true")
-            self.hint.setText("The preview opens in your browser in this client.")
+            self.body.set_icon("globe")
+            self.body.set_text(self.url, "The preview opens in your browser in this client.")
             self.browser_btn.show()
             self.status.show()
         else:
-            self.icon.setPixmap(icons.pixmap("app-window", t.text_3, 22))
-            self.title.setText("Preview a local web app next to the conversation.")
-            self.title.setProperty("mono", "false")
-            self.hint.setText("Ask Claude to start your dev server — addresses it prints show up above as shortcuts.")
+            self.body.set_icon("app-window")
+            self.body.set_text(
+                "Preview a local web app next to the conversation.",
+                "Ask Claude to start your dev server — addresses it prints show up above as shortcuts.",
+            )
             self.browser_btn.hide()
             self.status.hide()
             self.status.setText("")
-        self.title.style().unpolish(self.title)
-        self.title.style().polish(self.title)
 
 
 if __name__ == "__main__":  # pragma: no cover - development window

@@ -14,8 +14,9 @@ from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QPushButton, QS
 
 from ... import theme
 from ...store import store
-from ..ui.bits import Mark, hairline, label
+from ..ui.bits import Mark, hairline
 from ..ui.signals import bind
+from .parts import Text, sheet_bg
 from .settings_ui import Sheet, open_sheet, styled, vbox
 
 SECTIONS: List[Tuple[str, str]] = [
@@ -44,6 +45,7 @@ class SettingsSheet(Sheet):
         self.nav.setObjectName("settings-nav")
         self.nav.setFixedWidth(172)
         nl = vbox(self.nav, 1, (14, 6, 10, 14))
+        nl.setAlignment(Qt.AlignmentFlag.AlignTop)
         self.group = QButtonGroup(self.nav)
         self.group.setExclusive(True)
         self.nav_buttons: Dict[str, QPushButton] = {}
@@ -53,6 +55,8 @@ class SettingsSheet(Sheet):
             b.setAutoDefault(False)
             b.setAccessibleName(text)
             b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setFixedHeight(30)
+            b.setFont(theme.font_ui(theme.FS_UI))
             b.clicked.connect(lambda _c=False, s=sid: self.show_section(s))
             nl.addWidget(b)
             self.group.addButton(b)
@@ -62,9 +66,9 @@ class SettingsSheet(Sheet):
             self.nav,
             lambda t: (
                 f"""
-            #settings-nav QPushButton {{ text-align: left; border: none; background: transparent; padding: 0 10px; min-height: 30px; max-height: 30px; border-radius: {theme.R2}px; color: {t.text_2}; }}
-            #settings-nav QPushButton:hover {{ background: {theme.blend(t.fill_1, t.raised).name()}; color: {t.text}; }}
-            #settings-nav QPushButton:checked {{ background: {theme.blend(t.fill_2, t.raised).name()}; color: {t.text}; font-weight: 600; }}
+            #settings-nav QPushButton {{ text-align: left; border: none; background: transparent; padding: 0 10px; min-height: 30px; max-height: 30px; border-radius: {theme.R2}px; color: {t.text_2}; font-weight: 400; }}
+            #settings-nav QPushButton:hover {{ background: {theme.blend(t.fill_1, sheet_bg(t).name()).name()}; color: {t.text}; }}
+            #settings-nav QPushButton:checked {{ background: {theme.blend(t.fill_2, sheet_bg(t).name()).name()}; color: {t.text}; font-weight: 600; }}
         """
             ),
         )
@@ -91,7 +95,7 @@ class SettingsSheet(Sheet):
         al.setContentsMargins(22, 12, 22, 14)
         al.setSpacing(8)
         al.addWidget(Mark(16))
-        self.about_lb = label("", tone="faint", size="micro")
+        self.about_lb = Text("", theme.FS_MICRO, 400, "text_3", wrap=False)
         al.addWidget(self.about_lb, 1)
         self.foot.setContentsMargins(0, 0, 0, 0)
         self.add_foot(about, 1)

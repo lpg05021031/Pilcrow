@@ -84,6 +84,7 @@ class ClaudePage(Rows):
                 else "Not found on PATH",
             },
             name="Claude Code program",
+            popup_width=300,
         )
         self.program.currentIndexChanged.connect(self._on_program)
         self.program_row = SetRow("Claude Code program", self.program, claude_hint(info), fill=True)
@@ -103,6 +104,8 @@ class ClaudePage(Rows):
             str(c.get("defaultMode") or "default"),
             hints={str(m["id"]): str(m["hint"]) for m in modes},
             name="Default permission mode",
+            icons_={str(m["id"]): str(m["icon"]) for m in modes},
+            popup_width=300,
         )
         self.mode.currentIndexChanged.connect(lambda _i: save({"defaultMode": combo_value(self.mode)}))
         self.add(SetRow("Default permission mode", self.mode, fill=True))
@@ -119,7 +122,7 @@ class ClaudePage(Rows):
 
         self.effort = combo(EFFORTS, str(c.get("defaultEffort") or ""), name="Default effort")
         self.effort.currentIndexChanged.connect(lambda _i: save({"defaultEffort": combo_value(self.effort)}))
-        self.add(SetRow("Default effort", self.effort))
+        self.add(SetRow("Default effort", self.effort, fill=True))
 
         self.idle = combo(
             [(str(m), idle_label(m)) for m in IDLE],
@@ -129,7 +132,10 @@ class ClaudePage(Rows):
         self.idle.currentIndexChanged.connect(lambda _i: save({"idleTimeoutMin": int(combo_value(self.idle) or 30)}))
         self.add(
             SetRow(
-                "Stop idle Claude Code processes after", self.idle, "Sessions resume automatically on your next message"
+                "Stop idle Claude Code processes after",
+                self.idle,
+                "Sessions resume automatically on your next message",
+                fill=True,
             )
         )
 
@@ -145,9 +151,6 @@ class ClaudePage(Rows):
             )
         )
 
-        self.setup = SetupCard()
-        self.lay.addSpacing(14)
-        self.lay.addWidget(self.setup)
         bind(store.config_changed, self, self._sync)
         bind(store.info_changed, self, lambda _i: self._info())
 
@@ -176,7 +179,6 @@ class ClaudePage(Rows):
         info = store.info or {}
         self.program_row.set_hint(claude_hint(info))
         self.program_row.title.setToolTip(tildify(str((info.get("claude") or {}).get("path") or ""), home()))
-        self.setup.refresh()
 
 
 class SetupCard(QFrame):

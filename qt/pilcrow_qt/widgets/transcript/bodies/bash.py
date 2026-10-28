@@ -46,7 +46,7 @@ class BashBody(QWidget):
         self.lines = out.split("\n")
 
         lay = vbox(self, spacing=0)
-        self.well = Surface("inset", "hair", theme.R3, margins=(0, 0, 0, 0), spacing=0)
+        self.well = Surface("inset", "light:hair", theme.R3, margins=(0, 0, 0, 0), spacing=0)
         lay.addWidget(self.well)
 
         command = str_(i, "command")
@@ -54,7 +54,12 @@ class BashBody(QWidget):
         prompt = bits.label("$", tone="faint", mono=True)
         prompt.setAlignment(Qt.AlignmentFlag.AlignTop)
         cmd.add(prompt)
-        self.cmd_label = rich(f'<div style="white-space:pre-wrap">{_esc(command)}</div>', mono=True, size=12.5)
+        # .bash-cmd: 12.5px mono on 1.55 lines
+        self.cmd_label = rich(
+            f'<div style="white-space:pre-wrap;line-height:{int(theme.MONO_SIZE * 1.55 + 0.5)}px">{_esc(command)}</div>',
+            mono=True,
+            size=int(theme.MONO_SIZE + 0.5),
+        )
         cmd.lay.addWidget(self.cmd_label, 1, Qt.AlignmentFlag.AlignTop)
         copy = bits.IconButton("copy", "Copy command", 12)
         copy.clicked.connect(lambda: bits.copy_text(command))

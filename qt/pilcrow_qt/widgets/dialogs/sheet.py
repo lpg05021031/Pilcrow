@@ -32,6 +32,7 @@ from ... import icons, theme
 from ...store import store
 from ..ui.bits import IconButton, hairline
 from ..ui.signals import bind
+from .parts import Backdrop, Text, sheet_css
 
 SHEET_TOP = 0.09  # the sheet sits 9% of the way down, like the web's `padding: 9vh`
 SHEET_MAX_H = 860
@@ -84,6 +85,8 @@ class Sheet(QDialog):
         self.frame = QFrame(self)
         self.frame.setObjectName("sheet")
         self.frame.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.frame.setStyleSheet(sheet_css(theme.tokens()))
+        bind(theme.theme.changed, self.frame, lambda t: self.frame.setStyleSheet(sheet_css(t)))
         fl = QVBoxLayout(self.frame)
         fl.setContentsMargins(0, 0, 0, 0)
         fl.setSpacing(0)
@@ -92,6 +95,7 @@ class Sheet(QDialog):
         self.title_lb: Optional[QLabel] = None
         if title is not None:
             self.head = QWidget()
+            self.head.setFixedHeight(48)
             hl = QHBoxLayout(self.head)
             hl.setContentsMargins(22, 18, 16, 6)
             hl.setSpacing(10)
@@ -99,10 +103,10 @@ class Sheet(QDialog):
                 ico = QLabel()
                 ico.setPixmap(icons.pixmap(icon, theme.tokens().text_2, 15))
                 hl.addWidget(ico)
-            self.title_lb = QLabel(title)
-            self.title_lb.setStyleSheet(f"font-size: {theme.FS_H}px; font-weight: 600;")
+            self.title_lb = Text(title, theme.FS_H, 600, wrap=False)
             hl.addWidget(self.title_lb, 1)
             self.close_btn = IconButton("x", "Close (Esc)", 15)
+            self.close_btn.setFixedSize(24, 24)
             self.close_btn.clicked.connect(self.reject)
             hl.addWidget(self.close_btn)
             fl.addWidget(self.head)
@@ -152,6 +156,7 @@ class Sheet(QDialog):
         """Show over the window and take the keyboard."""
         self._prev_focus = QApplication.focusWidget()
         self.setGeometry(self._host.rect())
+        self.backdrop = Backdrop(self._host)
         self.show()
         self.raise_()
         self.place()
@@ -259,4 +264,8 @@ class Sheet(QDialog):
 
     def paintEvent(self, _e) -> None:  # noqa: N802
         p = QPainter(self)
-        p.fillRect(self.rect(), theme.qcolor(theme.tokens().scrim))
+        bd = getattr(self, "backdrop", None)
+        if bd is not None:
+            bd.paint(p, self)
+        else:
+            p.fillRect(self.rect(), theme.qcolor(theme.tokens().scrim))

@@ -6,7 +6,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, List, Optional
 
-from PySide6.QtCore import QEvent, QObject, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFontMetricsF, QPainter
 from PySide6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QLineEdit, QScrollArea, QVBoxLayout, QWidget
 
 from ... import icons, theme
@@ -14,7 +15,7 @@ from ...lib.fmt import basename, time_ago
 from ...lib.fuzzy import fuzzy_filter
 from ...store import store
 from ..ui.signals import bind
-from .parts import ElideLabel, Keys
+from .parts import Keys, sheet_bg, web_font
 from .sheet import Sheet
 
 # Permission modes as the composer lists them (MODES in web/src/components/Composer.tsx).
@@ -54,7 +55,7 @@ class Cmd:
 
 
 class PalItem(QWidget):
-    """One row of the list (``.pal-item``): icon, label, hint, keys."""
+    """One row of the list (``.pal-item``), painted: a 14px icon, the label, the hint, the keys."""
 
     entered = Signal()
     chosen = Signal()
@@ -65,39 +66,63 @@ class PalItem(QWidget):
         self._active = False
         self.setFixedHeight(36)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setAccessibleName(cmd.label)
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(10, 0, 10, 0)
-        lay.setSpacing(11)
-        self.ico = QLabel()
-        lay.addWidget(self.ico)
-        self.label = QLabel(cmd.label)
-        lay.addWidget(self.label)
-        self.hint = ElideLabel(cmd.hint)
-        self.hint.setProperty("size", "small")
-        lay.addWidget(self.hint, 1)
-        if not cmd.hint:
-            self.hint.hide()
-            lay.addStretch(1)
+        self.keys: Optional[Keys] = None
         if cmd.kbd:
-            lay.addWidget(Keys(cmd.kbd, quiet=True))
-        self._paint()
+            self.keys = Keys(cmd.kbd, quiet=True, parent=self)
+        bind(theme.theme.changed, self, lambda _t: self.update())
+
+    @property
+    def label(self) -> str:
+        return self.cmd.label
+
+    @property
+    def hint(self) -> str:
+        return self.cmd.hint
 
     def set_active(self, on: bool) -> None:
         if on != self._active:
             self._active = on
-            self._paint()
+            self.update()
 
-    def _paint(self) -> None:
+    def resizeEvent(self, e) -> None:  # noqa: N802
+        if self.keys is not None:
+            kw = self.keys.sizeHint().width()
+            self.keys.setGeometry(self.width() - 10 - kw, 9, kw, 18)
+        super().resizeEvent(e)
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
         t = theme.tokens()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
         on = self._active
-        self.setStyleSheet(
-            f"PalItem {{ background: {theme.blend(t.fill_2, t.canvas).name() if on else 'transparent'}; border-radius: {theme.R2}px; }}"
-        )
-        self.ico.setPixmap(icons.pixmap(self.cmd.icon, t.text if on else t.text_3, 14))
-        self.label.setStyleSheet(f"color: {t.text if on else t.text_2};")
-        self.hint.setStyleSheet(f"color: {t.text_3}; font-size: {theme.FS_SMALL}px;")
+        if on:
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(theme.blend(t.fill_2, sheet_bg(t).name()))
+            p.drawRoundedRect(QRectF(0, 0, self.width(), 36), theme.R2, theme.R2)
+        p.drawPixmap(10, 11, icons.pixmap(self.cmd.icon, t.text if on else t.text_3, 14))
+        x = 10 + 14 + 11
+        right = self.width() - 10 - ((self.keys.sizeHint().width() + 11) if self.keys is not None else 0)
+        lf = web_font(theme.font_ui(theme.FS_UI))
+        hf = web_font(theme.font_ui(theme.FS_SMALL))
+        lm, hm = QFontMetricsF(lf), QFontMetricsF(hf)
+        avail = max(10.0, right - x)
+        lw = min(lm.horizontalAdvance(self.cmd.label), avail)
+        label = lm.elidedText(self.cmd.label, Qt.TextElideMode.ElideRight, lw + 1)
+        p.setFont(lf)
+        p.setPen(QColor(t.text if on else t.text_2))
+        p.drawText(QRectF(x, 0, lw + 1, 36), int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), label)
+        if self.cmd.hint:
+            hx = x + lw + 11
+            hw = right - hx
+            if hw > 12:
+                p.setFont(hf)
+                p.setPen(QColor(t.text_3))
+                p.drawText(
+                    QRectF(hx, 0, hw, 36),
+                    int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+                    hm.elidedText(self.cmd.hint, Qt.TextElideMode.ElideRight, hw),
+                )
 
     def enterEvent(self, e) -> None:  # noqa: N802
         self.entered.emit()
@@ -134,8 +159,11 @@ class CommandPalette(Sheet):
         self.input.setPlaceholderText("Search sessions and commands, or type @ for files")
         self.input.setAccessibleName("Search sessions and commands")
         self.input.setStyleSheet(
-            f"QLineEdit {{ background: transparent; border: none; font-size: 15.5px; padding: 0; color: {t.text}; }}"
+            f"QLineEdit {{ background: transparent; border: none; font-size: 15.5px; padding: 0; color: {t.text}; selection-background-color: {theme.blend(t.selection, sheet_bg(t).name()).name()}; }}"
         )
+        pal = self.input.palette()
+        pal.setColor(pal.ColorRole.PlaceholderText, theme.qcolor(t.text_3))
+        self.input.setPalette(pal)
         self.input.textChanged.connect(self._on_text)
         self.input.installEventFilter(self)
         tl.addWidget(self.input, 1)
@@ -369,14 +397,18 @@ class CommandPalette(Sheet):
         self._idx = max(0, min(self._idx, len(self.items) - 1))
         t = theme.tokens()
         last_group = ""
+        height = 6 + 10
         for i, c in enumerate(self.items):
             if c.group != last_group:
                 head = QLabel(c.group)
+                head.setFixedHeight(31)  # padding 10 10 5 round an 11px line
                 head.setStyleSheet(
                     f"color: {t.text_3}; font-size: {theme.FS_MICRO}px; font-weight: 600; padding: 10px 10px 5px;"
                 )
                 self.list_lay.addWidget(head)
                 last_group = c.group
+                height += 31
+            height += 36
             row = PalItem(c)
             row.set_active(i == self._idx)
             row.entered.connect(lambda i=i: self._set_idx(i))
@@ -384,6 +416,7 @@ class CommandPalette(Sheet):
             self.rows.append(row)
             self.list_lay.addWidget(row)
         self.list_lay.addStretch(1)
+        self.list_scroll.setFixedHeight(min(height, 460))
         self.list_scroll.setVisible(bool(self.items))
         self.empty.setVisible(not self.items)
         self.empty.setText(f"Nothing matches “{self._q}”.")

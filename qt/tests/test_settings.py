@@ -11,7 +11,12 @@ MOCK_PORT = 5381
 
 
 def _labels(c, parent=None):
-    return [w.text() for w in c.find(QLabel, parent) if w.isVisible() and w.text()]
+    """Every visible line of text: QLabels and the browser-like Text widgets the dialogs lay type on."""
+    from pilcrow_qt.widgets.dialogs.parts import Text
+
+    out = [w.text() for w in c.find(QLabel, parent) if w.isVisible() and w.text()]
+    out += [w.text() for w in c.find(Text, parent) if w.isVisible() and w.text()]
+    return out
 
 
 def _button(c, text, parent=None):
@@ -245,3 +250,71 @@ def test_new_session_options_screenshot(app_client):
 
 
 _ = QPlainTextEdit
+
+
+def test_claude_tab_selects_open_the_menu(app_client):
+    """The Claude Code tab's dropdowns are the web's Select: a popover with icon, label and hint rows, the
+    chosen one checked, and the screenshot is taken with the list open."""
+    c = app_client
+    from pilcrow_qt.widgets.dialogs.settings import open_settings
+    from pilcrow_qt.widgets.dialogs.settings_ui import Select
+
+    c.wait_until(lambda: c.store.config is not None, 10, "config")
+    s = open_settings(c.win, "claude")
+    c.sleep(150)
+    page = s.page
+    selects = [w for w in c.find(Select, s.frame) if w.isVisible()]
+    assert [w.accessibleName() for w in selects][:4] == [
+        "Claude Code program",
+        "Default permission mode",
+        "Default model",
+        "Default effort",
+    ]
+    assert all(w.height() == 34 for w in selects)
+    mode = page.mode
+    assert mode.currentText() == "Ask before edits" and mode.items[0]["icon"] == "shield-check"
+    mode.showPopup()
+    c.sleep(100)
+    pop = mode.popup
+    assert pop is not None and pop.isVisible() and pop.width() == 300
+    rows = [r for r in pop.menu.rows if r is not None]
+    assert [r.label for r in rows] == [
+        "Ask before edits",
+        "Edit automatically",
+        "Plan mode",
+        "Auto",
+        "Bypass permissions",
+    ]
+    assert rows[0].it["checked"] and rows[0].hint.startswith("Asks before")
+    # the popover opens 6px under the button, flush with its left edge
+    assert pop.x() == mode.mapTo(pop.parentWidget(), mode.rect().topLeft()).x()
+    assert pop.y() == mode.mapTo(pop.parentWidget(), mode.rect().bottomLeft()).y() + 1 + 6
+    pop.menu.set_active(2)
+    c.sleep(60)
+    assert c.shot("settings-claude-open").exists()
+    # choosing a row closes the list and saves the mode
+    pop.menu.choose(2)
+    c.wait_until(lambda: mode.popup is None, 3, "list closed")
+    c.wait_until(lambda: (c.store.config or {}).get("defaultMode") == "plan", 5, "mode saved")
+    assert mode.currentText() == "Plan mode"
+    mode.showPopup()
+    c.sleep(60)
+    assert [r.it["checked"] for r in [r for r in mode.popup.menu.rows if r is not None]] == [
+        False,
+        False,
+        True,
+        False,
+        False,
+    ]
+    mode.hidePopup()
+    # the model select lists the gateway's models with their ids under the names
+    page.model.box.showPopup()
+    c.sleep(80)
+    labels = [(r.label, r.hint) for r in page.model.box.popup.menu.rows if r is not None]
+    assert labels[0] == ("Default", "Claude Code's configured model")
+    assert ("Mock 1", "claude-mock-1") in labels
+    assert c.shot("settings-claude-model-open").exists()
+    page.model.box.hidePopup()
+    c.store.set_config({"defaultMode": "default"})
+    c.wait_until(lambda: (c.store.config or {}).get("defaultMode") == "default", 5, "mode restored")
+    _close_all(c)

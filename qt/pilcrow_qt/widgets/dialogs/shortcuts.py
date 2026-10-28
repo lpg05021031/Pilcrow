@@ -55,7 +55,7 @@ class ShortcutRow(QWidget):
             if p in _WORDS or (p == "/" and " / " in keys):
                 w = QLabel(p)
                 w.setProperty("tone", "faint")
-                w.setProperty("size", "small")
+                w.setProperty("fs", "small")
                 cl.addWidget(w)
             else:
                 cl.addWidget(Keys(p))

@@ -1,12 +1,18 @@
-"""The window (a port of web/src/components/App.tsx): sidebar | main column | side panel, the
-keyboard shortcuts, the boot screen, the offline bar, dialogs and toasts."""
+"""The window (a port of web/src/components/App.tsx): the sidebar, the conversation sheet and the
+side panel on the chrome-coloured ground, the drag handles between them, the keyboard shortcuts,
+the boot screen, the offline bar, dialogs and toasts.
+
+The shell is laid out as app.css draws it: ``.app`` is the chrome ground with an 8px padding on the
+right and the bottom; the sidebar stands on it flush with the top; the conversation (``.main``) and
+the side panel (``.panel-shell``) are rounded canvas sheets that start 8px below the top with a
+hairline round them; a 9px drag handle straddles each seam and takes 1px of the flow."""
 
 from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, Qt, QTimer, QVariantAnimation, Signal
+from PySide6.QtGui import QColor, QKeySequence, QPainter, QPainterPath, QPen, QShortcut
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QStackedWidget, QVBoxLayout, QWidget
 
 from .. import icons, theme
@@ -16,6 +22,10 @@ from .ui.bits import Mark, Row, label
 from .ui.signals import bind
 
 TAB_KEYS = {"1": "changes", "2": "files", "3": "terminal", "4": "preview", "5": "tasks", "6": "history", "7": "info"}
+
+GROUND_PAD = 8  # .app { padding: 0 8px 8px 0 }
+SIDEBAR_MIN, SIDEBAR_MAX = 200, 440  # App.tsx resizeSidebar
+PANEL_MIN, PANEL_SHARE = 340, 0.62  # App.tsx resizePanel
 
 
 class MainWindow(QMainWindow):
@@ -27,7 +37,8 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(900, 560)
 
         central = QWidget()
-        central.setObjectName("canvas")
+        central.setObjectName("shell")
+        central.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setCentralWidget(central)
         col = QVBoxLayout(central)
         col.setContentsMargins(0, 0, 0, 0)
@@ -42,22 +53,15 @@ class MainWindow(QMainWindow):
             self.titlebar = TitleBar(self)
             col.addWidget(self.titlebar)
             EdgeResizer(self)
-        body = QWidget()
-        col.addWidget(body, 1)
-        row = QHBoxLayout(body)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(0)
+        self.body = Shell()
+        col.addWidget(self.body, 1)
+        row = self.body.row
 
         self.sidebar = Sidebar()
         row.addWidget(self.sidebar)
-        self.side_line = _vline()
-        row.addWidget(self.side_line)
 
-        main = QWidget()
-        main.setObjectName("main")
-        ml = QVBoxLayout(main)
-        ml.setContentsMargins(0, 0, 0, 0)
-        ml.setSpacing(0)
+        self.main = Card("main")
+        ml = self.main.body_layout
         self.offline = OfflineBar()
         self.offline.hide()
         ml.addWidget(self.offline)
@@ -66,18 +70,24 @@ class MainWindow(QMainWindow):
         ml.addWidget(self.update_notice)
         self.pages = QStackedWidget()
         ml.addWidget(self.pages, 1)
-        row.addWidget(main, 1)
+        row.addWidget(self.main, 1)
 
-        self.panel_line = _vline()
-        row.addWidget(self.panel_line)
-        self.panel_host = QWidget()
-        self.panel_host.setObjectName("panel")
-        self.panel_host.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.panel_layout = QVBoxLayout(self.panel_host)
-        self.panel_layout.setContentsMargins(0, 0, 0, 0)
+        self.panel_host = Card("panel")
+        self.panel_layout = self.panel_host.body_layout
         row.addWidget(self.panel_host)
         self.panel_host.hide()
-        self.panel_line.hide()
+        # The seams carry no standing line on the web ("the two surfaces meet by tone alone"); these
+        # stay for code that still toggles them, and show nothing.
+        self.side_line = _no_line(self.body)
+        self.panel_line = _no_line(self.body)
+
+        self.side_resizer = Resizer(self.body)
+        self.side_resizer.dragged.connect(self._drag_sidebar)
+        self.side_resizer.released.connect(lambda: store.set_ui(sidebar_w=self.sidebar.width()))
+        self.panel_resizer = Resizer(self.body)
+        self.panel_resizer.dragged.connect(self._drag_panel)
+        self.panel_resizer.released.connect(lambda: store.set_ui(panel_w=self.panel_host.width()))
+        self.body.set_parts(self.sidebar, self.main, self.panel_host, self.side_resizer, self.panel_resizer)
 
         # pages: welcome / session / overview / inbox (built lazily where heavy)
         from .welcome import Welcome
@@ -187,7 +197,6 @@ class MainWindow(QMainWindow):
     def _on_ui(self) -> None:
         ui = store.ui
         self.sidebar.setVisible(ui.sidebar)
-        self.side_line.setVisible(ui.sidebar)
         session = store.active_session()
         panel_open = bool(session and store.page == "session" and ui.panel)
         if panel_open and self.panel is None:
@@ -199,7 +208,18 @@ class MainWindow(QMainWindow):
             self.panel.set_session(session)
         self.panel_host.setFixedWidth(ui.panel_w)
         self.panel_host.setVisible(panel_open)
-        self.panel_line.setVisible(panel_open)
+        self.body.place()
+
+    # ---- the drag handles (App.tsx resizeSidebar / resizePanel)
+    def _drag_sidebar(self, dx: int) -> None:
+        w = max(SIDEBAR_MIN, min(SIDEBAR_MAX, self.sidebar.width() + dx))
+        self.sidebar.setFixedWidth(w)
+        self.body.place()
+
+    def _drag_panel(self, dx: int) -> None:
+        w = max(PANEL_MIN, min(int(round(self.width() * PANEL_SHARE)), self.panel_host.width() - dx))
+        self.panel_host.setFixedWidth(w)
+        self.body.place()
 
     # ---- dialogs, toasts, notifications
     def _on_dialog(self, key: str, value) -> None:
@@ -302,31 +322,283 @@ def custom_titlebar() -> bool:
     return sys.platform.startswith("linux")
 
 
-def _vline() -> QWidget:
-    from .ui.bits import hairline
+def _no_line(parent: QWidget) -> QWidget:
+    w = QWidget(parent)
+    w.setFixedSize(0, 0)
+    w.hide()
+    return w
 
-    return hairline(vertical=True)
+
+# ---------------------------------------------------------------- the ground, the sheets, the seams
+
+
+class Shell(QWidget):
+    """``.app``: the chrome ground the sidebar and the sheets stand on. Lays the three columns out
+    with a 1px seam between them (the flow width of a ``.resizer``), keeps the drag handles astride
+    the seams, and paints the sheets' soft shadow on the ground around them."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.row = QHBoxLayout(self)
+        self.row.setContentsMargins(0, 0, GROUND_PAD, GROUND_PAD)
+        self.row.setSpacing(1)
+        self.sidebar: Optional[QWidget] = None
+        self.main: Optional[QWidget] = None
+        self.panel: Optional[QWidget] = None
+        self.side_resizer: Optional[Resizer] = None
+        self.panel_resizer: Optional[Resizer] = None
+        bind(theme.theme.changed, self, lambda _t: self.update())
+
+    def set_parts(self, sidebar: QWidget, main: QWidget, panel: QWidget, side: Resizer, right: Resizer) -> None:
+        self.sidebar, self.main, self.panel, self.side_resizer, self.panel_resizer = sidebar, main, panel, side, right
+
+    def place(self) -> None:
+        """Put the handles over the seams (after any change of what is shown or how wide it is)."""
+        if self.main is None:
+            return
+        side_open = self.sidebar is not None and not self.sidebar.isHidden()
+        # .app.no-side > .main { margin-left: 8px }: the sheet keeps its margin when the sidebar is hidden
+        self.row.setContentsMargins(0 if side_open else GROUND_PAD, 0, GROUND_PAD, GROUND_PAD)
+        self.row.activate()
+        h = self.height() - GROUND_PAD
+        if self.side_resizer is not None:
+            self.side_resizer.setVisible(side_open)
+            if side_open:
+                seam = self.sidebar.geometry().right() + 1
+                self.side_resizer.setGeometry(seam - Resizer.WIDTH // 2, 0, Resizer.WIDTH, h)
+                self.side_resizer.raise_()
+        if self.panel_resizer is not None:
+            panel_open = self.panel is not None and not self.panel.isHidden()
+            self.panel_resizer.setVisible(panel_open)
+            if panel_open:
+                seam = self.main.geometry().right() + 1
+                self.panel_resizer.setGeometry(seam - Resizer.WIDTH // 2, 0, Resizer.WIDTH, h)
+                self.panel_resizer.raise_()
+        self.update()
+
+    def resizeEvent(self, e) -> None:  # noqa: N802
+        super().resizeEvent(e)
+        self.place()
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        # box-shadow 0 1px 2px: black at 18% on dark, 4% on light, blurred over the ground
+        t = theme.tokens()
+        strength = 0.18 if t.dark else 0.04
+        p = QPainter(self)
+        for card in (self.main, self.panel):
+            if card is None or card.isHidden():
+                continue
+            r = card.geometry().adjusted(0, Card.TOP, 0, 0)
+            for d, k in ((1, 0.75), (2, 0.36), (3, 0.17)):
+                c = QColor(0, 0, 0, int(255 * strength * k))
+                p.fillRect(QRect(r.left() + 1, r.bottom() + d, r.width() - 2, 1), c)
+            for d, k in ((1, 0.36), (2, 0.17)):
+                c = QColor(0, 0, 0, int(255 * strength * k))
+                p.fillRect(QRect(r.left() - d, r.top() + 1, 1, r.height()), c)
+                p.fillRect(QRect(r.right() + d, r.top() + 1, 1, r.height()), c)
+            p.fillRect(QRect(r.left() + 1, r.top() - 1, r.width() - 2, 1), QColor(0, 0, 0, int(255 * strength * 0.17)))
+
+
+class Card(QWidget):
+    """``.main`` / ``.panel-shell``: a canvas sheet with 12px corners and a hairline, resting 8px
+    below the top of the ground. The children lay out under the 8px band; a frame on top of them
+    paints the ground back into the corners (``overflow: hidden``) and draws the hairline."""
+
+    TOP = 8  # margin-top: 8px
+    RADIUS = 12
+
+    def __init__(self, name: str, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setObjectName(name)
+        self.body_layout = QVBoxLayout(self)
+        self.body_layout.setContentsMargins(0, self.TOP, 0, 0)
+        self.body_layout.setSpacing(0)
+        self._frame = _CardFrame(self)
+        bind(theme.theme.changed, self, lambda _t: (self.update(), self._frame.update()))
+
+    def sheet_rect(self) -> QRect:
+        return self.rect().adjusted(0, self.TOP, 0, 0)
+
+    def childEvent(self, e) -> None:  # noqa: N802
+        super().childEvent(e)
+        frame = getattr(self, "_frame", None)
+        if frame is not None and e.type() == QEvent.Type.ChildAdded and e.child() is not frame:
+            frame.raise_()
+
+    def resizeEvent(self, e) -> None:  # noqa: N802
+        super().resizeEvent(e)
+        self._frame.setGeometry(self.rect())
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(theme.qcolor(theme.tokens().canvas))
+        p.drawRoundedRect(QRectF(self.sheet_rect()), self.RADIUS, self.RADIUS)
+
+
+class _CardFrame(QWidget):
+    """The corners, the hairline and the dark theme's one-pixel light along the top edge, painted
+    over whatever the children drew."""
+
+    def __init__(self, card: Card) -> None:
+        super().__init__(card)
+        self._card = card
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        t = theme.tokens()
+        r = self._card.sheet_rect()
+        radius = Card.RADIUS
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        outside = QPainterPath()
+        outside.addRect(QRectF(self.rect()))
+        sheet = QPainterPath()
+        sheet.addRoundedRect(QRectF(r), radius, radius)
+        p.fillPath(outside.subtracted(sheet), theme.qcolor(t.chrome))
+        # border: 0.5px solid var(--hair) renders as one pixel of the hairline over the canvas
+        p.setPen(QPen(theme.blend(t.hair, t.canvas), 1))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(QRectF(r).adjusted(0.5, 0.5, -0.5, -0.5), radius - 0.5, radius - 0.5)
+        if t.dark:
+            # box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035)
+            p.setPen(QPen(QColor(255, 255, 255, 9), 1))
+            y = r.top() + 1.5
+            p.drawLine(QPointF(r.left() + radius * 0.6, y), QPointF(r.right() + 1 - radius * 0.6, y))
+
+
+class Resizer(QWidget):
+    """``.resizer``: a 9px column astride a seam. Nothing shows until the pointer has rested on it
+    for a moment; then a short handle, which turns to the accent while it is being dragged."""
+
+    WIDTH = 9
+    dragged = Signal(int)  # pointer x delta since the last move
+    released = Signal()
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setFixedWidth(self.WIDTH)
+        self.setCursor(Qt.CursorShape.SplitHCursor)
+        self.setMouseTracking(True)
+        self._shown = 0.0
+        self._last_x = 0.0
+        self.dragging = False
+        self._anim: Optional[QVariantAnimation] = None
+        self._delay = QTimer(self)
+        self._delay.setSingleShot(True)
+        self._delay.setInterval(120)  # transition-delay: 120ms
+        self._delay.timeout.connect(lambda: self._fade(1.0))
+        bind(theme.theme.changed, self, lambda _t: self.update())
+
+    # ---- showing the handle
+    def _fade(self, to: float) -> None:
+        if self._anim is not None:
+            self._anim.stop()
+            self._anim = None
+        if store.reduced_motion or to == self._shown:
+            self._set_shown(to)
+            return
+        a = QVariantAnimation(self)
+        a.setDuration(theme.T_MED)
+        a.setStartValue(self._shown)
+        a.setEndValue(to)
+        a.setEasingCurve(theme.ease())
+        a.valueChanged.connect(self._set_shown)
+        a.start()
+        self._anim = a
+
+    def _set_shown(self, v: float) -> None:
+        self._shown = float(v)
+        self.update()
+
+    def enterEvent(self, e) -> None:  # noqa: N802
+        self._delay.start()
+        super().enterEvent(e)
+
+    def leaveEvent(self, e) -> None:  # noqa: N802
+        self._delay.stop()
+        if not self.dragging:
+            self._fade(0.0)
+        super().leaveEvent(e)
+
+    # ---- dragging
+    def mousePressEvent(self, e) -> None:  # noqa: N802
+        if e.button() == Qt.MouseButton.LeftButton:
+            self.dragging = True
+            self._last_x = e.globalPosition().x()
+            self._delay.stop()
+            self._set_shown(1.0)
+            e.accept()
+            return
+        super().mousePressEvent(e)
+
+    def mouseMoveEvent(self, e) -> None:  # noqa: N802
+        if self.dragging:
+            x = e.globalPosition().x()
+            dx = int(round(x - self._last_x))
+            if dx:
+                self._last_x = x
+                self.dragged.emit(dx)
+            e.accept()
+            return
+        super().mouseMoveEvent(e)
+
+    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+        if self.dragging and e.button() == Qt.MouseButton.LeftButton:
+            self.dragging = False
+            self.released.emit()
+            if not self.underMouse():
+                self._fade(0.0)
+            self.update()
+            e.accept()
+            return
+        super().mouseReleaseEvent(e)
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        if self._shown <= 0:
+            return
+        t = theme.tokens()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        c = theme.qcolor(t.accent) if self.dragging else theme.qcolor(t.hair_3)
+        c.setAlphaF(c.alphaF() * self._shown)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(c)
+        # 3 x 40px, 2px corners, at left: 3px; scaleY from 0.6 as it appears
+        h = 40 * (0.6 + 0.4 * self._shown)
+        p.drawRoundedRect(QRectF(3, self.height() / 2 - h / 2, 3, h), 1.5, 1.5)
+
+
+# ---------------------------------------------------------------- bars and the boot screen
 
 
 class OfflineBar(QWidget):
+    """``.offline``: the line across the top of the sheet while the background process is away."""
+
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("offline")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(16, 6, 16, 6)
+        lay.setContentsMargins(14, 7, 14, 7)
+        lay.setSpacing(8)
+        lay.addStretch(1)
         self.ico = QLabel()
         lay.addWidget(self.ico)
         self.text = QLabel("Lost the connection to Pilcrow's background process. Reconnecting…")
-        lay.addWidget(self.text, 1)
+        self.text.setWordWrap(True)  # a long notice (an update waiting) wraps instead of being cut
+        lay.addWidget(self.text, 1)  # the whole width, so a long notice wraps only when it must
         bind(theme.theme.changed, self, lambda _t: self._paint())
         self._paint()
 
     def _paint(self) -> None:
         t = theme.tokens()
-        self.ico.setPixmap(icons.pixmap("wifi-off", t.warn, 14))
+        self.ico.setPixmap(icons.pixmap("wifi-off", t.text_2, 14))
         self.setStyleSheet(
-            f"#offline {{ background: {theme.blend(t.warn_wash, t.canvas).name()}; border-bottom: 1px solid {theme.blend(t.hair, t.canvas).name()}; }} QLabel {{ color: {t.text}; font-size: {theme.FS_SMALL}px; }}"
+            f"#offline {{ background: {theme.blend(t.fill_1, t.canvas).name()}; border-bottom: 1px solid {theme.blend(t.hair, t.canvas).name()}; }}"
+            f" QLabel {{ color: {t.text_2}; font-size: {theme.FS_SMALL}px; }}"
         )
 
 
@@ -349,7 +621,7 @@ class UpdateNotice(OfflineBar):
             if newer
             else f"Pilcrow {__version__} is installed, but its background process is still {server}. Quit Pilcrow and open it again to finish updating."
         )
-        self.ico.setPixmap(icons.pixmap("refresh-cw", theme.tokens().info, 14))
+        self.ico.setPixmap(icons.pixmap("refresh-cw", theme.tokens().text_2, 14))
         self.show()
 
 
@@ -382,10 +654,10 @@ class Boot(QWidget):
 
         self.mark = WorkingMark(44)
         sl.addWidget(self.mark, 0, Qt.AlignmentFlag.AlignHCenter)
-        self.name = label("Pilcrow", size="title")
+        self.name = label("Pilcrow")
         sl.addWidget(self.name, 0, Qt.AlignmentFlag.AlignHCenter)
         lay.addWidget(stage)
-        self.line = label("Connecting", tone="muted", size="small")
+        self.line = label("Connecting")
         self.line.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.line.setWordWrap(True)
         self.line.setMaximumWidth(460)
@@ -412,12 +684,15 @@ class Boot(QWidget):
             )
         )
         self._slower.start()
+        self._fatal = False
         bind(theme.theme.changed, self, lambda _t: self._paint())
         self._paint()
 
     def _paint(self) -> None:
         t = theme.tokens()
         self.setStyleSheet(f"Boot {{ background: {t.canvas}; }}")
+        self.name.setStyleSheet(f"font-size: {theme.FS_TITLE}px; font-weight: 600; color: {t.text};")
+        self.line.setStyleSheet(f"font-size: {theme.FS_SMALL}px; color: {t.err if self._fatal else t.text_2};")
 
     def set_connected(self, on: bool) -> None:
         self._connected = on
@@ -426,9 +701,8 @@ class Boot(QWidget):
 
     def set_fatal(self, text: str) -> None:
         self.line.setText(text)
-        self.line.setProperty("tone", "err")
-        self.line.style().unpolish(self.line)
-        self.line.style().polish(self.line)
+        self._fatal = True
+        self._paint()
 
     def leave(self) -> None:
         if not self.isVisible():

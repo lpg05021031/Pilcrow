@@ -32,7 +32,8 @@ from ..store import ConfirmSpec, store
 from .composer import Composer, LayoutButton
 from .folder_picker import FolderPicker
 from .mcp_notice import McpNotice
-from .ui.bits import IconButton, Mark, copy_text, hairline, label
+from .sidebar import IconBtn
+from .ui.bits import Mark, copy_text, hairline, label
 from .ui.menu import show_menu
 from .ui.signals import bind
 
@@ -131,7 +132,8 @@ class SessionView(QWidget):
         hl = QHBoxLayout(self.head)
         hl.setContentsMargins(20, 0, 10, 0)
         hl.setSpacing(12)
-        self.side_btn = IconButton("panel-left-open", "Show sidebar (Ctrl+B)", 16)
+        # .icon-btn.head-sidebar: 28px, shown only while the sidebar is hidden
+        self.side_btn = IconBtn("panel-left-open", "Show sidebar (Ctrl+B)", 16, 28)
         self.side_btn.clicked.connect(lambda: store.set_ui(sidebar=True))
         hl.addWidget(self.side_btn)
 
@@ -144,7 +146,8 @@ class SessionView(QWidget):
         self.title.setToolTip("Double-click to rename")
         self.title.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
         self.title.setMinimumWidth(40)
-        self.title.setStyleSheet("font-size: 13.5px; font-weight: 600;")
+        # .session-title: 13.5px at 600 (Qt sizes fonts in whole pixels; 13.5 rounds up like the CSS engines)
+        self.title.setStyleSheet("font-size: 14px; font-weight: 600;")
         self.title.double_clicked.connect(self.start_rename)
         wl.addWidget(self.title)
         self.crumbs = QWidget()
@@ -177,10 +180,10 @@ class SessionView(QWidget):
         self.diffstat.hide()
         self.diffstat.clicked.connect(self._toggle_changes)
         al.addWidget(self.diffstat)
-        self.panel_btn = IconButton("panel-right", "Side panel (Ctrl+\\)", 16)
+        self.panel_btn = IconBtn("panel-right", "Side panel (Ctrl+\\)", 16, 28)
         self.panel_btn.clicked.connect(lambda: store.set_ui(panel=not store.ui.panel))
         al.addWidget(self.panel_btn)
-        self.menu_btn = IconButton("ellipsis", "Session actions", 16)
+        self.menu_btn = IconBtn("ellipsis", "Session actions", 16, 28)
         self.menu_btn.clicked.connect(self.open_menu)
         al.addWidget(self.menu_btn)
         hl.addWidget(actions)
@@ -266,7 +269,9 @@ class SessionView(QWidget):
 
     def _paint(self) -> None:
         t = theme.tokens()
-        self.head.setStyleSheet(f"#session-head {{ background: {t.canvas}; }}")
+        # The head sits in the rounded sheet (main_window.Card) and must not paint over its corners.
+        self.head.setStyleSheet("#session-head { background: transparent; }")
+        _ = t
         self.render()
 
     # ---------------------------------------------------------------- rendering
@@ -774,7 +779,7 @@ class ErrorBar(QWidget):
         self.text.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         lay.addWidget(self.text, 1)
         self.btn = QPushButton()
-        self.btn.setProperty("size", "sm")
+        self.btn.setProperty("fs", "sm")
         self.btn.clicked.connect(self._act)
         lay.addWidget(self.btn)
         self.host = host
@@ -852,7 +857,7 @@ class SessionEmpty(QWidget):
         lay.addWidget(self.git)
         self.mem = QPushButton()
         self.mem.setProperty("kind", "ghost")
-        self.mem.setProperty("size", "sm")
+        self.mem.setProperty("fs", "sm")
         self.mem.setToolTip("Notes from earlier sessions in this folder ride along in this session")
         self.mem.clicked.connect(lambda: store.set_dialog("settings", "memory"))
         self.mem.hide()

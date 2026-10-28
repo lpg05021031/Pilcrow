@@ -182,10 +182,13 @@ class PermissionCard(QWidget):
                 )
             lay.addWidget(box)
 
-        actions = Row(spacing=6, margins=(0, 12 if self.orphan or sub else 8, 0, 0))
+        # .perm-actions: gap 6px (a key sits 5px from its button), no margin under the row above
+        # inside a tool card, 12px for a card of its own
+        actions = Row(spacing=6, margins=(0, 12 if self.orphan else 0, 0, 0))
         default_no = bool(perm.get("defaultToNo"))
         self.allow_btn = bits.button("Allow", kind="" if default_no else "primary", on_click=self.allow)
         self.allow_btn.setAccessibleName("Allow")
+        restyle(self.allow_btn, lambda tk: _perm_button(tk, "" if default_no else "primary"))
         actions.add(self.allow_btn)
         if self.first and not default_no:
             actions.add(_key("1"))
@@ -197,11 +200,13 @@ class PermissionCard(QWidget):
                 tooltip="\n".join(describe_suggestion(s, cwd) for s in suggestions),
             )
             self.always_btn.setAccessibleName("Always allow")
+            restyle(self.always_btn, lambda tk: _perm_button(tk, ""))
             actions.add(self.always_btn)
             if self.first:
                 actions.add(_key("2"))
         self.deny_btn = bits.button("Deny", kind="primary" if default_no else "ghost", on_click=self.deny)
         self.deny_btn.setAccessibleName("Deny")
+        restyle(self.deny_btn, lambda tk: _perm_button(tk, "primary" if default_no else "ghost"))
         actions.add(self.deny_btn)
         if self.first:
             actions.add(_key("3" if self.allow_always else "2"))
@@ -334,7 +339,40 @@ class PermissionCard(QWidget):
 
 
 def _key(k: str) -> QWidget:
-    """`.perm-key`: the number that answers, drawn small and quiet next to its button."""
+    """`.perm-key`: the number that answers, a 16px ringed box in text-4 next to its button."""
     lb = bits.label(k, size="micro")
-    restyle(lb, lambda t: f"QLabel {{ color: {t.text_4}; font-size: 10.5px; padding: 0 4px; }}")
+    lb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    lb.setFixedHeight(16)
+    lb.setMinimumWidth(16)
+    restyle(
+        lb,
+        lambda t: (
+            f"QLabel {{ color: {t.text_4}; font-size: 11px; font-weight: 600; padding: 0 3px; border-radius: 4px; "
+            f"border: 1px solid {theme.blend(t.hair_2, t.raised).name()}; }}"
+        ),
+    )
     return lb
+
+
+def _perm_button(t: theme.Tokens, kind: str) -> str:
+    """`.perm-actions .btn`: 28px tall, 11px sides, 13px text, 7px corners; primary in the accent,
+    the default on a quiet fill, ghost bare in text-2."""
+    base = (
+        f"min-height: 28px; max-height: 28px; padding: 0 11px; font-size: {theme.FS_UI}px; font-weight: 500; "
+        f"border-radius: 7px; border: none;"
+    )
+    if kind == "primary":
+        return (
+            f"QPushButton {{ {base} background: {t.accent}; color: {t.accent_ink}; }} "
+            f"QPushButton:hover {{ background: {t.accent_2}; }} "
+            f"QPushButton:disabled {{ background: {theme.blend(t.fill_2, t.raised).name()}; color: {t.text_4}; }}"
+        )
+    if kind == "ghost":
+        return (
+            f"QPushButton {{ {base} background: transparent; color: {t.text_2}; }} "
+            f"QPushButton:hover {{ background: {theme.blend(t.fill_2, t.raised).name()}; color: {t.text}; }}"
+        )
+    return (
+        f"QPushButton {{ {base} background: {theme.blend(t.fill_2, t.raised).name()}; color: {t.text}; }} "
+        f"QPushButton:hover {{ background: {theme.blend(t.fill_3, t.raised).name()}; }}"
+    )

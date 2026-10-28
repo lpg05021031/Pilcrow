@@ -5,6 +5,9 @@ drew its own (a GTK HeaderBar) and the Windows host too. This one is the same id
 the title, the window buttons, dragging by the bar, double-click to maximise, and resizing from
 the window's edges through the platform (``startSystemMove`` / ``startSystemResize``, which work on
 X11 and Wayland alike).
+
+It is one surface with the sidebar: the same chrome, no line under it, the mark in the sidebar's
+brand column (18px in, like ``.brand``), the window buttons as quiet as the sidebar's own icons.
 """
 
 from __future__ import annotations
@@ -16,7 +19,8 @@ from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 from ... import theme
-from .bits import IconButton, Mark
+from ..sidebar import IconBtn
+from .bits import Mark
 from .signals import bind
 
 HEIGHT = 38
@@ -31,20 +35,19 @@ class TitleBar(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFixedHeight(HEIGHT)
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(12, 0, 6, 0)
-        lay.setSpacing(8)
+        lay.setContentsMargins(18, 0, 6, 0)
+        lay.setSpacing(9)
         lay.addWidget(Mark(15))
         self.title = QLabel(window.windowTitle() or "Pilcrow")
         self.title.setObjectName("titlebar-title")
         lay.addWidget(self.title, 1)
-        self.min_btn = IconButton("minus", "Minimise", 14)
-        self.max_btn = IconButton("square", "Maximise", 12)
-        self.close_btn = IconButton("x", "Close", 15)
+        self.min_btn = IconBtn("minus", "Minimise", 14, 26, width=32)
+        self.max_btn = IconBtn("square", "Maximise", 12, 26, width=32)
+        self.close_btn = IconBtn("x", "Close", 15, 26, width=32)
         self.min_btn.clicked.connect(window.showMinimized)
         self.max_btn.clicked.connect(self.toggle_max)
         self.close_btn.clicked.connect(window.close)
         for b in (self.min_btn, self.max_btn, self.close_btn):
-            b.setFixedSize(30, 26)
             lay.addWidget(b)
         bind(theme.theme.changed, self, lambda _t: self._paint())
         self._paint()
@@ -53,11 +56,9 @@ class TitleBar(QWidget):
     def _paint(self) -> None:
         t = theme.tokens()
         self.setStyleSheet(
-            f"#titlebar {{ background: {t.chrome}; border-bottom: 1px solid {theme.blend(t.hair, t.chrome).name()}; }}"
-            f"#titlebar-title {{ color: {t.text_2}; font-size: {theme.FS_SMALL}px; font-weight: 500; }}"
+            f"#titlebar {{ background: {t.chrome}; border: none; }}"
+            f" #titlebar-title {{ color: {t.text_2}; font-size: {theme.FS_SMALL}px; font-weight: 500; }}"
         )
-        self.close_btn._color = ""
-        self.close_btn._paint_icon()
 
     def toggle_max(self) -> None:
         if self._win.isMaximized():
