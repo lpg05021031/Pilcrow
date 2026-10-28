@@ -15,7 +15,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
-from PySide6.QtCore import QEvent, QPoint, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 from shiboken6 import isValid
@@ -242,6 +242,13 @@ class Transcript(QScrollArea):
         self._restore_timer.setSingleShot(True)
         self._restore_timer.setInterval(450)
         self._restore_timer.timeout.connect(self._end_restore)
+        # A row the view was just sent to (find, a reveal): kept at its place while the pages drawn
+        # for it settle into their real heights, which would otherwise push it back out of view.
+        self._pin: Optional[QWidget] = None
+        self._pin_timer = QTimer(self)
+        self._pin_timer.setSingleShot(True)
+        self._pin_timer.setInterval(450)
+        self._pin_timer.timeout.connect(self._end_pin)
         self._near_timer = QTimer(self)
         self._near_timer.setSingleShot(True)
         self._near_timer.setInterval(0)
@@ -325,17 +332,42 @@ class Transcript(QScrollArea):
         fold = box.fold()
         if fold is not None:
             turn_open[fold.key] = True
-            fold.open()
+            fold.open(animate=False)
         return box.row_for(item_id) or box
 
     def scroll_to_row(self, w: QWidget) -> None:
         """Bring a row into the upper part of the view unless it is already comfortably visible."""
+        # A page drawn a moment ago has its layout request still queued: flush it, or the row's
+        # position and the scroll range are last frame's and the target gets clamped short.
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.LayoutRequest)
         vb = self.verticalScrollBar()
         v, vh = vb.value(), self.viewport().height()
         y = self._y(w)
         if y < v + 56 or y + w.height() > v + vh - 24:
+            # A deliberate move: it ends the landing at the bottom and the return to a remembered
+            # spot, which otherwise keep re-placing the view until the layout holds still.
             self._at_bottom = False
-            self._set(max(0, int(y - vh * 0.38)))
+            self._landing = False
+            self._restore = None
+            self._restore_timer.stop()
+            self._land_timer.stop()
+            self._pin = w
+            self._place_pin()
+
+    def _place_pin(self) -> None:
+        w = self._pin
+        if w is None:
+            return
+        try:
+            y = self._y(w)
+        except RuntimeError:  # the row went with a re-render
+            self._pin = None
+            return
+        self._set(max(0, int(y - self.viewport().height() * 0.38)))
+        self._pin_timer.start()
+
+    def _end_pin(self) -> None:
+        self._pin = None
 
     def first_visible_unit(self) -> int:
         return self._anchor()[0]
@@ -536,6 +568,8 @@ class Transcript(QScrollArea):
     def _on_range(self, _lo: int, _hi: int) -> None:
         if self._restore is not None:
             self._place_saved()
+        elif self._pin is not None:
+            self._place_pin()
         elif self._at_bottom:
             self._follow()
         if self._landing:
@@ -550,6 +584,7 @@ class Transcript(QScrollArea):
         own = v == self._last_set
         if not own:
             self._last_scroll = (v, now)
+            self._pin = None
         if self._scrolled_cb is not None:
             self._scrolled_cb(v > 4)
         if self._at_bottom and own:

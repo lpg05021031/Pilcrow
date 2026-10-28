@@ -72,7 +72,7 @@ def run_scenario(args, out: Path) -> int:
     app = QApplication([])
     fonts.load()
     theme.apply(args.theme == "dark")
-    store.reduced_motion = True
+    store.reduced_motion = os.environ.get("PILCROW_MOTION") != "1"
     store.init()
     w, h = (int(x) for x in args.size.split("x"))
     win = MainWindow()

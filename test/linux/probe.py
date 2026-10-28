@@ -64,7 +64,7 @@ def main() -> int:
             f"screen: {app.primaryScreen().logicalDotsPerInch():.0f} logical dpi, ratio {app.primaryScreen().devicePixelRatio()}"
         )
         theme.apply(True)
-        store.reduced_motion = True
+        store.reduced_motion = os.environ.get("PILCROW_MOTION", "1") != "1"
         store.init()
         win = MainWindow()
         win.resize(1480, 940)

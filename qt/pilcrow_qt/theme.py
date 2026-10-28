@@ -317,10 +317,25 @@ def _spring(stiffness: float, damping: float, mass: float = 1.0) -> Callable[[fl
 
 
 def _curve(stiffness: float, damping: float, settle_ms: int) -> QEasingCurve:
+    """The spring sampled into a piecewise cubic Bézier spline. Not a Custom-type curve with a Python
+    callable: Qt keeps only a raw function pointer to that, and once the lambda is collected the next
+    animation frame dereferences freed memory (the segfaults when a panel opened or a message went out)."""
     f = _spring(stiffness, damping)
     total = settle_ms / 1000.0
-    c = QEasingCurve(QEasingCurve.Type.Custom)
-    c.setCustomType(lambda t: f(t * total))
+    n = 8  # Qt's BezierSpline keeps room for 10 segments and never grows it; more corrupts the heap
+    h = 1.0 / n
+    eps = 1e-4
+
+    def slope(x: float) -> float:
+        return (f((x + eps) * total) - f((x - eps) * total)) / (2 * eps)
+
+    c = QEasingCurve(QEasingCurve.Type.BezierSpline)
+    for i in range(n):
+        x0, x1 = i * h, (i + 1) * h
+        y0 = f(x0 * total) if i else 0.0
+        y1 = f(x1 * total) if i < n - 1 else 1.0
+        m0, m1 = slope(x0) if i else slope(eps), slope(x1)
+        c.addCubicBezierSegment(_pt(x0 + h / 3, y0 + m0 * h / 3), _pt(x1 - h / 3, y1 - m1 * h / 3), _pt(x1, y1))
     return c
 
 

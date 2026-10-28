@@ -12,6 +12,7 @@ port = 5333
 mock = start_mock(port, 20)
 try:
     c = Client(port)
+    c.store.reduced_motion = os.environ.get("PILCROW_MOTION") != "1"
     c.wait_until(lambda: c.store.sessions_loaded, 15, "sessions")
     c.open("sess-login")
     from pilcrow_qt.store import PANEL_TABS

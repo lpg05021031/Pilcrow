@@ -62,7 +62,8 @@ class Client:
         self.app = QApplication.instance() or QApplication([])
         fonts.load()
         theme.apply(True)
-        store.reduced_motion = True
+        # PILCROW_MOTION=1 runs the suite with animations on
+        store.reduced_motion = os.environ.get("PILCROW_MOTION") != "1"
         if not getattr(store, "_inited", False):
             store.init()
             store._inited = True  # type: ignore[attr-defined]

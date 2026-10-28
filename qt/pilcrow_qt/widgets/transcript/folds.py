@@ -1119,12 +1119,14 @@ class WorkFold(Row):
         self._sync_open()
         self._paint()
 
-    def open(self) -> None:
+    def open(self, animate: bool = True) -> None:
+        """Open the fold; find and item reveals pass ``animate=False`` so the rows land at their final
+        place before the view scrolls to them."""
         turn_open[self.key] = True
-        self._sync_open()
+        self._sync_open(animate)
 
-    def _sync_open(self) -> None:
-        self.body.set_open(self.is_open)
+    def _sync_open(self, animate: bool = True) -> None:
+        self.body.set_open(self.is_open, animate)
         self._fill_n()
 
     def _build_body(self) -> QWidget:
