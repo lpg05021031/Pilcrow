@@ -6,8 +6,8 @@ the title, the window buttons, dragging by the bar, double-click to maximise, an
 the window's edges through the platform (``startSystemMove`` / ``startSystemResize``, which work on
 X11 and Wayland alike).
 
-It is one surface with the sidebar: the same chrome, no line under it, the title starting in the
-sidebar's brand column (18px in, like ``.brand``; no mark, the sidebar's brand row has it), the window buttons as quiet as the sidebar's own icons.
+It is one surface with the sidebar: the same chrome, no line under it, the title starting where the
+conversation sheet's text does (it follows the sidebar's width and hiding; see ``set_text_x``), the window buttons as quiet as the sidebar's own icons.
 """
 
 from __future__ import annotations
@@ -35,6 +35,7 @@ class TitleBar(QWidget):
         self.setFixedHeight(HEIGHT)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(18, 0, 6, 0)
+        self._lay = lay
         lay.setSpacing(9)
         self.title = QLabel(window.windowTitle() or "Pilcrow")
         self.title.setObjectName("titlebar-title")
@@ -76,6 +77,12 @@ class TitleBar(QWidget):
     def mouseDoubleClickEvent(self, e: QMouseEvent) -> None:  # noqa: N802
         if e.button() == Qt.MouseButton.LeftButton:
             self.toggle_max()
+
+    def set_text_x(self, x: int) -> None:
+        """Start the title at window x ``x``: the conversation sheet's text column, so the title
+        lines up with the session header whether the sidebar is open, resized or hidden."""
+        if self._lay.contentsMargins().left() != x:
+            self._lay.setContentsMargins(max(18, x), 0, 6, 0)
 
     # ---- the window's title and state
     def eventFilter(self, obj: QObject, e: QEvent) -> bool:  # noqa: N802

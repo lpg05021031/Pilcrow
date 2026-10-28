@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QKeySequence, QPainter, QPainterPath, QPen, QShortcut
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QStackedWidget, QVBoxLayout, QWidget
 
@@ -61,6 +61,8 @@ class MainWindow(QMainWindow):
         row.addWidget(self.sidebar)
 
         self.main = Card("main")
+        if self.titlebar is not None:
+            self.main.installEventFilter(self)  # the title follows the sheet's left edge
         ml = self.main.body_layout
         self.offline = OfflineBar()
         self.offline.hide()
@@ -137,6 +139,16 @@ class MainWindow(QMainWindow):
 
     def show_fatal(self, text: str) -> None:
         self.boot.set_fatal(text)
+
+    def eventFilter(self, obj, e) -> bool:  # noqa: N802
+        if obj is self.main and e.type() in (QEvent.Type.Move, QEvent.Type.Resize, QEvent.Type.Show):
+            self._place_title()
+        return super().eventFilter(obj, e)
+
+    def _place_title(self) -> None:
+        # The session header's text starts 21px into the sheet (its 1px border + 20px padding).
+        if self.titlebar is not None:
+            self.titlebar.set_text_x(self.main.mapTo(self, QPoint(0, 0)).x() + 21)
 
     def resizeEvent(self, e) -> None:  # noqa: N802
         self.boot.setGeometry(self.centralWidget().rect())

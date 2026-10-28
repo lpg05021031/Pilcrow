@@ -193,7 +193,17 @@ def test_custom_title_bar_is_one_surface_with_the_sidebar(mock_server):
         from pilcrow_qt.widgets.ui.bits import Mark
 
         assert not tb.findChildren(Mark), "no mark in the bar: the sidebar's brand row has it"
-        assert tb.title.mapTo(c.win, QPoint(0, 0)).x() == 18, "the title starts in the sidebar's brand column"
+        col = lambda: c.win.main.mapTo(c.win, QPoint(0, 0)).x() + 21  # noqa: E731 - the sheet's text column
+        title_x = lambda: tb.title.mapTo(c.win, QPoint(0, 0)).x()  # noqa: E731
+        assert title_x() == col() > 200, "the title starts where the session header's text does"
+        c.store.set_ui(sidebar=False)
+        c.sleep(80)
+        assert title_x() == col() < 40, "with the sidebar hidden it moves to the left edge"
+        c.store.set_ui(sidebar=True, sidebar_w=360)
+        c.sleep(80)
+        assert title_x() == col() > 360, "and it follows the sidebar's width"
+        c.store.set_ui(sidebar_w=268)
+        c.sleep(80)
         assert tb.title.text().endswith("Pilcrow")
         assert c.shot("titlebar").exists()
     finally:
