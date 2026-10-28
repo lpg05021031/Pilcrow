@@ -1,7 +1,7 @@
 {
   "name": "pilcrow",
   "productName": "Pilcrow",
-  "version": "2.9.4",
+  "version": "2.9.5",
   "private": true,
   "description": "Desktop workbench for Claude Code on Linux",
   "type": "module",
