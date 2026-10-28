@@ -382,7 +382,7 @@ if ((-not $SkipLaunch) -and (Test-Path $HostLock)) {
 
 # ---------------------------------------------------------------- Pilcrow 伺服器：已在跑就直接用，否則隱藏啟動一個
 function Get-Json([string]$Url) {
-  # 用 WebClient 而不是 Invoke-RestMethod：公司 proxy / PAC 設定不一定會略過 127.0.0.1
+  # 用 WebClient 而不是 Invoke-RestMethod：proxy / PAC 設定不一定會略過 127.0.0.1
   $wc = New-Object System.Net.WebClient
   $wc.Proxy = $null
   try { return ($wc.DownloadString($Url) | ConvertFrom-Json) } finally { $wc.Dispose() }

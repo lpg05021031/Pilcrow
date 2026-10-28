@@ -156,7 +156,7 @@ function networkMessage(e) {
   if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') return 'Could not resolve the gateway host name';
   if (code === 'ECONNREFUSED') return 'The gateway refused the connection';
   if (code === 'ETIMEDOUT' || e?.message === 'timeout') return 'The gateway did not answer in time';
-  if (/CERT|SELF_SIGNED|UNABLE_TO/.test(code || '')) return `TLS certificate problem (${code}); set NODE_EXTRA_CA_CERTS to your company CA`;
+  if (/CERT|SELF_SIGNED|UNABLE_TO/.test(code || '')) return `TLS certificate problem (${code}); set NODE_EXTRA_CA_CERTS to the CA certificate the endpoint uses`;
   return e?.message || String(e);
 }
 

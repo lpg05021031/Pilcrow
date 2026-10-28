@@ -6,7 +6,7 @@
 #
 #    powershell -NoProfile -ExecutionPolicy Bypass -File .\pilcrow-windows.ps1
 #
-#  If company policy blocks script files, run its contents instead (same options work):
+#  If the execution policy blocks script files, run its contents instead (same options work):
 #
 #    & ([scriptblock]::Create((Get-Content -Raw .\pilcrow-windows.ps1)))
 #
@@ -350,7 +350,7 @@ if (-not (Test-Path (Join-Path $electronDir 'package.json'))) {
   if (-not $p.WaitForExit(300000)) { try { $p.Kill() } catch { } }
   if (Test-Path $electronExe) { Ok "Electron downloaded" }
   else {
-    Warn "Electron could not be downloaded (corporate networks usually block GitHub). That is fine: the WebView2 shell provides the window."
+    Warn "Electron could not be downloaded (this machine cannot reach GitHub). That is fine: the WebView2 shell provides the window."
     Say "    To add it later: point ELECTRON_MIRROR at an internal mirror and run this file again with -Electron."
   }
 }

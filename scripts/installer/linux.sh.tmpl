@@ -76,7 +76,7 @@ Pilcrow 安裝檔 — Linux 上的 Claude Code 桌面版
   --no-desktop      不建立應用程式選單項目與 ~/.local/bin/pilcrow
   -h, --help        顯示這段說明
 
-  ELECTRON_MIRROR=URL   Electron 執行檔的下載鏡像（公司內部鏡像）
+  ELECTRON_MIRROR=URL   Electron 執行檔的下載鏡像
   PILCROW_FORCE=1       允許安裝到已有其他檔案的資料夾
 USAGE
 }
@@ -206,7 +206,7 @@ pilcrow_electron() {
     rm -f "$D/.electron.log"
     ok "Electron 下載完成"
   else
-    warn "Electron 下載不到（公司網路通常會擋 GitHub）。沒關係，Pilcrow 會改用 Chrome/Chromium 視窗。"
+    warn "Electron 下載不到（這台機器連不到 GitHub）。沒關係，Pilcrow 會改用 Chrome/Chromium 視窗。"
     say  "    之後想補裝：$D/scripts/electron.sh download <內部鏡像網址>"
     say  "    或自己帶 zip：$D/scripts/electron.sh from-zip electron-v<版本>-linux-<arch>.zip"
     say  "    下載記錄：$D/.electron.log"

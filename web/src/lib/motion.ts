@@ -196,7 +196,7 @@ const LATIN = /[A-Za-z0-9_'’-]/;
 
 /**
  * Reveal streamed text at a steady pace. Model output arrives in uneven bursts (more so through a
- * company gateway that buffers); showing it as received makes text lurch. Instead the visible
+ * gateway that buffers); showing it as received makes text lurch. Instead the visible
  * length eases toward the received length every frame: quick when a big burst lands, never slower
  * than about 60 characters a second, and it finishes the backlog promptly once the reply is done.
  * Text that is already there when the component mounts (history, switching sessions) shows at once.
