@@ -62,7 +62,8 @@ for (const name of [...names].sort()) {
   }
   const body = src.slice(start + 7, end);
   // Each node is ["tag", { attr: "value", key: "…" }]
-  const nodes = [...body.matchAll(/\["(\w+)",\s*\{([^}]*)\}\]/g)].map(([, tag, attrs]) => {
+  // Long paths are written one attribute per line: `[\n "path",\n { d: "…", key: "…" }\n ]`.
+  const nodes = [...body.matchAll(/\[\s*"(\w+)"\s*,\s*\{([^}]*)\}\s*\]/g)].map(([, tag, attrs]) => {
     const a = [...attrs.matchAll(/(\w+):\s*"([^"]*)"/g)].filter(([, k]) => k !== 'key').map(([, k, v]) => `${k}="${v}"`);
     return `<${tag} ${a.join(' ')}/>`;
   });
