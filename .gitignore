@@ -1,0 +1,8 @@
+# Runtime data (browser profiles contain cookies/sessions — never commit)
+data/
+host/webview2/
+state/
+
+# Logs
+*.log
+host/window.json
