@@ -3,6 +3,12 @@
 最新版在最上面。`npm run release -- X.Y.Z` 會檢查這裡有沒有該版的說明。
 
 
+- **2.9.4**：Qt 視窗在 Linux 上的字型修正，用 Ubuntu 24.04 容器（`test/linux/`：真的跑安裝檔、Xvfb 上開視窗逐頁操作）
+  查出來的：(1) 元件自己的 stylesheet 一有 `font-size`/`font-weight`，Qt 會從應用程式預設字型重解析，Linux 預設是 DejaVu，
+  所以很多字變寬變擠——現在應用程式預設字型就是 Inter；(2) 可變字型在 FreeType 下不會合成字重，改內附 400/500/600/700
+  的固定實例；(3) latin 與 latin-ext 子集是兩個檔都叫「Inter Regular」，fontconfig 挑到只有擴充字元的那個，ASCII 逐字退回
+  DejaVu——現在每個字重合併成一個檔。Inbox 空狀態的說明文字不再被切掉最後一行。
+
 - **2.9.3**：Qt 視窗：字型改以像素定大小（不再受 Linux 的 Xft.dpi 影響）、一律用 Fusion 樣式並補齊下拉選單的樣式、
   Linux 上畫自己的標題列（`--native-titlebar` 可關）、原生崩潰會留 Python 追蹤在 `~/.local/state/pilcrow-host/qt-crash.log`。
   安裝檔：系統 Python 拒絕 pip（PEP 668）時改建 `qt/.venv` 並寫進 `.launch-env`，啟動器優先用它。

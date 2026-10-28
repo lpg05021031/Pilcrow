@@ -636,6 +636,10 @@ class InboxPage(QWidget):
             else "A schedule runs a prompt in a folder at a set time — a nightly dependency audit, a Monday test sweep — and leaves the result here with a link back to the full session."
         )
         h.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # A wrapped label in a centred column is not asked for its height-for-width; give it the
+        # width it will have and the height that needs, or the last line is cut off.
+        h.setFixedWidth(440 - 48)
+        h.setMinimumHeight(h.heightForWidth(440 - 48))
         lay.addWidget(h)
         if not has_schedules:
             b = button(

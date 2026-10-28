@@ -340,6 +340,15 @@ python qt/tests/snap.py --scenario session            # 離線截圖到 test/out
 python qt/tests/perf.py --turns 400                   # 開啟時間、重畫成本、閒置 CPU
 ```
 
+沒有 Linux 機器時，`test/linux/` 用 Docker 跑一台 Ubuntu 24.04：真的執行安裝檔（含 PEP 668 的 venv 路徑）、
+在 Xvfb 上開 Qt 視窗逐頁操作，截圖與記錄回寫到 `test/out/linux-*`：
+
+```bash
+docker build -t pilcrow-linux test/linux
+docker run --rm -v pilcrow-home:/home/tester -v "$PWD/out:/in:ro" -v "$PWD:/repo:ro" -v "$PWD/test/out:/out" pilcrow-linux
+docker run --rm -e QUICK=1 -v pilcrow-home:/home/tester -v "$PWD/out:/in:ro" -v "$PWD:/repo:ro" -v "$PWD/test/out:/out" pilcrow-linux   # 沿用安裝，跑 repo 的 qt/
+```
+
 架構與規範在 [qt/ARCHITECTURE.md](qt/ARCHITECTURE.md)；`web/src` 的 React 元件就是每個 Qt 元件的規格。
 
 ### 檢查與測試

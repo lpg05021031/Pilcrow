@@ -54,4 +54,12 @@ def load() -> tuple[str, str]:
     ui = next((c for c in UI_CANDIDATES if c in have or c in loaded), "")
     mono = next((c for c in MONO_CANDIDATES if c in have or c in loaded), "")
     theme.set_families(ui, mono)
+    # The application font is the UI face itself. A widget stylesheet that sets only font-size or
+    # font-weight makes Qt resolve the rest from the application font, not from the global rule's
+    # family, so without this Linux draws those widgets in DejaVu (Windows in Segoe UI).
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    if app is not None:
+        app.setFont(theme.font_ui(theme.FS_UI))
     return ui, mono

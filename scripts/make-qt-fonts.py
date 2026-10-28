@@ -3,8 +3,11 @@
 
     python scripts/make-qt-fonts.py
 
-Writes qt/pilcrow_qt/assets/fonts/{Inter,JetBrainsMono}-Variable[-Italic].ttf from the latin and
-latin-ext woff2 subsets (Qt's FreeType cannot load woff2 directly). Needs fonttools and brotli.
+Writes qt/pilcrow_qt/assets/fonts/*.ttf: static instances of Inter at the weights the interface uses
+(Regular 400, Medium 500, SemiBold 600, Bold 700, plus Italic) and of JetBrains Mono (Regular, Bold,
+Italic), each one file with the latin + latin-ext woff2 subsets merged. Static instances rather than the variable font
+because FreeType on Linux does not pick a weight out of a variable font the way DirectWrite does:
+with the variable file, every weight drew as Regular there. Needs fonttools and brotli.
 The fonts are OFL-licensed; the licence text goes alongside.
 """
 from __future__ import annotations
@@ -14,35 +17,59 @@ import sys
 from pathlib import Path
 
 from fontTools.ttLib import TTFont
+from fontTools.merge import Merger
+from fontTools.varLib import instancer
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "qt" / "pilcrow_qt" / "assets" / "fonts"
 SRC = ROOT / "node_modules" / "@fontsource-variable"
 
-# (package, woff2 file stem, output name). The variable "wght" axis file covers all weights.
+WEIGHTS = {400: "Regular", 500: "Medium", 600: "SemiBold", 700: "Bold"}
+# (package, file stems to merge, output family stem, weights, italic). The latin and latin-ext
+# subsets are merged into one file per weight: as two files they both register as "Inter Regular"
+# and fontconfig may pick the latin-ext one, whose missing ASCII glyphs then fall back to DejaVu.
 FACES = [
-    ("inter", "inter-latin-wght-normal", "Inter-Variable.ttf"),
-    ("inter", "inter-latin-ext-wght-normal", "Inter-Variable-LatinExt.ttf"),
-    ("inter", "inter-latin-wght-italic", "Inter-Variable-Italic.ttf"),
-    ("jetbrains-mono", "jetbrains-mono-latin-wght-normal", "JetBrainsMono-Variable.ttf"),
-    ("jetbrains-mono", "jetbrains-mono-latin-ext-wght-normal", "JetBrainsMono-Variable-LatinExt.ttf"),
-    ("jetbrains-mono", "jetbrains-mono-latin-wght-italic", "JetBrainsMono-Variable-Italic.ttf"),
+    ("inter", ("inter-latin-wght-normal", "inter-latin-ext-wght-normal"), "Inter", (400, 500, 600, 700), False),
+    ("inter", ("inter-latin-wght-italic", "inter-latin-ext-wght-italic"), "Inter", (400,), True),
+    ("jetbrains-mono", ("jetbrains-mono-latin-wght-normal", "jetbrains-mono-latin-ext-wght-normal"), "JetBrainsMono", (400, 700), False),
+    ("jetbrains-mono", ("jetbrains-mono-latin-wght-italic", "jetbrains-mono-latin-ext-wght-italic"), "JetBrainsMono", (400,), True),
 ]
+
+
+def instance(src: Path, weight: int) -> TTFont:
+    f = TTFont(str(src))
+    f.flavor = None  # woff2 → plain sfnt
+    return instancer.instantiateVariableFont(f, {"wght": weight}, updateFontNames=True)
 
 
 def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
+    for old in OUT.glob("*.ttf"):
+        old.unlink()
     n = 0
-    for pkg, stem, out_name in FACES:
-        src = SRC / pkg / "files" / f"{stem}.woff2"
-        if not src.exists():
-            print(f"missing {src}")
+    for pkg, stems, out_stem, weights, italic in FACES:
+        srcs = [SRC / pkg / "files" / f"{stem}.woff2" for stem in stems]
+        srcs = [p for p in srcs if p.exists()]
+        if not srcs:
+            print(f"missing {stems}")
             continue
-        f = TTFont(str(src))
-        f.flavor = None  # woff2 → plain sfnt
-        f.save(str(OUT / out_name))
-        n += 1
-        print(f"{out_name}: {(OUT / out_name).stat().st_size // 1024} KB")
+        for w in weights:
+            parts = []
+            for p in srcs:
+                tmp = OUT / f".part-{p.stem}-{w}.ttf"
+                instance(p, w).save(str(tmp))
+                parts.append(tmp)
+            style = WEIGHTS[w] + (" Italic" if italic else "")
+            name = f"{out_stem}-{style.replace(' ', '')}.ttf"
+            if len(parts) == 1:
+                parts[0].rename(OUT / name)
+            else:
+                merged = Merger().merge([str(p) for p in parts])
+                merged.save(str(OUT / name))
+                for p in parts:
+                    p.unlink()
+            n += 1
+            print(f"{name}: {(OUT / name).stat().st_size // 1024} KB")
     for pkg in ("inter", "jetbrains-mono"):
         lic = SRC / pkg / "LICENSE"
         if lic.exists():
