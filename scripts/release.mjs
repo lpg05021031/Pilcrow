@@ -22,17 +22,23 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const INSTALLERS = ['pilcrow-install.sh', 'pilcrow-windows.ps1', 'pilcrow-app.sh'];
 
 const args = process.argv.slice(2);
+/** `--trailer "Key: value"` lines go at the end of the release commit message. */
+const trailers = [];
+for (let i = 0; i < args.length; i++) if (args[i] === '--trailer' && args[i + 1]) trailers.push(args.splice(i + 1, 1)[0]);
 const flags = new Set(args.filter((a) => a.startsWith('--')));
 const version = args.find((a) => !a.startsWith('--'));
 if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
-  console.error('usage: npm run release -- X.Y.Z [--skip-tests] [--skip-browser] [--no-commit] [--dry-run]');
+  console.error('usage: npm run release -- X.Y.Z [--skip-tests] [--skip-browser] [--no-commit] [--dry-run] [--trailer "Key: value"]');
   process.exit(2);
 }
 
 const say = (s) => console.log(`\n==> ${s}`);
 const die = (s) => { console.error(`\nx ${s}`); process.exit(1); };
+// On Windows the commands are .cmd shims, so they go through the shell; arguments with spaces must then be quoted.
+const win = process.platform === 'win32';
+const q = (a) => (win && /[\s"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a);
 const run = (cmd, argv, opts = {}) => {
-  const r = spawnSync(cmd, argv, { cwd: ROOT, stdio: 'inherit', shell: process.platform === 'win32', ...opts });
+  const r = spawnSync(cmd, win ? argv.map(q) : argv, { cwd: ROOT, stdio: 'inherit', shell: win, ...opts });
   if (r.status !== 0) die(`${cmd} ${argv.join(' ')} failed (exit ${r.status})`);
 };
 const out = (cmd, argv) => execFileSync(cmd, argv, { cwd: ROOT, encoding: 'utf8', shell: process.platform === 'win32' }).trim();
@@ -107,6 +113,9 @@ if (flags.has('--no-commit')) {
 }
 say('Commit');
 run('git', ['add', '-A']);
-run('git', ['commit', '-q', '-m', `Release ${version}`]);
+// The message goes through a file: a multi-line -m argument does not survive the Windows shell.
+const msgFile = join(ROOT, 'out', 'release-message.txt');
+writeFileSync(msgFile, [`Release ${version}`, ...(trailers.length ? ['', ...trailers] : []), ''].join('\n'));
+run('git', ['commit', '-q', '-F', msgFile]);
 run('git', ['tag', '-f', `v${version}`]);
 console.log(`\nPilcrow ${version} released: commit + tag v${version}. Push with: git push && git push --tags`);
