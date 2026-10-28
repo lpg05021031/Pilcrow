@@ -2,7 +2,8 @@
 # ============================================================================
 #  Pilcrow Desktop Host for Linux  (pilcrow-app.sh)
 #
-#  用 WebKitGTK（不是 Chromium）把 Pilcrow 包成一個 GNOME 風格的原生視窗：
+#  有 PySide6 時開的是原生的 Qt 視窗（qt/pilcrow_qt，純 CPU 繪圖，沒有 GPU 的機器也快）。
+#  沒有的話，用 WebKitGTK（不是 Chromium）把 Pilcrow 包成一個 GNOME 風格的原生視窗：
 #  GTK HeaderBar（顏色跟著 Pilcrow 主題）、沒有網址列、沒有分頁、沒有翻譯提示、沒有瀏覽器快捷鍵。
 #  找不到 WebKitGTK 時退回 PyQt6 WebEngine（pip 就能裝，但那又是 Chromium）。
 #
@@ -21,8 +22,9 @@
 #    --install           複製本檔到 ~/.local/share/pilcrow-host、改寫應用程式選單項目，然後啟動
 #    --uninstall         移除本外殼（Pilcrow 本體不動；重跑 ~/pilcrow/scripts/install-desktop.sh 可恢復原選單項目）
 #    --keep-server       關視窗後讓 Pilcrow 伺服器留在背景
+#    --webkit            不用原生 Qt 視窗，改用 WebKitGTK（或 PyQt6 WebEngine）
 #    --devtools          允許 WebKit 的開發者工具（右鍵 → 檢閱）
-#    --qt                強制用 PyQt6 WebEngine
+#    --qt                WebKit 模式下強制用 PyQt6 WebEngine
 #    --check             只檢查依賴
 # ============================================================================
 set -euo pipefail
@@ -115,7 +117,29 @@ check_deps() {
   fi
   die "缺少依賴。"
 }
-check_deps
+# ---------------------------------------------------------------- 原生視窗（Qt）優先
+# 系統的 python3 才有發行版的 Qt 平台外掛與輸入法模組；pyenv / conda 的 python3 通常沒有。
+WEBKIT=0
+for a in "${PASS[@]+"${PASS[@]}"}"; do [ "$a" = --webkit ] && WEBKIT=1; done
+qt_python() {
+  local c
+  for c in "${PILCROW_PYTHON:-}" /usr/bin/python3 python3; do
+    [ -n "$c" ] || continue
+    command -v "$c" >/dev/null 2>&1 || continue
+    if "$c" -c 'import PySide6' >/dev/null 2>&1; then command -v "$c"; return 0; fi
+  done
+  return 1
+}
+BACKEND=""
+QT_PY=""
+if [ "$WEBKIT" = 0 ] && [ -d "$DIR/qt/pilcrow_qt" ]; then QT_PY="$(qt_python || true)"; fi
+if [ -n "$QT_PY" ]; then
+  BACKEND=native
+  ok "原生 Qt 視窗（PySide6）可用：$QT_PY"
+else
+  [ "$WEBKIT" = 0 ] && [ -d "$DIR/qt/pilcrow_qt" ] && warn "沒有 PySide6（pip install --user -r $DIR/qt/requirements.txt 可裝）；改用 WebKit 視窗"
+  check_deps
+fi
 [ "$MODE" = check ] && exit 0
 
 # ---------------------------------------------------------------- 安裝：複製自己、改寫選單項目
@@ -145,7 +169,20 @@ EOF
   say "  外殼程式放在 $HOST_DIR；之後要更新本檔，重新執行一次 --install 即可。"
 fi
 
-# ---------------------------------------------------------------- 視窗程式（Python）
+# ---------------------------------------------------------------- 原生 Qt 視窗：到此為止
+if [ "$BACKEND" = native ]; then
+  export PYTHONPATH="$DIR/qt${PYTHONPATH:+:$PYTHONPATH}" PILCROW_NODE="$NODE"
+  QT_ARGS=(--dir "$DIR" --node "$NODE")
+  for a in "${PASS[@]+"${PASS[@]}"}"; do case "$a" in --keep-server) QT_ARGS+=(--keep-server) ;; esac; done
+  if [ -t 1 ]; then
+    exec "$QT_PY" -m pilcrow_qt "${QT_ARGS[@]}"
+  else
+    nohup "$QT_PY" -m pilcrow_qt "${QT_ARGS[@]}" >>"$STATE_DIR/host.log" 2>&1 &
+    exit 0
+  fi
+fi
+
+# ---------------------------------------------------------------- 視窗程式（Python，WebKit 備援）
 cat > "$HOST_DIR/pilcrow-host.py" <<'PY'
 #!/usr/bin/env python3
 # Pilcrow desktop host — WebKitGTK (GTK3) 主要後端，PyQt6 WebEngine 備援。由 pilcrow-app.sh 產生與啟動。
