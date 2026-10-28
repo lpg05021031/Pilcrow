@@ -36,10 +36,16 @@ MONO_CANDIDATES = [
 ]
 
 
+_loaded: list[str] = []
+_done = False
+
+
 def load() -> tuple[str, str]:
-    """Register bundled fonts and return the (ui, mono) families in force."""
-    loaded: list[str] = []
-    if FONT_DIR.exists():
+    """Register bundled fonts (once per process) and return the (ui, mono) families in force."""
+    global _done
+    loaded: list[str] = _loaded
+    if FONT_DIR.exists() and not _done:
+        _done = True
         for f in sorted(FONT_DIR.glob("*.[to]tf")):
             fid = QFontDatabase.addApplicationFont(str(f))
             if fid >= 0:
