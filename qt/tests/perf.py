@@ -56,11 +56,15 @@ def main() -> int:
             + (f", pages drawn {drawn}" if drawn >= 0 else "")
         )
 
-        # ---- idle CPU
+        # ---- idle CPU: a real event loop (the harness's polling sleep would be the cost itself)
+        from PySide6.QtCore import QEventLoop, QTimer
+
+        loop = QEventLoop()
+        QTimer.singleShot(3000, loop.quit)
         proc_t0, wall0 = time.process_time(), time.perf_counter()
-        c.sleep(2000)
+        loop.exec()
         idle = (time.process_time() - proc_t0) / (time.perf_counter() - wall0) * 100
-        print(f"idle: {idle:.1f}% of one core")
+        print(f"idle (3 s in the event loop, a long conversation open): {idle:.1f}% of one core")
 
         # ---- streaming
         frames = []

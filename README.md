@@ -331,6 +331,7 @@ node test/mock/mock-server.mjs 5300   # 假伺服器
 python -m pilcrow_qt --url http://127.0.0.1:5300/     # PYTHONPATH=qt
 python -m pytest qt/tests -q          # 純邏輯移植的單元測試 + 離線（offscreen）的視窗測試，接 mock server
 python qt/tests/snap.py --scenario session            # 離線截圖到 test/out/qt-*.png
+python qt/tests/perf.py --turns 400                   # 開啟時間、重畫成本、閒置 CPU
 ```
 
 架構與規範在 [qt/ARCHITECTURE.md](qt/ARCHITECTURE.md)；`web/src` 的 React 元件就是每個 Qt 元件的規格。

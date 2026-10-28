@@ -10,7 +10,9 @@
   各面板（Changes、Files 與編輯器、Terminal、Tasks、History、Info）都是原生實作，Preview 改用系統瀏覽器開啟。
   `pilcrow` 有 PySide6 就開 Qt 視窗（`--qt` / `--electron` / `--chrome` 可指定）；`pilcrow-app.sh` 同樣優先 Qt，
   `--webkit` 回到 WebKitGTK。安裝檔多一步 `pip install --user -r qt/requirements.txt`（`--skip-qt` 略過），
-  字型以 base64 bundle 內附。測試：`python -m pytest qt/tests`（純邏輯移植 + 離線視窗測試，接 mock server）。
+  字型以 base64 bundle 內附。測試：`python -m pytest qt/tests`（139 個：純邏輯移植 + 離線視窗測試，接 mock server）。
+  量測（`python qt/tests/perf.py`，offscreen，400 回合）：開啟到列出現 0.38 秒、第一次繪製 22 ms、串流時每格重畫
+  約 7 ms、閒置 CPU 約 5%。
 
 - **2.9.1**：測試套件重建：ESLint 設定（typescript-eslint recommended + react-hooks，禁止 any）、vitest 單元測試
   （`test/unit`，68 個：transcript 模型、分段、工具摘要、格式化、partial JSON、workflow、ANSI、fuzzy）、
