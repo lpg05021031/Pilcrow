@@ -123,7 +123,7 @@ WEBKIT=0
 for a in "${PASS[@]+"${PASS[@]}"}"; do [ "$a" = --webkit ] && WEBKIT=1; done
 qt_python() {
   local c
-  for c in "${PILCROW_PYTHON:-}" /usr/bin/python3 python3; do
+  for c in "${PILCROW_PYTHON:-}" "$DIR/qt/.venv/bin/python" /usr/bin/python3 python3; do
     [ -n "$c" ] || continue
     command -v "$c" >/dev/null 2>&1 || continue
     if "$c" -c 'import PySide6' >/dev/null 2>&1; then command -v "$c"; return 0; fi

@@ -382,7 +382,9 @@ def _weight(w) -> QFont.Weight:
 
 def font_ui(size: float = FS_UI, weight: int = QFont.Weight.Normal, italic: bool = False) -> QFont:
     f = QFont(_UI_FAMILY or QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont).family())
-    f.setPointSizeF(px_to_pt(size))
+    # Pixel sizes, like the CSS: a point size would follow the X server's idea of the DPI (Xft.dpi,
+    # often wrong on Linux), and the rows are laid out in pixels. HiDPI scaling still applies.
+    f.setPixelSize(max(1, int(round(size))))
     f.setWeight(_weight(weight))
     f.setItalic(italic)
     return f
@@ -390,7 +392,7 @@ def font_ui(size: float = FS_UI, weight: int = QFont.Weight.Normal, italic: bool
 
 def font_mono(size: float = MONO_SIZE, weight: int = QFont.Weight.Normal) -> QFont:
     f = QFont(_MONO_FAMILY or QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont).family())
-    f.setPointSizeF(px_to_pt(size))
+    f.setPixelSize(max(1, int(round(size))))
     f.setWeight(_weight(weight))
     f.setStyleHint(QFont.StyleHint.Monospace)
     return f
@@ -456,8 +458,16 @@ def stylesheet(t: Tokens) -> str:
     QLineEdit, QPlainTextEdit, QTextEdit {{ background: {t.inset}; border: 1px solid {hair_on_canvas}; border-radius: {R2}px; padding: 5px 8px; selection-background-color: {blend(t.selection, t.inset).name()}; color: {t.text}; }}
     QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus {{ border-color: {blend(t.accent_line, t.inset).name()}; }}
     QLineEdit[quiet="true"] {{ background: transparent; border: none; padding: 2px 4px; }}
-    QComboBox {{ background: {t.raised}; border: 1px solid {hair2_on_raised}; border-radius: {R2}px; padding: 4px 8px; }}
-    QComboBox QAbstractItemView {{ background: {t.raised_2}; border: 1px solid {hair2_on_raised}; selection-background-color: {fill2_on_chrome}; }}
+    QComboBox {{ background: {t.raised}; border: 1px solid {hair2_on_raised}; border-radius: {R2}px; padding: 5px 28px 5px 10px; min-height: 18px; combobox-popup: 0; }}
+    QComboBox:hover {{ border-color: {blend(t.hair_3, t.raised).name()}; }}
+    QComboBox:focus {{ border-color: {blend(t.accent_line, t.raised).name()}; }}
+    QComboBox::drop-down {{ subcontrol-origin: padding; subcontrol-position: center right; width: 24px; border: none; background: transparent; }}
+    QComboBox::down-arrow {{ image: url("{_arrow_file(t)}"); width: 12px; height: 12px; }}
+    QComboBox QAbstractItemView {{ background: {t.raised_2}; border: 1px solid {hair2_on_raised}; border-radius: {R2}px; padding: 4px; outline: none; selection-background-color: {fill2_on_chrome}; selection-color: {t.text}; }}
+    QComboBox QAbstractItemView::item {{ min-height: 26px; padding: 4px 8px; border-radius: {R1}px; }}
+    QComboBox QAbstractItemView::item:hover {{ background: {fill1_on_canvas}; }}
+    QSpinBox, QDoubleSpinBox {{ background: {t.inset}; border: 1px solid {hair_on_canvas}; border-radius: {R2}px; padding: 4px 8px; min-height: 18px; }}
+    QSpinBox::up-button, QSpinBox::down-button {{ width: 16px; border: none; background: transparent; }}
     QCheckBox {{ spacing: 8px; }}
     QCheckBox::indicator {{ width: 15px; height: 15px; border: 1px solid {t.text_4}; border-radius: {R1}px; background: {t.inset}; }}
     QCheckBox::indicator:checked {{ background: {t.accent}; border-color: {t.accent}; }}
@@ -492,6 +502,29 @@ def stylesheet(t: Tokens) -> str:
     QProgressBar {{ background: {fill1_on_chrome}; border: none; border-radius: 3px; height: 6px; }}
     QProgressBar::chunk {{ background: {t.accent}; border-radius: 3px; }}
     """
+
+
+def _arrow_file(t: Tokens) -> str:
+    """A tinted chevron-down for QComboBox, written once per theme to the cache folder (QSS takes a file)."""
+    import os
+
+    from PySide6.QtCore import QStandardPaths
+
+    d = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.CacheLocation) or os.path.join(
+        os.path.expanduser("~"), ".cache", "pilcrow"
+    )
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, f"chevron-down-{t.name}.svg")
+    if not os.path.exists(path):
+        src = os.path.join(os.path.dirname(__file__), "assets", "icons", "chevron-down.svg")
+        try:
+            with open(src, encoding="utf-8") as f:
+                svg = f.read().replace("currentColor", t.text_2)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(svg)
+        except OSError:
+            return ""
+    return path.replace("\\", "/")
 
 
 def palette(t: Tokens) -> QPalette:

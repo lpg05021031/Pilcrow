@@ -119,11 +119,18 @@ def run(
     lite: bool = False,
 ) -> int:
     # High-DPI is Qt 6's default; the rest is ours.
+    # Fonts are sized in pixels like the CSS; a stray Xft.dpi must not scale what the default
+    # font does either. HiDPI (device pixel ratio) scaling is unaffected.
+    os.environ.setdefault("QT_FONT_DPI", "96")
+    _crash_log()
     QApplication.setApplicationName("Pilcrow")
     QApplication.setOrganizationName("Pilcrow")
     QApplication.setDesktopFileName("pilcrow")
     app = QApplication(sys.argv[:1])
     app.setQuitOnLastWindowClosed(True)
+    # One style everywhere: the stylesheet is written against Fusion's metrics, and the platform
+    # themes (gtk, windowsvista) each ignore a different part of it.
+    app.setStyle("Fusion")
     fonts.load()
     theme.apply(True)  # the first frame is dark until the config says otherwise
     app.setWindowIcon(_app_icon())
@@ -153,6 +160,32 @@ def run(
 
     app.aboutToQuit.connect(shutdown)
     return app.exec()
+
+
+def _crash_log() -> None:
+    """A native crash (segfault in Qt) leaves a Python traceback in the host log instead of nothing."""
+    import faulthandler
+
+    try:
+        log_dir = _state_dir().parent / "pilcrow-host" if sys.platform != "win32" else _state_dir()
+        log_dir.mkdir(parents=True, exist_ok=True)
+        f = open(log_dir / "qt-crash.log", "a", encoding="utf-8")  # noqa: SIM115 - kept open for the process's life
+        f.write(f"
+--- {time.strftime('%Y-%m-%d %H:%M:%S')} pilcrow_qt started (pid {os.getpid()})
+")
+        f.flush()
+        faulthandler.enable(file=f, all_threads=True)
+
+        def hook(exc_type, exc, tb) -> None:
+            import traceback
+
+            traceback.print_exception(exc_type, exc, tb, file=f)
+            f.flush()
+            traceback.print_exception(exc_type, exc, tb)
+
+        sys.excepthook = hook
+    except OSError:
+        pass
 
 
 def _app_icon() -> QIcon:

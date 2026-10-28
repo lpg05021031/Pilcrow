@@ -3,6 +3,13 @@
 最新版在最上面。`npm run release -- X.Y.Z` 會檢查這裡有沒有該版的說明。
 
 
+## 未發佈
+
+- Qt 視窗：字型改以像素定大小（不再受 Linux 的 Xft.dpi 影響）、一律用 Fusion 樣式並補齊下拉選單的樣式、
+  Linux 上畫自己的標題列（`--native-titlebar` 可關）、原生崩潰會留 Python 追蹤在 `~/.local/state/pilcrow-host/qt-crash.log`。
+- 安裝檔：系統 Python 拒絕 pip（PEP 668）時改建 `qt/.venv` 並寫進 `.launch-env`；啟動器優先用它。
+- 介面原始碼裡的零寬空白改成跳脫寫法。
+
 - **2.9.2**：**原生 Qt 視窗**（`qt/pilcrow_qt`，PySide6 / Qt Widgets）：給沒有 GPU 的 Linux 機器的桌面視窗，純 CPU 繪圖，
   不經過瀏覽器引擎。接同一個伺服器與 RPC；側欄、對話、工具卡、權限卡、Composer、Control room、Inbox、設定、
   各面板（Changes、Files 與編輯器、Terminal、Tasks、History、Info）都是原生實作，Preview 改用系統瀏覽器開啟。

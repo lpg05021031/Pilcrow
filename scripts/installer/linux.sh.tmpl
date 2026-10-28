@@ -210,13 +210,30 @@ pilcrow_qt_deps() {
   done
   if [ -z "$py" ]; then warn "找不到 python3；略過。之後可以執行：pip3 install --user -r $D/qt/requirements.txt"; return 0; fi
   if "$py" -c 'import PySide6, pygments, markdown_it, pyte' >/dev/null 2>&1; then ok "PySide6 等套件已經裝好（$py）"; return 0; fi
+  # Debian 12 / Ubuntu 23.04+ mark the system Python "externally managed" (PEP 668): pip refuses
+  # even --user. Then the packages go into a venv of their own under the install folder, and the
+  # launchers use that interpreter (it is written to .launch-env as PILCROW_PYTHON).
+  local venv="$D/qt/.venv"
+  if [ -x "$venv/bin/python" ] && "$venv/bin/python" -c 'import PySide6, pygments, markdown_it, pyte' >/dev/null 2>&1; then
+    QT_PYTHON="$venv/bin/python"; ok "PySide6 等套件已在 $venv"; return 0
+  fi
   say "  pip install --user -r qt/requirements.txt（從你設定的 PyPI 來源，約 150 MB）…"
   if "$py" -m pip install --user --quiet --disable-pip-version-check -r "$D/qt/requirements.txt" >"$D/.qt-pip.log" 2>&1; then
     rm -f "$D/.qt-pip.log"
     ok "原生視窗的套件安裝完成"
-  else
-    warn "pip 安裝失敗（記錄：$D/.qt-pip.log）。Pilcrow 會改用 Electron / Chrome 視窗；之後可重試：$py -m pip install --user -r $D/qt/requirements.txt"
+    return 0
   fi
+  if grep -qi 'externally-managed' "$D/.qt-pip.log" 2>/dev/null; then
+    say "  這台的系統 Python 不讓 pip 直接裝（PEP 668）；改建一個 venv：$venv"
+    if "$py" -m venv --system-site-packages "$venv" >>"$D/.qt-pip.log" 2>&1 && "$venv/bin/python" -m pip install --quiet --disable-pip-version-check -r "$D/qt/requirements.txt" >>"$D/.qt-pip.log" 2>&1; then
+      QT_PYTHON="$venv/bin/python"
+      rm -f "$D/.qt-pip.log"
+      ok "原生視窗的套件裝進 $venv"
+      return 0
+    fi
+    warn "venv 也失敗（記錄：$D/.qt-pip.log）。如果沒有 python3-venv，請先安裝它（apt install python3-venv）再重跑安裝檔。"
+  fi
+  warn "pip 安裝失敗（記錄：$D/.qt-pip.log）。Pilcrow 會改用 Electron / Chrome 視窗；之後可重試：$py -m pip install --user -r $D/qt/requirements.txt"
 }
 
 pilcrow_icons() {
@@ -263,7 +280,8 @@ pilcrow_launch_env() {
     printf 'PILCROW_NODE=%q\n' "$nodebin"
     printf 'case ":$PATH:" in *:%q:*) ;; *) PATH=%q:"$PATH" ;; esac\n' "$nodedir" "$nodedir"
     printf 'PATH="$PATH":%q\n' "$PATH"
-    echo 'export PATH PILCROW_NODE'
+    [ -n "${QT_PYTHON:-}" ] && printf 'PILCROW_PYTHON=%q\n' "$QT_PYTHON"
+    echo 'export PATH PILCROW_NODE PILCROW_PYTHON'
   } >"$D/.launch-env"
 }
 
@@ -285,7 +303,7 @@ pilcrow_gateway_hint() {
 
 pilcrow_install_main() {
   local D="$1"
-  FILES_ONLY=0; SKIP_ELECTRON="${PILCROW_SKIP_ELECTRON:-0}"; NO_DESKTOP=0; SKIP_QT="${PILCROW_SKIP_QT:-0}"
+  FILES_ONLY=0; SKIP_ELECTRON="${PILCROW_SKIP_ELECTRON:-0}"; NO_DESKTOP=0; SKIP_QT="${PILCROW_SKIP_QT:-0}"; QT_PYTHON=""
   for a in "$@"; do
     case "$a" in
       --files-only) FILES_ONLY=1 ;;

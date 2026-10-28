@@ -25,7 +25,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--lite", action="store_true", help="no animations (set automatically when the system asks for reduced motion)"
     )
+    ap.add_argument(
+        "--native-titlebar", action="store_true", help="use the window manager's title bar instead of Pilcrow's"
+    )
     args = ap.parse_args(argv)
+    if args.native_titlebar:
+        import os
+
+        os.environ["PILCROW_TITLEBAR"] = "native"
     return run(
         url=args.url,
         install_dir=args.dir,

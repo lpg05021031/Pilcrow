@@ -29,7 +29,22 @@ class MainWindow(QMainWindow):
         central = QWidget()
         central.setObjectName("canvas")
         self.setCentralWidget(central)
-        row = QHBoxLayout(central)
+        col = QVBoxLayout(central)
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(0)
+        # Our own title bar where the window manager's would not match the theme (Linux by default;
+        # PILCROW_TITLEBAR=custom|native overrides, as does --native-titlebar).
+        self.titlebar = None
+        if custom_titlebar():
+            from .ui.titlebar import EdgeResizer, TitleBar
+
+            self.setWindowFlags(Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
+            self.titlebar = TitleBar(self)
+            col.addWidget(self.titlebar)
+            EdgeResizer(self)
+        body = QWidget()
+        col.addWidget(body, 1)
+        row = QHBoxLayout(body)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(0)
 
@@ -275,6 +290,16 @@ class MainWindow(QMainWindow):
 
     def _quit(self) -> None:
         store.call("app.quit").then(lambda _r: self.close()).catch(lambda _e: self.close())
+
+
+def custom_titlebar() -> bool:
+    import os
+    import sys
+
+    pref = os.environ.get("PILCROW_TITLEBAR", "").lower()
+    if pref in ("custom", "native"):
+        return pref == "custom"
+    return sys.platform.startswith("linux")
 
 
 def _vline() -> QWidget:

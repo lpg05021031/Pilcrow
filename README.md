@@ -164,12 +164,18 @@ Pilcrow 的對話也可以在終端機用 `claude --resume` 接著做。
 **原生 Qt 視窗（建議）**：`pilcrow` 會先找系統的 `python3` 有沒有 PySide6，有就開 `qt/pilcrow_qt` 這個原生視窗。
 它用 Qt Widgets 在 CPU 上直接繪圖，不經過瀏覽器引擎與 GPU 合成，所以在沒有 GPU 的機器、VM 或遠端桌面上
 一樣順。安裝檔會用 `pip install --user -r qt/requirements.txt` 從你設定的 PyPI 來源裝 PySide6 等套件
-（約 150 MB；`--skip-qt` 可略過）。手動安裝或重試：
+（約 150 MB；`--skip-qt` 可略過）。系統 Python 標示為 externally managed（Debian 12、Ubuntu 23.04 以後）而拒絕 pip 時，安裝檔會自動改在
+`~/pilcrow/qt/.venv` 建一個 venv 裝進去，並把它寫進 `.launch-env`，之後從選單或 `pilcrow` 啟動都會用它
+（這需要 `python3-venv`）。手動安裝或重試：
 
 ```bash
-pip3 install --user -r ~/pilcrow/qt/requirements.txt
+pip3 install --user -r ~/pilcrow/qt/requirements.txt          # 或
+python3 -m venv --system-site-packages ~/pilcrow/qt/.venv && ~/pilcrow/qt/.venv/bin/pip install -r ~/pilcrow/qt/requirements.txt
 pilcrow --qt            # 強制用 Qt 視窗；pilcrow --electron / --chrome 則是其他視窗
 ```
+
+Qt 視窗在 Linux 上畫自己的標題列（和主題同色）；要用視窗管理員的標題列：`pilcrow --qt --native-titlebar`
+或環境變數 `PILCROW_TITLEBAR=native`。
 
 Qt 視窗的 Preview 面板沒有內嵌瀏覽器，網頁預覽會改用系統瀏覽器開啟；其他面板（Changes、Files 與編輯器、
 Terminal、Tasks、History、Info）都是原生實作。介面的文字、快捷鍵與配色和網頁版相同。
