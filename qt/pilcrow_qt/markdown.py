@@ -123,9 +123,9 @@ LEXER_ALIAS = {
 }
 
 # The padding of an inline code pill (``.md :not(pre) > code { padding: 0.14em 0.38em }``): QTextDocument
-# cannot pad a span, so two thin spaces on either side make the room and the view paints the pill
+# cannot pad a span, so two narrow no-break spaces (U+202F, glue: no line break around them) on either side make the room and the view paints the pill
 # under them. They are stripped again when the text is copied.
-PILL_PAD = "  "
+PILL_PAD = "\u202f\u202f"
 # The left margin that marks a blockquote block for the view (``padding-left: 14px`` plus the 2px rule).
 QUOTE_INDENT = 14
 

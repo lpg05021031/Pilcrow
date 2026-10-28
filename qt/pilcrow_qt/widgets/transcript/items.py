@@ -407,10 +407,10 @@ class MarkdownView(QTextBrowser):
         return bool(sels)
 
     def createMimeDataFromSelection(self):  # noqa: N802
-        """Copied text loses the thin spaces that pad the code pills."""
+        """Copied text loses the no-break spaces that pad the code pills."""
         md = super().createMimeDataFromSelection()
         if md is not None and md.hasText():
-            md.setText(md.text().replace("\u2009", "").replace("\u2060", ""))
+            md.setText(md.text().replace("\u202f", "").replace("\u2060", ""))
         return md
 
     # ---- decorations under the text
