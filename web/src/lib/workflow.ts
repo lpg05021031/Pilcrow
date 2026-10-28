@@ -14,9 +14,24 @@ export interface WorkflowMeta {
 export function parseWorkflowMeta(script?: string): WorkflowMeta {
   const out: WorkflowMeta = { phases: [] };
   if (!script) return out;
-  const m = script.match(/export\s+const\s+meta\s*=\s*\{([\s\S]*?)\}\s*;?/);
-  if (!m) return out;
-  const body = m[1];
+  const m = script.match(/export\s+const\s+meta\s*=\s*\{/);
+  if (!m || m.index === undefined) return out;
+  // The body runs to the brace that closes the literal, not the first `}` inside it (phases are
+  // objects of their own), so walk the braces, skipping over strings.
+  const start = m.index + m[0].length;
+  let depth = 1;
+  let i = start;
+  let quote: string | null = null;
+  for (; i < script.length && depth > 0; i++) {
+    const c = script[i];
+    if (quote) {
+      if (c === '\\') i++;
+      else if (c === quote) quote = null;
+    } else if (c === "'" || c === '"' || c === '`') quote = c;
+    else if (c === '{') depth++;
+    else if (c === '}') depth--;
+  }
+  const body = script.slice(start, depth === 0 ? i - 1 : i);
   const str = (key: string) => {
     const r = body.match(new RegExp(`\\b${key}\\s*:\\s*(?:'((?:[^'\\\\]|\\\\.)*)'|"((?:[^"\\\\]|\\\\.)*)"|\`((?:[^\`\\\\]|\\\\.)*)\`)`));
     return r ? (r[1] ?? r[2] ?? r[3]).replace(/\\(.)/g, '$1') : undefined;

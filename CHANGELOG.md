@@ -3,6 +3,19 @@
 最新版在最上面。`npm run release -- X.Y.Z` 會檢查這裡有沒有該版的說明。
 
 
+## 未發佈
+
+下一版發佈時，把這一節改成 `- **X.Y.Z**：…` 的版本項目（`npm run release` 會檢查最上面的版本）。
+
+- 測試套件重建：ESLint 設定（typescript-eslint recommended + react-hooks，禁止 any）、vitest 單元測試
+  （`test/unit`，68 個：transcript 模型、分段、工具摘要、格式化、partial JSON、workflow、ANSI、fuzzy）、
+  假伺服器 `test/mock/mock-server.mjs`（同一套 RPC、腳本化的 Claude）、Playwright 瀏覽器測試
+  `test/e2e/run.mjs`（15 個）、WebKitGTK 檢查 `test/webkit`（沒有 rig 就跳過）。`npm run release` 會跑全部。
+- 修正：剛開啟 Pilcrow 的半秒內打開一段很長的對話（例如自動恢復上次的 session）時，遠處的頁換成真實高度
+  會被當成「讀者往上捲了」，對話停在離底部兩百多像素的地方，打字時也不跟著調整。瀏覽器測試抓到的。
+- 修正：Workflow 卡片讀 `export const meta = { … }` 時，`phases: [{ title }]` 這種物件形式的 phase 會讓
+  整段 meta 在第一個 `}` 就被截斷，標題與欄位讀不到；改成數括號找真正的結尾。
+
 - **2.9.0**：工程品質這一版，介面行為不變。(1) 型別：前端 102 個 `any` 全部換成真正的型別——SDK 訊息（`RawMsg`、`ContentBlock`、`StreamEvent`）、工具的結構化結果（`StructuredResult`、`PatchHunk`）、工具輸入（`ToolInput`）、權限回覆（`PermissionDecision`）、MCP 狀態、原生橋（`window.pilcrowNative`）都有定義；`tsc` 與新加的 ESLint（typescript-eslint recommended + react-hooks，`no-explicit-any` 為 error）都是零錯誤零警告。順手修到的：`errText` 現在也讀純物件的 `message`（RPC 的拒絕有時長這樣）；設定裡的 `panelTab`/`diffMode`/`view` 讀回來時會驗證，壞掉的值不再進狀態。(2) 測試：`test/unit`（vitest）蓋 transcript 模型（歷史載入、串流中的文字與工具、中斷、只結算未結算項目而不重掃 2000 回合）、回合分段（`groupTurns` 從 Transcript.tsx 抽到 `lib/units.ts`）、工具摘要、格式化、partial JSON；`test/e2e`（Playwright、headless Chromium）17 個測試把這幾版的 bug 都變成斷言：root fold、live fold、回答不被收起、archive 不閃、順序不跑、對齊、送出回底、Latest、打字零抖動、長對話開啟時間與分頁、Find、捲動記憶、Control room 版面；`test/webkit` 用真的 WebKitGTK 畫出來逐格量像素，確認 Control room 上緣、捲動與串流每一格都有內容，沒有 rig 就跳過。假伺服器 `test/mock/mock-server.mjs` 進了 repo。(3) 發佈：`npm run release -- x.y.z` 一個指令從工作樹到三個安裝檔（版本、檢查、測試、建置、打包、解開比對、commit），打包器 `scripts/make-installers.py` 與安裝檔模板也進了 repo，不再依賴外部資料夾。
 - **2.8.13**：這次在容器裡裝了和你一樣的 WebKitGTK 2.52.6，用它逐格截圖才看到三件 Chromium 上看不出來的事。(1) 換頁時 2.8.6 會把離開的那一頁整個複製一份、釘在上面淡出；WebKitGTK 合成得慢，那份複本會蓋在 Control room 的標題和統計磚上好一會兒——這就是「上面的格子被擋住」。頁面層級的離場複本拿掉了（選單、對話框、toast 的小型離場保留），只留新頁面升起。(2) WebKitGTK 對捲動容器內 `content-visibility: auto` 的「是否在畫面上」判斷又慢又錯，捲動時整頁一下空白一下出現；WebKit 上改為不用它，交給自己的分頁機制（遠的頁空、近的頁畫）。(3) 每一列（段落、思考、工具）掛著進場淡入動畫，歷史頁在捲動中被畫出來時整頁段落一起從透明淡入，看起來就是閃爍；現在只有進行中的頁才有進場動畫。側欄順序：改成完全只看「你最後一次送訊息」，transcript 檔案被寫到（Claude Code 的背景摘要、行程結束時的收尾）一律不再移動列；之前沒記錄過的 session 第一次被看到時就固定在當時的位置。Control room 區塊進場的延遲縮短（320/70ms→220/40ms）。Linux 外殼：更新後若舊版伺服器還在背景且沒有工作在跑，啟動時會自動換成新版，不再出現「background process is still x.y.z」。
 - **2.8.12**：在輸入框打多行文字時，上面的對話不再抽動。兩個原因：輸入框自動調高時會先以 height:auto 量一次（那一瞬間整頁重新排版、對話區被夾到較小的捲動位置，等輸入框回到真實高度就差了幾個像素），現在量完會把對話放回原本的底端；對話區本身變矮（輸入框變高、面板開合）時改為同一幀內直接對齊，不再用緩動追——緩動追的本身就是抽動。實測 6 行輸入與刪除，最後一列到視窗底的距離 200 幀內零變化。

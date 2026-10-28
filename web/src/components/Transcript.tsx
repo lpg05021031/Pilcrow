@@ -984,8 +984,11 @@ export function Transcript({ sessionId, cwd, empty, onScrolled }: { sessionId: s
   const raf = useRef<number | null>(null);
   const anchorRaf = useRef<number | null>(null);
   const landing = useRef(false);
-  // When the reader last moved the page themselves (wheel, keys, the scrollbar, a finger).
-  const userScrollAt = useRef(0);
+  // When the reader last moved the page themselves (wheel, keys, the scrollbar, a finger). Never,
+  // to begin with: at 0 it would read as "just now" for the first half second of the page's life,
+  // and a far page taking its real height then (the position drops) counted as the reader leaving
+  // the live end, so a long conversation opened at start-up landed short of its end.
+  const userScrollAt = useRef(-Infinity);
   useEffect(() => {
     const el = scroller.current;
     if (!el) return;

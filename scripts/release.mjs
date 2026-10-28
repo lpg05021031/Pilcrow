@@ -5,8 +5,9 @@
 //
 //   1. CHANGELOG.md must already describe this version at the top
 //   2. package.json / package-lock.json get the new version
-//   3. npm run check            (skipped with --skip-tests)
+//   3. npm run check, lint, test:unit   (skipped with --skip-tests)
 //   4. npm run build            -> web/dist
+//   4b. npm run test:e2e, test:webkit   (against the fresh build; skipped with --skip-tests or --skip-browser)
 //   5. scripts/make-installers.py --verify   -> out/, unpacked and compared with the tree
 //   6. out/* copied to the repo root
 //   7. git commit + tag vX.Y.Z  (skipped with --no-commit; --dry-run stops before step 2)
@@ -24,7 +25,7 @@ const args = process.argv.slice(2);
 const flags = new Set(args.filter((a) => a.startsWith('--')));
 const version = args.find((a) => !a.startsWith('--'));
 if (!version || !/^\d+\.\d+\.\d+$/.test(version)) {
-  console.error('usage: npm run release -- X.Y.Z [--skip-tests] [--no-commit] [--dry-run]');
+  console.error('usage: npm run release -- X.Y.Z [--skip-tests] [--skip-browser] [--no-commit] [--dry-run]');
   process.exit(2);
 }
 
@@ -70,15 +71,26 @@ for (const file of ['package.json', 'package-lock.json']) {
 
 // ---- checks
 if (flags.has('--skip-tests')) {
-  console.log('\n(--skip-tests: skipping npm run check)');
+  console.log('\n(--skip-tests: skipping check, lint and the tests)');
 } else {
   say('Checks');
   run('npm', ['run', 'check']);
+  run('npm', ['run', 'lint']);
+  run('npm', ['run', 'test:unit']);
 }
 
 // ---- build
 say('Build');
 run('npm', ['run', 'build']);
+
+// ---- browser tests run against the build that ships
+if (flags.has('--skip-tests') || flags.has('--skip-browser')) {
+  console.log('\n(skipping the browser tests)');
+} else {
+  say('Browser tests');
+  run('npm', ['run', 'test:e2e']);
+  run('npm', ['run', 'test:webkit']);
+}
 
 // ---- installers
 say('Installers');

@@ -311,20 +311,41 @@ npm run server              # 只開伺服器 http://127.0.0.1:47117/
 
 ```bash
 npm run check        # TypeScript（tsc --noEmit）
+npm run lint         # ESLint：typescript-eslint recommended + react-hooks，禁止 any
+npm run test:unit    # vitest：web/src/lib 的純邏輯（transcript 模型、分段、工具摘要、格式化、partial JSON、workflow）
+npm run test:e2e     # Playwright + headless Chromium：真的開介面、點、捲、打字，對 DOM 與座標做斷言
+npm run test:webkit  # WebKitGTK（Linux 外殼用的引擎）：真的畫出來再量；沒有 rig 就跳過
+npm test             # 以上全部
+npm run mock         # 只開假伺服器 http://127.0.0.1:5300/（MOCK_LONG=400 會多一個 400 回合的長對話）
 ```
 
-> 原專案的 `test/` 目錄（mock server、Playwright、WebKitGTK 測試）與 ESLint 設定沒有隨安裝檔保存，
-> 2.9.0 從安裝檔重建這個 repo 時無法還原。`package.json` 裡的 `lint`、`test:*` 指令目前會失敗，
-> 測試套件待重建；`release` 目前只跑 `check`。
+瀏覽器測試跑在 `test/mock/mock-server.mjs` 這個假伺服器上：它提供和真伺服器一樣的 RPC（同一個
+WebSocket JSON-RPC、同樣的事件），並有一個腳本化的 Claude——依提示裡的字眼決定要串流文字、讀檔、
+搜尋、編輯、要權限（`permission`／`run a command`）或慢慢回（`slow`）——所以不需要 Claude Code
+也不需要 API key。測試透過同一條 socket 的 `mock.*` 方法控制它（重設、調整串流速度、碰一下 session）。
+
+`test/e2e/run.mjs` 涵蓋的行為：Normal view 打開只有 root fold、進行中的 fold 與 working mark、回答留在
+頁面上而後面的工作另外摺起、權限卡（1 允許、Deny 告知 Claude）、archive 不重畫其他列、側欄順序不自己跑、
+送出後移到最上、品牌與列圖示對齊、400 回合一秒內開啟且只畫附近的頁並落到底部、Latest 在新內容到達時出現、
+點了就消失、從歷史送出會回到底並跟著回覆走、打字時對話相對 composer 零位移、Find 畫出全部並逐一跳、
+切走再切回落在同一處、Control room 的格子不溢出不被切、等待中的卡片可以直接批准。
+失敗時截圖在 `test/out/`。`--grep 文字` 只跑名稱符合的；`--headed` 看得到視窗。
+
+Playwright 的 Chromium 需要 `npx playwright install chromium`；下載不到時會改用機器上的 Chrome / Edge，
+或用 `PILCROW_CHROME=/path/to/chrome` 指定。
+
+`test:webkit`（`test/webkit/run.mjs` + `driver.py`）需要 Linux、`python3-gi`、`gir1.2-webkit2-4.1`、`python3-gi-cairo`，
+沒有顯示器時用 `xvfb-run`；找不到就印一行 skipped 並視為通過（CI 要強制時設 `PILCROW_REQUIRE_WEBKIT=1`）。
+它檢查 Chromium 代替不了的部分：Control room 的上緣有畫出來、捲動長對話時每一格都有內容、串流時視角跟著回覆。
 
 ### 發佈
 
 ```bash
-npm run release -- 2.9.1 [--skip-tests] [--no-commit] [--dry-run]
+npm run release -- 2.9.1 [--skip-tests] [--skip-browser] [--no-commit] [--dry-run]
 ```
 
 一個指令把工作樹變成三個安裝檔：確認 `CHANGELOG.md` 最上面有這一版的說明 → 改 `package.json` 與
-`package-lock.json` 的版本 → `tsc` → `vite build` → `scripts/make-installers.py` 產生
+`package-lock.json` 的版本 → `tsc`、`eslint`、單元測試、瀏覽器測試 → `vite build` → `scripts/make-installers.py` 產生
 `out/pilcrow-install.sh`、`out/pilcrow-windows.ps1`、`out/pilcrow-app.sh` → 把 Linux 安裝檔解回來，
 和工作樹、`web/dist` 逐檔比對 → 複製到 repo 根目錄 → `git commit` 並打 `vX.Y.Z` tag。任何一步失敗就停在那裡。
 
