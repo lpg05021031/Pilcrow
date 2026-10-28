@@ -153,6 +153,14 @@ class Client:
         st.timeline.clear()
         st._buffered.clear()
         st._opening.clear()
+        # Drafts and history are kept per session for the life of the app; a test must not inherit them.
+        try:
+            from pilcrow_qt.widgets import composer
+
+            composer._drafts.clear()
+            composer._histories.clear()
+        except Exception:  # noqa: BLE001
+            pass
         self.sleep(50)
 
 

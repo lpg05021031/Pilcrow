@@ -3,6 +3,7 @@
 One ``ToolCtx`` per session view, rebuilt (new object) whenever the pending permissions or the
 view mode change, so rows can compare identity to decide whether to re-render.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -22,5 +23,5 @@ class ToolCtx:
     #: 'normal' | 'thinking' | 'verbose'
     view: str = "normal"
 
-    def with_depth(self, depth: int) -> "ToolCtx":
+    def with_depth(self, depth: int) -> ToolCtx:
         return ToolCtx(self.session_id, self.cwd, self.pending, depth, self.view)

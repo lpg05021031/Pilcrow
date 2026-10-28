@@ -105,7 +105,7 @@ class ToolItem:
     status: ToolStatus = "running"
     result: Optional[ToolResult] = None
     structured: Optional[StructuredResult] = None
-    children: List["Item"] = field(default_factory=list)
+    children: List[Item] = field(default_factory=list)
     start_ts: float = 0
     end_ts: Optional[float] = None
     elapsed: Optional[float] = None

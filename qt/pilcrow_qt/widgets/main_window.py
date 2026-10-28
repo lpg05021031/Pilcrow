@@ -78,6 +78,9 @@ class MainWindow(QMainWindow):
         self.boot.raise_()
         self.toasts = None
         self._install_shortcuts()
+        from .dialogs import install_overlays
+
+        install_overlays(self)
 
         store.connected_changed.connect(self._on_connected)
         bind(store.config_changed, self, lambda _c: self._after_boot())

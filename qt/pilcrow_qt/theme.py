@@ -414,7 +414,6 @@ def stylesheet(t: Tokens) -> str:
     fill1_on_chrome = blend(t.fill_1, t.chrome).name()
     fill1_on_canvas = blend(t.fill_1, t.canvas).name()
     fill2_on_chrome = blend(t.fill_2, t.chrome).name()
-    accent_wash_on_canvas = blend(t.accent_wash, t.canvas).name()
     return f"""
     * {{ font-family: "{ui}"; font-size: {FS_UI}px; color: {t.text}; outline: none; }}
     QWidget {{ background: transparent; }}
