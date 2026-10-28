@@ -126,4 +126,4 @@ Windows 外殼（`host/sdk/PilcrowHost.cs`）可以直接改；`host/pilcrow-app
 
 ## 授權
 
-尚未指定授權條款。
+[MIT](LICENSE)。內附的 WebView2 SDK DLL 屬 Microsoft，依其自身條款散佈。
