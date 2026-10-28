@@ -11,3 +11,4 @@ ignore = ["N802", "E501", "UP007", "UP035", "UP006", "UP045", "B008"]
 
 [format]
 quote-style = "double"
+line-ending = "lf"  # ruff would otherwise write CRLF on Windows, which the installer heredocs reject

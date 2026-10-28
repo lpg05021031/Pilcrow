@@ -97,7 +97,10 @@ class Rpc(QObject):
     def close(self) -> None:
         self._closing = True
         if self._ws is not None:
-            self._ws.close()
+            try:
+                self._ws.close()
+            except RuntimeError:
+                self._ws = None
 
     def _open(self) -> None:
         if self._ws is not None or self._closing:
@@ -125,7 +128,10 @@ class Rpc(QObject):
         was = self.connected
         self.connected = False
         if self._ws is not None:
-            self._ws.deleteLater()
+            try:
+                self._ws.deleteLater()
+            except RuntimeError:  # already torn down by Qt at exit
+                pass
             self._ws = None
         pending = list(self._pending.values())
         self._pending.clear()
