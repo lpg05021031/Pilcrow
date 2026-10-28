@@ -5,7 +5,7 @@ Pilcrow 是一個跑在 Linux 與 Windows 桌面上的 Claude Code 圖形介面�
 介面則照 Claude Code Desktop 的工作方式設計：左邊是 session 清單，中間是對話，右邊是
 Changes / Files / Terminal / Preview / Tasks / Session 面板。
 
-它沿用你現有的 Claude Code 設定，所以公司 gateway（`ANTHROPIC_BASE_URL` + API key / token）
+它沿用你現有的 Claude Code 設定，所以 API endpoint（`ANTHROPIC_BASE_URL` + API key / token）
 不用另外設定。
 
 ---
@@ -34,7 +34,7 @@ Changes / Files / Terminal / Preview / Tasks / Session 面板。
 |---|---|
 | Linux x64 或 arm64 | 有桌面環境（X11 或 Wayland）。沒有桌面也能用 `--server` 模式 |
 | Node.js 20 以上 | 建議 22.12 以上（Electron 安裝程式需要） |
-| npm 能連到 registry | 公司內部 npm mirror 可以；安裝檔本身不需要連外 |
+| npm 能連到 registry | 自架的 npm mirror 也可以；安裝檔本身不需要連外 |
 | git | Changes 面板、worktree、commit 會用到 |
 | python3 | 內建終端機（Terminal 面板）用；沒有的話退回 `script` 指令 |
 | Chrome / Chromium（選用） | 當 Electron 下載不到時，改用它開成獨立視窗 |
@@ -88,7 +88,7 @@ bash pilcrow-install.sh --dir ~/apps/pilcrow   # 指定安裝位置（預設 ~/p
 bash pilcrow-install.sh --files-only           # 只寫出檔案與介面，不跑 npm
 bash pilcrow-install.sh --skip-electron        # 不下載 Electron，直接用 Chrome 視窗
 bash pilcrow-install.sh --no-desktop           # 不建立應用程式選單項目
-ELECTRON_MIRROR=https://你的內部鏡像/electron/ bash pilcrow-install.sh
+ELECTRON_MIRROR=https://你的鏡像/electron/ bash pilcrow-install.sh
 ```
 
 ---
@@ -107,7 +107,7 @@ pilcrow --doctor     # 健康檢查：Node、Claude Code、API endpoint、桌面
 
 ---
 
-## 公司 gateway / API 設定
+## Gateway / API 設定
 
 Pilcrow 不碰帳號，它啟動的就是 Claude Code，所以設定方式跟 CLI 一模一樣。建議寫在
 `~/.claude/settings.json`：
@@ -115,7 +115,7 @@ Pilcrow 不碰帳號，它啟動的就是 Claude Code，所以設定方式跟 CL
 ```json
 {
   "env": {
-    "ANTHROPIC_BASE_URL": "https://你的公司gateway",
+    "ANTHROPIC_BASE_URL": "https://你的gateway",
     "ANTHROPIC_AUTH_TOKEN": "你的key",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
   }
@@ -150,7 +150,7 @@ Pilcrow 會向你的 endpoint 查詢它提供哪些模型（`GET /v1/models`）�
 ## Claude Code 程式
 
 安裝時 npm 會一起裝好 SDK 內附的 Claude Code（版本跟 SDK 綁定）。如果你想用系統上自己的
-`claude`（例如公司統一安裝的版本），到 **Settings → Claude Code → Claude Code program** 選
+`claude`（例如已經裝在系統上的版本），到 **Settings → Claude Code → Claude Code program** 選
 *System* 或填路徑。
 
 對話記錄跟 CLI 共用 `~/.claude/projects/`：CLI 開過的對話會出現在 Pilcrow 的清單裡，
@@ -161,7 +161,7 @@ Pilcrow 的對話也可以在終端機用 `claude --resume` 接著做。
 ## 桌面視窗：Electron / Chrome / 瀏覽器
 
 Pilcrow 的視窗優先使用 Electron。Electron 的 npm 套件很小，但執行檔（約 100 MB）是另外從
-GitHub 下載的；公司網路擋住的話，安裝檔會提示，並自動改用 Chrome/Chromium 的 app 視窗
+GitHub 下載的；下載不到的話，安裝檔會提示，並自動改用 Chrome/Chromium 的 app 視窗
 （獨立視窗、沒有網址列，用起來差不多）。
 
 事後補裝 Electron：
@@ -169,11 +169,11 @@ GitHub 下載的；公司網路擋住的話，安裝檔會提示，並自動改�
 ```bash
 cd ~/pilcrow
 scripts/electron.sh status
-scripts/electron.sh download https://你的內部鏡像/electron/          # 有內部鏡像時
+scripts/electron.sh download https://你的鏡像/electron/              # 有鏡像時
 scripts/electron.sh from-zip ~/Downloads/electron-v44.7.2-linux-x64.zip  # 自己帶 zip 進來時
 ```
 
-如果 Electron 因為 Chromium sandbox 無法啟動（有些公司環境關了 user namespace），
+如果 Electron 因為 Chromium sandbox 無法啟動（有些環境關了 user namespace），
 launcher 會自動改用 `--no-sandbox` 並記住，不用手動處理。
 
 ### 遠端主機（SSH）
@@ -290,7 +290,6 @@ Pilcrow 是設計給「一人一台」的開發機：
 - 只接受 Pilcrow 自己頁面發出的請求（檢查 Host / Origin / Sec-Fetch-Site，並禁止被別的網頁嵌入），
   所以你瀏覽器裡開的其他網站、或本機其他 dev server，都沒辦法偷偷操作它
 - Pilcrow 本身不收集、不上傳任何資料；網路流量只有 Claude Code 連到你設定的 API endpoint
-- 請依公司資訊安全規範使用（例如哪些專案可以交給 AI 處理）
 
 > 同一台主機有多個使用者同時登入時（共用伺服器），其他使用者也連得到 `127.0.0.1` 上的服務。
 > Pilcrow 沒有為這種情況加上登入驗證，請在自己的機器上使用。
@@ -373,8 +372,8 @@ Windows 版跟 Linux 版是同一套程式與介面。安裝檔只有一個：`p
 | 項目 | 說明 |
 |---|---|
 | Windows 10 1809 以上 / Windows 11 | 需要 WebView2 Runtime（Windows 11 與 Edge 都內含） |
-| Node.js 20 以上 | 建議 22.12 以上；npm 能連到公司 registry |
-| Python 3 + pip | 只用來抓 `pywebview` wheel 裡的 WebView2 SDK；pip 能連到公司 PyPI 鏡像即可 |
+| Node.js 20 以上 | 建議 22.12 以上；npm 能連到 registry |
+| Python 3 + pip | 只用來抓 `pywebview` wheel 裡的 WebView2 SDK；pip 能連到 PyPI（或鏡像）即可 |
 | Git for Windows（選用） | 有的話 Claude Code 用 Git Bash 執行指令；沒有的話改用 PowerShell，一樣可以用。Changes 面板與 worktree 需要 git |
 
 **安裝 / 更新**
@@ -383,7 +382,7 @@ Windows 版跟 Linux 版是同一套程式與介面。安裝檔只有一個：`p
 powershell -NoProfile -ExecutionPolicy Bypass -File .\pilcrow-windows.ps1
 ```
 
-如果公司政策封鎖 PowerShell 腳本檔，改用這行（直接執行內容，效果一樣）：
+如果執行原則封鎖 PowerShell 腳本檔，改用這行（直接執行內容，效果一樣）：
 
 ```powershell
 & ([scriptblock]::Create((Get-Content -Raw .\pilcrow-windows.ps1)))
@@ -400,7 +399,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\pilcrow-windows.ps1
 
 **和 Linux 版的差別**
 
-- 公司 gateway 一樣寫在 `%USERPROFILE%\.claude\settings.json` 的 `env`
+- Gateway 一樣寫在 `%USERPROFILE%\.claude\settings.json` 的 `env`
 - 設定在 `%APPDATA%\Pilcrow`，狀態與記錄在 `%LOCALAPPDATA%\Pilcrow\state`
 - 終端機面板預設是 PowerShell（透過 ConPTY，元件是預先編好的 node-pty，不需要編譯）。
   想改用 `cmd.exe` 或 Git Bash，設定環境變數 `PILCROW_SHELL`（例如 `C:\Program Files\Git\bin\bash.exe`）。
