@@ -372,10 +372,18 @@ def set_families(ui: str, mono: str) -> None:
     _UI_FAMILY, _MONO_FAMILY = ui, mono
 
 
+def _weight(w) -> QFont.Weight:
+    """CSS-style numbers (400, 500, 600…) and QFont.Weight values both work."""
+    if isinstance(w, QFont.Weight):
+        return w
+    n = int(w)
+    return QFont.Weight(max(1, min(1000, n)))
+
+
 def font_ui(size: float = FS_UI, weight: int = QFont.Weight.Normal, italic: bool = False) -> QFont:
     f = QFont(_UI_FAMILY or QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont).family())
     f.setPointSizeF(px_to_pt(size))
-    f.setWeight(weight)
+    f.setWeight(_weight(weight))
     f.setItalic(italic)
     return f
 
@@ -383,7 +391,7 @@ def font_ui(size: float = FS_UI, weight: int = QFont.Weight.Normal, italic: bool
 def font_mono(size: float = MONO_SIZE, weight: int = QFont.Weight.Normal) -> QFont:
     f = QFont(_MONO_FAMILY or QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont).family())
     f.setPointSizeF(px_to_pt(size))
-    f.setWeight(weight)
+    f.setWeight(_weight(weight))
     f.setStyleHint(QFont.StyleHint.Monospace)
     return f
 
