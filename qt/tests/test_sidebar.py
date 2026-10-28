@@ -1,4 +1,5 @@
 """The sidebar against the mock server: grouping, order, archive, search."""
+
 from __future__ import annotations
 
 from harness import app_client, mock_server  # noqa: F401

@@ -2,6 +2,7 @@
 
 Everything here is painted from the theme tokens and repaints when the theme changes.
 """
+
 from __future__ import annotations
 
 import math
@@ -32,11 +33,20 @@ def label(text: str = "", tone: str = "", size: str = "", mono: bool = False, wr
     if mono:
         lb.setProperty("mono", "true")
     lb.setWordWrap(wrap)
-    lb.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse if wrap else Qt.TextInteractionFlag.NoTextInteraction)
+    lb.setTextInteractionFlags(
+        Qt.TextInteractionFlag.TextSelectableByMouse if wrap else Qt.TextInteractionFlag.NoTextInteraction
+    )
     return lb
 
 
-def button(text: str = "", kind: str = "", size: str = "", icon: str = "", on_click: Optional[Callable[[], None]] = None, tooltip: str = "") -> QPushButton:
+def button(
+    text: str = "",
+    kind: str = "",
+    size: str = "",
+    icon: str = "",
+    on_click: Optional[Callable[[], None]] = None,
+    tooltip: str = "",
+) -> QPushButton:
     b = QPushButton(text)
     if kind:
         b.setProperty("kind", kind)
@@ -58,7 +68,9 @@ def button(text: str = "", kind: str = "", size: str = "", icon: str = "", on_cl
 class IconButton(QPushButton):
     """A quiet square button with only an icon (``.icon-btn``). ``active`` tints it as pressed-in."""
 
-    def __init__(self, name: str, tooltip: str = "", size: int = 15, color: str = "", parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self, name: str, tooltip: str = "", size: int = 15, color: str = "", parent: Optional[QWidget] = None
+    ) -> None:
         super().__init__(parent)
         self._name, self._size, self._color = name, size, color
         self.setProperty("icon-only", "true")
@@ -71,6 +83,7 @@ class IconButton(QPushButton):
             self.setAccessibleName(tooltip)
         self._paint_icon()
         bind(theme.theme.changed, self, lambda _t: self._paint_icon())
+
     def set_icon_name(self, name: str) -> None:
         self._name = name
         self._paint_icon()
@@ -94,6 +107,7 @@ class Mark(QWidget):
         self._color = color
         self.setFixedSize(size, size)
         bind(theme.theme.changed, self, lambda _t: self.update())
+
     def paintEvent(self, _e) -> None:  # noqa: N802
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -128,6 +142,7 @@ class WorkingMark(QWidget):
         self._timer.setInterval(50)
         self._timer.timeout.connect(self.update)
         bind(theme.theme.changed, self, lambda _t: self.update())
+
     def showEvent(self, e) -> None:  # noqa: N802
         from ...store import store
 
@@ -162,6 +177,7 @@ class StatusGlyph(QWidget):
         self._timer.setInterval(60)
         self._timer.timeout.connect(self.update)
         bind(theme.theme.changed, self, lambda _t: self.update())
+
     def set_state(self, status: str, pending: int = 0, unread: bool = False) -> None:
         self._status, self._pending, self._unread = status, pending, unread
         from ...store import store
@@ -295,7 +311,10 @@ def copy_text(text: str) -> None:
 
 
 def expanding(w: QWidget, h: bool = True, v: bool = False) -> QWidget:
-    w.setSizePolicy(QSizePolicy.Policy.Expanding if h else QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Expanding if v else QSizePolicy.Policy.Preferred)
+    w.setSizePolicy(
+        QSizePolicy.Policy.Expanding if h else QSizePolicy.Policy.Preferred,
+        QSizePolicy.Policy.Expanding if v else QSizePolicy.Policy.Preferred,
+    )
     return w
 
 

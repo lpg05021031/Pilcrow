@@ -5,6 +5,7 @@ store emits Qt signals when something changes; transcript models live outside th
 and are referenced by a ``rev`` counter so streaming updates re-render cheaply (one signal per
 frame per session, coalesced).
 """
+
 from __future__ import annotations
 
 import time
@@ -140,7 +141,15 @@ class Store(QObject):
         self.active_id: Optional[str] = None
         self.rt: Dict[str, Runtime] = {}
         self.ui = Ui()
-        self.dialogs: Dict[str, Any] = {"newSession": None, "settings": False, "palette": False, "shortcuts": False, "confirm": None, "mcpAuth": None, "schedule": None}
+        self.dialogs: Dict[str, Any] = {
+            "newSession": None,
+            "settings": False,
+            "palette": False,
+            "shortcuts": False,
+            "confirm": None,
+            "mcpAuth": None,
+            "schedule": None,
+        }
         self.toasts: List[Toast] = []
         self.fs_rev = 0
         self.unread: Dict[str, bool] = {}
@@ -252,13 +261,18 @@ class Store(QObject):
         if level != "error":
             return text, action
         t = re.sub(r"^Claude Code returned an error result:\s*", "", text, flags=re.I)
-        if re.search(r"OAuth session expired|Failed to authenticate|not logged in|Invalid API key|authentication_error", t, re.I):
+        if re.search(
+            r"OAuth session expired|Failed to authenticate|not logged in|Invalid API key|authentication_error", t, re.I
+        ):
             return (
                 "Claude Code is signed out. Sign in again with `claude login` in a terminal, or set a gateway key in Settings → Claude Code.",
                 action or {"label": "Settings", "run": lambda: self.set_dialog("settings", "claude")},
             )
         if re.search(r"rate limit|429|overloaded|529", t, re.I):
-            return "The model is busy right now. Claude Code will retry; if it keeps happening, try again in a minute.", action
+            return (
+                "The model is busy right now. Claude Code will retry; if it keeps happening, try again in a minute.",
+                action,
+            )
         if re.search(r"ECONNREFUSED|ENOTFOUND|fetch failed|network", t, re.I):
             return f"Could not reach the model endpoint — {t[:120] + '…' if len(t) > 120 else t}", action
         return t, action
@@ -324,8 +338,12 @@ class Store(QObject):
                 if isinstance(last, str):
                     self.open_session(last)
 
-        rpc.call("app.info").then(lambda r: (pending.__setitem__("info", r or {}), ready())).catch(lambda e: print("[store] app.info failed", e))
-        rpc.call("config.get").then(lambda r: (pending.__setitem__("config", r or {}), ready())).catch(lambda e: print("[store] config.get failed", e))
+        rpc.call("app.info").then(lambda r: (pending.__setitem__("info", r or {}), ready())).catch(
+            lambda e: print("[store] app.info failed", e)
+        )
+        rpc.call("config.get").then(lambda r: (pending.__setitem__("config", r or {}), ready())).catch(
+            lambda e: print("[store] config.get failed", e)
+        )
 
     def _on_msgs(self, d: Json) -> None:
         sid = d.get("id")
@@ -344,9 +362,15 @@ class Store(QObject):
                 self.patch_rt(sid, thinking_tokens=int(msg.get("estimated_tokens") or 0))
                 continue
             if msg.get("type") == "system" and msg.get("subtype") == "notification":
-                self.toast(str(msg.get("text") or ""), "warning" if msg.get("priority") in ("high", "immediate") else "info")
+                self.toast(
+                    str(msg.get("text") or ""), "warning" if msg.get("priority") in ("high", "immediate") else "info"
+                )
                 continue
-            if msg.get("type") == "stream_event" and (msg.get("event") or {}).get("type") == "message_start" and not msg.get("parent_tool_use_id"):
+            if (
+                msg.get("type") == "stream_event"
+                and (msg.get("event") or {}).get("type") == "message_start"
+                and not msg.get("parent_tool_use_id")
+            ):
                 r2 = self.rt.setdefault(sid, Runtime())
                 r2.thinking_tokens = 0
             m.push(msg)
@@ -384,7 +408,13 @@ class Store(QObject):
         if not sid:
             return
         tool = req.get("toolName")
-        label = "Claude has a question" if tool == "AskUserQuestion" else "A plan is ready for review" if tool == "ExitPlanMode" else f"Claude wants to use {req.get('displayName') or tool}"
+        label = (
+            "Claude has a question"
+            if tool == "AskUserQuestion"
+            else "A plan is ready for review"
+            if tool == "ExitPlanMode"
+            else f"Claude wants to use {req.get('displayName') or tool}"
+        )
         self.notify.emit(sid, label, self.title_of(sid))
         if not _app_focused():
             self.attention.emit()
@@ -475,7 +505,20 @@ class Store(QObject):
 
     def _save_ui(self) -> None:
         u = self.ui
-        rpc.call("config.set", {"ui": {"sidebar": u.sidebar, "panel": u.panel, "panelTab": u.panel_tab, "sidebarW": u.sidebar_w, "panelW": u.panel_w, "diffMode": u.diff_mode, "view": u.view}})
+        rpc.call(
+            "config.set",
+            {
+                "ui": {
+                    "sidebar": u.sidebar,
+                    "panel": u.panel,
+                    "panelTab": u.panel_tab,
+                    "sidebarW": u.sidebar_w,
+                    "panelW": u.panel_w,
+                    "diffMode": u.diff_mode,
+                    "view": u.view,
+                }
+            },
+        )
 
     def cycle_view(self) -> None:
         ids = [v["id"] for v in VIEW_MODES]
@@ -565,8 +608,25 @@ class Store(QObject):
 
         rpc.call("session.open", {"id": sid}).then(ok).catch(bad)
 
-    def create_session(self, cwd: str, worktree: Optional[Json] = None, mode: Optional[str] = None, model: Optional[str] = None, effort: Optional[str] = None, prompt: Optional[str] = None, images: Optional[List[Json]] = None, title: Optional[str] = None) -> Call:
-        params: Json = {"cwd": cwd, "worktree": worktree or None, "mode": mode, "model": model, "effort": effort, "title": title}
+    def create_session(
+        self,
+        cwd: str,
+        worktree: Optional[Json] = None,
+        mode: Optional[str] = None,
+        model: Optional[str] = None,
+        effort: Optional[str] = None,
+        prompt: Optional[str] = None,
+        images: Optional[List[Json]] = None,
+        title: Optional[str] = None,
+    ) -> Call:
+        params: Json = {
+            "cwd": cwd,
+            "worktree": worktree or None,
+            "mode": mode,
+            "model": model,
+            "effort": effort,
+            "title": title,
+        }
         call = self.call("session.create", {k: v for k, v in params.items() if v is not None})
 
         def made(r: Json) -> None:
@@ -575,17 +635,28 @@ class Store(QObject):
             def opened() -> None:
                 self.open_session(sid)
                 if (prompt and prompt.strip()) or images:
-                    self.send_message(sid, prompt or "", images=images or []).catch(lambda _e: prompt and self.insert_into_composer(sid, prompt, True))
+                    self.send_message(sid, prompt or "", images=images or []).catch(
+                        lambda _e: prompt and self.insert_into_composer(sid, prompt, True)
+                    )
 
             self.refresh_sessions(True, opened)
 
         call.then(made)
         return call
 
-    def send_message(self, sid: str, text: str, images: Optional[List[Json]] = None, files: Optional[List[Json]] = None, now: bool = False) -> Call:
+    def send_message(
+        self,
+        sid: str,
+        text: str,
+        images: Optional[List[Json]] = None,
+        files: Optional[List[Json]] = None,
+        now: bool = False,
+    ) -> Call:
         """``now`` steers: the current step is interrupted and this message goes first."""
         self.sent.emit(sid)
-        return self.call("session.send", {"id": sid, "text": text, "images": images or [], "files": files or [], "now": bool(now)})
+        return self.call(
+            "session.send", {"id": sid, "text": text, "images": images or [], "files": files or [], "now": bool(now)}
+        )
 
     def remove_held(self, sid: str, uuid: str) -> Call:
         return self.call("session.queue.remove", {"id": sid, "uuid": uuid})
@@ -617,7 +688,9 @@ class Store(QObject):
             self.set_dialog("newSession", {})
             return
         c = self.config or {}
-        self.create_session(d, mode=c.get("defaultMode"), model=c.get("defaultModel"), effort=c.get("defaultEffort")).catch(lambda _e: self.set_dialog("newSession", {"cwd": d}))
+        self.create_session(
+            d, mode=c.get("defaultMode"), model=c.get("defaultModel"), effort=c.get("defaultEffort")
+        ).catch(lambda _e: self.set_dialog("newSession", {"cwd": d}))
 
     def interrupt(self, sid: str) -> Call:
         return self.call("session.interrupt", {"id": sid})
@@ -651,7 +724,9 @@ class Store(QObject):
         return self.call("session.delete", {"id": sid, "removeWorktree": remove_worktree}).then(done)
 
     def archive_session(self, sid: str, archived: bool) -> Call:
-        return self.call("session.archive", {"id": sid, "archived": archived}).then(lambda _r: self.refresh_sessions(True))
+        return self.call("session.archive", {"id": sid, "archived": archived}).then(
+            lambda _r: self.refresh_sessions(True)
+        )
 
     def pin_session(self, sid: str, pinned: bool) -> Call:
         return self.call("session.pin", {"id": sid, "pinned": pinned}).then(lambda _r: self.refresh_sessions(True))
@@ -724,7 +799,11 @@ class Store(QObject):
 
         def bad(e: RpcError) -> None:
             msg = err_text(e)
-            error = "Quit Pilcrow and open it again to finish updating" if "unknown method" in msg.lower() else (msg or "Could not ask the gateway")
+            error = (
+                "Quit Pilcrow and open it again to finish updating"
+                if "unknown method" in msg.lower()
+                else (msg or "Could not ask the gateway")
+            )
             self.gateway_models = {"ok": False, "error": error}
             self.gateway_models_changed.emit(self.gateway_models)
 

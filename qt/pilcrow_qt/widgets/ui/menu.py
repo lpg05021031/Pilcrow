@@ -4,13 +4,14 @@ An item is a dict: ``{"label", "icon"?, "hint"?, "checked"?, "danger"?, "disable
 ``{"separator": True}`` or ``{"heading": str}``. ``show_menu(items, anchor)`` opens it under a widget;
 ``show_menu_at(items, global_pos)`` at a point (context menus).
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QMenu, QWidget, QWidgetAction, QLabel
+from PySide6.QtWidgets import QLabel, QMenu, QWidget, QWidgetAction
 
 from ... import icons, theme
 
@@ -33,7 +34,9 @@ def build_menu(items: List[Item], parent: Optional[QWidget] = None, width: int =
             lb.setProperty("tone", "faint")
             lb.setProperty("size", "micro")
             lb.setContentsMargins(10, 6, 10, 2)
-            lb.setStyleSheet(f"color: {t.text_3}; font-size: {theme.FS_MICRO}px; font-weight: 600; letter-spacing: 0.4px;")
+            lb.setStyleSheet(
+                f"color: {t.text_3}; font-size: {theme.FS_MICRO}px; font-weight: 600; letter-spacing: 0.4px;"
+            )
             wa.setDefaultWidget(lb)
             m.addAction(wa)
             continue

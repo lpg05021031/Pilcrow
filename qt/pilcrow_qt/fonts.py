@@ -5,6 +5,7 @@ the web interface ships. When the folder is empty (a checkout without the genera
 client falls back to the same families if the system has them, else the platform's default faces.
 Chinese glyphs come from the system's CJK face through Qt's own substitution.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -15,8 +16,24 @@ from . import theme
 
 FONT_DIR = Path(__file__).parent / "assets" / "fonts"
 
-UI_CANDIDATES = ["Inter Variable", "Inter", "Noto Sans CJK TC", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei UI", "Segoe UI"]
-MONO_CANDIDATES = ["JetBrains Mono Variable", "JetBrains Mono", "Noto Sans Mono CJK TC", "DejaVu Sans Mono", "Cascadia Mono", "Consolas", "Menlo"]
+UI_CANDIDATES = [
+    "Inter Variable",
+    "Inter",
+    "Noto Sans CJK TC",
+    "Noto Sans TC",
+    "PingFang TC",
+    "Microsoft JhengHei UI",
+    "Segoe UI",
+]
+MONO_CANDIDATES = [
+    "JetBrains Mono Variable",
+    "JetBrains Mono",
+    "Noto Sans Mono CJK TC",
+    "DejaVu Sans Mono",
+    "Cascadia Mono",
+    "Consolas",
+    "Menlo",
+]
 
 
 def load() -> tuple[str, str]:

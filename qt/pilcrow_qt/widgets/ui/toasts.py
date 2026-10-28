@@ -1,5 +1,6 @@
 """Toasts (web/src/components/Overlays.tsx Toasts): short messages that sit just above the composer,
 bottom right, and leave on their own; hovering keeps one."""
+
 from __future__ import annotations
 
 from typing import Callable, Optional
@@ -52,7 +53,9 @@ class ToastCard(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         tk = theme.tokens()
         color = {"info": tk.text_2, "success": tk.ok, "warning": tk.warn, "error": tk.err}.get(t.level, tk.text_2)
-        self.setStyleSheet(f"ToastCard {{ background: {theme.blend(tk.glass, tk.canvas).name()}; border: 1px solid {theme.blend(tk.hair_2, tk.raised).name()}; border-radius: {theme.R3}px; }}")
+        self.setStyleSheet(
+            f"ToastCard {{ background: {theme.blend(tk.glass, tk.canvas).name()}; border: 1px solid {theme.blend(tk.hair_2, tk.raised).name()}; border-radius: {theme.R3}px; }}"
+        )
         lay = QHBoxLayout(self)
         lay.setContentsMargins(12, 10, 10, 10)
         lay.setSpacing(10)

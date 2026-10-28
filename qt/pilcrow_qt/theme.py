@@ -8,6 +8,7 @@ nothing else.
 Widgets never carry literal colours. They either paint with ``tokens()`` or are styled by the
 global stylesheet through object names and dynamic properties (``setProperty("tone", "accent")``).
 """
+
 from __future__ import annotations
 
 import math
@@ -298,6 +299,7 @@ def blend(fg: str, bg: str) -> QColor:
 
 # ---------------------------------------------------------------- springs
 
+
 def _spring(stiffness: float, damping: float, mass: float = 1.0) -> Callable[[float], float]:
     """A damped mass-spring sampled by progress: the curves in tokens.css, generated rather than tabulated."""
     w0 = math.sqrt(stiffness / mass)
@@ -306,7 +308,9 @@ def _spring(stiffness: float, damping: float, mass: float = 1.0) -> Callable[[fl
 
     def at(seconds: float) -> float:
         if zeta < 1:
-            return 1 - math.exp(-zeta * w0 * seconds) * (math.cos(wd * seconds) + (zeta * w0 / wd) * math.sin(wd * seconds))
+            return 1 - math.exp(-zeta * w0 * seconds) * (
+                math.cos(wd * seconds) + (zeta * w0 / wd) * math.sin(wd * seconds)
+            )
         return 1 - (1 + w0 * seconds) * math.exp(-w0 * seconds)
 
     return at
@@ -390,6 +394,7 @@ def px_to_pt(px: float) -> float:
 
 
 # ---------------------------------------------------------------- the stylesheet
+
 
 def stylesheet(t: Tokens) -> str:
     """The global QSS, from the tokens. Object names and dynamic properties are the selectors."""
@@ -508,6 +513,7 @@ def palette(t: Tokens) -> QPalette:
 
 
 # ---------------------------------------------------------------- the live theme
+
 
 class Theme(QObject):
     """The theme in force. ``changed`` fires after the stylesheet and palette are re-applied."""

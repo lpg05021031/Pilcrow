@@ -5,6 +5,7 @@ before the content is hidden, so collapsing feels as deliberate as expanding. Co
 already open when it first shows appears without animation. The body is built lazily the first
 time it opens (``builder``), like the function children in the React version.
 """
+
 from __future__ import annotations
 
 from typing import Callable, Optional
@@ -54,7 +55,13 @@ class Collapse(QWidget):
             self._anim = None
         if open_:
             self._ensure_body()
-        if not animate or store.reduced_motion or (first and open_) or not self.isVisibleTo(self.parentWidget()) and not open_:
+        if (
+            not animate
+            or store.reduced_motion
+            or (first and open_)
+            or not self.isVisibleTo(self.parentWidget())
+            and not open_
+        ):
             self.setMaximumHeight(16777215)
             self.setVisible(open_)
             return
@@ -62,11 +69,19 @@ class Collapse(QWidget):
             self.setMaximumHeight(0)
             self.setVisible(True)
             target = self._body.sizeHint().height() if self._body is not None else 0
-            self._run(0, target, theme.spring_soft(), min(420, 240 + target // 5), lambda: self.setMaximumHeight(16777215))
+            self._run(
+                0, target, theme.spring_soft(), min(420, 240 + target // 5), lambda: self.setMaximumHeight(16777215)
+            )
         else:
             start = self.height()
             self.setMaximumHeight(start)
-            self._run(start, 0, theme.ease_exit(), min(260, 160 + start // 10), lambda: (self.setVisible(False), self.setMaximumHeight(16777215)))
+            self._run(
+                start,
+                0,
+                theme.ease_exit(),
+                min(260, 160 + start // 10),
+                lambda: (self.setVisible(False), self.setMaximumHeight(16777215)),
+            )
 
     def _run(self, a: int, b: int, curve, ms: int, done: Callable[[], None]) -> None:
         anim = QPropertyAnimation(self, b"maximumHeight", self)

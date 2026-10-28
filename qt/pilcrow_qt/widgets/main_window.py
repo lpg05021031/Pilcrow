@@ -1,5 +1,6 @@
 """The window (a port of web/src/components/App.tsx): sidebar | main column | side panel, the
 keyboard shortcuts, the boot screen, the offline bar, dialogs and toasts."""
+
 from __future__ import annotations
 
 from typing import Optional
@@ -88,7 +89,11 @@ class MainWindow(QMainWindow):
         store.dialog_changed.connect(self._on_dialog)
         bind(store.toasts_changed, self, lambda _t: self._ensure_toasts())
         store.notify.connect(self._notify)
-        bind(store.attention, self, lambda: QTimer.singleShot(0, self.activateWindow) if not self.isActiveWindow() else None)
+        bind(
+            store.attention,
+            self,
+            lambda: QTimer.singleShot(0, self.activateWindow) if not self.isActiveWindow() else None,
+        )
         self._on_ui()
         self._route()
 
@@ -150,7 +155,15 @@ class MainWindow(QMainWindow):
     def _set_title(self) -> None:
         waiting = sum(1 for s in store.sessions if s.get("status") == "requires_action")
         session = store.active_session()
-        head = "Control room — " if store.page == "overview" else "Inbox — " if store.page == "inbox" else f"{session.get('title')} — " if session else ""
+        head = (
+            "Control room — "
+            if store.page == "overview"
+            else "Inbox — "
+            if store.page == "inbox"
+            else f"{session.get('title')} — "
+            if session
+            else ""
+        )
         self.setWindowTitle(f"{f'({waiting}) ' if waiting else ''}{head}{self._title}")
 
     def _on_ui(self) -> None:
@@ -248,7 +261,12 @@ class MainWindow(QMainWindow):
         sid = store.active_id
         r = store.rt_of(sid)
         fw = self.focusWidget()
-        typing = fw is not None and fw.metaObject().className() in ("QLineEdit", "QTextEdit", "QPlainTextEdit", "ComposerEdit")
+        typing = fw is not None and fw.metaObject().className() in (
+            "QLineEdit",
+            "QTextEdit",
+            "QPlainTextEdit",
+            "ComposerEdit",
+        )
         if sid and r is not None and not typing and r.status in ("running", "starting"):
             store.interrupt(sid)
 
@@ -279,7 +297,9 @@ class OfflineBar(QWidget):
     def _paint(self) -> None:
         t = theme.tokens()
         self.ico.setPixmap(icons.pixmap("wifi-off", t.warn, 14))
-        self.setStyleSheet(f"#offline {{ background: {theme.blend(t.warn_wash, t.canvas).name()}; border-bottom: 1px solid {theme.blend(t.hair, t.canvas).name()}; }} QLabel {{ color: {t.text}; font-size: {theme.FS_SMALL}px; }}")
+        self.setStyleSheet(
+            f"#offline {{ background: {theme.blend(t.warn_wash, t.canvas).name()}; border-bottom: 1px solid {theme.blend(t.hair, t.canvas).name()}; }} QLabel {{ color: {t.text}; font-size: {theme.FS_SMALL}px; }}"
+        )
 
 
 class UpdateNotice(OfflineBar):
@@ -296,7 +316,11 @@ class UpdateNotice(OfflineBar):
             self.hide()
             return
         newer = _compare_versions(str(server), __version__) > 0
-        self.text.setText(f"Pilcrow {server} is installed. Quit Pilcrow and open it again to use it." if newer else f"Pilcrow {__version__} is installed, but its background process is still {server}. Quit Pilcrow and open it again to finish updating.")
+        self.text.setText(
+            f"Pilcrow {server} is installed. Quit Pilcrow and open it again to use it."
+            if newer
+            else f"Pilcrow {__version__} is installed, but its background process is still {server}. Quit Pilcrow and open it again to finish updating."
+        )
         self.ico.setPixmap(icons.pixmap("refresh-cw", theme.tokens().info, 14))
         self.show()
 
@@ -341,12 +365,24 @@ class Boot(QWidget):
         self._slow = QTimer(self)
         self._slow.setSingleShot(True)
         self._slow.setInterval(5000)
-        self._slow.timeout.connect(lambda: not self._connected and self.line.setText("Starting the background process — the first launch takes a moment"))
+        self._slow.timeout.connect(
+            lambda: (
+                not self._connected
+                and self.line.setText("Starting the background process — the first launch takes a moment")
+            )
+        )
         self._slow.start()
         self._slower = QTimer(self)
         self._slower.setSingleShot(True)
         self._slower.setInterval(16000)
-        self._slower.timeout.connect(lambda: not self._connected and self.line.setText("Still trying to reach the background process. If this keeps up, quit Pilcrow and open it again."))
+        self._slower.timeout.connect(
+            lambda: (
+                not self._connected
+                and self.line.setText(
+                    "Still trying to reach the background process. If this keeps up, quit Pilcrow and open it again."
+                )
+            )
+        )
         self._slower.start()
         bind(theme.theme.changed, self, lambda _t: self._paint())
         self._paint()

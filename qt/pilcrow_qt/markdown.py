@@ -5,6 +5,7 @@ inline-styled spans using the theme's ``cm_*`` colours, since QTextDocument know
 Tables, lists, links, images and task lists come through; raw HTML is dropped (QTextDocument would
 render only some of it, and the web version sanitises it too).
 """
+
 from __future__ import annotations
 
 import html
@@ -28,22 +29,97 @@ except ImportError:  # pragma: no cover
     lex = None  # type: ignore[assignment]
 
 LANG_NAMES = {
-    "ts": "TypeScript", "tsx": "TSX", "typescript": "TypeScript", "js": "JavaScript", "jsx": "JSX", "javascript": "JavaScript", "mjs": "JavaScript", "cjs": "JavaScript",
-    "py": "Python", "python": "Python", "sh": "Shell", "bash": "Shell", "zsh": "Shell", "shell": "Shell", "console": "Terminal", "json": "JSON", "jsonc": "JSON", "yaml": "YAML", "yml": "YAML",
-    "toml": "TOML", "md": "Markdown", "markdown": "Markdown", "html": "HTML", "css": "CSS", "scss": "SCSS", "sql": "SQL", "c": "C", "h": "C", "cpp": "C++", "c++": "C++", "cc": "C++", "hpp": "C++",
-    "cs": "C#", "java": "Java", "kt": "Kotlin", "go": "Go", "rs": "Rust", "rust": "Rust", "rb": "Ruby", "php": "PHP", "swift": "Swift", "diff": "Diff", "patch": "Diff", "dockerfile": "Dockerfile",
-    "makefile": "Makefile", "make": "Makefile", "verilog": "Verilog", "v": "Verilog", "sv": "SystemVerilog", "systemverilog": "SystemVerilog", "vhdl": "VHDL", "tcl": "Tcl", "perl": "Perl", "pl": "Perl",
-    "r": "R", "matlab": "MATLAB", "lua": "Lua", "xml": "XML", "ini": "INI", "text": "Text", "txt": "Text", "plaintext": "Text", "csv": "CSV", "graphql": "GraphQL", "proto": "Protobuf",
+    "ts": "TypeScript",
+    "tsx": "TSX",
+    "typescript": "TypeScript",
+    "js": "JavaScript",
+    "jsx": "JSX",
+    "javascript": "JavaScript",
+    "mjs": "JavaScript",
+    "cjs": "JavaScript",
+    "py": "Python",
+    "python": "Python",
+    "sh": "Shell",
+    "bash": "Shell",
+    "zsh": "Shell",
+    "shell": "Shell",
+    "console": "Terminal",
+    "json": "JSON",
+    "jsonc": "JSON",
+    "yaml": "YAML",
+    "yml": "YAML",
+    "toml": "TOML",
+    "md": "Markdown",
+    "markdown": "Markdown",
+    "html": "HTML",
+    "css": "CSS",
+    "scss": "SCSS",
+    "sql": "SQL",
+    "c": "C",
+    "h": "C",
+    "cpp": "C++",
+    "c++": "C++",
+    "cc": "C++",
+    "hpp": "C++",
+    "cs": "C#",
+    "java": "Java",
+    "kt": "Kotlin",
+    "go": "Go",
+    "rs": "Rust",
+    "rust": "Rust",
+    "rb": "Ruby",
+    "php": "PHP",
+    "swift": "Swift",
+    "diff": "Diff",
+    "patch": "Diff",
+    "dockerfile": "Dockerfile",
+    "makefile": "Makefile",
+    "make": "Makefile",
+    "verilog": "Verilog",
+    "v": "Verilog",
+    "sv": "SystemVerilog",
+    "systemverilog": "SystemVerilog",
+    "vhdl": "VHDL",
+    "tcl": "Tcl",
+    "perl": "Perl",
+    "pl": "Perl",
+    "r": "R",
+    "matlab": "MATLAB",
+    "lua": "Lua",
+    "xml": "XML",
+    "ini": "INI",
+    "text": "Text",
+    "txt": "Text",
+    "plaintext": "Text",
+    "csv": "CSV",
+    "graphql": "GraphQL",
+    "proto": "Protobuf",
 }
 # Pygments lexer aliases for the names Claude writes in fences.
-LEXER_ALIAS = {"sh": "bash", "shell": "bash", "zsh": "bash", "console": "console", "jsonc": "json", "tsx": "tsx", "jsx": "jsx", "vue": "html", "svelte": "html", "sv": "systemverilog", "v": "verilog", "make": "makefile", "c++": "cpp", "txt": "text", "plaintext": "text"}
+LEXER_ALIAS = {
+    "sh": "bash",
+    "shell": "bash",
+    "zsh": "bash",
+    "console": "console",
+    "jsonc": "json",
+    "tsx": "tsx",
+    "jsx": "jsx",
+    "vue": "html",
+    "svelte": "html",
+    "sv": "systemverilog",
+    "v": "verilog",
+    "make": "makefile",
+    "c++": "cpp",
+    "txt": "text",
+    "plaintext": "text",
+}
 
 
 def lang_label(lang: str) -> str:
     return LANG_NAMES.get(lang.lower(), lang) if lang else "Text"
 
 
-def _md() -> "MarkdownIt":
+def _md() -> MarkdownIt:
     md = MarkdownIt("gfm-like" if MarkdownIt else "commonmark", {"html": False, "linkify": True, "typographer": False})
     try:
         md.enable("table")
@@ -53,10 +129,10 @@ def _md() -> "MarkdownIt":
     return md
 
 
-_parser: Optional["MarkdownIt"] = None
+_parser: Optional[MarkdownIt] = None
 
 
-def parser() -> "MarkdownIt":
+def parser() -> MarkdownIt:
     global _parser
     if _parser is None:
         _parser = _md()
@@ -64,6 +140,7 @@ def parser() -> "MarkdownIt":
 
 
 # ---------------------------------------------------------------- code highlighting
+
 
 def _style_for(ttype, t: theme.Tokens) -> Optional[str]:
     if ttype in Comment:
@@ -118,6 +195,7 @@ def highlight_html(code: str, lang: str, theme_name: str) -> str:
 
 # ---------------------------------------------------------------- rendering
 
+
 def render_html(src: str, streaming: bool = False, base_dir: Optional[str] = None, compact: bool = False) -> str:
     """Markdown → HTML body for ``QTextDocument.setHtml``/``QLabel`` rich text."""
     if not src:
@@ -160,15 +238,36 @@ def _post_process(body: str, t: theme.Tokens, base_dir: Optional[str], compact: 
         )
 
     body = _FENCE_RE.sub(fence, body)
-    body = body.replace("<code>", f'<code style="font-family:\'{mono}\';font-size:{theme.MONO_SIZE}px;background:{theme.blend(t.fill_1, t.canvas).name()};border-radius:3px">')
+    body = body.replace(
+        "<code>",
+        f"<code style=\"font-family:'{mono}';font-size:{theme.MONO_SIZE}px;background:{theme.blend(t.fill_1, t.canvas).name()};border-radius:3px\">",
+    )
     body = re.sub(r"<a href=", f'<a style="color:{t.accent_text};text-decoration:none" href=', body)
-    body = body.replace("<blockquote>", f'<blockquote style="border-left:2px solid {theme.blend(t.hair_3, t.canvas).name()};margin:6px 0;padding-left:10px;color:{t.text_2}">')
-    body = body.replace("<table>", f'<table cellpadding="5" cellspacing="0" style="border:1px solid {hair};margin:6px 0">')
-    body = body.replace("<th>", f'<th style="border-bottom:1px solid {hair};background:{theme.blend(t.fill_1, t.canvas).name()};text-align:left">')
+    body = body.replace(
+        "<blockquote>",
+        f'<blockquote style="border-left:2px solid {theme.blend(t.hair_3, t.canvas).name()};margin:6px 0;padding-left:10px;color:{t.text_2}">',
+    )
+    body = body.replace(
+        "<table>", f'<table cellpadding="5" cellspacing="0" style="border:1px solid {hair};margin:6px 0">'
+    )
+    body = body.replace(
+        "<th>",
+        f'<th style="border-bottom:1px solid {hair};background:{theme.blend(t.fill_1, t.canvas).name()};text-align:left">',
+    )
     body = body.replace("<hr>", f'<hr style="border:none;border-top:1px solid {hair}">')
-    body = re.sub(r"<h([1-6])>", lambda m: f'<h{m.group(1)} style="font-size:{[theme.FS_DISPLAY, theme.FS_TITLE, theme.FS_H, theme.FS_H, theme.FS_UI, theme.FS_UI][int(m.group(1)) - 1]}px;font-weight:600;margin:10px 0 4px">', body)
+    body = re.sub(
+        r"<h([1-6])>",
+        lambda m: (
+            f'<h{m.group(1)} style="font-size:{[theme.FS_DISPLAY, theme.FS_TITLE, theme.FS_H, theme.FS_H, theme.FS_UI, theme.FS_UI][int(m.group(1)) - 1]}px;font-weight:600;margin:10px 0 4px">'
+        ),
+        body,
+    )
     if base_dir:
-        body = re.sub(r'<img src="(?!https?:|data:|/)([^"]+)"', lambda m: f'<img src="{html.escape(_join(base_dir, html.unescape(m.group(1))))}"', body)
+        body = re.sub(
+            r'<img src="(?!https?:|data:|/)([^"]+)"',
+            lambda m: f'<img src="{html.escape(_join(base_dir, html.unescape(m.group(1))))}"',
+            body,
+        )
     if compact:
         body = body.replace("<p>", '<p style="margin:0">')
     return body
@@ -206,7 +305,9 @@ def split_blocks(src: str) -> list[str]:
 
 
 PATH_RE = re.compile(r"^(?:\.{0,2}/)?(?:[\w@.+-]+/)*[\w@.+-]+\.[A-Za-z0-9]{1,10}(?::(\d+)(?:-\d+)?)?$")
-KNOWN_EXT = set("ts tsx js jsx mjs cjs mts cts json jsonc md mdx css scss sass less html htm vue svelte astro py pyi rb go rs java kt kts swift m mm c h cc cpp hpp cs fs php pl sh bash zsh fish ps1 psm1 bat cmd yml yaml toml ini cfg conf env txt log sql graphql gql proto xml svg png jpg jpeg gif webp ico pdf csv tsv lock map wasm dockerfile makefile gradle properties plist tf hcl ex exs erl hs ml elm clj cljs scala dart lua r jl nim zig v sol ipynb".split())
+KNOWN_EXT = set(
+    "ts tsx js jsx mjs cjs mts cts json jsonc md mdx css scss sass less html htm vue svelte astro py pyi rb go rs java kt kts swift m mm c h cc cpp hpp cs fs php pl sh bash zsh fish ps1 psm1 bat cmd yml yaml toml ini cfg conf env txt log sql graphql gql proto xml svg png jpg jpeg gif webp ico pdf csv tsv lock map wasm dockerfile makefile gradle properties plist tf hcl ex exs erl hs ml elm clj cljs scala dart lua r jl nim zig v sol ipynb".split()
+)
 
 
 def as_path_ref(text: str) -> Optional[dict]:

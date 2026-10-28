@@ -1,0 +1,13 @@
+# Lint and format rules for the Qt client (python -m ruff check qt; python -m ruff format qt).
+line-length = 120
+target-version = "py39"
+
+[lint]
+select = ["E", "F", "W", "B", "I", "UP", "N"]
+ignore = ["N802", "E501", "UP007", "UP035", "UP006", "UP045", "B008"]
+
+[lint.per-file-ignores]
+"tests/*" = ["F401", "F811"]
+
+[format]
+quote-style = "double"

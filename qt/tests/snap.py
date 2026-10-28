@@ -5,6 +5,7 @@
 Used while building the client (the screenshots are how the work is checked without a display) and
 by the pytest suite. Exits non-zero when the scenario raises.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -24,7 +25,13 @@ if sys.platform == "win32":
 
 
 def start_mock(port: int, long: int = 60) -> subprocess.Popen:
-    p = subprocess.Popen(["node", str(ROOT / "test" / "mock" / "mock-server.mjs"), str(port)], cwd=str(ROOT), env={**os.environ, "MOCK_LONG": str(long)}, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    p = subprocess.Popen(
+        ["node", str(ROOT / "test" / "mock" / "mock-server.mjs"), str(port)],
+        cwd=str(ROOT),
+        env={**os.environ, "MOCK_LONG": str(long)},
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.STDOUT,
+    )
     for _ in range(100):
         try:
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/hello", timeout=1):
@@ -117,7 +124,12 @@ def scenario_steps(name: str, win, store, out: Path):
     if name == "overview":
         return [wait_loaded, (500, lambda: store.show_page("overview")), (300, lambda: shot(win, out, "overview"))]
     if name == "light":
-        return [wait_loaded, (300, lambda: store.set_theme("light")), (700, lambda: store.open_session("sess-login")), (300, lambda: shot(win, out, "light"))]
+        return [
+            wait_loaded,
+            (300, lambda: store.set_theme("light")),
+            (700, lambda: store.open_session("sess-login")),
+            (300, lambda: shot(win, out, "light")),
+        ]
     if name == "turn":
         return [
             wait_loaded,

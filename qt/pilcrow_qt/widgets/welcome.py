@@ -1,4 +1,5 @@
 """The welcome page (a port of web/src/components/Welcome.tsx): shown when no session is open."""
+
 from __future__ import annotations
 
 from typing import Optional
@@ -35,10 +36,14 @@ class Welcome(QWidget):
         self.title = label("Pilcrow", size="title")
         self.title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         il.addWidget(self.title)
-        self.sub = label("A desktop for Claude Code. Start a session in a folder and ask for something.", tone="muted", wrap=True)
+        self.sub = label(
+            "A desktop for Claude Code. Start a session in a folder and ask for something.", tone="muted", wrap=True
+        )
         self.sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
         il.addWidget(self.sub)
-        self.new_btn = button("New session", kind="primary", icon="square-pen", on_click=lambda: store.set_dialog("newSession", {}))
+        self.new_btn = button(
+            "New session", kind="primary", icon="square-pen", on_click=lambda: store.set_dialog("newSession", {})
+        )
         il.addWidget(self.new_btn, 0, Qt.AlignmentFlag.AlignHCenter)
         self.folders = QVBoxLayout()
         self.folders.setSpacing(4)

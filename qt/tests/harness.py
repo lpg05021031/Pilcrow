@@ -11,6 +11,7 @@ Each test module should pick its own mock port (``MOCK_PORT`` module attribute) 
 in parallel. ``c.call`` talks to the mock through the client's own socket (the ``mock.*`` methods
 reset it, set the streaming pace, touch a session).
 """
+
 from __future__ import annotations
 
 import os
@@ -96,7 +97,9 @@ class Client:
 
     def call(self, method: str, params: Optional[dict] = None, timeout: float = 10.0) -> Any:
         box: dict = {}
-        self.rpc.call(method, params or {}).then(lambda r: box.__setitem__("r", r)).catch(lambda e: box.__setitem__("e", e))
+        self.rpc.call(method, params or {}).then(lambda r: box.__setitem__("r", r)).catch(
+            lambda e: box.__setitem__("e", e)
+        )
         self.wait_until(lambda: "r" in box or "e" in box, timeout, method)
         if "e" in box:
             raise box["e"]
@@ -104,7 +107,9 @@ class Client:
 
     def open(self, sid: str) -> None:
         self.store.open_session(sid)
-        self.wait_until(lambda: (self.store.rt.get(sid) or None) is not None and self.store.rt[sid].loaded, 10, f"session {sid}")
+        self.wait_until(
+            lambda: (self.store.rt.get(sid) or None) is not None and self.store.rt[sid].loaded, 10, f"session {sid}"
+        )
         self.sleep(200)
 
     def shot(self, name: str) -> Path:

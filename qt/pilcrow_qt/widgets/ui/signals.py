@@ -4,6 +4,7 @@ A lambda connected to a long-lived signal keeps running after the widget it capt
 then touches a deleted C++ object. ``bind(signal, owner, fn)`` connects ``fn`` and disconnects it
 again when ``owner`` is destroyed. Use it for every connection whose sender outlives the widget.
 """
+
 from __future__ import annotations
 
 from typing import Any, Callable

@@ -4,6 +4,7 @@ The wire: a request is ``{t:'req', id, m, p}``; a response ``{t:'res', id, ok, r
 ``{t:'ev', e, d}``. ``call()`` returns a :class:`Call` whose ``then``/``catch`` run on the Qt thread
 when the answer arrives; ``on()`` subscribes to an event by name.
 """
+
 from __future__ import annotations
 
 import json
@@ -31,14 +32,14 @@ class Call(QObject):
         self._value: Any = None
         self._error: Optional[RpcError] = None
 
-    def then(self, fn: Callable[[Any], None]) -> "Call":
+    def then(self, fn: Callable[[Any], None]) -> Call:
         if self._done and self._error is None:
             fn(self._value)
         else:
             self._ok.append(fn)
         return self
 
-    def catch(self, fn: Callable[[RpcError], None]) -> "Call":
+    def catch(self, fn: Callable[[RpcError], None]) -> Call:
         if self._done and self._error is not None:
             fn(self._error)
         else:

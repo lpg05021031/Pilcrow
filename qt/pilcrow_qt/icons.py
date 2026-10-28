@@ -4,6 +4,7 @@ The SVGs in assets/icons are stroke-based with ``currentColor`` (scripts/extract
 them from lucide-react). ``icon("square-terminal", color="#9c9c9c", size=14)`` renders one at the
 device pixel ratio and caches it.
 """
+
 from __future__ import annotations
 
 from functools import lru_cache
@@ -56,7 +57,9 @@ def _pixmap(name: str, color: str, size: int, stroke: float) -> QPixmap:
     return pm
 
 
-def icon(name: str, color: str | QColor = "#9c9c9c", size: int = 16, stroke: float = STROKE, hover: Optional[str] = None) -> QIcon:
+def icon(
+    name: str, color: str | QColor = "#9c9c9c", size: int = 16, stroke: float = STROKE, hover: Optional[str] = None
+) -> QIcon:
     """A QIcon for buttons and actions. ``hover`` tints the Active mode (Qt uses it for hovered buttons)."""
     ic = QIcon()
     ic.addPixmap(pixmap(name, color, size, stroke), QIcon.Mode.Normal)

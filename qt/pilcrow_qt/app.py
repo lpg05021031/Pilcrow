@@ -1,4 +1,5 @@
 """QApplication setup: fonts, theme, the server to talk to, the main window."""
+
 from __future__ import annotations
 
 import json
@@ -10,7 +11,7 @@ import urllib.request
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
@@ -19,8 +20,8 @@ from .rpc import rpc
 from .store import store
 from .theme import theme
 
-
 # ---------------------------------------------------------------- finding or starting the server
+
 
 def _state_dir() -> Path:
     if sys.platform == "win32":
@@ -72,9 +73,18 @@ class ServerProcess:
     def start(self, timeout: float = 25.0) -> str:
         main_js = self.dir / "server" / "main.js"
         if not main_js.exists():
-            raise RuntimeError(f"Pilcrow is not installed at {self.dir} (no server/main.js). Run pilcrow-install.sh, or pass --dir.")
+            raise RuntimeError(
+                f"Pilcrow is not installed at {self.dir} (no server/main.js). Run pilcrow-install.sh, or pass --dir."
+            )
         env = {**os.environ, "PILCROW_SHELL_ENV": "0"}
-        self.proc = subprocess.Popen([self.node, str(main_js), "--shell=none"], cwd=str(self.dir), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        self.proc = subprocess.Popen(
+            [self.node, str(main_js), "--shell=none"],
+            cwd=str(self.dir),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
         deadline = time.time() + timeout
         while time.time() < deadline:
             url = existing_server()
@@ -99,7 +109,15 @@ class ServerProcess:
 
 # ---------------------------------------------------------------- the app
 
-def run(url: str = "", install_dir: str = "", node: str = "", keep_server: bool = False, title: str = "Pilcrow", lite: bool = False) -> int:
+
+def run(
+    url: str = "",
+    install_dir: str = "",
+    node: str = "",
+    keep_server: bool = False,
+    title: str = "Pilcrow",
+    lite: bool = False,
+) -> int:
     # High-DPI is Qt 6's default; the rest is ours.
     QApplication.setApplicationName("Pilcrow")
     QApplication.setOrganizationName("Pilcrow")
