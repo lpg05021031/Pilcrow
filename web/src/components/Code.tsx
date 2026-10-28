@@ -9,7 +9,7 @@ import type { DiffHunk, DiffLine } from '../lib/types';
 type Range = [number, number];
 
 function renderContent(text: string, toks?: Tok[] | null, ranges?: Range[] | null): ReactNode {
-  if (!toks && !ranges?.length) return text || '​';
+  if (!toks && !ranges?.length) return text || '\u200b';
   const segs = toks && toks.length ? toks : [{ t: text } as Tok];
   const rs = ranges || [];
   const out: ReactNode[] = [];
@@ -42,7 +42,7 @@ function renderContent(text: string, toks?: Tok[] | null, ranges?: Range[] | nul
     }
     pos += s.length;
   }
-  return out.length ? out : '​';
+  return out.length ? out : '\u200b';
 }
 
 /** Token lines for a text, filled in once highlighting finishes. */
