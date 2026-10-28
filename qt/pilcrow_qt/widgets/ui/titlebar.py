@@ -129,13 +129,13 @@ class EdgeResizer(QObject):
 
 
 def _cursor_for(edges: Qt.Edges) -> Qt.CursorShape:
-    l, r = bool(edges & Qt.Edge.LeftEdge), bool(edges & Qt.Edge.RightEdge)
+    left, right = bool(edges & Qt.Edge.LeftEdge), bool(edges & Qt.Edge.RightEdge)
     t, b = bool(edges & Qt.Edge.TopEdge), bool(edges & Qt.Edge.BottomEdge)
-    if (l and t) or (r and b):
+    if (left and t) or (right and b):
         return Qt.CursorShape.SizeFDiagCursor
-    if (r and t) or (l and b):
+    if (right and t) or (left and b):
         return Qt.CursorShape.SizeBDiagCursor
-    if l or r:
+    if left or right:
         return Qt.CursorShape.SizeHorCursor
     if t or b:
         return Qt.CursorShape.SizeVerCursor

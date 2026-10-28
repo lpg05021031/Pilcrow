@@ -384,7 +384,7 @@ def font_ui(size: float = FS_UI, weight: int = QFont.Weight.Normal, italic: bool
     f = QFont(_UI_FAMILY or QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont).family())
     # Pixel sizes, like the CSS: a point size would follow the X server's idea of the DPI (Xft.dpi,
     # often wrong on Linux), and the rows are laid out in pixels. HiDPI scaling still applies.
-    f.setPixelSize(max(1, int(round(size))))
+    f.setPixelSize(max(1, int(size + 0.5)))  # half up, like the CSS engines round 14.5px
     f.setWeight(_weight(weight))
     f.setItalic(italic)
     return f
@@ -392,7 +392,7 @@ def font_ui(size: float = FS_UI, weight: int = QFont.Weight.Normal, italic: bool
 
 def font_mono(size: float = MONO_SIZE, weight: int = QFont.Weight.Normal) -> QFont:
     f = QFont(_MONO_FAMILY or QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont).family())
-    f.setPixelSize(max(1, int(round(size))))
+    f.setPixelSize(max(1, int(size + 0.5)))
     f.setWeight(_weight(weight))
     f.setStyleHint(QFont.StyleHint.Monospace)
     return f

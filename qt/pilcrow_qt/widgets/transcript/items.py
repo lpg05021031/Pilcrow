@@ -71,8 +71,10 @@ VERBS = [
 
 
 def pt(px: float) -> str:
-    """A CSS pixel size as the point size QSS takes (``font-size: 14.5px`` would be read as 0)."""
-    return f"{theme.px_to_pt(px):g}pt"
+    """A CSS size for a stylesheet: whole pixels, rounded half-up like ``theme.font_ui``, so what a
+    row measures with and what it draws with are the same font (points would follow the X server's
+    DPI and drift from the pixel-sized layout)."""
+    return f"{int(px + 0.5)}px"
 
 
 def style_label(lb: QLabel, px: float, color: str, weight: int = 400, extra: str = "") -> None:
@@ -578,7 +580,7 @@ def render_mentions(text: str) -> str:
         esc = html.escape(part)
         if i % 2 == 1 and len(part) > 1:
             out.append(
-                f"<span style=\"font-family:'{mono}';font-size:{theme.px_to_pt(theme.FS_BODY * 0.88):g}pt;color:{t.info}\">{esc}</span>"
+                f"<span style=\"font-family:'{mono}';font-size:{int(theme.FS_BODY * 0.88 + 0.5)}px;color:{t.info}\">{esc}</span>"
             )
         else:
             out.append(esc)

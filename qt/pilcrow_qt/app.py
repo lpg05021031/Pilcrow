@@ -170,9 +170,7 @@ def _crash_log() -> None:
         log_dir = _state_dir().parent / "pilcrow-host" if sys.platform != "win32" else _state_dir()
         log_dir.mkdir(parents=True, exist_ok=True)
         f = open(log_dir / "qt-crash.log", "a", encoding="utf-8")  # noqa: SIM115 - kept open for the process's life
-        f.write(f"
---- {time.strftime('%Y-%m-%d %H:%M:%S')} pilcrow_qt started (pid {os.getpid()})
-")
+        f.write(f"\n--- {time.strftime('%Y-%m-%d %H:%M:%S')} pilcrow_qt started (pid {os.getpid()})\n")
         f.flush()
         faulthandler.enable(file=f, all_threads=True)
 
