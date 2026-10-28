@@ -76,11 +76,12 @@ class Client:
 
     # ---- helpers
     def wait_until(self, cond: Callable[[], Any], timeout: float = 10.0, what: str = "") -> Any:
-        from PySide6.QtCore import QCoreApplication
+        from PySide6.QtCore import QCoreApplication, QEvent
 
         end = time.monotonic() + timeout
         while time.monotonic() < end:
             QCoreApplication.processEvents()
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
             v = cond()
             if v:
                 return v
@@ -88,11 +89,12 @@ class Client:
         raise AssertionError(f"timed out waiting for {what or cond}")
 
     def sleep(self, ms: int) -> None:
-        from PySide6.QtCore import QCoreApplication
+        from PySide6.QtCore import QCoreApplication, QEvent
 
         end = time.monotonic() + ms / 1000
         while time.monotonic() < end:
             QCoreApplication.processEvents()
+            QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
             time.sleep(0.005)
 
     def call(self, method: str, params: Optional[dict] = None, timeout: float = 10.0) -> Any:
@@ -132,9 +134,26 @@ class Client:
         return out
 
     def close(self) -> None:
+        """Close the window and the socket, and put the store back to its blank state for the next test."""
         self.rpc.close()
         self.win.close()
-        self.app.processEvents()
+        self.win.deleteLater()
+        self.sleep(150)  # the socket's close round-trip; a new client must not inherit a closing one
+        st = self.store
+        st.active_id = None
+        st.rt.clear()
+        st.models.clear()
+        st.sessions = []
+        st.sessions_loaded = False
+        st.page = "session"
+        for k in list(st.dialogs):
+            st.dialogs[k] = None if k not in ("settings", "palette", "shortcuts") else False
+        st.toasts = []
+        st.unread.clear()
+        st.timeline.clear()
+        st._buffered.clear()
+        st._opening.clear()
+        self.sleep(50)
 
 
 @pytest.fixture(scope="module")

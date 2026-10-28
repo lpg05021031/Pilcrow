@@ -228,13 +228,18 @@ class Sidebar(QWidget):
             item = self.list.takeAt(0)
             w = item.widget()
             if w is not None and not isinstance(w, SessionRow):
+                w.hide()  # gone from the screen now; the C++ object follows when the loop gets to it
+                w.setParent(None)
                 w.deleteLater()
             elif w is not None:
                 w.setParent(None)
         keep = {s.get("id") for s in lst}
         for sid in list(self._rows):
             if sid not in keep:
-                self._rows.pop(sid).deleteLater()
+                row = self._rows.pop(sid)
+                row.hide()
+                row.setParent(None)
+                row.deleteLater()
         idx = 0
 
         def add(w: QWidget) -> None:
