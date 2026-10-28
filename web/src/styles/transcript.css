@@ -1,0 +1,2750 @@
+/* ================================================================ conversation column */
+
+.transcript {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-anchor: none;
+  position: relative;
+}
+/* A page not yet drawn: faint lines where its rows will be, so a fast fling shows pages taking
+   shape rather than nothing. */
+.units > .page.far {
+  position: relative;
+  min-height: 24px;
+  background-image: linear-gradient(var(--fill-1) 0 8px, transparent 8px);
+  background-size: 38% 200px;
+  background-repeat: repeat-y;
+  background-position: 8px 10px;
+  opacity: 0.7;
+}
+/* While the reader is up in the history, the browser keeps what they are looking at still as the
+   rows above it take their real size (see below); while following the live end, the follow owns the scroll. */
+.transcript.reading {
+  overflow-anchor: auto;
+}
+.transcript-inner {
+  max-width: calc(var(--col) + 48px);
+  margin: 0 auto;
+  padding: 22px 24px 44px;
+}
+/* Long conversations. Every unit of the conversation (a stretch of what was said, or one fold of
+   work) sits in its own box, and a box that is off screen is neither laid out nor painted. It keeps a
+   stand-in height until it has been seen once and its own height after that, so the scrollbar stays
+   honest. The last few boxes are always live: that is where rows arrive and where a sent message
+   flies in from the composer, which the box's clipping must not cut off. */
+/* A page (a few units) is a box too; far from the viewport it is empty, with a stand-in height set
+   inline from what it holds (Transcript: PageBox). */
+.units > .page {
+  padding: 0 8px;
+  margin: 0 -8px;
+}
+.page > .unit {
+  /* room for the hover highlights that reach 8px past the text edge, which the box would otherwise clip */
+  padding: 0 8px;
+  margin-left: -8px;
+  margin-right: -8px;
+}
+/* Drawn boxes off screen skip layout and paint — on Blink. WebKit (2.52) decides which boxes are off
+   screen late and wrongly inside a scrolling pane, leaving pages blank mid-scroll; there the paging
+   above (far pages empty, near pages drawn) does the work on its own. */
+html:not([data-engine='webkit']) .units > .page {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 2400px;
+}
+html:not([data-engine='webkit']) .units > .page.live {
+  content-visibility: visible;
+}
+html:not([data-engine='webkit']) .page > .unit {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 260px;
+}
+html:not([data-engine='webkit']) .page > .unit.work {
+  contain-intrinsic-size: auto 44px;
+}
+html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3) {
+  content-visibility: visible;
+}
+/* A box does not let its edge rows' margins reach out, so the box carries them instead: the same
+   rhythm as before, now between boxes. */
+.unit > :first-child {
+  margin-top: 0;
+}
+.unit > :last-child {
+  margin-bottom: 0;
+}
+.unit:has(> :first-child.msg-user) {
+  margin-top: 26px;
+}
+.unit:has(> :first-child.msg-assistant),
+.unit:has(> :first-child.work),
+.unit:has(> :first-child.notice),
+.unit:has(> :first-child.cmd-output) {
+  margin-top: 10px;
+}
+.unit:has(> :first-child.turn-foot),
+.unit:has(> :first-child.thinking) {
+  margin-top: 8px;
+}
+.unit:has(> :first-child.steps) {
+  margin-top: 6px;
+}
+.unit:has(> :first-child.tool.special) {
+  margin-top: 12px;
+}
+.unit:has(> :first-child.divider) {
+  margin-top: 18px;
+}
+.unit:has(> :last-child.msg-user),
+.unit:has(> :last-child.thinking) {
+  margin-bottom: 8px;
+}
+.unit:has(> :last-child.msg-assistant),
+.unit:has(> :last-child.notice),
+.unit:has(> :last-child.cmd-output) {
+  margin-bottom: 10px;
+}
+.unit:has(> :last-child.work) {
+  margin-bottom: 14px;
+}
+.unit:has(> :last-child.turn-foot) {
+  margin-bottom: 20px;
+}
+.unit:has(> :last-child.steps) {
+  margin-bottom: 6px;
+}
+.unit:has(> :last-child.tool.special) {
+  margin-bottom: 12px;
+}
+.unit:has(> :last-child.divider) {
+  margin-bottom: 18px;
+}
+.units > .page:first-child > .unit:first-child {
+  margin-top: 6px;
+}
+.transcript-inner > :first-child {
+  margin-top: 6px;
+}
+
+.transcript-loading {
+  display: grid;
+  gap: 12px;
+  padding-top: 24px;
+}
+.sk {
+  height: 14px;
+  border-radius: 7px;
+  background: linear-gradient(90deg, var(--fill-1), var(--fill-2), var(--fill-1));
+  background-size: 200% 100%;
+  animation: sheen 1.4s linear infinite;
+}
+.sk.short {
+  width: 60%;
+}
+@keyframes sheen {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+.jump {
+  position: sticky;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  height: 30px;
+  padding: 0 12px 0 10px;
+  border-radius: 15px;
+  font-size: var(--fs-small);
+  font-weight: 550;
+  color: var(--text);
+  background: var(--raised);
+  box-shadow: var(--shadow-float);
+  animation: jump-in var(--t-med) var(--ease);
+  z-index: 3;
+}
+@keyframes jump-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(6px);
+  }
+}
+.jump:hover {
+  background: var(--raised-2);
+}
+
+/* ---------------------------------------------------------------- messages */
+
+.msg-user {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  margin: 26px 0 8px;
+}
+.msg-bubble {
+  max-width: 84%;
+  padding: 9px 14px;
+  border-radius: 16px;
+  background: var(--fill-2);
+  font-size: var(--font-size);
+  line-height: 1.55;
+}
+[data-theme='light'] .msg-bubble {
+  background: #f0f0f2;
+}
+.msg-user-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.msg-user.queued .msg-bubble {
+  opacity: 0.6;
+}
+.msg-queued {
+  margin-top: 6px;
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+}
+.mention {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  color: var(--info);
+}
+.msg-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  margin: 2px 0 8px;
+}
+.msg-attachments:last-child {
+  margin-bottom: 2px;
+}
+.msg-thumb {
+  max-width: 220px;
+  max-height: 160px;
+  border-radius: var(--r-3);
+  cursor: zoom-in;
+  box-shadow: 0 0 0 1px var(--hair);
+}
+.msg-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 10px;
+  border-radius: var(--r-2);
+  background: var(--fill-2);
+  font-size: var(--fs-small);
+}
+.msg-actions {
+  display: flex;
+  gap: 2px;
+  margin-top: 4px;
+  opacity: 0;
+  transition: opacity var(--t-fast);
+}
+.msg-user:hover .msg-actions,
+.msg-actions:focus-within {
+  opacity: 1;
+}
+.copy-btn.done {
+  color: var(--ok);
+}
+
+.msg-user.command {
+  flex-direction: row;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+.cmd-chip {
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: 13px;
+  background: var(--fill-2);
+  font-size: 12.5px;
+}
+
+.msg-assistant {
+  margin: 10px 0;
+}
+
+/* ---------------------------------------------------------------- thinking */
+
+.thinking {
+  margin: 6px 0;
+}
+.thinking-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  margin-left: -6px;
+  padding: 0 6px;
+  border-radius: var(--r-2);
+  font-size: var(--fs-ui);
+  color: var(--text-3);
+  transition: color var(--t-fast), background var(--t-fast);
+}
+.thinking-head:hover {
+  color: var(--text-2);
+  background: var(--fill-1);
+}
+.thinking-chev {
+  opacity: 0.7;
+  transition: transform var(--t-med) var(--ease);
+}
+.thinking.open .thinking-chev {
+  transform: rotate(90deg);
+}
+.thinking-text {
+  margin: 4px 0 6px 1px;
+  padding: 2px 0 2px 14px;
+  box-shadow: inset 1px 0 0 var(--hair-2);
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  overflow: hidden;
+}
+.thinking-text.peek {
+  max-height: 4.9em;
+  color: var(--text-3);
+  mask-image: linear-gradient(to bottom, transparent, #000 60%);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+/* shimmering text for "Thinking" and the working verb (neutral, never amber) */
+.shimmer {
+  background: linear-gradient(90deg, var(--text-3) 0%, var(--text-3) 35%, var(--text) 50%, var(--text-3) 65%, var(--text-3) 100%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 2s linear infinite;
+}
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -150% 0;
+  }
+}
+
+/* ---------------------------------------------------------------- notices, dividers, footers */
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0;
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+}
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--hair);
+}
+
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 10px 0;
+  padding: 10px 14px;
+  border-radius: var(--r-3);
+  font-size: var(--fs-ui);
+  line-height: 1.55;
+  color: var(--text);
+  background: var(--fill-1);
+}
+.notice > svg {
+  margin-top: 2px;
+  color: var(--text-3);
+}
+.notice.warning {
+  background: var(--accent-wash);
+}
+.notice.warning > svg {
+  color: var(--accent-text);
+}
+.notice.error {
+  background: var(--err-wash);
+}
+.notice.error > svg {
+  color: var(--err);
+}
+.notice .link {
+  margin-top: 2px;
+  font-size: var(--fs-small);
+  color: var(--text-3);
+}
+.notice .link:hover {
+  color: var(--text);
+}
+.notice-detail {
+  margin: 8px 0 2px;
+  padding: 8px 10px;
+  border-radius: var(--r-2);
+  background: var(--inset);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.cli-info {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 6px 0;
+  font-size: var(--fs-small);
+  line-height: 1.55;
+  color: var(--text-3);
+}
+.cli-info > svg {
+  margin-top: 3px;
+}
+.cli-info.warning > svg {
+  color: var(--accent-text);
+}
+.cli-info.task {
+  margin: 10px 0;
+}
+.cli-info.task.info > svg {
+  color: var(--ok);
+}
+.cli-info .link {
+  margin-left: 6px;
+  color: var(--text-2);
+}
+.cli-info .md {
+  font-size: var(--fs-small);
+  color: var(--text-2);
+}
+
+.turn-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 20px;
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+}
+/* Claude Code's orange asterisk: the turn's cost sits behind it and shows on hover. */
+.turn-mark {
+  color: var(--accent);
+  font-size: 12px;
+  line-height: 1;
+  margin-right: -2px;
+}
+.turn-detail {
+  opacity: 0;
+  transition: opacity var(--t-fast);
+}
+.turn-foot:hover .turn-detail {
+  opacity: 1;
+}
+.turn-fork {
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+  opacity: 0;
+  transition: opacity var(--t-fast), color var(--t-fast);
+}
+.turn-foot:hover .turn-fork,
+.turn-fork:focus-visible {
+  opacity: 1;
+}
+.turn-fork:hover {
+  color: var(--text);
+}
+
+.cmd-output {
+  margin: 10px 0;
+  padding: 10px 14px;
+  border-radius: var(--r-3);
+  background: var(--fill-1);
+}
+.cmd-output-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  color: var(--text-3);
+}
+
+/* working indicator */
+.working {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+  margin: 10px 0 4px;
+  font-size: var(--fs-ui);
+  color: var(--text-3);
+  animation: fade var(--t-med) var(--ease);
+}
+/* The working mark is the app's pilcrow, focusing: a slowly turning crosshair ring around the safelight. */
+.working-mark {
+  flex: none;
+  color: var(--text-3);
+  overflow: visible;
+}
+/* The pilcrow at work: the bowl breathes in Claude's orange while the stems hold still. */
+.wm-bowl {
+  fill: var(--accent);
+  transform-origin: 10.6px 9.2px;
+  animation: wm-breathe 1.8s var(--ease-io) infinite;
+}
+.wm-stems {
+  animation: wm-ink 1.8s var(--ease-io) infinite;
+}
+@keyframes wm-breathe {
+  0%,
+  100% {
+    transform: scale(0.72);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+@keyframes wm-ink {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.95;
+  }
+}
+.working-verb {
+  font-weight: 500;
+}
+.working-meta {
+  font-size: var(--fs-small);
+}
+.working-hint {
+  margin-left: auto;
+  font-size: var(--fs-micro);
+  color: var(--text-4);
+}
+
+/* ---------------------------------------------------------------- markdown */
+
+.md {
+  font-size: var(--font-size);
+  line-height: 1.65;
+  color: var(--text);
+  overflow-wrap: break-word;
+}
+/* Blocks are layout-transparent wrappers, so margins between paragraphs behave as if they were one document. */
+.md-b {
+  display: contents;
+}
+.md > :first-child,
+.md > .md-b:first-child > :first-child {
+  margin-top: 0;
+}
+.md > :last-child,
+.md > .md-b:last-child > :last-child {
+  margin-bottom: 0;
+}
+.md p {
+  margin: 0 0 0.75em;
+}
+/* No one- or two-character orphans on the last line (matters most for Chinese: 偏高。 alone on a line). */
+.md p,
+.md li,
+.md blockquote {
+  text-wrap: pretty;
+}
+/* CJK fonts have no italic; never let the browser slant Chinese in italic code comments. */
+.md pre,
+.code-view,
+.diff,
+.bash,
+.tool-pre,
+.hl-line {
+  font-synthesis-style: none;
+}
+.md h1,
+.md h2,
+.md h3,
+.md h4 {
+  margin: 1.35em 0 0.45em;
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.012em;
+}
+.md h1 {
+  font-size: 1.32em;
+}
+.md h2 {
+  font-size: 1.16em;
+}
+.md h3 {
+  font-size: 1.04em;
+}
+.md h4 {
+  font-size: 1em;
+  color: var(--text-2);
+}
+.md ul,
+.md ol {
+  margin: 0 0 0.75em;
+  padding-left: 1.45em;
+}
+.md li {
+  margin: 0.22em 0;
+  padding-left: 0.15em;
+}
+.md li::marker {
+  color: var(--text-3);
+}
+.md li > p {
+  margin: 0;
+}
+.md input[type='checkbox'] {
+  margin: 0 6px 0 -2px;
+  accent-color: var(--text);
+}
+.md blockquote {
+  margin: 0 0 0.75em;
+  padding: 0 0 0 14px;
+  box-shadow: inset 2px 0 0 var(--hair-2);
+  color: var(--text-2);
+}
+.md hr {
+  border: none;
+  height: 1px;
+  margin: 1.4em 0;
+  background: var(--hair);
+}
+.md a {
+  color: var(--info);
+}
+.md strong {
+  font-weight: 620;
+}
+.md :not(pre) > code {
+  font-size: 0.86em;
+  padding: 0.14em 0.38em;
+  border-radius: 5px;
+  background: var(--fill-2);
+  color: var(--text);
+  white-space: break-spaces;
+}
+.md code.md-path {
+  padding: 0;
+  background: none;
+  color: var(--info);
+  cursor: pointer;
+}
+.md code.md-path:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.md img {
+  max-width: 100%;
+  border-radius: var(--r-3);
+}
+.md-table {
+  margin: 0.4em 0 1em;
+  overflow-x: auto;
+}
+.md table {
+  border-collapse: collapse;
+  min-width: 60%;
+  font-size: 0.93em;
+  font-variant-numeric: tabular-nums;
+}
+.md th,
+.md td {
+  padding: 7px 14px 7px 0;
+  text-align: left;
+  vertical-align: top;
+  box-shadow: inset 0 -1px 0 var(--hair);
+}
+.md th {
+  font-weight: 600;
+  color: var(--text-2);
+  box-shadow: inset 0 -1px 0 var(--hair-2);
+}
+.md-code {
+  position: relative;
+  margin: 0.6em 0 1em;
+  border-radius: var(--r-3);
+  background: var(--inset);
+  overflow: hidden;
+}
+[data-theme='light'] .md-code {
+  box-shadow: inset 0 0 0 1px var(--hair);
+}
+.md-code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 30px;
+  padding: 0 10px 0 14px;
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+}
+.md-copy {
+  padding: 2px 8px;
+  border-radius: var(--r-1);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--t-fast), background var(--t-fast), color var(--t-fast);
+}
+.md-code:hover .md-copy,
+.md-copy:focus-visible {
+  opacity: 1;
+}
+.md-copy:hover {
+  background: var(--fill-2);
+  color: var(--text);
+}
+.md-copy.done {
+  opacity: 1;
+  color: var(--ok);
+}
+.md pre {
+  margin: 0;
+  padding: 0 14px 13px;
+  overflow-x: auto;
+  font-size: var(--mono-size);
+  line-height: 1.6;
+}
+.md pre code {
+  font-size: inherit;
+}
+.md-compact {
+  font-size: var(--fs-ui);
+  line-height: 1.6;
+}
+
+/* ---------------------------------------------------------------- tool steps
+   Rows sit on the prose edge: an 18px icon column, verb in secondary, target in primary text.
+   A hairline rail ties the icons of one run of steps together. */
+
+.steps {
+  position: relative;
+  display: grid;
+  margin: 6px 0;
+}
+.steps:has(> :nth-child(2))::before {
+  content: '';
+  position: absolute;
+  left: 8.5px;
+  top: 14px;
+  bottom: 14px;
+  width: 1px;
+  background: var(--hair-2);
+}
+
+.steps-more {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+  font-size: var(--fs-ui);
+  color: var(--text-3);
+  text-align: left;
+}
+.steps-more:hover {
+  color: var(--text);
+}
+
+.tool {
+  position: relative;
+  animation: tool-in var(--t-panel) var(--ease) both;
+}
+@keyframes tool-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+/* the status mark crossfades when a step finishes; the right-hand figures settle in after it */
+.tool-ico-swap {
+  display: grid;
+  place-items: center;
+  animation: pop var(--t-med) var(--ease);
+}
+.tool-meta {
+  animation: fade var(--t-med) var(--ease);
+}
+.tool.streaming .tool-target {
+  animation: fade var(--t-med) var(--ease);
+}
+.msg-assistant {
+  animation: fade var(--t-panel) var(--ease);
+}
+.thinking {
+  animation: fade var(--t-panel) var(--ease);
+}
+/* Rows arriving in the live pages ease in; rows of history pages being drawn as the reader scrolls
+   up must not — a page of paragraphs fading in during a scroll reads as the page flickering. */
+.page:not(.live) .msg-assistant,
+.page:not(.live) .thinking,
+.page:not(.live) .tool,
+.page:not(.live) .tool-ico-swap,
+.page:not(.live) .tool-meta {
+  animation: none;
+}
+.thinking-text.peek {
+  transition: opacity var(--t-med);
+}
+.tool.special {
+  margin: 12px 0;
+}
+.tool-head {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: calc(100% + 12px);
+  min-height: 28px;
+  margin-left: -6px;
+  padding: 0 6px;
+  border-radius: var(--r-2);
+  font-size: var(--fs-ui);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--t-fast);
+}
+.tool-head:hover {
+  background: var(--fill-1);
+}
+.tool-ico {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 20px;
+  background: var(--canvas);
+  color: var(--text-3);
+  border-radius: 4px;
+}
+.tool-head:hover .tool-ico {
+  background: transparent;
+}
+.tool.running .tool-ico,
+.tool.streaming .tool-ico {
+  color: var(--text-2);
+}
+.tool-line {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  white-space: nowrap;
+}
+.wait-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+.tool-verb {
+  flex: none;
+  color: var(--text-3);
+}
+.tool-head .tool-verb,
+.tool-head .tool-target {
+  line-height: 20px;
+}
+.tool-target {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+.explore .tool-target {
+  color: var(--text-2);
+}
+.tool-target.mono {
+  font-size: 12.5px;
+}
+.tool.denied .tool-target,
+.tool.interrupted .tool-target {
+  color: var(--text-3);
+  text-decoration: line-through;
+  text-decoration-color: var(--hair-3);
+}
+.tool-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+}
+.tool-stats {
+  display: inline-flex;
+  gap: 5px;
+}
+.tool-open {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: -2px 0;
+  opacity: 0;
+  transition: opacity var(--t-fast), background var(--t-fast);
+}
+.tool-head:hover .tool-open,
+.tool-open:focus-visible {
+  opacity: 1;
+}
+.tool-chev {
+  flex: none;
+  margin-left: -3px;
+  color: var(--text-3);
+  opacity: 0;
+  transition: opacity var(--t-fast), transform var(--t-med) var(--ease);
+}
+.tool-head:hover .tool-chev,
+.tool-head:focus-visible .tool-chev {
+  opacity: 1;
+}
+.tool.open > .tool-head .tool-chev,
+.explore.open > .tool-head .tool-chev {
+  opacity: 1;
+  transform: rotate(90deg);
+}
+
+/* Disclosure wrapper (components/ui/Collapse): contains its children's margins so heights animate cleanly. */
+.collapse {
+  display: flow-root;
+}
+.tool-body {
+  margin: 4px 0 10px 28px;
+}
+
+.explore-body {
+  position: relative;
+  padding-left: 28px;
+  padding-bottom: 4px;
+}
+
+.tool-section {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.tool-label {
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  color: var(--text-3);
+}
+.tool-note {
+  font-size: var(--fs-small);
+  color: var(--text-2);
+}
+.tool-note.err {
+  color: var(--text-2);
+  padding: 8px 12px;
+  border-radius: var(--r-sm);
+  background: var(--fill-1);
+  line-height: 1.5;
+}
+.tool-note.shimmer-soft {
+  color: var(--text-3);
+  animation: breathe 1.6s ease-in-out infinite;
+}
+.tool-wait {
+  font-size: var(--fs-small);
+}
+.tool-pre {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--r-3);
+  background: var(--inset);
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow: auto;
+}
+.tool-pre.err {
+  color: var(--err);
+}
+.tool-img {
+  max-width: 100%;
+  border-radius: var(--r-3);
+}
+.tool-file-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+}
+.tool-file-bar .link {
+  font-size: 12px;
+}
+
+/* bash: command and output in one inset well */
+.bash {
+  border-radius: var(--r-3);
+  background: var(--inset);
+  overflow: hidden;
+}
+[data-theme='light'] .bash,
+[data-theme='light'] .tool-pre,
+[data-theme='light'] .code-view,
+[data-theme='light'] .diff {
+  box-shadow: inset 0 0 0 1px var(--hair);
+}
+.bash-cmd {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 6px 8px 12px;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.bash-cmd code {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.bash-cmd .copy-btn {
+  opacity: 0;
+  margin-top: -2px;
+}
+.bash:hover .bash-cmd .copy-btn,
+.bash-cmd .copy-btn.done {
+  opacity: 1;
+}
+.bash-prompt {
+  color: var(--text-3);
+  user-select: none;
+}
+.bash-out {
+  margin: 0;
+  padding: 2px 12px 11px;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 360px;
+  overflow: auto;
+}
+.bash-out.err {
+  color: var(--text-2);
+}
+.bash-running {
+  padding: 0 12px 10px;
+  font-size: var(--fs-small);
+}
+.bash-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  font-size: var(--fs-micro);
+  box-shadow: inset 0 1px 0 var(--hair);
+}
+.a-b {
+  font-weight: 600;
+}
+.a-d {
+  opacity: 0.65;
+}
+.a-i {
+  font-style: italic;
+}
+.a-u {
+  text-decoration: underline;
+}
+
+/* "show all" pinned over a fade at the bottom of a clipped block */
+.code-more {
+  justify-self: start;
+  padding: 4px 8px;
+  border-radius: var(--r-2);
+  font-size: var(--fs-small);
+  color: var(--text-3);
+}
+.code-more:hover {
+  color: var(--text);
+  background: var(--fill-2);
+}
+.clipped {
+  position: relative;
+}
+.code-more.fade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 52px;
+  display: grid;
+  place-items: end center;
+  padding: 0 0 9px;
+  border-radius: 0;
+  background: linear-gradient(to bottom, transparent, var(--inset) 72%);
+  font-weight: 550;
+}
+.code-more.fade:hover {
+  background: linear-gradient(to bottom, transparent, var(--inset) 72%);
+}
+.plan-text .code-more.fade {
+  background: linear-gradient(to bottom, transparent, var(--raised) 72%);
+}
+[data-theme='dark'] .plan-text .code-more.fade {
+  background: linear-gradient(to bottom, transparent, #232326 72%);
+}
+
+.file-list {
+  display: grid;
+  gap: 1px;
+  font-size: var(--fs-small);
+}
+.file-list-item {
+  justify-self: start;
+  padding: 1px 0;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.file-list-item:hover {
+  color: var(--info);
+}
+
+.todos {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 2px 0;
+  list-style: none;
+}
+.todo {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 3px 0;
+  font-size: var(--fs-ui);
+  line-height: 1.5;
+  color: var(--text-2);
+}
+.todo-box {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  margin-top: 2px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--hair-3);
+}
+.todo.completed {
+  color: var(--text-3);
+}
+.todo.completed span:last-child {
+  text-decoration: line-through;
+  text-decoration-color: var(--hair-3);
+}
+.todo.completed .todo-box {
+  background: var(--fill-3);
+  box-shadow: none;
+  color: var(--text-2);
+}
+.todo.in_progress {
+  color: var(--text);
+  font-weight: 500;
+}
+.todo.in_progress .todo-box {
+  box-shadow: inset 0 0 0 1.5px var(--text-2);
+}
+.todo-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text);
+  animation: breathe 1.4s ease-in-out infinite;
+}
+
+/* ---------------------------------------------------------------- code and diffs */
+
+.code-view {
+  border-radius: var(--r-3);
+  background: var(--inset);
+  overflow: auto;
+  max-height: 520px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.code-grid {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 8px 0;
+  min-width: max-content;
+}
+.code-view.wrap .code-grid {
+  min-width: 0;
+}
+.code-view.wrap .hl-line {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.ln {
+  padding: 0 12px 0 14px;
+  text-align: right;
+  color: var(--text-4);
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+.ln.hit,
+.hl-line.hit {
+  background: var(--accent-wash);
+}
+.code-grid .hl-line {
+  padding-right: 16px;
+  white-space: pre;
+}
+
+.diff {
+  border-radius: var(--r-3);
+  background: var(--inset);
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.diff-grid {
+  display: grid;
+  grid-template-columns: auto 18px minmax(0, 1fr);
+  min-width: max-content;
+  padding: 6px 0;
+}
+.diff.no-numbers .diff-grid {
+  grid-template-columns: 18px minmax(0, 1fr);
+}
+.diff.dual .diff-grid {
+  grid-template-columns: auto auto 18px minmax(0, 1fr);
+}
+.diff.dual .dn {
+  padding: 0 4px 0 12px;
+}
+.diff.dual .dn-new {
+  padding: 0 10px 0 8px;
+}
+.diff.split .diff-grid {
+  grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr);
+  min-width: 0;
+}
+/* Wrapped code breaks between tokens where it can and mid-token only when it must. */
+.diff.split .dc,
+.diff.wrap .dc {
+  white-space: pre-wrap;
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+.diff.wrap .diff-grid {
+  min-width: 0;
+}
+.diff-hunk {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 26px;
+  margin: 4px 0;
+  padding: 0 14px;
+  font-family: var(--font-ui);
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+  background: var(--fill-1);
+}
+.diff-grid > .diff-hunk:first-child {
+  margin-top: -2px;
+}
+.diff-hunk-dots {
+  letter-spacing: 1px;
+  color: var(--text-4);
+}
+.diff-hunk {
+  white-space: nowrap;
+}
+.diff-hunk-ctx {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  color: var(--text-4);
+}
+.dn {
+  position: relative;
+  padding: 0 8px 0 14px;
+  text-align: right;
+  color: var(--text-4);
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+.ds {
+  position: relative;
+  text-align: center;
+  color: var(--text-4);
+  user-select: none;
+}
+.dc {
+  padding-right: 18px;
+  white-space: pre;
+}
+.dn.add,
+.ds.add,
+.dc.add {
+  background: var(--diff-add);
+}
+.dn.del,
+.ds.del,
+.dc.del {
+  background: var(--diff-del);
+}
+.ds.add {
+  color: var(--ok);
+}
+.ds.del {
+  color: var(--err);
+}
+.dn.add,
+.dn.del {
+  color: var(--text-3);
+}
+.dn.void,
+.dc.void {
+  background: repeating-linear-gradient(135deg, transparent 0 5px, var(--fill-1) 5px 6px);
+}
+.dc.add mark {
+  background: var(--diff-add-hl);
+  color: inherit;
+  border-radius: 2px;
+}
+.dc.del mark {
+  background: var(--diff-del-hl);
+  color: inherit;
+  border-radius: 2px;
+}
+.diff.split .dn {
+  padding-left: 12px;
+}
+.diff-add-comment {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-1);
+  color: var(--canvas);
+  background: var(--text);
+  opacity: 0;
+  transition: opacity var(--t-fast);
+}
+.diff-grid > span:hover .diff-add-comment,
+.diff-grid > span:hover + span .diff-add-comment,
+.ds:hover .diff-add-comment,
+.dn:hover .diff-add-comment {
+  opacity: 1;
+}
+.diff-comment-row {
+  padding: 8px 12px 10px 44px;
+  font-family: var(--font-ui);
+  font-size: var(--fs-small);
+  background: var(--chrome);
+  box-shadow: inset 0 1px 0 var(--hair), inset 0 -1px 0 var(--hair);
+  white-space: normal;
+}
+.diff-comment {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 8px 8px 12px;
+  border-radius: var(--r-2);
+  background: var(--raised);
+  box-shadow: var(--shadow-card);
+  line-height: 1.5;
+}
+.comment-editor {
+  display: grid;
+  gap: 8px;
+}
+.comment-editor .textarea {
+  font-size: 12.5px;
+}
+
+/* ---------------------------------------------------------------- permission prompt
+   Attached to its step, one level deep, with a single amber ring that pulses once. */
+
+.perm {
+  position: relative;
+  margin: 6px 0 14px 28px;
+  padding: 14px 16px 14px;
+  border-radius: 12px;
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1.5px var(--accent-ring), 0 6px 20px -12px rgba(0, 0, 0, 0.5);
+  animation: perm-in var(--t-panel) var(--ease);
+}
+[data-theme='dark'] .perm {
+  background: #232326;
+}
+@keyframes perm-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+/* one soft ping when something starts waiting on you, then stillness */
+.perm::after,
+.askcard.live::after,
+.plancard.live::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  /* the border brightens once to full amber and settles; no glow spilling outside the card */
+  box-shadow: inset 0 0 0 1.5px var(--accent), 0 0 12px -2px var(--accent-wash);
+  animation: ping 900ms 300ms var(--ease-io) both;
+}
+@keyframes ping {
+  0% {
+    opacity: 0;
+  }
+  35% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.tool.orphan .perm {
+  margin-left: 0;
+}
+.perm-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.006em;
+}
+.perm-sub {
+  display: grid;
+  gap: 2px;
+  margin-top: 3px;
+  font-size: var(--fs-small);
+  color: var(--text-2);
+}
+.perm-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.perm-actions .btn {
+  max-width: 100%;
+  min-width: 0;
+}
+.perm-rules {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+.perm-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.perm-key {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  font-size: 10.5px;
+  color: var(--text-4);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--hair-2);
+}
+.key {
+  display: inline-grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  margin-left: 2px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-weight: 600;
+  background: var(--fill-2);
+  color: var(--text-3);
+}
+.btn.primary .key {
+  background: rgba(0, 0, 0, 0.12);
+  color: inherit;
+}
+.btn.perm-note-link {
+  color: var(--text-2);
+  margin-right: -6px;
+}
+.perm-feedback {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  animation: rise var(--t-med) var(--ease);
+}
+.perm-feedback .input {
+  flex: 1;
+}
+.perm-enter {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* ---------------------------------------------------------------- questions and plans */
+
+.askcard,
+.plancard {
+  border-radius: 14px;
+  background: var(--raised);
+  box-shadow: var(--shadow-card);
+}
+[data-theme='dark'] .askcard,
+[data-theme='dark'] .plancard {
+  background: #212124;
+}
+.askcard,
+.plancard {
+  position: relative;
+}
+.askcard.live,
+.plancard.live {
+  box-shadow: inset 0 0 0 1.5px var(--accent-ring), 0 8px 26px -14px rgba(0, 0, 0, 0.55);
+  animation: perm-in var(--t-panel) var(--ease);
+}
+.askcard {
+  padding: 14px 16px 14px;
+}
+.ask-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  font-size: var(--fs-small);
+  font-weight: 600;
+  color: var(--text-3);
+}
+.askcard.live .ask-head {
+  color: var(--accent-text);
+}
+.ask-body {
+  display: grid;
+  gap: 16px;
+}
+.ask-body.with-preview {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr);
+}
+.ask-qs {
+  display: grid;
+  gap: 18px;
+}
+.ask-q {
+  display: grid;
+  gap: 9px;
+}
+.ask-qline {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.ask-tag {
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  color: var(--text-3);
+}
+.ask-qtext {
+  font-size: 14.5px;
+  font-weight: 560;
+  letter-spacing: -0.006em;
+}
+.ask-multi {
+  font-size: var(--fs-small);
+  color: var(--text-3);
+}
+.ask-options {
+  display: grid;
+  border-radius: var(--r-3);
+  background: var(--fill-1);
+  box-shadow: inset 0 0 0 1px var(--hair);
+  overflow: hidden;
+}
+.ask-opt {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 12px;
+  text-align: left;
+  transition: background var(--t-fast);
+  cursor: pointer;
+}
+.ask-opt + .ask-opt {
+  box-shadow: 0 -1px 0 var(--hair);
+}
+.ask-opt:hover {
+  background: var(--fill-1);
+}
+.ask-opt.on {
+  background: var(--fill-2);
+}
+.ask-mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--hair-3);
+  color: var(--canvas);
+  transition: background var(--t-fast), box-shadow var(--t-fast);
+}
+.ask-mark.box {
+  border-radius: 4px;
+}
+.ask-opt.on .ask-mark {
+  background: var(--text);
+  box-shadow: none;
+  animation: pop var(--t-fast) var(--spring);
+}
+.ask-opt-text {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.ask-opt-label {
+  font-weight: 520;
+}
+.ask-opt-desc {
+  font-size: var(--fs-small);
+  color: var(--text-3);
+  line-height: 1.45;
+}
+.ask-other {
+  align-items: center;
+  cursor: text;
+}
+.ask-other input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+}
+.ask-other input::placeholder {
+  color: var(--text-3);
+}
+.ask-note-link {
+  justify-self: start;
+  font-size: var(--fs-small);
+  color: var(--text-3);
+}
+.ask-notes {
+  animation: rise var(--t-med) var(--ease);
+}
+.ask-preview {
+  border-radius: var(--r-3);
+  background: var(--inset);
+  padding: 10px 12px;
+  overflow: auto;
+  max-height: 360px;
+}
+.ask-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+.askcard.done {
+  padding: 12px 16px;
+}
+.askcard.done .ask-head {
+  margin-bottom: 8px;
+}
+.askcard.done .ask-q {
+  gap: 2px;
+}
+.askcard.done .ask-q + .ask-q {
+  margin-top: 8px;
+}
+.askcard.done .ask-qtext {
+  font-size: var(--fs-ui);
+  font-weight: 500;
+  color: var(--text-2);
+}
+.ask-answer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-ui);
+}
+.ask-answer svg {
+  color: var(--ok);
+}
+
+.plan-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 16px 0 20px;
+  box-shadow: inset 0 -1px 0 var(--hair);
+}
+.plan-kicker {
+  font-size: var(--fs-small);
+  font-weight: 600;
+  color: var(--text-3);
+}
+.plancard.live .plan-kicker {
+  color: var(--accent-text);
+}
+.plan-text {
+  position: relative;
+  padding: 16px 22px 18px;
+}
+.plan-text .md > .md-b:first-child > h1,
+.plan-text .md > .md-b:first-child > h2 {
+  margin-top: 0;
+}
+.plan-text.collapsed {
+  max-height: 260px;
+  overflow: hidden;
+}
+.plan-actions {
+  padding: 12px 16px 14px;
+  border-radius: 0 0 14px 14px;
+  box-shadow: inset 0 1px 0 var(--hair);
+  background: var(--fill-1);
+}
+.plan-feedback {
+  display: grid;
+  gap: 8px;
+  animation: rise var(--t-med) var(--ease);
+}
+
+/* ---------------------------------------------------------------- subagents */
+
+.agent {
+  display: grid;
+  gap: 8px;
+}
+.agent-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+}
+.agent-prompt-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  justify-self: start;
+  font-size: var(--fs-small);
+  color: var(--text-3);
+}
+.agent-prompt-toggle:hover {
+  color: var(--text);
+}
+.agent-prompt-toggle svg {
+  transition: transform var(--t-med) var(--ease);
+}
+.agent-prompt {
+  padding: 10px 12px;
+  border-radius: var(--r-2);
+  background: var(--inset);
+  font-size: var(--fs-small);
+  line-height: 1.6;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  max-height: 220px;
+  overflow: auto;
+  animation: rise var(--t-med) var(--ease);
+}
+.agent-children {
+  margin-left: 1px;
+  padding-left: 14px;
+  box-shadow: inset 1px 0 0 var(--hair-2);
+}
+.agent-children .msg-assistant {
+  margin: 6px 0;
+}
+.agent-children .md {
+  font-size: var(--fs-ui);
+}
+.agent-report {
+  padding: 10px 14px;
+  border-radius: var(--r-3);
+  background: var(--fill-1);
+}
+
+/* Scroll shadows: wide code shows a soft edge where more of the line is hidden, and the edge
+   disappears once you scroll to it (pure CSS: covers scroll with the content, shadows stay put). */
+.md pre,
+.code-view {
+  --edge: rgba(0, 0, 0, 0.45);
+  background:
+    linear-gradient(to right, var(--inset) 40%, transparent) left / 28px 100% no-repeat local,
+    linear-gradient(to left, var(--inset) 40%, transparent) right / 28px 100% no-repeat local,
+    linear-gradient(to right, var(--edge), transparent) left / 14px 100% no-repeat scroll,
+    linear-gradient(to left, var(--edge), transparent) right / 14px 100% no-repeat scroll,
+    var(--inset);
+}
+[data-theme='light'] .md pre,
+[data-theme='light'] .code-view {
+  --edge: rgba(17, 17, 26, 0.1);
+}
+
+
+
+/* ================================================================ reading the transcript
+   Three voices. Speech: full-contrast prose at the column edge. Action: rows with an icon column
+   and a rail, set in secondary text. Thought: one lilac line that opens on request. */
+
+.steps .tool-head {
+  color: var(--text-2);
+}
+.steps .tool-target {
+  color: var(--text);
+}
+
+.thinking {
+  margin: 8px 0;
+}
+.thinking-head {
+  gap: 7px;
+  margin-left: -8px;
+  padding: 0 9px 0 7px;
+  color: var(--text-3);
+}
+.thinking-head:hover {
+  background: var(--think-wash);
+  color: var(--text-2);
+}
+.thinking-ico {
+  display: inline-grid;
+  place-items: center;
+  color: var(--think);
+}
+.thinking.live .thinking-ico {
+  animation: breathe 1.4s ease-in-out infinite;
+}
+.thinking-text {
+  margin-left: 8px;
+  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--think) 55%, transparent);
+  color: var(--text-2);
+  font-style: normal;
+}
+
+/* ---------------------------------------------------------------- failures
+   No boxes. The row says it failed; one line says why; "Details" shows the rest. */
+
+.tool-flag {
+  font-size: var(--fs-micro);
+  font-weight: 550;
+}
+.tool-flag.err {
+  color: var(--err);
+}
+.tool-error {
+  display: grid;
+  gap: 4px;
+}
+.tool-error-title {
+  font-size: var(--fs-ui);
+  line-height: 1.5;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.tool-error-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  justify-self: start;
+  margin-left: -4px;
+  padding: 2px 6px 2px 4px;
+  border-radius: var(--r-1);
+  font-size: var(--fs-small);
+  color: var(--text-3);
+  transition: color var(--t-fast), background var(--t-fast);
+}
+.tool-error-more:hover {
+  color: var(--text);
+  background: var(--fill-1);
+}
+.tool-error-more .tool-chev {
+  opacity: 0.8;
+  transition: transform var(--t-med) var(--ease);
+}
+.tool-error-more .tool-chev.open {
+  transform: rotate(90deg);
+}
+.tool-error-detail {
+  display: grid;
+  gap: 8px;
+  padding-top: 4px;
+}
+.tool-pre.err {
+  color: var(--text-2);
+}
+
+
+/* ================================================================ asking for permission
+   One card, not two: the tool row and its command sit on a raised sheet and the answer bar is the
+   sheet's footer. Nothing orange around it; the dot in the row and the chip in the header already
+   say Claude is waiting. */
+.tool.awaiting {
+  margin: 10px 0 14px;
+  padding: 4px 10px 0;
+  border-radius: 12px;
+  background: var(--raised);
+  box-shadow: 0 0 0 0.5px var(--hair-2), 0 1px 2px rgba(0, 0, 0, 0.04);
+  animation: perm-in var(--t-panel) var(--ease);
+}
+[data-theme='dark'] .tool.awaiting {
+  background: var(--raised);
+  box-shadow: 0 0 0 0.5px var(--hair-2), 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+.tool.awaiting > .tool-head {
+  width: calc(100% + 8px);
+  margin-left: -4px;
+  padding: 2px 4px;
+  min-height: 32px;
+}
+.tool.awaiting > .tool-head .tool-chev {
+  display: none;
+}
+.tool.awaiting .tool-body {
+  margin: 0 0 8px 22px;
+}
+.tool.awaiting .bash,
+.tool.awaiting .tool-pre,
+.tool.awaiting .code-view,
+.tool.awaiting .diff {
+  background: var(--inset);
+  box-shadow: none;
+}
+.tool.awaiting .perm {
+  margin: 0 -10px;
+  padding: 10px 14px 10px;
+  border-radius: 0 0 12px 12px;
+  background: transparent;
+  box-shadow: inset 0 0.5px 0 var(--hair-2);
+  animation: none;
+}
+.tool.awaiting .perm::after {
+  display: none;
+}
+/* a request that lost its tool row keeps a card of its own */
+.perm.orphan {
+  margin: 10px 0 14px;
+  padding: 14px 16px 12px;
+  border-radius: 12px;
+  background: var(--raised);
+  box-shadow: 0 0 0 0.5px var(--hair-2), 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+.perm.orphan::after {
+  display: none;
+}
+.perm-title {
+  font-size: var(--fs-ui);
+  font-weight: 550;
+}
+.perm-sub {
+  margin: 2px 0 0;
+}
+.perm.orphan .perm-actions {
+  margin-top: 12px;
+}
+.perm-actions {
+  gap: 6px;
+  margin-top: 0;
+}
+.perm-actions .btn {
+  height: 28px;
+  padding: 0 11px;
+  font-size: var(--fs-ui);
+  border-radius: 7px;
+}
+.perm-actions .btn.ghost {
+  color: var(--text-2);
+}
+.perm-note-link {
+  padding: 4px 6px;
+  margin-right: -6px;
+  border-radius: var(--r-1);
+  font-size: var(--fs-small);
+  color: var(--text-3);
+  transition: color var(--t-fast), background var(--t-fast);
+}
+.perm-note-link:hover {
+  color: var(--text);
+  background: var(--fill-1);
+}
+.perm-rules {
+  margin-top: 8px;
+  font-family: var(--font-ui);
+  font-size: var(--fs-small);
+  color: var(--text-3);
+}
+.perm-rules code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+.perm .key {
+  margin-left: 4px;
+  background: var(--fill-1);
+  color: var(--text-3);
+}
+.perm .btn.primary .key {
+  background: rgba(0, 0, 0, 0.16);
+  color: rgba(255, 255, 255, 0.9);
+}
+.perm.stale {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+/* ================================================================ workflows
+   In the conversation a workflow is one quiet tool row. The run itself — phases, agents, the
+   sub-agents they spawn — lives in the Tasks panel as a single rail: numbered phase nodes down
+   the left, agents indented under each, sub-agents hanging off their agent with an elbow. */
+
+/* --- the conversation row's body --- */
+.wfi {
+  display: grid;
+  gap: 6px;
+}
+.wfi-desc {
+  font-size: var(--fs-small);
+  color: var(--text-2);
+}
+.wfi-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--fs-small);
+}
+.wfi .wf-foot-btn {
+  margin-left: -4px;
+}
+
+/* --- progress bar: done, running, failed --- */
+.wf-bar {
+  position: relative;
+  display: flex;
+  height: 2px;
+  margin: 0 14px;
+  background: var(--fill-2);
+  border-radius: 1px;
+  overflow: hidden;
+}
+.wf-bar > div {
+  height: 100%;
+  transition: width var(--t-med) var(--ease);
+}
+.wf-bar-done {
+  background: var(--ok);
+}
+.wf-bar-run {
+  background: var(--accent);
+}
+.wf-bar-err {
+  background: var(--err);
+}
+
+/* the graph */
+
+/* --- the run card in the Tasks panel --- */
+.wfd {
+  --rail-x: 9px; /* centre of the phase nodes */
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+  overflow: hidden;
+}
+.wfd + .wfd {
+  margin-top: 8px;
+}
+.wfd-head {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 9px 10px 9px 11px;
+  text-align: left;
+}
+.wfd-head:hover {
+  background: var(--fill-1);
+}
+.wfd-ico {
+  display: inline-flex;
+  color: var(--text-3);
+}
+.wfd-ico.live {
+  color: var(--accent-text);
+}
+.wfd-ico.ok {
+  color: var(--ok);
+}
+.wfd-ico.err {
+  color: var(--err);
+}
+.wfd-title {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.wfd-name {
+  font-weight: 550;
+  font-size: var(--fs-base);
+}
+.wfd-sub {
+  font-size: var(--fs-micro);
+}
+.wfd-end {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-3);
+}
+.wfd-end .tool-chev {
+  transition: transform var(--t-med) var(--ease);
+}
+.wfd-end .tool-chev.open {
+  transform: rotate(90deg);
+}
+.wfd .wf-bar {
+  margin: 0 11px 0 11px;
+  height: 2px;
+}
+.wfd.collapsed .wf-bar {
+  margin-bottom: 9px;
+}
+.wfd-body {
+  padding: 10px 8px 4px 11px;
+}
+.wfd-empty {
+  padding: 0 0 8px;
+  font-size: var(--fs-small);
+}
+
+/* the rail */
+.wfd-phases {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+.wfd-phase {
+  position: relative;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  column-gap: 9px;
+  padding-bottom: 10px;
+}
+.wfd-phase:last-child {
+  padding-bottom: 4px;
+}
+/* the line between nodes */
+.wfd-phase::before {
+  content: '';
+  position: absolute;
+  left: var(--rail-x);
+  top: 20px;
+  bottom: -1px;
+  width: 1px;
+  background: var(--hair-2);
+}
+.wfd-phase:last-child::before {
+  display: none;
+}
+.wfd-phase.done::before {
+  background: color-mix(in srgb, var(--ok) 55%, var(--hair-2));
+}
+.wfd-node {
+  grid-row: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-3);
+  background: var(--raised);
+  box-shadow: inset 0 0 0 1px var(--hair-3);
+  transition: background var(--t-med), color var(--t-med), box-shadow var(--t-med);
+}
+.wfd-phase.running .wfd-node {
+  color: var(--accent-text);
+  box-shadow: inset 0 0 0 1.5px var(--accent-text);
+}
+.wfd-phase.done .wfd-node {
+  color: #fff;
+  background: var(--ok);
+  box-shadow: none;
+}
+.wfd-phase.error .wfd-node {
+  color: #fff;
+  background: var(--err);
+  box-shadow: none;
+}
+.wfd-phase-head {
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 18px;
+  min-width: 0;
+}
+.wfd-phase-title {
+  font-weight: 550;
+  font-size: var(--fs-small);
+}
+.wfd-phase.pending .wfd-phase-title {
+  color: var(--text-3);
+  font-weight: 500;
+}
+.wf-phase-kind {
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--fill-2);
+  color: var(--text-3);
+}
+.wfd-phase-state {
+  margin-left: auto;
+  font-size: var(--fs-micro);
+  color: var(--text-4);
+  white-space: nowrap;
+}
+.wfd-phase-state.running {
+  color: var(--accent-text);
+}
+.wfd-phase-state.error {
+  color: var(--err);
+}
+.wfd-agents {
+  grid-column: 2;
+  display: grid;
+  gap: 1px;
+  margin-top: 4px;
+}
+
+/* an agent */
+.wfa {
+  border-radius: var(--r-1);
+}
+.wfa.ghost {
+  padding: 3px 6px;
+  font-size: var(--fs-micro);
+  color: var(--text-4);
+}
+.wfa-row {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: start;
+  gap: 7px;
+  width: 100%;
+  padding: 4px 6px 4px 5px;
+  border-radius: var(--r-1);
+  text-align: left;
+  transition: background var(--t-fast);
+}
+.wfa-row:hover,
+.wfa.open > .wfa-row {
+  background: var(--fill-1);
+}
+.wfa-main {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.wfa-top {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  line-height: 16px;
+}
+.wfa-label {
+  font-size: var(--fs-small);
+  color: var(--text);
+}
+.wfa.queued .wfa-label {
+  color: var(--text-3);
+}
+.wfa-end {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 7px;
+  font-size: var(--fs-micro);
+  color: var(--text-4);
+  white-space: nowrap;
+}
+.wfa-detail {
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+}
+.wfa.error .wfa-detail,
+.wfa.blocked .wfa-detail {
+  color: var(--err);
+}
+.wfa-body {
+  display: grid;
+  gap: 8px;
+  padding: 2px 6px 8px 26px;
+}
+.wfa-subs {
+  display: grid;
+  gap: 1px;
+  padding: 1px 0 3px 11px;
+}
+
+/* a sub-agent an agent spawned: an elbow off the agent's mark */
+.wfs {
+  position: relative;
+  display: grid;
+  grid-template-columns: 10px 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px 2px 0;
+  min-height: 20px;
+}
+.wfs-elbow {
+  position: relative;
+  width: 10px;
+  height: 20px;
+}
+.wfs-elbow::before {
+  content: '';
+  position: absolute;
+  left: 1px;
+  top: -10px;
+  bottom: 10px;
+  width: 1px;
+  background: var(--hair-3);
+}
+.wfs-elbow::after {
+  content: '';
+  position: absolute;
+  left: 1px;
+  top: 9px;
+  width: 7px;
+  height: 1px;
+  background: var(--hair-3);
+}
+.wfs:not(:last-child) .wfs-elbow::before {
+  bottom: -10px;
+}
+.wfs-label {
+  font-size: var(--fs-micro);
+  color: var(--text-2);
+}
+.wfs.running .wfs-label {
+  color: var(--text);
+}
+.wfs-end {
+  display: inline-flex;
+  gap: 7px;
+  margin-left: auto;
+  padding-left: 8px;
+  font-size: var(--fs-micro);
+  color: var(--text-4);
+  white-space: nowrap;
+}
+.wfd-orphans {
+  padding: 6px 0 6px 27px;
+}
+.wfd-orphans .tool-label {
+  margin-bottom: 2px;
+}
+.wfd-orphans .wfs {
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+}
+.wfd-orphans .wfs-elbow {
+  display: none;
+}
+
+/* state marks shared by agents and sub-agents */
+.wf-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 16px;
+  color: var(--text-4);
+}
+.wf-mark.done,
+.wf-mark.cached {
+  color: var(--ok);
+}
+.wf-mark.error,
+.wf-mark.blocked {
+  color: var(--err);
+}
+.wf-mark.running {
+  color: var(--accent-text);
+}
+.wf-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--text-4);
+}
+.wf-chip {
+  font-size: 10px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--fill-2);
+  color: var(--text-3);
+}
+.wf-iso {
+  color: var(--text-4);
+}
+.wf-kv {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-small);
+  color: var(--text-2);
+}
+.wf-block {
+  display: grid;
+  gap: 3px;
+}
+.wf-pre {
+  font-size: var(--fs-small);
+  line-height: 1.5;
+  color: var(--text-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 160px;
+  overflow: auto;
+}
+.wf-pre.err {
+  color: var(--err);
+}
+
+
+/* footer: log, tokens, stop */
+.wfd-foot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 0 6px 0;
+  margin-left: -4px;
+}
+.wfd-foot .btn.xs {
+  margin-left: 4px;
+}
+.wf-foot-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 7px 3px 4px;
+  border-radius: var(--r-1);
+  font-size: var(--fs-small);
+  color: var(--text-3);
+  transition: color var(--t-fast), background var(--t-fast);
+}
+.wf-foot-btn:hover {
+  color: var(--text);
+  background: var(--fill-1);
+}
+.wf-foot-btn .tool-chev {
+  opacity: 0.8;
+  transition: transform var(--t-med) var(--ease);
+}
+.wf-foot-btn .tool-chev.open {
+  transform: rotate(90deg);
+}
+.wf-usage {
+  margin-left: auto;
+  font-size: var(--fs-micro);
+}
+.wf-log {
+  display: grid;
+  gap: 2px;
+  padding: 0 0 8px 2px;
+  font-size: var(--fs-micro);
+}
+.wf-log-line {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 10px;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.wf-script {
+  margin: 0 14px 12px;
+  max-height: 320px;
+  overflow: auto;
+}
+.wf-result {
+  padding: 2px 0 4px;
+}
+.wf-empty {
+  padding: 12px 14px 14px;
+  font-size: var(--fs-small);
+}
+
+
+.status-sub {
+  font-weight: 450;
+  opacity: 0.85;
+}
+.status-link {
+  color: inherit;
+  font: inherit;
+  padding: 0 2px;
+  margin: 0 -2px;
+  border-radius: 4px;
+}
+.status-link:hover {
+  opacity: 1;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ================================================================ a turn's work, folded
+   Between your message and the answer, everything Claude did is one line: what it edited, ran,
+   read and searched. Open it to see the steps; the answer always stands below on its own. */
+.work {
+  margin: 10px 0 14px;
+}
+/* the line sits on the same left edge as the answer under it; the chevron trails the words */
+.work-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 30px;
+  padding: 0;
+  font-size: var(--fs-ui);
+  color: var(--text-3);
+  text-align: left;
+  transition: color var(--t-fast);
+}
+.work-head:hover {
+  color: var(--text-2);
+}
+.work-head .tool-chev {
+  flex: none;
+  margin-left: 0;
+  opacity: 0.7;
+  transition: transform var(--t-med) var(--ease), opacity var(--t-fast);
+}
+.work-head:hover .tool-chev {
+  opacity: 1;
+}
+.work-head .tool-chev.open {
+  transform: rotate(90deg);
+}
+.work-sum {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.work-fail {
+  flex: none;
+  color: var(--err);
+}
+.work-n {
+  flex: none;
+  margin-left: auto;
+  font-size: var(--fs-micro);
+  color: var(--text-4);
+}
+/* a turn still under way: the fold line is the working line, mark breathing, words shimmering.
+   When the turn ends the mark folds away sideways so the words settle onto the left edge. */
+.work-mark {
+  flex: none;
+  display: inline-flex;
+  width: 16px;
+  margin-right: 4px;
+  overflow: hidden;
+  transition: width var(--t-med) var(--ease), margin var(--t-med) var(--ease), opacity var(--t-fast);
+}
+.work-mark.gone {
+  width: 0;
+  margin-right: -6px; /* swallows the row gap so the words sit on the answer's left edge */
+  opacity: 0;
+}
+.work-mark.gone .wm-bowl,
+.work-mark.gone .wm-stems {
+  animation: none;
+}
+.work.live .work-sum {
+  font-weight: 500;
+}
+
+.work-body {
+  margin: 4px 0 0;
+  padding: 2px 0 4px 14px;
+  box-shadow: inset 1px 0 0 var(--hair-2);
+}
+/* what Claude said along the way reads as notes, quieter than the answer */
+.work-body .msg-assistant {
+  color: var(--text-2);
+  font-size: var(--fs-ui);
+}
+.work-body .msg-assistant .md {
+  font-size: inherit;
+}
+
+/* ---- chapters: narration as headings, steps beneath, a rail down the side ---- */
+.chapters {
+  display: grid;
+  padding: 2px 0;
+}
+.chap {
+  position: relative;
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  column-gap: 10px;
+  padding-bottom: 12px;
+}
+.chap.last {
+  padding-bottom: 2px;
+}
+.chap-rail {
+  position: relative;
+  grid-row: 1 / span 3;
+  display: flex;
+  justify-content: center;
+}
+.chap-dot {
+  position: relative;
+  z-index: 1;
+  width: 7px;
+  height: 7px;
+  margin-top: 9px;
+  border-radius: 50%;
+  background: var(--text-4);
+}
+.chap.has-failed .chap-dot {
+  background: var(--err);
+}
+.chap-dot.live {
+  background: var(--accent);
+  animation: breathe 1.4s ease-in-out infinite;
+}
+.chap-line {
+  position: absolute;
+  top: 18px;
+  bottom: -12px;
+  width: 1px;
+  background: var(--hair-2);
+}
+.chap-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  min-height: 24px;
+  text-align: left;
+  border-radius: var(--r-2);
+}
+.chap-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-ui);
+  line-height: 1.55;
+  color: var(--text-2);
+}
+.chap.open .chap-title,
+.chap-head:hover .chap-title {
+  color: var(--text);
+}
+.chap-title .md > :last-child {
+  margin-bottom: 0;
+}
+.chap-title.untitled {
+  color: var(--text-3);
+}
+.chap-tally {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-top: 4px;
+  font-size: var(--fs-micro);
+  color: var(--text-4);
+  white-space: nowrap;
+}
+.chap-tally .tool-chev {
+  margin-left: 2px;
+  opacity: 0.8;
+  transition: transform var(--t-med) var(--ease);
+}
+.chap-tally .tool-chev.open {
+  transform: rotate(90deg);
+}
+.chap-fail {
+  color: var(--err);
+}
+.chap-thought {
+  grid-column: 2;
+}
+.chap-thought .thinking {
+  margin: 0;
+}
+.chap-steps {
+  grid-column: 2;
+  padding-top: 2px;
+}
+.chap-steps .steps {
+  margin: 2px 0;
+}
+/* inside a chapter the steps do not repeat the narration style */
+.work-body .chap .msg-assistant {
+  display: none;
+}

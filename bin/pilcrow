@@ -1,0 +1,178 @@
+#!/usr/bin/env bash
+# Pilcrow launcher.
+# Opens Pilcrow in its own desktop window (Electron). If Electron is missing or cannot start on this
+# machine, it falls back to a Chrome/Chromium app window, then to the default browser.
+#
+#   pilcrow                 open the desktop app
+#   pilcrow --chrome        use a Chrome/Chromium app window
+#   pilcrow --browser       open in the default browser
+#   pilcrow --server        run headless and print the address (e.g. over SSH with port forwarding)
+#   pilcrow --doctor        check Node, Claude Code, the API endpoint and the desktop setup
+#   pilcrow --no-sandbox    start Electron without the Chromium sandbox
+#   pilcrow --version
+set -u
+
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+APP_DIR="$(cd "$(dirname "$SELF")/.." && pwd)"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/pilcrow"
+LOG="$STATE_DIR/launcher.log"
+# Pilcrow's state (logs, access secret) is private to this user.
+(umask 077 && mkdir -p "$STATE_DIR" && touch "$LOG")
+chmod 700 "$STATE_DIR" 2>/dev/null || true
+chmod 600 "$LOG" 2>/dev/null || true
+NO_SANDBOX_MARK="$STATE_DIR/electron-no-sandbox"
+
+# Started from the desktop menu there is no terminal, so variables set in ~/.bashrc or ~/.profile
+# (ANTHROPIC_BASE_URL, proxies, PATH additions…) are missing. Ask the login shell for its environment,
+# as editors such as VS Code do. Skipped when started from a terminal, which already has it.
+import_shell_env() {
+  local sh="${SHELL:-/bin/bash}" kv
+  command -v timeout >/dev/null 2>&1 || return 0
+  while IFS= read -r -d '' kv; do
+    case "${kv%%=*}" in
+      '' | *[!A-Za-z0-9_]* | _ | SHLVL | PWD | OLDPWD | DISPLAY | WAYLAND_DISPLAY | XAUTHORITY | DBUS_SESSION_BUS_ADDRESS | XDG_RUNTIME_DIR | XDG_SESSION_* | TERM | COLORTERM) continue ;;
+    esac
+    export "$kv" 2>/dev/null || true
+  done < <(timeout 8 "$sh" -ilc 'env -0' </dev/null 2>/dev/null)
+}
+if [ ! -t 0 ] && [ ! -t 1 ] && [ "${PILCROW_SHELL_ENV:-1}" != 0 ]; then import_shell_env; fi
+
+# PATH and node captured at install time, so launching from the desktop menu finds the same tools.
+if [ -f "$APP_DIR/.launch-env" ]; then
+  # shellcheck disable=SC1091
+  . "$APP_DIR/.launch-env"
+fi
+NODE="${PILCROW_NODE:-$(command -v node || true)}"
+if [ -z "$NODE" ] || [ ! -x "$NODE" ]; then
+  echo "pilcrow: Node.js not found. Install Node 20+ or set PILCROW_NODE in $APP_DIR/.launch-env" >&2
+  exit 1
+fi
+
+MODE="${PILCROW_SHELL:-auto}"
+NO_SANDBOX=0
+PASS=()
+for arg in "$@"; do
+  case "$arg" in
+    --shell=*) MODE="${arg#--shell=}" ;;
+    --electron) MODE=electron ;;
+    --chrome) MODE=chrome ;;
+    --browser) MODE=browser ;;
+    --server | --headless) MODE=none ;;
+    --no-sandbox) NO_SANDBOX=1 ;;
+    --doctor) exec "$NODE" "$APP_DIR/server/main.js" --doctor ;;
+    --restart-outdated) exec "$NODE" "$APP_DIR/server/main.js" --restart-outdated ;;
+    --version | -v)
+      "$NODE" -e "console.log('Pilcrow ' + require('$APP_DIR/package.json').version)"
+      exit 0
+      ;;
+    --help | -h)
+      sed -n '2,12p' "$SELF" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *) PASS+=("$arg") ;;
+  esac
+done
+
+note() { printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$LOG"; }
+say() {
+  note "$*"
+  [ -t 2 ] && printf 'pilcrow: %s\n' "$*" >&2
+  return 0
+}
+
+# Without any display there is no window to open: serve and print the URL instead.
+if [ "$MODE" != none ] && [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]; then
+  say "no graphical display found; running as a server (open the URL below in a browser)"
+  MODE=none
+fi
+
+ELECTRON="$APP_DIR/node_modules/electron/dist/electron"
+
+start_detached() {
+  # setsid keeps the app alive when the terminal that started it closes.
+  if command -v setsid >/dev/null 2>&1; then
+    setsid "$@" </dev/null >>"$LOG" 2>&1 &
+  else
+    nohup "$@" </dev/null >>"$LOG" 2>&1 &
+  fi
+  CHILD=$!
+}
+
+# Start Electron and watch it briefly. Returns 0 if it is running (or handed off to a running
+# instance), 2 if the Chromium sandbox is the problem, 1 for any other failure.
+try_electron() {
+  local flags=()
+  if [ "$NO_SANDBOX" = 1 ] || [ -f "$NO_SANDBOX_MARK" ] || [ "$(id -u)" = 0 ]; then flags+=(--no-sandbox); fi
+  local mark
+  mark=$(wc -c <"$LOG" 2>/dev/null || echo 0)
+  note "starting electron ${flags[*]:-}"
+  start_detached "$ELECTRON" ${flags[@]+"${flags[@]}"} "$APP_DIR" ${PASS[@]+"${PASS[@]}"}
+  local _
+  for _ in $(seq 1 60); do
+    # The server writes instance.json once it is listening: Electron is up.
+    if grep -qE "\"pid\": ?${CHILD}[,}]" "$STATE_DIR/instance.json" 2>/dev/null && kill -0 "$CHILD" 2>/dev/null; then
+      note "electron is running (pid $CHILD)"
+      return 0
+    fi
+    if ! kill -0 "$CHILD" 2>/dev/null; then
+      wait "$CHILD"
+      local code=$?
+      [ "$code" = 0 ] && return 0 # another Pilcrow window took over
+      local out
+      out=$(tail -c +"$((mark + 1))" "$LOG" 2>/dev/null)
+      if printf '%s' "$out" | grep -qiE 'sandbox|namespace|setuid|SUID'; then return 2; fi
+      return 1
+    fi
+    sleep 0.2
+  done
+  return 0
+}
+
+run_electron() {
+  [ -x "$ELECTRON" ] || return 1
+  try_electron
+  local rc=$?
+  if [ "$rc" = 2 ] && [ "$NO_SANDBOX" != 1 ] && [ ! -f "$NO_SANDBOX_MARK" ]; then
+    say "the Chromium sandbox is not available on this machine; retrying without it (remembered for next time)"
+    touch "$NO_SANDBOX_MARK"
+    try_electron
+    rc=$?
+  fi
+  return "$rc"
+}
+
+# Chrome/Chromium app window (or the default browser when there is no Chrome). From a terminal it stays
+# in the foreground so the address and any problems are visible; from the desktop menu it detaches.
+run_chrome() {
+  if [ -t 1 ]; then
+    exec "$NODE" "$APP_DIR/server/main.js" --shell=chrome ${PASS[@]+"${PASS[@]}"}
+  fi
+  start_detached "$NODE" "$APP_DIR/server/main.js" --shell=chrome ${PASS[@]+"${PASS[@]}"}
+}
+
+case "$MODE" in
+  auto | electron)
+    if run_electron; then exit 0; fi
+    if [ -x "$ELECTRON" ]; then
+      say "Electron could not start (details in $LOG); falling back to a browser window"
+    else
+      say "Electron is not installed; using a browser window (see README to add it)"
+    fi
+    [ "$MODE" = electron ] && exit 1
+    run_chrome
+    ;;
+  chrome)
+    run_chrome
+    ;;
+  browser)
+    exec "$NODE" "$APP_DIR/server/main.js" --shell=browser ${PASS[@]+"${PASS[@]}"}
+    ;;
+  none)
+    exec "$NODE" "$APP_DIR/server/main.js" --shell=none ${PASS[@]+"${PASS[@]}"}
+    ;;
+  *)
+    echo "pilcrow: unknown shell '$MODE' (use electron, chrome, browser or none)" >&2
+    exit 2
+    ;;
+esac
+exit 0

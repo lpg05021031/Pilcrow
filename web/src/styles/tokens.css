@@ -1,0 +1,313 @@
+/* Pilcrow design tokens.
+   Warm neutrals in the key of Claude's own apps: charcoal and bone rather than blue-grey, with
+   Claude's orange as the single accent. Orange is reserved for: the primary action, the send button,
+   attention ("needs you"), and focus. Lilac marks reasoning, and nothing else. */
+
+:root {
+  --font-ui: 'Inter Variable', 'Inter', 'Noto Sans CJK TC', 'Noto Sans TC', 'Source Han Sans TC', 'PingFang TC', 'Microsoft JhengHei UI', 'Microsoft JhengHei', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', 'Noto Sans Mono CJK TC', 'Microsoft JhengHei', 'DejaVu Sans Mono', 'Cascadia Mono', Consolas, ui-monospace, monospace;
+
+  /* type scale (px) — UI is 13, reading text 15 */
+  --fs-micro: 11px;
+  --fs-small: 12px;
+  --fs-ui: 13px;
+  --fs-body: 14.5px;
+  --font-size: 14.5px; /* conversation prose; user-configurable */
+  --fs-h: 15px; /* section headings */
+  --fs-title: 17px;
+  --fs-display: 22px;
+  --mono-size: 12.5px;
+
+  /* radii: controls < cards < floating < bubbles */
+  --r-1: 4px;
+  --r-2: 6px;
+  --r-3: 10px;
+  --r-4: 16px;
+  --r-5: 999px;
+
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+
+  /* motion: hover/press 120, menus 180, panels/dialogs 240, height 300; exits are short and accelerate */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --ease-io: cubic-bezier(0.65, 0, 0.35, 1);
+  --spring: cubic-bezier(0.34, 1.36, 0.64, 1);
+  --t-fast: 120ms;
+  --t-med: 180ms;
+  --t-panel: 240ms;
+  --t-slow: 300ms;
+  --t-exit: 140ms;
+
+  /* Real springs, sampled from a damped mass-spring (k, c, m) into linear() so every element that
+     moves settles the way a physical thing does. Each curve is paired with the time it takes to settle;
+     use them together (duration var(--spring-snappy-t), easing var(--spring-snappy)).
+     soft: no overshoot, for layout (a panel sliding open). snappy: 6% overshoot, for things that
+     appear (menus, cards, the send button). bouncy: 19% overshoot, for small toggles and check marks. */
+  --spring-soft: linear(0, 0.0165 2.5%, 0.0586 5%, 0.1171 7.5%, 0.1853 10%, 0.258 12.5%, 0.3316 15%, 0.4035 17.5%, 0.4721 20%, 0.5362 22.5%, 0.5951 25%, 0.6487 27.5%, 0.6968 30%, 0.7397 32.5%, 0.7776 35%, 0.8109 37.5%, 0.8399 40%, 0.865 42.5%, 0.8867 45%, 0.9053 47.5%, 0.9211 50%, 0.9346 52.5%, 0.946 55%, 0.9556 57.5%, 0.9637 60%, 0.9704 62.5%, 0.976 65%, 0.9806 67.5%, 0.9844 70%, 0.9876 72.5%, 0.9902 75%, 0.9922 77.5%, 0.9939 80%, 0.9953 82.5%, 0.9964 85%, 0.9973 87.5%, 0.998 90%, 0.9985 92.5%, 0.9989 95%, 0.9993 97.5%, 1);
+  --spring-soft-t: 560ms;
+  --spring-snappy: linear(0, 0.0319 2.5%, 0.1123 5%, 0.2217 7.5%, 0.3449 10%, 0.4702 12.5%, 0.5894 15%, 0.6973 17.5%, 0.7908 20%, 0.8685 22.5%, 0.9307 25%, 0.9782 27.5%, 1.0127 30%, 1.036 32.5%, 1.0501 35%, 1.0569 37.5%, 1.0582 40%, 1.0557 42.5%, 1.0505 45%, 1.0439 47.5%, 1.0366 50%, 1.0294 52.5%, 1.0225 55%, 1.0164 57.5%, 1.0112 60%, 1.0068 62.5%, 1.0034 65%, 1.0008 67.5%, 0.9989 70%, 0.9977 72.5%, 0.997 75%, 0.9966 77.5%, 0.9966 80%, 0.9968 82.5%, 0.9971 85%, 0.9975 87.5%, 0.998 90%, 0.9984 92.5%, 0.9988 95%, 0.9991 97.5%, 1);
+  --spring-snappy-t: 600ms;
+  --spring-bouncy: linear(0, 0.0666 2.5%, 0.2304 5%, 0.4412 7.5%, 0.6584 10%, 0.8527 12.5%, 1.0066 15%, 1.1131 17.5%, 1.1731 20%, 1.1931 22.5%, 1.1828 25%, 1.1527 27.5%, 1.1125 30%, 1.0703 32.5%, 1.0321 35%, 1.0014 37.5%, 0.9799 40%, 0.9674 42.5%, 0.9628 45%, 0.9642 47.5%, 0.9697 50%, 0.9774 52.5%, 0.9856 55%, 0.9931 57.5%, 0.9992 60%, 1.0035 62.5%, 1.0061 65%, 1.0072 67.5%, 1.007 70%, 1.006 72.5%, 1.0045 75%, 1.003 77.5%, 1.0015 80%, 1.0003 82.5%, 0.9994 85%, 0.9989 87.5%, 0.9986 90%, 0.9986 92.5%, 0.9988 95%, 0.9991 97.5%, 1);
+  --spring-bouncy-t: 760ms;
+
+  --header-h: 48px;
+  --col: 700px; /* conversation column: ~80 characters at 14.5px */
+
+  /* legacy aliases used by older rules */
+  --r-xs: var(--r-1);
+  --r-sm: var(--r-2);
+  --r-md: var(--r-3);
+  --r-lg: var(--r-4);
+  --ui-size: var(--fs-ui);
+  --fs-base: var(--fs-ui);
+  --fs-code: var(--mono-size);
+  --mono: var(--font-mono);
+
+  interpolate-size: allow-keywords;
+}
+
+:root,
+[data-theme='dark'] {
+  color-scheme: dark;
+  /* Claude Code's own tokens (cds, neutral set): page #191919, sidebar #1f1f1f, popover #303030; text = white at 93 / 57 / 40%. */
+  --canvas: #191919; /* conversation */
+  --chrome: #1f1f1f; /* sidebar and side panel */
+  --raised: #262626; /* composer, cards, menus */
+  --raised-2: #303030; /* hover / selected on raised */
+  --inset: #141414; /* code, diffs, fields */
+  --hair: rgba(255, 255, 255, 0.07);
+  --hair-2: rgba(255, 255, 255, 0.12);
+  --hair-3: rgba(255, 255, 255, 0.2);
+  --fill-1: rgba(255, 255, 255, 0.075);
+  --fill-2: rgba(255, 255, 255, 0.15);
+  --fill-3: rgba(255, 255, 255, 0.2);
+
+  --text: #ededed;
+  --text-2: #9c9c9c;
+  --text-3: #878787;
+  --text-4: #6b6b6b;
+
+  /* elevation: a card is a lighter surface with a hairline; it never casts a shadow on dark */
+  --card: var(--raised);
+  --card-shadow: 0 0 0 0.5px var(--hair-2);
+  --card-shadow-hover: 0 0 0 0.5px var(--hair-3);
+  --card-shadow-lift: 0 0 0 0.5px var(--hair-3), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+
+  /* Claude's orange: primary action, send, attention, focus */
+  --accent: #d97757;
+  --accent-2: #e2896c;
+  --accent-ink: #ffffff;
+  --accent-text: #e8946f;
+  --accent-wash: rgba(217, 119, 87, 0.14);
+  --accent-line: rgba(217, 119, 87, 0.48);
+  --accent-ring: rgba(217, 119, 87, 0.55);
+
+  --ok: #53c556;
+  --ok-wash: rgba(83, 197, 86, 0.12);
+  --err: #f17778;
+  --err-wash: rgba(220, 60, 61, 0.12);
+  --info: #6aabf1;
+  --info-wash: rgba(106, 171, 241, 0.12);
+  --warn: #e0b341;
+  --warn-wash: rgba(224, 179, 65, 0.12);
+  --plan: #3bbd8c;
+  --plan-wash: rgba(91, 191, 174, 0.12);
+  /* reasoning: lilac, so thought is never confused with speech or action */
+  --think: #a89af0;
+  --think-wash: rgba(185, 166, 230, 0.1);
+
+  /* Claude Code's git tints: #32d74b / #ff2c56 at 20% for rows, stronger for the changed words */
+  --diff-add: rgba(50, 215, 75, 0.12);
+  --diff-add-hl: rgba(50, 215, 75, 0.3);
+  --diff-del: rgba(255, 44, 86, 0.11);
+  --diff-del-hl: rgba(255, 44, 86, 0.3);
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-card: 0 0 0 1px var(--hair), 0 1px 2px rgba(0, 0, 0, 0.25);
+  --shadow-float: 0 0 0 1px var(--hair-2), 0 10px 30px -10px rgba(0, 0, 0, 0.7), 0 2px 8px -2px rgba(0, 0, 0, 0.4);
+  --shadow-pop: 0 0 0 1px var(--hair-2), 0 18px 48px -12px rgba(0, 0, 0, 0.75), 0 6px 16px -6px rgba(0, 0, 0, 0.45);
+  --scrim: rgba(12, 11, 9, 0.55);
+  --selection: rgba(122, 167, 240, 0.3);
+
+  /* Floating material: what menus, sheets and toasts are made of. Slightly translucent over a deep
+     blur, so what lies underneath still colours the surface; a one-pixel light along the top edge
+     is where the light catches it, and a hairline keeps it from dissolving into a dark page. */
+  --glass: rgba(40, 40, 43, 0.76);
+  --glass-2: rgba(33, 33, 36, 0.86); /* sheets: a little more opaque, there is reading to do on them */
+  --glass-blur: blur(28px) saturate(170%);
+  --edge-hi: rgba(255, 255, 255, 0.07);
+  --shadow-glass: 0 0 0 0.5px rgba(0, 0, 0, 0.6), inset 0 0 0 0.5px rgba(255, 255, 255, 0.09), inset 0 1px 0 var(--edge-hi), 0 20px 50px -14px rgba(0, 0, 0, 0.8), 0 6px 16px -8px rgba(0, 0, 0, 0.5);
+  --shadow-sheet: 0 0 0 0.5px rgba(0, 0, 0, 0.7), inset 0 0 0 0.5px rgba(255, 255, 255, 0.1), inset 0 1px 0 var(--edge-hi), 0 36px 90px -24px rgba(0, 0, 0, 0.85), 0 12px 28px -12px rgba(0, 0, 0, 0.55);
+  --scrim-blur: blur(10px) saturate(120%);
+
+  /* legacy names */
+  --bg: var(--canvas);
+  --bg-2: var(--chrome);
+  --bg-3: var(--raised);
+  --bg-4: var(--raised-2);
+  --bg-inset: var(--inset);
+  --line: var(--hair);
+  --line-2: var(--hair-2);
+
+  --cm-comment: #767369;
+  --cm-keyword: #c7aaee;
+  --cm-string: #a8d19a;
+  --cm-number: #ecb37e;
+  --cm-function: #93bbf3;
+  --cm-type: #86d1c4;
+  --cm-property: #cfcbc0;
+  --cm-tag: #f09c96;
+  --cm-regex: #eeaecd;
+  --cm-punct: #93908a;
+
+  --ansi-black: #3d3b37;
+  --ansi-red: #e8695c;
+  --ansi-green: #6fbf8a;
+  --ansi-yellow: #e6c06a;
+  --ansi-blue: #7aa7f0;
+  --ansi-magenta: #c7aaee;
+  --ansi-cyan: #5bbfae;
+  --ansi-white: #d3d0c6;
+  --ansi-bright-black: #76736a;
+  --ansi-bright-red: #ff8c80;
+  --ansi-bright-green: #8fdba8;
+  --ansi-bright-yellow: #ffd98a;
+  --ansi-bright-blue: #a6c5ff;
+  --ansi-bright-magenta: #dfc6ff;
+  --ansi-bright-cyan: #97e3d6;
+  --ansi-bright-white: #f6f4ec;
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+  /* Claude Code's own tokens (cds, neutral set): page #fff, sidebar #fafafa; text = black at 90 / 60 / 40%; hairlines black at 8%. */
+  --canvas: #ffffff;
+  --chrome: #fafafa;
+  --raised: #ffffff;
+  --raised-2: #f2f2f2;
+  --inset: #f9f9f9;
+  --hair: rgba(0, 0, 0, 0.08);
+  --hair-2: rgba(0, 0, 0, 0.12);
+  --hair-3: rgba(0, 0, 0, 0.2);
+  --fill-1: rgba(0, 0, 0, 0.05);
+  --fill-2: rgba(0, 0, 0, 0.1);
+  --fill-3: rgba(0, 0, 0, 0.145);
+
+  --text: #1a1a1a;
+  --text-2: #666666;
+  --text-3: #878787;
+  --text-4: #a3a3a3;
+
+  /* elevation: on a white page a card needs a soft shadow to exist at all */
+  --card: #ffffff;
+  --card-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.07), 0 1px 2px rgba(0, 0, 0, 0.04), 0 6px 16px -10px rgba(0, 0, 0, 0.12);
+  --card-shadow-hover: 0 0 0 0.5px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.05), 0 8px 20px -10px rgba(0, 0, 0, 0.16);
+  --card-shadow-lift: 0 0 0 0.5px rgba(0, 0, 0, 0.1), 0 12px 32px -12px rgba(0, 0, 0, 0.22);
+
+  --accent: #d97757;
+  --accent-2: #c6613f;
+  --accent-ink: #ffffff;
+  --accent-text: #ad4f2e;
+  --accent-wash: rgba(217, 119, 87, 0.12);
+  --accent-line: rgba(217, 119, 87, 0.5);
+  --accent-ring: rgba(217, 119, 87, 0.55);
+
+  --ok: #006c10;
+  --ok-wash: rgba(0, 108, 16, 0.1);
+  --err: #a42528;
+  --err-wash: rgba(220, 60, 61, 0.12);
+  --info: #1757ac;
+  --info-wash: rgba(23, 87, 172, 0.09);
+  --warn: #9a6b00;
+  --warn-wash: rgba(154, 107, 0, 0.1);
+  --plan: #065f49;
+  --plan-wash: rgba(15, 122, 108, 0.09);
+  --think: #5437b8;
+  --think-wash: rgba(123, 95, 196, 0.09);
+
+  /* Claude Code's git tints: #1e9e3c / #cd2054 at 20% for rows, stronger for the changed words */
+  --diff-add: rgba(30, 158, 60, 0.1);
+  --diff-add-hl: rgba(30, 158, 60, 0.26);
+  --diff-del: rgba(205, 32, 84, 0.08);
+  --diff-del-hl: rgba(205, 32, 84, 0.24);
+
+  --shadow-1: 0 1px 2px rgba(44, 40, 30, 0.06);
+  --shadow-card: 0 0 0 1px var(--hair), 0 1px 2px rgba(44, 40, 30, 0.04);
+  --shadow-float: 0 0 0 1px var(--hair), 0 8px 28px -10px rgba(44, 40, 30, 0.16), 0 2px 6px -2px rgba(44, 40, 30, 0.06);
+  --shadow-pop: 0 0 0 1px var(--hair-2), 0 18px 44px -12px rgba(44, 40, 30, 0.22), 0 4px 12px -4px rgba(44, 40, 30, 0.08);
+  --scrim: rgba(40, 36, 28, 0.24);
+  --selection: rgba(44, 98, 196, 0.16);
+
+  --glass: rgba(255, 255, 255, 0.78);
+  --glass-2: rgba(255, 255, 255, 0.88);
+  --glass-blur: blur(28px) saturate(170%);
+  --edge-hi: rgba(255, 255, 255, 0.9);
+  --shadow-glass: 0 0 0 0.5px rgba(0, 0, 0, 0.16), inset 0 1px 0 var(--edge-hi), 0 18px 44px -12px rgba(44, 40, 30, 0.26), 0 4px 12px -4px rgba(44, 40, 30, 0.1);
+  --shadow-sheet: 0 0 0 0.5px rgba(0, 0, 0, 0.14), inset 0 1px 0 var(--edge-hi), 0 36px 80px -24px rgba(44, 40, 30, 0.35), 0 10px 24px -10px rgba(44, 40, 30, 0.14);
+  --scrim-blur: blur(10px) saturate(120%);
+
+  --bg: var(--canvas);
+  --bg-2: var(--chrome);
+  --bg-3: var(--raised);
+  --bg-4: var(--raised-2);
+  --bg-inset: var(--inset);
+  --line: var(--hair);
+  --line-2: var(--hair-2);
+
+  --cm-comment: #8d8a80;
+  --cm-keyword: #7c3fbf;
+  --cm-string: #2f7a37;
+  --cm-number: #b2570f;
+  --cm-function: #1f5fc0;
+  --cm-type: #0d7a6e;
+  --cm-property: #3f3d36;
+  --cm-tag: #b52a33;
+  --cm-regex: #b2357a;
+  --cm-punct: #6e6b63;
+
+  --ansi-black: #1f1e1b;
+  --ansi-red: #c73d2f;
+  --ansi-green: #2f8a4f;
+  --ansi-yellow: #9a6b00;
+  --ansi-blue: #2c62c4;
+  --ansi-magenta: #8a3fc2;
+  --ansi-cyan: #0f7a6c;
+  --ansi-white: #5d5a53;
+  --ansi-bright-black: #8d8a80;
+  --ansi-bright-red: #e24b3f;
+  --ansi-bright-green: #2aa55e;
+  --ansi-bright-yellow: #b8740b;
+  --ansi-bright-blue: #3b7be0;
+  --ansi-bright-magenta: #a35bd8;
+  --ansi-bright-cyan: #13968a;
+  --ansi-bright-white: #1f1e1b;
+}
+
+/* Shiki dual-theme output */
+[data-theme='dark'] .hl span,
+[data-theme='dark'] .hl-line span {
+  color: var(--shiki-dark);
+  font-style: var(--shiki-dark-font-style);
+  font-weight: var(--shiki-dark-font-weight);
+}
+[data-theme='light'] .hl span,
+[data-theme='light'] .hl-line span {
+  color: var(--shiki-light);
+  font-style: var(--shiki-light-font-style);
+  font-weight: var(--shiki-light-font-weight);
+}
+
+/* Before the script has chosen a theme, follow the system so the very first frame is already right. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+    --canvas: #ffffff;
+    --chrome: #fafafa;
+    --text: #1a1a1a;
+  }
+}

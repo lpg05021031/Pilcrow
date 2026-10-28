@@ -1,8 +1,18 @@
-# Runtime data (browser profiles contain cookies/sessions — never commit)
-data/
-host/webview2/
-state/
+# Build and install output
+node_modules/
+web/dist/
+assets/icon-*.png
+assets/icon.ico
+out/
+test/out/
+.launch-env
+.pilcrow-manifest
+.pilcrow-partial
 
-# Logs
+# This repo lives in %LOCALAPPDATA%\Pilcrow, which is also the app's runtime folder.
+# Browser profiles contain cookies and sessions: never commit them.
+data/
+host/
+state/
 *.log
-host/window.json
+__pycache__/

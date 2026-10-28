@@ -1,129 +1,396 @@
-# Pilcrow ¶
+# Pilcrow — Claude Code 桌面版（Linux / Windows）
 
-**Claude Code 的桌面版圖形介面（Linux / Windows）。**
+Pilcrow 是一個跑在 Linux 與 Windows 桌面上的 Claude Code 圖形介面。背後就是真正的 Claude Code
+（透過官方 Claude Agent SDK 驅動同一套 harness、工具、權限、CLAUDE.md、skills、MCP），
+介面則照 Claude Code Desktop 的工作方式設計：左邊是 session 清單，中間是對話，右邊是
+Changes / Files / Terminal / Preview / Tasks / Session 面板。
 
-Pilcrow 背後就是真正的 Claude Code：透過官方 Claude Agent SDK 驅動同一套 harness、工具、權限、
-`CLAUDE.md`、skills 與 MCP。介面照 Claude Code Desktop 的工作方式設計：左邊是 session 清單，
-中間是對話，右邊是 Changes / Files / Terminal / Preview / Tasks / Session 面板。
-它沿用你現有的 `~/.claude` 設定，所以公司 gateway（`ANTHROPIC_BASE_URL` + API key / token）不用另外設定。
-
-目前版本：**2.9.0**（見 [CHANGELOG.md](CHANGELOG.md)）。
+它沿用你現有的 Claude Code 設定，所以公司 gateway（`ANTHROPIC_BASE_URL` + API key / token）
+不用另外設定。
 
 ---
 
-## 這個 repo 放什麼
+## 這個 repo
 
-Pilcrow 以「單一純文字安裝檔」發佈：伺服器原始碼直接寫在安裝檔裡，建置好的前端以 base64 內附，
-安裝時只用 `npm install --omit=dev` 從你設定的 registry 抓執行需要的套件，機器上不需要任何建置工具。
-這個 repo 收的就是這些發佈產物，以及兩個原生桌面外殼：
+這裡是 Pilcrow 完整的開發樹，也是安裝檔的來源。根目錄的三個安裝檔是**最新版的發佈產物**，由
+`npm run release` 產生，不要手改。
 
 | 路徑 | 內容 |
 |---|---|
-| `pilcrow-install.sh` | **Linux 安裝檔**。寫出程式、介面與啟動器，建立應用程式選單項目與 `~/.local/bin/pilcrow` |
-| `pilcrow-windows.ps1` | **Windows 安裝檔**。裝 Pilcrow、準備 WebView2 桌面外殼、建立開始功能表與桌面捷徑，然後開視窗。重跑同一個檔案即可更新 |
-| `pilcrow-app.sh` | Linux 桌面外殼：用 WebKitGTK（找不到時退回 PyQt6 WebEngine）把 Pilcrow 包成 GNOME 風格的原生視窗 |
-| `host/pilcrow-app.ps1` | Windows 桌面外殼腳本：取得 WebView2 SDK、編譯 `PilcrowHost.exe`、建立捷徑 |
-| `host/sdk/` | Windows 外殼本體：`PilcrowHost.cs` 原始碼、編好的 `PilcrowHost.exe`、WebView2 SDK 的三個 DLL、`launch.json`。詳見 [host/README.md](host/README.md) |
-| `docs/user-guide.md` | 完整使用手冊（安裝後也會寫到 `~/pilcrow/README.md`） |
+| `server/` | Node 伺服器：Claude Agent SDK 驅動、session / 歷史 / git / 檔案 / 終端機 / 排程 / 記憶 |
+| `web/src/` | React 介面（Vite + TypeScript）；`web/dist/` 是建置結果，不進 git |
+| `electron/`、`bin/pilcrow` | Linux 的 Electron 視窗與啟動器 |
+| `scripts/pilcrow-app.sh`、`scripts/pilcrow-app.ps1` | Linux（WebKitGTK）與 Windows（WebView2）的原生桌面外殼。Windows 外殼的 C# 原始碼就寫在 ps1 裡，安裝時用系統內建的 csc 編成 PilcrowHost.exe |
+| `scripts/make-installers.py`、`scripts/installer/*.tmpl` | 把工作樹打包成三個安裝檔；模板是安裝檔的固定部分 |
+| `scripts/release.mjs` | 改版流程：版本號、檢查、build、打包、驗證、commit、tag |
+| `pilcrow-install.sh`、`pilcrow-windows.ps1`、`pilcrow-app.sh` | 發佈產物（見下方「修改介面」與「發佈」） |
 | `CHANGELOG.md` | 版本紀錄 |
 
-執行期資料不在 repo 裡（已用 `.gitignore` 排除）：瀏覽器 profile（`data/`、`host/webview2/`）、
-log、視窗狀態。這些含有登入 session，請不要加進來。
+---
+
+## 需求
+
+| 項目 | 說明 |
+|---|---|
+| Linux x64 或 arm64 | 有桌面環境（X11 或 Wayland）。沒有桌面也能用 `--server` 模式 |
+| Node.js 20 以上 | 建議 22.12 以上（Electron 安裝程式需要） |
+| npm 能連到 registry | 公司內部 npm mirror 可以；安裝檔本身不需要連外 |
+| git | Changes 面板、worktree、commit 會用到 |
+| python3 | 內建終端機（Terminal 面板）用；沒有的話退回 `script` 指令 |
+| Chrome / Chromium（選用） | 當 Electron 下載不到時，改用它開成獨立視窗 |
 
 ---
 
 ## 安裝
 
-### Linux
+安裝檔 `pilcrow-install.sh` 是純文字：原始碼直接寫在裡面，建置好的介面以 base64 文字內附
+（約 2 MB），所以你的機器**不需要建置**，也不需要 Vite、rollup、esbuild 這類帶平台執行檔的建置工具。
+安裝時只會用 `npm install --omit=dev` 從你設定好的 registry 下載執行需要的套件。
 
-需求：Linux x64 / arm64 有桌面環境、Node.js 20 以上（建議 22.12+）、npm 能連到 registry；
-git 與 python3 建議安裝。
+### 方法 A：存成檔案再執行（建議）
+
+1. 用文字編輯器（gedit、VS Code、vim…）開一個新檔，貼上全部內容，存成 `pilcrow-install.sh`
+2. 執行：
+
+   ```bash
+   bash pilcrow-install.sh
+   ```
+
+### 方法 B：直接在終端機貼
 
 ```bash
+cat > pilcrow-install.sh
+# 貼上全部內容，然後按 Ctrl+D
 bash pilcrow-install.sh
 ```
 
-```bash
-bash pilcrow-install.sh --help
-```
+> 不要把內容直接貼進 shell 提示字元執行：互動式 shell 會把 `!`、Tab 等字元當成指令處理，內容會被改掉。
+> 一定要先存成檔案。
 
-常用選項：`--dir PATH`（預設 `~/pilcrow`）、`--files-only`、`--skip-electron`（改用 Chrome 視窗）、
-`--no-desktop`；`ELECTRON_MIRROR=URL` 指定 Electron 下載鏡像。
+### 方法 C：剪貼簿太小、一次貼不完
 
-> 請先把安裝檔**存成檔案**再用 bash 執行，不要直接貼進 shell 提示字元。
-> 安裝檔每寫完一個檔案都會做 sha256 驗證，貼壞了會直接指出是哪個檔案。
-
-裝好後從應用程式選單開 **Pilcrow**，或在終端機執行 `pilcrow`。
-想要沒有網址列與瀏覽器快捷鍵的原生視窗，再跑一次：
+用分段檔 `pilcrow-install.part1.sh` … `partN.sh`。每一段都是獨立可執行的腳本，
+照順序各存成檔案、各自執行即可，最後一段會檢查前面每一段都寫對了，再開始安裝：
 
 ```bash
-bash pilcrow-app.sh --install
+bash pilcrow-install.part1.sh
+bash pilcrow-install.part2.sh
+...
 ```
 
-### Windows
+安裝檔每寫完一個檔案都會用 sha256 驗證；如果貼的時候少了一截或被改到，會直接告訴你是哪個檔案壞了，
+重貼那一段就好。
 
-需求：Windows 10 1809 以上、Node.js 20 以上、Python 3 + pip（只用來取 WebView2 SDK）、
-WebView2 Runtime（Windows 11 與 Edge 內含）；Git for Windows 建議安裝。
+### 安裝選項
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\pilcrow-windows.ps1
+```bash
+bash pilcrow-install.sh --dir ~/apps/pilcrow   # 指定安裝位置（預設 ~/pilcrow）
+bash pilcrow-install.sh --files-only           # 只寫出檔案與介面，不跑 npm
+bash pilcrow-install.sh --skip-electron        # 不下載 Electron，直接用 Chrome 視窗
+bash pilcrow-install.sh --no-desktop           # 不建立應用程式選單項目
+ELECTRON_MIRROR=https://你的內部鏡像/electron/ bash pilcrow-install.sh
 ```
-
-公司政策封鎖腳本檔時，改成直接執行內容：
-
-```powershell
-& ([scriptblock]::Create((Get-Content -Raw .\pilcrow-windows.ps1)))
-```
-
-常用選項：`-Dir <path>`（預設 `%LOCALAPPDATA%\Programs\Pilcrow`）、`-NoDesktop`、`-NoLaunch`、
-`-FilesOnly`、`-Uninstall`（設定與對話保留）。外殼相關選項（`-Node`、`-Python`、`-WebView2Package`、
-`-NuGetSource`、`-WebView2Runtime`、`-KeepServer`、`-NativeTitleBar`、`-DevTools`、`-SkipSignatureCheck`）
-意思同 `host/pilcrow-app.ps1` 檔頭說明。
-
-裝完會建立開始功能表與桌面的 **Pilcrow** 捷徑，直接指向 `%LOCALAPPDATA%\Pilcrow\host\sdk\PilcrowHost.exe`，
-並把 `pilcrow` 指令加到 PATH（`pilcrow --doctor` 健康檢查、`pilcrow --server` 只開背景程式）。
 
 ---
 
-## 功能一覽
+## 啟動
 
-- **Sessions**：依專案分組、置頂、封存；*Needs you* 區塊集中顯示等你回覆的 session；多個 session 同時跑
-- **Worktree**：開新 session 時勾選，就在獨立的 git worktree / branch 裡工作
-- **權限模式與確認**：Ask / Edit automatically / Plan / Auto / Bypass；工具卡片上直接 Allow / Always / Deny
-- **Diff 與 Changes 面板**：逐字差異、unified / side-by-side、在行上留評論再送回給 Claude、commit、開 PR
-- **時光機（Timeline）**：每個改檔步驟留快照，可看每一步改了什麼、整個資料夾或單一檔案還原
-- **控制室（Control room）**：所有 session 一頁看完，等你的直接在這裡批准；今日花費與耗時
-- **排程 + 收件匣**：把提示排在某個資料夾定時跑，結果進收件匣，可一鍵接手
-- **專案記憶**：每輪結束後把決定、死路、慣例蒸餾成筆記，新 session 自動帶著開始
-- **Files / Terminal / Preview / Tasks**：檔案樹與 CodeMirror 編輯器、多終端機、localhost 預覽、背景工作
-- **Skills 與 MCP servers 管理**：讀寫 Claude Code 自己的設定，格式與 CLI 一致
-- **Workflows**：多代理流程以流程卡呈現，每個代理有狀態、耗時與結果預覽
+- 應用程式選單 → **Pilcrow**
+- 或終端機：`pilcrow`（安裝檔會放一個連結到 `~/.local/bin/pilcrow`）
 
-完整說明（快捷鍵、gateway 設定、遠端 SSH 用法、檔案位置、疑難排解）見 [docs/user-guide.md](docs/user-guide.md)。
+```bash
+pilcrow              # 開桌面視窗（Electron → Chrome app 視窗 → 預設瀏覽器，依序嘗試）
+pilcrow --chrome     # 強制用 Chrome/Chromium 視窗
+pilcrow --server     # 不開視窗，只印出網址 http://127.0.0.1:47117/（SSH 遠端用，見下方）
+pilcrow --doctor     # 健康檢查：Node、Claude Code、API endpoint、桌面環境
+```
 
 ---
+
+## 公司 gateway / API 設定
+
+Pilcrow 不碰帳號，它啟動的就是 Claude Code，所以設定方式跟 CLI 一模一樣。建議寫在
+`~/.claude/settings.json`：
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://你的公司gateway",
+    "ANTHROPIC_AUTH_TOKEN": "你的key",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1"
+  }
+}
+```
+
+（用 `ANTHROPIC_API_KEY` 或 `apiKeyHelper` 也可以。）
+
+如果你是在 `~/.bashrc` / `~/.profile` 用 `export` 設定的：從應用程式選單啟動時，Pilcrow 會先讀一次
+你的登入 shell 環境（跟 VS Code 一樣的做法），所以也會生效。
+
+### 選用 gateway 上的模型
+
+Pilcrow 會向你的 endpoint 查詢它提供哪些模型（`GET /v1/models`），列在三個地方：
+
+- 輸入框右下角的模型選單（Claude Code 內建的 Opus / Sonnet / Haiku 不再列出，一律用 gateway 的模型）
+- 新增 session 視窗的 **Model**
+- **Settings → Claude Code → Default model**
+
+選了之後，Claude Code 送給 gateway 的就是那個模型 ID。查詢用的設定跟 Claude Code 完全一樣
+（endpoint、key 或 `apiKeyHelper`、`ANTHROPIC_CUSTOM_HEADERS`、`HTTPS_PROXY` / `NO_PROXY`、
+`NODE_EXTRA_CA_CERTS`）。Anthropic 格式和 OpenAI 格式（如 LiteLLM）的清單都看得懂；清單會快取 10 分鐘，
+選單最下方可以重新整理。gateway 沒有提供清單時，仍可選 **Custom model ID…** 自己輸入。
+
+確認方式：
+
+- `pilcrow --doctor` 會列出實際使用的 endpoint、設定來源、gateway 上的模型，並試連一次
+- App 裡 **Settings → Diagnostics**，或右側 **Session** 面板最下方的 *API endpoint*
+
+---
+
+## Claude Code 程式
+
+安裝時 npm 會一起裝好 SDK 內附的 Claude Code（版本跟 SDK 綁定）。如果你想用系統上自己的
+`claude`（例如公司統一安裝的版本），到 **Settings → Claude Code → Claude Code program** 選
+*System* 或填路徑。
+
+對話記錄跟 CLI 共用 `~/.claude/projects/`：CLI 開過的對話會出現在 Pilcrow 的清單裡，
+Pilcrow 的對話也可以在終端機用 `claude --resume` 接著做。
+
+---
+
+## 桌面視窗：Electron / Chrome / 瀏覽器
+
+Pilcrow 的視窗優先使用 Electron。Electron 的 npm 套件很小，但執行檔（約 100 MB）是另外從
+GitHub 下載的；公司網路擋住的話，安裝檔會提示，並自動改用 Chrome/Chromium 的 app 視窗
+（獨立視窗、沒有網址列，用起來差不多）。
+
+事後補裝 Electron：
+
+```bash
+cd ~/pilcrow
+scripts/electron.sh status
+scripts/electron.sh download https://你的內部鏡像/electron/          # 有內部鏡像時
+scripts/electron.sh from-zip ~/Downloads/electron-v44.7.2-linux-x64.zip  # 自己帶 zip 進來時
+```
+
+如果 Electron 因為 Chromium sandbox 無法啟動（有些公司環境關了 user namespace），
+launcher 會自動改用 `--no-sandbox` 並記住，不用手動處理。
+
+### 遠端主機（SSH）
+
+```bash
+# 在遠端主機
+pilcrow --server --port=47117
+# 在自己的電腦
+ssh -L 47117:127.0.0.1:47117 遠端主機
+# 然後用自己電腦的瀏覽器開 http://127.0.0.1:47117/
+```
+
+---
+
+## 功能
+
+- **Sessions**：依專案分組、置頂、封存、改名、刪除；*Needs you* 區塊集中顯示等你回覆的 session；
+  多個 session 可以同時跑
+- **Worktree**：開新 session 時勾選，就會在獨立的 git worktree / branch 裡工作，平行任務互不干擾
+- **權限模式**：Ask before edits / Edit automatically / Plan mode / Auto / Bypass（Shift+Tab 切換）
+- **權限確認**：工具卡片上直接 Allow / 本 session 一律允許 / Deny（鍵盤 1 / 2 / 3）；
+  或按 *Suggest something else* 直接告訴 Claude 改做什麼
+- **Plan mode**：計畫用卡片呈現，核准後自動切換模式；或寫下修改意見繼續規劃
+- **AskUserQuestion**：Claude 的選擇題用表單回答
+- **步驟摺疊**：讀檔、搜尋、唯讀指令等探索步驟自動收成一行（例如「Ran 3 commands, read a file」），
+  點開才看細節；修改檔案、失敗、等你確認的步驟永遠單獨顯示
+- **Diff**：Claude 提出修改時直接展開差異（逐字標示、語法上色），完成後收成一行並顯示 +N −M；
+  Changes 面板看整個 working tree，可切換 unified / side-by-side（面板窄時自動換行），
+  在行上留評論再一次送給 Claude，commit，或請 Claude 開 PR
+- **還原檔案**：任何一則訊息上的 ⟲ 按鈕，可以把檔案還原到那則訊息之前的狀態（同 `/rewind`）
+- **Edit & resend / Fork**：從任何一則訊息分岔出新的對話
+- **Subagents**：子代理的工作過程巢狀顯示在 Agent 卡片裡
+- **Files**：檔案樹 + 編輯器（CodeMirror，支援 Verilog / SystemVerilog / VHDL / Tcl / Python / C++…）
+- **Terminal**：每個 session 可以開多個終端機，跟 session 同一個資料夾
+- **Preview**：開發中的網頁直接在旁邊預覽，會自動抓 Claude 啟動的 localhost 網址
+- **Tasks**：Todo 清單與背景工作，可以停止背景工作
+- **Session**：context 使用量、成本、模型、MCP server 狀態（需要登入或連不上時直接 Sign in / Retry）
+- **Skills**（Settings → Skills，或 command palette 的「Skills…」）：列出個人（`~/.claude/skills`）、專案（`.claude/skills`）
+  與 plugin 的 skills；新增（填名稱和一句「什麼時候用」，直接在 Files 面板編輯 SKILL.md）、匯入資料夾、複製到另一個範圍、
+  刪除；變更會通知所有執行中的 session 重新載入
+- **MCP servers**（Settings → MCP servers，或 palette 的「MCP servers…」）：讀 Claude Code 自己的設定
+  （`~/.claude.json` 與專案的 `.mcp.json`），新增（HTTP / SSE / 指令，或貼 JSON；範圍：所有專案 / 本專案 / 本專案只有你）
+  與移除都透過 `claude mcp` 寫入，格式跟 CLI 一致。有 session 在跑時每一列顯示即時狀態：Connected（可看工具清單）、
+  Needs sign-in、Failed（附錯誤）、Disabled；可重連、停用、簽入 / 簽出、批准或拒絕專案的 .mcp.json server
+- **Workflows**：Claude 用 Workflow 工具開一個多代理流程時，對話裡會出現一張流程卡：每個 phase 一欄、欄裡是該階段的代理，
+  每個代理有自己的狀態（排隊 / 執行中 / 完成 / 失敗 / 重用快取 / 被擋）、模型、耗時、最後一步或結果預覽，點開看 prompt 與結果；
+  卡片上方是整體進度（完成 / 執行中 / 失敗），底部可展開 log 與 script；標題列的狀態會寫出正在跑的 workflow 名稱；
+  Tasks 面板列出所有 workflow，點一下跳到卡片；可以從卡片上停止 workflow。
+  Workflow 功能由 Claude Code 自己的設定決定（`~/.claude/settings.json` 的 `enableWorkflows`，依方案開放）。
+- **MCP 登入與故障**：server 需要重新登入或連不上時，session 標題列下方會出現一行提示，一鍵 Sign in / Retry；
+  MCP 工具因為授權或連線失敗時，錯誤下方直接給出「Sign in to …」或「Reconnect …」。登入走 Claude Code 自己的 OAuth
+  流程：Pilcrow 開啟登入頁，瀏覽器跳回 localhost 時自動完成；跳不回來時可把網址貼進對話框完成
+- **對話內搜尋**：Ctrl+F 在對話裡找字，所有符合處同時標出，Enter / Shift+Enter 逐一跳轉
+- **中文輸入**：注音、倉頡等輸入法選字時按 Enter / Esc 只會交給輸入法，不會誤送訊息或中斷 Claude；中英文之間自動留出細縫
+- **其他**：`@` 引用檔案、`/` 指令、貼上圖片、command palette、桌面通知、深淺色主題、session 右鍵選單
+
+### 快捷鍵
+
+| 快捷鍵 | 動作 |
+|---|---|
+| Ctrl+K | Command palette（輸入 `@` 搜尋檔案） |
+| Ctrl+N | 新 session（對話框裡 Ctrl+Enter 直接開始） |
+| Ctrl+F | 在對話中搜尋（Enter / Shift+Enter 跳下一個 / 上一個） |
+| Ctrl+B / Ctrl+\\ | 切換左側欄 / 右側面板 |
+| Alt+1…6 | Changes / Files / Terminal / Preview / Tasks / Session |
+| Ctrl+Alt+↑ / ↓ | 上一個 / 下一個 session |
+| Shift+Tab | 切換權限模式 |
+| Esc | 停止 Claude |
+| Ctrl+, | 設定 |
+| Ctrl+/ | 所有快捷鍵 |
+
+---
+
+## 檔案位置
+
+| 位置 | 內容 |
+|---|---|
+| `~/pilcrow/` | 程式本體（可用 `--dir` 改） |
+| `~/.config/pilcrow/` | Pilcrow 設定、session 標題等 |
+| `~/.local/state/pilcrow/` | log（`pilcrow.log`、`launcher.log`） |
+| `~/.local/share/pilcrow/worktrees/` | Pilcrow 建立的 worktree |
+| `~/.claude/` | Claude Code 自己的設定與對話（與 CLI 共用） |
+
+## 更新與移除
+
+- **更新**：執行新版的安裝檔即可（會保留 `node_modules`，舊版多出來的檔案會被清掉）
+- **移除**：
+
+  ```bash
+  ~/pilcrow/scripts/install-desktop.sh --uninstall
+  rm -rf ~/pilcrow
+  rm -rf ~/.config/pilcrow ~/.local/state/pilcrow   # 連設定一起刪（選用）
+  ```
+
+---
+
+## 疑難排解
+
+| 狀況 | 處理 |
+|---|---|
+| 不知道哪裡有問題 | `pilcrow --doctor` |
+| 開了沒有視窗 | 看 `~/.local/state/pilcrow/launcher.log`；試 `pilcrow --chrome` |
+| 「Authentication failed」 | API key / token 不對，或 gateway 沒收到；`pilcrow --doctor` 看實際用的 endpoint |
+| 「Retrying request … HTTP 5xx」 | gateway 暫時有問題，Claude Code 會自動重試 |
+| 終端機面板不能用 | 安裝 `python3` |
+| Electron 下載不到 | 用 Chrome 視窗即可，或照上面「事後補裝 Electron」 |
+| 畫面空白／GPU 錯誤（VNC、遠端桌面） | `PILCROW_DISABLE_GPU=1 pilcrow` |
 
 ## 安全性
 
 Pilcrow 是設計給「一人一台」的開發機：
 
 - 背景程式只聽 `127.0.0.1`，別台電腦連不進來
-- 只接受 Pilcrow 自己頁面發出的請求（檢查 Host / Origin / Sec-Fetch-Site，並禁止被別的網頁嵌入）
+- 只接受 Pilcrow 自己頁面發出的請求（檢查 Host / Origin / Sec-Fetch-Site，並禁止被別的網頁嵌入），
+  所以你瀏覽器裡開的其他網站、或本機其他 dev server，都沒辦法偷偷操作它
 - Pilcrow 本身不收集、不上傳任何資料；網路流量只有 Claude Code 連到你設定的 API endpoint
+- 請依公司資訊安全規範使用（例如哪些專案可以交給 AI 處理）
 
-> 共用伺服器上其他登入使用者也連得到 `127.0.0.1`。Pilcrow 沒有為這種情況加登入驗證，請在自己的機器上使用。
+> 同一台主機有多個使用者同時登入時（共用伺服器），其他使用者也連得到 `127.0.0.1` 上的服務。
+> Pilcrow 沒有為這種情況加上登入驗證，請在自己的機器上使用。
+
+## 修改介面（開發者）
+
+這個 repo 就是開發樹。安裝後的資料夾裡也有同一份原始碼（`web/src`、`server/`）但沒有建置工具；
+要改介面，在 repo 裡做：
+
+```bash
+npm install --include=dev   # 裝建置工具（Vite、React、TypeScript…）
+npm run build               # 輸出到 web/dist
+npm run dev                 # 邊改邊建（vite build --watch）
+npm run server              # 只開伺服器 http://127.0.0.1:47117/
+```
+
+### 檢查與測試
+
+```bash
+npm run check        # TypeScript（tsc --noEmit）
+```
+
+> 原專案的 `test/` 目錄（mock server、Playwright、WebKitGTK 測試）與 ESLint 設定沒有隨安裝檔保存，
+> 2.9.0 從安裝檔重建這個 repo 時無法還原。`package.json` 裡的 `lint`、`test:*` 指令目前會失敗，
+> 測試套件待重建；`release` 目前只跑 `check`。
+
+### 發佈
+
+```bash
+npm run release -- 2.9.1 [--skip-tests] [--no-commit] [--dry-run]
+```
+
+一個指令把工作樹變成三個安裝檔：確認 `CHANGELOG.md` 最上面有這一版的說明 → 改 `package.json` 與
+`package-lock.json` 的版本 → `tsc` → `vite build` → `scripts/make-installers.py` 產生
+`out/pilcrow-install.sh`、`out/pilcrow-windows.ps1`、`out/pilcrow-app.sh` → 把 Linux 安裝檔解回來，
+和工作樹、`web/dist` 逐檔比對 → 複製到 repo 根目錄 → `git commit` 並打 `vX.Y.Z` tag。任何一步失敗就停在那裡。
+
+安裝檔的格式：`scripts/installer/linux.sh.tmpl` 與 `windows.ps1.tmpl` 是固定部分（檢查環境、npm、
+Electron、捷徑…），`make-installers.py` 只填入版本號、檔案清單、每個檔案的 heredoc 與 sha256、
+介面的 base64 tgz（Linux）或整包 zip（Windows）、以及 Windows 外殼腳本的 base64。輸出是決定性的：
+同一棵樹產生的安裝檔逐位元組相同。要改安裝流程本身，改模板。
+
+```bash
+python scripts/make-installers.py            # 只打包到 out/（需要先 npm run build）
+python scripts/make-installers.py --verify   # 打包後把 Linux 安裝檔解回來逐檔比對
+```
 
 ---
 
-## 開發
+## Windows
 
-前端與伺服器的原始碼樹不在這個 repo，這裡只有發佈出來的安裝檔。
-要改介面或重新打包，請參考 [docs/user-guide.md](docs/user-guide.md) 的「修改介面（開發者）」與「發佈」兩節。
+Windows 版跟 Linux 版是同一套程式與介面。安裝檔只有一個：`pilcrow-windows.ps1`（純 ASCII 文字，
+裡面內附經過驗證的程式、建置好的介面，以及桌面外殼腳本）。跑一次就把三件事做完：
+安裝 Pilcrow（npm 只抓需要的套件）、準備 WebView2 桌面外殼（SDK 從 pip 的 `pywebview` 取出並編譯）、
+建立開始功能表與桌面的 **Pilcrow** 捷徑，然後把視窗打開。之後要更新，拿新版的同一個檔案再跑一次。
 
-Windows 外殼（`host/sdk/PilcrowHost.cs`）可以直接改；`host/pilcrow-app.ps1` 會用系統內建的 C# 編譯器重新編譯。
+**需求**
+
+| 項目 | 說明 |
+|---|---|
+| Windows 10 1809 以上 / Windows 11 | 需要 WebView2 Runtime（Windows 11 與 Edge 都內含） |
+| Node.js 20 以上 | 建議 22.12 以上；npm 能連到公司 registry |
+| Python 3 + pip | 只用來抓 `pywebview` wheel 裡的 WebView2 SDK；pip 能連到公司 PyPI 鏡像即可 |
+| Git for Windows（選用） | 有的話 Claude Code 用 Git Bash 執行指令；沒有的話改用 PowerShell，一樣可以用。Changes 面板與 worktree 需要 git |
+
+**安裝 / 更新**
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\pilcrow-windows.ps1
+```
+
+如果公司政策封鎖 PowerShell 腳本檔，改用這行（直接執行內容，效果一樣）：
+
+```powershell
+& ([scriptblock]::Create((Get-Content -Raw .\pilcrow-windows.ps1)))
+```
+
+選項：`-Dir <路徑>`（預設 `%LOCALAPPDATA%\Programs\Pilcrow`）、`-NoDesktop`、`-NoLaunch`（裝完不開視窗）、
+`-FilesOnly`、`-Uninstall`（移除程式與外殼，設定與對話紀錄保留）、`-Electron`（額外嘗試下載 Electron，通常不需要）；
+外殼相關：`-Node`、`-Python`、`-WebView2Package`、`-NuGetSource`、`-WebView2Runtime`、`-KeepServer`、
+`-NativeTitleBar`、`-DevTools`、`-SkipSignatureCheck`，意思同 `pilcrow-app.ps1` 的說明。
+
+安裝完會建立開始功能表與桌面的 **Pilcrow** 捷徑，直接指向 `%LOCALAPPDATA%\Pilcrow\host\sdk\PilcrowHost.exe`
+（exe 自己會找到或啟動背景伺服器，啟動不經過 PowerShell，也不受執行原則影響），並把 `pilcrow` 指令加到 PATH
+（`pilcrow --doctor` 健康檢查、`pilcrow --server` 只開背景程式）。
+
+**和 Linux 版的差別**
+
+- 公司 gateway 一樣寫在 `%USERPROFILE%\.claude\settings.json` 的 `env`
+- 設定在 `%APPDATA%\Pilcrow`，狀態與記錄在 `%LOCALAPPDATA%\Pilcrow\state`
+- 終端機面板預設是 PowerShell（透過 ConPTY，元件是預先編好的 node-pty，不需要編譯）。
+  想改用 `cmd.exe` 或 Git Bash，設定環境變數 `PILCROW_SHELL`（例如 `C:\Program Files\Git\bin\bash.exe`）。
+  裝不到 node-pty 或 ConPTY 無法啟動時，自動改用簡易模式：可以下指令，但全螢幕程式不能用
+- 新增 session 的資料夾選擇器最上層是「This PC」，列出所有磁碟機
+- 介面中文字型使用微軟正黑體
 
 ---
 
-## 授權
+---
 
-[MIT](LICENSE)。內附的 WebView2 SDK DLL 屬 Microsoft，依其自身條款散佈。
+## 版本紀錄
+
+見 [CHANGELOG.md](CHANGELOG.md)。

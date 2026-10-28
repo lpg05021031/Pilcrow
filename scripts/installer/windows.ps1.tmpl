@@ -1,0 +1,413 @@
+# ============================================================================
+#  Pilcrow {{VERSION}} for Windows -- one-file installer
+#
+#  Installs Pilcrow (server + prebuilt interface) and the WebView2 desktop shell, creates the
+#  Start menu / desktop shortcuts, and opens Pilcrow. Run again to update; same file, same options.
+#
+#    powershell -NoProfile -ExecutionPolicy Bypass -File .\pilcrow-windows.ps1
+#
+#  If company policy blocks script files, run its contents instead (same options work):
+#
+#    & ([scriptblock]::Create((Get-Content -Raw .\pilcrow-windows.ps1)))
+#
+#  Needs: Windows 10 1809+, Node.js 20+ (22.12+ recommended) with npm reaching your registry,
+#  Python 3 with pip reaching your PyPI mirror (for the WebView2 SDK), and the WebView2 Runtime
+#  (part of Windows 11 / Edge). git is recommended.
+#
+#  Options:
+#    -Dir <path>            install location (default %LOCALAPPDATA%\Programs\Pilcrow)
+#    -NoDesktop             no desktop shortcut (the Start menu entry is still created)
+#    -NoLaunch              install and create shortcuts, but do not open Pilcrow
+#    -FilesOnly             only write the files (no npm, no desktop shell)
+#    -Uninstall             remove Pilcrow and the desktop shell (settings and conversations are kept)
+#    -Electron              also try to download Electron (not needed; the WebView2 shell is the window)
+#    -Node <path>           node.exe for the shell (default: the one found on PATH)
+#    -Python <path>         python.exe (default: PATH / py launcher)
+#    -WebView2Package <p>   WebView2 SDK as .nupkg / .whl / .zip / folder / URL, when pip is not an option
+#    -NuGetSource <url>     NuGet v3 flat-container root (with -WebView2Version), when pip is not an option
+#    -WebView2Runtime <dir> Fixed Version WebView2 Runtime folder (when Evergreen is not installed)
+#    -KeepServer            keep the Pilcrow server running after the window closes
+#    -NativeTitleBar        use the Windows title bar instead of the in-page one
+#    -DevTools              allow F12 / browser shortcuts (debugging)
+#    -SkipSignatureCheck    do not verify the Microsoft signature of the WebView2 DLLs (offline only)
+#
+#  The program, its interface and the shell script are embedded below as verified payloads;
+#  npm and pip download only the packages they need, from your configured mirrors.
+#  This file is plain ASCII on purpose, so any editor or code page keeps it intact.
+# ============================================================================
+param(
+  [string]$Dir = '',
+  [switch]$NoDesktop,
+  [switch]$NoLaunch,
+  [switch]$FilesOnly,
+  [switch]$Uninstall,
+  [switch]$Force,
+  [switch]$Electron,
+  [switch]$SkipElectron,
+  [string]$Node = '',
+  [string]$Python = '',
+  [string]$WebView2Package = '',
+  [string]$NuGetSource = '',
+  [string]$WebView2Version = '',
+  [string]$WebView2Runtime = '',
+  [switch]$KeepServer,
+  [switch]$NativeTitleBar,
+  [switch]$DevTools,
+  [switch]$SkipSignatureCheck
+)
+# The WebView2 shell is the window; Electron is opt-in.
+if (-not $Electron) { $SkipElectron = $true }
+$HostDir = ''
+if ($env:LOCALAPPDATA) { $HostDir = Join-Path $env:LOCALAPPDATA 'Pilcrow\host' }
+
+$ErrorActionPreference = 'Stop'
+$Version = '{{VERSION}}'
+$OnWindows = ($PSVersionTable.PSEdition -eq 'Desktop') -or $IsWindows
+$NodeCmd = 'node'
+$NpmCmd = 'npm'
+if ($OnWindows) { $NodeCmd = 'node.exe'; $NpmCmd = 'npm.cmd' }
+try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
+
+function Say([string]$Text) { Write-Host $Text }
+function Step([string]$Text) { Write-Host ''; Write-Host '==> ' -ForegroundColor DarkYellow -NoNewline; Write-Host $Text -ForegroundColor White }
+function Ok([string]$Text) { Write-Host "  OK " -ForegroundColor Green -NoNewline; Write-Host $Text }
+function Warn([string]$Text) { Write-Host '  ! ' -ForegroundColor Yellow -NoNewline; Write-Host $Text }
+function Die([string]$Text) { Write-Host ''; Write-Host "x $Text" -ForegroundColor Red; exit 1 }
+
+if (-not $Dir) {
+  if ($env:LOCALAPPDATA) { $Dir = Join-Path $env:LOCALAPPDATA 'Programs\Pilcrow' } else { Die "Pass -Dir to choose the install location" }
+}
+$StateDir = ''
+if ($env:LOCALAPPDATA) { $StateDir = Join-Path $env:LOCALAPPDATA 'Pilcrow\state' }
+$StartMenuLink = ''
+$DesktopLink = ''
+if ($OnWindows) {
+  $StartMenuLink = Join-Path ([Environment]::GetFolderPath('Programs')) 'Pilcrow.lnk'
+  $DesktopLink = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Pilcrow.lnk'
+}
+
+# ---------------------------------------------------------------- helpers
+
+function Stop-RunningPilcrow {
+  if (-not $StateDir) { return }
+  $lock = Join-Path $StateDir 'instance.json'
+  if (-not (Test-Path $lock)) { return }
+  try {
+    $info = Get-Content -Raw -Path $lock | ConvertFrom-Json
+    if ($info.pid) { Stop-Process -Id ([int]$info.pid) -Force -ErrorAction SilentlyContinue }
+  } catch { }
+}
+
+function Remove-FromUserPath([string]$Folder) {
+  if (-not $OnWindows) { return }
+  $p = [Environment]::GetEnvironmentVariable('Path', 'User')
+  if (-not $p) { return }
+  $kept = @($p -split ';' | Where-Object { $_ -and ($_.TrimEnd('\') -ne $Folder.TrimEnd('\')) })
+  [Environment]::SetEnvironmentVariable('Path', ($kept -join ';'), 'User')
+}
+
+function Add-ToUserPath([string]$Folder) {
+  if (-not $OnWindows) { return $false }
+  $p = [Environment]::GetEnvironmentVariable('Path', 'User')
+  $parts = @()
+  if ($p) { $parts = @($p -split ';' | Where-Object { $_ }) }
+  foreach ($x in $parts) { if ($x.TrimEnd('\') -eq $Folder.TrimEnd('\')) { return $false } }
+  [Environment]::SetEnvironmentVariable('Path', (($parts + $Folder) -join ';'), 'User')
+  return $true
+}
+
+function Quote-Ps([string]$Text) { return "'" + ($Text -replace "'", "''") + "'" }
+
+function New-Shortcut([string]$Path, [string]$AppDir, [string]$Node) {
+  # The launcher is an inline command rather than a .ps1 file, so it works even where policy blocks
+  # PowerShell scripts. It prefers Electron when it has been downloaded, else a Chrome / Edge window.
+  $electron = Join-Path $AppDir 'node_modules\electron\dist\electron.exe'
+  $launch = 'if (Test-Path -LiteralPath ' + (Quote-Ps $electron) + ') { Start-Process -FilePath ' + (Quote-Ps $electron) + ' -ArgumentList . -WorkingDirectory ' + (Quote-Ps $AppDir) + ' } else { Start-Process -FilePath ' + (Quote-Ps $Node) + ' -ArgumentList server\main.js,--shell=chrome -WorkingDirectory ' + (Quote-Ps $AppDir) + ' -WindowStyle Hidden }'
+  $shell = New-Object -ComObject WScript.Shell
+  $lnk = $shell.CreateShortcut($Path)
+  $lnk.TargetPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+  $lnk.Arguments = '-NoProfile -WindowStyle Hidden -Command "' + $launch + '"'
+  $lnk.WorkingDirectory = $AppDir
+  $ico = Join-Path $AppDir 'assets\icon.ico'
+  if (Test-Path $ico) { $lnk.IconLocation = $ico + ',0' }
+  $lnk.Description = 'Pilcrow - Claude Code desktop'
+  $lnk.WindowStyle = 7
+  $lnk.Save()
+}
+
+function Invoke-Native([string]$Exe, [string[]]$Arguments) {
+  # Shows the tool's output and returns only its exit code. Native tools print progress on stderr;
+  # never let that turn into a PowerShell error.
+  $old = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try { & $Exe @Arguments | Out-Host; return $LASTEXITCODE } finally { $ErrorActionPreference = $old }
+}
+
+function Invoke-Quiet([string]$Exe, [string[]]$Arguments) {
+  $old = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try { & $Exe @Arguments *> $null; return $LASTEXITCODE } catch { return 1 } finally { $ErrorActionPreference = $old }
+}
+
+function Get-NativeOutput([string]$Exe, [string[]]$Arguments) {
+  $old = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try { return ((& $Exe @Arguments 2>$null) | Out-String).Trim() } catch { return '' } finally { $ErrorActionPreference = $old }
+}
+
+# ---------------------------------------------------------------- uninstall
+
+if ($Uninstall) {
+  Step "Removing Pilcrow ($Dir)"
+  Stop-RunningPilcrow
+  foreach ($l in @($StartMenuLink, $DesktopLink)) { if ($l -and (Test-Path $l)) { Remove-Item -Force $l } }
+  Remove-FromUserPath (Join-Path $Dir 'bin')
+  if ($HostDir -and (Test-Path $HostDir)) { Remove-Item -Recurse -Force $HostDir; Ok 'Removed the desktop shell' }
+  if (Test-Path (Join-Path $Dir '.pilcrow-manifest')) { Remove-Item -Recurse -Force $Dir; Ok "Removed $Dir" }
+  elseif (Test-Path $Dir) { Warn "$Dir does not look like a Pilcrow install; left as is" }
+  Say "  Settings stay in %APPDATA%\Pilcrow; conversations stay in %USERPROFILE%\.claude (Claude Code data)."
+  exit 0
+}
+
+Write-Host "Pilcrow $Version installer (Windows)" -ForegroundColor White
+
+# ---------------------------------------------------------------- retire "Reticle" (this program's old name)
+if ($OnWindows -and $env:LOCALAPPDATA) {
+  $oldDir = Join-Path $env:LOCALAPPDATA 'Programs\Reticle'
+  $oldHost = Join-Path $env:LOCALAPPDATA 'Reticle\host'
+  $oldLock = Join-Path $env:LOCALAPPDATA 'Reticle\state\instance.json'
+  $oldLinks = @((Join-Path ([Environment]::GetFolderPath('Programs')) 'Reticle.lnk'), (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Reticle.lnk'))
+  $hadOld = (Test-Path (Join-Path $oldDir '.reticle-manifest')) -or (Test-Path $oldHost) -or ($oldLinks | Where-Object { Test-Path $_ })
+  if ($hadOld) {
+    Step 'Retiring the old "Reticle" install (settings and conversations move to Pilcrow on first start)'
+    if (Test-Path $oldLock) { try { $oi = Get-Content -Raw $oldLock | ConvertFrom-Json; if ($oi.pid) { Stop-Process -Id ([int]$oi.pid) -Force -ErrorAction SilentlyContinue } } catch { } }
+    foreach ($l in $oldLinks) { if (Test-Path $l) { Remove-Item -Force $l } }
+    Remove-FromUserPath (Join-Path $oldDir 'bin')
+    if (Test-Path $oldHost) { Remove-Item -Recurse -Force $oldHost -ErrorAction SilentlyContinue }
+    if (Test-Path (Join-Path $oldDir '.reticle-manifest')) { Remove-Item -Recurse -Force $oldDir -ErrorAction SilentlyContinue; Ok "Removed $oldDir" }
+  }
+}
+
+# ---------------------------------------------------------------- preflight
+
+Step "Checking the environment"
+if ($OnWindows) {
+  $osv = [Environment]::OSVersion.Version
+  if ($osv.Major -lt 10) { Die "Windows 10 1809 or later is required (this is $osv)" }
+  Ok ("Windows " + $osv.ToString() + ", PowerShell " + $PSVersionTable.PSVersion.ToString())
+}
+if (-not $FilesOnly) {
+  $nodeInfo = Get-Command $NodeCmd -ErrorAction SilentlyContinue
+  if (-not $nodeInfo) { Die "Node.js was not found. Install Node.js 20 or later (22.12+ recommended) and run this file again." }
+  $NodePath = $nodeInfo.Source
+  $nodeVersion = Get-NativeOutput $NodeCmd @('-p', 'process.versions.node')
+  $nv = $nodeVersion.Split('.')
+  if ([int]$nv[0] -lt 20) { Die "Node.js $nodeVersion is too old (20 or later is required)" }
+  Ok "Node.js $nodeVersion ($NodePath)"
+  if (([int]$nv[0] -lt 22) -or (([int]$nv[0] -eq 22) -and ([int]$nv[1] -lt 12))) {
+    Warn "Electron needs Node 22.12+; skipping it on this machine"
+    $SkipElectron = $true
+  }
+  if (-not (Get-Command $NpmCmd -ErrorAction SilentlyContinue)) { Die "npm was not found." }
+  $registry = Get-NativeOutput $NpmCmd @('config', 'get', 'registry')
+  Ok "npm (registry: $registry)"
+  if (Get-Command git -ErrorAction SilentlyContinue) { Ok (Get-NativeOutput 'git' @('--version')) } else { Warn "git was not found: the Changes panel, worktrees and commits will not work" }
+  if ($OnWindows) {
+    $bash = $null
+    $candidates = @()
+    if ($env:CLAUDE_CODE_GIT_BASH_PATH) { $candidates += $env:CLAUDE_CODE_GIT_BASH_PATH }
+    if ($env:ProgramFiles) { $candidates += (Join-Path $env:ProgramFiles 'Git\bin\bash.exe') }
+    if ($env:LOCALAPPDATA) { $candidates += (Join-Path $env:LOCALAPPDATA 'Programs\Git\bin\bash.exe') }
+    foreach ($b in $candidates) {
+      if (Test-Path $b) { $bash = $b; break }
+    }
+    if ($bash) { Ok "Git Bash: $bash (Claude Code uses it for its Bash tool)" } else { Warn "No Git for Windows: Claude Code will run commands with PowerShell instead (that works too)" }
+  }
+}
+
+# ---------------------------------------------------------------- write files
+
+Step "Writing the program files to $Dir"
+if (Test-Path $Dir) {
+  $hasFiles = @(Get-ChildItem -Force -Path $Dir -ErrorAction SilentlyContinue).Count -gt 0
+  $ours = (Test-Path (Join-Path $Dir '.pilcrow-manifest')) -or (Test-Path (Join-Path $Dir '.pilcrow-partial'))
+  if ($hasFiles -and -not $ours -and -not $Force) { Die "$Dir already has other files and does not look like a Pilcrow install. Pass -Dir to pick another folder, or -Force to overwrite." }
+}
+New-Item -ItemType Directory -Force -Path $Dir | Out-Null
+Set-Content -Path (Join-Path $Dir '.pilcrow-partial') -Value '' -Encoding ASCII
+
+$payload = @'
+{{PAYLOAD}}
+'@
+$zipBytes = [Convert]::FromBase64String(($payload -replace '\s', ''))
+$sha = [Security.Cryptography.SHA256]::Create()
+$digest = ([BitConverter]::ToString($sha.ComputeHash($zipBytes)) -replace '-', '').ToLowerInvariant()
+if ($digest -ne '{{DIGEST}}') { Die "The embedded payload is incomplete or was altered (checksum mismatch). Download or copy the installer again." }
+Ok ("Payload verified (" + [Math]::Round($zipBytes.Length / 1MB, 1) + " MB)")
+
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$stream = New-Object System.IO.MemoryStream(, $zipBytes)
+$zip = New-Object System.IO.Compression.ZipArchive($stream, [System.IO.Compression.ZipArchiveMode]::Read)
+$names = New-Object System.Collections.Generic.List[string]
+foreach ($e in $zip.Entries) { if (-not $e.FullName.EndsWith('/')) { $names.Add($e.FullName) } }
+
+# Remove files the previous version installed that this one no longer has.
+$manifest = Join-Path $Dir '.pilcrow-manifest'
+if (Test-Path $manifest) {
+  $keep = New-Object 'System.Collections.Generic.HashSet[string]'
+  foreach ($n in $names) { [void]$keep.Add($n) }
+  $removed = 0
+  foreach ($old in (Get-Content -Path $manifest)) {
+    if (-not $old -or $old.Contains('..') -or [IO.Path]::IsPathRooted($old)) { continue }
+    if (-not $keep.Contains($old)) {
+      $f = Join-Path $Dir ($old -replace '/', [IO.Path]::DirectorySeparatorChar)
+      if (Test-Path -LiteralPath $f) { Remove-Item -Force -LiteralPath $f; $removed++ }
+    }
+  }
+  if ($removed -gt 0) { Ok "Removed $removed file(s) left by an older version" }
+}
+
+# The interface is replaced as a whole, so no outdated asset is left behind.
+$dist = Join-Path $Dir 'web\dist'
+if (Test-Path $dist) { Remove-Item -Recurse -Force $dist }
+$written = 0
+foreach ($e in $zip.Entries) {
+  if ($e.FullName.EndsWith('/')) { continue }
+  $dest = Join-Path $Dir ($e.FullName -replace '/', [IO.Path]::DirectorySeparatorChar)
+  $parent = Split-Path -Parent $dest
+  if (-not (Test-Path $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
+  [System.IO.Compression.ZipFileExtensions]::ExtractToFile($e, $dest, $true)
+  $written++
+}
+$zip.Dispose()
+Ok "Wrote $written files (the interface is prebuilt; nothing to build here)"
+[IO.File]::WriteAllLines($manifest, [string[]]$names)
+Remove-Item -Force (Join-Path $Dir '.pilcrow-partial') -ErrorAction SilentlyContinue
+
+if ($FilesOnly) {
+  Step "Done (files only)"
+  Say "  Next: cd `"$Dir`"; npm install --omit=dev; node scripts\make-icon.mjs; node server\main.js"
+  exit 0
+}
+
+# ---------------------------------------------------------------- npm packages
+
+Step "Installing npm packages (runtime only; the first time takes a few minutes, the Claude Code binary is about 250 MB)"
+Push-Location $Dir
+try {
+  $env:ELECTRON_SKIP_BINARY_DOWNLOAD = '1'
+  $npmArgs = @('install', '--no-audit', '--no-fund', '--no-update-notifier', '--omit=dev', '--loglevel=error')
+  $rc = Invoke-Native $NpmCmd $npmArgs
+  if ($rc -ne 0) {
+    Warn "Install from the lockfile failed (the internal registry may lack some versions); retrying with compatible versions the registry has"
+    # Retry without the lockfile and without devDependencies; both files are put back afterwards.
+    if (Test-Path 'package-lock.json') { Move-Item -Force 'package-lock.json' '.package-lock.json.pilcrow' }
+    Copy-Item -Force 'package.json' '.package.json.pilcrow'
+    $null = Invoke-Native $NodeCmd @('-e', "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));delete p.devDependencies;fs.writeFileSync('package.json',JSON.stringify(p,null,2)+String.fromCharCode(10))")
+    $rc = Invoke-Native $NpmCmd ($npmArgs + '--no-package-lock')
+    Move-Item -Force '.package.json.pilcrow' 'package.json'
+    if (Test-Path '.package-lock.json.pilcrow') { Move-Item -Force '.package-lock.json.pilcrow' 'package-lock.json' }
+    if ($rc -ne 0) { Die "npm install failed. Check that npm can reach its registry (npm config get registry) and run this file again." }
+  }
+  Ok "Packages installed"
+  $bundled = @('node_modules\@anthropic-ai\claude-agent-sdk-win32-x64\claude.exe', 'node_modules\@anthropic-ai\claude-agent-sdk-win32-arm64\claude.exe', 'node_modules\@anthropic-ai\claude-agent-sdk-linux-x64\claude')
+  $hasBundled = $false
+  foreach ($b in $bundled) { if (Test-Path (Join-Path $Dir $b)) { $hasBundled = $true } }
+  if ($hasBundled) { Ok "Bundled Claude Code is ready" }
+  elseif (Get-Command claude.exe -ErrorAction SilentlyContinue) { Warn "The bundled Claude Code did not install; the claude.exe on this system will be used" }
+  else { Warn "The bundled Claude Code did not install and no claude.exe was found; install Claude Code before starting" }
+
+  if ($OnWindows) {
+    # A real terminal on Windows needs ConPTY; node-pty ships it prebuilt, so nothing is compiled here.
+    Say "  Installing the terminal component (node-pty)..."
+    $rc = Invoke-Native $NpmCmd @('install', '--no-save', '--no-audit', '--no-fund', '--no-update-notifier', '--omit=dev', '--loglevel=error', 'node-pty@1.1.0')
+    if ($rc -eq 0 -and (Test-Path 'node_modules\node-pty\prebuilds')) { Ok "Terminal component ready (ConPTY)" } else { Warn "node-pty did not install: the terminal panel falls back to a simple mode (commands work, full-screen programs do not)" }
+  }
+
+  $null = Invoke-Quiet $NodeCmd @('scripts/make-icon.mjs')
+  if (Test-Path (Join-Path $Dir 'assets\icon.ico')) { Ok "Icon generated" } else { Warn "Icon generation failed (does not affect use)" }
+} finally {
+  Pop-Location
+  Remove-Item Env:ELECTRON_SKIP_BINARY_DOWNLOAD -ErrorAction SilentlyContinue
+}
+
+# ---------------------------------------------------------------- Electron (optional)
+
+Step "Desktop window (Electron)"
+$electronDir = Join-Path $Dir 'node_modules\electron'
+$electronExe = Join-Path $electronDir 'dist\electron.exe'
+if (-not (Test-Path (Join-Path $electronDir 'package.json'))) {
+  Warn "The electron package did not install; not needed with the WebView2 shell"
+} elseif (Test-Path $electronExe) {
+  Ok "Electron is ready"
+} elseif ($SkipElectron -or -not $OnWindows) {
+  Ok 'Electron not needed: the WebView2 shell provides the window'
+} else {
+  Say "  Downloading the Electron binary (up to 5 minutes)..."
+  $log = Join-Path $Dir '.electron.log'
+  $p = Start-Process -FilePath $NodePath -ArgumentList 'install.js' -WorkingDirectory $electronDir -NoNewWindow -PassThru -RedirectStandardOutput $log -RedirectStandardError ($log + '.err')
+  if (-not $p.WaitForExit(300000)) { try { $p.Kill() } catch { } }
+  if (Test-Path $electronExe) { Ok "Electron downloaded" }
+  else {
+    Warn "Electron could not be downloaded (corporate networks usually block GitHub). That is fine: the WebView2 shell provides the window."
+    Say "    To add it later: point ELECTRON_MIRROR at an internal mirror and run this file again with -Electron."
+  }
+}
+
+# ---------------------------------------------------------------- launcher
+
+if ($OnWindows) {
+  Step "Creating shortcuts"
+  $cmdText = "@echo off`r`nnode `"%~dp0..\server\main.js`" %*`r`n"
+  [IO.File]::WriteAllText((Join-Path $Dir 'bin\pilcrow.cmd'), $cmdText, [Text.Encoding]::ASCII)
+  New-Shortcut $StartMenuLink $Dir $NodePath
+  Ok "Start menu: Pilcrow"
+  if (-not $NoDesktop) { New-Shortcut $DesktopLink $Dir $NodePath; Ok "Desktop shortcut: Pilcrow" }
+  if (Add-ToUserPath (Join-Path $Dir 'bin')) { Ok "Added the pilcrow command to PATH (takes effect in new terminals)" }
+}
+
+# ---------------------------------------------------------------- health check
+
+Step "Health check"
+$null = Invoke-Native $NodeCmd @((Join-Path $Dir 'server\main.js'), '--doctor')
+# An older Pilcrow still running would keep serving old code to new windows.
+$null = Invoke-Native $NodeCmd @((Join-Path $Dir 'server\main.js'), '--restart-outdated')
+
+# ---------------------------------------------------------------- desktop shell (WebView2)
+
+$HostPayload = @'
+{{HOST_PAYLOAD}}
+'@
+
+if ($OnWindows -and -not $FilesOnly) {
+  Step 'Desktop shell (WebView2)'
+  if (-not (Test-Path $HostDir)) { New-Item -ItemType Directory -Force $HostDir | Out-Null }
+  $hostScript = Join-Path $HostDir 'pilcrow-app.ps1'
+  [IO.File]::WriteAllBytes($hostScript, [Convert]::FromBase64String($HostPayload))
+  Ok "Shell script: $hostScript"
+  $ps51 = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+  $hostArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-File', ('"' + $hostScript + '"'), '-Install', '-Dir', ('"' + $Dir + '"'))
+  foreach ($sw in @('NoDesktop', 'NoLaunch', 'KeepServer', 'NativeTitleBar', 'DevTools', 'SkipSignatureCheck')) {
+    if ((Get-Variable $sw -ValueOnly).IsPresent) { $hostArgs += "-$sw" }
+  }
+  foreach ($opt in @('Node', 'Python', 'WebView2Package', 'NuGetSource', 'WebView2Version', 'WebView2Runtime')) {
+    $v = Get-Variable $opt -ValueOnly
+    if ($v) { $hostArgs += "-$opt"; $hostArgs += ('"' + $v + '"') }
+  }
+  Say '  Preparing the WebView2 SDK (pip) and compiling the shell; the Pilcrow window opens when it is ready.'
+  $hp = Start-Process -FilePath $ps51 -ArgumentList $hostArgs -Wait -PassThru -NoNewWindow
+  if ($hp.ExitCode -ne 0) {
+    Warn "The desktop shell did not finish (exit $($hp.ExitCode)). Pilcrow itself is installed; fix the message above and run this file again, or start it with: pilcrow"
+  } else {
+    Ok 'Desktop shell ready'
+  }
+}
+
+Write-Host ''
+Write-Host "Pilcrow $Version installed" -ForegroundColor Green
+if ($OnWindows) {
+  Say "  Start: Pilcrow in the Start menu or on the desktop, or run  pilcrow  in a terminal"
+  Say "  Health check: pilcrow --doctor    Remove: run this file again with -Uninstall"
+}
+Say ("  Docs: " + (Join-Path $Dir 'README.md'))

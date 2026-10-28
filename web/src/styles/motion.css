@@ -1,0 +1,954 @@
+/* ================================================================ motion and material
+   The choreography layer, loaded last. tokens.css holds the springs; this file says what each thing
+   does with them: what the floating surfaces are made of, how they arrive and how they leave, how
+   the shell opens and closes, and how every control answers the hand. Nothing here changes what a
+   thing is, only how it moves and what it is made of. */
+
+/* ---------------------------------------------------------------- arrivals and departures */
+@keyframes pop-spring {
+  from {
+    opacity: 0;
+    transform: scale(0.94) translateY(-3px);
+  }
+}
+@keyframes pop-spring-up {
+  from {
+    opacity: 0;
+    transform: scale(0.94) translateY(3px);
+  }
+}
+@keyframes pop-spring-sm {
+  from {
+    opacity: 0;
+    transform: scale(0.55);
+  }
+}
+@keyframes pop-out {
+  to {
+    opacity: 0;
+    transform: scale(0.97) translateY(-2px);
+  }
+}
+@keyframes pop-out-down {
+  to {
+    opacity: 0;
+    transform: scale(0.97) translateY(2px);
+  }
+}
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.965);
+  }
+}
+@keyframes sheet-out {
+  to {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+@keyframes veil-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes veil-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes slide-out-right {
+  to {
+    opacity: 0;
+    transform: translateX(12px) scale(0.98);
+  }
+}
+@keyframes sink {
+  to {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+@keyframes lift-away {
+  to {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+}
+@keyframes shrink-away {
+  to {
+    opacity: 0;
+    transform: scale(0.88);
+  }
+}
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* ---------------------------------------------------------------- floating material
+   Menus, sheets, the find bar, toasts: a translucent pane over a deep blur, lit along the top edge. */
+.popover,
+.suggest,
+.findbar,
+.toast,
+.jump {
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-glass);
+}
+[data-theme='dark'] .popover,
+[data-theme='dark'] .findbar,
+[data-theme='dark'] .toast {
+  background: var(--glass);
+}
+.dialog {
+  background: var(--glass-2);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-sheet);
+}
+[data-theme='dark'] .dialog {
+  background: var(--glass-2);
+}
+/* A sheet's footer and header hairlines stay, but its inset wells read through the material. */
+[data-theme='dark'] .dialog .confirm-list,
+[data-theme='dark'] .dialog .browser,
+[data-theme='dark'] .dialog .radio-list {
+  background: rgba(0, 0, 0, 0.22);
+}
+
+/* Raised things on a dark page are lit from above: one pixel of light along their top edge. */
+[data-theme='dark'] .composer,
+[data-theme='dark'] .ovc,
+[data-theme='dark'] .run,
+[data-theme='dark'] .sched,
+[data-theme='dark'] .askcard,
+[data-theme='dark'] .plancard,
+[data-theme='dark'] .tool.awaiting,
+[data-theme='dark'] .perm.orphan,
+[data-theme='dark'] .setup-card,
+[data-theme='dark'] .mem-note,
+[data-theme='dark'] .task-row:not(.done),
+[data-theme='dark'] .wfd {
+  background-image: linear-gradient(to bottom, var(--edge-hi), transparent 1px);
+}
+[data-theme='dark'] .main,
+[data-theme='dark'] .panel-shell {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+
+/* ---- popovers: grow from the anchor's corner, shrink back into it */
+.popover {
+  animation: pop-spring var(--spring-snappy-t) var(--spring-snappy);
+}
+.popover[data-placement='top'] {
+  animation-name: pop-spring-up;
+}
+.popover.leaving {
+  animation: pop-out var(--t-exit) var(--ease-exit) forwards;
+  pointer-events: none;
+}
+.popover.leaving[data-placement='top'] {
+  animation-name: pop-out-down;
+}
+/* rows unfold a few milliseconds apart */
+.menu-item {
+  animation: menu-in 240ms var(--ease) both;
+  animation-delay: calc(var(--i, 0) * 11ms);
+}
+@keyframes menu-in {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}
+.popover.leaving .menu-item {
+  animation: none;
+}
+.menu-item {
+  transition: background var(--t-fast);
+}
+
+/* ---- sheets */
+.scrim {
+  -webkit-backdrop-filter: var(--scrim-blur);
+  backdrop-filter: var(--scrim-blur);
+  animation: veil-in var(--t-panel) var(--ease);
+}
+.dialog {
+  animation: sheet-in var(--spring-snappy-t) var(--spring-snappy);
+}
+.scrim.leaving {
+  animation: veil-out var(--t-exit) var(--ease-exit) forwards;
+  pointer-events: none;
+}
+.scrim.leaving .dialog {
+  animation: sheet-out var(--t-exit) var(--ease-exit) forwards;
+}
+
+/* ---- the find bar, the @ and / suggestions, the "Latest" pill */
+.findbar {
+  animation: find-in var(--spring-snappy-t) var(--spring-snappy);
+}
+.findbar.leaving {
+  animation: lift-away var(--t-exit) var(--ease-exit) forwards;
+}
+.suggest {
+  animation: pop-spring-up var(--spring-snappy-t) var(--spring-snappy);
+}
+.suggest.leaving {
+  animation: pop-out-down var(--t-exit) var(--ease-exit) forwards;
+}
+.jump {
+  animation: jump-in var(--spring-snappy-t) var(--spring-snappy);
+}
+.jump.leaving {
+  animation: sink var(--t-exit) var(--ease-exit) forwards;
+}
+
+/* ---- toasts: in from the right on a spring, out the same way; the others settle into the gap */
+.toast {
+  animation: toast-in var(--spring-snappy-t) var(--spring-snappy);
+}
+.toast.leaving {
+  animation: slide-out-right 200ms var(--ease-exit) forwards;
+}
+.toast-n {
+  animation: pop-spring-sm var(--spring-bouncy-t) var(--spring-bouncy);
+}
+
+/* ---- things attached to the composer and the header */
+.queue.leaving {
+  animation: sink var(--t-exit) var(--ease-exit) forwards;
+}
+.attach-img,
+.attach-file {
+  animation: pop-spring-sm var(--spring-snappy-t) var(--spring-snappy);
+}
+.attach-img.leaving,
+.attach-file.leaving {
+  animation: shrink-away var(--t-exit) var(--ease-exit) forwards;
+}
+.session-error.leaving,
+.mcp-notice.leaving {
+  animation: lift-away var(--t-exit) var(--ease-exit) forwards;
+}
+
+/* ---- an image, full size */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  display: grid;
+  place-items: center;
+  padding: 36px;
+  background: rgba(8, 8, 8, 0.72);
+  -webkit-backdrop-filter: blur(18px) saturate(120%);
+  backdrop-filter: blur(18px) saturate(120%);
+  cursor: zoom-out;
+  animation: veil-in var(--t-panel) var(--ease);
+}
+.lightbox img {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 10px;
+  box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.14), 0 40px 100px -24px rgba(0, 0, 0, 0.9);
+  cursor: default;
+  animation: lightbox-in var(--spring-snappy-t) var(--spring-snappy);
+}
+@keyframes lightbox-in {
+  from {
+    opacity: 0;
+    transform: scale(0.86);
+  }
+}
+.lightbox.leaving {
+  animation: veil-out 180ms var(--ease-exit) forwards;
+}
+.lightbox.leaving img {
+  animation: shrink-away 180ms var(--ease-exit) forwards;
+}
+.lightbox-x {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  transition: background var(--t-fast), transform var(--spring-snappy-t) var(--spring-snappy);
+}
+.lightbox-x:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+.lightbox-x:active {
+  transform: scale(0.92);
+  transition-duration: 80ms;
+}
+
+/* ---------------------------------------------------------------- the shell
+   The sidebar and the side panel live in slots that open and close by width (components/ui/Slot).
+   The sheet's left margin follows the sidebar on the same spring, so the ground never jumps. */
+.slot {
+  display: flex;
+  flex: 0 1 auto;
+  min-height: 0;
+}
+.slot > * {
+  align-self: stretch;
+}
+.main {
+  transition: margin-left var(--spring-soft-t) var(--spring-soft);
+}
+body.resizing .main {
+  transition: none;
+}
+
+/* pages arrive together: a short rise, nothing more */
+.session,
+.overview,
+.inbox,
+.welcome {
+  animation: page-in 260ms var(--ease);
+}
+.settings-page {
+  animation: page-in 220ms var(--ease);
+}
+
+/* settings: the highlight behind the chosen page glides */
+.settings-nav {
+  position: relative;
+}
+.settings-nav button {
+  position: relative;
+  z-index: 1;
+}
+.settings-nav button.on {
+  background: transparent;
+}
+.settings-nav button:hover {
+  background: var(--fill-1);
+}
+.settings-nav button.on:hover {
+  background: transparent;
+}
+.settings-ink {
+  position: absolute;
+  left: 14px;
+  right: 10px;
+  top: 0; /* the measured offsetTop already includes the nav's padding */
+  border-radius: var(--r-2);
+  background: var(--fill-2);
+  transition: transform var(--spring-snappy-t) var(--spring-snappy), height var(--t-med) var(--ease);
+  pointer-events: none;
+}
+
+/* side-panel tabs: the ink settles on a spring */
+.panel-ink {
+  transition: transform var(--spring-snappy-t) var(--spring-snappy), width var(--spring-snappy-t) var(--spring-snappy);
+}
+
+/* ---------------------------------------------------------------- controls
+   Press: a quick give under the finger. Release: a spring back. One rule for everything pressable. */
+.btn,
+.icon-btn,
+.cbtn,
+.send,
+.example,
+.folder-chip,
+button.chip,
+.side-new,
+.side-new-opts,
+.side-page,
+.side-foot-btn,
+.panel-tab,
+.seg button,
+.ask-opt,
+.radio-row,
+.fpick-row,
+.browser-item,
+.suggest-item,
+.pal-item,
+.queue-btn,
+.ovc,
+.ovr,
+.run,
+.sched,
+.mem-note,
+.tl-row-btn,
+.cfile-toggle,
+.tree-row,
+.ftab,
+.ttab,
+.wfd-head,
+.wfa-row,
+.work-head,
+.tool-head,
+.chap-head,
+.thinking-head,
+.explore > .tool-head,
+.steps-more,
+.diffstat,
+.ctx-btn,
+.session-empty-mem,
+.touches,
+.link-btn,
+.spend-row,
+.lightbox-x {
+  transition-property: background-color, color, box-shadow, opacity, border-color, transform;
+  transition-duration: var(--t-fast), var(--t-fast), var(--t-fast), var(--t-fast), var(--t-fast), var(--spring-snappy-t);
+  transition-timing-function: ease, ease, ease, ease, ease, var(--spring-snappy);
+}
+.btn:active:not(:disabled),
+.icon-btn:active,
+.cbtn:active,
+.example:active,
+.folder-chip:active,
+button.chip:active,
+.side-new:active,
+.side-page:active,
+.side-foot-btn:active,
+.panel-tab:active,
+.seg button:active:not(:disabled),
+.queue-btn:active,
+.diffstat:active,
+.ctx-btn:active,
+.session-empty-mem:active,
+.lightbox-x:active {
+  transform: scale(0.96);
+  transition-duration: var(--t-fast), var(--t-fast), var(--t-fast), var(--t-fast), var(--t-fast), 70ms;
+  transition-timing-function: ease, ease, ease, ease, ease, ease-out;
+}
+.send:active:not(:disabled) {
+  transform: scale(0.9);
+  transition-duration: var(--t-fast), var(--t-fast), var(--t-fast), var(--t-fast), var(--t-fast), 70ms;
+}
+/* rows and cards give less: they are large, and a big thing should barely move */
+.ask-opt:active,
+.radio-row:active,
+.fpick-row:active,
+.browser-item:active,
+.suggest-item:active,
+.pal-item:active,
+.ovr:active,
+.tl-row-btn:active,
+.tree-row:active,
+.ftab:active,
+.ttab:active,
+.wfa-row:active,
+.wfd-head:active,
+.work-head:active,
+.tool-head:active,
+.chap-head:active,
+.thinking-head:active,
+.steps-more:active,
+.spend-row:active {
+  transform: scale(0.992);
+  transition-duration: var(--t-fast), var(--t-fast), var(--t-fast), var(--t-fast), var(--t-fast), 70ms;
+  transition-timing-function: ease, ease, ease, ease, ease, ease-out;
+}
+.ovc:active:not(.needs),
+.run:active,
+.sched:active,
+.mem-note:active {
+  transform: scale(0.995);
+  transition-duration: var(--t-fast), var(--t-fast), var(--t-fast), var(--t-fast), var(--t-fast), 70ms;
+}
+/* cards lift a hair under the pointer */
+.ovc:not(.needs):hover,
+.run:hover,
+.sched:hover {
+  transform: translateY(-1px);
+}
+.btn.primary:hover {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 2px 8px -2px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+/* the switch: the knob stretches toward where it is going while held, then springs over */
+.switch {
+  transition: background var(--t-med) var(--ease), transform var(--spring-snappy-t) var(--spring-snappy);
+}
+.switch::after {
+  transition: transform var(--spring-snappy-t) var(--spring-snappy), width 160ms var(--ease);
+}
+.switch:active::after {
+  width: 20px;
+}
+.switch.on:active::after {
+  transform: translateX(10px);
+}
+.switch:active {
+  transform: scale(0.97);
+  transition-duration: var(--t-med), 70ms;
+}
+
+/* the segmented control: one raised thumb slides between the segments; the labels stay put */
+.seg {
+  position: relative;
+}
+.seg button {
+  position: relative;
+  z-index: 1;
+}
+.seg button.on,
+[data-theme='dark'] .seg button.on {
+  background: transparent;
+  box-shadow: none;
+}
+.seg-thumb {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 0;
+  border-radius: 6px;
+  background: var(--raised);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18), 0 0 0 1px var(--hair);
+  pointer-events: none;
+}
+[data-theme='dark'] .seg-thumb {
+  background: var(--fill-3);
+  box-shadow: none;
+}
+.seg.settled .seg-thumb {
+  transition: transform var(--spring-snappy-t) var(--spring-snappy), width var(--spring-snappy-t) var(--spring-snappy);
+}
+
+/* check marks and chosen options pop in on the bouncy spring */
+.ask-opt.on .ask-mark,
+.copy-btn.done svg,
+.md-copy.done,
+.ovc-decided,
+.radio-check svg,
+.fpick-check,
+.todo.completed .todo-box svg {
+  animation: pop-spring-sm var(--spring-bouncy-t) var(--spring-bouncy);
+}
+.send.ready {
+  animation: send-ready var(--spring-bouncy-t) var(--spring-bouncy);
+}
+@keyframes send-ready {
+  from {
+    transform: scale(0.82);
+  }
+}
+.send > * {
+  transition: opacity var(--t-fast), transform var(--spring-snappy-t) var(--spring-snappy);
+}
+
+/* every chevron turns on a spring */
+.tool-chev,
+.thinking-chev,
+.side-group-chev,
+.ns-disclose-chev,
+.cfile-toggle > svg,
+.tree-row > .lucide-chevron-right,
+.agent-prompt-toggle svg,
+.crumb-chev,
+.cbtn-chev,
+.select-chev {
+  transition: transform var(--spring-snappy-t) var(--spring-snappy), opacity var(--t-fast);
+}
+.cbtn[aria-expanded='true'] .cbtn-chev,
+.crumb-btn.on .crumb-chev {
+  transform: rotate(180deg);
+}
+
+/* inputs: the ring settles rather than snaps */
+.input,
+.select,
+.textarea,
+.select-btn,
+.ns-folder,
+.cust-search,
+.side-search {
+  transition: box-shadow var(--t-med) var(--ease), background var(--t-med) var(--ease);
+}
+
+/* the composer: a faint warmth when it has your attention, and it rises a hair */
+.composer {
+  transition: box-shadow var(--t-slow) var(--ease), background var(--t-med), transform var(--spring-soft-t) var(--spring-soft);
+}
+.composer:focus-within {
+  transform: translateY(-1px);
+  box-shadow: 0 0 0 1px var(--hair-3), 0 0 0 5px color-mix(in srgb, var(--accent) 7%, transparent), 0 12px 36px -14px rgba(0, 0, 0, 0.6);
+}
+[data-theme='light'] .composer:focus-within {
+  box-shadow: 0 0 0 1px var(--hair-3), 0 0 0 5px color-mix(in srgb, var(--accent) 8%, transparent), 0 14px 36px -16px rgba(17, 17, 26, 0.28);
+}
+.composer-wrap.dragging .composer {
+  transform: none;
+}
+
+/* ---------------------------------------------------------------- the conversation */
+
+/* the reply is being written: a soft caret in Claude's own colour at the end of the last line */
+.md.streaming > .md-b:last-child > :is(p, h1, h2, h3, h4, blockquote):last-child::after,
+.md.streaming > .md-b:last-child > :is(ul, ol):last-child > li:last-child::after,
+.md.streaming > .md-b:last-child > :is(ul, ol):last-child > li:last-child > p:last-child::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 0.95em;
+  margin-left: 3px;
+  vertical-align: -0.14em;
+  border-radius: 1px;
+  background: var(--accent);
+  opacity: 0.85;
+  animation: caret 1.1s steps(2, jump-none) infinite;
+}
+@keyframes caret {
+  50% {
+    opacity: 0.1;
+  }
+}
+
+/* a step's status mark changes on a spring */
+.tool-ico-swap {
+  animation: pop-spring-sm var(--spring-snappy-t) var(--spring-snappy);
+}
+/* the fold line of a turn is a row: it lights under the pointer like the steps beneath it */
+.work-head {
+  width: calc(100% + 16px);
+  margin-left: -8px;
+  padding: 0 8px;
+  border-radius: var(--r-2);
+}
+.work-head:hover {
+  background: var(--fill-1);
+}
+.chap-head {
+  margin-left: -6px;
+  padding: 0 6px;
+  width: calc(100% + 12px);
+}
+.chap-head:hover {
+  background: var(--fill-1);
+}
+/* a new user message lands on a spring; replies simply rise (both from Transcript's observer, this is the fallback) */
+.msg-bubble {
+  transition: background var(--t-fast);
+}
+.msg-thumb,
+.tool-img {
+  cursor: zoom-in;
+  transition: transform var(--spring-snappy-t) var(--spring-snappy), box-shadow var(--t-fast);
+}
+.msg-thumb:hover,
+.tool-img:hover {
+  transform: scale(1.015);
+}
+
+/* the "needs you" ring draws itself once more deliberately */
+.perm::after,
+.askcard.live::after,
+.plancard.live::after {
+  animation-duration: 1100ms;
+}
+
+/* ---------------------------------------------------------------- sidebar */
+.side-row {
+  transition: background var(--t-med) var(--ease);
+}
+.side-row.active {
+  animation: row-settle var(--spring-soft-t) var(--spring-soft);
+}
+@keyframes row-settle {
+  from {
+    background-color: var(--fill-3);
+  }
+}
+.glyph {
+  transition: background var(--t-med), transform var(--spring-bouncy-t) var(--spring-bouncy);
+}
+.side-page-n,
+.tab-count,
+.side-count {
+  animation: pop-spring-sm var(--spring-bouncy-t) var(--spring-bouncy);
+}
+
+/* ---------------------------------------------------------------- panels */
+.tree-row > .lucide-chevron-right.rot {
+  transform: rotate(90deg);
+}
+.panel-tab.on .panel-tab-ico {
+  animation: pop-spring-sm var(--spring-snappy-t) var(--spring-snappy);
+}
+.ctx-meter > div,
+.progress > div,
+.wf-bar > div,
+.spend-bar > span {
+  transition: width var(--spring-soft-t) var(--spring-soft);
+}
+.ctx-ring circle:last-child {
+  transition: stroke-dasharray var(--spring-soft-t) var(--spring-soft), stroke var(--t-slow);
+}
+
+/* ---------------------------------------------------------------- the conversation's edges
+   The header is frosted glass and the conversation scrolls under it; at the bottom the text dissolves
+   into a progressive blur before it reaches the composer, the way a list does under an iOS bar. */
+.session-head {
+  background: color-mix(in srgb, var(--canvas) 74%, transparent);
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  backdrop-filter: blur(22px) saturate(160%);
+}
+.session:not(:has(> .mcp-notice-stack, > .session-error)) > .transcript {
+  margin-top: calc(-1 * var(--header-h));
+}
+.session:not(:has(> .mcp-notice-stack, > .session-error)) > .transcript > .transcript-inner {
+  padding-top: calc(var(--header-h) + 22px);
+}
+.session:not(:has(> .mcp-notice-stack, > .session-error)) > .transcript .session-empty {
+  padding-top: calc(12vh - var(--header-h) + 20px);
+}
+.composer-wrap::before {
+  top: -44px;
+  height: 44px;
+  background: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--canvas) 88%, transparent));
+  -webkit-backdrop-filter: blur(7px);
+  backdrop-filter: blur(7px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 75%);
+  mask-image: linear-gradient(to bottom, transparent, #000 75%);
+}
+
+/* ---- the send: the arrow launches, the field settles back to one line (Composer), and the
+   bubble flies up from the field into the conversation (Transcript) */
+.send-arrow.go {
+  animation: launch 460ms var(--ease) both;
+}
+@keyframes launch {
+  0% {
+    transform: none;
+    opacity: 1;
+  }
+  38% {
+    transform: translateY(-16px) scale(0.9);
+    opacity: 0;
+  }
+  42% {
+    transform: translateY(12px) scale(0.9);
+    opacity: 0;
+  }
+  100% {
+    transform: none;
+    opacity: 1;
+  }
+}
+.send.stop .send-arrow.go {
+  animation: launch-out 220ms var(--ease) both;
+}
+@keyframes launch-out {
+  to {
+    transform: translateY(-16px) scale(0.9);
+    opacity: 0;
+  }
+}
+
+/* ---- the composer wears its mode: a quiet wash on the chip, and a tinted ring when the mode
+   is one you should notice (planning only, or no questions asked) */
+.cbtn.mode.accent {
+  background: var(--accent-wash);
+}
+.cbtn.mode.plan {
+  background: var(--plan-wash);
+}
+.cbtn.mode.info {
+  background: var(--info-wash);
+}
+.cbtn.mode.err {
+  background: var(--err-wash);
+}
+.cbtn.mode.accent:hover,
+.cbtn.mode.plan:hover,
+.cbtn.mode.info:hover,
+.cbtn.mode.err:hover {
+  filter: brightness(1.08);
+}
+.composer.mode-plan {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--plan) 50%, var(--hair-2)), 0 6px 24px -14px rgba(0, 0, 0, 0.5);
+}
+.composer.mode-plan:focus-within {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--plan) 65%, var(--hair-3)), 0 0 0 5px color-mix(in srgb, var(--plan) 9%, transparent), 0 12px 36px -14px rgba(0, 0, 0, 0.6);
+}
+.composer.mode-bypassPermissions {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--err) 45%, var(--hair-2)), 0 6px 24px -14px rgba(0, 0, 0, 0.5);
+}
+.composer.mode-bypassPermissions:focus-within {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--err) 60%, var(--hair-3)), 0 0 0 5px color-mix(in srgb, var(--err) 8%, transparent), 0 12px 36px -14px rgba(0, 0, 0, 0.6);
+}
+
+/* ---- code: colour arrives as a fade, not a flash; a diff writes itself in one row at a time */
+.md-code pre.hl[data-hl='1'] code,
+.code-grid[data-hl='1'] {
+  animation: hl-in 320ms var(--ease);
+}
+@keyframes hl-in {
+  from {
+    opacity: 0.45;
+  }
+}
+/* only the code cells of the first rows (Code.tsx caps the count); gutters simply appear */
+.diff-grid > .dc {
+  animation: row-in 280ms var(--ease) both;
+  animation-delay: calc(var(--i, 0) * 13ms);
+}
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+}
+
+/* ---- pages: the next one rises; the one you leave simply goes. (A fading copy of the old page —
+   a whole conversation, cloned and composited over the new one — cost more than the moment it
+   bought: on slower compositors it lingered over the next page's top as a visible flash.) */
+
+/* ---------------------------------------------------------------- the sidebar's selection
+   One highlight for the open session, anchored to its row (CSS anchor positioning), so it glides
+   from row to row and follows the row when the list reflows; it steps aside while rows glide (FLIP). */
+@supports (anchor-name: --a) {
+  .side-list {
+    position: relative;
+  }
+  .side-row.active {
+    anchor-name: --side-active;
+    background: transparent;
+  }
+  .side-row.active:hover {
+    background: transparent;
+  }
+  .side-row.active {
+    animation: none;
+  }
+  .side-sel {
+    position: absolute;
+    position-anchor: --side-active;
+    top: anchor(top);
+    left: anchor(left);
+    width: anchor-size(width);
+    height: anchor-size(height);
+    border-radius: var(--r-2);
+    background: var(--fill-2);
+    pointer-events: none;
+    z-index: 0;
+    transition: top var(--spring-snappy-t) var(--spring-snappy), left var(--spring-snappy-t) var(--spring-snappy), width var(--t-med) var(--ease), height var(--t-med) var(--ease), opacity var(--t-fast);
+  }
+  .side-row {
+    position: relative;
+    z-index: 1;
+  }
+  .side-list:not(:has(.side-row.active)) .side-sel,
+  .side-list.flipping .side-sel {
+    opacity: 0;
+  }
+}
+
+/* ---------------------------------------------------------------- the session gauge */
+.gauge-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.gauge-wrap {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+.gauge {
+  display: block;
+}
+.gauge-track {
+  stroke: var(--fill-2);
+}
+.gauge-arc {
+  transition: stroke-dashoffset var(--spring-soft-t) var(--spring-soft), stroke var(--t-slow) var(--ease);
+}
+.gauge-num {
+  position: absolute;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.gauge-side {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+.gauge-line {
+  font-size: var(--fs-small);
+  color: var(--text-3);
+}
+.gauge-line b {
+  font-weight: 600;
+  color: var(--text);
+}
+.stat-row {
+  display: flex;
+  gap: 8px;
+}
+.stat {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px 7px;
+  border-radius: 10px;
+  background: var(--fill-1);
+  box-shadow: inset 0 0 0 0.5px var(--hair);
+}
+.stat-k {
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.stat-v {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------------------------------------------------------------- small things */
+.tip {
+  transition: opacity 120ms ease, transform var(--spring-snappy-t) var(--spring-snappy);
+}
+.drop-hint {
+  animation: pop-spring var(--spring-snappy-t) var(--spring-snappy);
+}
+.side-row-main:active {
+  transform: scale(0.99);
+}
+.side-row-main {
+  transition: transform var(--spring-snappy-t) var(--spring-snappy);
+}
+[data-theme='dark'] .welcome-icon,
+[data-theme='dark'] .session-empty-icon {
+  filter: drop-shadow(0 18px 44px rgba(217, 119, 87, 0.22));
+}
+
+/* ---------------------------------------------------------------- still copies (lib/motion ghost) */
+[data-ghost] {
+  pointer-events: none !important;
+  user-select: none;
+}
+
+/* ---------------------------------------------------------------- less motion, by request */
+@media (prefers-reduced-motion: reduce) {
+  .main {
+    transition: none;
+  }
+  .md.streaming > .md-b:last-child > :last-child::after {
+    animation: none;
+  }
+}

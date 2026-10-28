@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark light" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <title>Pilcrow</title>
+    <!-- The first frame is the right colour before any stylesheet arrives (public/theme.js). -->
+    <script src="./theme.js"></script>
+  </head>
+  <body>
+    <style>
+      html { background: #191919; }
+      html[data-theme='light'] { background: #ffffff; }
+      #splash { position: fixed; inset: 0; display: grid; place-content: center; justify-items: center; }
+      #splash svg { width: 44px; height: 44px; opacity: 0; animation: splash-in 420ms cubic-bezier(0.22, 1, 0.36, 1) 80ms forwards; }
+      #splash i { display: block; height: 70px; } /* where the name and status line will sit */
+      @keyframes splash-in { to { opacity: 1; } }
+      @media (prefers-reduced-motion: reduce) { #splash svg { animation: none; opacity: 1; } }
+    </style>
+    <div id="root">
+      <div id="splash" aria-hidden="true">
+        <svg viewBox="4.5 4 14 16"><circle cx="10.6" cy="9.2" r="4.1" fill="#d97757"/><g fill="#9c9c9c"><rect x="10.6" y="5.1" width="6.6" height="1.9" rx="0.5"/><rect x="12.4" y="5.1" width="1.9" height="13.8" rx="0.5"/><rect x="15.3" y="5.1" width="1.9" height="13.8" rx="0.5"/></g></svg>
+        <i></i>
+      </div>
+    </div>
+    <script type="module" src="./src/main.tsx"></script>
+  </body>
+</html>

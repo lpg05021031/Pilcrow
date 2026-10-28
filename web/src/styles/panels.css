@@ -1,0 +1,1222 @@
+/* ================================================================ side panel
+   Lives on the chrome surface like the sidebar. Tabs are text with a sliding underline;
+   each tab has one toolbar row of borderless controls. */
+
+.panel {
+  flex: 0 1 auto;
+  min-width: 300px;
+  /* Never wider than the conversation in a small window, never above 40% of a big one. */
+  max-width: max(300px, min(40vw, calc(100vw - 760px)));
+  display: flex;
+  flex-direction: column;
+  background: var(--canvas);
+  container-type: inline-size;
+}
+/* The panel gives way before the conversation does: in a narrow window it shrinks (down to 300px)
+   instead of pushing past the window edge. */
+.panel-shell {
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  min-height: 0;
+  background: var(--chrome);
+}
+
+.panel-tabs {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: var(--header-h);
+  padding: 0 8px 0 10px;
+  box-shadow: inset 0 -1px 0 var(--hair);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.panel-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: var(--r-2);
+  font-size: var(--fs-ui);
+  color: var(--text-3);
+  white-space: nowrap;
+  transition: color var(--t-fast), background var(--t-fast);
+}
+.panel-tab:hover {
+  color: var(--text);
+  background: var(--fill-1);
+}
+.panel-tab.on {
+  color: var(--text);
+  font-weight: 550;
+}
+.panel-tab-ico {
+  flex: none;
+  opacity: 0.85;
+}
+.panel-tab.on .panel-tab-ico {
+  opacity: 1;
+}
+.panel-ink {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px 2px 0 0;
+  background: var(--text);
+  transition: transform var(--t-panel) var(--ease), width var(--t-panel) var(--ease);
+  pointer-events: none;
+  z-index: 1;
+}
+.tab-count {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--fill-3);
+  color: var(--text);
+  font-size: 10.5px;
+  font-weight: 600;
+  display: grid;
+  place-items: center;
+}
+/* In a narrow panel only the chosen tab keeps its name; the others are icons with tooltips. The name
+   grows in and the ink follows, so switching tabs reads as one movement. */
+@container (max-width: 759px) {
+  .panel-tab:not(.on) .panel-tab-label {
+    display: none;
+  }
+  .panel-tab:not(.on) {
+    width: 34px;
+    justify-content: center;
+    padding: 0;
+  }
+  .panel-tab.on {
+    padding: 0 10px 0 8px;
+    animation: tab-name var(--t-panel) var(--ease);
+  }
+}
+@keyframes tab-name {
+  from {
+    opacity: 0.4;
+  }
+}
+
+.panel-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.panel-body > * {
+  flex: 1;
+  min-height: 0;
+}
+.panel-keep {
+  flex-direction: column;
+  min-height: 0;
+}
+.panel-keep > * {
+  flex: 1;
+  min-height: 0;
+}
+
+.panel-toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 42px;
+  padding: 6px 10px 6px 12px;
+  box-shadow: inset 0 -1px 0 var(--hair);
+  overflow-x: auto;
+  scrollbar-width: none;
+  font-size: var(--fs-small);
+}
+.panel-toolbar .btn.sm {
+  height: 26px;
+}
+
+.panel .empty {
+  padding: 40px 28px;
+}
+
+/* ---------------------------------------------------------------- changes */
+
+.changes {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.changes-bar {
+  gap: 6px;
+}
+.changes-scope {
+  font-weight: 550;
+  color: var(--text);
+  white-space: nowrap;
+}
+.select-btn.ghost-select {
+  height: 26px;
+  max-width: 200px;
+  padding: 0 6px 0 8px;
+  background: transparent;
+  box-shadow: none;
+  font-weight: 550;
+}
+.select-btn.ghost-select:hover {
+  background: var(--fill-2);
+}
+.changes-stat {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 4px;
+  font-size: var(--fs-small);
+  white-space: nowrap;
+}
+.changes-summary {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  font-size: var(--fs-small);
+  box-shadow: inset 0 -1px 0 var(--hair);
+}
+.commit-box {
+  flex: none;
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  box-shadow: inset 0 -1px 0 var(--hair);
+  animation: rise var(--t-med) var(--ease);
+}
+.changes-files {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 0 24px;
+  display: grid;
+  align-content: start;
+}
+/* Files read as one continuous document: sticky headers, hairlines between files, no boxes. */
+.cfile {
+  min-width: 0;
+  box-shadow: inset 0 -1px 0 var(--hair);
+}
+.cfile-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 40px;
+  padding: 0 8px 0 6px;
+  background: var(--chrome);
+  font-size: var(--fs-small);
+}
+.cfile.open .cfile-head {
+  box-shadow: inset 0 -1px 0 var(--hair);
+}
+.cfile-head .icon-btn {
+  opacity: 0;
+  transition: opacity var(--t-fast);
+}
+.cfile-head:hover .icon-btn,
+.cfile-head .icon-btn:focus-visible {
+  opacity: 1;
+}
+.cfile-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 30px;
+  padding: 0 4px;
+  text-align: left;
+  border-radius: var(--r-2);
+}
+.cfile-toggle > svg {
+  flex: none;
+  color: var(--text-3);
+  transition: transform var(--t-med) var(--ease);
+}
+.cfile-name {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.cfile-dir {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+.fstat {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 650;
+}
+.fstat.s-M {
+  color: var(--text-2);
+  background: var(--fill-2);
+}
+.fstat.s-A,
+.fstat.s-U {
+  color: var(--ok);
+  background: var(--ok-wash);
+}
+.fstat.s-D {
+  color: var(--err);
+  background: var(--err-wash);
+}
+.fstat.s-R {
+  color: var(--info);
+  background: var(--info-wash);
+}
+.cfile-body .diff {
+  border-radius: 0;
+  max-height: none;
+  box-shadow: none;
+  background: var(--canvas);
+}
+.cfile-body .diff-grid {
+  padding: 4px 0 8px;
+}
+.cfile-note {
+  padding: 12px 14px;
+  font-size: var(--fs-small);
+}
+.notes-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--raised);
+  box-shadow: inset 0 1px 0 var(--hair-2);
+  color: var(--text);
+  font-size: var(--fs-small);
+  animation: rise var(--t-med) var(--ease);
+}
+
+/* ---------------------------------------------------------------- files */
+
+.files {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.files-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.tree {
+  width: 212px;
+  flex: none;
+  overflow: auto;
+  padding: 6px 6px 18px;
+  box-shadow: inset -1px 0 0 var(--hair);
+  font-size: 12.5px;
+}
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 26px;
+  padding-right: 6px;
+  border-radius: var(--r-2);
+  text-align: left;
+  color: var(--text-2);
+  white-space: nowrap;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.tree-row:hover {
+  background: var(--fill-1);
+  color: var(--text);
+}
+.tree-row.on {
+  background: var(--fill-2);
+  color: var(--text);
+}
+.tree-row svg {
+  flex: none;
+}
+.tree-dir-ico,
+.tree-file-ico {
+  color: var(--text-3);
+}
+.tree-row > .lucide-chevron-right {
+  color: var(--text-4);
+  transition: transform var(--t-fast) var(--ease);
+}
+.tree-err {
+  font-size: 11.5px;
+  color: var(--err);
+  padding: 2px 6px;
+}
+.files-editor {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--canvas);
+}
+.ftabs {
+  flex: none;
+  display: flex;
+  gap: 2px;
+  padding: 6px 6px 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  background: var(--chrome);
+  box-shadow: inset 0 -1px 0 var(--hair);
+}
+.ftab {
+  display: flex;
+  align-items: center;
+  flex: none;
+  border-radius: var(--r-2) var(--r-2) 0 0;
+  font-size: 12px;
+  color: var(--text-3);
+  transition: color var(--t-fast), background var(--t-fast);
+}
+.ftab:hover {
+  color: var(--text);
+}
+.ftab.on {
+  background: var(--canvas);
+  color: var(--text);
+  box-shadow: 0 0 0 1px var(--hair);
+  clip-path: inset(-1px -1px 0 -1px);
+}
+.ftab-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 4px 0 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.ftab-x {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-right: 5px;
+  border-radius: 4px;
+  color: var(--text-3);
+  opacity: 0;
+  transition: opacity var(--t-fast), background var(--t-fast);
+}
+.ftab:hover .ftab-x,
+.ftab.on .ftab-x {
+  opacity: 1;
+}
+.ftab-x:hover {
+  background: var(--fill-2);
+  color: var(--text);
+}
+.dirty-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-2);
+}
+.editor {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.editor .cm-editor {
+  height: 100%;
+}
+.editor .cm-editor.cm-focused {
+  outline: none;
+}
+.img-preview {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  padding: 24px;
+  overflow: auto;
+}
+.img-preview img {
+  max-width: 100%;
+  max-height: 70vh;
+  border-radius: var(--r-2);
+  box-shadow: var(--shadow-card);
+  background: repeating-conic-gradient(var(--fill-2) 0 25%, transparent 0 50%) 0 0 / 16px 16px;
+}
+
+/* ---------------------------------------------------------------- terminal */
+
+.terms {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.ttab {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  border-radius: var(--r-2);
+  font-size: 12px;
+  color: var(--text-3);
+  transition: color var(--t-fast), background var(--t-fast);
+}
+.ttab:hover {
+  color: var(--text);
+}
+.ttab button:first-child {
+  height: 26px;
+  padding: 0 4px 0 9px;
+  font-family: var(--font-mono);
+}
+.ttab.on {
+  background: var(--fill-2);
+  color: var(--text);
+}
+.ttab.exited {
+  opacity: 0.55;
+}
+.ttab-x {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-right: 4px;
+  border-radius: 4px;
+}
+.ttab-x:hover {
+  background: var(--fill-2);
+}
+.term-host {
+  flex: 1;
+  min-height: 0;
+  background: var(--chrome);
+  padding: 8px 4px 4px 12px;
+}
+.xterm-host {
+  height: 100%;
+}
+.xterm-host .xterm-viewport {
+  background: transparent !important;
+}
+.xterm-host .xterm .scrollbar.vertical {
+  width: 10px !important;
+}
+.xterm-host .xterm .scrollbar .slider {
+  left: 3px !important;
+  width: 5px !important;
+  border-radius: 3px;
+  background: var(--fill-3) !important;
+}
+.xterm-host .xterm .scrollbar .slider:hover,
+.xterm-host .xterm .scrollbar .slider.active {
+  background: var(--hair-3) !important;
+}
+
+/* ---------------------------------------------------------------- preview */
+
+.preview {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.url-bar {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.url-bar .input {
+  height: 28px;
+  font-size: 12px;
+}
+.preview .chips {
+  padding: 8px 12px;
+  box-shadow: inset 0 -1px 0 var(--hair);
+}
+.preview-frame {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: none;
+  background: #fff;
+}
+
+/* ---------------------------------------------------------------- tasks & session info */
+
+.tasks-panel,
+.info-panel {
+  overflow-y: auto;
+  padding: 4px 16px 24px;
+}
+.ps {
+  display: grid;
+  gap: 10px;
+  padding: 16px 0 18px;
+  box-shadow: inset 0 -1px 0 var(--hair);
+}
+.ps:last-child {
+  box-shadow: none;
+}
+.ps-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: var(--fs-h);
+  letter-spacing: -0.01em;
+}
+.ps-head > svg {
+  display: none;
+}
+.ps-head .faint {
+  font-weight: 400;
+  margin-left: auto;
+  font-size: var(--fs-small);
+}
+.ps-empty {
+  font-size: var(--fs-small);
+  color: var(--text-3);
+  line-height: 1.5;
+}
+.progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--fill-2);
+  overflow: hidden;
+}
+.progress > div {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--text-2);
+  transition: width 0.5s var(--ease);
+}
+.task-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px 9px 12px;
+  border-radius: var(--r-3);
+  background: var(--canvas);
+  box-shadow: var(--shadow-card);
+  font-size: var(--fs-ui);
+}
+.task-row.done {
+  background: transparent;
+  box-shadow: none;
+  padding: 4px 2px;
+  color: var(--text-2);
+}
+.task-sub {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11.5px;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ctx-big {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.ctx-meter {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--fill-2);
+  overflow: hidden;
+}
+.ctx-meter > div {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--text-2);
+  transition: width 0.5s var(--ease);
+}
+.ctx-meter > .warm {
+  background: var(--accent);
+}
+.ctx-meter > .hot {
+  background: var(--err);
+}
+.ctx-analyze {
+  justify-self: start;
+  margin-left: -8px;
+  color: var(--text-2);
+}
+.ctx-num {
+  font-size: var(--fs-display);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.ctx-bar {
+  display: flex;
+  gap: 2px;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--fill-2);
+  margin-bottom: 6px;
+}
+.ctx-bar > * {
+  border-radius: 1px;
+}
+.ctx-cats {
+  display: grid;
+  gap: 5px;
+}
+.ctx-cat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-small);
+  color: var(--text-2);
+}
+.ctx-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.kv {
+  display: grid;
+  grid-template-columns: 112px 1fr;
+  gap: 8px 12px;
+  font-size: var(--fs-small);
+  align-items: baseline;
+}
+.kv > span:nth-child(odd) {
+  color: var(--text-3);
+}
+.kv > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.chips.wrap {
+  max-height: 200px;
+  overflow-y: auto;
+}
+.mcp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-small);
+}
+.mcp-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-4);
+}
+.mcp-dot.connected {
+  background: var(--ok);
+}
+.mcp-dot.failed {
+  background: var(--err);
+}
+.mcp-dot.needs-auth,
+.mcp-dot.pending {
+  background: var(--accent);
+}
+
+.changes-loading {
+  display: grid;
+  gap: 22px;
+  padding: 16px 14px;
+  animation: fade var(--t-med) var(--ease) 120ms both;
+}
+.sk-file {
+  display: grid;
+  gap: 9px;
+}
+.sk-file .sk {
+  height: 11px;
+}
+
+.kv-sub {
+  margin-left: 4px;
+  font-size: 11.5px;
+}
+
+/* ================================================================ timeline (time machine)
+   A scrubber on top — one tick per step, taller for messages — and the same steps as a list below,
+   joined by a rail. Picking a point opens what that step changed; the footer says how far the
+   folder has moved since. */
+.history {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  outline: none;
+}
+.history .panel-toolbar {
+  flex: none;
+}
+.tl-scrub {
+  flex: none;
+  position: relative;
+  padding: 28px 20px 8px;
+  cursor: ew-resize;
+  user-select: none;
+  touch-action: none;
+  box-shadow: inset 0 -1px 0 var(--hair);
+}
+.tl-scrub-label {
+  position: absolute;
+  top: 6px;
+  transform: translateX(-50%);
+  max-width: 70%;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--raised-2);
+  font-size: var(--fs-micro);
+  color: var(--text-2);
+  pointer-events: none;
+  white-space: nowrap;
+  transition: left var(--t-fast);
+}
+.tl-scrub:hover .tl-scrub-label {
+  transition: none;
+}
+.tl-scrub-label.edge-r {
+  left: auto !important;
+  right: 20px;
+  transform: none;
+}
+.tl-scrub-label.edge-l {
+  left: 20px !important;
+  transform: none;
+}
+.tl-scrub.dragging .tl-cursor {
+  transform: scale(1.25);
+  transition: transform var(--t-fast) var(--spring);
+}
+.tl-scrub.dragging .tl-scrub-label,
+.tl-scrub.dragging .tl-cursor,
+.tl-scrub.dragging .tl-scrub-done {
+  transition-duration: 0ms;
+}
+.tl-scrub-track {
+  position: relative;
+  height: 28px;
+}
+.tl-scrub-track::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 2px;
+  margin-top: -1px;
+  border-radius: 1px;
+  background: var(--fill-2);
+}
+.tl-scrub-done {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  height: 2px;
+  margin-top: -1px;
+  border-radius: 1px;
+  background: var(--text-3);
+  transition: width var(--t-fast);
+}
+.tl-tick {
+  position: absolute;
+  top: 50%;
+  width: 2px;
+  height: 8px;
+  margin: -4px 0 0 -1px;
+  border-radius: 1px;
+  background: var(--hair-3);
+}
+.tl-tick.changed {
+  background: var(--text-4);
+}
+.tl-tick.past.changed {
+  background: var(--text-2);
+}
+.tl-tick.message,
+.tl-tick.start,
+.tl-tick.restore,
+.tl-tick.external {
+  height: 14px;
+  margin-top: -7px;
+}
+.tl-tick.message {
+  background: var(--text-3);
+}
+.tl-tick.external {
+  background: var(--warn);
+}
+.tl-tick.restore {
+  background: var(--text-2);
+}
+.tl-tick.now {
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border-radius: 50%;
+  background: var(--raised);
+  box-shadow: 0 0 0 2px var(--text-3);
+}
+.tl-cursor {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--chrome), 0 0 0 4px var(--accent);
+  transition: left var(--t-fast), transform var(--t-fast) var(--ease);
+  pointer-events: none;
+}
+.tl-cursor::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 100%;
+  width: 1px;
+  height: 14px;
+  margin-bottom: 4px;
+  background: var(--hair-3);
+}
+.tl-scrub-axis {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 4px 0;
+  font-size: 10px;
+  color: var(--text-4);
+}
+
+.tl-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 12px 12px 8px;
+}
+.tl-row {
+  position: relative;
+}
+.tl-row {
+  animation: rise var(--t-panel) var(--ease) both;
+}
+.tl-row-btn {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 6px 5px 4px;
+  border-radius: var(--r-2);
+  text-align: left;
+  transition: background var(--t-fast);
+}
+.tl-row-btn:hover,
+.tl-row.on > .tl-row-btn {
+  background: var(--fill-1);
+}
+.tl-row.on > .tl-row-btn {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.tl-rail {
+  position: relative;
+  align-self: stretch;
+  display: flex;
+  justify-content: center;
+}
+.tl-dot {
+  position: relative;
+  z-index: 1;
+  width: 7px;
+  height: 7px;
+  margin-top: 11px;
+  border-radius: 50%;
+  background: var(--card);
+  box-shadow: inset 0 0 0 1.5px var(--hair-3);
+  transition: transform var(--t-fast) var(--ease), background var(--t-fast), box-shadow var(--t-fast);
+}
+/* the rail's vocabulary: hollow = nothing changed, filled = files changed, a square = you spoke,
+   amber = changed outside the conversation, a ring = restored */
+.tl-dot.changed {
+  background: var(--text-3);
+  box-shadow: none;
+}
+.tl-row.message .tl-dot,
+.tl-row.start .tl-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--text-2);
+  box-shadow: none;
+}
+.tl-row.external .tl-dot {
+  background: var(--warn);
+  box-shadow: none;
+}
+.tl-row.restore .tl-dot {
+  background: var(--card);
+  box-shadow: inset 0 0 0 2px var(--text-2);
+}
+.tl-row.on .tl-dot {
+  transform: scale(1.3);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+  background: var(--accent);
+}
+.tl-now-mark {
+  margin-top: 8px;
+  color: var(--text-2);
+}
+.tl-now.on .tl-now-mark {
+  color: var(--text);
+}
+.tl-line {
+  position: absolute;
+  top: 19px;
+  bottom: -11px;
+  width: 1px;
+  background: var(--hair-2);
+}
+.tl-main {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.tl-title {
+  font-size: var(--fs-small);
+  color: var(--text);
+}
+.tl-row.message .tl-title {
+  color: var(--text-2);
+  font-style: italic;
+}
+.tl-row.message .tl-title::before {
+  content: '“';
+}
+.tl-row.message .tl-title::after {
+  content: '”';
+}
+.tl-sub {
+  display: flex;
+  gap: 8px;
+  font-size: var(--fs-micro);
+  color: var(--text-4);
+}
+.tl-stat {
+  display: inline-flex;
+  gap: 5px;
+  font-size: var(--fs-micro);
+  white-space: nowrap;
+}
+.tl-jump {
+  opacity: 0;
+}
+.tl-row-btn:hover .tl-jump,
+.tl-row.on .tl-jump {
+  opacity: 1;
+}
+.tl-now {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  padding: 5px 6px 5px 4px;
+  border-radius: var(--r-2);
+  cursor: pointer;
+}
+.tl-now:hover,
+.tl-now.on {
+  background: var(--fill-1);
+}
+.tl-now .tl-sub {
+  color: var(--text-3);
+}
+
+.tl-detail {
+  margin: 0 0 6px 22px;
+  padding: 8px 8px 8px 10px;
+  border-radius: 0 0 var(--r-2) var(--r-2);
+  background: var(--fill-1);
+  display: grid;
+  gap: 6px;
+}
+.tl-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.tl-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-small);
+}
+.tl-file {
+  background: var(--raised);
+  border-radius: var(--r-2);
+}
+.tl-file .cfile-head {
+  padding-left: 4px;
+}
+
+.tl-since {
+  flex: none;
+  padding: 8px 12px;
+  box-shadow: inset 0 1px 0 var(--hair);
+  font-size: var(--fs-small);
+}
+.tl-since.faint {
+  padding: 10px 14px;
+}
+.tl-since-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  text-align: left;
+  color: var(--text-2);
+}
+.tl-since-btn .tl-stat {
+  margin-left: auto;
+}
+.tl-since-btn .tool-chev {
+  transition: transform var(--t-med) var(--ease);
+}
+.tl-since-btn .tool-chev.open {
+  transform: rotate(90deg);
+}
+.tl-since-files {
+  display: grid;
+  gap: 2px;
+  max-height: 180px;
+  overflow: auto;
+  padding: 6px 0 0 18px;
+}
+.tl-since-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-micro);
+  color: var(--text-2);
+}
+.tl-since-file .tl-stat {
+  margin-left: auto;
+}
+
+/* a step jumped to from the timeline lights up briefly */
+.flash {
+  animation: flash 1.4s var(--ease);
+}
+@keyframes flash {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-text) 0%, transparent);
+  }
+  20% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-text) 35%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 4px transparent;
+  }
+}
+
+/* ================================================================ documents: read, edit, or both */
+.doc-area {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+.doc-area.split {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+.doc-area.split > :first-child {
+  box-shadow: inset -1px 0 0 var(--hair);
+}
+.doc-area > .cm-host,
+.doc-area > .editor {
+  min-height: 0;
+}
+.doc-preview {
+  min-height: 0;
+  overflow: auto;
+  padding: 22px 28px 56px;
+  animation: fade var(--t-med) var(--ease);
+}
+.doc-md {
+  max-width: 720px;
+  margin: 0 auto;
+  font-size: var(--font-size);
+  line-height: 1.7;
+}
+.doc-md > :first-child {
+  margin-top: 0;
+}
+.doc-area.split .doc-preview {
+  padding: 16px 20px 48px;
+}
+.doc-area.split .doc-md {
+  font-size: 13.5px;
+  line-height: 1.65;
+}
+.doc-seg {
+  margin-right: 2px;
+}
+.doc-seg button {
+  min-width: 28px;
+}
+.doc-frame-wrap {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+.doc-frame-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 6px 0 12px;
+  font-size: var(--fs-micro);
+  background: var(--chrome);
+  box-shadow: inset 0 -1px 0 var(--hair);
+}
+.doc-frame {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  background: #fff;
+}

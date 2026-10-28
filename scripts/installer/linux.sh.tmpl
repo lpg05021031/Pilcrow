@@ -1,0 +1,330 @@
+#!/usr/bin/env bash
+# ============================================================================
+#  Pilcrow {{VERSION}} — Linux 上的 Claude Code 桌面版
+#  完整安裝檔
+#
+#  這是純文字安裝檔：原始碼以文字直接寫在下面，建置好的介面以 base64 文字內附，
+#  安裝時只會從你的 npm registry 下載執行需要的套件（不需要建置工具）。
+#  請先「存成檔案」再用 bash 執行，不要直接貼進 shell。
+#
+#    bash pilcrow-install.sh            安裝到 ~/pilcrow
+#    bash pilcrow-install.sh --help     所有選項
+# ============================================================================
+if [ -z "${BASH_VERSION:-}" ]; then echo "請用 bash 執行：bash $0" >&2; exit 1; fi
+set -euo pipefail
+
+PILCROW_VERSION={{VERSION}}
+
+if [ -t 1 ]; then
+  C_B=$'\e[1m'; C_G=$'\e[32m'; C_Y=$'\e[33m'; C_R=$'\e[31m'; C_A=$'\e[38;5;179m'; C_0=$'\e[0m'
+else
+  C_B=; C_G=; C_Y=; C_R=; C_A=; C_0=
+fi
+say()  { printf '%s\n' "$*"; }
+step() { printf '\n%s==>%s %s%s%s\n' "$C_A" "$C_0" "$C_B" "$*" "$C_0"; }
+ok()   { printf '  %s✓%s %s\n' "$C_G" "$C_0" "$*"; }
+warn() { printf '  %s!%s %s\n' "$C_Y" "$C_0" "$*"; }
+die()  { printf '\n%s✗ %s%s\n' "$C_R" "$*" "$C_0" >&2; exit 1; }
+
+pilcrow_target_dir() {
+  local dir="${PILCROW_DIR:-$HOME/pilcrow}" prev=""
+  for a in "$@"; do
+    case "$a" in
+      --dir=*) dir="${a#--dir=}" ;;
+    esac
+    [ "$prev" = "--dir" ] && dir="$a"
+    prev="$a"
+  done
+  case "$dir" in "~"*) dir="$HOME${dir#\~}" ;; esac
+  mkdir -p "$dir" || die "無法建立資料夾 $dir"
+  (cd "$dir" && pwd)
+}
+
+pilcrow_check_target() {
+  local D="$1"
+  if [ -n "$(ls -A "$D" 2>/dev/null)" ] && [ ! -f "$D/.pilcrow-manifest" ] && [ ! -f "$D/.pilcrow-partial" ] && [ "${PILCROW_FORCE:-0}" != 1 ]; then
+    die "$D 已經有其他檔案，不像是 Pilcrow 的安裝位置。請用 --dir 指定別的資料夾，或設定 PILCROW_FORCE=1 強制覆寫。"
+  fi
+}
+
+pilcrow_verify() {
+  # pilcrow_verify DIR SUMS LABEL [HINT]
+  local D="$1" sums="$2" label="$3" hint="${4:-請重新複製完整的安裝檔、存檔後再執行一次。}"
+  if ! command -v sha256sum >/dev/null 2>&1; then
+    warn "找不到 sha256sum，略過檔案驗證"
+    return 0
+  fi
+  local bad
+  bad=$(cd "$D" && printf '%s\n' "$sums" | sha256sum -c 2>/dev/null | grep -v ': OK$' || true)
+  if [ -n "$bad" ]; then
+    printf '%s\n' "$bad" | sed 's/^/    /' >&2
+    PILCROW_BAD="$bad"
+    die "$label：上面這些檔案缺少或內容不對（通常是貼上時少了一截或被改到）。$hint"
+  fi
+  ok "$label：$(printf '%s\n' "$sums" | grep -c .) 個檔案驗證通過"
+}
+
+pilcrow_usage() {
+  cat <<'USAGE'
+Pilcrow 安裝檔 — Linux 上的 Claude Code 桌面版
+
+  bash pilcrow-install.sh [選項]
+
+  --dir PATH        安裝位置（預設 ~/pilcrow，也可用環境變數 PILCROW_DIR）
+  --files-only      只寫出檔案與介面，不執行 npm install
+  --skip-electron   不下載 Electron 執行檔（改用 Chrome/Chromium 視窗）
+  --no-desktop      不建立應用程式選單項目與 ~/.local/bin/pilcrow
+  -h, --help        顯示這段說明
+
+  ELECTRON_MIRROR=URL   Electron 執行檔的下載鏡像（公司內部鏡像）
+  PILCROW_FORCE=1       允許安裝到已有其他檔案的資料夾
+USAGE
+}
+
+pilcrow_preflight() {
+  step "檢查環境"
+  [ "$(uname -s)" = Linux ] || die "Pilcrow 只支援 Linux（目前是 $(uname -s)）"
+  case "$(uname -m)" in
+    x86_64 | amd64 | aarch64 | arm64) ok "Linux $(uname -m)" ;;
+    *) warn "未測試過的 CPU 架構 $(uname -m)，繼續嘗試" ;;
+  esac
+  if [ "$FILES_ONLY" = 1 ]; then return 0; fi
+  command -v node >/dev/null 2>&1 || die "找不到 node。請先安裝 Node.js 20 以上（建議 22.12+）。"
+  command -v npm >/dev/null 2>&1 || die "找不到 npm。"
+  local nv major minor
+  nv="$(node -p 'process.versions.node' 2>/dev/null || echo 0.0.0)"
+  major="${nv%%.*}"; minor="$(printf '%s' "$nv" | cut -d. -f2)"
+  [ "$major" -ge 20 ] 2>/dev/null || die "Node.js 版本太舊：$nv（需要 20 以上）"
+  ok "Node.js $nv（$(command -v node)）"
+  if [ "$major" -lt 22 ] || { [ "$major" -eq 22 ] && [ "$minor" -lt 12 ]; }; then
+    warn "Electron 安裝程式需要 Node 22.12+；這台會改用 Chrome 視窗"
+    SKIP_ELECTRON=1
+  fi
+  ok "npm $(npm -v 2>/dev/null)（registry：$(npm config get registry 2>/dev/null)）"
+  if command -v git >/dev/null 2>&1; then ok "$(git --version)"; else warn "找不到 git：Changes 面板、worktree 與 commit 會無法使用"; fi
+  if command -v python3 >/dev/null 2>&1; then ok "python3（內建終端機用）"; else warn "找不到 python3：終端機面板會退回較陽春的模式"; fi
+  if command -v claude >/dev/null 2>&1; then ok "系統上也有 Claude Code：$(command -v claude)"; fi
+}
+
+pilcrow_prune() {
+  local D="$1"
+  local old="$D/.pilcrow-manifest"
+  [ -f "$old" ] || return 0
+  local keep n=0 f
+  keep="$(pilcrow_manifest)"
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    case "$f" in /* | *..*) continue ;; esac
+    if ! printf '%s\n' "$keep" | grep -qxF -- "$f"; then
+      rm -f -- "$D/$f" && n=$((n + 1))
+    fi
+  done <"$old"
+  [ "$n" -gt 0 ] && ok "移除舊版留下的 $n 個檔案"
+  return 0
+}
+
+pilcrow_npm() {
+  local D="$1"
+  step "安裝 npm 套件（只裝執行需要的；第一次約需幾分鐘，Claude Code 執行檔約 250 MB）"
+  cd "$D"
+  # The interface ships prebuilt, so the build tools in devDependencies (Vite, rollup, esbuild, React…)
+  # are never fetched; internal registries often lack their native platform packages.
+  local args=(install --no-audit --no-fund --no-update-notifier --omit=dev --loglevel=error)
+  if ! npm "${args[@]}"; then
+    warn "依 lockfile 安裝失敗（可能是內部 registry 沒有某些版本），改用 registry 上有的相容版本重試"
+    # Retry without the lockfile and without devDependencies, so npm never even looks up the build tools.
+    # Both files are set aside and put back afterwards, so the folder stays exactly as written and
+    # re-running just the last part works.
+    mv -f package-lock.json .package-lock.json.pilcrow 2>/dev/null || true
+    cp -f package.json .package.json.pilcrow
+    node -e 'const fs=require("fs");const p=JSON.parse(fs.readFileSync("package.json","utf8"));delete p.devDependencies;fs.writeFileSync("package.json",JSON.stringify(p,null,2)+"\n")' \
+      || die "無法暫時調整 package.json"
+    local rc=0
+    npm "${args[@]}" --no-package-lock || rc=$?
+    mv -f .package.json.pilcrow package.json
+    mv -f .package-lock.json.pilcrow package-lock.json 2>/dev/null || true
+    [ "$rc" = 0 ] || die "npm install 失敗。請確認 npm 能連到 registry（npm config get registry），再重新執行安裝檔（分段安裝只要重跑最後一段）。"
+  fi
+  ok "套件安裝完成"
+  if [ -x node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/claude ] || [ -x node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64/claude ]; then
+    ok "內附 Claude Code 已就緒"
+  elif command -v claude >/dev/null 2>&1; then
+    warn "沒有裝到內附的 Claude Code，會改用系統上的 claude（$(command -v claude)）"
+  else
+    warn "沒有裝到內附的 Claude Code，系統上也找不到 claude；請安裝 Claude Code 後再啟動"
+  fi
+}
+
+pilcrow_ui() {
+  # Unpack the prebuilt interface that ships inside the installer (no bundler needed on this machine).
+  local D="$1" B="$1/web/ui-bundle"
+  step "準備介面"
+  local chunks
+  chunks="$(cd "$B" 2>/dev/null && LC_ALL=C ls ui.tgz.b64.* 2>/dev/null || true)"
+  [ -n "$chunks" ] || die "安裝檔裡沒有內附的介面（web/ui-bundle）。請重新複製完整的安裝檔。"
+  command -v base64 >/dev/null 2>&1 || die "找不到 base64 指令（coreutils）"
+  local tmp="$D/web/.ui-unpack"
+  rm -rf "$tmp"; mkdir -p "$tmp"
+  (cd "$B" && cat $chunks) | base64 -d >"$tmp/ui.tgz" 2>/dev/null || { rm -rf "$tmp"; die "介面解碼失敗，請重新複製完整的安裝檔。"; }
+  if command -v sha256sum >/dev/null 2>&1; then
+    [ "$(sha256sum <"$tmp/ui.tgz" | cut -d' ' -f1)" = "$(cut -d' ' -f1 <"$B/ui.tgz.sha256")" ] \
+      || { rm -rf "$tmp"; die "介面驗證失敗，請重新複製完整的安裝檔。"; }
+  fi
+  tar -xzf "$tmp/ui.tgz" -C "$tmp" 2>/dev/null && [ -f "$tmp/dist/index.html" ] \
+    || { rm -rf "$tmp"; die "介面解壓失敗（需要 tar 與 gzip）。"; }
+  rm -rf "$D/web/dist"
+  mv "$tmp/dist" "$D/web/dist"
+  rm -rf "$tmp"
+  ok "介面已就緒（安裝檔內附建置好的版本，這台機器不需要建置）"
+}
+
+pilcrow_icons() {
+  local D="$1"
+  if (cd "$D" && node scripts/make-icon.mjs >/dev/null 2>&1); then ok "圖示產生完成"; else warn "圖示產生失敗（不影響使用）"; fi
+}
+
+pilcrow_electron() {
+  local D="$1"
+  step "準備桌面視窗（Electron）"
+  cd "$D"
+  if [ ! -f node_modules/electron/package.json ]; then
+    warn "electron 套件沒有安裝成功，會改用 Chrome/Chromium 視窗"
+    return 0
+  fi
+  if [ -x node_modules/electron/dist/electron ] && [ -f node_modules/electron/path.txt ]; then
+    ok "Electron 已就緒"
+    return 0
+  fi
+  if [ "$SKIP_ELECTRON" = 1 ]; then
+    warn "略過 Electron 下載；之後可用 scripts/electron.sh download 補裝"
+    return 0
+  fi
+  say "  下載 Electron 執行檔${ELECTRON_MIRROR:+（鏡像：$ELECTRON_MIRROR）}，最多等 5 分鐘…"
+  local t=()
+  command -v timeout >/dev/null 2>&1 && t=(timeout 300)
+  if (cd node_modules/electron && env -u ELECTRON_SKIP_BINARY_DOWNLOAD "${t[@]}" node install.js) >"$D/.electron.log" 2>&1 && [ -x node_modules/electron/dist/electron ]; then
+    rm -f "$D/.electron.log"
+    ok "Electron 下載完成"
+  else
+    warn "Electron 下載不到（公司網路通常會擋 GitHub）。沒關係，Pilcrow 會改用 Chrome/Chromium 視窗。"
+    say  "    之後想補裝：$D/scripts/electron.sh download <內部鏡像網址>"
+    say  "    或自己帶 zip：$D/scripts/electron.sh from-zip electron-v<版本>-linux-<arch>.zip"
+    say  "    下載記錄：$D/.electron.log"
+  fi
+}
+
+pilcrow_launch_env() {
+  local D="$1" nodebin nodedir
+  nodebin="$(command -v node)"
+  nodedir="$(dirname "$nodebin")"
+  {
+    echo "# Written by the Pilcrow installer: the Node.js and PATH that were used to install Pilcrow."
+    printf 'PILCROW_NODE=%q\n' "$nodebin"
+    printf 'case ":$PATH:" in *:%q:*) ;; *) PATH=%q:"$PATH" ;; esac\n' "$nodedir" "$nodedir"
+    printf 'PATH="$PATH":%q\n' "$PATH"
+    echo 'export PATH PILCROW_NODE'
+  } >"$D/.launch-env"
+}
+
+pilcrow_desktop() {
+  local D="$1"
+  step "加到應用程式選單"
+  if ! bash "$D/scripts/install-desktop.sh" 2>&1 | sed 's/^/  /'; then
+    warn "沒能建立選單項目；仍然可以直接執行 $D/bin/pilcrow"
+  fi
+}
+
+pilcrow_gateway_hint() {
+  local s="$HOME/.claude/settings.json"
+  if [ -n "${ANTHROPIC_BASE_URL:-}" ] && ! grep -q ANTHROPIC_BASE_URL "$s" 2>/dev/null; then
+    warn "你的 ANTHROPIC_BASE_URL 設在 shell 環境變數裡；從選單啟動時 Pilcrow 會讀登入 shell 的設定。"
+    say  "    若沒有生效，可以改寫進 ~/.claude/settings.json 的 \"env\"（見 README）。"
+  fi
+}
+
+pilcrow_install_main() {
+  local D="$1"
+  FILES_ONLY=0; SKIP_ELECTRON="${PILCROW_SKIP_ELECTRON:-0}"; NO_DESKTOP=0
+  for a in "$@"; do
+    case "$a" in
+      --files-only) FILES_ONLY=1 ;;
+      --skip-electron) SKIP_ELECTRON=1 ;;
+      --no-desktop) NO_DESKTOP=1 ;;
+    esac
+  done
+  pilcrow_manifest >"$D/.pilcrow-manifest"
+  rm -f "$D/.pilcrow-partial"
+  pilcrow_ui "$D"
+  if [ "$FILES_ONLY" = 1 ]; then
+    step "完成（只寫出檔案與介面）"
+    say "  下一步：cd $D && npm install --omit=dev && node scripts/make-icon.mjs && bin/pilcrow"
+    return 0
+  fi
+  pilcrow_npm "$D"
+  pilcrow_icons "$D"
+  pilcrow_electron "$D"
+  pilcrow_launch_env "$D"
+  if [ "$NO_DESKTOP" = 1 ]; then warn "略過應用程式選單（--no-desktop）"; else pilcrow_desktop "$D"; fi
+
+  step "健康檢查"
+  "$D/bin/pilcrow" --doctor 2>&1 | sed -n '/^Runtime/,$p' | sed 's/^/  /' || true
+  pilcrow_gateway_hint
+  # An older Pilcrow still running would keep serving old code to new windows ("unknown method").
+  "$D/bin/pilcrow" --restart-outdated 2>/dev/null || true
+
+  printf '\n%s%sPilcrow %s 安裝完成%s\n' "$C_B" "$C_G" "$PILCROW_VERSION" "$C_0"
+  say "  啟動：應用程式選單 → Pilcrow，或執行  $D/bin/pilcrow"
+  say "  說明：$D/README.md"
+}
+
+pilcrow_manifest() {
+  cat <<'PILCROW_MANIFEST_EOF'
+{{MANIFEST}}
+PILCROW_MANIFEST_EOF
+}
+pilcrow_write_all() {
+  local D="$1"
+{{WRITE_ALL}}
+}
+pilcrow_sums_all() {
+  cat <<'PILCROW_SUMS_EOF'
+{{SUMS}}
+PILCROW_SUMS_EOF
+}
+# Pilcrow used to be called Reticle. Retire that install so two copies do not compete for the shortcuts.
+pilcrow_retire_reticle() {
+  local old="$HOME/reticle" lock="${XDG_STATE_HOME:-$HOME/.local/state}/reticle/instance.json"
+  [ -f "$old/.reticle-manifest" ] || [ -f "$HOME/.local/bin/reticle" ] || [ -f "${XDG_DATA_HOME:-$HOME/.local/share}/applications/reticle.desktop" ] || return 0
+  step "移除舊名稱 Reticle 的安裝（設定與對話會自動搬到 Pilcrow）"
+  if [ -f "$lock" ]; then
+    local pid; pid="$(sed -n 's/.*"pid"[^0-9]*\([0-9]*\).*/\1/p' "$lock" | head -1)"
+    [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+  fi
+  rm -f "$HOME/.local/bin/reticle" "${XDG_DATA_HOME:-$HOME/.local/share}/applications/reticle.desktop" "${XDG_DATA_HOME:-$HOME/.local/share}/applications/reticle-desktop.desktop" 2>/dev/null || true
+  rm -f "${XDG_DATA_HOME:-$HOME/.local/share}"/icons/hicolor/*/apps/reticle.png "${XDG_DATA_HOME:-$HOME/.local/share}"/icons/hicolor/scalable/apps/reticle.svg 2>/dev/null || true
+  rm -rf "${XDG_DATA_HOME:-$HOME/.local/share}/reticle/host" 2>/dev/null || true
+  if [ -f "$old/.reticle-manifest" ]; then rm -rf "$old" && ok "已移除 $old"; fi
+  return 0
+}
+
+pilcrow_main() {
+  for a in "$@"; do case "$a" in -h | --help) pilcrow_usage; exit 0 ;; esac; done
+  printf '%sPilcrow %s 安裝程式%s\n' "$C_B" "$PILCROW_VERSION" "$C_0"
+  local D; D="$(pilcrow_target_dir "$@")"
+  pilcrow_check_target "$D"
+  FILES_ONLY=0; SKIP_ELECTRON="${PILCROW_SKIP_ELECTRON:-0}"
+  for a in "$@"; do case "$a" in --files-only) FILES_ONLY=1 ;; --skip-electron) SKIP_ELECTRON=1 ;; esac; done
+  pilcrow_preflight
+  pilcrow_retire_reticle
+  step "寫出程式檔案到 $D"
+  touch "$D/.pilcrow-partial"
+  pilcrow_prune "$D"
+  wrote=0
+  pilcrow_write_all "$D"
+  ok "寫出 $wrote 個檔案"
+  pilcrow_verify "$D" "$(pilcrow_sums_all)" "原始碼"
+  pilcrow_install_main "$D" "$@"
+}
+
+# Everything above only defines functions; nothing runs unless this last line arrived intact.
+pilcrow_main "$@"

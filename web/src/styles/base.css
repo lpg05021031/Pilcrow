@@ -1,0 +1,507 @@
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--canvas);
+  color: var(--text);
+  font-family: var(--font-ui);
+  font-size: var(--fs-ui);
+  line-height: 1.45;
+  letter-spacing: -0.003em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-optical-sizing: auto;
+  font-feature-settings: 'ss03'; /* rounder quotes and commas */
+  /* Mixed Chinese and Latin text ("改用 Murphy 模型", "共 3 個檔案"): a hair of space between scripts,
+     and full-width punctuation trimmed at line starts, the way a typesetter would set it. */
+  text-autospace: normal;
+  text-spacing-trim: normal;
+  overflow: hidden;
+}
+
+/* Smooth colour change when switching theme (class set briefly by applyTheme). */
+html.theme-switch * {
+  transition: background-color var(--t-slow) var(--ease-io), border-color var(--t-slow) var(--ease-io), color var(--t-slow) var(--ease-io), fill var(--t-slow), stroke var(--t-slow) !important;
+}
+
+/* Theme switches reveal through a clip-path circle animated from script; no default cross-fade. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+::view-transition-old(root) {
+  z-index: 1;
+}
+::view-transition-new(root) {
+  z-index: 2;
+}
+
+::selection {
+  background: var(--selection);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+}
+
+button {
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+a {
+  color: var(--info);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+code,
+pre,
+kbd,
+.mono {
+  font-family: var(--font-mono);
+  font-feature-settings: 'calt' 0, 'liga' 0;
+  letter-spacing: 0;
+}
+
+svg {
+  flex: none;
+}
+
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 2px;
+  border-radius: var(--r-1);
+}
+
+/* Scrollbars: a slim overlay-style thumb with no track, no arrows, that darkens on hover.
+   Only the -webkit- rules are used: once `scrollbar-color` is set, Chromium ignores them and falls
+   back to the platform scrollbar (arrows and all on Windows). */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--fill-3);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 10px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: var(--hair-3);
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+/* Lists and the conversation show their thumb only while the pointer is over them. */
+.side-list::-webkit-scrollbar-thumb,
+.transcript::-webkit-scrollbar-thumb,
+.panel-body::-webkit-scrollbar-thumb {
+  background-color: transparent;
+}
+.side-list:hover::-webkit-scrollbar-thumb,
+.transcript:hover::-webkit-scrollbar-thumb,
+.panel-body:hover::-webkit-scrollbar-thumb {
+  background-color: var(--fill-3);
+}
+.side-list:hover::-webkit-scrollbar-thumb:hover,
+.transcript:hover::-webkit-scrollbar-thumb:hover,
+.panel-body:hover::-webkit-scrollbar-thumb:hover {
+  background-color: var(--hair-3);
+}
+
+kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  font-family: var(--font-ui);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-3);
+  border-radius: var(--r-1);
+  background: var(--fill-2);
+  box-shadow: inset 0 -1px 0 var(--hair);
+}
+
+.muted {
+  color: var(--text-2);
+}
+.faint {
+  color: var(--text-3);
+}
+.grow {
+  flex: 1;
+  min-width: 0;
+}
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.ellipsis {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+.rot {
+  transform: rotate(90deg);
+}
+
+/* ---- buttons
+   Default buttons are quiet fills; one primary (amber) per surface. Every press gives a 2% squeeze. */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: var(--r-2);
+  background: var(--fill-2);
+  color: var(--text);
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast), transform var(--t-fast) var(--ease), opacity var(--t-fast);
+}
+.btn:hover {
+  background: var(--fill-3);
+}
+.btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.btn.primary:disabled {
+  opacity: 1;
+  background: var(--fill-2);
+  color: var(--text-4);
+  box-shadow: none;
+}
+.btn svg {
+  opacity: 0.85;
+}
+.btn.primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 1px 2px rgba(0, 0, 0, 0.18);
+}
+.btn.primary:hover {
+  background: var(--accent-2);
+}
+.btn.primary svg {
+  opacity: 1;
+}
+.btn.ghost {
+  background: transparent;
+  color: var(--text-2);
+}
+.btn.ghost:hover {
+  background: var(--fill-2);
+  color: var(--text);
+}
+.btn.outline {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--hair-2);
+}
+.btn.outline:hover {
+  background: var(--fill-1);
+}
+.btn.danger {
+  color: var(--err);
+}
+.btn.danger:hover {
+  background: var(--err-wash);
+}
+.btn.danger.solid {
+  background: var(--err);
+  color: #fff;
+}
+.btn.danger.solid:hover {
+  filter: brightness(1.06);
+}
+.btn.sm {
+  height: 26px;
+  padding: 0 10px;
+  font-size: var(--fs-small);
+  border-radius: var(--r-2);
+}
+.btn.lg {
+  height: 36px;
+  padding: 0 16px;
+  font-size: 13.5px;
+  border-radius: var(--r-3);
+}
+
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-2);
+  color: var(--text-3);
+  transition: background var(--t-fast), color var(--t-fast), transform var(--t-fast) var(--ease);
+  flex: none;
+}
+.icon-btn:hover {
+  background: var(--fill-2);
+  color: var(--text);
+}
+.icon-btn:active {
+  transform: scale(0.94);
+}
+.icon-btn.active,
+.icon-btn[aria-expanded='true'] {
+  background: var(--fill-2);
+  color: var(--text);
+}
+.icon-btn.sm {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-2);
+}
+
+.link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-2);
+  font-size: inherit;
+  transition: color var(--t-fast);
+}
+.link:hover {
+  color: var(--text);
+}
+
+/* ---- inputs: filled, no visible border until hover/focus */
+.input,
+.select,
+.textarea {
+  width: 100%;
+  height: 34px;
+  padding: 0 11px;
+  border-radius: var(--r-2);
+  border: none;
+  background: var(--fill-1);
+  box-shadow: inset 0 0 0 1px var(--hair);
+  color: var(--text);
+  outline: none;
+  transition: box-shadow var(--t-fast), background var(--t-fast);
+}
+.input::placeholder,
+.textarea::placeholder {
+  color: var(--text-3);
+}
+.input:hover,
+.textarea:hover {
+  box-shadow: inset 0 0 0 1px var(--hair-2);
+}
+.textarea {
+  height: auto;
+  padding: 9px 11px;
+  resize: none;
+  line-height: 1.55;
+}
+.input:focus,
+.select:focus,
+.textarea:focus {
+  background: var(--canvas);
+  box-shadow: inset 0 0 0 1px var(--hair-3), 0 0 0 3px var(--fill-1);
+}
+.input.mono {
+  font-size: 12.5px;
+}
+
+.field {
+  display: grid;
+  gap: 7px;
+}
+.field > label,
+.field-label {
+  font-size: var(--fs-small);
+  font-weight: 550;
+  color: var(--text-2);
+}
+.hint {
+  font-size: var(--fs-small);
+  color: var(--text-3);
+  line-height: 1.5;
+}
+
+/* iOS-style switch */
+.switch {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--fill-3);
+  transition: background var(--t-med) var(--ease);
+  flex: none;
+}
+.switch::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: transform var(--t-med) var(--spring);
+}
+/* On = lit amber track; the knob stays white in both states so "off" can never read as "on". */
+.switch.on {
+  background: var(--accent);
+}
+.switch.on::after {
+  transform: translateX(14px);
+}
+[data-theme='dark'] .switch:not(.on) {
+  background: #3a3a3e;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 19px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 550;
+  color: var(--text-2);
+  background: var(--fill-2);
+  white-space: nowrap;
+}
+.badge.accent {
+  color: var(--accent-text);
+  background: var(--accent-wash);
+}
+.badge.ok {
+  color: var(--ok);
+  background: var(--ok-wash);
+}
+.badge.err {
+  color: var(--err);
+  background: var(--err-wash);
+}
+.badge.plan {
+  color: var(--plan);
+  background: var(--plan-wash);
+}
+.badge.info {
+  color: var(--info);
+  background: var(--info-wash);
+}
+
+.num-add,
+.num-del {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.num-add {
+  color: var(--ok);
+}
+.num-del {
+  color: var(--err);
+}
+.num-add.zero,
+.num-del.zero {
+  color: var(--text-4);
+}
+
+.spin {
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Appear: used by things that mount in response to the user (rows, cards, panels). */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+
+.empty {
+  display: grid;
+  place-items: center;
+  gap: 8px;
+  padding: 44px 20px;
+  text-align: center;
+  color: var(--text-3);
+  line-height: 1.55;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
