@@ -74,6 +74,7 @@ Pilcrow 安裝檔 — Linux 上的 Claude Code 桌面版
   --files-only      只寫出檔案與介面，不執行 npm install
   --skip-electron   不下載 Electron 執行檔（改用 Chrome/Chromium 視窗）
   --no-desktop      不建立應用程式選單項目與 ~/.local/bin/pilcrow
+  --skip-qt         不用 pip 安裝原生視窗（PySide6）的套件；改用 Electron / Chrome 視窗
   -h, --help        顯示這段說明
 
   ELECTRON_MIRROR=URL   Electron 執行檔的下載鏡像
@@ -178,6 +179,46 @@ pilcrow_ui() {
   ok "介面已就緒（安裝檔內附建置好的版本，這台機器不需要建置）"
 }
 
+# pilcrow_unpack DIR BUNDLE_REL STEM DEST_PARENT_REL LABEL
+# A folder of binary files (the fonts) ships as a base64 tgz split into chunks, like the interface.
+pilcrow_unpack() {
+  local D="$1" B="$1/$2" stem="$3" dest="$1/$4" label="$5"
+  local chunks
+  chunks="$(cd "$B" 2>/dev/null && LC_ALL=C ls "$stem".tgz.b64.* 2>/dev/null || true)"
+  [ -n "$chunks" ] || { warn "安裝檔裡沒有$label（$2）"; return 0; }
+  local tmp="$D/.unpack-$stem"
+  rm -rf "$tmp"; mkdir -p "$tmp"
+  (cd "$B" && cat $chunks) | base64 -d >"$tmp/$stem.tgz" 2>/dev/null || { rm -rf "$tmp"; warn "$label解碼失敗"; return 0; }
+  if command -v sha256sum >/dev/null 2>&1; then
+    [ "$(sha256sum <"$tmp/$stem.tgz" | cut -d' ' -f1)" = "$(cut -d' ' -f1 <"$B/$stem.tgz.sha256")" ] || { rm -rf "$tmp"; warn "$label驗證失敗"; return 0; }
+  fi
+  tar -xzf "$tmp/$stem.tgz" -C "$tmp" 2>/dev/null || { rm -rf "$tmp"; warn "$label解壓失敗"; return 0; }
+  mkdir -p "$dest"
+  rm -rf "$dest/$stem"
+  mv "$tmp/$stem" "$dest/$stem"
+  rm -rf "$tmp"
+  ok "$label已就緒"
+}
+
+# The native window (Qt) needs PySide6 and a few pure-Python packages from your PyPI mirror. Without
+# them Pilcrow still works: bin/pilcrow falls back to Electron, then a Chrome window.
+pilcrow_qt_deps() {
+  local D="$1" py=""
+  step "原生視窗（Qt）的 Python 套件"
+  for c in "${PILCROW_PYTHON:-}" /usr/bin/python3 python3; do
+    [ -n "$c" ] && command -v "$c" >/dev/null 2>&1 && { py="$(command -v "$c")"; break; }
+  done
+  if [ -z "$py" ]; then warn "找不到 python3；略過。之後可以執行：pip3 install --user -r $D/qt/requirements.txt"; return 0; fi
+  if "$py" -c 'import PySide6, pygments, markdown_it, pyte' >/dev/null 2>&1; then ok "PySide6 等套件已經裝好（$py）"; return 0; fi
+  say "  pip install --user -r qt/requirements.txt（從你設定的 PyPI 來源，約 150 MB）…"
+  if "$py" -m pip install --user --quiet --disable-pip-version-check -r "$D/qt/requirements.txt" >"$D/.qt-pip.log" 2>&1; then
+    rm -f "$D/.qt-pip.log"
+    ok "原生視窗的套件安裝完成"
+  else
+    warn "pip 安裝失敗（記錄：$D/.qt-pip.log）。Pilcrow 會改用 Electron / Chrome 視窗；之後可重試：$py -m pip install --user -r $D/qt/requirements.txt"
+  fi
+}
+
 pilcrow_icons() {
   local D="$1"
   if (cd "$D" && node scripts/make-icon.mjs >/dev/null 2>&1); then ok "圖示產生完成"; else warn "圖示產生失敗（不影響使用）"; fi
@@ -244,23 +285,26 @@ pilcrow_gateway_hint() {
 
 pilcrow_install_main() {
   local D="$1"
-  FILES_ONLY=0; SKIP_ELECTRON="${PILCROW_SKIP_ELECTRON:-0}"; NO_DESKTOP=0
+  FILES_ONLY=0; SKIP_ELECTRON="${PILCROW_SKIP_ELECTRON:-0}"; NO_DESKTOP=0; SKIP_QT="${PILCROW_SKIP_QT:-0}"
   for a in "$@"; do
     case "$a" in
       --files-only) FILES_ONLY=1 ;;
       --skip-electron) SKIP_ELECTRON=1 ;;
       --no-desktop) NO_DESKTOP=1 ;;
+      --skip-qt) SKIP_QT=1 ;;
     esac
   done
   pilcrow_manifest >"$D/.pilcrow-manifest"
   rm -f "$D/.pilcrow-partial"
   pilcrow_ui "$D"
+  pilcrow_unpack "$D" qt/pilcrow_qt/assets/fonts-bundle fonts qt/pilcrow_qt/assets "原生視窗的字型"
   if [ "$FILES_ONLY" = 1 ]; then
     step "完成（只寫出檔案與介面）"
     say "  下一步：cd $D && npm install --omit=dev && node scripts/make-icon.mjs && bin/pilcrow"
     return 0
   fi
   pilcrow_npm "$D"
+  if [ "$SKIP_QT" = 1 ]; then warn "略過原生視窗的套件（--skip-qt）"; else pilcrow_qt_deps "$D"; fi
   pilcrow_icons "$D"
   pilcrow_electron "$D"
   pilcrow_launch_env "$D"

@@ -3,6 +3,15 @@
 最新版在最上面。`npm run release -- X.Y.Z` 會檢查這裡有沒有該版的說明。
 
 
+## 未發佈
+
+- **原生 Qt 視窗**（`qt/pilcrow_qt`，PySide6 / Qt Widgets）：給沒有 GPU 的 Linux 機器的桌面視窗，純 CPU 繪圖，
+  不經過瀏覽器引擎。接同一個伺服器與 RPC；側欄、對話、工具卡、權限卡、Composer、Control room、Inbox、設定、
+  各面板（Changes、Files 與編輯器、Terminal、Tasks、History、Info）都是原生實作，Preview 改用系統瀏覽器開啟。
+  `pilcrow` 有 PySide6 就開 Qt 視窗（`--qt` / `--electron` / `--chrome` 可指定）；`pilcrow-app.sh` 同樣優先 Qt，
+  `--webkit` 回到 WebKitGTK。安裝檔多一步 `pip install --user -r qt/requirements.txt`（`--skip-qt` 略過），
+  字型以 base64 bundle 內附。測試：`python -m pytest qt/tests`（純邏輯移植 + 離線視窗測試，接 mock server）。
+
 - **2.9.1**：測試套件重建：ESLint 設定（typescript-eslint recommended + react-hooks，禁止 any）、vitest 單元測試
   （`test/unit`，68 個：transcript 模型、分段、工具摘要、格式化、partial JSON、workflow、ANSI、fuzzy）、
   假伺服器 `test/mock/mock-server.mjs`（同一套 RPC、腳本化的 Claude）、Playwright 瀏覽器測試

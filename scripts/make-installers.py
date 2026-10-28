@@ -50,7 +50,13 @@ INCLUDE = [
     'web/index.html',
     'web/public/',
     'web/src/',
+    'qt/',
 ]
+# Folders never shipped (tests, caches) and binary folders that travel as a base64 tgz in the Linux
+# installer (heredocs carry text only) and as plain files in the Windows zip.
+EXCLUDE_DIRS = {'qt/tests', 'qt/pilcrow_qt/__pycache__'}
+EXCLUDE_NAMES = {'__pycache__', '.pytest_cache', '.ruff_cache'}
+BUNDLE_DIRS = {'qt/pilcrow_qt/assets/fonts': 'qt/pilcrow_qt/assets/fonts-bundle'}
 HOST_SCRIPT = 'scripts/pilcrow-app.ps1'
 DIST = 'web/dist'
 B64_COLS = 76
@@ -80,7 +86,8 @@ def collect(spec):
             if not os.path.isdir(full):
                 sys.exit(f'missing directory: {item}')
             for dirpath, dirnames, filenames in os.walk(full):
-                dirnames[:] = sorted(d for d in dirnames if not d.startswith('.'))
+                reld = os.path.relpath(dirpath, ROOT).replace(os.sep, '/')
+                dirnames[:] = sorted(d for d in dirnames if not d.startswith('.') and d not in EXCLUDE_NAMES and f'{reld}/{d}' not in EXCLUDE_DIRS and f'{reld}/{d}' not in BUNDLE_DIRS)
                 for fn in sorted(filenames):
                     if fn.startswith('.'):
                         continue
@@ -97,6 +104,12 @@ def collect_dist():
     full = os.path.join(ROOT, DIST)
     if not os.path.isfile(os.path.join(full, 'index.html')):
         sys.exit(f'{DIST}/index.html not found: run `npm run build` first')
+    return collect_tree(DIST)
+
+
+def collect_tree(rel_dir):
+    """Every file below a folder, keyed by its path relative to that folder."""
+    full = os.path.join(ROOT, rel_dir)
     out = {}
     for dirpath, dirnames, filenames in os.walk(full):
         dirnames.sort()
@@ -107,6 +120,11 @@ def collect_dist():
     return out
 
 
+def collect_bundles():
+    """Binary folders (fonts) as {folder: {relative path: bytes}}; missing folders are skipped."""
+    return {d: collect_tree(d) for d in BUNDLE_DIRS if os.path.isdir(os.path.join(ROOT, d))}
+
+
 def b64_lines(data):
     s = base64.b64encode(data).decode('ascii')
     return [s[i:i + B64_COLS] for i in range(0, len(s), B64_COLS)]
@@ -114,37 +132,56 @@ def b64_lines(data):
 
 # ---------------------------------------------------------------- Linux
 
-def ui_bundle(dist, gzip_mtime):
-    """web/dist -> deterministic dist/ tgz -> {web/ui-bundle/...: bytes}."""
+def make_tgz(tree, prefix, gzip_mtime):
+    """A deterministic tgz of {relative path: bytes} under ``prefix/`` (fixed metadata, sorted entries)."""
     buf = io.BytesIO()
     import gzip
     gz = gzip.GzipFile(filename='', mode='wb', compresslevel=9, fileobj=buf, mtime=gzip_mtime)
     with tarfile.open(fileobj=gz, mode='w') as tar:
-        names = sorted({'dist'} | {'dist/' + os.path.dirname(p) for p in dist if '/' in p} | {'dist/' + p for p in dist})
+        names = sorted({prefix} | {prefix + '/' + os.path.dirname(p) for p in tree if '/' in p} | {prefix + '/' + p for p in tree})
         for name in names:
-            rel = name[len('dist/'):] if name != 'dist' else None
+            rel = name[len(prefix) + 1:] if name != prefix else None
             info = tarfile.TarInfo(name)
             info.mtime = 0
             info.uid = info.gid = 0
             info.uname = info.gname = ''
-            if rel is None or rel not in dist:
+            if rel is None or rel not in tree:
                 info.type = tarfile.DIRTYPE
                 info.mode = 0o755
                 tar.addfile(info)
             else:
-                data = dist[rel]
+                data = tree[rel]
                 info.type = tarfile.REGTYPE
                 info.mode = 0o644
                 info.size = len(data)
                 tar.addfile(info, io.BytesIO(data))
     gz.close()
-    tgz = buf.getvalue()
+    return buf.getvalue()
+
+
+def chunked(tgz, out_dir, stem):
+    """A tgz as 76-column base64 split into numbered chunk files, plus its sha256 file."""
     lines = b64_lines(tgz)
     files = {}
     for n, i in enumerate(range(0, len(lines), CHUNK_LINES), start=1):
-        files[f'web/ui-bundle/ui.tgz.b64.{n:02d}'] = ('\n'.join(lines[i:i + CHUNK_LINES]) + '\n').encode('ascii')
-    files['web/ui-bundle/ui.tgz.sha256'] = (sha256(tgz) + '\n').encode('ascii')
-    return files, tgz
+        files[f'{out_dir}/{stem}.tgz.b64.{n:02d}'] = ('\n'.join(lines[i:i + CHUNK_LINES]) + '\n').encode('ascii')
+    files[f'{out_dir}/{stem}.tgz.sha256'] = (sha256(tgz) + '\n').encode('ascii')
+    return files
+
+
+def ui_bundle(dist, gzip_mtime):
+    """web/dist -> deterministic dist/ tgz -> {web/ui-bundle/...: bytes}."""
+    tgz = make_tgz(dist, 'dist', gzip_mtime)
+    return chunked(tgz, 'web/ui-bundle', 'ui'), tgz
+
+
+def binary_bundles(bundles, gzip_mtime):
+    """Each binary folder -> chunks under its bundle folder, unpacked by the installer's pilcrow_unpack."""
+    files = {}
+    for folder, tree in bundles.items():
+        out_dir = BUNDLE_DIRS[folder]
+        files.update(chunked(make_tgz(tree, os.path.basename(folder), gzip_mtime), out_dir, os.path.basename(folder)))
+    return files
 
 
 def heredoc(path, data):
@@ -159,11 +196,12 @@ def heredoc(path, data):
             f'  cat > "$D"/\'{path}\' <<\'{tag}\'\n').encode('utf-8') + data + f'{tag}\n  wrote=$((wrote + 1))\n'.encode('utf-8')
 
 
-def linux_installer(version, files, gzip_mtime):
+def linux_installer(version, files, gzip_mtime, bundles):
     dist = collect_dist()
     bundle, tgz = ui_bundle(dist, gzip_mtime)
     all_files = dict(files)
     all_files.update(bundle)
+    all_files.update(binary_bundles(bundles, gzip_mtime))
     order = sorted(all_files, key=lower_key)
     dirs = sorted({os.path.dirname(p) for p in order if '/' in p})
     dirs = sorted({d for p in dirs for d in parents(p)})
@@ -187,11 +225,13 @@ def parents(d):
 
 # ---------------------------------------------------------------- Windows
 
-def windows_installer(version, files, dist):
+def windows_installer(version, files, dist, bundles):
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w', compression=zipfile.ZIP_DEFLATED) as z:
         entries = [(p, files[p]) for p in sorted(files, key=lower_key)]
         entries += [('web/dist/' + p, dist[p]) for p in sorted(dist)]
+        for folder, tree in sorted(bundles.items()):
+            entries += [(folder + '/' + p, tree[p]) for p in sorted(tree)]
         for name, data in entries:
             info = zipfile.ZipInfo(name, date_time=ZIP_DATE)
             info.compress_type = zipfile.ZIP_DEFLATED
@@ -236,8 +276,9 @@ def main():
         print(f'warning: --version {version} differs from package.json {pkg_version}', file=sys.stderr)
 
     files = collect(INCLUDE)
-    sh, tgz, dist = linux_installer(version, files, args.gzip_mtime)
-    ps1, zb = windows_installer(version, files, dist)
+    bundles = collect_bundles()
+    sh, tgz, dist = linux_installer(version, files, args.gzip_mtime, bundles)
+    ps1, zb = windows_installer(version, files, dist, bundles)
     app_sh = files['scripts/pilcrow-app.sh']
 
     os.makedirs(args.out, exist_ok=True)
@@ -253,10 +294,10 @@ def main():
         print(f'{name}: {len(data):,} bytes')
     print(f'  {len(files)} source files, {len(dist)} interface files; UI bundle {len(tgz):,} bytes, zip {len(zb):,} bytes')
     if args.verify:
-        verify(os.path.join(args.out, 'pilcrow-install.sh'), os.path.join(args.out, 'pilcrow-windows.ps1'), files, dist, read(HOST_SCRIPT))
+        verify(os.path.join(args.out, 'pilcrow-install.sh'), os.path.join(args.out, 'pilcrow-windows.ps1'), files, dist, read(HOST_SCRIPT), bundles)
 
 
-def verify(sh_path, ps1_path, files, dist, host):
+def verify(sh_path, ps1_path, files, dist, host, bundles):
     """Parse the installers back and check every file against the tree."""
     import re
     with open(sh_path, 'rb') as f:
@@ -284,9 +325,23 @@ def verify(sh_path, ps1_path, files, dist, host):
         for mem in t.getmembers():
             if mem.isfile():
                 got_dist[mem.name[len('dist/'):]] = t.extractfile(mem).read()
-    src = {p: b for p, b in got.items() if not p.startswith('web/ui-bundle/')}
+    bundle_dirs = set(BUNDLE_DIRS.values())
+    src = {p: b for p, b in got.items() if not p.startswith('web/ui-bundle/') and not any(p.startswith(d + '/') for d in bundle_dirs)}
     problems = [p for p in set(src) | set(files) if src.get(p) != files.get(p)]
     problems += ['web/dist/' + p for p in set(got_dist) | set(dist) if got_dist.get(p) != dist.get(p)]
+    for folder, tree in bundles.items():
+        out_dir = BUNDLE_DIRS[folder]
+        stem = os.path.basename(folder)
+        parts = sorted(p for p in got if p.startswith(f'{out_dir}/{stem}.tgz.b64.'))
+        btgz = base64.b64decode(b''.join(got[c] for c in parts))
+        if sha256(btgz) != got[f'{out_dir}/{stem}.tgz.sha256'].decode().split()[0]:
+            sys.exit(f'verify: {folder} bundle checksum mismatch')
+        got_tree = {}
+        with tarfile.open(fileobj=io.BytesIO(btgz), mode='r:gz') as t:
+            for mem in t.getmembers():
+                if mem.isfile():
+                    got_tree[mem.name[len(stem) + 1:]] = t.extractfile(mem).read()
+        problems += [folder + '/' + p for p in set(got_tree) | set(tree) if got_tree.get(p) != tree.get(p)]
     if problems:
         sys.exit('verify: Linux installer differs from the tree: ' + ', '.join(sorted(problems)[:10]))
     with open(ps1_path, 'rb') as f:
@@ -298,6 +353,8 @@ def verify(sh_path, ps1_path, files, dist, host):
     zf = {i.filename: z.read(i) for i in z.infolist() if not i.filename.endswith('/')}
     want = dict(files)
     want.update({'web/dist/' + p: b for p, b in dist.items()})
+    for folder, tree in bundles.items():
+        want.update({folder + '/' + p: b for p, b in tree.items()})
     problems = [p for p in set(zf) | set(want) if zf.get(p) != want.get(p)]
     if problems:
         sys.exit('verify: Windows installer differs from the tree: ' + ', '.join(sorted(problems)[:10]))

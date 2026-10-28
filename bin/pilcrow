@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Pilcrow launcher.
-# Opens Pilcrow in its own desktop window (Electron). If Electron is missing or cannot start on this
-# machine, it falls back to a Chrome/Chromium app window, then to the default browser.
+# Opens Pilcrow in its own desktop window: the native Qt window when PySide6 is installed (the one to
+# use on machines without a GPU), else Electron, else a Chrome/Chromium app window, then the browser.
 #
 #   pilcrow                 open the desktop app
+#   pilcrow --qt            use the native Qt window (python3 + PySide6)
+#   pilcrow --electron      use the Electron window
 #   pilcrow --chrome        use a Chrome/Chromium app window
 #   pilcrow --browser       open in the default browser
 #   pilcrow --server        run headless and print the address (e.g. over SSH with port forwarding)
@@ -54,6 +56,7 @@ PASS=()
 for arg in "$@"; do
   case "$arg" in
     --shell=*) MODE="${arg#--shell=}" ;;
+    --qt) MODE=qt ;;
     --electron) MODE=electron ;;
     --chrome) MODE=chrome ;;
     --browser) MODE=browser ;;
@@ -87,6 +90,31 @@ if [ "$MODE" != none ] && [ -z "${DISPLAY:-}" ] && [ -z "${WAYLAND_DISPLAY:-}" ]
 fi
 
 ELECTRON="$APP_DIR/node_modules/electron/dist/electron"
+
+# The native Qt window: python3 with PySide6 (the system python has the distro's Qt platform
+# plugins and input-method modules; a pyenv/conda python first on PATH usually does not).
+find_qt_python() {
+  local c
+  for c in "${PILCROW_PYTHON:-}" /usr/bin/python3 python3; do
+    [ -n "$c" ] || continue
+    command -v "$c" >/dev/null 2>&1 || continue
+    if "$c" -c 'import PySide6' >/dev/null 2>&1; then command -v "$c"; return 0; fi
+  done
+  return 1
+}
+
+run_qt() {
+  [ -d "$APP_DIR/qt/pilcrow_qt" ] || return 1
+  local py
+  py="$(find_qt_python)" || return 1
+  note "starting the Qt window with $py"
+  export PYTHONPATH="$APP_DIR/qt${PYTHONPATH:+:$PYTHONPATH}" PILCROW_NODE="$NODE"
+  if [ -t 1 ]; then
+    exec "$py" -m pilcrow_qt --dir "$APP_DIR" --node "$NODE" ${PASS[@]+"${PASS[@]}"}
+  fi
+  start_detached "$py" -m pilcrow_qt --dir "$APP_DIR" --node "$NODE" ${PASS[@]+"${PASS[@]}"}
+  return 0
+}
 
 start_detached() {
   # setsid keeps the app alive when the terminal that started it closes.
@@ -151,7 +179,13 @@ run_chrome() {
 }
 
 case "$MODE" in
+  qt)
+    if run_qt; then exit 0; fi
+    echo "pilcrow: the Qt window needs python3 with PySide6 (pip install --user -r $APP_DIR/qt/requirements.txt)" >&2
+    exit 1
+    ;;
   auto | electron)
+    if [ "$MODE" = auto ] && run_qt; then exit 0; fi
     if run_electron; then exit 0; fi
     if [ -x "$ELECTRON" ]; then
       say "Electron could not start (details in $LOG); falling back to a browser window"
@@ -171,7 +205,7 @@ case "$MODE" in
     exec "$NODE" "$APP_DIR/server/main.js" --shell=none ${PASS[@]+"${PASS[@]}"}
     ;;
   *)
-    echo "pilcrow: unknown shell '$MODE' (use electron, chrome, browser or none)" >&2
+    echo "pilcrow: unknown shell '$MODE' (use qt, electron, chrome, browser or none)" >&2
     exit 2
     ;;
 esac

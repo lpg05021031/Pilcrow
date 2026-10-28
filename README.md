@@ -20,7 +20,8 @@ Changes / Files / Terminal / Preview / Tasks / Session 面板。
 | `server/` | Node 伺服器：Claude Agent SDK 驅動、session / 歷史 / git / 檔案 / 終端機 / 排程 / 記憶 |
 | `web/src/` | React 介面（Vite + TypeScript）；`web/dist/` 是建置結果，不進 git |
 | `electron/`、`bin/pilcrow` | Linux 的 Electron 視窗與啟動器 |
-| `scripts/pilcrow-app.sh`、`scripts/pilcrow-app.ps1` | Linux（WebKitGTK）與 Windows（WebView2）的原生桌面外殼。Windows 外殼的 C# 原始碼就寫在 ps1 裡，安裝時用系統內建的 csc 編成 PilcrowHost.exe |
+| `qt/pilcrow_qt/` | **原生桌面視窗（PySide6 / Qt Widgets）**：純 CPU 繪圖，沒有 GPU 的機器也快；接同一個伺服器。見 [qt/ARCHITECTURE.md](qt/ARCHITECTURE.md) |
+| `scripts/pilcrow-app.sh`、`scripts/pilcrow-app.ps1` | Linux 與 Windows 的桌面外殼。Linux 有 PySide6 時開 Qt 視窗，否則用 WebKitGTK；Windows 用 WebView2，C# 原始碼就寫在 ps1 裡 |
 | `scripts/make-installers.py`、`scripts/installer/*.tmpl` | 把工作樹打包成三個安裝檔；模板是安裝檔的固定部分 |
 | `scripts/release.mjs` | 改版流程：版本號、檢查、build、打包、驗證、commit、tag |
 | `pilcrow-install.sh`、`pilcrow-windows.ps1`、`pilcrow-app.sh` | 發佈產物（見下方「修改介面」與「發佈」） |
@@ -36,7 +37,7 @@ Changes / Files / Terminal / Preview / Tasks / Session 面板。
 | Node.js 20 以上 | 建議 22.12 以上（Electron 安裝程式需要） |
 | npm 能連到 registry | 自架的 npm mirror 也可以；安裝檔本身不需要連外 |
 | git | Changes 面板、worktree、commit 會用到 |
-| python3 | 內建終端機（Terminal 面板）用；沒有的話退回 `script` 指令 |
+| python3 | 原生 Qt 視窗（加 PySide6）與內建終端機用；沒有的話退回 Electron / Chrome 視窗與 `script` 指令 |
 | Chrome / Chromium（選用） | 當 Electron 下載不到時，改用它開成獨立視窗 |
 
 ---
@@ -158,7 +159,21 @@ Pilcrow 的對話也可以在終端機用 `claude --resume` 接著做。
 
 ---
 
-## 桌面視窗：Electron / Chrome / 瀏覽器
+## 桌面視窗：Qt / Electron / Chrome / 瀏覽器
+
+**原生 Qt 視窗（建議）**：`pilcrow` 會先找系統的 `python3` 有沒有 PySide6，有就開 `qt/pilcrow_qt` 這個原生視窗。
+它用 Qt Widgets 在 CPU 上直接繪圖，不經過瀏覽器引擎與 GPU 合成，所以在沒有 GPU 的機器、VM 或遠端桌面上
+一樣順。安裝檔會用 `pip install --user -r qt/requirements.txt` 從你設定的 PyPI 來源裝 PySide6 等套件
+（約 150 MB；`--skip-qt` 可略過）。手動安裝或重試：
+
+```bash
+pip3 install --user -r ~/pilcrow/qt/requirements.txt
+pilcrow --qt            # 強制用 Qt 視窗；pilcrow --electron / --chrome 則是其他視窗
+```
+
+Qt 視窗的 Preview 面板沒有內嵌瀏覽器，網頁預覽會改用系統瀏覽器開啟；其他面板（Changes、Files 與編輯器、
+Terminal、Tasks、History、Info）都是原生實作。介面的文字、快捷鍵與配色和網頁版相同。
+
 
 Pilcrow 的視窗優先使用 Electron。Electron 的 npm 套件很小，但執行檔（約 100 MB）是另外從
 GitHub 下載的；下載不到的話，安裝檔會提示，並自動改用 Chrome/Chromium 的 app 視窗
@@ -305,6 +320,20 @@ npm run build               # 輸出到 web/dist
 npm run dev                 # 邊改邊建（vite build --watch）
 npm run server              # 只開伺服器 http://127.0.0.1:47117/
 ```
+
+### 原生 Qt 視窗（開發者）
+
+```bash
+pip install -r qt/requirements.txt pytest pytest-qt
+node scripts/extract-icons.mjs        # Lucide 圖示 → qt/pilcrow_qt/assets/icons（已產生並進版）
+python scripts/make-qt-fonts.py       # Inter / JetBrains Mono → qt/pilcrow_qt/assets/fonts（已產生並進版）
+node test/mock/mock-server.mjs 5300   # 假伺服器
+python -m pilcrow_qt --url http://127.0.0.1:5300/     # PYTHONPATH=qt
+python -m pytest qt/tests -q          # 純邏輯移植的單元測試 + 離線（offscreen）的視窗測試，接 mock server
+python qt/tests/snap.py --scenario session            # 離線截圖到 test/out/qt-*.png
+```
+
+架構與規範在 [qt/ARCHITECTURE.md](qt/ARCHITECTURE.md)；`web/src` 的 React 元件就是每個 Qt 元件的規格。
 
 ### 檢查與測試
 
