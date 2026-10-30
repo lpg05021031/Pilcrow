@@ -224,13 +224,13 @@ def _toggle_rows(ctx: Ctx, cls_name: str, n: int, label: str) -> Json:
         for action, filmed in (("open", False), ("close", False), ("open", True), ("close", True)):
             ctx.counters.reset()
             sets: List[int] = []
-            conn = bar.valueChanged.connect(lambda v: sets.append(v))
+            conn = bar.valueChanged.connect(lambda v, sets=sets: sets.append(v))
             film = Film(vp, ctx.canvas_color()) if filmed else None
             heights: List[int] = []
             below_y: List[int] = []
             stamps: List[float] = []
 
-            def frame() -> None:
+            def frame(row=row, below=below, heights=heights, below_y=below_y, stamps=stamps) -> None:
                 try:
                     heights.append(row.height())
                     stamps.append(time.perf_counter())

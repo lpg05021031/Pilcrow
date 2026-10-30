@@ -41,9 +41,8 @@ def main() -> int:
     args = ap.parse_args()
     faulthandler.dump_traceback_later(900, repeat=True, file=sys.stderr)
 
-    from harness import Client, start_mock
-
     from bench.scenarios import SCENARIOS, Ctx
+    from harness import Client, start_mock
 
     names = [n for n in args.only.split(",") if n] or list(SCENARIOS)
     mock = start_mock(args.port, 0)
