@@ -161,6 +161,10 @@ a relayout for every change and a Python widget tree for every row that comes in
 
 ## 4. The design
 
+_The specification that implementers work from is `qt/DESIGN.md`: structures, algorithms,
+invariants, the frame pipeline, each interaction, the side panel, migration and tests. This section
+is the summary._
+
 ### 4.1 One canvas, a scene of blocks, no QLayout
 
 The conversation becomes a single `TranscriptCanvas(QAbstractScrollArea)` that owns a **Scene**: an
