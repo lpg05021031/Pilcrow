@@ -729,9 +729,11 @@ def idle(ctx: Ctx) -> Json:
 
 
 SCENARIOS: Dict[str, Callable[[Ctx], Json]] = {
+    # in the order a person meets them: the view mode and theme switches run while only the live
+    # pages are drawn (the realistic state), before the scroll scenarios draw the history
     "open_cold": open_cold,
-    "scroll_wheel": scroll_wheel,
-    "scroll_drag": scroll_drag,
+    "view_mode_cycle": view_mode_cycle,
+    "theme_toggle": theme_toggle,
     "fold_toggle": fold_toggle,
     "thinking_toggle": thinking_toggle,
     "tool_toggle": tool_toggle,
@@ -740,11 +742,11 @@ SCENARIOS: Dict[str, Callable[[Ctx], Json]] = {
     "streaming_scrolled_up": streaming_scrolled_up,
     "typing": typing,
     "resize_window": resize_window,
+    "switch_session": switch_session,
     "panel_tabs": panel_tabs,
     "panel_while_streaming": panel_while_streaming,
-    "switch_session": switch_session,
-    "view_mode_cycle": view_mode_cycle,
-    "theme_toggle": theme_toggle,
+    "scroll_wheel": scroll_wheel,
+    "scroll_drag": scroll_drag,
     "find": find,
     "idle": idle,
 }
