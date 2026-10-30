@@ -44,9 +44,13 @@ const msg = {
 };
 
 /** A finished turn for the history: the question, Claude's words and the work in between. */
-function turn(sid, at, { prompt, reply, tools = [], narration }) {
+function turn(sid, at, { prompt, reply, tools = [], narration, thinking }) {
   const out = [msg.user(sid, prompt, at)];
   let t = at + 800;
+  if (thinking) {
+    out.push(msg.assistant(sid, [{ type: 'thinking', thinking, signature: '' }], t));
+    t += 300;
+  }
   if (narration) {
     out.push(msg.assistant(sid, [{ type: 'text', text: narration }], t));
     t += 400;
@@ -54,6 +58,19 @@ function turn(sid, at, { prompt, reply, tools = [], narration }) {
   for (const tool of tools) {
     const id = `toolu_${uuid()}`;
     out.push(msg.assistant(sid, [{ type: 'tool_use', id, name: tool.name, input: tool.input }], t));
+    t += 120;
+    // A sub-agent's own work arrives with parent_tool_use_id set, nested under the Agent card.
+    for (const c of tool.children || []) {
+      if (c.text !== undefined) {
+        out.push({ ...msg.assistant(sid, [{ type: 'text', text: c.text }], t), parent_tool_use_id: id });
+      } else {
+        const cid = `toolu_${uuid()}`;
+        out.push({ ...msg.assistant(sid, [{ type: 'tool_use', id: cid, name: c.name, input: c.input }], t), parent_tool_use_id: id });
+        t += c.ms || 200;
+        out.push({ ...msg.toolResult(sid, cid, c.result || 'ok', t, c.structured, c.error), parent_tool_use_id: id });
+      }
+      t += 100;
+    }
     t += tool.ms || 600;
     out.push(msg.toolResult(sid, id, tool.result || 'ok', t, tool.structured, tool.error));
     t += 200;
@@ -67,6 +84,61 @@ const READ = (file, lines = 40) => ({ name: 'Read', input: { file_path: `${PROJ}
 const GREP = (pattern) => ({ name: 'Grep', input: { pattern, path: PROJ, output_mode: 'files_with_matches' }, result: 'server/sessions.js\nweb/src/lib/store.ts' });
 const BASH = (command, description, result = 'done') => ({ name: 'Bash', input: { command, description }, result, structured: { stdout: result, stderr: '', interrupted: false } });
 const EDIT = (file, oldS, newS) => ({ name: 'Edit', input: { file_path: `${PROJ}/${file}`, old_string: oldS, new_string: newS }, result: `The file ${PROJ}/${file} has been updated.`, structured: { filePath: `${PROJ}/${file}`, oldString: oldS, newString: newS, structuredPatch: [{ oldStart: 10, oldLines: 1, newStart: 10, newLines: 1, lines: ['-' + oldS, '+' + newS] }] } });
+
+// ---- the extreme shapes the benchmarks (qt/tests/bench) open: long prose, big outputs, big diffs,
+// thinking, sub-agents with their own work, failures. Deterministic, so runs compare.
+const WORDS = 'the parser reads each line and keeps a small stack of open containers so a truncated document still closes cleanly while the scheduler hands every stage its configuration without side effects and the tests cover both paths'.split(' ');
+const sentence = (i, n = 14) => {
+  const out = [];
+  for (let k = 0; k < n; k++) out.push(WORDS[(i * 7 + k * 3) % WORDS.length]);
+  const s = out.join(' ');
+  return s[0].toUpperCase() + s.slice(1) + '.';
+};
+const paragraph = (i, sentences = 3) => Array.from({ length: sentences }, (_, k) => sentence(i + k, 10 + ((i + k) % 7))).join(' ');
+function longReply(i) {
+  return [
+    `## Module ${i}: what it does`,
+    paragraph(i, 3),
+    `- ${sentence(i + 1, 8)}\n- ${sentence(i + 2, 9)}\n- ${sentence(i + 3, 7)}`,
+    paragraph(i + 4, 2),
+    '```ts\n' + Array.from({ length: 14 }, (_, k) => `export function step${k}(x: number): number {\n  return x * ${k} + ${i}; // ${WORDS[(i + k) % WORDS.length]}\n}`).join('\n') + '\n```',
+    `| stage | files | notes |\n|---|---|---|\n| ${i % 7} | ${(i % 5) + 1} | ${sentence(i, 4)} |\n| ${(i + 1) % 7} | ${(i % 3) + 2} | ${sentence(i + 1, 4)} |`,
+    paragraph(i + 5, 2),
+    'Inline `code` and a path `web/src/lib/store.ts:42` to round it off.',
+  ].join('\n\n');
+}
+const BIG_BASH = (n, fail = false) => {
+  const lines = Array.from({ length: n }, (_, k) => `[${String(k).padStart(4, '0')}] ${k % 9 === 0 ? `warning: unused variable in src/mod${k}.ts` : `compiled src/mod${k}.ts (${((k * 37) % 900) + 100} bytes)`}`);
+  const out = lines.join('\n');
+  return { name: 'Bash', input: { command: `npm run build 2>&1 | tail -n ${n}`, description: 'Build and show the log' }, result: fail ? `Error: Exit code 1\n${out}` : out, structured: fail ? undefined : { stdout: out, stderr: '', interrupted: false }, error: fail, ms: 900 };
+};
+const BIG_EDIT = (file, n) => {
+  const lines = [];
+  for (let k = 0; k < n; k++) {
+    const m = k % 4;
+    lines.push(m === 1 ? `-  const v${k} = read(${k});` : m === 2 ? `+  const v${k} = readSafe(${k}); // checked` : `   use(v${k});`);
+  }
+  const ctx = Math.ceil((n * 3) / 4);
+  return { name: 'Edit', input: { file_path: `${PROJ}/${file}`, old_string: 'read(', new_string: 'readSafe(' }, result: `The file ${PROJ}/${file} has been updated.`, structured: { filePath: `${PROJ}/${file}`, oldString: 'read(', newString: 'readSafe(', structuredPatch: [{ oldStart: 40, oldLines: ctx, newStart: 40, newLines: ctx, lines }] } };
+};
+const AGENT = (i) => ({ name: 'Agent', input: { description: `Explore module ${i}`, prompt: `Find every call site of parse() in module ${i} and report whether each is covered by a test.`, subagent_type: 'Explore' }, result: `Found 3 call sites in module ${i}; all three are covered by tests.`, ms: 2500, children: [{ text: "I'll search for the call sites first." }, GREP('parse\\('), READ(`src/mod${i}.ts`, 80), READ(`src/mod${i}.test.ts`, 60), { text: 'Three call sites, all covered by tests.' }] });
+
+/** One turn of the heavy conversation: six shapes, cycling. */
+function heavyTurn(sid, at, i) {
+  const kind = i % 6;
+  if (kind === 0) return turn(sid, at, { prompt: `Turn ${i + 1}: explain module ${i} in detail`, reply: longReply(i) });
+  if (kind === 1) return turn(sid, at, { prompt: `Turn ${i + 1}: check file ${i} and its tests`, narration: `Reading file ${i}, its tests and the call sites.`, tools: [READ(`src/mod${i}.ts`, 60), READ(`src/mod${i}.test.ts`, 40), GREP(`mod${i}`), GREP(`import.*mod${i}`), READ(`docs/mod${i}.md`, 20)], reply: `File ${i} is fine. ${sentence(i, 12)}` });
+  if (kind === 2) return turn(sid, at, { prompt: `Turn ${i + 1}: fix the unchecked read in module ${i}`, thinking: paragraph(i, 4), tools: [BIG_EDIT(`src/mod${i}.ts`, 48), BIG_BASH(300)], reply: `Fixed module ${i}. ${sentence(i, 10)}\n\n\`\`\`sh\nnpm run check\n\`\`\`` });
+  if (kind === 3) return turn(sid, at, { prompt: `Turn ${i + 1}: find every call site of parse in module ${i}`, thinking: paragraph(i, 2), tools: [AGENT(i)], reply: paragraph(i, 3) });
+  if (kind === 4) return turn(sid, at, { prompt: `Turn ${i + 1}: run the build for module ${i}`, narration: 'Building first.', tools: [BIG_BASH(40, true), EDIT(`src/mod${i}.ts`, 'recieve', 'receive'), BIG_BASH(20)], reply: `The build failed on an unused variable, so I fixed it. ${sentence(i, 9)}` });
+  return turn(sid, at, { prompt: `Turn ${i + 1}: anything else?`, reply: `Nothing else stands out in module ${i}. Moving on.` });
+}
+
+/** The simple shapes of MOCK_LONG, as a function so mock.generate can build them too. */
+function mixedTurn(sid, at, i) {
+  const kind = i % 4;
+  return turn(sid, at, kind === 0 ? { prompt: `Turn ${i + 1}: what does module ${i} do?`, reply: `Module ${i} parses the configuration for stage ${i % 7} and hands it to the scheduler. It is small and has no side effects.` } : kind === 1 ? { prompt: `Turn ${i + 1}: check file ${i}`, narration: `Reading file ${i} and its tests.`, tools: [READ(`src/mod${i}.ts`, 30 + i), GREP(`mod${i}`)], reply: `File ${i} is fine: it exports two functions and both are covered by tests.` } : kind === 2 ? { prompt: `Turn ${i + 1}: fix the typo in module ${i}`, tools: [EDIT(`src/mod${i}.ts`, 'recieve', 'receive'), BASH('npm run check', 'Type-check', 'ok')], reply: `Fixed the typo in module ${i}; the type check passes.` } : { prompt: `Turn ${i + 1}: anything else?`, reply: `Nothing else stands out in module ${i}. Moving on.` });
+}
 
 const DAY = 86400e3;
 const now = Date.now();
@@ -176,6 +248,7 @@ seed();
 /** What Claude does with a message: keywords in the prompt pick the script. */
 function scriptFor(text) {
   const t = text.toLowerCase();
+  if (/\bmarathon\b/.test(t)) return 'marathon';
   if (/\bperm|permission|run (a |the )?command|dangerous/.test(t)) return 'permission';
   if (/\btool|read|look|check|edit|fix/.test(t)) return 'tools';
   if (/\bask|question/.test(t)) return 'question';
@@ -191,6 +264,18 @@ async function streamText(s, msgId, index, text, { delay = pace } = {}) {
     s.out(msg.stream(s.id, { type: 'content_block_delta', index, delta: { type: 'text_delta', text: piece } }));
     s.activity = { kind: 'text', label: text.slice(0, 140), at: Date.now() };
     if (delay) await sleep(delay);
+  }
+  s.out(msg.stream(s.id, { type: 'content_block_stop', index }));
+}
+
+async function streamThinking(s, index, text) {
+  s.out(msg.stream(s.id, { type: 'content_block_start', index, content_block: { type: 'thinking', thinking: '' } }));
+  const pieces = text.match(/\S+\s*|\s+/g) || [];
+  for (const piece of pieces) {
+    if (s.aborted) return;
+    s.out(msg.stream(s.id, { type: 'content_block_delta', index, delta: { type: 'thinking_delta', thinking: piece } }));
+    s.activity = { kind: 'thinking', label: 'Thinking', at: Date.now() };
+    if (pace) await sleep(pace);
   }
   s.out(msg.stream(s.id, { type: 'content_block_stop', index }));
 }
@@ -219,6 +304,9 @@ async function say(s, parts) {
     if (p.text !== undefined) {
       await streamText(s, msgId, i, p.text);
       content.push({ type: 'text', text: p.text });
+    } else if (p.thinking !== undefined) {
+      await streamThinking(s, i, p.thinking);
+      content.push({ type: 'thinking', thinking: p.thinking, signature: '' });
     } else {
       const id = await streamTool(s, msgId, i, p.tool);
       s.activity = { kind: 'tool', tool: p.tool.name, label: p.tool.input.file_path || p.tool.input.command || p.tool.name, at: Date.now() };
@@ -256,7 +344,17 @@ async function useTool(s, tool, { ask = false } = {}) {
       return 'denied';
     }
   }
-  await sleep(tool.ms || 350);
+  for (const c of tool.children || []) {
+    // the sub-agent's work, recorded whole under the Agent card as it comes in
+    if (c.text !== undefined) s.record({ ...msg.assistant(s.id, [{ type: 'text', text: c.text }], Date.now()), parent_tool_use_id: id });
+    else {
+      const cid = `toolu_${uuid()}`;
+      s.record({ ...msg.assistant(s.id, [{ type: 'tool_use', id: cid, name: c.name, input: c.input }], Date.now()), parent_tool_use_id: id });
+      await sleep(Math.min(c.ms || 120, 120));
+      s.record({ ...msg.toolResult(s.id, cid, c.result || 'ok', Date.now(), c.structured, c.error), parent_tool_use_id: id });
+    }
+  }
+  await sleep(Math.min(tool.ms || 350, 350));
   s.record(msg.toolResult(s.id, id, tool.result || 'ok', Date.now(), tool.structured, tool.error));
   return 'done';
 }
@@ -272,6 +370,22 @@ async function runTurn(s, text) {
       await say(s, [{ text: `You said “${text.trim().slice(0, 60)}”. Here is a short reply with a list:\n\n- one thing\n- another thing\n\nAnd a line of \`code\` to round it off.` }]);
     } else if (script === 'slow') {
       await say(s, [{ text: 'This reply arrives slowly, word by word, so a scroll test can watch it come in. '.repeat(6) }]);
+    } else if (script === 'marathon') {
+      // A long turn with everything in it: thinking, prose, quiet steps, a big edit, a big command, a
+      // sub-agent, and a long answer. What a streaming benchmark watches.
+      for (let k = 0; k < 4; k++) {
+        await say(s, [{ thinking: paragraph(k, 3) }, { text: `Step ${k + 1}. ${paragraph(k, 2)}` }]);
+        if (s.aborted) throw new Error('aborted');
+        await useTool(s, READ(`src/mod${k}.ts`, 60));
+        await useTool(s, GREP(`mod${k}`));
+        await useTool(s, BIG_BASH(200));
+        await useTool(s, BIG_EDIT(`src/mod${k}.ts`, 40));
+        if (s.aborted) throw new Error('aborted');
+      }
+      await say(s, [{ text: 'Now a sub-agent checks the call sites.' }]);
+      await useTool(s, AGENT(7));
+      if (s.aborted) throw new Error('aborted');
+      await say(s, [{ text: `${longReply(99)}\n\n${longReply(100)}` }]);
     } else if (script === 'tools') {
       await say(s, [{ text: "I'll look at the parser first, then its tests." }]);
       await useTool(s, READ('web/src/lib/partialJson.ts', 40));
@@ -526,6 +640,15 @@ const methods = {
     const s = S(id);
     for (const m of msgs) s.record({ uuid: uuid(), session_id: id, timestamp: new Date().toISOString(), ...m });
     return s.messages.length;
+  },
+  /** Build a long conversation: `shape` is 'heavy' (prose, big outputs, big diffs, thinking, sub-agents, failures) or 'mixed' (the MOCK_LONG shapes). */
+  'mock.generate': ({ id = 'sess-heavy', title, turns = 500, shape = 'heavy' }) => {
+    const msgs = [];
+    const start = now - turns * 90e3 - 3600e3;
+    for (let i = 0; i < turns; i++) msgs.push(...(shape === 'heavy' ? heavyTurn : mixedTurn)(id, start + i * 90e3, i));
+    sessions.set(id, new Sess({ id, title: title || `${shape} conversation (${turns} turns)`, cwd: PROJ, touched: now - 3 * DAY, messages: msgs }));
+    listChanged();
+    return { id, turns, messages: msgs.length, bytes: JSON.stringify(msgs).length };
   },
   'mock.pace': ({ ms }) => {
     pace = Math.max(0, Number(ms) || 0);

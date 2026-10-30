@@ -1,0 +1,251 @@
+# Pilcrow Qt client — performance: the baseline and the design that replaces it
+
+This document is the record of what the Qt client costs today under extreme use, the reasons, and
+the architecture that replaces the conversation view and the side panel's refresh model. The
+numbers come from `qt/tests/bench` (see the end), run offscreen on the software rasteriser, which is
+the machine the Qt client exists for: no GPU, a CPU painting every pixel.
+
+## 1. How the client is measured
+
+`python qt/tests/bench/run.py --heavy 600 --mixed 2000` boots the client against the mock server,
+has the mock build two conversations on demand (`mock.generate`) and drives the window with real
+input events the way Playwright drives the web client:
+
+- **heavy** (600 turns, ~4,500 items): prose with headings, lists, code blocks and tables; 300-line
+  command outputs; 48-line diffs; thinking blocks; sub-agents with their own nested steps; failed
+  commands; "Explored" runs of quiet reads.
+- **mixed** (2,000 turns, ~10,000 items): the plain shapes of `MOCK_LONG`.
+
+Eighteen scenarios cover what a person does to a long conversation: open it cold, fling through it
+with the wheel, drag the scrollbar, open and close folds, thinking rows and tool cards, sweep the
+pointer over it, stream a long turn while following and while scrolled up, type in the composer,
+resize the window, open every side-panel tab and drag the panel seam, stream with the panel open on
+each tab, switch between the two conversations, cycle the view mode, switch theme, find, and sit
+idle. The rig records, per scenario:
+
+| measure | what it tells |
+|---|---|
+| **stall** p50 / p95 / max, over 16 ms, over 50 ms | how long each turn of the event loop blocks the window (a stall over 16.7 ms drops a frame; over 50 ms is a "long task") |
+| **layout** | `LayoutRequest` events inside the widget tree: one per QLayout activation |
+| **resize** / **move** | content-widget resizes (each moves the scrollbar range) and child moves |
+| **paint**, **paint_px** | paint events on the viewport and the area they covered (the rig's own grabs are excluded) |
+| **widgets_made** | `ChildAdded` under the tree: what a refresh built from scratch |
+| **scroll_sets** | how often the program changed the scroll position (each is a visible shift) |
+| **fps**, **height_frames** | frames an animation actually produced |
+| **flashes** | frames in which a band of ≥24 scanlines went blank and came back: flicker |
+| **shift** (unexpected px, max jump) | the Qt analogue of cumulative layout shift, read off scanline hashes of consecutive grabs |
+| **cpu_pct**, **rss** | CPU share of one core, resident memory |
+
+Input is paced by the clock (120 wheel notches a second, a pointer at 720 px/s, 40 keys a second),
+so a slower client receives the same input as a faster one and the stall numbers stay comparable.
+
+## 2. Baseline (release 2.9.8)
+
+_Filled in from `test/out/bench-baseline.json`; see section 2 of the report in the pull request._
+
+## 3. Why
+
+The conversation is a tree of QWidgets ten levels deep (Transcript → PageBox → UnitBox → WorkFold →
+Steps → ToolCard → Collapse → Body → Surface → Row → QLabel), eight widgets per item, laid out by
+QLayouts, inside a QScrollArea. Everything that goes wrong follows from that:
+
+1. **Layout is synchronous and global.** A streamed token, a hovered chevron, a one-second timer
+   writing "12s" into a label, a fold growing by one pixel: each changes a `sizeHint`, and Qt walks
+   the invalidation up through every ancestor layout and relays the whole column. The baseline
+   counts about a hundred layout passes per fold toggle and over a hundred a second while
+   streaming. Each pass is milliseconds of C++ plus the Python `sizeHint` overrides on the way.
+2. **Expand and collapse animate `maximumHeight`** (`ui/collapse.py`), so every animation frame is a
+   full relayout, a scrollbar-range change and a scroll compensation. The target height is taken
+   from `sizeHint()` before the body has been laid out at its real width, so the animation ends at
+   the wrong height and snaps. The baseline shows ~8 distinct frames in a 200 ms close.
+3. **Prose is a QTextBrowser per paragraph** that starts 1px tall, lays itself out, feeds its
+   height back through `documentSizeChanged` → `setFixedHeight` → relayout, and on every streamed
+   token rebuilds its whole document with `setHtml`. Cost per token grows with the message.
+4. **Refresh rebuilds.** A tool head clears and recreates its icon and meta widgets on every rev;
+   an open tool body is rebuilt whole on every chunk of output; `Steps`, `Stack` and
+   `clear_layout` pull widgets out with `setParent(None)` and put them back. Deleted widgets linger
+   until `deleteLater` runs, so there are frames with both old and new on screen.
+5. **Hover changes layout.** Chevrons and "Open in Files" buttons are shown with `setVisible`, so a
+   pointer moving down the column relays it continuously; several heads also call
+   `setStyleSheet` on hover, which re-polishes fonts and invalidates geometry.
+6. **Scroll position is kept right by timers** (follow at 24 % a frame, a compensation one frame
+   late when a far page takes its real height, three 160–450 ms timers re-placing the view) because
+   heights are unknown until laid out. Every correction is one frame of the wrong position.
+7. **The side panel refreshes hidden tabs** every 500 ms while Claude streams, and the Tasks and
+   Session tabs key their "did anything change" test on `rt.rev`, which moves on every token, so
+   they tear down and rebuild all their sections twice a second during a turn. The sidebar rebuilds
+   its whole list on every `sessions.changed` by reparenting every row.
+8. **Opening a conversation parses and models the whole history on the GUI thread**, then builds
+   widgets for the live pages synchronously; scrolling into history builds a page of eight units at
+   a time, several hundred milliseconds each.
+
+Patching these one by one keeps the ceiling where it is: any design in which rows are widgets pays
+a relayout for every change and a Python widget tree for every row that comes into view.
+
+## 4. The design
+
+### 4.1 One canvas, a scene of blocks, no QLayout
+
+The conversation becomes a single `TranscriptCanvas(QAbstractScrollArea)` that owns a **Scene**: an
+ordered list of **blocks**. A block is a plain Python object with a key, the `rev` it was built from,
+a height, `measure(width)`, `paint(painter, rect, state)` and `hit(point)`. Nothing in the scene is
+a QWidget except the rare **islands** (a permission prompt, a question form, a plan review) that
+are real widgets the canvas positions.
+
+Blocks are grouped the way the conversation is: a **Group** block holds a child list of its own
+(a work fold holds its chapters and steps; a tool card holds its body; an agent card holds its
+children). Groups nest at most four deep. Every list, at every level, keeps its children's heights in
+a **Fenwick tree**, so the y of block *i* is a prefix sum in O(log n), the block under a y is a binary
+descent in O(log n), and one height change is O(log n). The whole conversation is positioned by
+integer arithmetic; there is no layout pass.
+
+### 4.2 Paint only what shows; keep what was painted
+
+`paintEvent` finds the first block that intersects the exposed rectangle (one descent) and paints
+blocks until it passes the bottom, translating by the scroll offset. Prose is drawn with
+`QTextDocument.documentLayout().draw()` clipped to the exposed part; decorations the document
+cannot draw (code wells, inline-code pills, quote rules, table hairlines, rails) are painted with
+QPainter from the layout's geometry, as `items.py` does today. The viewport is opaque and paints its
+own background.
+
+Blocks that are finished, not hovered, not selected and not lit by find keep a **cached pixmap** of
+themselves (keyed by block, rev, width, theme, device pixel ratio; an LRU of about 48 MB). A screen
+of finished history is a dozen blits. When the scroll position changes, the viewport **scrolls its
+pixels** (`QWidget::scroll`) and only the newly exposed strip is painted. A streamed token
+invalidates the rectangle of the block it landed in and nothing else; a spinner invalidates its
+14×14 pixels.
+
+### 4.3 Streaming costs the paragraph, not the message
+
+One Markdown top-level block (a paragraph, a list, a code fence) is one `ProseBlock` with one
+`QTextDocument`. A streamed delta touches the last block only: when the delta is plain text it is
+appended with a `QTextCursor`; when it carries Markdown syntax the block's document is re-rendered
+(`setHtml` of that block alone, ~0.3 ms). Finished blocks are never touched again. Thinking rows
+stream the same way; the collapsed "peek" is the same document painted through a clip, no second
+layout.
+
+Model updates arrive coalesced (one signal per frame per session, as today). Reconciliation is
+**incremental**: the units before the last user message are settled and cached, so each update
+recomputes only the live turn, diffs its blocks by key and `rev`, and updates one or two blocks.
+
+### 4.4 Folds are one number
+
+A fold is a Group whose visible height is `reveal × content height`. Opening or closing runs a
+`QVariantAnimation` on `reveal` with the spring curves in `theme.py`; each frame updates one Fenwick
+entry, fixes the scroll anchor and repaints from the fold down. The content keeps being painted
+through the clip while it shrinks, as on the web. The chevron turns on the same clock. There is no
+second height to get wrong: the content's height is the sum of its children's measured heights.
+
+### 4.5 Scroll anchoring is exact, and there are no timers
+
+Every layout change goes through one function that (1) picks the anchor — the bottom while the
+reader follows, otherwise the block under the viewport's top edge and its offset — (2) applies the
+height changes, (3) sets the scroll value so the anchor stays where it was, and (4) repaints. All in
+the same frame, before anything is drawn. Following new output is a short eased animation of the
+scroll value on the shared clock; "Latest" appears when the reader is more than a screen's distance
+from the live end. The remembered position of a conversation is an anchor (block key, offset), so
+coming back lands exactly, even after far blocks have taken their real heights.
+
+### 4.6 Virtualisation per block, with a budget and a calibrated estimate
+
+Blocks farther than three screens from the viewport are **cold**: no document, no pixmap, an
+estimated height. The estimate is not a constant: it is computed from the text (characters per
+line at the current width and font, code blocks by line count, fixed heights for heads and rows)
+and **calibrated** against the blocks that have been measured, so the scrollbar's proportions are
+right from the start and improve as the conversation is read. Cold blocks become warm through a
+queue ordered by distance to the viewport, drained with a time budget (about 4 ms a frame) so a
+fling stays smooth; each materialisation applies its height delta through the anchoring function,
+so what the reader is looking at never moves. Measured heights are kept per width, so a block that
+goes cold and comes back has the same height and nothing shifts. Documents and pixmaps of far
+blocks are evicted by LRU; the Python blocks themselves are small and stay.
+
+### 4.7 Interaction without widgets
+
+Hit testing descends the groups to the block, and the block names a **target** (a fold head, a
+chevron, a link, a path, a copy button, a "Show all" control). Hover is a pair of rectangles
+repainted; the cursor follows the target. Click activates the target. Keyboard focus is an index
+over the focusable targets on screen, drawn as a ring; Tab moves it, Enter and Space activate, Home,
+End, PageUp and PageDown scroll. Text selection is a range of (block, position) pairs painted
+through each block's document and copied as one text. Links use `anchorAt`; tooltips show after
+the pointer rests. Find lights matches through each prose block's extra selections, as now, and the
+current match is revealed through the anchoring function, not a pin timer.
+
+### 4.8 Islands
+
+The permission prompt, the live question form and the plan review stay the QWidgets they are. An
+`IslandBlock` owns one, measures it at the column width, and the canvas calls `setGeometry` on it
+whenever its y changes. They scroll with the pixels, keep native focus and input, and there are at
+most one or two on screen. The "Latest" pill and the find bar are children of the canvas, not of the
+viewport, so scrolling the pixels does not move them.
+
+### 4.9 Sessions are scenes
+
+Each session's Scene (blocks, fold state, anchor, caches) is retained while the app runs (an LRU of
+eight). Switching sessions swaps the Scene the canvas draws: one repaint. A hidden session's Scene
+is not reconciled on every update; it is marked stale and brought up to date when shown, which costs
+the live turn only.
+
+### 4.10 Opening without freezing
+
+The history snapshot is modelled in slices (a few hundred messages per event-loop turn) behind the
+loading skeleton, so the window stays responsive during the longest load; the first paint waits
+only for the blocks of the last screen to be measured. `orjson`, when installed, parses the
+snapshot several times faster than the standard library.
+
+### 4.11 One clock
+
+All breathing marks, spinners, rails, elapsed counters and scroll easing share one timer that runs
+only while something live is on screen, at 30 Hz for indicators and 60 Hz during an animation. A
+tick repaints the small rectangles that changed. A counter changing from "12s" to "13s" repaints
+its rectangle; nothing is relaid out.
+
+### 4.12 The side panel and the sidebar
+
+- Only the **visible** tab refreshes; hidden tabs mark themselves stale and refresh when shown.
+- The Tasks, Session and Timeline tabs **reconcile** rows by id (update in place, insert, remove)
+  instead of tearing down their sections, and their change keys no longer include `rt.rev`.
+- The Changes tab diffs the file list by path and updates file cards in place; file cards paint
+  their hover actions instead of showing and hiding widgets.
+- Panel disclosure (`Collapse`) measures its body at the real width before animating and runs on the
+  shared clock; panel trees are shallow, so a relayout per frame there costs a millisecond.
+- The sidebar diffs its ordered list of rows and moves only the rows that moved; it no longer
+  reparents every row on every `sessions.changed`.
+- Nothing calls `setStyleSheet` or `setVisible` from a hover or a refresh. Colours and fonts are set
+  with the painter, `setFont` and `setPalette`.
+
+### 4.13 What stays
+
+`lib/` (the transcript model, units, tool metadata, formatting), `markdown.py` (Markdown → HTML,
+Pygments), `theme.py`, `icons.py`, `store.py`, `rpc.py`, the composer, the dialogs, the Files tree
+and the terminal (both already painted), and the decoration painters in `items.py`. The public
+surface of `Transcript` (`set_empty`, `open_find`, `scroll_to_bottom`, `reveal_item`,
+`find_entries`, `units`, `set_scrolled_callback`) is kept so `session_view.py` and `find_bar.py`
+change little; tests address blocks by item id instead of widgets by class.
+
+## 5. Targets
+
+Measured by the same rig, same scenarios, same machine class (software rasteriser):
+
+| scenario | target |
+|---|---|
+| fold / thinking / tool toggle | 0 layout passes; ≤ 1 scroll adjustment; ≥ 55 fps; no flash; the row below moves only by the animated amount |
+| streaming (follow and scrolled up) | event-loop stall p95 ≤ 8 ms, max ≤ 16 ms; 0 layout passes; scrolled up: 0 px of unexpected shift |
+| wheel fling / scrollbar drag | stall p95 ≤ 8 ms; ≤ 1 frame in 100 over 16 ms; blank fraction ≤ 0.05 |
+| hover sweep, typing | 0 layout passes in the conversation; 0 px of shift |
+| open 600 heavy / 2,000 mixed turns | first paint ≤ 150 ms after the snapshot is modelled; no event-loop stall over 50 ms while modelling |
+| switch session | ≤ 30 ms to first paint; 0 widgets made for a retained session |
+| view mode cycle, theme switch | ≤ 100 ms to first paint |
+| panel open on any tab while streaming | widgets made per second = 0 on hidden tabs; ≤ 1 refresh a second on the visible one |
+| idle with a busy-looking session | ≤ 2 % of one core |
+
+## 6. Running the benchmarks
+
+```
+pip install -r qt/requirements.txt
+python qt/tests/bench/run.py --heavy 600 --mixed 2000 --out test/out/bench.json
+python qt/tests/bench/run.py --only fold_toggle,streaming_follow      # a subset
+```
+
+`qt/tests/bench/rig.py` holds the instruments, `scenarios.py` the scenarios (one function each,
+written against behaviour so they run on any implementation of the conversation view), `run.py`
+the driver. The JSON it writes is what the tables above are made from.
