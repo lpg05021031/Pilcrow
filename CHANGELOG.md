@@ -3,6 +3,17 @@
 最新版在最上面。`npm run release -- X.Y.Z` 會檢查這裡有沒有該版的說明。
 
 
+- **2.10.0**：Qt 對話區整個換成自繪的 canvas 引擎（`qt/pilcrow_qt/canvas/`，設計見 `qt/DESIGN.md`，量測見
+  `qt/PERF.md`）。對話不再是一棵 QWidget／QLayout 樹，而是一個 viewport 上的場景：每一列是一個 block，位置由
+  Fenwick 樹算、折疊是一個數字（reveal）、每次變動都先讀錨點、改完再把錨點放回原位——所以展開／收起指令與思考過程、
+  streaming、遠處高度修正、字寬重排都不會讓眼前的內容位移或閃爍；畫面只重畫真正變了的那一段，靜止的列快取成 pixmap，
+  看不到的列不畫也不量（估高 → 快量 → 精量三級，背景預取、遠處回收），長對話開啟時只建模型不建 widget，
+  切 session 會保留場景與畫面。串流時只把新字塞進段落的文件、不重排整段；fold 展開前先在 8 ms 預算內精量子項，
+  動畫跑在真實高度上。量測（`qt/tests/bench`）見 `qt/PERF.md` 的對照表。
+  `widgets/transcript/` 只留權限卡、提問／計畫表單與程式碼 diff 的工具函式；純函式搬到 `lib/folds.py`。
+  Bench 的 flicker 量法改為「同一段內容消失一格又回到原位」（內容滑過空隙不算），並多記錄 canvas 的 placeholder
+  次數；scrolled-up 串流情境改成送出後再往上捲（送出本來就會跳到自己的訊息）。
+
 - **2.9.8**：Linux 自繪標題列的標題對齊對話區：從對話卡片的文字欄開始（與 session 標題同一條線），側欄收起時移到最左、
   拖寬側欄時跟著走。
 

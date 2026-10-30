@@ -17,7 +17,8 @@ qt/
     rpc.py             WebSocket JSON-RPC client (QWebSocket), reconnect, events as signals
     store.py           app state + session actions (port of web/src/lib/store.ts)
     lib/               pure Python ports of web/src/lib (no Qt): transcript_model, units,
-                       tools_meta, fmt, partial_json, ansi, fuzzy, workflow
+                       tools_meta, fmt, partial_json, ansi, fuzzy, workflow, folds (what a
+                       stretch of work is called, chapters, tallies, quiet steps)
     theme.py           tokens for dark/light (port of styles/tokens.css), QPalette + QSS
     icons.py           icon(name, color, size) from assets/icons/*.svg (Lucide, currentColor)
     fonts.py           loads assets/fonts/*.ttf (Inter, JetBrains Mono) when present
@@ -26,7 +27,14 @@ qt/
       main_window.py   sidebar | main column | right panel; global shortcuts (App.tsx)
       sidebar.py       Sidebar.tsx
       session_view.py  SessionView.tsx: header, transcript, composer, find bar
-      transcript/      Transcript.tsx: paged list, folds, chapters, items, tool cards, permission
+      transcript/      the real widgets the conversation still hosts: permission card, the
+                       question and plan forms (bodies/ask, bodies/plan), code/diff helpers
+    canvas/            the conversation itself (Transcript.tsx), as one painted viewport: see
+                       DESIGN.md — scene.py (blocks, groups, Fenwick trees), view.py (the
+                       QAbstractScrollArea: commit, anchor, prefetch, paint, input), transcript.py
+                       (the session's scene, reconciled from the model), blocks/ (prose, user,
+                       thinking, tool cards and their node-tree bodies, folds, islands), nodes.py
+                       (the mini-layout bodies are built from), paint.py (documents, caches)
       composer.py      Composer.tsx
       overview.py      Overview.tsx (control room)
       inbox.py         Inbox.tsx

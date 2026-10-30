@@ -149,18 +149,27 @@ Everything that changes the picture goes through four stages in one event-loop t
 1. **Mutate** — a coalesced model update (`store.rt_changed`, one per 16 ms per session), an input
    event, a clock tick or an animation frame produces a `Mutation` list: blocks added, removed,
    resynced (`rev`/`sig` changed), heights changed, reveal changed.
-2. **Commit** — `anchor.pick()` reads the anchor from the pre-mutation layout; the Fenwick trees are
-   updated along each affected path; `anchor.correct()` computes the new scroll value; islands are
-   repositioned.
-3. **Invalidate** — the union of the affected rectangles (translated by the scroll) is passed to
-   `viewport().update(region)`; a pure scroll becomes `viewport().scroll(0, dy)` so only the
-   exposed strip is painted.
+2. **Commit** — `begin()` reads the anchor from the pre-mutation layout; the Fenwick trees are
+   updated along each affected path as the mutation runs; `end()` puts the anchor back (a *silent*
+   scroll set: no pixels move), measures exactly whatever is in the viewport now, and puts the
+   anchor back once more. The commit is reentrancy-safe: a scroll set inside it never starts another.
+3. **Invalidate** — every height change was noted as `(block, offset)`. A change whose block ends
+   above the anchor moved with the anchor and the scroll together, so it changed nothing on screen;
+   the first change at or below the anchor gives the scene y from which the viewport is repainted.
+   Rects noted for in-place changes (a live row, a toggle inside a body) are repainted as they are.
+   A person's scroll, and the easing towards the end, blit with `viewport().scroll(0, dy)` so only
+   the exposed strip is painted.
 4. **Paint** — `paintEvent` descends to the first block intersecting each exposed rectangle and
-   paints forward until past its bottom, warming visible cold blocks on the spot.
+   paints forward until past its bottom. It never mutates: a block that is still cold (only after a
+   fling that outran the prefetch) is painted as faint placeholder bars and the prefetch fills it
+   in; `CanvasView.cold_paints` counts how often that happened (zero in the benchmarks).
 
-Between frames, the **prefetch queue** warms blocks within three screens of the viewport and cools
-blocks beyond six, under a time budget (4 ms per drain, 2 ms while a fling is in progress), and
-stops when there is nothing to do.
+Between frames, the **prefetch drain** — one commit — warms blocks within three screens of the
+viewport, upgrades the estimates of cold blocks everywhere (one slice per drain, the top of the
+history first), and cools blocks beyond six screens once the view has moved a screen or the warm set
+has grown past 600, under a time budget (4 ms per drain, 2 ms while a fling is in progress). A
+drain that finishes with nothing left records the state it saw (scroll, viewport, width, structure
+revision, height changes, theme) and the next one returns at once unless that state has changed.
 
 Per-frame budget at 60 Hz (16.7 ms): reconcile ≤ 1 ms, commit ≤ 0.2 ms, paint ≤ 4 ms, prefetch
 ≤ 4 ms, leaving half the frame to Qt and the OS.
@@ -169,25 +178,31 @@ Per-frame budget at 60 Hz (16.7 ms): reconcile ≤ 1 ms, commit ≤ 0.2 ms, pain
 
 ### 4.1 The anchor
 
-`Anchor` is either `BOTTOM` or `(path, offset)`: the path (indices from the root) of the leaf block
-whose rect contains the viewport's top edge (the first block with `y + h > scroll`), and
-`offset = scroll − y`. `pick()` costs one Fenwick descent per level. It is read at the start of
-every commit; it is never stored across mutations except as the session's remembered position.
+The anchor is `(key, offset)`: the first leaf in the viewport whose height is **exact** (so the
+offset of the top edge into it means what it shows), else the leaf under the top edge, and
+`offset = scroll − y`. Preferring an exact leaf is what keeps the reading still when the person
+scrolls up into cold history: the cold block at the top is measured and grows *upwards*, away from
+the lines they were reading. `pick_anchor()` costs one Fenwick descent per level plus a short walk.
+It is read at the start of every commit, following or not; it is never stored across mutations
+except as the session's remembered position.
 
 ### 4.2 Correction
 
-After the heights are applied, `y_after = y(path)`; if the block at `path` is gone, the path is
-resolved to the nearest surviving block by key order (the block before, else after).
-`scroll_new = y_after + offset`, clamped. Mutations entirely below the anchor leave `y_after`
-unchanged, so nothing happens — which is what the reader wants when Claude writes below.
+After the heights are applied, `scroll_new = y(key) + offset + PAD_TOP`, clamped, set without
+blitting (the picture is rigid with the anchor, so there is nothing to move). If the block is gone,
+or the value had to be clamped, the whole viewport is repainted. Mutations entirely below the anchor
+leave `y(key)` unchanged, so nothing happens — which is what the reader wants when Claude writes
+below. Mutations entirely above it change the scroll value and nothing else: no paint at all.
 
 ### 4.3 Following
 
 `following` is true when the reader is within 60 px of the end (after their own scroll, a send, End,
 or the "Latest" pill) and false the moment they scroll up by more than one line. While following,
-the anchor is `BOTTOM` and the correction sets the **target** of the scroll easing to the maximum;
-the easing (on the clock) moves the actual value by `d × (1 − e^(−dt/τ))`, τ = 60 ms, snapping when
-`|d| < 1` or when `reduced_motion`. "Latest" shows when `following` is false and new content arrived
+the anchor is still held (so a height upgrade far above never nudges the view), and then the
+**target** of the scroll easing is set to the maximum; the easing (on the clock) moves the actual
+value by `d × (1 − e^(−dt/τ))`, τ = 60 ms, snapping when `|d| < 1` or when `reduced_motion`.
+Retargeting never restarts the easing. Every own scroll set runs a small commit of its own, so what
+the easing brings into view is measured before it is painted. "Latest" shows when `following` is false and new content arrived
 more than one viewport below.
 
 ### 4.4 Remembered position
@@ -216,6 +231,13 @@ estimate-to-real snap of a page coming into view.
   within about a second of opening, without a document anywhere.
 - **Grade 2, exact**: the block's documents laid out at the width. Cost: 0.2–1 ms per prose block,
   less for heads. Applied to visible blocks and the prefetch window.
+
+Every block has a height from the moment it exists: a block the reconciler makes is estimated at
+once (for a group, the leaves that show once it is open), so the scrollbar is honest from the first
+frame and a block streaming in at the end never spends a frame at zero height. A fold that opens
+measures its children exactly under an 8 ms budget before the reveal starts, so the animation runs
+on true heights; past the budget the rest keep their estimates and are measured as they come into
+view.
 
 A height upgrade is a mutation like any other: it goes through the anchor correction, so the
 reader never sees it. Heights are cached per `(key, rev, width, font scale)`; a block that is

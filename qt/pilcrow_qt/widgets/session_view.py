@@ -64,9 +64,9 @@ def running_workflow(tasks: Optional[List[Json]]) -> Optional[str]:
 
 
 def _make_transcript(session_id: str, cwd: str) -> QWidget:
-    """The real Transcript when it is there, otherwise a stand-in with the same surface so this page runs alone."""
+    """The conversation on the canvas engine, otherwise a stand-in with the same surface so this page runs alone."""
     try:
-        from .transcript.view import Transcript
+        from ..canvas.transcript import Transcript
 
         return Transcript(session_id, cwd)
     except Exception as e:  # noqa: BLE001 — the transcript is built separately; this page must not depend on it

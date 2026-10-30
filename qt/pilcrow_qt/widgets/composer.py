@@ -797,6 +797,7 @@ class ChipButton(LayoutButton):
         self._icon_size = 16 if icon_only else 14
         self._tone = ""
         self._chevron = chevron and not icon_only
+        self._shown: tuple = ()
         self._icon_only = icon_only
         self._open = False
         self._pressed = False
@@ -832,6 +833,9 @@ class ChipButton(LayoutButton):
         self._paint()
 
     def set(self, text: str, icon: str = "", sub: str = "", tone: str = "") -> None:
+        if (text, icon, sub, tone) == self._shown:
+            return
+        self._shown = (text, icon, sub, tone)
         self.text_lb.setText(text)
         self.text_lb.setVisible(bool(text) and not self._icon_only)
         self.sub_lb.setText(f"· {sub}" if sub else "")

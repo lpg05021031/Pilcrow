@@ -9,6 +9,7 @@ hairline round them; a 9px drag handle straddles each seam and takes 1px of the 
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from typing import Optional
 
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
@@ -24,6 +25,7 @@ from .ui.signals import bind
 TAB_KEYS = {"1": "changes", "2": "files", "3": "terminal", "4": "preview", "5": "tasks", "6": "history", "7": "info"}
 
 GROUND_PAD = 8  # .app { padding: 0 8px 8px 0 }
+SESSION_VIEWS_KEPT = 8  # conversations kept built behind the one on screen
 SIDEBAR_MIN, SIDEBAR_MAX = 200, 440  # App.tsx resizeSidebar
 PANEL_MIN, PANEL_SHARE = 340, 0.62  # App.tsx resizePanel
 
@@ -97,6 +99,7 @@ class MainWindow(QMainWindow):
         self.welcome = Welcome()
         self.pages.addWidget(self.welcome)
         self.session_view: Optional[QWidget] = None
+        self._session_views: OrderedDict[str, QWidget] = OrderedDict()
         self.overview: Optional[QWidget] = None
         self.inbox: Optional[QWidget] = None
         self.panel: Optional[QWidget] = None
@@ -177,16 +180,25 @@ class MainWindow(QMainWindow):
         elif session is not None:
             from .session_view import SessionView
 
-            if self.session_view is None or getattr(self.session_view, "sid", None) != session.get("id"):
-                old = self.session_view
-                self.session_view = SessionView(session)
-                self.pages.addWidget(self.session_view)
-                if old is not None:
+            sid = str(session.get("id"))
+            view = self._session_views.get(sid)
+            if view is None:
+                view = SessionView(session)
+                self.pages.addWidget(view)
+                self._session_views[sid] = view
+                # the last few conversations stay built, so coming back to one is a page flip
+                while len(self._session_views) > SESSION_VIEWS_KEPT:
+                    old_sid, old = next(iter(self._session_views.items()))
+                    if old is view:
+                        break
+                    del self._session_views[old_sid]
                     self.pages.removeWidget(old)
                     old.deleteLater()
             else:
-                self.session_view.update_session(session)
-            self.pages.setCurrentWidget(self.session_view)
+                self._session_views.move_to_end(sid)
+                view.update_session(session)
+            self.session_view = view
+            self.pages.setCurrentWidget(view)
         else:
             self.pages.setCurrentWidget(self.welcome)
         self._on_ui()

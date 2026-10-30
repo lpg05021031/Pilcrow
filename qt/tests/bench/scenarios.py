@@ -22,6 +22,42 @@ from .rig import Film, Paced, click, move, pump, rss_mb, settle, type_text, whee
 Json = Dict[str, Any]
 
 
+class RowRef:
+    """A row of the conversation as the scenarios see it: a widget (the old transcript) or a block
+    of the canvas engine. ``height()`` and ``y`` read the same way either way."""
+
+    def __init__(self, ctx: Ctx, widget: Optional[QWidget] = None, block: Any = None) -> None:
+        self.ctx = ctx
+        self.widget = widget
+        self.block = block
+
+    def height(self) -> int:
+        if self.block is not None:
+            return int(self.block.h)
+        return self.widget.height()
+
+    @property
+    def is_open(self) -> bool:
+        if self.block is not None:
+            return bool(getattr(self.block, "open", False))
+        return bool(getattr(self.widget, "is_open", False))
+
+    def head_rect(self):
+        """The clickable head, in viewport coordinates."""
+        from PySide6.QtCore import QRect
+
+        if self.block is not None:
+            r = self.ctx.transcript().view.block_rect(self.block)
+            head_h = getattr(self.block, "head_h", None) or min(r.height(), 28)
+            return QRect(r.x(), r.y(), r.width(), head_h)
+        head = getattr(self.widget, "head", self.widget)
+        top = head.mapTo(self.ctx.viewport(), QPoint(0, 0))
+        return QRect(top.x(), top.y(), head.width(), head.height())
+
+    def y(self) -> int:
+        return self.head_rect().y()
+
+
 class Ctx:
     """The booted client and what the scenarios share."""
 
@@ -39,10 +75,22 @@ class Ctx:
 
     # ---- the conversation
     def transcript(self):
+        try:
+            from pilcrow_qt.canvas.transcript import Transcript as CanvasTranscript
+
+            views = self.c.find(CanvasTranscript)
+            if views:
+                return views[0]
+        except ImportError:
+            pass
         from pilcrow_qt.widgets.transcript.view import Transcript
 
         views = self.c.find(Transcript)
         return views[0] if views else None
+
+    @property
+    def canvas(self) -> bool:
+        return hasattr(self.transcript(), "scene")
 
     def viewport(self) -> QWidget:
         return self.transcript().viewport()
@@ -74,57 +122,76 @@ class Ctx:
     def scope(self, name: str, root: QWidget):
         return self.counters.scope(name, root)
 
-    def rows(self, cls_name: str, whole: bool = False) -> List[QWidget]:
-        """Rows of a class (``WorkFold``, ``Thinking``, ``ToolHead``…) that touch the viewport, top to
+    CANVAS_CLASSES = {"WorkFold": "FoldGroup", "Thinking": "ThinkingBlock", "ToolHead": "ToolBlock"}
+
+    def rows(self, cls_name: str, whole: bool = False) -> List[RowRef]:
+        """Rows of a kind (``WorkFold``, ``Thinking``, ``ToolHead``…) that touch the viewport, top to
         bottom; ``whole`` keeps only the ones whose clickable head is entirely on screen."""
         tv = self.transcript()
         vp = tv.viewport()
-        out = []
+        out: List[RowRef] = []
+        if self.canvas:
+            want = self.CANVAS_CLASSES.get(cls_name, cls_name)
+            view = tv.view
+            for b in view.visible_blocks():
+                if type(b).__name__ != want:
+                    continue
+                ref = RowRef(self, block=b)
+                hr = ref.head_rect()
+                if whole and not (0 <= hr.top() and hr.bottom() < vp.height()):
+                    continue
+                out.append(ref)
+            out.sort(key=lambda r: r.y())
+            return out
         for w in tv.widget().findChildren(QWidget):
             if type(w).__name__ != cls_name or not w.isVisible():
                 continue
             top = y_in(w, vp)
             if top + w.height() <= 0 or top >= vp.height():
                 continue
-            if whole and not rig.visible_in(self.head_of(w), vp):
+            if whole and not rig.visible_in(getattr(w, "head", w), vp):
                 continue
-            out.append(w)
-        out.sort(key=lambda w: y_in(w, vp))
+            out.append(RowRef(self, widget=w))
+        out.sort(key=lambda r: r.y())
         return out
 
-    def bring_on_screen(self, w: QWidget) -> None:
+    def click_row(self, row: RowRef) -> None:
+        """Click a row's head where it is on the screen."""
+        hr = row.head_rect()
+        click(self.viewport(), QPoint(hr.x() + min(60, hr.width() // 3), hr.y() + hr.height() // 2))
+
+    def bring_on_screen(self, row: RowRef) -> None:
         """Scroll so a row's head sits in the upper third of the viewport (a person scrolls to a row
         before clicking it; QTest delivers a click at the row's place on the screen, so the row must be
         there)."""
         tv = self.transcript()
         vp = tv.viewport()
-        head = self.head_of(w)
-        if rig.visible_in(head, vp) and 0 < y_in(head, vp) < vp.height() - 120:
+        hr = row.head_rect()
+        if 0 < hr.y() < vp.height() - 120 and hr.bottom() < vp.height():
             return
         bar = tv.verticalScrollBar()
-        bar.setValue(max(0, bar.value() + y_in(head, vp) - vp.height() // 3))
+        bar.setValue(max(0, bar.value() + hr.y() - vp.height() // 3))
         settle(250)
 
-    def rows_on_screen(self, cls_name: str, n: int = 3) -> List[QWidget]:
+    def rows_on_screen(self, cls_name: str, n: int = 3) -> List[RowRef]:
         """At least ``n`` rows of a class with their heads on screen at some point, found by starting
         at the live end (always drawn) and paging up through the history, collecting as it goes."""
         tv = self.transcript()
         tv.scroll_to_bottom()
         settle(500)
         bar = tv.verticalScrollBar()
-        found: Dict[int, QWidget] = {}
+        found: Dict[Any, RowRef] = {}
         for _ in range(60):
-            for w in self.rows(cls_name, whole=True):
-                found.setdefault(id(w), w)
+            for r in self.rows(cls_name, whole=True):
+                found.setdefault(r.block.key if r.block is not None else id(r.widget), r)
             if len(found) >= n or bar.value() == 0:
                 break
             bar.setValue(max(0, bar.value() - tv.viewport().height() // 2))
             settle(250)
         return list(found.values())[:n]
 
-    def head_of(self, row: QWidget) -> QWidget:
-        """The clickable line of a fold-like row (its ``head``), or the row itself."""
-        return getattr(row, "head", row)
+    def head_of(self, row: RowRef) -> RowRef:
+        return row
 
     def scroll_to(self, v: int) -> None:
         self.transcript().verticalScrollBar().setValue(v)
@@ -147,7 +214,7 @@ def open_cold(ctx: Ctx) -> Json:
         r = ctx.open(sid)
         tv = ctx.transcript()
         r["rss_delta_mb"] = round(rss_mb() - mem0, 1)
-        r["widgets"] = len(tv.widget().findChildren(QWidget))
+        r["widgets"] = len((tv.viewport() if ctx.canvas else tv.widget()).findChildren(QWidget))
         r["items"] = len(ctx.store.get_model(sid).items)
         r["window"] = ctx.counters.scopes["window"].snapshot()
         out[name] = r
@@ -229,12 +296,14 @@ def _toggle_rows(ctx: Ctx, cls_name: str, n: int, label: str) -> Json:
         ctx.counters.drop("transcript")
         return {"error": f"no visible {cls_name}"}
     for row in rows[:n]:
-        head = ctx.head_of(row)
         # what grows: the row itself, or for a tool head the card around it (the head stays 28px)
-        grow = row.parentWidget() if cls_name == "ToolHead" and row.parentWidget() is not None else row
+        if row.widget is not None and cls_name == "ToolHead" and row.widget.parentWidget() is not None:
+            grow = RowRef(ctx, widget=row.widget.parentWidget())
+        else:
+            grow = row
         ctx.bring_on_screen(row)
         try:
-            below = next((r for r in ctx.rows(cls_name) if y_in(r, vp) > y_in(row, vp) + 10), None)
+            below = next((r for r in ctx.rows(cls_name) if r.y() > row.y() + 10), None)
         except RuntimeError:
             below = None
         # The first open of a fold is not animated by design (its body is built then), so each row is
@@ -253,12 +322,12 @@ def _toggle_rows(ctx: Ctx, cls_name: str, n: int, label: str) -> Json:
                     heights.append(grow.height())
                     stamps.append(time.perf_counter())
                     if below is not None:
-                        below_y.append(y_in(below, vp))
+                        below_y.append(below.y())
                 except RuntimeError:
                     pass
 
             t0 = time.perf_counter()
-            click(head)
+            ctx.click_row(row)
             sync = time.perf_counter() - t0
             p = pump(0.8, on_frame=frame, film=film)
             bar.valueChanged.disconnect(conn)
@@ -316,10 +385,10 @@ def _open_folds(ctx: Ctx, n: int = 4) -> None:
     """Open a few work folds near the live end so the rows inside them are on screen. Each fold is
     brought on screen before its head is clicked: opening one moves the ones below it."""
     for row in ctx.rows_on_screen("WorkFold", n)[:n]:
-        if getattr(row, "is_open", False):
+        if row.is_open:
             continue  # left open by an earlier scenario; a click would close it
         ctx.bring_on_screen(row)
-        click(ctx.head_of(row))
+        ctx.click_row(row)
         settle(500)
     settle(300)
 
@@ -367,7 +436,8 @@ def streaming_follow(ctx: Ctx) -> Json:
     sc = ctx.scope("transcript", tv)
     win = ctx.counters.scopes["window"]
     render_times: List[float] = []
-    orig = getattr(tv, "_render", None)
+    attr = "_sync" if ctx.canvas else "_render"
+    orig = getattr(tv, attr, None)
     if orig is not None:
 
         def timed() -> None:
@@ -375,14 +445,14 @@ def streaming_follow(ctx: Ctx) -> Json:
             orig()
             render_times.append(time.perf_counter() - t)
 
-        tv._render = timed  # type: ignore[attr-defined]
+        setattr(tv, attr, timed)
     ctx.counters.reset()
     tv.scroll_to_bottom()
     ctx.store.send_message(ctx.heavy, "marathon please")
     ctx.wait_busy(ctx.heavy, True)
     p = pump(120, until=lambda: not ctx.store.rt[ctx.heavy].busy)
     if orig is not None:
-        tv._render = orig  # type: ignore[attr-defined]
+        setattr(tv, attr, orig)
     out: Json = {
         "stall": p.report(),
         "render": rig.summary(render_times),
@@ -406,21 +476,23 @@ def streaming_follow(ctx: Ctx) -> Json:
 
 
 def streaming_scrolled_up(ctx: Ctx) -> Json:
-    """The same long turn while the reader is up in the history: nothing on screen may move."""
+    """The same long turn while the reader is up in the history: nothing on screen may move. (Sending
+    takes the reader to their own message first, as it should; they scroll up once the turn runs.)"""
     ctx.open(ctx.heavy)
     ctx.c.call("mock.pace", {"ms": 3})
     tv = ctx.transcript()
     vp = tv.viewport()
     bar = tv.verticalScrollBar()
     sc = ctx.scope("transcript", tv)
+    ctx.store.send_message(ctx.heavy, "marathon please")
+    ctx.wait_busy(ctx.heavy, True)
+    settle(600)
     ctx.scroll_to(max(0, bar.maximum() - 2400))
-    settle(800)
+    settle(400)
     v0 = bar.value()
     sets: List[int] = []
     conn = bar.valueChanged.connect(lambda v: sets.append(v))
     ctx.counters.reset()
-    ctx.store.send_message(ctx.heavy, "marathon please")
-    ctx.wait_busy(ctx.heavy, True)
     # the film leaves out the bottom 70px, where the "Latest" pill appears (that one may change)
     film = Film(vp, ctx.canvas_color(), region=(0, 0, vp.width(), max(1, vp.height() - 70)))
     p = pump(120, until=lambda: not ctx.store.rt[ctx.heavy].busy, film=film)
@@ -723,7 +795,13 @@ def find(ctx: Ctx) -> Json:
     t1 = time.perf_counter()
     if bar is not None:
         type_text(bar.field, "module")
-    p = pump(20, until=lambda: not any(pg.far for pg in getattr(tv, "_pages", [])) or time.perf_counter() - t1 > 19)
+    p = pump(
+        20,
+        until=lambda: (
+            (not any(pg.far for pg in getattr(tv, "_pages", [])) and time.perf_counter() - t1 > 0.5)
+            or time.perf_counter() - t1 > 19
+        ),
+    )
     t_search = time.perf_counter() - t1
     entries = len(tv.find_entries())
     if bar is not None:
@@ -734,7 +812,7 @@ def find(ctx: Ctx) -> Json:
         "search_ms": round(t_search * 1000),
         "stall_max_ms": p.report()["max"],
         "entries": entries,
-        "widgets": len(tv.widget().findChildren(QWidget)),
+        "widgets": len((tv.viewport() if ctx.canvas else tv.widget()).findChildren(QWidget)),
     }
 
 

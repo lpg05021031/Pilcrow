@@ -1,5 +1,5 @@
-"""The conversation view against the mock server: rows and folds, a live turn, paging of a long
-conversation, following and the "Latest" pill, find."""
+"""The conversation view against the mock server: rows and folds, a live turn, a long conversation
+that opens at its end, following and the "Latest" pill, the remembered place, find."""
 
 from __future__ import annotations
 
@@ -38,9 +38,7 @@ def _socket_settled():
 def _mount(c, sid: str):
     """Open a session and reach its Transcript: the one in the real session view when that hosts it,
     otherwise one built in a plain window (the session view may still be a placeholder)."""
-    from PySide6.QtWidgets import QVBoxLayout, QWidget
-
-    from pilcrow_qt.widgets.transcript.view import Transcript
+    from pilcrow_qt.canvas.transcript import Transcript
 
     c.open(sid)
     sv = getattr(c.win, "session_view", None)
@@ -48,6 +46,16 @@ def _mount(c, sid: str):
     if isinstance(tr, Transcript) and tr.sid == sid:
         c.sleep(400)
         return c.win, tr
+    return _plain(c, sid)
+
+
+def _plain(c, sid: str):
+    """A Transcript of its own in a plain window, as another place in the app would host it."""
+    from PySide6.QtWidgets import QVBoxLayout, QWidget
+
+    from pilcrow_qt.canvas.transcript import Transcript
+
+    c.open(sid)
     cwd = str((c.store.session(sid) or {}).get("cwd") or "")
     win = QWidget()
     win.setObjectName("canvas")
@@ -71,67 +79,67 @@ def _shot(c, win, name: str) -> Path:
     return path
 
 
-def _cards(c, root):
-    from pilcrow_qt.widgets.transcript.folds import FallbackToolCard
+def _blocks(tr, cls, shown: bool = False):
+    """The blocks of a class in the scene, in reading order; ``shown`` keeps only those a person can
+    see once they scroll there (not inside a closed fold)."""
+    return [b for b in tr.scene.root.walk() if isinstance(b, cls) and (not shown or b.visible_in_tree())]
 
-    out = [w for w in c.find(FallbackToolCard, root)]
-    try:
-        from pilcrow_qt.widgets.transcript.tool_card import ToolCard
 
-        out += [w for w in c.find(ToolCard, root)]
-    except ImportError:
-        pass
-    return [w for w in out if w.isVisible()]
+def _toggle(c, tr, group) -> None:
+    from pilcrow_qt.canvas.scene import Target
+
+    tr.view.activate(group, Target("head", group.KIND, (0, 0, 0, 0)))
+    c.sleep(500)
 
 
 def test_login_shows_bubbles_text_and_closed_folds(app_client):
     c = app_client
-    from pilcrow_qt.widgets.transcript.folds import WorkFold
-    from pilcrow_qt.widgets.transcript.items import AssistantText, UserMessage
+    from pilcrow_qt.canvas.blocks.fold import Explore, FoldGroup
+    from pilcrow_qt.canvas.blocks.prose import TextGroup
+    from pilcrow_qt.canvas.blocks.tool import ToolBlock
+    from pilcrow_qt.canvas.blocks.user import UserBlock
+    from pilcrow_qt.canvas.view import column_width
 
     win, tr = _mount(c, "sess-login")
     try:
-        bubbles = c.find(UserMessage, tr)
+        bubbles = _blocks(tr, UserBlock)
         assert len(bubbles) == 3, len(bubbles)
         assert bubbles[0].item.text.startswith("The login page redirects")
-        texts = [w.item.text for w in c.find(AssistantText, tr)]
+        texts = [g.item.text for g in _blocks(tr, TextGroup)]
         assert any("hidden field" in t for t in texts), texts
-        folds = c.find(WorkFold, tr)
+        folds = _blocks(tr, FoldGroup)
         assert len(folds) == 2, len(folds)  # the two turns with tools; the last turn only spoke
-        assert all(not f.body.is_open for f in folds)
-        assert folds[0].sum.text() == "Read 2 files, searched once", folds[0].sum.text()
-        assert folds[1].sum.text() == "Edited a file, ran a command", folds[1].sum.text()
-        assert folds[0].n.text() == "3 steps"
-        assert not _cards(c, tr)  # closed folds draw no tool cards
-        # the column is centred and is the golden section of the pane plus its 24px paddings (app.css --col)
-        from pilcrow_qt.widgets.transcript.view import column_width
-
-        assert tr.inner.width() == column_width(tr.width()) + 48 and tr.inner.x() > 0
+        assert all(not f.open for f in folds)
+        assert folds[0].summary.text == "Read 2 files, searched once", folds[0].summary.text
+        assert folds[1].summary.text == "Edited a file, ran a command", folds[1].summary.text
+        assert folds[0].summary.steps == 3
+        assert not _blocks(tr, ToolBlock, shown=True)  # closed folds show no tool cards
+        # the column is centred and is the golden section of the pane (app.css --col)
+        assert tr.view.col_w == column_width(tr.view.viewport().width()) and tr.view.col_x > 0
         # thinking/verbose open every fold; normal closes them again (a remembered toggle would win)
         c.store.set_ui(view="verbose")
         c.sleep(300)
-        folds = c.find(WorkFold, tr)
-        assert len(folds) == 2 and all(f.body.is_open for f in folds)
-        assert len(_cards(c, tr)) == 5, len(_cards(c, tr))  # verbose: every step is its own card
+        folds = _blocks(tr, FoldGroup)
+        assert len(folds) == 2 and all(f.open for f in folds)
+        cards = _blocks(tr, ToolBlock, shown=True)
+        assert len(cards) == 5, len(cards)  # verbose: every step is its own card
         c.store.set_ui(view="normal")
         c.sleep(300)
-        folds = c.find(WorkFold, tr)
-        assert len(folds) == 2 and all(not f.body.is_open for f in folds)
+        folds = _blocks(tr, FoldGroup)
+        assert len(folds) == 2 and all(not f.open for f in folds)
         # a fold opens on click and shows the steps as an "Explored" line (quiet reads fold) or cards
-        folds[0].toggle()
-        c.sleep(200)
-        assert folds[0].body.is_open
-        from pilcrow_qt.widgets.transcript.folds import Explore
-
-        assert c.find(Explore, folds[0]), "quiet finished steps fold into one Explored line"
-        folds[1].toggle()
-        c.sleep(200)
-        assert _cards(c, folds[1]), "an edit and a command stay as their own cards"
+        _toggle(c, tr, folds[0])
+        assert folds[0].open and folds[0].reveal == 1.0
+        assert [b for b in folds[0].walk() if isinstance(b, Explore)], (
+            "quiet finished steps fold into one Explored line"
+        )
+        _toggle(c, tr, folds[1])
+        assert [b for b in folds[1].walk() if isinstance(b, ToolBlock)], "an edit and a command stay as their own cards"
+        assert all(b.warm for b in tr.view.visible_blocks() if not hasattr(b, "children")), "what shows is measured"
         _shot(c, win, "transcript-open-fold")
-        folds[1].toggle()
-        folds[0].toggle()
-        c.sleep(100)
-        assert not folds[0].body.is_open
+        _toggle(c, tr, folds[1])
+        _toggle(c, tr, folds[0])
+        assert not folds[0].open and folds[0].h == folds[0].HEAD
         _shot(c, win, "transcript-login")
     finally:
         if win is not c.win:
@@ -140,57 +148,55 @@ def test_login_shows_bubbles_text_and_closed_folds(app_client):
 
 def test_turn_shows_live_fold_then_done(app_client):
     c = app_client
-    from pilcrow_qt.widgets.transcript.folds import WorkFold
-    from pilcrow_qt.widgets.transcript.items import AssistantText, UserMessage
+    from pilcrow_qt.canvas.blocks.fold import FoldGroup
+    from pilcrow_qt.canvas.blocks.prose import TextGroup
+    from pilcrow_qt.canvas.blocks.user import UserBlock
 
     win, tr = _mount(c, "sess-empty")
     try:
-        assert not c.find(UserMessage, tr)
+        assert not _blocks(tr, UserBlock)
         c.call("mock.pace", {"ms": 0})
         c.store.send_message("sess-empty", "please look at the parser and fix the comment")
-        c.wait_until(lambda: c.find(UserMessage, tr), 10, "the user message")
-        assert c.find(UserMessage, tr)[0].item.text == "please look at the parser and fix the comment"
-        c.wait_until(lambda: any(f.unit.live for f in c.find(WorkFold, tr)), 10, "a live fold")
-        live = [f for f in c.find(WorkFold, tr) if f.unit.live][0]
-        assert live.mark.isVisible(), "the live fold carries the breathing mark"
-        assert not tr.working.isVisible(), "so the working line stays out of the way"
+        c.wait_until(lambda: _blocks(tr, UserBlock), 10, "the user message")
+        assert _blocks(tr, UserBlock)[0].item.text == "please look at the parser and fix the comment"
+        c.wait_until(lambda: any(f.unit.live for f in _blocks(tr, FoldGroup)), 10, "a live fold")
+        live = [f for f in _blocks(tr, FoldGroup) if f.unit.live][0]
+        assert live.live(), "the live fold carries the breathing mark"
+        assert not tr.scene.working.shown, "so the working line stays out of the way"
         _shot(c, win, "transcript-live")
         c.wait_until(lambda: c.store.rt["sess-empty"].status == "idle", 20, "the turn to finish")
-        c.sleep(300)
-        texts = [w for w in c.find(AssistantText, tr)]
+        c.sleep(600)
+        texts = _blocks(tr, TextGroup)
         assert texts and "Done" in texts[-1].item.text, [t.item.text for t in texts]
-        folds = c.find(WorkFold, tr)
-        assert folds and all(not f.unit.live and not f.body.is_open for f in folds)
-        assert all(not f.mark.isVisible() for f in folds)
-        assert not tr.working.isVisible()
+        folds = _blocks(tr, FoldGroup)
+        assert folds and all(not f.unit.live and not f.open for f in folds)
+        assert not tr.scene.working.shown and tr.scene.working.h == 0
         vb = tr.verticalScrollBar()
-        assert vb.value() == vb.maximum()
+        c.wait_until(lambda: vb.value() == vb.maximum(), 5, "the view at the end")
+        assert tr.view.follow.following
         _shot(c, win, "transcript-turn")
     finally:
         if win is not c.win:
             win.close()
 
 
-def test_long_opens_at_bottom_with_placeholder_pages(app_client):
+def test_long_opens_at_bottom_with_most_of_the_history_cold(app_client):
     c = app_client
-    from pilcrow_qt.widgets.transcript.items import UserMessage
+    from pilcrow_qt.canvas.blocks.user import UserBlock
+    from pilcrow_qt.canvas.scene import GRADE_EXACT
 
     win, tr = _mount(c, "sess-long")
     try:
         c.sleep(500)
-        pages = tr._pages
-        assert len(pages) >= 10, len(pages)
-        far = [p for p in pages if p.far]
-        drawn = [p for p in pages if not p.far]
-        assert far and drawn, (len(far), len(drawn))
-        assert len(far) > len(pages) // 2, "most of the history is a placeholder"
-        assert all(p.height() == p.est for p in far)
-        assert not pages[-1].far
         vb = tr.verticalScrollBar()
         assert vb.value() == vb.maximum() and vb.maximum() > 2000
         assert not tr.jump.isVisible()
-        bubbles = [b for b in c.find(UserMessage, tr) if b.isVisible()]
+        bubbles = [b for b in tr.view.visible_blocks() if isinstance(b, UserBlock)]
         assert bubbles and bubbles[-1].item.text.startswith("Turn 120")
+        leaves = [b for b in tr.scene.root.walk() if not hasattr(b, "children")]
+        exact = [b for b in leaves if b.grade >= GRADE_EXACT]
+        assert len(leaves) > 200 and len(exact) < len(leaves) // 2, (len(leaves), len(exact))
+        assert all(b.warm for b in tr.view.visible_blocks() if not hasattr(b, "children")), "what shows is exact"
         _shot(c, win, "transcript-long")
     finally:
         if win is not c.win:
@@ -206,21 +212,32 @@ def test_scrolling_up_stops_following_and_sent_jumps_back(app_client):
         assert vb.value() == vb.maximum()
         target = vb.maximum() // 2
         vb.setValue(target)
-        c.sleep(300)
-        assert not tr._at_bottom
-        assert abs(vb.value() - target) < 400, (vb.value(), target)  # pages near it drew; the view stayed put
-        # pages around the new spot were drawn as the reader came near
-        assert any(not p.far for p in tr._pages[: len(tr._pages) // 2])
+        c.sleep(400)
+        assert not tr.view.follow.following
+        assert abs(vb.value() - target) < 400, (vb.value(), target)  # rows near it were measured; the view stayed put
+        assert all(b.warm for b in tr.view.visible_blocks() if not hasattr(b, "children"))
         # new output while up shows "Latest"
-        c.store.get_model("sess-long").rev += 1
+        model = c.store.get_model("sess-long")
+        model.push(
+            {
+                "type": "assistant",
+                "uuid": "uu-late",
+                "message": {
+                    "id": "m-late",
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "One more thing."}],
+                },
+            }
+        )
         c.store.rt["sess-long"].rev += 1
         c.store.rt_changed.emit("sess-long")
-        c.sleep(50)
+        c.sleep(100)
         assert tr.jump.isVisible()
+        assert abs(vb.value() - target) < 400, "the new row below did not move what the reader sees"
         _shot(c, win, "transcript-latest")
         c.store.sent.emit("sess-long")
         c.wait_until(lambda: vb.value() == vb.maximum(), 5, "back at the bottom")
-        assert tr._at_bottom and not tr.jump.isVisible()
+        assert tr.view.follow.following and not tr.jump.isVisible()
     finally:
         if win is not c.win:
             win.close()
@@ -229,28 +246,34 @@ def test_scrolling_up_stops_following_and_sent_jumps_back(app_client):
 def test_scroll_position_is_remembered_per_session(app_client):
     c = app_client
     win, tr = _mount(c, "sess-long")
+    wins = [win]
     try:
         vb = tr.verticalScrollBar()
         vb.setValue(vb.maximum() // 3)
         c.sleep(400)
         index = tr.first_visible_unit()
         assert index > 0
+        # another conversation takes the window; the first one's place is kept with its scene
         win2, tr2 = _mount(c, "sess-login")
+        wins.append(win2)
         assert tr2 is not tr and tr2.verticalScrollBar().value() == tr2.verticalScrollBar().maximum()
-        win3, tr3 = _mount(c, "sess-long")
+        assert tr.scene.saved is not None and not tr.scene.saved_following
+        # a new view of the first conversation opens where the reader left it
+        win3, tr3 = _plain(c, "sess-long")
+        wins.append(win3)
         c.sleep(400)
-        assert tr3 is not tr
-        assert not tr3._at_bottom and tr3.jump.isVisible()
+        assert tr3 is not tr and tr3.scene is tr.scene, "the scene of a session is kept; the widget is new"
+        assert not tr3.view.follow.following and tr3.jump.isVisible()
         assert abs(tr3.first_visible_unit() - index) <= 1, (tr3.first_visible_unit(), index)
     finally:
-        for w in {win, win2, win3} if "win3" in locals() else {win}:
+        for w in wins:
             if w is not c.win:
                 w.close()
 
 
 def test_find_counts_and_reveals(app_client):
     c = app_client
-    from pilcrow_qt.widgets.transcript.find_bar import FindBar
+    from pilcrow_qt.canvas.find_bar import FindBar
 
     win, tr = _mount(c, "sess-long")
     try:
@@ -260,25 +283,19 @@ def test_find_counts_and_reveals(app_client):
         n = len(bar.matches)
         assert n >= 2, n
         assert bar.count.text().endswith(f"of {n}"), bar.count.text()
-        assert all(not p.far for p in tr._pages), "find draws every page"
         bar.step(1)
-        c.sleep(200)
-        # the words themselves are lit in prose rows (::highlight(find)); other rows get the wash
-        lit = [v for v in bar._lit if v.extraSelections()]
-        assert lit or bar.highlight.isVisible()
-        if lit:
-            assert any(s.format.background().color().name() == "#d97757" for v in lit for s in v.extraSelections()), (
-                "the current match is lit in full"
-            )
-        row = bar._row
-        assert row is not None and row.isVisible()
-        vb = tr.verticalScrollBar()
-        y = row.mapTo(tr.widget(), row.rect().topLeft()).y()
-        assert vb.value() - 10 <= y <= vb.value() + tr.viewport().height(), (y, vb.value())
+        c.sleep(300)
+        # the words are lit in the row that holds the current match, and that row is on screen
+        assert tr.view.needle == "module 7" and tr.view.needle_key
+        blk = tr.scene.block(tr.view.needle_key)
+        assert blk is not None and blk.visible_in_tree() and blk.warm
+        r = tr.block_rect(blk)
+        assert -10 <= r.top() <= tr.viewport().height(), (r.top(), tr.viewport().height())
         bar.field.setText("zzz-nothing-here")
         c.sleep(50)
         assert bar.count.text() == "No matches"
         bar.close_bar()
+        assert tr.view.needle == ""
         _shot(c, win, "transcript")
     finally:
         if win is not c.win:

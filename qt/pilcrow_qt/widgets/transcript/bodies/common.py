@@ -17,7 +17,7 @@ from PySide6.QtCore import QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QFont, QFontMetrics, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
-from .... import icons, theme
+from .... import icons, markdown, theme
 from ....lib.fmt import truncate
 from ....lib.transcript_model import ToolItem
 from ....store import store
@@ -610,3 +610,8 @@ def clear_layout(lay) -> None:
         if w is not None:
             w.setParent(None)
             w.deleteLater()
+
+
+def markdown_label(text: str, cwd: str = "", compact: bool = False) -> QLabel:
+    """A Markdown block as rich text (the <Markdown> component), for results and reports."""
+    return rich(markdown.render_html(text, base_dir=cwd or None, compact=compact))

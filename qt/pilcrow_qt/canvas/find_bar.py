@@ -1,64 +1,43 @@
-"""Find in the conversation (a port of web/src/components/FindBar.tsx).
+"""Find in the conversation (a port of web/src/components/FindBar.tsx) for the canvas.
 
-The search runs over the item models rather than the widgets (what the person said, what Claude
-wrote, the targets of its steps), so a row in a page that is not drawn yet still counts. Stepping
-to a match draws its page, opens the fold around it, brings the row into view and washes it in the
-accent. The list refreshes as new output arrives; Enter / Shift+Enter step, Escape closes.
+The search runs over the item models (what the person said, what Claude wrote, the targets of its
+steps), so a row that is cold still counts. Stepping to a match opens the fold around it, brings
+the block into view and lights the words; the list refreshes as new output arrives; Enter / Shift+Enter
+step, Escape closes.
 """
 
 from __future__ import annotations
 
 from typing import Callable, List, Optional, Tuple
 
-from PySide6.QtCore import QPoint, Qt, QTimer
-from PySide6.QtGui import QPainter
+from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QWidget
 
-from ... import theme
-from ...store import store
-from ..ui.bits import IconButton
-from ..ui.signals import bind
-from .items import MarkdownView, icon_label, pt, set_icon, style_label
-from .view import Transcript
+from .. import icons, theme
+from ..store import store
+from ..widgets.ui.bits import IconButton
+from ..widgets.ui.signals import bind
 
 _last_query = ""
 MAX_MATCHES = 3000
 
 
-class Highlight(QWidget):
-    """A wash over the row of the current match, mouse-transparent."""
-
-    def __init__(self, parent: QWidget) -> None:
-        super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        self.hide()
-
-    def paintEvent(self, _e) -> None:  # noqa: N802
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(theme.tokens().color("accent_wash"))
-        p.drawRoundedRect(self.rect(), theme.R2, theme.R2)
-
-
 class FindBar(QWidget):
     def __init__(
-        self, transcript: Transcript, on_close: Optional[Callable[[], None]] = None, parent: Optional[QWidget] = None
+        self, transcript, on_close: Optional[Callable[[], None]] = None, parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
         self.transcript = transcript
         self._on_close = on_close or (lambda: store.set_find_open(False))
         self.matches: List[Tuple[int, str, int]] = []  # (unit index, item id, offset)
         self.index = 0
-        self._row: Optional[QWidget] = None
-        self._lit: List[QWidget] = []  # the prose views carrying match highlights
         self.setAccessibleName("Find in conversation")
-        # .findbar: 38px tall, padding 0 5px 0 11px, radius 11, a 2px gap; the icon 6px before the field
         self.setFixedHeight(38)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(11, 0, 5, 0)
         lay.setSpacing(2)
-        self.ico = icon_label("search", theme.tokens().text_3, 14)
+        self.ico = QLabel()
+        self.ico.setFixedSize(14, 14)
         lay.addWidget(self.ico)
         lay.addSpacing(6)
         self.field = QLineEdit()
@@ -72,7 +51,7 @@ class FindBar(QWidget):
         lay.addWidget(self.field, 1)
         self.count = QLabel()
         lay.addSpacing(6)
-        lay.addWidget(self.count)  # .findbar-count: margin 0 6px
+        lay.addWidget(self.count)
         lay.addSpacing(6)
         self.prev_btn = IconButton("chevron-up", "Previous match (Shift+Enter)", 14)
         self.prev_btn.clicked.connect(lambda: self.step(-1))
@@ -81,9 +60,8 @@ class FindBar(QWidget):
         self.close_btn = IconButton("x", "Close (Esc)", 14)
         self.close_btn.clicked.connect(self.close_bar)
         for b in (self.prev_btn, self.next_btn, self.close_btn):
-            b.setFixedSize(24, 24)  # .icon-btn.sm
+            b.setFixedSize(24, 24)
             lay.addWidget(b)
-        self.highlight = Highlight(transcript.widget())
         self._refresh = QTimer(self)
         self._refresh.setSingleShot(True)
         self._refresh.setInterval(250)
@@ -93,7 +71,7 @@ class FindBar(QWidget):
         transcript.find_bar = self
         self._paint()
         if not store.find_open:
-            store.set_find_open(True)  # draws every page, so every row can be found
+            store.set_find_open(True)
         self.search(False)
         self.field.selectAll()
         self.field.setFocus()
@@ -121,16 +99,11 @@ class FindBar(QWidget):
                 if len(found) >= MAX_MATCHES:
                     break
         self.matches = found
-        if keep_index:
-            nxt = min(self.index, max(0, len(found) - 1))
-        else:
-            nxt = self._nearest()
-        self.index = nxt
+        self.index = min(self.index, max(0, len(found) - 1)) if keep_index else self._nearest()
         self._fill_count()
         self._paint_current(not keep_index)
 
     def _nearest(self) -> int:
-        """Start from the first match at or below the top of the visible part of the conversation."""
         if not self.matches:
             return 0
         top = self.transcript.first_visible_unit()
@@ -157,66 +130,18 @@ class FindBar(QWidget):
         self._paint_count()
 
     def _paint_current(self, reveal: bool) -> None:
-        if not self.matches:
-            self.highlight.hide()
-            self._row = None
-            self._light_matches("", "", -1)
+        needle = self.field.text().strip()
+        if not self.matches or not needle:
+            self.transcript.set_needle("")
             return
         _unit, item_id, _off = self.matches[self.index]
-        row = self.transcript.reveal_item(item_id)
-        if row is None:
-            self.highlight.hide()
-            return
-        self._row = row
-        # which of this item's matches is the current one, counted the way the row counts them
         k = sum(1 for u, i, o in self.matches[: self.index] if i == item_id)
-        lit = self._light_matches(self.field.text().strip(), item_id, k)
-        if lit:
-            self.highlight.hide()  # the words themselves are lit, as on the web
-        else:
-            self._place_highlight()
         if reveal:
-            # a row in a page far off screen has no layout yet: place it after the layout has run
-            QTimer.singleShot(0, lambda: (None if lit else self._place_highlight(), self.transcript.scroll_to_row(row)))
-            self.transcript.scroll_to_row(row)
-
-    def _light_matches(self, needle: str, current_id: str, k: int) -> bool:
-        """Light every match in the prose views on screen (``::highlight(find)``) and the current one
-        in full (``::highlight(find-current)``). Returns whether the current match's row could."""
-        for v in self._lit:
-            try:
-                v.set_find("", -1)
-            except RuntimeError:
-                pass
-        self._lit = []
-        if not needle:
-            return False
-        lit_current = False
-        for item_id in {i for _u, i, _o in self.matches}:
-            row = self.transcript.row_widget(item_id)
-            if row is None:
-                continue
-            for v in row.findChildren(MarkdownView) + ([row] if isinstance(row, MarkdownView) else []):
-                if v.set_find(needle, k if item_id == current_id else -1):
-                    self._lit.append(v)
-                    if item_id == current_id:
-                        lit_current = True
-        return lit_current
-
-    def _place_highlight(self) -> None:
-        row = self._row
-        if row is None:
-            self.highlight.hide()
-            return
-        pos = row.mapTo(self.transcript.widget(), QPoint(0, 0))
-        self.highlight.setGeometry(pos.x() - 6, pos.y() - 2, row.width() + 12, row.height() + 4)
-        self.highlight.show()
-        self.highlight.raise_()
+            self.transcript.reveal_item(item_id)
+        self.transcript.set_needle(needle, item_id, k)
 
     # ---- keys
     def eventFilter(self, obj, e) -> bool:  # noqa: N802
-        from PySide6.QtCore import QEvent
-
         if obj is self.field and e.type() == QEvent.Type.KeyPress:
             if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
                 self.step(-1 if e.modifiers() & Qt.KeyboardModifier.ShiftModifier else 1)
@@ -227,9 +152,7 @@ class FindBar(QWidget):
         return super().eventFilter(obj, e)
 
     def close_bar(self) -> None:
-        self._light_matches("", "", -1)
-        self.highlight.hide()
-        self.highlight.deleteLater()
+        self._refresh.stop()
         if self.transcript.find_bar is self:
             self.transcript.find_bar = None
         self._on_close()
@@ -237,18 +160,18 @@ class FindBar(QWidget):
     # ---- looks
     def _paint(self) -> None:
         t = theme.tokens()
-        set_icon(self.ico, "search", t.text_3, 14)
+        self.ico.setPixmap(icons.pixmap("search", t.text_3, 14))
         self.setObjectName("findbar")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        # a floating sheet: raised (a shade lighter on dark), 11px corners, a hairline for the shadow
         bg = "#252528" if t.dark else t.raised
         self.setStyleSheet(
             f"#findbar {{ background: {bg}; border: 1px solid {theme.blend(t.hair_2, bg).name()}; border-radius: 11px; }} "
-            f"QLineEdit {{ font-size: {pt(theme.FS_UI)}; color: {t.text}; background: transparent; border: none; padding: 0; "
+            f"QLineEdit {{ font-size: {int(theme.FS_UI + 0.5)}px; color: {t.text}; background: transparent; border: none; padding: 0; "
             f"selection-background-color: {theme.blend(t.selection, bg).name()}; }}"
         )
         self._paint_count()
 
     def _paint_count(self) -> None:
         t = theme.tokens()
-        style_label(self.count, theme.FS_SMALL, t.err if self.count.property("none") else t.text_3)
+        color = t.err if self.count.property("none") else t.text_3
+        self.count.setStyleSheet(f"QLabel {{ font-size: {int(theme.FS_SMALL + 0.5)}px; color: {color}; }}")

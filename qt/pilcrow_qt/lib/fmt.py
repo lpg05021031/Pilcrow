@@ -312,3 +312,11 @@ def err_text(e: Any) -> str:
     if e is not None and not isinstance(e, (int, float, bool, list)) and isinstance(getattr(e, "message", None), str):
         return e.message
     return str(e)
+
+
+def resolve_path(p: str, cwd: str) -> str:
+    """A path as a tool or a link names it, made absolute against the working directory."""
+    if not p or p.startswith("/") or p.startswith("~/") or re.match(r"^[A-Za-z]:[\\/]", p):
+        return p
+    base = (cwd or "").rstrip("/")
+    return f"{base}/{p[2:] if p.startswith('./') else p}" if base else p

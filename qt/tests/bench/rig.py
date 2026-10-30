@@ -96,6 +96,13 @@ class Scope:
         self.resize = 0
         self.move = 0
         self.children_added = 0
+        self.cold_paints0 = self._cold_paints()
+
+    def _cold_paints(self) -> int:
+        """The canvas engine's count of placeholders painted (a block shown before it was measured);
+        the widget transcript has no such thing and reads 0."""
+        view = getattr(self.root, "view", None)
+        return int(getattr(view, "cold_paints", 0) or 0)
 
     def snapshot(self) -> Dict[str, int]:
         return {
@@ -105,6 +112,7 @@ class Scope:
             "resize": self.resize,
             "move": self.move,
             "widgets_made": self.children_added,
+            "cold_paints": self._cold_paints() - self.cold_paints0,
         }
 
 
@@ -269,12 +277,17 @@ class Film:
         }
 
     def flashes(self, min_rows: int = 24) -> int:
-        """Frames in which a band of at least ``min_rows`` scanlines went blank and was back by the next
-        frame: what the eye sees as a flicker."""
+        """Frames in which a band of at least ``min_rows`` scanlines went blank and the same content was
+        back in the same place by the next frame: what the eye sees as a flicker. (Content moving past
+        a gap is not one: the rows that come back are different rows.)"""
         n = 0
         for i in range(1, len(self.frames) - 1):
             a, b, c = self.frames[i - 1], self.frames[i], self.frames[i + 1]
-            rows = sum(1 for y in range(len(b.blank)) if b.blank[y] and not a.blank[y] and not c.blank[y])
+            rows = sum(
+                1
+                for y in range(len(b.blank))
+                if b.blank[y] and not a.blank[y] and not c.blank[y] and a.rows[y] == c.rows[y]
+            )
             if rows >= min_rows:
                 n += 1
         return n

@@ -15,8 +15,7 @@ from ....store import store
 from ...ui import bits
 from ...ui.signals import bind
 from ..ctx import ToolCtx
-from .common import Badge, Hairline, IconLabel, Json, Row, Surface, faint, restyle, vbox
-from .generic import markdown_label
+from .common import Badge, Hairline, IconLabel, Json, Row, Surface, faint, markdown_label, restyle, vbox
 
 
 def extract_answer(text: str, q: str) -> str:
