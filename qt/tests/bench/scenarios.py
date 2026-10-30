@@ -92,20 +92,35 @@ class Ctx:
         out.sort(key=lambda w: y_in(w, vp))
         return out
 
+    def bring_on_screen(self, w: QWidget) -> None:
+        """Scroll so a row's head sits in the upper third of the viewport (a person scrolls to a row
+        before clicking it; QTest delivers a click at the row's place on the screen, so the row must be
+        there)."""
+        tv = self.transcript()
+        vp = tv.viewport()
+        head = self.head_of(w)
+        if rig.visible_in(head, vp) and 0 < y_in(head, vp) < vp.height() - 120:
+            return
+        bar = tv.verticalScrollBar()
+        bar.setValue(max(0, bar.value() + y_in(head, vp) - vp.height() // 3))
+        settle(250)
+
     def rows_on_screen(self, cls_name: str, n: int = 3) -> List[QWidget]:
-        """At least ``n`` rows of a class with their heads on screen, found by starting at the live end
-        (always drawn) and paging up through the history until enough are in view."""
+        """At least ``n`` rows of a class with their heads on screen at some point, found by starting
+        at the live end (always drawn) and paging up through the history, collecting as it goes."""
         tv = self.transcript()
         tv.scroll_to_bottom()
         settle(500)
         bar = tv.verticalScrollBar()
-        for _ in range(40):
-            found = self.rows(cls_name, whole=True)
+        found: Dict[int, QWidget] = {}
+        for _ in range(60):
+            for w in self.rows(cls_name, whole=True):
+                found.setdefault(id(w), w)
             if len(found) >= n or bar.value() == 0:
-                return found
+                break
             bar.setValue(max(0, bar.value() - tv.viewport().height() // 2))
-            settle(350)
-        return self.rows(cls_name, whole=True)
+            settle(250)
+        return list(found.values())[:n]
 
     def head_of(self, row: QWidget) -> QWidget:
         """The clickable line of a fold-like row (its ``head``), or the row itself."""
@@ -215,6 +230,9 @@ def _toggle_rows(ctx: Ctx, cls_name: str, n: int, label: str) -> Json:
         return {"error": f"no visible {cls_name}"}
     for row in rows[:n]:
         head = ctx.head_of(row)
+        # what grows: the row itself, or for a tool head the card around it (the head stays 28px)
+        grow = row.parentWidget() if cls_name == "ToolHead" and row.parentWidget() is not None else row
+        ctx.bring_on_screen(row)
         try:
             below = next((r for r in ctx.rows(cls_name) if y_in(r, vp) > y_in(row, vp) + 10), None)
         except RuntimeError:
@@ -230,9 +248,9 @@ def _toggle_rows(ctx: Ctx, cls_name: str, n: int, label: str) -> Json:
             below_y: List[int] = []
             stamps: List[float] = []
 
-            def frame(row=row, below=below, heights=heights, below_y=below_y, stamps=stamps) -> None:
+            def frame(grow=grow, below=below, heights=heights, below_y=below_y, stamps=stamps) -> None:
                 try:
-                    heights.append(row.height())
+                    heights.append(grow.height())
                     stamps.append(time.perf_counter())
                     if below is not None:
                         below_y.append(y_in(below, vp))
@@ -295,10 +313,15 @@ def fold_toggle(ctx: Ctx) -> Json:
 
 
 def _open_folds(ctx: Ctx, n: int = 4) -> None:
-    """Open a few work folds near the live end so the rows inside them are on screen."""
+    """Open a few work folds near the live end so the rows inside them are on screen. Each fold is
+    brought on screen before its head is clicked: opening one moves the ones below it."""
     for row in ctx.rows_on_screen("WorkFold", n)[:n]:
+        if getattr(row, "is_open", False):
+            continue  # left open by an earlier scenario; a click would close it
+        ctx.bring_on_screen(row)
         click(ctx.head_of(row))
-    settle(700)
+        settle(500)
+    settle(300)
 
 
 def thinking_toggle(ctx: Ctx) -> Json:

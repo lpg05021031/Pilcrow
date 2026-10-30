@@ -41,7 +41,84 @@ so a slower client receives the same input as a faster one and the stall numbers
 
 ## 2. Baseline (release 2.9.8)
 
-_Filled in from `test/out/bench-baseline.json`; see section 2 of the report in the pull request._
+`qt/tests/bench/baseline-2.9.8.json`, printed by `report.py`. The heavy conversation is 600 turns,
+5,200 messages, 5.7 MB of JSON; the mixed one 2,000 turns, 10,500 messages, 4.1 MB. Offscreen,
+software rasteriser, one core.
+
+| scenario | measure | 2.9.8 |
+|---|---|---|
+| open cold | mixed 2,000 turns: rows on screen | 868 ms |
+| open cold | heavy 600 turns: rows on screen | 680 ms |
+| open cold | heavy: first paint of the live pages | 37 ms |
+| view mode → verbose | to first paint (every drawn row rebuilt) | 15,684 ms |
+| view mode → normal | to first paint | 2,047 ms |
+| theme → light | to first paint (every widget re-polished) | 8,826 ms |
+| fold toggle | layout passes per toggle | 122 |
+| fold toggle | program scroll sets per toggle | 5.2 |
+| fold toggle | event-loop stall, max | 69 ms |
+| fold toggle | animation fps, worst | 56 |
+| thinking toggle | layout passes per toggle | 53 |
+| thinking toggle | animation fps, worst | 48 |
+| tool card toggle | layout passes per toggle | 107 |
+| tool card toggle | program scroll sets per toggle | 13 |
+| tool card toggle | stall, max | 46 ms |
+| tool card toggle | animation fps, worst | 28 |
+| tool card toggle | row below: largest single-frame jump | 84 px |
+| hover sweep | layout passes for 240 pointer moves | 1,348 |
+| streaming, following | stall p95 / max | 18 ms / 5,701 ms |
+| streaming, following | stalls over 16 ms in a 14 s turn | 19 |
+| streaming, following | CPU, one core | 94 % |
+| streaming, scrolled up | unexpected shift of what is on screen | 1,577 px over 30 frames |
+| streaming, scrolled up | program scroll sets | 33 |
+| streaming, scrolled up | stall p95 / max | 141 ms / 3,809 ms |
+| typing in the composer | conversation layout passes | 0 |
+| typing in the composer | stall p95 | 9.8 ms |
+| window resize | step p95 (reflow of the column) | 148 ms |
+| window resize | steps over 50 ms, of 26 | 10 |
+| switch session | to first paint, p50 | 7,091 ms |
+| switch session | widgets made per switch | 374 |
+| switch session | RSS growth over 10 switches | 75 MB |
+| panel tabs | Session tab: first event-loop turn | 683 ms |
+| panel tabs | Timeline tab (300 steps): stall max | 1,286 ms |
+| panel tabs | seam drag step p95 | 147 ms |
+| panel open while streaming | Tasks tab: stall p95 / max | 174 ms / 576 ms |
+| panel open while streaming | Tasks tab: layout passes in a 9 s turn | 1,928 |
+| wheel fling, 120 notches/s | stall p95 / max | 12.7 ms / 21 ms |
+| scrollbar drag, 81 steps | step p95 | 406 ms |
+| scrollbar drag, 81 steps | steps over 16 ms | 61 |
+| find | search over the whole conversation | 4,488 ms |
+| find | widgets in the conversation afterwards | 22,556 |
+| idle, nothing running | CPU | 3.6 % |
+| idle, a turn that looks busy | CPU | 16.1 % |
+
+Reading the table:
+
+- **Nothing that touches the column is cheap.** A fold toggle is a hundred layout passes; a tool
+  card opening pushes the scroll position around a dozen times; a pointer moving down the column
+  relays it 1,348 times. The animations reach 50–60 fps only because the heavy work runs between
+  frames; the toggles' stalls (47–69 ms) and the jumps of the row below (13–68 px) are the frames
+  it drops.
+- **Streaming stalls for seconds.** The 5.7 s and 3.8 s maxima are the moments a big result lands
+  (a 300-line output, a sub-agent's children): the open card is rebuilt whole, synchronously, in
+  Python. CPU sits at 94 % of a core for the whole turn.
+- **Reading while Claude writes is not possible.** Scrolled up, the content moved by 1,577 px over
+  the turn in 30 separate jumps, the largest 358 px: the compensation runs a frame late every time a
+  page below takes its real height, and the follow logic still sets the scroll position 33 times.
+- **Mode, theme and session changes rebuild the world.** Verbose view: 15.7 s. Theme: 8.8 s of
+  re-polishing 2,700 layouts and 2,800 resizes. Switching to a conversation that is already loaded:
+  7 s and 374 new widgets, because the session view is torn down and rebuilt, and 75 MB of growth
+  over ten switches.
+- **History is built a page at a time, synchronously.** Dragging the scrollbar through 600 turns
+  freezes the window for 400 ms at 61 of 81 steps. Find draws every page (22,556 widgets) before it
+  can count.
+- **The side panel redoes its tabs while Claude works.** The Tasks tab, keyed on `rt.rev`, relays
+  itself 1,928 times during one turn and stalls the window for up to 576 ms; the Session tab takes
+  683 ms to build; the Timeline tab with 300 steps blocks for 1.3 s.
+- **Idle is not idle.** A session that looks busy costs 16 % of a core to animate three indicators.
+
+(An earlier run without `linkify-it-py` installed rendered all Markdown as plain text and measured
+lower; the run above has the client's full requirements. The find scenario also surfaced a crash in
+the find bar's teardown: its refresh timer fires after the highlight widget is deleted.)
 
 ## 3. Why
 
