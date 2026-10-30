@@ -70,6 +70,8 @@ def test_prose_lines_are_24px_apart(app):
     assert prose("one line").h == 24
     assert prose("word " * 30).h == 48  # wraps to two lines at 700px
     g = TextGroup(TextItem(id="t1", text="a\n\nb", streaming=False, ts=0))
+    assert not g.shaped and g.estimate(700, measurer()) > 0  # one estimate until the text comes near
+    g.ensure_shape(None)
     assert len(g.children) == 2
     for c in g.children:
         c.set_height(c.measure(700, measurer()), 2, 700)

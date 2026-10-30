@@ -54,6 +54,11 @@ class ToolBodyBlock(NodeBlock):
             self.rebuild()
         return changed
 
+    def estimate(self, width: int, m: Measurer) -> int:
+        """A height from the item's shape (lines of output, files found, steps), so a fold's reveal
+        and the scrollbar are close before the body is ever built."""
+        return body_estimate(self.item, self.part, bool(self.state.get("full")))
+
     def _build(self, m: Measurer) -> nd.Node:
         self.handlers = {}
         try:
@@ -73,6 +78,58 @@ class ToolBodyBlock(NodeBlock):
 
 
 # ---------------------------------------------------------------- shared pieces
+
+LINE = 20  # a line of code or output, roughly (12px mono on 1.55)
+
+
+def _lines(text: Optional[str]) -> int:
+    return (text.count("\n") + 1) if text else 0
+
+
+def body_estimate(item: ToolItem, part: str = "body", full: bool = False) -> int:
+    name = item.name
+    i = item.input if isinstance(item.input, dict) else {}
+    r = item.result
+    s = item.structured if isinstance(item.structured, dict) else None
+    out = _lines(r.text) if r else 0
+    if part == "reports":
+        return 60 + min(_lines(agent_report(item)), 20) * LINE if agent_report(item) else 0
+    if r and r.is_error and name not in ("Bash", "PowerShell"):
+        return 40 + min(out, 30) * LINE
+    if name in ("Bash", "PowerShell"):
+        shown = out if (full or out <= TAIL) else TAIL
+        h = 16 + _lines(str_(i, "command")) * LINE
+        if shown:
+            h += 13 + shown * LINE + (28 if out > TAIL and not full else 0)
+        if r and r.is_error:
+            h += 30
+        return h
+    if name in ("Read", "NotebookRead"):
+        file = s.get("file") if s else None
+        n = int(file.get("numLines") or 0) if isinstance(file, dict) else out
+        return 28 + min(n, READ_MAX_LINES) * LINE + 16 + (28 if n > READ_MAX_LINES else 0)
+    if name in ("Edit", "MultiEdit", "NotebookEdit"):
+        patch = s.get("structuredPatch") if s else None
+        if isinstance(patch, list) and patch:
+            n = sum(len(h.get("lines") or []) for h in patch if isinstance(h, dict))
+        else:
+            n = _lines(str_(i, "old_string")) + _lines(str_(i, "new_string"))
+        return 40 + min(n, 400) * LINE
+    if name == "Write":
+        return 40 + min(_lines(str_(i, "content")), 400) * LINE
+    if name in ("Grep", "Glob"):
+        files = s.get("filenames") if s else None
+        if isinstance(files, list) and files:
+            return 30 + min(len(files), 200) * 22
+        return 30 + min(out, 200) * LINE
+    if name == "TodoWrite":
+        todos = i.get("todos")
+        return 8 + (len(todos) if isinstance(todos, list) else 1) * 26
+    if name in ("Agent", "Task"):
+        return 70 + min(_lines(str_(i, "prompt")), 12) * LINE
+    if name in ("WebFetch", "WebSearch"):
+        return 40 + min(out, 60) * LINE
+    return 60 + min(_lines(json_pretty(i)), 40) * LINE + min(out, 60) * LINE
 
 
 def _esc(s: str) -> str:

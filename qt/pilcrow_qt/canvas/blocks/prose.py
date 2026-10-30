@@ -185,25 +185,56 @@ class TextGroup(Group):
     paragraph margin between them."""
 
     KIND = "text"
-    __slots__ = ("item", "compact", "quiet", "cwd", "_srcs")
+    __slots__ = ("item", "compact", "quiet", "cwd", "_srcs", "_est")
 
     def __init__(self, item: TextItem, cwd: str = "", quiet: bool = False, compact: bool = False) -> None:
+        self._est = 0  # read by content_h() while Group.__init__ sets the first height
         super().__init__(f"text:{item.id}", head_h=0, pad_top=0, pad_bottom=0, open_=True)
         self.item = item
         self.cwd, self.quiet, self.compact = cwd, quiet, compact
         self._srcs: List[str] = []
-        self.shaped = True
+        # a finished text is split into its blocks when it first comes near the screen (the parse is
+        # the costly part of opening a long conversation); a text being written is split at once
+        self.shaped = False
         self.sync(item)
 
     def gap_px(self) -> int:
         return markdown.metrics(self.compact or self.quiet).para
 
+    # ---- before the split: one estimate for the whole text
+    def ensure_shape(self, scene: Any) -> None:
+        if self.shaped:
+            return
+        self.shaped = True
+        self._split(self.item)
+
+    def content_h(self) -> int:
+        return self.fen.total() if self.shaped else self._est
+
+    def estimate(self, width: int, m: Measurer) -> int:
+        if self.shaped:
+            return self.h
+        text = self.item.text
+        compact = self.compact or self.quiet
+        self._est = m.calibration.apply("prose", m.estimate_markdown(text, width, compact)) if text.strip() else 0
+        return self._est
+
+    fast_measure = estimate
+
     def sync(self, item: TextItem) -> List[Block]:
-        """Bring the blocks in line with the item's text; returns the blocks whose content changed.
-        Blocks keep their identity: the one being written is updated in place (its document takes
-        the delta), blocks past the new count go, new ones are appended."""
+        """Bring the blocks in line with the item's text; returns the blocks whose content changed."""
         self.item = item
         self.rev = item.rev
+        if not self.shaped:
+            if not item.streaming:
+                self.sig = (None, False)
+                return [self]
+            self.shaped = True
+        return self._split(item)
+
+    def _split(self, item: TextItem) -> List[Block]:
+        """Blocks keep their identity: the one being written is updated in place (its document takes
+        the delta), blocks past the new count go, new ones are appended."""
         srcs = markdown.split_blocks(item.text) if item.text else []
         streaming = bool(item.streaming)
         changed: List[Block] = []

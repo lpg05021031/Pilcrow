@@ -137,7 +137,7 @@ class FindBar(QWidget):
         _unit, item_id, _off = self.matches[self.index]
         k = sum(1 for u, i, o in self.matches[: self.index] if i == item_id)
         if reveal:
-            self.transcript.reveal_item(item_id)
+            self.transcript.reveal_item(item_id, needle, k)
         self.transcript.set_needle(needle, item_id, k)
 
     # ---- keys

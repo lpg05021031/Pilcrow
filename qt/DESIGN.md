@@ -234,10 +234,21 @@ estimate-to-real snap of a page coming into view.
 
 Every block has a height from the moment it exists: a block the reconciler makes is estimated at
 once (for a group, the leaves that show once it is open), so the scrollbar is honest from the first
-frame and a block streaming in at the end never spends a frame at zero height. A fold that opens
-measures its children exactly under an 8 ms budget before the reveal starts, so the animation runs
-on true heights; past the budget the rest keep their estimates and are measured as they come into
-view.
+frame and a block streaming in at the end never spends a frame at zero height. A tool body's
+estimate reads the item (lines of output up to the tail it shows, lines of a diff, files found,
+steps of a todo), so it is close before the body is ever built. A fold that opens measures its
+children exactly under a 14 ms budget before the reveal starts, so the animation runs on true
+heights; past the budget the rest take the fast grade and are measured as they come into view.
+
+A person's scroll and a resize step measure exactly under an 8 ms deadline: what fits is painted
+exactly, the rest shows as placeholder bars for a frame or two while the drain finishes it. A
+commit from the model (new output, a toggle) has no deadline: what it shows must be right.
+
+Shapes are lazy twice over: a work fold builds its inside (chapters, steps, cards) the first time it
+is opened, revealed by a search, or scrolled into view while open, and carries a guess (a row per
+step) until then; a finished text splits into its paragraphs the first time it comes near the
+screen, and is one estimate until then. Opening a 600-turn conversation builds its units and
+nothing inside them; switching every fold open (verbose) costs the units that are on screen.
 
 A height upgrade is a mutation like any other: it goes through the anchor correction, so the
 reader never sees it. Heights are cached per `(key, rev, width, font scale)`; a block that is
@@ -492,7 +503,7 @@ scenarios.
 
 ## 12. Costs, estimated against the baseline
 
-Back-of-envelope, to be replaced by measurements as each phase lands:
+Back-of-envelope from before the work; the measurements are in `PERF.md` §5 and §7:
 
 | interaction | 2.9.8 | engine |
 |---|---|---|
@@ -513,44 +524,48 @@ Back-of-envelope, to be replaced by measurements as each phase lands:
 
 ## 13. Migration
 
-Phase 1 — the engine and prose: `canvas/` with Fenwick, Scene, anchor, estimate, clock, paint,
-prose/user/thinking/notice/result blocks, streaming append, pixmap cache, pixel scrolling, follow,
-"Latest", remembered position, islands for the empty card. `TranscriptCanvas` replaces
-`Transcript` behind the same public methods; `test_transcript.py` and `test_items.py` are rewritten
-against blocks; pure unit tests for `fenwick`, `anchor`, `estimate`, `scene`. Bench: open, scroll,
-streaming, typing, resize, switch, theme.
+Phases 1 and 2 have landed (2.10.0): `canvas/` with Fenwick, Scene, anchor, estimate, clock, paint,
+nodes, the prose / user / thinking / notice / result / working blocks, streaming append, the pixmap
+cache, pixel scrolling, follow and "Latest", the remembered place, islands for the empty card; the
+work folds (`FoldGroup`, `ChapterGroup`, `Explore`, `Steps`, `Flat`), `ToolBlock` with every body
+painter (Bash, Read, Edit/Write diff, Notebook, Grep/Glob, Todo, Task, Agent with nested children,
+Web, Workflow, generic/MCP, errors with fixes), the permission / question / plan islands, orphans.
+`canvas.transcript.Transcript` replaced `widgets.transcript.view.Transcript` behind the same public
+methods; the old package is gone but for the real widgets the canvas still hosts (`permission.py`,
+`bodies/ask.py`, `bodies/plan.py`) and the pure code/diff helpers (`bodies/code.py`,
+`bodies/common.py`); the fold helpers moved to `lib/folds.py`. Sessions keep their scene (eight)
+and their view (eight) when switched. What the implementation refined over the plan: the anchor
+prefers an exact leaf (§4.1); the hold is silent and the invalidation is per changed block (§3);
+every block has a height from birth, and a fold measures its children under a budget before it
+opens (§5); the drain is one commit and remembers when there is nothing to do.
 
-Phase 2 — work: `FoldGroup`, `ChapterGroup`, `ExploreGroup`, `StepsGroup`, `ToolBlock` with every
-body painter (Bash, Read, Edit/Write diff, Notebook, Grep/Glob, Todo, Task, Agent with nested
-children, Web, Workflow, generic/MCP, errors with fixes), the permission / question / plan islands,
-orphans. `test_tool_cards.py` rewritten against blocks. Bench: fold / thinking / tool toggles, hover,
-find, view mode.
-
-Phase 3 — people: selection and copy, context menu, keyboard focus and shortcuts, tooltips, find
-highlighting, accessibility (`QAccessibleInterface` exposing visible blocks), font scale.
+Phase 3 — people: context menu, keyboard focus and shortcuts, accessibility (`QAccessibleInterface`
+exposing visible blocks), font scale. (Selection and copy, tooltips and find highlighting are in.)
 
 Phase 4 — the rest of the window: Refresher discipline and row reconciliation, `RowScene` for the
 Timeline and Tasks lists, `DiffGrid` caching, `Collapse` on the clock, the sidebar diff, hover and
 stylesheet hygiene, sliced loading, the perf budget tests in `qt/tests/test_perf_budget.py` and in
-the release script.
-
-The old `widgets/transcript/` package is deleted at the end of phase 2; until then both exist and
-`session_view._make_transcript` picks the engine. There is no runtime flag to keep both alive.
+the release script. The view-mode and theme switches still re-sync every unit and re-polish every
+widget in the window; both belong here.
 
 ## 14. Tests
 
-- **Pure**: `test_fenwick.py` (randomised against a list), `test_anchor.py` (anchor choice,
-  correction, fallback when the anchor block is removed, following thresholds), `test_estimate.py`
-  (calibration converges; CJK and code), `test_scene.py` (incremental sync equals a from-scratch
-  build for random message sequences; shapes stale/restale; keys stable).
-- **Engine, offscreen**: `test_canvas.py` — paint covers the exposed region with the right blocks;
-  pixel scroll exposes only the strip; hover invalidates two rects; selection text; islands move;
-  no `LayoutRequest` ever reaches the view (asserted with the bench's counter); toggles produce no
-  scroll sets; heights at grade 1 within 3 % of grade 2 on the mock's heavy shapes.
-- **Behaviour**: the rewritten transcript and tool-card tests, asserting on block text, fold state,
-  follow, "Latest", find, remembered position — what the web e2e tests assert.
-- **Budgets**: `test_perf_budget.py` runs a short version of the bench (120 heavy turns) and asserts
-  the targets in `qt/PERF.md` §5 with headroom; `npm run release` runs it.
+- **Pure** (`test_canvas_core.py`): the Fenwick tree against a list under random updates; group
+  heights, positions and reveal; leaf walks; the anchor surviving growth above it and the removal of
+  its block; the follow thresholds; estimates and calibration; sibling margins collapsing.
+- **Blocks, offscreen, no server** (`test_blocks.py`, `test_tool_blocks.py`): prose line boxes,
+  pills, quotes and code wells as painted; find lights; the person's bubble; the column width; every
+  tool body (head words, numbered code, diffs, ANSI output, exit codes and tails, todo, search,
+  nested agents and their reports, MCP), the sync fast path, the question and plan forms and the
+  permission card answering through `store.respond`, and a screenshot of every kind painted by a
+  real `CanvasView` with `cold_paints == 0`.
+- **Behaviour, against the mock** (`test_transcript.py`): rows and closed folds of a conversation,
+  verbose opening every fold, a fold opening to an "Explored" line or to cards, a live turn carrying
+  the mark and the view ending at the end, a long conversation opening at its end with most of the
+  history cold, scrolling up stopping the follow and new output showing "Latest" without moving
+  the view, the remembered place in a new view, find.
+- **Budgets** (phase 4): `test_perf_budget.py` will run a short version of the bench (120 heavy
+  turns) and assert the targets in `qt/PERF.md` §5 with headroom; `npm run release` runs it.
 
 ## 15. Rejected alternatives, briefly
 

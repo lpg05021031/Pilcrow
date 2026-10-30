@@ -143,10 +143,15 @@ def sync_row(b: Block, item: Item, ctx: ToolCtx) -> List[Block]:
 
 
 def reconcile(
-    group: Group, keys: List[str], make: Callable[[int], Block], update: Callable[[Block, int], List[Block]]
+    group: Group,
+    keys: List[str],
+    make: Callable[[int], Block],
+    update: Callable[[Block, int], List[Block]],
+    settled: int = 0,
 ) -> List[Block]:
-    """Make a group's children match ``keys`` in order: the common prefix is kept and updated, the
-    rest is rebuilt from the first difference. Returns the blocks whose content changed."""
+    """Make a group's children match ``keys`` in order: the common prefix is kept and updated (the
+    first ``settled`` of them without even asking), the rest is rebuilt from the first difference.
+    Returns the blocks whose content changed."""
     changed: List[Block] = []
     have = [c.key for c in group.children]
     keep = 0
@@ -159,7 +164,8 @@ def reconcile(
         group.truncate(keep)
     for i in range(len(keys)):
         if i < keep:
-            changed.extend(update(group.children[i], i))
+            if i >= settled:
+                changed.extend(update(group.children[i], i))
         else:
             b = make(i)
             group.append(b)
@@ -599,7 +605,6 @@ class FoldGroup(Group):
 
     def __init__(self, unit: WorkUnit, ctx: ToolCtx, sid: str, state: Dict[str, bool]) -> None:
         super().__init__(unit.key, head_h=self.HEAD, pad_top=6, pad_bottom=4, open_=False)
-        self.shaped = True
         self.unit = unit
         self.ctx = ctx
         self.sid = sid
@@ -607,8 +612,24 @@ class FoldGroup(Group):
         self.summary = work_summary(unit.work)
         self.inner: Optional[Group] = None
         self._mode = ""
+        self.shaped = False  # the inside is built the first time it is needed (opened, revealed, found)
         self.sync(unit, ctx)
         self.set_open(self.wants_open)
+
+    def ensure_shape(self, scene: Any) -> None:
+        if self.shaped:
+            return
+        self.shaped = True
+        self.sync(self.unit, self.ctx)
+
+    def content_h(self) -> int:
+        if self.shaped:
+            return self.fen.total()
+        unit = getattr(self, "unit", None)  # not there yet while Group.__init__ runs
+        if unit is None:
+            return 0
+        # a fair guess at the inside until it is built: a row per step, a heading per paragraph
+        return sum(40 if it.kind == "text" else 28 for it in unit.work if it.kind != "thinking") + 8
 
     @property
     def waiting(self) -> bool:
@@ -625,9 +646,20 @@ class FoldGroup(Group):
         self.summary = work_summary(unit.work)
         doing = live_label(unit.work) if unit.live else None
         self.sig = (unit.live, self.summary.text, self.summary.failed, doing, ctx.view, len(unit.work))
+        changed: List[Block] = []
+        if not self.shaped:
+            # nothing inside to keep in line; the head reads the unit directly
+            want = self.wants_open
+            if want != self.open and self.key not in self.state:
+                self.open = want
+                self.set_reveal(1.0 if want else 0.0)
+            elif self.waiting and not self.open:
+                self.open = True
+                self.set_reveal(1.0)
+            changed.append(self)
+            return changed
         chapters = chapters_of(unit.work)
         mode = "flat" if (len(chapters) == 1 and chapters[0].title is None) else "chapters"
-        changed: List[Block] = []
         if mode != self._mode or self.inner is None:
             if self.inner is not None:
                 self.truncate(0)

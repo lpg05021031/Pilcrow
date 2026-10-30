@@ -79,8 +79,9 @@ class Ctx:
             from pilcrow_qt.canvas.transcript import Transcript as CanvasTranscript
 
             views = self.c.find(CanvasTranscript)
-            if views:
-                return views[0]
+            shown = [v for v in views if v.isVisible()]  # sessions keep their view; one is on screen
+            if shown or views:
+                return (shown or views)[0]
         except ImportError:
             pass
         from pilcrow_qt.widgets.transcript.view import Transcript
@@ -156,8 +157,13 @@ class Ctx:
         return out
 
     def click_row(self, row: RowRef) -> None:
-        """Click a row's head where it is on the screen."""
+        """Click a row's head where it is on the screen (the canvas takes the click on its viewport; a
+        widget row takes it on the head widget itself, as QTest delivers to one widget)."""
         hr = row.head_rect()
+        if row.widget is not None:
+            head = getattr(row.widget, "head", row.widget)
+            click(head, QPoint(min(60, head.width() // 3), head.height() // 2))
+            return
         click(self.viewport(), QPoint(hr.x() + min(60, hr.width() // 3), hr.y() + hr.height() // 2))
 
     def bring_on_screen(self, row: RowRef) -> None:
@@ -254,7 +260,8 @@ def scroll_wheel(ctx: Ctx) -> Json:
         if film is not None:
             out["blank_fraction"] = film.blank_fraction()
             out["flashes"] = film.flashes()
-            out["shift"] = film.shifts(expected=lambda i: positions[i - 1] - positions[i] if i < len(positions) else 0)
+            # the content moves up by what the value grew (frame i shows the value recorded after frame i-1)
+            out["shift"] = film.shifts(expected=lambda i: positions[i] - positions[i - 1] if i < len(positions) else 0)
         return out
 
     up = fling(+1, 4.0, filmed=False)
@@ -752,9 +759,10 @@ def view_mode_cycle(ctx: Ctx) -> Json:
         ctx.store.set_ui(view=mode)
         ctx.c.app.processEvents()
         ctx.transcript().viewport().grab()
+        to_paint = time.perf_counter() - t0
         p = pump(1.0)
         out[mode] = {
-            "to_paint_ms": round((time.perf_counter() - t0) * 1000),
+            "to_paint_ms": round(to_paint * 1000),
             "stall_max_ms": p.report()["max"],
             "widgets_made": ctx.counters.scopes["window"].children_added,
         }
@@ -773,9 +781,10 @@ def theme_toggle(ctx: Ctx) -> Json:
         ctx.theme.theme.apply(dark)
         ctx.c.app.processEvents()
         ctx.transcript().viewport().grab()
+        to_paint = time.perf_counter() - t0
         p = pump(0.6)
         out["light" if not dark else "dark"] = {
-            "to_paint_ms": round((time.perf_counter() - t0) * 1000),
+            "to_paint_ms": round(to_paint * 1000),
             "stall_max_ms": p.report()["max"],
             "window": ctx.counters.scopes["window"].snapshot(),
         }
@@ -795,10 +804,12 @@ def find(ctx: Ctx) -> Json:
     t1 = time.perf_counter()
     if bar is not None:
         type_text(bar.field, "module")
+    # the matches are counted once every row the search reads is there (the widget transcript had to
+    # draw its placeholder pages first; the canvas reads the model)
     p = pump(
         20,
         until=lambda: (
-            (not any(pg.far for pg in getattr(tv, "_pages", [])) and time.perf_counter() - t1 > 0.5)
+            (bar is not None and bool(bar.matches) and not any(pg.far for pg in getattr(tv, "_pages", [])))
             or time.perf_counter() - t1 > 19
         ),
     )

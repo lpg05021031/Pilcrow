@@ -92,6 +92,7 @@ class TranscriptScene(Scene):
         self.saved_following = True
         self.model_rev = -1
         self.shapes_stale = False
+        self._find_cache: Dict[str, Tuple[int, str]] = {}
 
     # ---- the context
     def _ctx(self, rt, view: str) -> ToolCtx:
@@ -138,6 +139,7 @@ class TranscriptScene(Scene):
         if loaded and not items and self.empty is not None and self.empty.usable:
             keys.append("empty")
         unit_keys = [unit_group_key(u) for u in units]
+        unit_at = {k: i for i, k in enumerate(unit_keys)}
         keys.extend(unit_keys)
         orphan_perms = [
             p
@@ -145,6 +147,7 @@ class TranscriptScene(Scene):
             if not p.get("toolUseId") or str(p.get("toolUseId")) not in model.tools
         ]
         orphan_keys = [f"orphan:{p.get('requestId')}" for p in orphan_perms]
+        orphan_at = {k: i for i, k in enumerate(orphan_keys)}
         keys.extend(orphan_keys)
         keys.append("working")
         n_settled = len(self.settled_units)
@@ -159,25 +162,25 @@ class TranscriptScene(Scene):
             if k == "working":
                 return self.working
             if k.startswith("orphan:"):
-                p = orphan_perms[orphan_keys.index(k)]
+                p = orphan_perms[orphan_at[k]]
                 o = OrphanIsland(p, ctx)
                 self.orphans[k] = o
                 return o
-            u = units[unit_keys.index(k)]
+            u = units[unit_at[k]]
             return unit_group(u, ctx, self.sid, self.fold_state)
 
         def update(blk: Block, i: int) -> List[Block]:
             k = keys[i]
             if k in ("skeleton", "empty", "working") or k.startswith("orphan:"):
                 return []
-            ui = unit_keys.index(k)
+            ui = unit_at[k]
             if ui < resync_from:
                 return []
             return sync_unit_group(blk, units[ui], ctx)  # type: ignore[arg-type]
 
         from .blocks.fold import reconcile
 
-        changed.extend(reconcile(self.root, keys, make, update))
+        changed.extend(reconcile(self.root, keys, make, update, settled=1 + resync_from))
         self.shapes_stale = False
         # the skeleton and the working line
         if self.skeleton.shown != loading:
@@ -196,6 +199,17 @@ class TranscriptScene(Scene):
 
     # ---- lookups
     def block_for_item(self, item_id: str) -> Optional[Block]:
+        blk = self._lookup(item_id)
+        if blk is None:
+            # inside a fold that has not been built yet: build it, then look again
+            i = self.unit_index_of(item_id)
+            g = self.root.children[1 + i] if 0 <= i < len(self.units) and 1 + i < len(self.root.children) else None
+            if isinstance(g, Group) and not g.shaped:
+                g.ensure_shape(self)
+                blk = self._lookup(item_id)
+        return blk
+
+    def _lookup(self, item_id: str) -> Optional[Block]:
         for prefix in ("text", "user", "thinking", "tool", "special", "notice", "result", "compact", "cmd"):
             blk = self.by_key.get(f"{prefix}:{item_id}")
             if blk is not None:
@@ -210,12 +224,20 @@ class TranscriptScene(Scene):
         return -1
 
     def find_entries(self) -> List[Tuple[int, str, str]]:
+        """(unit index, item id, text) for everything find can match; the texts are kept per item
+        revision, so a search costs the walk, not the tool metadata."""
         out: List[Tuple[int, str, str]] = []
+        cache = self._find_cache
+        fresh: Dict[str, Tuple[int, str]] = {}
         for i, u in enumerate(self.units):
             for it in u.work if u.kind == "work" else u.items:
-                text = _find_text(it, self.cwd)
-                if text:
-                    out.append((i, it.id, text))
+                hit = cache.get(it.id)
+                if hit is None or hit[0] != it.rev:
+                    hit = (it.rev, _find_text(it, self.cwd))
+                fresh[it.id] = hit
+                if hit[1]:
+                    out.append((i, it.id, hit[1]))
+        self._find_cache = fresh
         return out
 
 
@@ -355,19 +377,41 @@ class Transcript(QWidget):
         self.scene.saved = None
         self.scene.saved_following = True
 
-    def reveal_item(self, item_id: str) -> Optional[Block]:
-        """Open the folds around an item and bring it into view; the block, or None when it is not here."""
+    def reveal_item(self, item_id: str, needle: str = "", k: int = -1) -> Optional[Block]:
+        """Open the folds around an item and bring it into view (with a needle: the paragraph holding
+        its k-th match); the block, or None when it is not here."""
+        blk = self.locate(item_id, needle, k)
+        if blk is None:
+            return None
+        self.view.scroll_to_block(blk)
+        return blk
+
+    def locate(self, item_id: str, needle: str = "", k: int = -1) -> Optional[Block]:
+        """The block of an item, built and measured, its folds opened; for a text with a needle, the
+        paragraph that holds the k-th match."""
         blk = self.scene.block_for_item(item_id)
         if blk is None:
             return None
-        self.view.begin()
+        v = self.view
+        v.begin()
         try:
-            self.view.open_path(blk)
-            if not blk.warm or blk.h_width != self.view.col_w:
-                self.view._exact(blk)
+            v.open_path(blk)
+            if not blk.warm or blk.h_width != v.col_w:
+                v._exact(blk)
+            if needle and k >= 0 and isinstance(blk, Group) and blk.children:
+                from .paint import find_ranges
+
+                for c in blk.children:
+                    if not c.warm or c.h_width != v.col_w:
+                        v._exact(c)
+                    doc = getattr(c, "doc", None)
+                    n = len(find_ranges(doc, needle)) if doc is not None else 0
+                    if k < n:
+                        blk = c
+                        break
+                    k -= n
         finally:
-            self.view.end()
-        self.view.scroll_to_block(blk)
+            v.end()
         return blk
 
     def block_rect(self, blk: Block):
@@ -376,10 +420,25 @@ class Transcript(QWidget):
     def set_needle(self, needle: str, current_item_id: str = "", k: int = -1) -> None:
         """Light every match of ``needle`` on screen, the current one (the k-th in its item) in full."""
         self.view.needle = needle
-        blk = self.scene.block_for_item(current_item_id) if current_item_id else None
+        blk = self.locate(current_item_id, needle, k) if current_item_id else None
         self.view.needle_key = blk.key if blk is not None else ""
-        self.view.needle_index = k
+        self.view.needle_index = self._needle_index(blk, current_item_id, needle, k) if blk is not None else -1
         self.view.viewport().update()
+
+    def _needle_index(self, blk: Block, item_id: str, needle: str, k: int) -> int:
+        """The match's index within the block that paints it (a text's k-th match counted across
+        its paragraphs becomes the j-th of one paragraph)."""
+        from .paint import find_ranges
+
+        g = self.scene.block_for_item(item_id)
+        if g is blk or not isinstance(g, Group):
+            return k
+        for c in g.children:
+            if c is blk:
+                return k
+            doc = getattr(c, "doc", None)
+            k -= len(find_ranges(doc, needle)) if doc is not None else 0
+        return k
 
     def open_find(self) -> None:
         store.set_find_open(True)
@@ -426,8 +485,7 @@ class Transcript(QWidget):
                 if blk.scene is not self.scene:
                     continue
                 if isinstance(blk, Group):
-                    v._exact(blk)  # its height is its children's; the leaves that show get estimates
-                    v.estimate(blk)
+                    v.estimate(blk)  # its height is its children's; the leaves that show get estimates
                 elif blk.warm:
                     v._exact(blk)
                 else:

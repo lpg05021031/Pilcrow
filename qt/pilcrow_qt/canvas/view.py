@@ -33,7 +33,8 @@ NEAR_SCREENS = 3  # warm within this many viewports
 FAR_SCREENS = 6  # cool beyond this many
 PREFETCH_BUDGET = 0.004
 FLING_BUDGET = 0.002
-OPEN_BUDGET = 0.008  # measuring a fold's children before it opens, so the reveal runs on true heights
+OPEN_BUDGET = 0.014  # measuring a fold's children before it opens, so the reveal runs on true heights
+SCROLL_BUDGET = 0.008  # exact measuring on a person's scroll or a resize step; the rest follows in the drain
 WARM_MAX = 600  # warm blocks kept before the far ones are cooled regardless of movement
 TOOLTIP_MS = 600
 
@@ -145,6 +146,7 @@ class CanvasView(QAbstractScrollArea):
         self._scanned_rev = -1
         self._drained: Any = None  # the state the last complete drain saw: nothing to do until it changes
         self._cooled_at = 0
+        self._deadline: Optional[float] = None  # when set, the commit measures exactly only until then
         self._last_value = 0
         self._last_user_scroll = 0.0
         self._grew = False
@@ -198,11 +200,13 @@ class CanvasView(QAbstractScrollArea):
         self.col_x = (vw - col) // 2
         if self.scene.width != col:
             self.scene.width = col
+            self._deadline = time.perf_counter() + SCROLL_BUDGET
             self.begin()
             try:
                 self._remeasure_visible(force=True)
             finally:
                 self.end()
+                self._deadline = None
             self._prefetch.start()
 
     def _update_range(self) -> None:
@@ -379,8 +383,13 @@ class CanvasView(QAbstractScrollArea):
         self.scrolled.emit(v > 4)
         if self._depth == 0 and not self._committing:
             # a commit at the new place: what came into view is measured, the pill and islands follow
-            self.begin()
-            self.end()
+            # (a person's scroll gets a deadline: the frame must not wait for a screen of documents)
+            self._deadline = None if self._own else time.perf_counter() + SCROLL_BUDGET
+            try:
+                self.begin()
+                self.end()
+            finally:
+                self._deadline = None
         if not self._silent:
             self._rehover()
 
@@ -454,7 +463,7 @@ class CanvasView(QAbstractScrollArea):
     def _exact(self, b: Block) -> int:
         """Measure a block exactly at the column width; returns the height delta."""
         if isinstance(b, Group) and not b.shaped:
-            b.ensure_shape(self.scene)
+            self.shape(b)
         h = b.measure(self.col_w, self.m)
         self._warm.add(b)
         b.warm = True
@@ -471,6 +480,17 @@ class CanvasView(QAbstractScrollArea):
         b.warm = False
         b.set_height(b.estimate(self.col_w, self.m), 0, self.col_w)
 
+    def shape(self, g: Group) -> None:
+        """Build a group's children the first time they are needed: they take their estimates, and
+        the islands among them are hosted here."""
+        if g.shaped:
+            return
+        g.ensure_shape(self.scene)
+        self.estimate(g)
+        for c in g.walk():
+            if isinstance(c, IslandBlock):
+                self.register_island(c)
+
     def _cold_visible(self, y0: int, y1: int) -> List[Block]:
         out: List[Block] = []
         for b, _y in self.scene.leaves_between(y0, y1):
@@ -479,14 +499,19 @@ class CanvasView(QAbstractScrollArea):
         return out
 
     def _remeasure_visible(self, force: bool = False) -> bool:
-        """Measure every cold block in the viewport exactly; returns whether anything was measured."""
+        """Measure every cold block in the viewport exactly (until the deadline, when one is set: the
+        rest paint as placeholders and the drain finishes them); returns whether anything was measured."""
         y0 = self.scene_y(0)
         y1 = y0 + self.viewport().height()
         did = False
         cold = self._cold_visible(y0, y1)
+        deadline = self._deadline
         for b in cold:
             if isinstance(b, Group) and b.children and b.shaped and b.h_width == self.col_w and not force:
                 continue
+            if deadline is not None and did and time.perf_counter() > deadline:
+                self._prefetch.start()
+                break
             self._exact(b)
             did = True
         return did
@@ -864,7 +889,7 @@ class CanvasView(QAbstractScrollArea):
         if tw is not None:
             tw.stop()
         if open_ and not g.shaped:
-            g.ensure_shape(self.scene)
+            self.shape(g)
         if open_:
             # the children are measured before they show, so the reveal runs on their true heights;
             # a heavy body past the budget keeps its estimate and is measured as it comes into view
@@ -876,8 +901,8 @@ class CanvasView(QAbstractScrollArea):
                         continue
                     if time.perf_counter() - t0 < OPEN_BUDGET:
                         self._exact(c)
-                    elif c.grade == 0 and not c.warm:
-                        c.set_height(c.estimate(self.col_w, self.m), 0, self.col_w)
+                    elif c.grade < GRADE_FAST and not c.warm:
+                        c.set_height(c.fast_measure(self.col_w, self.m), GRADE_FAST, self.col_w)
             finally:
                 self.end()
         if not animate or store.reduced_motion or not self.isVisible():
@@ -907,11 +932,10 @@ class CanvasView(QAbstractScrollArea):
         tw.start(g.reveal, target, ms, curve)
 
     def _walk_open(self, g: Group) -> Any:
-        """The leaves of a group that show once it is open (closed groups inside stay closed)."""
+        """The leaves of a group that show once it is open: closed groups inside stay closed, and a
+        group not built yet counts as one leaf (it carries its own estimate until it is needed)."""
         for c in g.children:
             if isinstance(c, Group) and c.children:
-                if not c.shaped:
-                    c.ensure_shape(self.scene)
                 if c.open:
                     yield from self._walk_open(c)
                 continue
