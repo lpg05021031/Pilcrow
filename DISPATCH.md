@@ -2,8 +2,8 @@
 
 A design for running the same piece of work across a set of repositories at once, watching it as a
 whole, and finishing it as a whole. The reference point is herdr and the tools built around it
-(a terminal UI that finds the repositories under a folder, shows what Claude Code is doing in each,
-and lets you start and steer agents there). Pilcrow already owns the parts that make the hard half of
+(a terminal runtime that keeps coding agents in panes on a background server, marks each one working,
+blocked or idle, and gives agents a CLI and socket API to start, prompt and wait on one another). Pilcrow already owns the parts that make the hard half of
 this easy: a server that runs sessions through the Agent SDK, git worktrees per session, a scheduler
 that runs sessions unattended and collects what they did into an inbox, snapshots of every file a
 session touched, a control room that watches live sessions and answers their permission requests, and
@@ -12,21 +12,39 @@ that ties them together, and the two screens that show it.
 
 ## 0. What herdr does, and where the room is
 
-What it does well: find every repository under a tree, start an agent in each from one place, see at a
-glance which agents are idle, working, blocked or done, and read a little git status beside them. It
-is a pane manager with a repo finder; the agents are tmux panes.
+herdr (herdr.dev, Apache-2.0, one Rust binary) is the runtime many people run their agents on, and it
+is good at being that: panes survive the client closing or an SSH drop because a background server owns
+them; the sidebar marks every pane *working*, *blocked* or *idle*; a CLI and a socket API let one agent
+start another, prompt it, wait until it is blocked and read its screen (`herdr agent start | prompt
+--wait | wait --until | read`, `events.subscribe`); `herdr worktree create` opens a worktree as a
+workspace under its repository; saved SSH machines appear beside local work; plugins add sandboxes and
+coordinators. The fan-out people do on top of it is a pattern, not a feature: *worktree-fleet* splits a
+task into file-disjoint buckets, gives each a tab, a worktree and a branch, hands each a short contract
+(paths owned, a verify command, push after every commit, an evidence block at the end), watches the
+agents' state from a bash loop so no tokens are spent waiting, and merges the branches one by one from
+the main pane; *herdr-projects* runs a coordinator agent that spawns one agent per task on its own
+branch.
 
-What it leaves to the person: the work has no identity (there is no "job", only panes that happen to
-share a prompt); nothing is isolated (agents edit the repository's checkout, so two jobs or a person's
-own work collide); there is no plan before the fan-out, so a typo in the prompt runs twenty times;
-blocked agents are found by looking; results are read pane by pane, and finishing (commit, branch,
-PR, cleanup) is twenty manual acts; nothing survives the terminal closing; nothing is measured.
+What that leaves to the person, in herdr's own words and its users': the state is a heuristic (a screen
+manifest matches known approval prompts; an unfamiliar prompt reads as *idle*, so an agent can wait on a
+question while the sidebar says nothing is wrong); a worktree isolates files only (ports, `.env`,
+dependencies are the person's per-worktree chore); the work has no identity across panes (a fleet is
+the set of panes on `fleet/*` branches, gone with them); nothing is planned before the fan-out, so a
+bad brief runs twenty times; the same permission is answered twenty times, once per pane; results are
+read pane by pane and merged by hand; nothing is measured per repository; and the docs name the poor
+fit themselves: a team that wants a graphical diff and review board.
 
-Dispatch keeps the good part (one place, every repo, live) and gives the work an identity with a
-lifecycle: a **job** with a brief and targets, which **plans** before it runs, runs each target in its
-own **worktree** as a real session, lets a **canary** go first, queues what the agents need to ask in
-one place, **reviews** the result across repositories as one diff, and **finishes** with one commit or
-one set of pull requests, with the cost and time of every repository written down.
+Pilcrow already owns the parts herdr does not have and cannot easily grow: the server runs sessions
+through the Agent SDK and gets their state from the SDK's own events, not from a screen; every session
+can have a worktree; the scheduler runs sessions unattended and collects what they did into an inbox;
+snapshots keep every file a session touched; the control room watches live sessions and answers their
+permission requests; the Qt client draws thousands of rows at 60 Hz on a CPU and shows diffs. Dispatch
+keeps what herdr's users like (one place, every repository, live, scriptable) and gives the work an
+identity with a lifecycle: a **job** with a brief and targets, which **plans** before it runs, runs each
+target in its own **worktree** as a real session, lets a **canary** go first, answers a permission
+**once for every repository** that asks it, **reviews** the result across repositories as one diff, and
+**finishes** with one commit or one set of pull requests, with the cost and time of every repository
+written down.
 
 ## 1. Principles
 
@@ -48,6 +66,12 @@ one set of pull requests, with the cost and time of every repository written dow
   state, not a surprise.
 - **Fast under load.** Fifty streaming runs are fifty sessions; the board paints only what changed, the
   server sends per-run deltas coalesced to a frame, and the rows are drawn by the canvas engine.
+- **One answer, every repository.** Twenty agents asking to run `npm install` is one question. A
+  permission answered with *for all* answers every run of the job that asks the same thing, now and
+  later; the answer is scoped to the job and to the exact request, never wider.
+- **Exact state.** A run is *blocked* because the SDK said a permission is pending, *done* because the
+  turn ended, not because a screen looked like it. The board never shows *idle* over an agent waiting
+  on a question.
 
 ## 2. Concepts
 
@@ -58,7 +82,8 @@ one set of pull requests, with the cost and time of every repository written dow
 | **Brief** | The prompt. Markdown, with variables (`{{repo.name}}`, `{{repo.path}}`, `{{repo.branch}}`, `{{job.name}}`, `{{notes}}`), optionally saved as a **playbook** for reuse. |
 | **Job** | A brief, its targets, its settings and policy, and its runs. States: `draft` → `planned` → `running` (canary / main wave) → `reviewing` → `finished`; or `stopped`. |
 | **Run** | One target of one job: a session in a worktree. States: `queued` → `preparing` → `running` → `needs_action` ⇄ `running` → `done` \| `failed` \| `stopped` \| `skipped`. Carries its result: summary, files touched, diffstat, cost, duration, branch, commit, PR. |
-| **Wave** | The targets that run together: the canary wave (1 by default) and then the main wave, which waits for the person after the canary unless told not to. |
+| **Wave** | The targets that run together: the canary wave (1 by default) and then the main wave, which waits for the person after the canary unless told not to. Inside a wave, a target that depends on another (a local path dependency, a `go.mod` replace, a Cargo path) runs after it and is told what it did. |
+| **Prepare** | An optional command run in the worktree before the agent starts (`npm ci`, copying `.env` from the main checkout): a worktree isolates files only, and a run needs its dependencies. Its failure fails the run before a token is spent. |
 | **Verify** | An optional command run in the worktree after the agent finishes (`npm test`, `cargo check`), whose exit code is part of the run's result. |
 | **Fan-in** | The review of a job's results together: one list of changed files across repositories, one place to commit, open pull requests, or discard. |
 | **Report** | The job's record once finished: a table of targets with state, summary, files, cost and duration; an inbox item; exportable as Markdown. |
@@ -116,9 +141,25 @@ replied. Differences from a scheduled run:
   continues, edits the brief, or stops. The main wave runs with the (possibly edited) brief and, when
   asked, with the canary's summary appended (*"In <repo>, this was done as follows: …"*), which is how the
   rest learn from the first.
+- **One answer for all.** Requests are keyed by tool and normalized input (`Bash: npm install`,
+  `Edit .eslintrc.cjs`, `WebFetch host`). When a request of a key already seen in this job arrives from
+  another run, the board shows one card with the count. *Allow* answers that run; *Allow for all*
+  answers every run of the job that asks the same key, the ones waiting now and the ones that will ask
+  later, and is written on the job as a rule the report lists. The rule never outlives the job and
+  never reaches another one.
 - **Parallelism and order.** Up to `parallel` runs at once (default `min(3, cores ÷ 2)`), smallest
-  repositories first so the person sees results sooner; a rate-limit error from the API backs the whole
-  job off (exponential, capped) rather than failing each run in turn.
+  repositories first so the person sees results sooner. When the scan found dependencies between
+  targets (a local path dependency in `package.json`, a `replace` in `go.mod`, a `path` in `Cargo.toml`),
+  the dependent waits for the dependency's run and gets its summary appended to the brief; the plan
+  shows the order as levels. A rate-limit error from the API backs the whole job off (exponential,
+  capped) rather than failing each run in turn.
+- **Prepare.** When set, the command runs in the fresh worktree before `session.send` (through the same
+  terminal module the Terminal tab uses, with a time cap); a non-zero exit fails the run with the tail
+  of its output, before any token is spent. A per-target variant can copy files the agent needs from
+  the main checkout (`.env`, local certificates), listed in the plan so nothing moves unseen.
+- **Forecast.** When the canary finishes, the continue card shows the main wave's expected cost and
+  wall time from the canary's, scaled by each target's size class and the parallel setting, against
+  the job's caps; the person continues knowing what it will cost.
 - **Caps.** Minutes per run (the session is interrupted, the run `stopped` with the reason); cost per job
   (no new run starts past it, running ones finish); both are states on the job, shown as such.
 - **Verify.** When set, after the agent's turn ends the command runs in the worktree (through the same
@@ -144,7 +185,10 @@ replied. Differences from a scheduled run:
 - **keep**: leave the worktree for the person to continue in by hand (the session opens there).
 
 Finishing writes the report: an inbox item of a new kind (`dispatch`), with the per-target table, that
-the Inbox shows under the day like a schedule's run, and a Markdown export.
+the Inbox shows under the day like a schedule's run, and a Markdown export. The table is written by
+the server from the results. Optionally (`report: 'agent'`), one more session reads every run's summary
+and diffstat and writes the prose on top: what was done the same way everywhere, where a repository
+differed and why, what still needs a hand. It costs one short run and is off by default.
 
 ### 3.5 RPC
 
@@ -167,7 +211,9 @@ events: dispatch.changed { id, runs: [delta...], job: delta }, inbox.changed
 ```
 
 Permission requests and answers keep using `session.permission` on the run's session; the job view
-and the control room both answer the same request.
+and the control room both answer the same request. `dispatch.allow { id, key }` writes the job's
+*for all* rule and answers every waiting run that matches; later matching requests are answered by the
+server as they arrive.
 
 ## 4. The client
 
@@ -204,8 +250,9 @@ forty repositories is one row until opened.
 The same discipline as the control room: sections appear only when they have something; the thing
 that needs the person is first; a card is a row (name, scope, a progress bar whose segments are its
 runs' states in the status colours, counts, cost), and a job that needs a hand shows the requests
-inline with the control room's Allow / Deny, so most jobs never need opening. Keyboard: j/k move,
-Enter opens, a/d answer, Space pauses.
+inline with the control room's Allow / Deny, so most jobs never need opening. A request several runs
+asked alike shows once, with its count and *Allow for all*. Keyboard: j/k move, Enter opens, a/d answer,
+A answers for all, Space pauses.
 
 ### 4.3 The job view
 
@@ -235,6 +282,10 @@ run's session as any session (the conversation, the Changes panel on its worktre
 it); the job view stays in the sidebar's history to come back to. A needs-action row answers inline.
 Rows sort by state (needs action, running, queued, done, failed) then by name; the sort is stable so
 nothing jumps while the person reads.
+
+The review at the foot groups identical hunks across repositories: a change made the same way in nine
+repositories is one item with a count, read once; the repositories that differ are listed by themselves
+with what differs. Enter on an item opens that run's Changes for the full diff.
 
 The rows are a `RowScene` on the canvas engine, like the Timeline and Tasks lists: five hundred
 repositories scroll at 60 Hz, a run's change repaints its row, and a streaming "now" label costs the
@@ -316,6 +367,9 @@ section of the composer, the permission answers are inline, confirmations only f
 | A target is not a repository, or the base branch is missing | blocked in the plan; Start waits |
 | Uncommitted changes in a main checkout | warning in the plan: the run starts from the last commit |
 | An agent asks for a permission | the run waits in needs-action; the job continues elsewhere; the control room shows the card |
+| Several runs ask the same permission | one card with the count; *Allow for all* answers every run of this job that asks it, now and later; the rule is on the report |
+| A worktree needs dependencies or secrets | the prepare command runs first; a failure fails the run before a token is spent, with the output's tail |
+| A target depends on another target | it waits for the dependency's run and receives its summary; a dependency that failed skips its dependents with the reason |
 | An agent runs past its minutes | interrupted; `stopped (20 min)`; Open to continue |
 | The job passes its cost cap | no new runs start; running ones finish; the job says so |
 | The API rate-limits | the whole job backs off (exponential, capped at a minute), runs resume |
@@ -327,18 +381,21 @@ section of the composer, the permission answers are inline, confirmations only f
 
 ## 7. Against herdr, concretely
 
-| | herdr | Dispatch |
+| | herdr (and the fleet patterns on it) | Dispatch |
 |---|---|---|
-| Unit of work | a pane | a job with runs, persisted, resumable |
-| Isolation | the repository's checkout | a worktree per run, on a branch of its own |
-| Before running | nothing | a plan: per-target checks, the brief as each will see it, worst-case caps |
-| Rollout | all at once | canary, then the rest, which can learn from it |
-| Blocked agents | found by looking | queued in one place, answered inline or from the control room |
-| Results | read pane by pane | one review across repositories; one commit; pull requests; a report |
+| Unit of work | a pane; a fleet is the panes on `fleet/*` branches | a job with runs, persisted, resumable, reported |
+| Where agents run | the repository's checkout, or a worktree you create per pane | a worktree per run, always, on a branch of its own |
+| State | a screen manifest: *blocked* when a known prompt is recognised, else *idle* | the SDK's own events: pending permission, turn ended, error |
+| Before running | nothing | a plan: per-target checks, the brief as each will see it, the order, the worst-case caps |
+| Rollout | all at once | canary, then the rest, which can learn from it; dependents after dependencies |
+| Permissions | answered pane by pane | queued in one place; one answer for every repository that asks the same thing |
+| Worktree setup | yours (ports, `.env`, dependencies) | a prepare command and copied files, listed in the plan |
+| Results | read pane by pane; merged by hand from the main pane | one review across repositories, identical changes grouped; one commit; pull requests; a report |
 | Limits | none | minutes per run, parallel, cost cap, rate-limit backoff |
-| After the terminal closes | gone | the job is there tomorrow, with its report |
-| Reuse | shell history | playbooks with variables and saved target sets |
-| Where | a terminal with tmux | the desktop client and the web client, over the same server |
+| Cost and time | not measured | per run and per job, forecast after the canary |
+| After the terminal closes | the panes live on the server; the fleet's meaning does not | the job is there tomorrow, with its report |
+| Reuse | shell history, skills | playbooks with variables and saved target sets |
+| Where | a terminal, with a socket API | the desktop client and the web client, over the same server, with the same RPC for scripts |
 
 ## 8. Phases
 
@@ -352,7 +409,9 @@ section of the composer, the permission answers are inline, confirmations only f
 ## 9. Testing
 
 - Server: the job state machine against a fake `sessions` module (vitest): waves, caps, backoff,
-  restart re-attach, every state transition; `workspace.scan` on a fixture tree; the plan's verdicts.
+  restart re-attach, every state transition; `workspace.scan` on a fixture tree (with path dependencies
+  between fixtures, so the order comes out as levels); the plan's verdicts; the approve-once rule (the
+  same request from two runs answered once, a different one not); prepare failing before any send.
 - Client: the board and job view against the mock server (`qt/tests/harness.py`): a job of forty runs
   streaming at once, permission answered from both screens, the sort staying stable, the rows repainting
   alone (the smoothness probe extended to the board: no stray repaints of the shell or the panel).
@@ -366,5 +425,8 @@ section of the composer, the permission answers are inline, confirmations only f
 - Default policy *allow edits in the worktree*, default canary of one, default parallel `min(3, cores ÷ 2)`,
   default cap 20 minutes per run and no cost cap until one is set.
 - Pull requests only through `gh`, off by default; a push without `gh` offers the compare URL.
+- *Allow for all* is scoped to one job and one request key (tool + normalized input); it is never
+  offered for `Bash` commands that differ in anything but whitespace, and never carried to another job.
+- The agent-written report is off by default; the server's table is always there.
 - The web client gets the screens in phase 3; until then a job started from the web shows as a group of
   sessions with the inbox report.
