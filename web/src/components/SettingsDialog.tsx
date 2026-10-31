@@ -11,9 +11,11 @@ import { ModelSelect } from './ModelSelect';
 import { SkillsPage } from './settings/SkillsPage';
 import { McpPage } from './settings/McpPage';
 import { MemoryPage } from './settings/MemoryPage';
+import { ReposPage } from './settings/ReposPage';
 import type { PermissionMode, Effort } from '../lib/types';
 
-type Section = 'general' | 'claude' | 'skills' | 'mcp' | 'memory' | 'diagnostics';
+type Section = 'general' | 'repos' | 'claude' | 'skills' | 'mcp' | 'memory' | 'diagnostics';
+const WIDE: Section[] = ['repos', 'skills', 'mcp', 'memory'];
 
 export function SettingsDialog() {
   const config = useStore((s) => s.config)!;
@@ -30,13 +32,14 @@ export function SettingsDialog() {
   }, [section]);
 
   return (
-    <Dialog title="Settings" onClose={() => setDialog('settings', false)} width={section === 'skills' || section === 'mcp' || section === 'memory' ? 860 : 720} className={`settings${section === 'skills' || section === 'mcp' || section === 'memory' ? ' settings-wide' : ''}`}>
+    <Dialog title="Settings" onClose={() => setDialog('settings', false)} width={WIDE.includes(section) ? 860 : 720} className={`settings${WIDE.includes(section) ? ' settings-wide' : ''}`}>
       <div className="settings-layout">
         <nav className="settings-nav" ref={nav}>
           {ink && <span className="settings-ink" aria-hidden="true" style={{ transform: `translateY(${ink.top}px)`, height: ink.height }} />}
           {(
             [
               ['general', 'General'],
+              ['repos', 'Repositories'],
               ['claude', 'Claude Code'],
               ['skills', 'Skills'],
               ['mcp', 'MCP servers'],
@@ -149,6 +152,7 @@ export function SettingsDialog() {
           {section === 'skills' && <SkillsPage />}
           {section === 'mcp' && <McpPage />}
           {section === 'memory' && <MemoryPage />}
+          {section === 'repos' && <ReposPage />}
           {section === 'diagnostics' && <Diagnostics info={info} />}
           </div>
         </div>

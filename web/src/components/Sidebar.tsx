@@ -1,7 +1,7 @@
 import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { EASE, reducedMotion } from '../lib/motion';
 import { Plus, Search, Settings, Sun, Moon, Monitor, ChevronRight, Archive, FolderGit2, GitBranch, Pin, Ellipsis, Pencil, GitFork, Trash, PinOff, ArchiveRestore, X, SquarePen, SlidersHorizontal, PanelLeftClose, LayoutGrid, Inbox, Send } from 'lucide-react';
-import { foldingRows, useStore, openSession, setDialog, setTheme, setUi, archiveSession, pinSession, forkSession, deleteSession, confirmAction, renameSession, quickNewSession, showPage, showDispatch, dispatchNeeds } from '../lib/store';
+import { foldingRows, useStore, openSession, setDialog, setTheme, setUi, archiveSession, pinSession, forkSession, deleteSession, confirmAction, renameSession, quickNewSession, showPage, showDispatch, dispatchNeeds, repoFor } from '../lib/store';
 import type { SessionSummary } from '../lib/types';
 import { basename, timeAgo, tildify } from '../lib/format';
 import { fuzzyScore } from '../lib/fuzzy';
@@ -48,12 +48,16 @@ export function Sidebar() {
     const map = new Map<string, Group>();
     for (const s of rest) {
       const key = s.project || s.cwd;
-      if (!map.has(key)) map.set(key, { key, label: basename(key), path: key, items: [] });
+      if (!map.has(key)) {
+        // a registered repository (REPOSITORIES.md) goes by the person's name for it
+        const reg = repoFor(key, config?.repos);
+        map.set(key, { key, label: reg && reg.path.replace(/\/+$/, '') === key.replace(/\/+$/, '') ? reg.name : basename(key), path: key, items: [] });
+      }
       map.get(key)!.items.push(s);
     }
     const groups = [...map.values()].sort((a, b) => (b.items[0]?.lastModified || 0) - (a.items[0]?.lastModified || 0));
     return { attention, pinned, groups, archivedCount: sessions.filter((s) => s.archived).length };
-  }, [sessions, q, ui.showArchived, activeId]);
+  }, [sessions, q, ui.showArchived, activeId, config?.repos]);
   const working = sessions.filter((s) => !s.archived && (s.status === 'running' || s.status === 'starting')).length;
   const needsAll = sessions.filter((s) => !s.archived && (s.status === 'requires_action' || (s.pending || 0) > 0)).length;
 

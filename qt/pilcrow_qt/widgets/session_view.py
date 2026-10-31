@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import icons, theme
-from ..lib.fmt import basename, cost, tildify
+from ..lib.fmt import basename, cost, err_text, tildify
 from ..store import ConfirmSpec, store
 from .composer import Composer, LayoutButton
 from .folder_picker import FolderPicker
@@ -428,6 +428,26 @@ class SessionView(QWidget):
     def open_menu(self) -> None:
         show_menu(self.menu_items(), self.menu_btn, 250, align_right=True)
 
+    def project_root(self) -> str:
+        """The repository this session works on: the worktree's main checkout, else the project folder."""
+        s = self.session
+        return str((s.get("worktree") or {}).get("repoRoot") or s.get("project") or self.cwd)
+
+    def register_repo(self) -> None:
+        """Register this session's repository (REPOSITORIES.md), or open its entry when it has one."""
+        root = self.project_root()
+        if store.repo_for(root):
+            store.set_dialog("settings", "repos")
+            return
+
+        def ok(e: Json) -> None:
+            store.toast(
+                f"Registered {e.get('name')} · names, policy and notes are in Settings → Repositories", "success"
+            )
+            store.set_dialog("settings", "repos")
+
+        store.call("repos.register", {"path": root}).then(ok).catch(lambda e: store.toast(err_text(e), "error"))
+
     def menu_items(self) -> List[Json]:
         s, r, sid = self.session, self.rt, self.sid
         cwd = self.cwd
@@ -445,6 +465,12 @@ class SessionView(QWidget):
                 "label": "Open a terminal here",
                 "icon": "square-terminal",
                 "on_select": lambda: store.set_ui(panel=True, panel_tab="terminal"),
+            },
+            {
+                "label": "Repository settings…" if store.repo_for(self.project_root()) else "Register this repository…",
+                "hint": "Names, aliases, policy and notes for helpers and Dispatch",
+                "icon": "folder-git-2",
+                "on_select": self.register_repo,
             },
             {"separator": True},
         ]

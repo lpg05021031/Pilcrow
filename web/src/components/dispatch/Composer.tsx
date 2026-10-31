@@ -51,8 +51,20 @@ export function Composer() {
   const rescan = () => call<{ repos: WorkspaceRepo[] }>('workspace.scan', { root, force: true }, { quiet: true }).then((r) => setRepos(r.repos)).catch(() => {});
   const shown = useMemo(() => {
     const q = filter.trim().toLowerCase();
-    return (repos || []).filter((r) => !q || `${r.name} ${r.path} ${r.kind || ''} ${r.packageName || ''}`.toLowerCase().includes(q));
+    return (repos || [])
+      .filter((r) => !q || `${r.name} ${r.registryName || ''} ${r.about || ''} ${r.path} ${r.kind || ''} ${r.packageName || ''}`.toLowerCase().includes(q))
+      // registered repositories first (REPOSITORIES.md), then the rest, each by name
+      .sort((a, b) => Number(Boolean(b.registered)) - Number(Boolean(a.registered)) || a.name.localeCompare(b.name));
   }, [repos, filter]);
+  // a registered repository's standing notes prefill the target's, until the person edits them
+  useEffect(() => {
+    if (!repos) return;
+    setNotes((n) => {
+      const next = { ...n };
+      for (const r of repos) if (r.notes && next[r.path] === undefined) next[r.path] = r.notes;
+      return next;
+    });
+  }, [repos]);
   const targets: DispatchTarget[] = useMemo(() => {
     const byPath = Object.fromEntries((repos || []).map((r) => [r.path, r]));
     return Object.entries(checked)
@@ -308,6 +320,8 @@ function TargetRow({ repo, checked, notes, verdict, onToggle, onNotes }: { repo:
     chips.push({ label: verdict.verdict === 'ok' || !first ? verdict.verdict : `${verdict.verdict} · ${first.text.split('.')[0].slice(0, 40)}`, tone: verdict.verdict });
     if (verdict.level > 0) chips.push({ label: `after ${deps.join(', ')}`, tone: '' });
   } else {
+    // the registry's name for it (REPOSITORIES.md); a never policy is said in the plan's words
+    if (repo.registered) chips.push({ label: repo.registryName || 'registered', tone: repo.policy === 'never' ? 'blocked' : 'plan' });
     if (repo.dirty) chips.push({ label: `${repo.changed + repo.untracked} uncommitted`, tone: 'warning' });
     if (deps.length) chips.push({ label: `depends on ${deps.join(', ')}`, tone: '' });
     if (repo.kind) chips.push({ label: repo.kind, tone: '' });

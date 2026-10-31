@@ -9,6 +9,7 @@ import * as snapshots from './snapshots.js';
 import { pushInbox, updateInbox } from './schedules.js';
 import { xdg, readJson, writeJson, uuid, log, slash, slugify, run, which, IS_WIN } from './util.js';
 import { createDispatcher } from './dispatch_core.js';
+import { repos } from './repos.js';
 
 const FILE = path.join(xdg('state'), 'dispatch.json');
 
@@ -35,6 +36,7 @@ export const dispatch = createDispatcher({
   slugify,
   slash,
   textOfContent,
+  registry: repos,
   readJson,
   writeJson,
 });

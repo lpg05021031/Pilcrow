@@ -185,6 +185,7 @@ class Sidebar(QWidget):
         bind(store.page_changed, self, lambda _p: self._on_page())
         bind(store.inbox_unread_changed, self, lambda _n: self._on_page())
         bind(store.dispatch_changed, self, lambda _d: self.rebuild())
+        bind(store.repos_changed, self, lambda _r: self.rebuild())
         bind(store.config_changed, self, lambda _c: self._on_config())
         bind(theme.theme.changed, self, lambda _t: self._on_config())
         self._on_config()
@@ -331,10 +332,19 @@ class Sidebar(QWidget):
                 wanted.append(row_for(s, True))
         for key, items in ordered:
             head = self._heads.get(key)
+            # a registered repository (REPOSITORIES.md) is called by the person's name for it
+            reg = store.repo_for(key)
+            label_text = (
+                str(reg.get("name"))
+                if reg and str(reg.get("path") or "").rstrip("/") == key.rstrip("/")
+                else basename(key)
+            )
             if head is None:
-                head = self._heads[key] = GroupHead(basename(key), key)
+                head = self._heads[key] = GroupHead(label_text, key)
                 head.toggled.connect(lambda k=key: self._toggle_group(k))
                 head.add_clicked.connect(lambda k=key: self._new_in(k))
+            elif head.btn.text() != label_text:
+                head.btn.setText(label_text)
             head.set_collapsed(self._collapsed.get(key, False))
             wanted.append(head)
             if self._collapsed.get(key):

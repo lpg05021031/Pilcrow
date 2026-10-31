@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUp, Square, Plus, X, ChevronDown, ShieldCheck, FilePen, Map as MapIcon, Zap, ShieldOff, File as FileIcon, Folder, CornerDownLeft, RefreshCw, Clock3, Image as ImageIcon } from 'lucide-react';
+import { ArrowUp, Square, Plus, X, ChevronDown, ShieldCheck, FilePen, Map as MapIcon, Zap, ShieldOff, File as FileIcon, Folder, FolderGit2, CornerDownLeft, RefreshCw, Clock3, Image as ImageIcon } from 'lucide-react';
 import { useStore, sendMessage, interrupt, setMode, setModel, setEffort, setUi, toast, call, loadGatewayModels, removeHeld, updateHeld, sendHeldNow } from '../lib/store';
 import { ALIASES, useGatewayModels, modelLabel as nameOf } from '../lib/models';
 import type { PermissionMode, Effort, SlashCommandInfo, HeldMsg } from '../lib/types';
 import { fuzzyFilter } from '../lib/fuzzy';
-import { bytes } from '../lib/format';
+import { bytes, tildify } from '../lib/format';
 import { Popover, Menu, type MenuItem } from './ui/Popover';
 import { ContextRing, contextLabel, focusIfFree, Leave, Num } from './ui/bits';
 import { markLaunch, reducedMotion, spring } from '../lib/motion';
@@ -151,8 +151,16 @@ export function Composer({ sessionId, cwd }: { sessionId: string; cwd: string })
     if (popup.kind === 'slash') return fuzzyFilter(popup.query, commands, (c) => c.name, 40).map((m) => ({ key: m.item.name, label: '/' + m.item.name, hint: m.item.argumentHint ? `${m.item.argumentHint} — ${m.item.description}` : m.item.description, kind: 'cmd' as const }));
     const q = popup.query;
     const list = q ? fuzzyFilter(q, index, (f) => f, 40).map((m) => m.item) : index.filter((f) => !f.includes('/') || f.split('/').length <= 2).slice(0, 40);
-    return list.map((f) => ({ key: f, label: f, hint: '', kind: f.endsWith('/') ? ('dir' as const) : ('file' as const) }));
-  }, [popup, commands, index]);
+    const files = list.map((f) => ({ key: f, label: f, hint: '', kind: f.endsWith('/') ? ('dir' as const) : ('file' as const) }));
+    // registered repositories (REPOSITORIES.md) answer to their names and the person's aliases
+    const norm = (s: string) => s.toLowerCase().replace(/[\s_-]+/g, '');
+    const nq = norm(q);
+    const repos = (config?.repos || [])
+      .filter((e) => e.name && (!nq || [e.name, ...(e.aliases || [])].some((w) => norm(w).includes(nq))))
+      .slice(0, 8)
+      .map((e) => ({ key: e.name, label: e.name, hint: e.about || tildify(e.path, info?.home), kind: 'repo' as const }));
+    return [...repos, ...files];
+  }, [popup, commands, index, config?.repos, info?.home]);
 
   const detectPopup = (value: string, caret: number) => {
     const before = value.slice(0, caret);
@@ -394,11 +402,11 @@ export function Composer({ sessionId, cwd }: { sessionId: string; cwd: string })
     >
       {popup && suggestions.length > 0 && (
         <Leave className="suggest" role="listbox" duration={160}>
-          <div className="suggest-head">{popup.kind === 'slash' ? 'Commands' : popup.query ? 'Files' : 'Files — keep typing to narrow down'}</div>
+          <div className="suggest-head">{popup.kind === 'slash' ? 'Commands' : popup.query ? (suggestions.some((s) => s.kind === 'repo') ? 'Repositories and files' : 'Files') : 'Files — keep typing to narrow down'}</div>
           <div className="suggest-list" style={{ ['--name-ch' as string]: `${Math.min(30, Math.max(8, ...suggestions.filter((x) => x.kind === 'cmd').map((x) => x.label.length)))}ch` }}>
             {suggestions.slice(0, 40).map((s, i) => (
               <button key={s.key} role="option" aria-selected={i === popup.index} className={`suggest-item${i === popup.index ? ' active' : ''}`} onMouseDown={(e) => e.preventDefault()} onClick={() => applySuggestion(s)} onMouseEnter={() => setPopup({ ...popup, index: i })} ref={i === popup.index ? (el) => el?.scrollIntoView({ block: 'nearest' }) : undefined}>
-                {s.kind === 'dir' ? <Folder size={14} /> : s.kind === 'file' ? <FileIcon size={14} /> : null}
+                {s.kind === 'repo' ? <FolderGit2 size={14} className="suggest-repo" /> : s.kind === 'dir' ? <Folder size={14} /> : s.kind === 'file' ? <FileIcon size={14} /> : null}
                 <span className={`suggest-label${s.kind === 'cmd' ? ' cmd' : ''}`}>
                   {s.kind === 'cmd' ? (
                     <>

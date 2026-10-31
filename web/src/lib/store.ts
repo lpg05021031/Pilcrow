@@ -6,6 +6,7 @@ import { TranscriptModel } from './transcript';
 import { setHome } from './format';
 import { EASE_EXIT, reducedMotion } from './motion';
 import type { AppInfo, Config, SessionState, SessionSummary, PermissionMode, Effort, RawMsg, GatewayModels, TimelineStep, PermissionDecision, DispatchJob, DispatchRun, DispatchDelta, Playbook } from './types';
+import type { RepoEntry } from './types';
 import type { PilcrowNative } from './globals';
 import { errText } from './format';
 
@@ -66,7 +67,7 @@ export function cycleView() {
 
 interface Dialogs {
   newSession: null | { cwd?: string; prompt?: string };
-  settings: boolean | 'general' | 'claude' | 'skills' | 'mcp' | 'memory' | 'diagnostics';
+  settings: boolean | 'general' | 'repos' | 'claude' | 'skills' | 'mcp' | 'memory' | 'diagnostics';
   /** OAuth sign-in to an MCP server, driven by one session's Claude Code process. */
   mcpAuth: null | { sessionId: string; name: string };
   palette: boolean;
@@ -393,6 +394,10 @@ export function initApp() {
   rpc.on('sessions.changed', () => refreshSessions());
   rpc.on('schedules.changed', () => set({ schedRev: get().schedRev + 1 }));
   rpc.on('memory.changed', () => set({ schedRev: get().schedRev + 1 }));
+  rpc.on('repos.changed', ({ repos }: { repos: RepoEntry[] }) => {
+    const config = get().config;
+    if (config) set({ config: { ...config, repos } });
+  });
   rpc.on('inbox.changed', (unread: number) => set({ inboxUnread: typeof unread === 'number' ? unread : get().inboxUnread, schedRev: get().schedRev + 1 }));
   rpc.on('dispatch.changed', (d: DispatchDelta) => onDispatch(d));
   rpc.on('dispatch.playbooks', () => loadPlaybooks());
@@ -786,6 +791,18 @@ export function bumpFs() {
 
 export function insertIntoComposer(id: string, text: string, replace = false) {
   set({ composerInsert: { id, text, nonce: Date.now(), replace } });
+}
+
+/** The registered repository (REPOSITORIES.md) whose folder holds `path` (the deepest one), or null. */
+export function repoFor(path: string | undefined | null, repos: RepoEntry[] | undefined = useStore.getState().config?.repos): RepoEntry | null {
+  const p = String(path || '').replace(/\/+$/, '');
+  if (!p) return null;
+  let best: RepoEntry | null = null;
+  for (const e of repos || []) {
+    const ep = String(e.path || '').replace(/\/+$/, '');
+    if (ep && (p === ep || p.startsWith(ep + '/')) && (!best || ep.length > best.path.length)) best = e;
+  }
+  return best;
 }
 
 export function activeSession() {

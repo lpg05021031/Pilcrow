@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { GitBranch, PanelRight, PanelLeftOpen, Ellipsis, Pencil, GitFork, FolderOpen, Archive, Trash, Copy, SquareTerminal, RotateCcw, Power, FolderGit2, Folder, Settings2, CircleDollarSign, ChevronDown, BookMarked } from 'lucide-react';
-import { useStore, setUi, VIEW_MODES, renameSession, forkSession, archiveSession, deleteSession, confirmAction, call, insertIntoComposer, toast, openSession, setDialog, setCwd, getModel } from '../lib/store';
-import { basename, cost, tildify } from '../lib/format';
+import { useStore, setUi, VIEW_MODES, renameSession, forkSession, archiveSession, deleteSession, confirmAction, call, insertIntoComposer, toast, openSession, setDialog, setCwd, getModel, repoFor } from '../lib/store';
+import { basename, cost, errText, tildify } from '../lib/format';
 import { McpNotice } from './McpNotice';
-import type { GitInfo, SessionSummary } from '../lib/types';
+import type { GitInfo, RepoEntry, SessionSummary } from '../lib/types';
 import { Transcript } from './Transcript';
 import { FindBar } from './FindBar';
 import { Composer } from './Composer';
@@ -83,12 +83,30 @@ export function SessionView({ session }: { session: SessionSummary }) {
   useEffect(() => setTitle(session.title), [session.title]);
 
   const changes = (git?.changed || 0) + (git?.untracked || 0);
+  const projectRoot = session.worktree?.repoRoot || session.project || cwd;
 
   const menu = [
     { label: 'Rename', icon: Pencil, onSelect: () => setEditing(true) },
     { label: 'Fork into a new session', icon: GitFork, onSelect: () => forkSession(id) },
     { label: 'Open folder', icon: FolderOpen, onSelect: () => call('shell.openPath', { path: cwd }) },
     { label: 'Open a terminal here', icon: SquareTerminal, onSelect: () => setUi({ panel: true, panelTab: 'terminal' }) },
+    {
+      label: repoFor(projectRoot) ? 'Repository settings…' : 'Register this repository…',
+      hint: 'Names, aliases, policy and notes for helpers and Dispatch',
+      icon: FolderGit2,
+      onSelect: () => {
+        if (repoFor(projectRoot)) {
+          setDialog('settings', 'repos');
+          return;
+        }
+        call<RepoEntry>('repos.register', { path: projectRoot })
+          .then((e) => {
+            toast(`Registered ${e.name} · names, policy and notes are in Settings → Repositories`, 'success');
+            setDialog('settings', 'repos');
+          })
+          .catch((e) => toast(errText(e), 'error'));
+      },
+    },
     { separator: true },
     ...VIEW_MODES.map((v) => ({ label: `${v.label} view`, hint: v.hint, checked: v.id === ui.view, onSelect: () => setUi({ view: v.id }) })),
     { separator: true },

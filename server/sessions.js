@@ -10,9 +10,26 @@ import * as history from './history.js';
 import * as snapshots from './snapshots.js';
 import * as memory from './memory.js';
 import * as git from './git.js';
+import { repos } from './repos.js';
 import { AsyncQueue, uuid, IS_ROOT, log, xdg, slugify, cleanEnv, slash } from './util.js';
 
 export const bus = new EventEmitter();
+/** Where other modules (helpers.js) extend a session: in-process MCP servers to attach, permission
+ *  decisions Pilcrow takes itself, fields added to `state()`, and a say on a decision as it is given. */
+export const extensions = {
+  mcpServers: [], // (session) => McpSdkServerConfigWithInstance | null
+  permission: [], // (session, toolName, input) => PermissionResult | null
+  state: [], // (session) => object merged into state()
+  respond: [], // (session, request, decision) => decision
+};
+function mcpOption(session) {
+  const servers = {};
+  for (const fn of extensions.mcpServers) {
+    const s = fn(session);
+    if (s) servers[s.name] = s;
+  }
+  return Object.keys(servers).length ? { mcpServers: servers } : {};
+}
 
 /** Spend over the last few hours, per session, for the control room's burn chart. */
 export const costLog = {
@@ -183,7 +200,8 @@ class Session {
       tasks: [...this.tasks.values()],
       bgTasks: this.bgTasks,
       queued: [...this.queuedUuids],
-      held: this.held.map((h) => ({ uuid: h.uuid, text: h.text, images: h.images.length, files: h.files.map((f) => f.name), at: h.at })),
+      held: this.held.map((h) => ({ uuid: h.uuid, text: h.text, images: h.images.length, files: h.files.map((f) => f.name), at: h.at, note: h.note || null, from: h.from || null })),
+      ...Object.assign({}, ...extensions.state.map((fn) => fn(this) || {})),
       init: init
         ? {
             version: init.claude_code_version,
@@ -300,6 +318,8 @@ class Session {
     const input = new AsyncQueue();
     // What earlier sessions in this project learned rides along in the system prompt.
     const memoryText = cfg.memoryInject === false ? '' : memory.promptFor(memory.projectOf(this));
+    // …and the repositories the person registered, so their own names for them land in the right folders.
+    const appendText = memoryText + repos.promptFor();
     const options = {
       cwd: this.cwd,
       pathToClaudeCodeExecutable: claude.path,
@@ -307,7 +327,7 @@ class Session {
       includePartialMessages: true,
       forwardSubagentText: true,
       settingSources: ['user', 'project', 'local'],
-      systemPrompt: { type: 'preset', preset: 'claude_code', ...(memoryText ? { append: memoryText } : {}) },
+      systemPrompt: { type: 'preset', preset: 'claude_code', ...(appendText ? { append: appendText } : {}) },
       env: childEnv(),
       canUseTool: (name, toolInput, opts) => this.askPermission(name, toolInput, opts),
       stderr: (d) => {
@@ -317,6 +337,7 @@ class Session {
       perTaskStopAffordance: true,
       // Lets the UI restore files to how they were before any earlier message (like /rewind).
       enableFileCheckpointing: true,
+      ...mcpOption(this),
     };
     if (!IS_ROOT) options.allowDangerouslySkipPermissions = true;
     if (this.model) options.model = this.model;
@@ -572,6 +593,11 @@ class Session {
   }
 
   askPermission(toolName, input, opts) {
+    // Decisions Pilcrow takes itself (a helper's read-only tools, a start in an allowed repository).
+    for (const fn of extensions.permission) {
+      const d = fn(this, toolName, input);
+      if (d) return Promise.resolve(d);
+    }
     if (this.unattended) {
       // A scheduled run has nobody to ask. Say so, so Claude works around it instead of waiting.
       const why = toolName === 'AskUserQuestion' ? 'This session runs on a schedule with nobody watching, so questions cannot be answered. Decide yourself and say what you assumed.' : 'This session runs on a schedule with nobody watching, so this action cannot be approved. Do what you can without it and report what you skipped.';
@@ -617,41 +643,44 @@ class Session {
   respond(requestId, decision) {
     const p = this.pending.get(requestId);
     if (!p) return false;
-    const d = { ...decision };
+    let d = { ...decision };
+    for (const fn of extensions.respond) d = fn(this, p.req, d) || d;
     if (d.behavior === 'allow' && !d.updatedInput) d.updatedInput = p.req.input;
     if (d.behavior === 'deny' && !d.message) d.message = 'The user declined this action.';
     p.resolve(d);
     return true;
   }
 
-  async send({ text = '', images = [], files = [], clientUuid, shouldQuery, now = false }) {
+  /** `note` marks a message Pilcrow wrote (a helper's news to its lead); `from` says who sent it
+   *  when it was not the person ('lead'). Both ride on the record for the clients to draw it apart. */
+  async send({ text = '', images = [], files = [], clientUuid, shouldQuery, now = false, note = null, from = null }) {
     await this.ensureStarted();
     if (!text && !images.length && !files.length) return null;
     const u = clientUuid || uuid();
     const busy = this.isBusy() && this.status !== 'starting';
     if (busy && now) {
       // Steer: stop the current step, then deliver as soon as the turn is over.
-      this.held.unshift({ uuid: u, text, images, files, at: Date.now(), shouldQuery });
+      this.held.unshift({ uuid: u, text, images, files, at: Date.now(), shouldQuery, note, from });
       this.emitState();
       await this.interrupt();
       return u;
     }
     if (busy) {
-      this.held.push({ uuid: u, text, images, files, at: Date.now(), shouldQuery });
+      this.held.push({ uuid: u, text, images, files, at: Date.now(), shouldQuery, note, from });
       this.emitState();
       return u;
     }
-    return this.deliver({ uuid: u, text, images, files, shouldQuery });
+    return this.deliver({ uuid: u, text, images, files, shouldQuery, note, from });
   }
 
   /** Push one message into the running Claude Code process. */
-  deliver({ uuid: u, text = '', images = [], files = [], shouldQuery }) {
+  deliver({ uuid: u, text = '', images = [], files = [], shouldQuery, note = null, from = null }) {
     const content = [];
     for (const img of images) content.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType, data: img.data } });
     for (const f of files) content.push({ type: 'text', text: `<attached_file name="${f.name}">\n${f.text}\n</attached_file>` });
     if (text) content.push({ type: 'text', text });
     if (!content.length) return null;
-    const rec = { type: 'user', uuid: u, message: { role: 'user', content }, parent_tool_use_id: null, session_id: this.id, timestamp: new Date().toISOString(), _local: true };
+    const rec = { type: 'user', uuid: u, message: { role: 'user', content }, parent_tool_use_id: null, session_id: this.id, timestamp: new Date().toISOString(), _local: true, ...(note ? { _note: note } : {}), ...(from ? { _from: from } : {}) };
     this.messages.push(rec);
     this.out(rec);
     const sdkMsg = { type: 'user', message: { role: 'user', content }, parent_tool_use_id: null, uuid: u, session_id: this.id };
@@ -949,6 +978,8 @@ class SessionManager {
         worktree: meta.worktree || null,
         scheduled: meta.scheduled || null,
         dispatch: meta.dispatch || null,
+        helper: meta.helper ? { leadId: meta.helper.leadId, name: meta.helper.name, state: meta.helper.state || null } : null,
+        lead: meta.lead ? { since: meta.lead.since, count: (meta.lead.helpers || []).length } : null,
         status: 'stopped',
         live: false,
       });
@@ -969,6 +1000,8 @@ class SessionManager {
         worktree: meta.worktree || null,
         scheduled: meta.scheduled || null,
         dispatch: meta.dispatch || null,
+        helper: meta.helper ? { leadId: meta.helper.leadId, name: meta.helper.name, state: meta.helper.state || null } : null,
+        lead: meta.lead ? { since: meta.lead.since, count: (meta.lead.helpers || []).length } : null,
         status: 'idle',
         live: false,
       });
@@ -1021,6 +1054,7 @@ class SessionManager {
     await history.remove(id, meta.cwd || s?.cwd);
     if (removeWorktree && meta.worktree) await git.removeWorktree({ repoRoot: meta.worktree.repoRoot, dir: meta.worktree.path, branch: meta.worktree.branch, deleteBranch: true });
     store.deleteMeta(id);
+    bus.emit('removed', { id, meta });
     bus.emit('list-changed');
   }
 

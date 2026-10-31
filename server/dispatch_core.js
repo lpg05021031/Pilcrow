@@ -59,6 +59,14 @@ export function renderBrief(brief, { job, target, learned = [], deps = [] } = {}
   return out.replace(/\n{3,}/g, '\n\n').trim();
 }
 
+/** Registry notes and a target's own, as one `{{notes}}` for a brief. */
+export function joinNotes(...parts) {
+  const clean = parts.map((p) => String(p || '').trim()).filter(Boolean);
+  // a target's notes that begin as the registry's (the picker prefills them) are not said twice
+  const kept = clean.filter((p, i) => !clean.some((q, j) => j !== i && q !== p && q.includes(p)));
+  return [...new Set(kept)].join('\n\n');
+}
+
 /** The key two requests share when one answer should serve both: the tool and its normalized input. */
 export function ruleKey(req, worktreePath = '') {
   const tool = String(req?.toolName || '');
@@ -291,6 +299,7 @@ export function createDispatcher(deps) {
     slugify = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40),
     slash = (p) => p,
     textOfContent = () => '',
+    registry = null, // the repositories registry (REPOSITORIES.md): policy, defaults and notes per folder
     readJson = (p, fb) => readJsonFile(p) ?? fb,
     writeJson = (p, d) => {
       fs.mkdirSync(path.dirname(p), { recursive: true });
@@ -417,6 +426,7 @@ export function createDispatcher(deps) {
       delete r._localDeps;
       delete r._depNames;
     }
+    if (registry) registry.annotate(repos);
     repos.sort((a, b) => a.name.localeCompare(b.name));
     const result = { root: slash(root), depth, at: now(), repos };
     scanCache.set(root, { at: now(), result });
@@ -658,7 +668,8 @@ export function createDispatcher(deps) {
         if (openElsewhere.has(t.path)) warn('Another job still has a run open on this repository (the branches differ, so both can run).');
         if (!fs.existsSync(path.join(t.path, 'CLAUDE.md')) && !fs.existsSync(path.join(t.path, '.claude', 'CLAUDE.md'))) note('No CLAUDE.md: the brief may want to say more about this repository.');
       }
-      const brief = renderBrief(job.brief, { job, target: { ...t, base } });
+      if (registry?.policyFor(t.path) === 'never') blocked('Registered with policy Never (Settings → Repositories).');
+      const brief = renderBrief(job.brief, { job, target: { ...t, base, notes: joinNotes(registry?.notesFor(t.path), t.notes) } });
       if (brief.length > MAX_BRIEF) blocked(`The brief is ${brief.length.toLocaleString()} characters after substitution; the limit is ${MAX_BRIEF.toLocaleString()}.`);
       if (!job.brief.trim()) blocked('The brief is empty.');
       const lv = level.get(t.path) ?? 0;
@@ -843,10 +854,11 @@ export function createDispatcher(deps) {
           fs.copyFileSync(from, to);
         }
       }
-      if (job.settings.prepare) {
-        run.now = `prepare: ${job.settings.prepare}`;
+      const prepare = job.settings.prepare || registry?.defaultsFor(run.path)?.prepare || '';
+      if (prepare) {
+        run.now = `prepare: ${prepare}`;
         touch(job, run);
-        const r = await shell(job.settings.prepare, made.cwd, Math.min(job.settings.maxMinutes, 15) * 60e3);
+        const r = await shell(prepare, made.cwd, Math.min(job.settings.maxMinutes, 15) * 60e3);
         if (r.code !== 0) {
           run.prepare = { code: r.code, tail: tail(r.output) };
           endRun(job, run, 'failed', `Prepare failed (exit ${r.code}): ${tail(r.output, 200).trim() || 'no output'}`, session);
@@ -869,7 +881,8 @@ export function createDispatcher(deps) {
         }, job.settings.maxMinutes * 60e3),
       );
       const extras = { learned: job.wave === 'main' && job.settings.learn ? job.learned : [], deps: run.dependsOn.map((d) => job.runs.find((x) => x.path === d && x.state === 'done')).filter(Boolean).map((d) => ({ name: d.name, summary: d.summary })) };
-      run.brief = renderBrief(job.brief, { job, target: { ...run }, ...extras });
+      const tgt = job.targets.find((x) => x.path === run.path);
+      run.brief = renderBrief(job.brief, { job, target: { ...run, notes: joinNotes(registry?.notesFor(run.path), tgt?.notes) }, ...extras });
       await (session || (await sessions.get(made.id))).send({ text: run.brief });
     } catch (e) {
       if (ACTIVE.has(run.state)) endRun(job, run, 'failed', e?.message || 'Could not start', session);
@@ -883,7 +896,7 @@ export function createDispatcher(deps) {
 
   async function onIdle(job, run, session) {
     if (!ACTIVE.has(run.state)) return;
-    const v = job.settings.verify;
+    const v = job.settings.verify || registry?.defaultsFor(run.path)?.verify || '';
     if (v && !(run.verify && run.verify.ran)) {
       run.now = `verify: ${v}`;
       run.state = 'running';

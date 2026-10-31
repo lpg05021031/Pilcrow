@@ -21,6 +21,8 @@ import * as snapshots from './snapshots.js';
 import * as schedules from './schedules.js';
 import * as dispatch from './dispatch.js';
 import * as memory from './memory.js';
+import { repos } from './repos.js';
+import * as helpersMod from './helpers.js';
 import { which, log, xdg, HOME, IS_ROOT, IS_WIN, slash, readJson, writeJson, debounce, expandHome, run, privateDir } from './util.js';
 
 // Old environment variable names keep working after the rename.
@@ -116,6 +118,9 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
   schedules.setDispatchRunner((playbookId, opts) => dispatch.dispatch.startFromPlaybook(playbookId, opts));
   dispatch.start();
   memory.events.on('changed', (d) => broadcast('memory.changed', d));
+  repos.events.on('changed', (d) => broadcast('repos.changed', d));
+  helpersMod.start();
+  helpersMod.events.on('changed', (d) => broadcast('helpers.changed', d));
   term.terminals.on('data', (d) => broadcast('term.data', d));
   term.terminals.on('exit', (d) => broadcast('term.exit', d));
 
@@ -165,7 +170,11 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
     'session.setEffort': async ({ id, effort }) => (await S(id)).setEffort(effort),
     'session.permission': async ({ id, requestId, decision }) => (await S(id)).respond(requestId, decision),
     'session.rename': ({ id, title }) => sessions.rename(id, title),
-    'session.delete': ({ id, removeWorktree }) => sessions.remove(id, { removeWorktree }),
+    'session.delete': async ({ id, removeWorktree, removeHelpers }) => {
+      // a lead's helpers go with it when asked (HELPERS.md §5.10); otherwise they stay as sessions
+      if (removeHelpers) for (const hid of helpersMod.helpers.helperIds(id)) await sessions.remove(hid, { removeWorktree: Boolean(removeWorktree) });
+      return sessions.remove(id, { removeWorktree });
+    },
     'session.archive': ({ id, archived }) => {
       store.setMeta(id, { archived: archived || null });
       listChanged();
@@ -248,6 +257,20 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
     'inbox.markRead': ({ ids }) => schedules.markRead(ids || null),
     'inbox.remove': ({ id }) => schedules.removeItem(id),
     // ---- dispatch: one job across many repositories
+    'helpers.list': ({ leadId }) => helpersMod.helpers.list(leadId),
+    'helpers.allow': ({ leadId, requestId }) => helpersMod.helpers.allow(leadId, requestId),
+    'helpers.stop': ({ leadId, name }) => helpersMod.helpers.stop(leadId, { name }),
+    'helpers.review': ({ leadId }) => helpersMod.helpers.review(leadId),
+    'helpers.finish': ({ leadId, name, action, message, pr }) => helpersMod.helpers.finish(leadId, { name, action, message, pr }),
+    'helpers.export': ({ leadId }) => helpersMod.helpers.exportMarkdown(leadId),
+    'helpers.detach': ({ id }) => helpersMod.helpers.detach(id),
+    'repos.list': () => repos.list(),
+    'repos.save': (p) => repos.save({ ...p, path: p.path ? expandHome(p.path) : p.path }),
+    'repos.remove': ({ id }) => repos.remove(id),
+    'repos.register': ({ path: dir, ...patch }) => repos.register(expandHome(dir), patch),
+    'repos.scan': ({ root, depth }) => repos.scan(expandHome(root), depth),
+    'repos.refresh': ({ ids, force }) => repos.refresh(ids || null, { force: Boolean(force) }),
+    'repos.resolve': ({ word }) => repos.resolve(word) || { nearest: repos.nearest(word) },
     'workspace.scan': ({ root, depth, force }) => dispatch.dispatch.scan({ root: expandHome(root), depth, force: Boolean(force) }),
     'dispatch.list': () => dispatch.dispatch.list(),
     'dispatch.get': ({ id }) => dispatch.dispatch.get(id),

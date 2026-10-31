@@ -112,6 +112,7 @@ class Store(QObject):
     connected_changed = Signal(bool)
     info_changed = Signal(object)
     config_changed = Signal(object)
+    repos_changed = Signal(object)  # the repositories registry (REPOSITORIES.md), a list of entries
     sessions_changed = Signal(object)  # list of SessionSummary dicts
     active_changed = Signal(object)  # session id or None
     rt_changed = Signal(str)  # session id (coalesced to one per frame)
@@ -308,6 +309,7 @@ class Store(QObject):
         rpc.on("sessions.changed", lambda _d: self.refresh_sessions())
         rpc.on("schedules.changed", lambda _d: self._bump_sched())
         rpc.on("memory.changed", lambda _d: self._bump_sched())
+        rpc.on("repos.changed", self._on_repos)
         rpc.on("inbox.changed", self._on_inbox)
         rpc.on("dispatch.changed", self._on_dispatch)
         rpc.on("dispatch.playbooks", lambda _d: self.load_playbooks())
@@ -599,6 +601,28 @@ class Store(QObject):
             self.apply_theme()
 
         return self.call("config.set", patch).then(done)
+
+    # ---- the repositories registry (REPOSITORIES.md)
+    @property
+    def repos(self) -> List[Json]:
+        return [e for e in (self.config or {}).get("repos") or [] if isinstance(e, dict)]
+
+    def _on_repos(self, d: Json) -> None:
+        if self.config is None:
+            return
+        self.config = {**self.config, "repos": list((d or {}).get("repos") or [])}
+        self.config_changed.emit(self.config)
+        self.repos_changed.emit(self.config["repos"])
+
+    def repo_for(self, path: str) -> Optional[Json]:
+        """The registered repository whose folder holds ``path`` (the deepest one), or None."""
+        p = str(path or "").rstrip("/")
+        best: Optional[Json] = None
+        for e in self.repos:
+            ep = str(e.get("path") or "").rstrip("/")
+            if ep and (p == ep or p.startswith(ep + "/")) and (best is None or len(ep) > len(str(best.get("path")))):
+                best = e
+        return best
 
     def set_ui(self, **patch: Any) -> None:
         for k, v in patch.items():

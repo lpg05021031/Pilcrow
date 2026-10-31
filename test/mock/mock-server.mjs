@@ -484,6 +484,73 @@ const REPOS = [
   hasClaudeMd: Boolean(r.hasClaudeMd),
 }));
 const REPO_BY_PATH = new Map(REPOS.map((r) => [r.path, r]));
+/** The repositories registry (REPOSITORIES.md) as the person left it: three entries, one of each policy. */
+const REGISTRY = [
+  { id: 'repo-web', path: `${HOME}/code/web-ui`, name: 'web', aliases: ['order FE', 'storefront'], about: 'Next.js storefront; calls api', policy: 'allowed', defaults: { worktree: true, verify: 'pnpm test' }, notes: 'pnpm, not npm. The ESLint config lives in config/eslint.cjs.', deps: [], facts: { manifest: 'node', packageName: '@acme/web-ui', isRepo: true, branch: 'main', dirty: false, hasClaudeMd: false, seenAt: 1700000000000 }, addedAt: 1700000000000, machine: 'local' },
+  { id: 'repo-api', path: `${HOME}/code/api-gateway`, name: 'api', aliases: ['orders service', '後端'], about: 'Fastify gateway in front of the services', policy: 'ask', defaults: {}, notes: '', deps: [], facts: { manifest: 'node', packageName: '@acme/api-gateway', isRepo: true, branch: 'main', dirty: true, hasClaudeMd: false, seenAt: 1700000000000 }, addedAt: 1700000000000, machine: 'local' },
+  { id: 'repo-legacy', path: `${HOME}/code/legacy-api`, name: 'legacy-api', aliases: [], about: 'Frozen; release branches only', policy: 'never', defaults: {}, notes: '', deps: [], facts: { manifest: 'go', packageName: null, isRepo: true, branch: 'release/4', dirty: false, hasClaudeMd: false, seenAt: 1700000000000 }, addedAt: 1700000000000, machine: 'local' },
+];
+const normWord = (w) => String(w || '').normalize('NFKC').toLowerCase().replace(/^@/, '').replace(/[\s_-]+/g, '');
+const rWords = (e) => [e.name, ...(e.aliases || [])];
+const rMissing = (e) => ({ ...e, missing: !fs.existsSync(e.path) && !e.path.startsWith(`${HOME}/code/`) });
+function rResolve(word) {
+  const w = String(word || '').trim();
+  if (!w) return null;
+  const list = config.repos || [];
+  const byPath = list.find((e) => e.path === w);
+  if (byPath) return rMissing(byPath);
+  const n = normWord(w);
+  const hit = list.find((e) => normWord(e.name) === n) || list.find((e) => (e.aliases || []).some((a) => normWord(a) === n)) || list.find((e) => normWord(e.path.split('/').pop()) === n);
+  return hit ? rMissing(hit) : null;
+}
+function rSave(input) {
+  const list = config.repos || (config.repos = []);
+  const cur = input.id ? list.find((x) => x.id === input.id) : null;
+  if (input.id && !cur) throw new Error('No such repository.');
+  const e = cur ? { ...cur } : { id: `repo-${uuid().slice(0, 6)}`, addedAt: Date.now(), machine: 'local', facts: {}, aliases: [], about: '', notes: '', policy: 'ask', defaults: {}, deps: [] };
+  if (input.path !== undefined || !cur) {
+    if (!input.path) throw new Error('A repository needs a folder.');
+    e.path = String(input.path).replace(/\/+$/, '');
+    // the mock's world: everything under ~/code exists
+    if (!cur && !REPO_BY_PATH.has(e.path) && !e.path.startsWith(`${HOME}/code/`) && !fs.existsSync(e.path)) throw new Error(`The folder does not exist: ${e.path}`);
+  }
+  if (input.name !== undefined) e.name = String(input.name).trim().slice(0, 40);
+  if (!e.name) e.name = e.path.split('/').pop();
+  if (input.aliases !== undefined) {
+    const seen = new Set([normWord(e.name)]);
+    e.aliases = [];
+    for (const a of input.aliases) {
+      const t = String(a).trim();
+      if (!t || seen.has(normWord(t))) continue;
+      seen.add(normWord(t));
+      e.aliases.push(t);
+    }
+  }
+  if (input.about !== undefined) e.about = String(input.about).trim().slice(0, 200);
+  if (input.notes !== undefined) e.notes = String(input.notes).trim().slice(0, 2000);
+  if (input.policy !== undefined) e.policy = ['allowed', 'ask', 'never'].includes(input.policy) ? input.policy : 'ask';
+  if (input.defaults !== undefined) e.defaults = Object.fromEntries(Object.entries(input.defaults || {}).filter(([, v]) => v !== '' && v !== null && v !== undefined));
+  if (input.deps !== undefined) e.deps = (input.deps || []).filter((d) => d !== e.id && list.some((x) => x.id === d));
+  const others = list.filter((x) => x.id !== e.id);
+  const taken = others.find((x) => x.path === e.path);
+  if (taken) throw new Error(`That folder is already registered as ${taken.name}.`);
+  for (const w of rWords(e)) {
+    const hit = others.find((x) => rWords(x).some((y) => normWord(y) === normWord(w)));
+    if (hit) throw new Error(`“${w}” is already a name of ${hit.name}.`);
+  }
+  const known = REPO_BY_PATH.get(e.path);
+  if (known) e.facts = { manifest: known.kind, packageName: known.packageName, isRepo: true, branch: known.branch, dirty: known.dirty, hasClaudeMd: known.hasClaudeMd, seenAt: Date.now() };
+  config.repos = cur ? list.map((x) => (x.id === e.id ? e : x)) : [...list, e];
+  broadcast('repos.changed', { repos: config.repos.map(rMissing) });
+  return rMissing(e);
+}
+const rAnnotate = (list) =>
+  list.map((r) => {
+    const e = (config.repos || []).find((x) => x.path === r.path);
+    if (!e) return { ...r, registered: false };
+    const extra = (e.deps || []).map((d) => (config.repos || []).find((x) => x.id === d)?.path).filter((p) => p && p !== r.path);
+    return { ...r, registered: true, registryId: e.id, registryName: e.name, about: e.about, policy: e.policy, notes: e.notes || r.notes, deps: [...new Set([...(r.deps || []), ...extra])].sort() };
+  });
 const D_TERMINAL = new Set(['done', 'failed', 'stopped', 'skipped']);
 const D_ACTIVE = new Set(['preparing', 'running', 'needs_action']);
 const D_DEFAULTS = { mode: 'acceptEdits', allowedTools: [], model: '', effort: '', parallel: 3, maxMinutes: 20, costCap: 0, canary: 1, learn: true, prepare: '', copy: [], verify: '', verifyRetry: true, commitMessage: '', pr: false, report: 'table' };
@@ -800,7 +867,23 @@ function seedDispatch() {
 seedDispatch();
 
 const dispatchMethods = {
-  'workspace.scan': ({ root }) => ({ root: root || `${HOME}/code`, depth: 3, at: Date.now(), repos: REPOS }),
+  'workspace.scan': ({ root }) => ({ root: root || `${HOME}/code`, depth: 3, at: Date.now(), repos: rAnnotate(REPOS) }),
+  'repos.list': () => (config.repos || []).map(rMissing),
+  'repos.save': (p) => rSave(p),
+  'repos.remove': ({ id }) => {
+    const list = config.repos || [];
+    if (!list.some((x) => x.id === id)) return false;
+    config.repos = list.filter((x) => x.id !== id).map((x) => ({ ...x, deps: (x.deps || []).filter((d) => d !== id) }));
+    broadcast('repos.changed', { repos: config.repos.map(rMissing) });
+    return true;
+  },
+  'repos.register': ({ path: dir, ...patch }) => {
+    const cur = (config.repos || []).find((e) => dir === e.path || dir.startsWith(e.path + '/'));
+    return rSave(cur ? { id: cur.id, ...patch } : { path: dir, ...patch });
+  },
+  'repos.scan': ({ root }) => ({ root: root || `${HOME}/code`, found: REPOS.map((r) => ({ path: r.path, name: r.name, packageName: r.packageName, kind: r.kind, branch: r.branch, registered: (config.repos || []).some((e) => e.path === r.path) })) }),
+  'repos.refresh': () => (config.repos || []).map(rMissing),
+  'repos.resolve': ({ word }) => rResolve(word) || { nearest: (config.repos || []).map((e) => e.name).slice(0, 3) },
   'dispatch.list': () => jobs.map(dSummary).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)),
   'dispatch.get': ({ id }) => ({ job: dSummary(dJob(id)), runs: dJob(id).runs }),
   'dispatch.save': (p) => {
@@ -999,7 +1082,7 @@ const listChanged = () => {
   clearTimeout(listTimer);
   listTimer = setTimeout(() => broadcast('sessions.changed', {}), 50);
 };
-const config = { theme: 'dark', fontSize: 14.5, sendKey: 'enter', claudeBinary: 'auto', defaultModel: '', defaultMode: 'default', defaultEffort: '', worktreeRoot: '', idleTimeoutMin: 30, notifications: false, promptSuggestions: false, showThinking: false, recentProjects: [PROJ, OTHER], ui: { sidebar: true, panel: false, view: 'normal' } };
+const config = { theme: 'dark', fontSize: 14.5, sendKey: 'enter', claudeBinary: 'auto', defaultModel: '', defaultMode: 'default', defaultEffort: '', worktreeRoot: '', idleTimeoutMin: 30, notifications: false, promptSuggestions: false, showThinking: false, recentProjects: [PROJ, OTHER], repos: JSON.parse(JSON.stringify(REGISTRY)), helpers: { enabled: true, total: 8, parallel: 0, maxMinutes: 30, costUsd: 0, wakeLead: true }, ui: { sidebar: true, panel: false, view: 'normal' } };
 const configDefaults = JSON.parse(JSON.stringify(config)); // what mock.reset puts back
 const S = (id) => {
   const s = sessions.get(id);

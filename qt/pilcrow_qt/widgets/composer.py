@@ -76,7 +76,7 @@ from PySide6.QtWidgets import (
 
 from .. import icons, theme
 from ..canvas.pixels import hline
-from ..lib.fmt import bytes_, short_model
+from ..lib.fmt import bytes_, short_model, tildify
 from ..lib.fuzzy import fuzzy_filter
 from ..store import store
 from .ui.bits import ContextRing, IconButton, LayoutButton, context_label
@@ -1419,6 +1419,13 @@ class _FloatingPanel(QWidget):
 # ---------------------------------------------------------------- the @ and / popup
 
 
+def _word_match(q: str, words: List[Any]) -> bool:
+    """Whether a typed fragment is part of one of the person's names for a repository, loosely (case,
+    spaces, hyphens and underscores do not count)."""
+    n = re.sub(r"[\s_\-]+", "", q.lower())
+    return bool(n) and any(n in re.sub(r"[\s_\-]+", "", str(w).lower()) for w in words if w)
+
+
 class SuggestPopup(_FloatingPanel):
     """The list of files or commands above the field (``.suggest``). Keyboard-driven by the Composer;
     rows light under the pointer, a click picks. Painted whole, so it arrives on the snappy spring."""
@@ -1538,8 +1545,9 @@ class SuggestPopup(_FloatingPanel):
                 p.drawRoundedRect(row, theme.R2, theme.R2)
             x = row.x() + 10
             kind = it["kind"]
-            if kind in ("dir", "file"):
-                p.drawPixmap(QPointF(x, ry + 9), icons.pixmap("folder" if kind == "dir" else "file", t.text_3, 14))
+            if kind in ("dir", "file", "repo"):
+                ico = "folder-git-2" if kind == "repo" else "folder" if kind == "dir" else "file"
+                p.drawPixmap(QPointF(x, ry + 9), icons.pixmap(ico, t.plan if kind == "repo" else t.text_3, 14))
                 x += 14 + 10
             p.setFont(mono)
             label = str(it["label"])
@@ -2841,10 +2849,20 @@ class Composer(QWidget):
                 if q
                 else [f for f in self.index if "/" not in f or len(f.split("/")) <= 2][:40]
             )
-            self.suggestions = [
-                {"key": f, "label": f, "hint": "", "kind": "dir" if f.endswith("/") else "file"} for f in lst
+            files = [{"key": f, "label": f, "hint": "", "kind": "dir" if f.endswith("/") else "file"} for f in lst]
+            # registered repositories (REPOSITORIES.md) answer to their names and the person's aliases
+            repos = [
+                {
+                    "key": str(e.get("name") or ""),
+                    "label": str(e.get("name") or ""),
+                    "hint": str(e.get("about") or tildify(str(e.get("path") or ""), (store.info or {}).get("home"))),
+                    "kind": "repo",
+                }
+                for e in store.repos
+                if e.get("name") and (not q or _word_match(q, [e.get("name")] + list(e.get("aliases") or [])))
             ]
-            head = "Files" if q else "Files — keep typing to narrow down"
+            self.suggestions = repos[:8] + files
+            head = ("Repositories and files" if repos else "Files") if q else "Files — keep typing to narrow down"
         if not self.suggestions:
             self.popup.pop_out()
             return

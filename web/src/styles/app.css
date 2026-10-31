@@ -4171,3 +4171,168 @@ html[data-os='win'] .msg-bubble {
   color: var(--text);
   background: var(--fill-2);
 }
+
+/* ================================================================ settings → repositories
+   The registry (REPOSITORIES.md): one row per repository, edited in place. */
+.rp {
+  display: grid;
+  gap: 14px;
+}
+.rp-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.rp-filter {
+  max-width: 260px;
+}
+.rp-box {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--r-3);
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+}
+.rp-box-title {
+  font-size: var(--fs-small);
+  font-weight: 600;
+}
+.rp-found {
+  display: grid;
+  gap: 2px;
+}
+.rp-found-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px;
+  font-size: var(--fs-small);
+  min-width: 0;
+}
+.rp-found-row.done {
+  color: var(--text-3);
+}
+.rp-found-row input {
+  accent-color: var(--accent);
+}
+.rp-found-name {
+  font-weight: 500;
+  flex: none;
+}
+.rp-found-row .mono {
+  font-size: var(--fs-micro);
+  min-width: 0;
+}
+.rp-empty {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding: 36px 20px;
+  text-align: center;
+  color: var(--text-3);
+}
+.rp-empty .hint {
+  max-width: 460px;
+}
+.rp-list {
+  display: grid;
+  gap: 8px;
+}
+.rp-row {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px 8px 12px;
+  border-radius: var(--r-3);
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+}
+.rp-row.missing .rp-name {
+  color: var(--text-3);
+}
+.rp-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.rp-name {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  font-size: var(--fs-ui);
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  flex: none;
+}
+.rp-name:hover {
+  color: var(--text-2);
+}
+.rp-name-edit {
+  max-width: 220px;
+}
+.rp-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--fs-micro);
+}
+.rp-aliases,
+.rp-deps {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-left: 26px;
+}
+.rp-deps {
+  padding-left: 0;
+}
+button.rp-alias {
+  border: 0;
+  cursor: pointer;
+  font-weight: 600;
+}
+button.rp-alias:hover {
+  color: var(--err);
+  background: var(--err-wash);
+}
+.rp-alias-edit {
+  width: 200px;
+  height: 24px;
+  font-size: var(--fs-small);
+}
+.rp-locate {
+  display: grid;
+  gap: 6px;
+  padding-left: 26px;
+}
+.rp-detail {
+  display: grid;
+  gap: 8px;
+  padding: 6px 0 2px 26px;
+}
+.rp-field {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+}
+.rp-field.top {
+  align-items: start;
+}
+.rp-field-label > div:first-child {
+  font-size: var(--fs-small);
+  font-weight: 600;
+}
+.rp-field-label .hint {
+  font-size: var(--fs-micro);
+  line-height: 1.4;
+}
+.rp-field-control {
+  min-width: 0;
+}
+.suggest-item .suggest-repo {
+  color: var(--plan);
+}

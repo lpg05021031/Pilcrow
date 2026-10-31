@@ -76,6 +76,9 @@ class TargetBlock(NodeBlock):
             if int(v.get("level") or 0) > 0:
                 out.append((f"after {', '.join(dep_names(r))}", ""))
             return out
+        if r.get("registered"):
+            # the registry's name for it (REPOSITORIES.md); a never policy is said in the plan's words
+            out.append((str(r.get("registryName") or "registered"), "err" if r.get("policy") == "never" else "plan"))
         if r.get("dirty"):
             out.append((f"{int(r.get('changed') or 0) + int(r.get('untracked') or 0)} uncommitted", "accent"))
         if r.get("deps"):
@@ -261,12 +264,19 @@ class TargetPicker(QWidget):
         q = self._filter.lower()
         out = []
         for r in self.repos or []:
-            hay = f"{r.get('name')} {r.get('path')} {r.get('kind') or ''} {r.get('packageName') or ''}".lower()
+            hay = f"{r.get('name')} {r.get('registryName') or ''} {r.get('about') or ''} {r.get('path')} {r.get('kind') or ''} {r.get('packageName') or ''}".lower()
             if not q or q in hay:
                 out.append(r)
+        # registered repositories first (REPOSITORIES.md), then the rest, each by name
+        out.sort(key=lambda r: (not r.get("registered"), str(r.get("name") or "").lower()))
         return out
 
     def _rebuild(self) -> None:
+        # a registered repository's standing notes prefill the target's, until the person edits them
+        for r in self.repos or []:
+            p = str(r.get("path") or "")
+            if r.get("notes") and p and p not in self._notes:
+                self._notes[p] = str(r.get("notes"))
         self.list.sync(self.shown())
         self.empty.setVisible(self.repos is not None and not self.repos)
         self.list.setVisible(bool(self.repos))

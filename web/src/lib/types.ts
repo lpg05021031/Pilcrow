@@ -236,7 +236,43 @@ export interface Config {
   memoryInject?: boolean;
   memoryModel?: string;
   recentProjects: string[];
+  repos?: RepoEntry[];
+  helpers?: HelpersConfig;
   ui: Record<string, unknown>;
+}
+
+/** The repositories registry (REPOSITORIES.md): one entry the person maintains per repository. */
+export type RepoPolicy = 'allowed' | 'ask' | 'never';
+export interface RepoEntry {
+  id: string;
+  path: string;
+  name: string;
+  aliases: string[];
+  about: string;
+  policy: RepoPolicy;
+  defaults: { mode?: 'default' | 'acceptEdits' | 'plan'; worktree?: boolean; base?: string; prepare?: string; verify?: string; model?: string };
+  notes: string;
+  deps: string[];
+  facts: { manifest?: string | null; packageName?: string | null; isRepo?: boolean; branch?: string | null; dirty?: boolean; hasClaudeMd?: boolean; seenAt?: number; missing?: boolean };
+  addedAt: number;
+  machine: string;
+  missing?: boolean;
+}
+export interface RepoScanHit {
+  path: string;
+  name: string;
+  packageName: string | null;
+  kind: string | null;
+  branch: string | null;
+  registered: boolean;
+}
+export interface HelpersConfig {
+  enabled: boolean;
+  total: number;
+  parallel: number;
+  maxMinutes: number;
+  costUsd: number;
+  wakeLead: boolean;
 }
 
 export interface DiffLine {
@@ -555,6 +591,13 @@ export interface WorkspaceRepo {
   packageName: string | null;
   lastSession: number | null;
   deps: string[];
+  /** what the registry (REPOSITORIES.md) knows about it, when it is registered */
+  registered?: boolean;
+  registryId?: string;
+  registryName?: string;
+  about?: string;
+  policy?: RepoPolicy;
+  notes?: string;
 }
 export interface DispatchReview {
   id: string;
