@@ -1,5 +1,5 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { ArrowDown, PencilLine, GitFork, ChevronRight, Info, TriangleAlert, CircleAlert, Layers, Paperclip, Terminal as TermIcon, History, Telescope, CircleCheck, Sparkles } from 'lucide-react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { ArrowDown, ArrowUpRight, CornerDownRight, PencilLine, GitFork, ChevronRight, Info, TriangleAlert, CircleAlert, Layers, Paperclip, Terminal as TermIcon, History, Telescope, CircleCheck, Sparkles } from 'lucide-react';
 import { useStore, models, forkSession, insertIntoComposer, toast, call, confirmAction, bumpFs, openLightbox, openSession } from '../lib/store';
 import type { Item, ToolItem, UserItem, ThinkingItem, TextItem, NoticeItem, ResultItem, CompactItem, CommandOutputItem } from '../lib/transcript';
 import type { PermissionRequest } from '../lib/types';
@@ -81,6 +81,12 @@ function liveLabel(work: Item[]): string | null {
           return 'Running an agent';
         case 'mcp':
           return 'Using a connector';
+        case 'helper':
+          return HELPER_LIVE[it.name.slice('mcp__helpers__'.length)] || 'Working with helpers';
+        case 'ask':
+          return 'Asking you a question';
+        case 'plan':
+          return 'Waiting for your review of the plan';
         default:
           return `Using ${it.name}`;
       }
@@ -90,6 +96,8 @@ function liveLabel(work: Item[]): string | null {
   return null;
 }
 
+const HELPER_LIVE: Record<string, string> = { start: 'Starting a helper', wait: 'Waiting for helpers', read: "Reading a helper's result", send: 'Telling a helper', stop: 'Stopping a helper', list: 'Listing helpers' };
+
 function toolWord(t: ToolItem) {
   const n = t.name;
   if (['Edit', 'MultiEdit', 'Write', 'NotebookEdit'].includes(n)) return 'edit';
@@ -97,6 +105,9 @@ function toolWord(t: ToolItem) {
   if (['Grep', 'Glob', 'LS', 'WebSearch', 'WebFetch', 'ToolSearch'].includes(n)) return 'search';
   if (n === 'Bash' || n === 'PowerShell' || n === 'BashOutput') return 'command';
   if (n === 'Task' || n === 'Agent' || n === 'Workflow' || n === 'RunWorkflow') return 'agent';
+  if (n.startsWith('mcp__helpers__')) return 'helper';
+  if (n === 'AskUserQuestion') return 'ask';
+  if (n === 'ExitPlanMode') return 'plan';
   if (n.startsWith('mcp__')) return 'mcp';
   return 'other';
 }
@@ -111,6 +122,10 @@ function workSummary(work: Item[]) {
   let mcp = 0;
   let other = 0;
   let failed = 0;
+  let starts = 0;
+  let helperSteps = 0;
+  let asks = 0;
+  let plans = 0;
   for (const t of tools) {
     if (t.status === 'error' || t.status === 'denied') failed++;
     switch (toolWord(t)) {
@@ -129,6 +144,16 @@ function workSummary(work: Item[]) {
       case 'agent':
         agents++;
         break;
+      case 'helper':
+        if (t.name.endsWith('__start')) starts++;
+        else helperSteps++;
+        break;
+      case 'ask':
+        asks++;
+        break;
+      case 'plan':
+        plans++;
+        break;
       case 'mcp':
         mcp++;
         break;
@@ -143,6 +168,10 @@ function workSummary(work: Item[]) {
   if (reads) parts.push(`read ${reads === 1 ? 'a file' : `${reads} files`}`);
   if (searches) parts.push(`searched ${searches === 1 ? 'once' : `${searches} times`}`);
   if (agents) parts.push(`${agents === 1 ? 'ran an agent' : `ran ${agents} agents`}`);
+  if (starts) parts.push(`started ${starts === 1 ? 'a helper' : `${starts} helpers`}`);
+  if (helperSteps && !starts) parts.push('worked with helpers');
+  if (asks) parts.push(`asked you ${asks === 1 ? 'a question' : `${asks} questions`}`);
+  if (plans) parts.push('proposed a plan');
   if (mcp) parts.push(`used ${mcp === 1 ? 'a connector' : `${mcp} connector tools`}`);
   if (other) parts.push(`${other} other ${other === 1 ? 'step' : 'steps'}`);
   if (!parts.length) parts.push(work.some((it) => it.kind === 'thinking') ? 'thought it through' : 'worked');
@@ -250,6 +279,9 @@ function tally(steps: Item[]) {
   let searches = 0;
   let agents = 0;
   let mcp = 0;
+  let helpers = 0;
+  let asks = 0;
+  let plans = 0;
   let other = 0;
   let failed = 0;
   for (const t of tools) {
@@ -260,6 +292,9 @@ function tally(steps: Item[]) {
     else if (w === 'read') reads++;
     else if (w === 'search') searches++;
     else if (w === 'agent') agents++;
+    else if (w === 'helper') helpers++;
+    else if (w === 'ask') asks++;
+    else if (w === 'plan') plans++;
     else if (w === 'mcp') mcp++;
     else other++;
   }
@@ -269,6 +304,9 @@ function tally(steps: Item[]) {
   if (reads) parts.push(`${reads} read${reads > 1 ? 's' : ''}`);
   if (searches) parts.push(`${searches} search${searches > 1 ? 'es' : ''}`);
   if (agents) parts.push(`${agents} agent${agents > 1 ? 's' : ''}`);
+  if (helpers) parts.push(`${helpers} helper step${helpers > 1 ? 's' : ''}`);
+  if (asks) parts.push(`${asks} question${asks > 1 ? 's' : ''}`);
+  if (plans) parts.push(`${plans} plan${plans > 1 ? 's' : ''}`);
   if (mcp) parts.push(`${mcp} connector call${mcp > 1 ? 's' : ''}`);
   if (other) parts.push(`${other} other`);
   const first = tools[0]?.startTs;
@@ -690,6 +728,7 @@ function UserMessage({ item, ctx }: { item: UserItem; ctx: ToolCtx }) {
   const queued = useStore((s) => s.rt[ctx.sessionId]?.queued?.includes(item.uuid));
   const busy = useStore((s) => ['running', 'starting', 'requires_action'].includes(s.rt[ctx.sessionId]?.status || ''));
   if (item.note) return <HelperNote item={item} ctx={ctx} />;
+  if (item.from) return <FromLead item={item} ctx={ctx} />;
   if (item.command) {
     return (
       <div className="msg-user command">
@@ -736,11 +775,6 @@ function UserMessage({ item, ctx }: { item: UserItem; ctx: ToolCtx }) {
   };
   return (
     <div className={`msg-user${queued ? ' queued' : ''}`} lang={langOf(item.text)} id={`msg-${item.uuid}`}>
-      {item.from && (
-        <span className="msg-from" title="Sent by another session">
-          {item.from}
-        </span>
-      )}
       <div className="msg-bubble">
         {(item.images.length > 0 || item.files.length > 0) && (
           <div className="msg-attachments">
@@ -1337,34 +1371,112 @@ function parseNotes(text: string) {
   return { parts, tail: tail.join(' ') };
 }
 
-/** Drawn apart from the person's messages: left-aligned, a rule in the state's colour, the helper's name
- *  and numbers in the head, its handoff as quiet prose, Open at the right. */
+const HELPER_VERB: Record<string, string> = { done: 'Helper finished', failed: 'Helper failed', stopped: 'Helper stopped', needs_action: 'Helper needs you', skipped: 'Helper skipped' };
+const HELPER_HEADER_PREFIX = 'You are a helper started by another Pilcrow session';
+
+/** Words another session wrote, drawn as a tool card: a glyph in the status column, a verb, a target, figures
+ *  at the right, Open on hover, and a body that folds under the head (HELPERS.md §6.1). */
+function SessionCard({ id, glyph, verb, target, meta, openTip, onOpen, children }: { id?: string; glyph: ReactNode; verb: string; target: string; meta?: ReactNode; openTip: string; onOpen?: () => void; children?: ReactNode }) {
+  const [open, setOpen] = useState(true);
+  const foldable = Boolean(children);
+  return (
+    <div className={`tool session-card${open && foldable ? ' open' : ''}`} id={id}>
+      <div className="tool-head" role="button" tabIndex={0} onClick={() => foldable && setOpen(!open)} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && foldable && (e.preventDefault(), setOpen(!open))} aria-expanded={foldable ? open : undefined}>
+        <span className="tool-ico">{glyph}</span>
+        <span className="tool-line">
+          <span className="tool-verb">{verb}</span>
+          <span className="tool-target">{target}</span>
+          {foldable && <ChevronRight size={13} className="tool-chev" />}
+          {onOpen && (
+            <button
+              className="icon-btn sm tool-open"
+              title={openTip}
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpen();
+              }}
+            >
+              <ArrowUpRight size={13} />
+            </button>
+          )}
+        </span>
+        <span className="tool-meta">{meta}</span>
+      </div>
+      {foldable && <Collapse open={open}>{() => <div className="tool-body">{children}</div>}</Collapse>}
+    </div>
+  );
+}
+
+/** A note Pilcrow wrote to a lead: one card per helper it speaks of; the text around the cards is for the model. */
 function HelperNote({ item, ctx }: { item: UserItem; ctx: ToolCtx }) {
   const helpers = useStore((s) => s.rt[ctx.sessionId]?.helpers);
-  const { parts, tail } = useMemo(() => parseNotes(item.text), [item.text]);
-  const open = (name: string) => {
-    const h = helpers?.find((x) => x.name === name);
-    if (h) openSession(h.id);
-    else toast(`${name} is no longer a helper of this session`, 'info');
-  };
+  const { parts } = useMemo(() => parseNotes(item.text), [item.text]);
+  const list = parts.length ? parts : [{ name: 'note', state: '', body: item.text }];
   return (
-    <div className="msg-note" id={`msg-${item.uuid}`}>
-      {(parts.length ? parts : [{ name: 'note', state: '', body: item.text }]).map((p, k) => (
-        <div key={k} className={`note ${p.state || ''}`}>
-          <div className="note-head">
-            <span className="note-name">{p.name}</span>
-            <span className="note-meta faint tnum">
-              {[p.state?.replace('_', ' '), p.elapsed, p.cost, p.files && p.files !== '0' ? `${p.files} files +${p.add || 0} −${p.del || 0}` : ''].filter(Boolean).join(' · ')}
-            </span>
-            <span className="grow" />
-            <button className="btn xs ghost" onClick={() => open(p.name)} title="Open the helper's session">
-              Open
-            </button>
-          </div>
-          {p.body && <div className="note-body">{p.body}</div>}
-        </div>
-      ))}
-      {tail && <div className="note-tail faint small">{tail}</div>}
+    <div className="msg-notes" id={`msg-${item.uuid}`}>
+      {list.map((p, k) => {
+        const h = helpers?.find((x) => x.name === p.name);
+        const files = p.files && p.files !== '0';
+        return (
+          <SessionCard
+            key={k}
+            glyph={<span className={`dp-glyph ${p.state || 'stopped'}`} aria-hidden="true" />}
+            verb={HELPER_VERB[p.state] || 'Helper'}
+            target={p.name}
+            openTip="Open the helper's session"
+            onOpen={h ? () => openSession(h.id) : undefined}
+            meta={
+              <>
+                {p.elapsed && <span className="tnum">{p.elapsed}</span>}
+                {p.cost && <span className="tnum">{p.cost}</span>}
+                {files && (
+                  <span className="tool-stats tnum">
+                    {p.add && p.add !== '0' && <span className="num-add">+{p.add}</span>}
+                    {p.del && p.del !== '0' && <span className="num-del">−{p.del}</span>}
+                  </span>
+                )}
+              </>
+            }
+          >
+            {p.body ? (
+              <div className="tool-well">
+                <Markdown text={p.body} cwd={ctx.cwd} className="md-compact" />
+              </div>
+            ) : null}
+          </SessionCard>
+        );
+      })}
     </div>
+  );
+}
+
+/** A brief or a message the lead sent to this helper (`_from: lead`): not the person speaking, so a card
+ *  rather than a bubble; the standing instructions a brief opens with fold under it. */
+function FromLead({ item, ctx }: { item: UserItem; ctx: ToolCtx }) {
+  const lead = useStore((s) => s.rt[ctx.sessionId]?.helper);
+  const [showHeader, setShowHeader] = useState(false);
+  let header = '';
+  let brief = item.text;
+  if (item.text.startsWith(HELPER_HEADER_PREFIX)) {
+    const i = item.text.indexOf('\n\n');
+    header = i < 0 ? item.text : item.text.slice(0, i);
+    brief = i < 0 ? '' : item.text.slice(i + 2).trim();
+  }
+  return (
+    <SessionCard id={`msg-${item.uuid}`} glyph={<CornerDownRight size={14} />} verb="From the lead" target={lead?.leadTitle || 'the lead session'} openTip="Open the lead session" onOpen={lead ? () => openSession(lead.leadId) : undefined}>
+      {brief && (
+        <div className="tool-well">
+          <Markdown text={brief} cwd={ctx.cwd} className="md-compact" />
+        </div>
+      )}
+      {header && (
+        <div className="hb-fold">
+          <button className="tool-toggle" onClick={() => setShowHeader(!showHeader)}>
+            <ChevronRight size={12} className={showHeader ? 'rot' : ''} /> Standing instructions for a helper
+          </button>
+          <Collapse open={showHeader}>{() => <div className="tool-note">{header}</div>}</Collapse>
+        </div>
+      )}
+    </SessionCard>
   );
 }

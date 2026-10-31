@@ -206,7 +206,7 @@ class UserBlock(Block):
             f_tag = st.m.font(theme.FS_MICRO, 600)
             tw = int(st.m.text_w(it.from_, f_tag)) + 12
             tr = QRect(br.x() - tw - 8, br.y() + 8, tw, 18)
-            rounded(p, tr, theme.blend(t.plan, t.canvas, 0.18) if hasattr(theme, "blend") else bg, None, 9)
+            rounded(p, tr, theme.blend(t.plan_wash, t.canvas), None, 9)
             st.m.draw_text(p, tr.x() + 6, tr.y() + (18 - st.m.line_h(f_tag)) / 2, it.from_, f_tag, QColor(t.plan))
         for r, pm, _src in self.thumbs:
             p.drawPixmap(r.translated(x, y).topLeft(), pm)

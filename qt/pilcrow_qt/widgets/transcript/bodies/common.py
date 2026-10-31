@@ -133,6 +133,38 @@ class Surface(QFrame):
         p.drawRoundedRect(r, self.radius, self.radius)
 
 
+class NeedsDot(QWidget):
+    """`.wait-dot`: the accent dot a tool's status column shows while Claude waits for the person; the
+    question and plan cards and a permission card of its own open with it."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setFixedSize(14, 14)
+        bind(theme.theme.changed, self, lambda _t: self.update())
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        t = theme.tokens()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(t.color("accent_wash"))
+        p.drawEllipse(QRectF(0.5, 0.5, 13, 13))
+        p.setBrush(t.color("accent"))
+        p.drawEllipse(QRectF(3.5, 3.5, 7, 7))
+
+
+def caption(text: str, live: bool) -> QLabel:
+    """The small semibold line that opens a card: accent while it waits on the person, text-3 after."""
+    lb = bits.label(text, size="small")
+    restyle(
+        lb,
+        lambda t: (
+            f"QLabel {{ font-weight: 600; font-size: {theme.FS_SMALL}px; color: {t.accent_text if live else t.text_3}; }}"
+        ),
+    )
+    return lb
+
+
 class Hairline(QFrame):
     """A one-pixel rule in the ``hair`` token (the ``box-shadow: inset 0 1px 0 var(--hair)`` of the web)."""
 

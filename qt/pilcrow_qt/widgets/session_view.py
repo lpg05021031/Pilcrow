@@ -158,7 +158,7 @@ class HelperChip(QPushButton):
         self.setAccessibleName(text)
         self.setToolTip(tip)
         fm = QFontMetrics(theme.font_ui(theme.FS_SMALL, 500))
-        self.w = min(280, 9 + 8 + 7 + fm.horizontalAdvance(text) + 10)
+        self.w = min(280, 9 + 8 + 7 + fm.horizontalAdvance(text) + 16)
         self.update()
         return True
 

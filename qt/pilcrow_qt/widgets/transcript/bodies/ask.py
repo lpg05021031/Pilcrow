@@ -6,8 +6,8 @@ import re
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QRectF, Qt, Signal
-from PySide6.QtGui import QPainter, QPen
-from PySide6.QtWidgets import QLineEdit, QWidget
+from PySide6.QtGui import QKeySequence, QPainter, QPen, QShortcut
+from PySide6.QtWidgets import QApplication, QLineEdit, QWidget
 
 from .... import icons, theme
 from ....lib.transcript_model import ToolItem
@@ -15,7 +15,21 @@ from ....store import store
 from ...ui import bits
 from ...ui.signals import bind
 from ..ctx import ToolCtx
-from .common import Badge, Hairline, IconLabel, Json, Row, Surface, faint, markdown_label, restyle, vbox
+from ..permission import key_badge, perm_button, typing_elsewhere
+from .common import (
+    Badge,
+    Hairline,
+    IconLabel,
+    Json,
+    NeedsDot,
+    Row,
+    Surface,
+    caption,
+    faint,
+    markdown_label,
+    restyle,
+    vbox,
+)
 
 
 def extract_answer(text: str, q: str) -> str:
@@ -63,7 +77,9 @@ class OptionRow(QWidget):
     toggled = Signal()
     hovered = Signal()
 
-    def __init__(self, label: str, description: str, multi: bool, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self, label: str, description: str, multi: bool, key: str = "", parent: Optional[QWidget] = None
+    ) -> None:
         super().__init__(parent)
         self.label = label
         self.on = False
@@ -85,6 +101,8 @@ class OptionRow(QWidget):
         if description:
             tl.addWidget(bits.label(description, tone="faint", size="small", wrap=True))
         row.lay.addWidget(text, 1)
+        if key:
+            row.lay.addWidget(key_badge(key), 0, Qt.AlignmentFlag.AlignVCenter)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
     def set_on(self, on: bool) -> None:
@@ -145,6 +163,11 @@ class AskBody(QWidget):
         self.other_fields: Dict[int, QLineEdit] = {}
         self.note_fields: Dict[int, QLineEdit] = {}
         self.live = perm is not None
+        first_pending = next(iter(ctx.pending.values()), None)
+        self.first = bool(perm) and bool(first_pending) and first_pending.get("requestId") == perm.get("requestId")
+        # number keys pick an option when one question is asked (the keys are shown on the rows)
+        self.keyed = self.live and self.first and len(self.questions) == 1
+        self._shortcuts: List[QShortcut] = []
         bind(theme.theme.changed, self, lambda _t: self.update())
         lay = vbox(self, margins=(16, 14, 16, 14) if self.live else (16, 12, 16, 12), spacing=0)
         if not self.live:
@@ -160,11 +183,9 @@ class AskBody(QWidget):
             answered = {str(k): str(v) for k, v in item.structured["answers"].items()}
         result_text = item.result.text if item.result else ""
         head = Row(spacing=8, margins=(0, 0, 0, 8))
-        title = bits.label(
-            "Claude asked a few questions" if len(self.questions) > 1 else "Claude asked a question", size="small"
+        head.add(
+            caption("Claude asked a few questions" if len(self.questions) > 1 else "Claude asked a question", False)
         )
-        restyle(title, lambda t: f"QLabel {{ font-weight: 600; color: {t.text_2}; font-size: {theme.FS_SMALL}px; }}")
-        head.add(title)
         if item.status == "denied":
             head.add(Badge("Skipped"))
         head.stretch()
@@ -198,11 +219,8 @@ class AskBody(QWidget):
     def _build_live(self, lay) -> None:
         head = Row(spacing=8, margins=(0, 0, 0, 12))
         n = len(self.questions)
-        title = bits.label(f"Claude has {n} questions" if n > 1 else "Claude has a question", size="small")
-        restyle(
-            title, lambda t: f"QLabel {{ font-weight: 600; color: {t.accent_text}; font-size: {theme.FS_SMALL}px; }}"
-        )
-        head.add(title)
+        head.add(NeedsDot())
+        head.add(caption(f"Claude has {n} questions" if n > 1 else "Claude has a question", True))
         head.stretch()
         lay.addWidget(head)
         body = Row(spacing=16)
@@ -224,6 +242,8 @@ class AskBody(QWidget):
         self.send_btn.setAccessibleName(self.send_btn.text())
         self.skip_btn = bits.button("Skip", kind="ghost", on_click=self.skip)
         self.skip_btn.setAccessibleName("Skip")
+        perm_button(self.send_btn)
+        perm_button(self.skip_btn)
         actions.add(self.send_btn)
         actions.add(self.skip_btn)
         actions.stretch()
@@ -252,8 +272,14 @@ class AskBody(QWidget):
                 continue
             if oi:
                 options.add(Hairline())
-            row = OptionRow(str(o.get("label") or ""), str(o.get("description") or ""), multi)
+            key = str(oi + 1) if self.keyed and oi < 9 else ""
+            row = OptionRow(str(o.get("label") or ""), str(o.get("description") or ""), multi, key)
             row.toggled.connect(lambda qi=qi, label=row.label, multi=multi: self.toggle(qi, label, multi))
+            if key:
+                sc = QShortcut(QKeySequence(key), self)
+                sc.setContext(Qt.ShortcutContext.WindowShortcut)
+                sc.activated.connect(lambda qi=qi, label=row.label, multi=multi: self._on_key(qi, label, multi))
+                self._shortcuts.append(sc)
             row.hovered.connect(lambda qi=qi, oi=oi: self._preview(qi, oi))
             options.add(row)
             self.rows[qi].append(row)
@@ -293,6 +319,11 @@ class AskBody(QWidget):
         nl.addWidget(notes)
         bl.addWidget(note_host)
         return box
+
+    def _on_key(self, qi: int, label: str, multi: bool) -> None:
+        if self.busy or self.perm is None or typing_elsewhere(QApplication.focusWidget()):
+            return
+        self.toggle(qi, label, multi)
 
     def toggle(self, qi: int, label: str, multi: bool) -> None:
         cur = self.sel.get(qi, [])
@@ -392,4 +423,4 @@ class AskBody(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setPen(QPen(t.color("accent_ring" if self.live else "hair_2"), 1.5 if self.live else 1))
         p.setBrush(t.color("raised"))
-        p.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 14, 14)
+        p.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 12, 12)

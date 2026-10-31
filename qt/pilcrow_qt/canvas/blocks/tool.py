@@ -20,7 +20,7 @@ from ...widgets.transcript.ctx import ToolCtx
 from ..paint import Measurer, PaintState, rounded
 from ..pixels import vline
 from ..scene import Block, Group, Target
-from .base import chevron, paint_head_tint
+from .base import chevron, paint_head_tint, paint_needs_frame
 from .bodies import ToolBodyBlock
 from .island import IslandBlock
 
@@ -203,7 +203,7 @@ class ToolBlock(Group):
     def paint(self, p: QPainter, x: int, y: int, w: int, st: PaintState) -> None:
         t = st.t
         if self.awaiting:
-            rounded(p, QRect(x - 10, y, w + 20, self.h), QColor(t.raised), QColor(t.hair_2), 12)
+            paint_needs_frame(p, QRect(x - 10, y, w + 20, self.h), st)
         head_h = self.head_h
         hover = st.hover is not None and st.hover.kind == "head"
         if hover:

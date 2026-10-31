@@ -619,6 +619,8 @@ class ComposerEdit(QTextEdit):
 
     def __init__(self, owner: Optional[Any] = None, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        # the number keys that answer a waiting card look for this: an empty composer is not "typing"
+        self.setProperty("composer", True)
         self._owner = owner
         self._composing = False
         self.setAcceptRichText(False)

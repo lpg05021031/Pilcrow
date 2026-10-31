@@ -22,7 +22,7 @@ from ...store import store
 from ..ui import bits
 from ..ui.button import Btn
 from ..ui.signals import bind
-from .bodies.common import Hairline, IconLabel, Row, faint, mono_family, restyle, rich, vbox
+from .bodies.common import Hairline, IconLabel, NeedsDot, Row, caption, faint, mono_family, restyle, rich, vbox
 from .ctx import ToolCtx
 
 Json = Dict[str, Any]
@@ -156,9 +156,15 @@ class PermissionCard(QWidget):
                 else default_title(perm, cwd)
             )
         self.title_text = title or ""
+        if self.orphan:
+            cap = Row(spacing=8, margins=(0, 0, 0, 8))
+            cap.add(NeedsDot())
+            cap.add(caption("Needs your permission", not stale))
+            cap.stretch()
+            lay.addWidget(cap)
         if title:
             t = bits.label(title, wrap=True)
-            restyle(t, lambda tk: f"QLabel {{ font-size: {theme.FS_UI}px; font-weight: 600; color: {tk.text}; }}")
+            restyle(t, lambda tk: f"QLabel {{ font-size: {theme.FS_BODY}px; font-weight: 600; color: {tk.text}; }}")
             lay.addWidget(t)
         desc = perm.get("description") or ""
         sub: List[str] = []
@@ -329,13 +335,14 @@ class PermissionCard(QWidget):
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(QPen(t.color("hair_2"), 1))
+        p.setPen(QPen(t.color("hair_2" if self.stale else "accent_ring"), 1 if self.stale else 1.5))
         p.setBrush(t.color("raised"))
-        p.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 12, 12)
+        p.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 12, 12)
 
 
-def _key(k: str) -> QWidget:
-    """`.perm-key`: the number that answers, a 16px ringed box in text-4 next to its button."""
+def key_badge(k: str) -> QWidget:
+    """`.perm-key`: the number that answers, a 16px ringed box in text-4 next to its button. Every card
+    that waits on the person draws its keys this way."""
     lb = bits.label(k, size="micro")
     lb.setAlignment(Qt.AlignmentFlag.AlignCenter)
     lb.setFixedHeight(16)
@@ -350,8 +357,15 @@ def _key(k: str) -> QWidget:
     return lb
 
 
-def _perm_button(b: Btn) -> Btn:
-    """`.perm-actions .btn`: 28px tall, 11px sides, 13px text, 7px corners (the kind gives the colours)."""
+_key = key_badge
+
+
+def perm_button(b: Btn) -> Btn:
+    """`.perm-actions .btn`: 28px tall, 11px sides, 13px text, 7px corners (the kind gives the colours).
+    The buttons of every card that waits on the person share these metrics."""
     b.override = {"h": 28, "px": 11, "fs": theme.FS_UI, "fw": 500, "r": 7}
     b.updateGeometry()
     return b
+
+
+_perm_button = perm_button

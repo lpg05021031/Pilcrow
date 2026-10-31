@@ -134,6 +134,11 @@ export function PermissionCard({ perm, item, ctx, stale = false }: { perm: Permi
 
   return (
     <div className={`perm${stale ? ' stale' : ''}${item ? '' : ' orphan'}`} role="alertdialog" aria-label="Permission request">
+      {!item && (
+        <div className="perm-cap">
+          <span className="wait-dot" aria-hidden="true" /> Needs your permission
+        </div>
+      )}
       {titleText && <div className="perm-title">{titleText}</div>}
       {(sub.length > 0 || perm.blockedPath) && (
         <div className="perm-sub">

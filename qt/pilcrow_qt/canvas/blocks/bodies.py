@@ -10,12 +10,12 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import QRectF, Qt
+from PySide6.QtCore import QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 
 from ... import theme
 from ...lib.fmt import duration, plural, rel_path, truncate
-from ...lib.tools_meta import str_
+from ...lib.tools_meta import HELPER_RING, HELPER_TONE, helper_text_tone, helper_word, str_
 from ...lib.transcript_model import ToolItem
 from ...lib.workflow import parse_workflow_meta, workflow_counts
 from ...store import store
@@ -321,7 +321,6 @@ def build_body(item: ToolItem, ctx: ToolCtx, block: ToolBodyBlock, m: Measurer) 
 # ---------------------------------------------------------------- the lead's tools (HELPERS.md)
 
 HELPER_TERMINAL = ("done", "failed", "stopped", "skipped")
-_HELPER_TONE = {"done": "ok", "failed": "err", "running": "accent", "preparing": "accent", "needs_action": "info"}
 
 
 def _helpers_result(item: ToolItem) -> Optional[Json]:
@@ -338,21 +337,41 @@ def _helpers_result(item: ToolItem) -> Optional[Json]:
     return None
 
 
+def helper_glyph(state: str) -> nd.Node:
+    """The state dot the bar's chips and the sidebar use: a disc in the state's colour, a ring while queued."""
+
+    def paint(p: QPainter, rect: QRect, st: PaintState) -> None:
+        c = QColor(getattr(st.t, HELPER_TONE.get(state, "text_4")))
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = QRectF(rect.x() + 0.5, rect.y() + 0.5, 9, 9)
+        if state in HELPER_RING:
+            p.setPen(QPen(c, 1.5))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+        else:
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(c)
+        p.drawEllipse(r)
+
+    return nd.Painted(paint, 10, 10)
+
+
 def _helper_row(h: Json, block: ToolBodyBlock, tid: str) -> nd.Node:
-    """One helper as a line: its state as a badge, its name, its last line or reason, Open."""
+    """One helper as a line, the way the bar's chip says it: the state dot, its name, the state word,
+    its last line or reason, Open."""
     st = str(h.get("state") or "")
     line = str(h.get("lastLine") or h.get("reason") or "")[:120]
     parts: List[nd.Node] = [
-        nd.Badge(st.replace("_", " ") or "?", _HELPER_TONE.get(st, "")),
+        helper_glyph(st),
         nd.Text(str(h.get("name") or ""), theme.FS_UI, 600, "text", wrap=False),
+        nd.Text(helper_word(st) or "?", theme.FS_SMALL, 500, helper_text_tone(st), wrap=False),
     ]
     if line:
-        parts.append(nd.Text(line, theme.FS_SMALL, 400, "text_2", wrap=False))
+        parts.append(nd.Text(line, theme.FS_SMALL, 400, "text_3", wrap=False))
     hid = str(h.get("id") or "")
     if hid:
         parts.append(nd.Button("Open", tid, kind="ghost", size="xs"))
         block.on(tid, lambda _t, _v, sid=hid: store.open_session(sid))
-    return nd.Row(parts, 8, (0, 0, 0, 0), [2] if line else [], "center", 24)
+    return nd.Row(parts, 8, (0, 0, 0, 0), [3] if line else [], "center", 24)
 
 
 def helpers_body(item: ToolItem, ctx: ToolCtx, block: ToolBodyBlock) -> nd.Node:

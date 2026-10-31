@@ -4409,46 +4409,25 @@ button.rp-alias:hover {
   letter-spacing: 0.03em;
   text-transform: uppercase;
 }
-.msg-note {
+.msg-notes {
   display: grid;
-  gap: 6px;
-  max-width: 84%;
-  margin: 18px 0 8px;
+  gap: 2px;
+  margin: 12px 0;
 }
-.note {
-  display: grid;
-  gap: 4px;
-  padding: 7px 12px 9px 14px;
-  border-left: 2px solid var(--text-3);
-  border-radius: 0 var(--r-3) var(--r-3) 0;
-  background: var(--fill-1);
+.session-card .tool-ico .dp-glyph {
+  width: 9px;
+  height: 9px;
 }
-.note.done {
-  border-left-color: var(--ok);
-}
-.note.failed {
-  border-left-color: var(--err);
-}
-.note-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: var(--fs-small);
-}
-.note-name {
-  font-weight: 600;
-}
-.note-meta {
-  font-size: var(--fs-micro);
-}
-.note-body {
+.tool-well {
+  padding: 10px 12px;
+  border-radius: var(--r-3);
+  background: var(--inset);
   color: var(--text-2);
   font-size: var(--fs-small);
   line-height: 1.5;
-  white-space: pre-wrap;
 }
-.note-tail {
-  padding-left: 2px;
+[data-theme='light'] .tool-well {
+  box-shadow: inset 0 0 0 1px var(--hair);
 }
 .hb {
   display: grid;

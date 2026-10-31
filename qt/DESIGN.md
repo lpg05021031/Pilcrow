@@ -493,6 +493,17 @@ widget.layout().activate(); widget.sizeHint().height()`. After every commit and 
 calls `setGeometry(x, y − scroll, width, h)` on islands within a screen of the viewport and hides
 the others. They keep native focus, input methods and shortcuts; `bind` guards them as today.
 
+**One grammar for the cards that wait on the person.** A permission (under its tool row or on a card of
+its own), a question and a plan review share a frame (`paint_needs_frame`: raised, the accent ring
+1.5 px wide, radius 12), a caption that opens with the accent dot the status column shows while Claude
+waits (`NeedsDot`), the permission card's button metrics (`perm_button`) and its ringed key boxes
+(`key_badge`): 1 2 3 beside a permission's and a plan's choices, 1…9 on a single question's options.
+The composer's field carries the `composer` property so an empty composer with focus does not count
+as typing elsewhere. Words another session wrote — a helper's note to its lead, the lead's brief to a
+helper — are not islands: `blocks/note.py` draws them as Groups in the tool card's grammar, a painted
+head (state dot or icon, verb, target, figures, Open on hover) over a `NodeBlock` body on the inset
+well, folded by the head like a tool body.
+
 ### 8.7 Theme, view mode, font scale, resize
 
 - **Theme**: `paint.cache.clear()`; warm documents re-render (their HTML carries token colours) in

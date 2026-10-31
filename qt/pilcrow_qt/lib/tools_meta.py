@@ -215,3 +215,29 @@ def file_path_of(name: str, tool_input: Optional[ToolInput]) -> Optional[str]:
     if not tool_input:
         return None
     return str_(tool_input, "file_path") or str_(tool_input, "notebook_path") or None
+
+
+# ---------------------------------------------------------------- helpers (HELPERS.md): one vocabulary for every surface
+# A helper's state as a colour token (the bar's chips, the cards' rows, a note's dot, the sidebar) and as a word.
+HELPER_TONE = {
+    "done": "ok",
+    "failed": "err",
+    "running": "accent",
+    "preparing": "accent",
+    "needs_action": "warn",
+    "stopped": "text_3",
+    "queued": "text_4",
+    "skipped": "text_4",
+}
+HELPER_RING = ("queued", "skipped")  # drawn as a ring, not a disc: nothing has happened yet
+HELPER_HEADER_PREFIX = "You are a helper started by another Pilcrow session"
+
+
+def helper_word(state: str) -> str:
+    return "needs you" if state == "needs_action" else state.replace("_", " ")
+
+
+def helper_text_tone(state: str) -> str:
+    """The token a state word is written in (accent reads as accent_text)."""
+    tone = HELPER_TONE.get(state, "text_3")
+    return "accent_text" if tone == "accent" else tone

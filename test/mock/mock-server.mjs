@@ -257,6 +257,7 @@ function scriptFor(text) {
   if (/\bstart (two |some |the )?helpers?\b/.test(t)) return 'helpers';
   if (/\bmarathon\b/.test(t)) return 'marathon';
   if (/\bperm|permission|run (a |the )?command|dangerous/.test(t)) return 'permission';
+  if (/\bplan\b/.test(t)) return 'plan';
   if (/\btool|read|look|check|edit|fix/.test(t)) return 'tools';
   if (/\bask|question/.test(t)) return 'question';
   if (/\bslow\b/.test(t)) return 'slow';
@@ -356,6 +357,11 @@ async function useTool(s, tool, { ask = false } = {}) {
       s.record(msg.toolResult(s.id, id, decision.message || 'The user declined this action.', Date.now(), undefined, true));
       return 'denied';
     }
+    const answers = decision.updatedInput?.answers;
+    if (tool.name === 'AskUserQuestion' && answers && typeof answers === 'object') {
+      tool.result = `User has answered your questions: ${Object.entries(answers).map(([q, a]) => `"${q}"="${a}"`).join(', ')}. You can now continue with the user's answers in mind.`;
+      tool.structured = { ...(tool.structured || {}), answers };
+    }
   }
   for (const c of tool.children || []) {
     // the sub-agent's work, recorded whole under the Agent card as it comes in
@@ -430,6 +436,11 @@ async function runTurn(s, text) {
     } else if (script === 'note') {
       const names = [...text.matchAll(/<helper-note name="([^"]+)" state="([^"]+)"/g)].map((m) => `${m[1]} (${m[2]})`);
       await say(s, [{ text: `Noted: ${names.join(', ')}. I read the handoff; the pieces agree.` }]);
+    } else if (script === 'plan') {
+      await say(s, [{ text: 'Here is the plan.' }]);
+      const plan = '# Fix the comment bug\n\n1. Teach the lexer to skip `//` comments to the end of the line.\n2. Add a test for a comment on the last line of a file.\n3. Run the parser tests.';
+      const r = await useTool(s, { name: 'ExitPlanMode', input: { plan }, result: 'Plan approved; starting.', structured: { plan, filePath: `${PROJ}/.claude/plans/comment-fix.md` } }, { ask: true });
+      await say(s, [{ text: r === 'denied' ? 'Staying in plan mode; tell me what should change.' : 'Starting on the lexer.' }]);
     } else if (script === 'question') {
       await say(s, [{ text: 'Before I go on, one question.' }]);
       await useTool(s, { name: 'AskUserQuestion', input: { questions: [{ question: 'Which style?', header: 'Style', options: [{ label: 'Compact', description: 'Short lines' }, { label: 'Verbose', description: 'Everything' }], multiSelect: false }] }, result: 'Compact' }, { ask: true });

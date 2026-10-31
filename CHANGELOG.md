@@ -33,6 +33,15 @@
   composer、標題都不重畫也不重排，一次更新不到 3 ms（`qt/tests/stress/s_helpers.py` 量測，`qt/tests/test_helpers.py` 守著）；
   store 只在 session 清單顯示的欄位變了才重發清單（之前每個 state 事件都重發、側欄都重建一次）；Changes 分頁的 helper 節
   跟著分頁的可見性走，被別的分頁蓋住時不做事；瀏覽器端的對話區不再滑到 helpers bar 底下。
+  視覺：helper 在對話裡改用跟工具卡同一套語法——便條是一張卡（狀態色點、「Helper finished」、名字、時間／花費／diffstat、
+  滑過出現 Open，handoff 放在工具結果用的那種內嵌底上、由標題列折疊），不再是引言式的灰塊；helper 自己的對話裡 lead 送來
+  的 brief 是同一張卡（「From the lead」＋ lead 標題＋Open 回 lead），每個 helper 都拿到的常備指示收在卡片底下；工具卡裡
+  helper 的列改成 bar 的順序（色點、名字、狀態字、最後一行、Open）；折疊列的摘要說「Started 2 helpers」「Asked you a
+  question」「Proposed a plan」，不再是「connector tools」或工具名。要你回答的三種卡——權限、提問、計畫——統一：同一圈
+  accent 外框、標題列同一顆 accent 點、同一組按鈕尺寸、同一種數字鍵小框（提問的選項也有，單一問題時按數字就選、再按
+  Enter 送出），答完後都收成同一種安靜的記錄。順手修了兩個舊 bug：Qt 的 composer 有焦點（預設狀態）時數字鍵答不了任何
+  卡；helper 對話裡 lead 的 brief 畫成一個空的大灰塊。mock 多了 ExitPlanMode 的腳本，提問的回答也照 Claude Code 的格式回傳，
+  兩邊的測試都能把三種卡走一遍（`qt/tests/test_islands.py`、`test/e2e/run.mjs`）。
 
 - **2.11.0**：**Dispatch：一份 brief、一組 repo、一個 job**（設計與現況見 `DISPATCH.md`）。伺服器新增 `server/dispatch_core.js`
   與 `server/dispatch.js`：掃描資料夾找 repo（分支、未提交、遠端、大小、CLAUDE.md，以及 package.json / go.mod /

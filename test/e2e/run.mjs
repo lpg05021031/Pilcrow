@@ -446,7 +446,7 @@ test('helpers: a lead starts two helpers; the bar follows them, the person answe
   expect((await page.locator('.ovc.needs .ovc-proj').first().innerText()).includes('helper of'), 'the card says whose helper asked');
   await page.click('.ovc.needs .btn:has-text("Allow for all helpers")');
   await open(page, 'sess-empty');
-  await page.waitForSelector('.msg-note .note', { timeout: 30_000 });
+  await page.waitForSelector('.msg-notes .session-card', { timeout: 30_000 });
   await page.waitForFunction(() => document.querySelectorAll('.helper-chip .dp-glyph.done').length === 2, null, { timeout: 30_000 });
   await page.waitForSelector('.helpers-bar .btn:has-text("Review")', { timeout: 10_000 });
   await page.click('.helpers-bar .btn:has-text("Review")');
@@ -457,6 +457,31 @@ test('helpers: a lead starts two helpers; the bar follows them, the person answe
   await page.click('.side-page[title="Results of scheduled sessions"]');
   await page.waitForSelector('.dp-report .chip:has-text("helpers")', { timeout: 10_000 });
   expect((await page.locator('.dp-report .dp-report-row').count()) === 2, 'the record lists both helpers');
+});
+
+test('answer cards: the question and the plan open with the dot, carry key boxes, and the digits answer', async ({ page }) => {
+  await open(page, 'sess-tests');
+  await send(page, 'ask me a question');
+  await page.waitForSelector('.askcard.live', { timeout: 20_000 });
+  expect((await page.locator('.askcard.live .ask-head .wait-dot').count()) === 1, 'the caption dot');
+  expect((await page.locator('.askcard.live .ask-key').count()) === 2, 'a key box per option');
+  expect(await page.locator('.ask-actions .btn.primary').isDisabled(), 'nothing chosen yet');
+  await page.keyboard.press('1');
+  await page.waitForSelector('.ask-opt.on', { timeout: 5_000 });
+  expect((await page.locator('.ask-opt.on .ask-opt-label').innerText()) === 'Compact', '1 picked the first option');
+  await page.click('.ask-actions .btn.primary');
+  await page.waitForFunction(() => document.body.innerText.includes('Compact it is.'), null, { timeout: 20_000 });
+  await page.click('text=Asked you a question');
+  await page.waitForSelector('.askcard.done', { timeout: 10_000 });
+  expect((await page.locator('.askcard.done .ask-answer').innerText()).includes('Compact'), 'the record carries the answer');
+  await send(page, 'propose a plan');
+  await page.waitForSelector('.plancard.live', { timeout: 20_000 });
+  expect((await page.locator('.plancard.live .plan-head .wait-dot').count()) === 1, 'the same dot');
+  expect((await page.locator('.plancard.live .perm-key').count()) === 3, 'the same key boxes');
+  await page.keyboard.press('1');
+  await page.waitForFunction(() => document.body.innerText.includes('Starting on the lexer.'), null, { timeout: 20_000 });
+  await page.click('text=Proposed a plan');
+  await page.waitForSelector('.plancard .badge.ok', { timeout: 10_000 });
 });
 
 // ---------------------------------------------------------------- run

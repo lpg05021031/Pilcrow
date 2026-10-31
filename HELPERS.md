@@ -393,19 +393,23 @@ to know where the helpers are.
 
 **The cards.** The four tool calls draw as cards in the conversation, by the generic tool card's shape:
 
-- `start`: *Started **api** in ~/code/api · worktree pilcrow/api-3f2a1c*, the brief under a toggle
-  (as the Agent card shows its instructions), and the helper's **live** glyph, state and last line read
-  from `session.state` while the helper runs, with **Open** on the right. A queued one says *waits for
-  api*. The `start` card is the helper's row for as long as the conversation is open at it.
+- `start`: *Started helper **api** in api*, the brief under a toggle (as the Agent card shows its
+  instructions), the branch as a chip, and the helper's row as the bar's chip says it — the state dot,
+  its name, the state word, its last line — with **Open** on the right, settled at the moment of the
+  start (the bar is the live picture). A queued one says *waits for api*.
 - `wait`: *Waited for api, web · 4:12* and one line per helper with its state and the first line of its
   handoff; *timed out, still running: web* when it did.
 - `read`: *Read api's diff · 6 files* with the text folded under a toggle, drawn by the code block for
   diffs and the prose block for summaries.
 - `send`: *Told web: "…"*; `stop`: *Stopped docs*.
 
-**The notes.** A note draws as a quiet block on the left, the helper's glyph and name in the head
-(`api · done · 4:12 · $0.31`), the handoff as prose under a fold that opens by default when short, and
-**Open** at the right. It is visibly not the person's message: no bubble, no edit, no resend.
+**The notes.** A note draws as a tool card, not as a quote: the helper's state dot in the status
+column, *Helper finished* (or *failed*, *stopped*, *needs you*) as the verb, the helper's name as the
+target, its time, cost and diffstat at the right, **Open** on hover, and the handoff on the inset well a
+tool's result sits on, folded by the head like any tool body. The text around the cards is for the
+model and is not drawn. It is visibly not the person's message: no bubble, no edit, no resend. The fold
+line of a turn says *Started 2 helpers*, *Waited for helpers*, *Asked you a question*, *Proposed a
+plan* — the person's words, never a tool's name.
 
 **The header.** The status pill of a lead says *leading* with the count while any helper runs and the
 lead itself is idle, in the accent used for running, so the sidebar and the overview both show a lead
@@ -414,9 +418,11 @@ as live work.
 ### 6.2 The helper's conversation
 
 The header gains a crumb, *helper of Invoice download*, in the plan colour the worktree crumb uses,
-clicking back to the lead. The first user message shows the brief with the header folded (*from the
-lead*). A message sent by the lead draws as a user message with a small *lead* tag; one typed by the
-person draws as usual. The composer works; the person can steer a helper directly. The session menu
+clicking back to the lead. The brief and any message the lead sends draw as one card in the tool cards'
+grammar — *From the lead* as the verb, the lead's title as the target, **Open** back to the lead, the
+text on the inset well — and the standing instructions a brief opens with fold under it (*Standing
+instructions for a helper*); they are visibly not the person's message, while one the person types
+draws as usual. The composer works; the person can steer a helper directly. The session menu
 gains **Detach from lead**, which makes it an ordinary session (the lead gets a note).
 
 ### 6.3 The sidebar

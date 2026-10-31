@@ -33,8 +33,8 @@ function HelperRow({ h }: { h: Partial<HelperState> }) {
   return (
     <div className="hb-row">
       <span className={`dp-glyph ${h.state || ''}`} aria-hidden="true" />
-      <span className={`dp-word ${h.state || ''}`}>{(h.state || '').replace('_', ' ')}</span>
       <span className="hb-name">{h.name}</span>
+      <span className={`dp-word ${h.state || ''}`}>{h.state === 'needs_action' ? 'needs you' : (h.state || '').replace('_', ' ')}</span>
       <span className="hb-last ellipsis faint">{line}</span>
       {h.id && (
         <button className="btn xs ghost" onClick={() => openSession(h.id!)}>
