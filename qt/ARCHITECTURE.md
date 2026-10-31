@@ -40,7 +40,11 @@ qt/
                        a11y.py (the viewport as an accessible list of its blocks)
       composer.py      Composer.tsx
       overview.py      Overview.tsx (control room)
-      inbox.py         Inbox.tsx
+      inbox.py         Inbox.tsx (+ the dispatch report card)
+      dispatch/        one job across many repositories (DISPATCH.md): board.py (every job, requests
+                       answered on the card), job_view.py (one row per repository on the canvas
+                       engine, the review foot), composer.py (a new job, the plan as you type),
+                       targets.py (the workspace scan as a picker), common.py (states, the bar)
       panels/          changes, files (+editor), terminal, preview, tasks, history (its timeline
                        is a list on the canvas engine: timeline_list.py), info
       dialogs/         new_session, settings (+pages), schedule, mcp_auth, palette, shortcuts, confirm

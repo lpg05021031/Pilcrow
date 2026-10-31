@@ -11,6 +11,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { EventEmitter } from 'node:events';
 import { WebSocketServer } from 'ws';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -145,6 +146,8 @@ const now = Date.now();
 
 /** @type {Map<string, Sess>} */
 const sessions = new Map();
+/** What the sessions do, for the dispatch engine below: 'idle' (s), 'permission' ({ s, req }), 'resolved' ({ s, requestId }). */
+const hooks = new EventEmitter();
 class Sess {
   constructor({ id, title, cwd, touched, archived = false, pinned = false, messages = [] }) {
     this.id = id;
@@ -177,7 +180,7 @@ class Sess {
     this.extra = {}; // fields the tests lay over state() (mock.patch): tasks, mcp, …
   }
   summary() {
-    return { id: this.id, title: this.title, firstPrompt: this.messages[0]?.message?.content?.[0]?.text, cwd: this.cwd, project: this.cwd, gitBranch: 'main', lastModified: this.touched, createdAt: this.createdAt, archived: this.archived, pinned: this.pinned, worktree: null, scheduled: null, status: this.status, live: this.live, pending: this.pending.size };
+    return { id: this.id, title: this.title, firstPrompt: this.messages[0]?.message?.content?.[0]?.text, cwd: this.cwd, project: this.cwd, gitBranch: 'main', lastModified: this.touched, createdAt: this.createdAt, archived: this.archived, pinned: this.pinned, worktree: null, scheduled: null, dispatch: this.dispatch || null, status: this.status, live: this.live, pending: this.pending.size };
   }
   state() {
     return {
@@ -333,10 +336,12 @@ async function useTool(s, tool, { ask = false } = {}) {
       broadcast('session.permission', { id: s.id, request: req });
       s.emitState();
       listChanged();
+      hooks.emit('permission', { s, req });
     });
     s.pending.delete(requestId);
     if (s.status === 'requires_action') s.status = 'running';
     broadcast('session.permissionResolved', { id: s.id, requestId, decision: decision.behavior });
+    hooks.emit('resolved', { s, requestId });
     s.emitState();
     listChanged();
     if (decision.behavior === 'deny') {
@@ -426,6 +431,7 @@ async function runTurn(s, text) {
   s.lastActivity = Date.now();
   s.emitState();
   listChanged();
+  hooks.emit('idle', s);
   if (s.held.length) setTimeout(() => deliver(s, s.held.shift()), 60);
 }
 
@@ -443,6 +449,458 @@ function deliver(s, { uuid: u, text }) {
   listChanged();
   runTurn(s, text).catch((e) => console.error('turn failed', e));
 }
+
+// ---------------------------------------------------------------- dispatch: one job across many repositories
+// A small model of server/dispatch_core.js: the same states and events, runs that are mock sessions fed
+// the brief (so they stream, ask and finish like any mock turn), a canary wave, rules that answer a
+// permission for every repository, review, finish and a report in the inbox.
+
+const REPOS = [
+  { name: 'design-system', branch: 'main', size: 'small', kind: 'node', deps: [], hasClaudeMd: true },
+  { name: 'web-ui', branch: 'main', size: 'medium', kind: 'node', deps: ['design-system'] },
+  { name: 'docs', branch: 'main', size: 'small', kind: 'node', deps: [] },
+  { name: 'api-gateway', branch: 'main', size: 'medium', kind: 'node', deps: [], changed: 2 },
+  { name: 'cli', branch: 'main', size: 'small', kind: 'node', deps: [] },
+  { name: 'legacy-api', branch: 'release/4', size: 'large', kind: 'go', deps: [] },
+  { name: 'infra', branch: 'main', size: 'small', kind: null, deps: [] },
+  { name: 'mobile', branch: 'main', size: 'large', kind: 'node', deps: ['design-system'] },
+].map((r) => ({
+  ...r,
+  path: `${HOME}/code/${r.name}`,
+  deps: r.deps.map((n) => `${HOME}/code/${n}`),
+  dirty: Boolean(r.changed),
+  changed: r.changed || 0,
+  untracked: 0,
+  ahead: 0,
+  behind: 0,
+  remote: { host: 'github', owner: 'acme', repo: r.name, url: `git@github.com:acme/${r.name}.git` },
+  files: { small: 120, medium: 900, large: 4000 }[r.size],
+  packageName: r.kind === 'node' ? `@acme/${r.name}` : null,
+  lastSession: null,
+  hasClaudeMd: Boolean(r.hasClaudeMd),
+}));
+const REPO_BY_PATH = new Map(REPOS.map((r) => [r.path, r]));
+const D_TERMINAL = new Set(['done', 'failed', 'stopped', 'skipped']);
+const D_ACTIVE = new Set(['preparing', 'running', 'needs_action']);
+const D_DEFAULTS = { mode: 'acceptEdits', allowedTools: [], model: '', effort: '', parallel: 3, maxMinutes: 20, costCap: 0, canary: 1, learn: true, prepare: '', copy: [], verify: '', verifyRetry: true, commitMessage: '', pr: false, report: 'table' };
+/** @type {any[]} */
+let jobs = [];
+/** @type {any[]} */
+let inboxItems = [];
+
+function dRender(brief, job, t, extras = {}) {
+  let out = String(brief || '').replace(/\{\{\s*([a-zA-Z_.]+)\s*\}\}/g, (m, k) => ({ 'repo.name': t.name, 'repo.path': t.path, 'repo.branch': t.base || '', 'job.name': job.name, notes: t.notes || '' })[k] ?? m);
+  if (extras.learned?.length) out += '\n\nThe same work was already done in ' + extras.learned.length + ' repositories. Follow the same approach where it fits:\n' + extras.learned.map((l) => `- ${l.name}: ${l.summary}`).join('\n');
+  return out.trim();
+}
+function dKey(req) {
+  const tool = req.toolName || '';
+  const input = req.input || {};
+  if (tool === 'Bash') return `Bash:${String(input.command || '').replace(/\s+/g, ' ').trim()}`;
+  if (input.file_path) return `${tool}:${String(input.file_path).split('/').slice(-2).join('/')}`;
+  return `${tool}:${JSON.stringify(input)}`;
+}
+function dLabel(req) {
+  const [tool, ...rest] = dKey(req).split(':');
+  return `${tool}: ${rest.join(':')}`;
+}
+function dSummary(job) {
+  const counts = { queued: 0, preparing: 0, running: 0, needs_action: 0, done: 0, failed: 0, stopped: 0, skipped: 0 };
+  let cost = 0;
+  let needs = 0;
+  let files = 0;
+  for (const r of job.runs) {
+    counts[r.state] = (counts[r.state] || 0) + 1;
+    cost += r.cost || 0;
+    needs += (r.pending || []).length;
+    files += (r.files || []).length;
+  }
+  const { runs, ...rest } = job;
+  return { ...rest, counts, total: runs.length, cost: Math.round(cost * 10000) / 10000, needsAction: needs, files, canaryWaiting: job.state === 'reviewing' && job.wave === 'canary' };
+}
+function dEmit(job, runs = null) {
+  job.updatedAt = Date.now();
+  broadcast('dispatch.changed', { id: job.id, job: dSummary(job), runs: runs || job.runs, all: !runs });
+}
+const dJob = (id) => {
+  const j = jobs.find((x) => x.id === id);
+  if (!j) throw new Error('No such job.');
+  return j;
+};
+function dNormalize(input, cur) {
+  const settings = { ...D_DEFAULTS, ...(cur?.settings || {}), ...(input.settings || {}) };
+  settings.parallel = Math.max(1, Math.min(16, Number(settings.parallel) || 3));
+  settings.canary = Math.max(0, Math.min(8, Number.isFinite(Number(settings.canary)) ? Number(settings.canary) : 1));
+  const name = String(input.name ?? cur?.name ?? '').trim() || 'Untitled job';
+  const targets = (input.targets ?? cur?.targets ?? []).map((t) => ({ path: String(t.path || ''), name: String(t.name || String(t.path || '').split('/').pop()), base: String(t.base || ''), notes: String(t.notes || ''), size: t.size || REPO_BY_PATH.get(t.path)?.size || null, deps: Array.isArray(t.deps) ? t.deps : REPO_BY_PATH.get(t.path)?.deps || [] }));
+  return { id: cur?.id || `job-${uuid()}`, name, slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'job', brief: String(input.brief ?? cur?.brief ?? ''), root: String(input.root ?? cur?.root ?? `${HOME}/code`), targets, settings, state: cur?.state || 'draft', wave: cur?.wave || null, paused: cur?.paused || false, createdAt: cur?.createdAt || Date.now(), updatedAt: Date.now(), startedAt: cur?.startedAt || null, finishedAt: cur?.finishedAt || null, plan: cur?.plan || null, rules: cur?.rules || [], runs: cur?.runs || [], learned: cur?.learned || [], forecast: cur?.forecast || null, capReached: false, report: cur?.report || null, stoppedReason: null };
+}
+function dLevels(targets) {
+  const paths = new Set(targets.map((t) => t.path));
+  const level = new Map();
+  let changed = true;
+  for (const t of targets) level.set(t.path, 0);
+  while (changed) {
+    changed = false;
+    for (const t of targets) {
+      const l = Math.max(0, ...(t.deps || []).filter((d) => paths.has(d)).map((d) => level.get(d) + 1));
+      if (l !== level.get(t.path) && l < 10) {
+        level.set(t.path, l);
+        changed = true;
+      }
+    }
+  }
+  return level;
+}
+function dPlan(job) {
+  const level = dLevels(job.targets);
+  const targets = job.targets.map((t) => {
+    const repo = REPO_BY_PATH.get(t.path);
+    const notes = [];
+    let verdict = 'ok';
+    const base = t.base || repo?.branch || 'main';
+    if (!repo) {
+      verdict = 'blocked';
+      notes.push({ kind: 'blocked', text: 'Not a git repository.' });
+    } else {
+      if (base !== repo.branch) {
+        verdict = 'blocked';
+        notes.push({ kind: 'blocked', text: `Branch ${base} not found. Pick another branch or deselect this repository.` });
+      }
+      if (repo.dirty) {
+        if (verdict === 'ok') verdict = 'warning';
+        notes.push({ kind: 'warning', text: `${repo.changed} uncommitted changes in the main checkout. The run starts from the branch's last commit; they are not in it.` });
+      }
+      if (!repo.hasClaudeMd) notes.push({ kind: 'note', text: 'No CLAUDE.md: the brief may want to say more about this repository.' });
+    }
+    if (!job.brief.trim()) {
+      verdict = 'blocked';
+      notes.push({ kind: 'blocked', text: 'The brief is empty.' });
+    }
+    const deps = (t.deps || []).filter((d) => job.targets.some((x) => x.path === d));
+    if (deps.length) notes.push({ kind: 'note', text: `Runs after ${deps.map((d) => job.targets.find((x) => x.path === d)?.name || d).join(', ')} and receives ${deps.length === 1 ? 'its' : 'their'} summary.` });
+    return { path: t.path, name: t.name, base, verdict, notes, brief: dRender(job.brief, job, { ...t, base }), level: level.get(t.path) || 0, deps, size: t.size };
+  });
+  const n = targets.filter((t) => t.verdict !== 'blocked').length;
+  const levels = targets.length ? Math.max(...targets.map((t) => t.level)) + 1 : 0;
+  return { at: Date.now(), targets, levels, worst: { minutes: Math.ceil((n * job.settings.maxMinutes) / job.settings.parallel), cost: job.settings.costCap || null, runs: n, levels }, ok: targets.filter((t) => t.verdict === 'ok').length, warnings: targets.filter((t) => t.verdict === 'warning').length, blocked: targets.filter((t) => t.verdict === 'blocked').length };
+}
+function dRunBySession(sid) {
+  for (const j of jobs) {
+    const r = j.runs.find((x) => x.sessionId === sid && D_ACTIVE.has(x.state));
+    if (r) return { job: j, run: r };
+  }
+  return null;
+}
+function dStartRun(job, run) {
+  run.state = 'running';
+  run.startedAt = Date.now();
+  run.now = 'starting';
+  const extras = { learned: job.wave === 'main' && job.settings.learn ? job.learned : [] };
+  run.brief = dRender(job.brief, job, run, extras);
+  const s = new Sess({ id: `dj-${uuid()}`, title: `${job.name} · ${run.name}`, cwd: run.path, touched: Date.now() });
+  s.dispatch = { jobId: job.id, runId: run.id, name: job.name, target: run.name };
+  s.usage.costUsd = 0;
+  sessions.set(s.id, s);
+  run.sessionId = s.id;
+  run.worktree = { path: `${HOME}/.local/share/pilcrow/worktrees/${run.name}/${job.slug}-${s.id.slice(-4)}`, branch: `pilcrow/${job.slug}`, base: run.base, repoRoot: run.path };
+  dEmit(job, [run]);
+  listChanged();
+  setTimeout(() => deliver(s, { text: run.brief }), 30);
+}
+function dPump(job) {
+  if (job.state !== 'running' || job.paused) return;
+  const active = job.runs.filter((r) => D_ACTIVE.has(r.state)).length;
+  const eligible = (r) => r.state === 'queued' && (job.wave === 'main' || r.wave === 'canary');
+  for (const r of job.runs.filter(eligible)) {
+    const bad = r.dependsOn.find((d) => job.runs.some((x) => x.path === d && D_TERMINAL.has(x.state) && x.state !== 'done'));
+    if (bad) {
+      r.state = 'skipped';
+      r.reason = `Depends on ${job.runs.find((x) => x.path === bad)?.name}, which did not finish.`;
+      r.endedAt = Date.now();
+    }
+  }
+  const ready = job.runs.filter(eligible).filter((r) => r.dependsOn.every((d) => !job.runs.some((x) => x.path === d) || job.runs.some((x) => x.path === d && x.state === 'done')));
+  ready.sort((a, b) => a.level - b.level || a.name.localeCompare(b.name));
+  for (const r of ready.slice(0, Math.max(0, job.settings.parallel - active))) dStartRun(job, r);
+  dSettle(job);
+}
+function dSettle(job) {
+  if (job.state !== 'running' || job.runs.some((r) => D_ACTIVE.has(r.state))) return;
+  const queued = job.runs.filter((r) => r.state === 'queued');
+  if (job.wave === 'canary' && queued.length) {
+    job.state = 'reviewing';
+    job.learned = job.runs.filter((r) => r.wave === 'canary' && r.state === 'done').map((r) => ({ name: r.name, summary: r.summary }));
+    const canary = job.runs.filter((r) => r.wave === 'canary' && r.state === 'done');
+    job.forecast = canary.length ? { cost: Math.round(queued.length * (canary[0].cost || 0.01) * 100) / 100, minutes: Math.max(1, Math.round((queued.length * Math.max(1, canary[0].durationMs || 60e3)) / job.settings.parallel / 60e3)), from: canary.map((r) => r.name), runs: queued.length } : null;
+    dEmit(job);
+    return;
+  }
+  if (queued.length) return;
+  job.state = 'reviewing';
+  job.wave = 'done';
+  dEmit(job);
+  dMaybeFinish(job);
+}
+function dEndRun(job, run, state, reason, s) {
+  if (D_TERMINAL.has(run.state)) return;
+  run.state = state;
+  run.reason = reason || null;
+  run.now = null;
+  run.pending = [];
+  run.endedAt = Date.now();
+  run.durationMs = run.endedAt - (run.startedAt || run.endedAt);
+  if (s) {
+    run.cost = Math.round((s.usage.costUsd || 0) * 10000) / 10000;
+    run.summary = s.lastReply?.text || '';
+    const edits = s.messages.flatMap((m) => (m.type === 'assistant' ? m.message.content : [])).filter((c) => c.type === 'tool_use' && (c.name === 'Edit' || c.name === 'Write'));
+    run.files = edits.map((c) => ({ path: String(c.input.file_path || '').replace(`${PROJ}/`, ''), add: 3, del: 1 }));
+    run.add = run.files.length * 3;
+    run.del = run.files.length;
+  }
+  dEmit(job, [run]);
+  dPump(job);
+}
+hooks.on('idle', (s) => {
+  const hit = dRunBySession(s.id);
+  if (hit) dEndRun(hit.job, hit.run, 'done', null, s);
+});
+hooks.on('permission', ({ s, req }) => {
+  const hit = dRunBySession(s.id);
+  if (!hit) return;
+  const { job, run } = hit;
+  const key = dKey(req);
+  if (job.rules.some((r) => r.key === key)) {
+    const p = s.pending.get(req.requestId);
+    p?.resolve({ behavior: 'allow', updatedInput: req.input });
+    return;
+  }
+  run.pending = [...run.pending.filter((p) => p.requestId !== req.requestId), { requestId: req.requestId, toolName: req.toolName, displayName: req.toolName, key, label: dLabel(req), interactive: Boolean(req.interactive), at: req.at }];
+  run.state = 'needs_action';
+  run.now = dLabel(req);
+  dEmit(job, [run]);
+});
+hooks.on('resolved', ({ s, requestId }) => {
+  const hit = dRunBySession(s.id);
+  if (!hit) return;
+  const { job, run } = hit;
+  run.pending = run.pending.filter((p) => p.requestId !== requestId);
+  if (!run.pending.length && run.state === 'needs_action') {
+    run.state = 'running';
+    run.now = 'continuing';
+  }
+  dEmit(job, [run]);
+});
+function dReport(job) {
+  return { at: Date.now(), targets: job.runs.map((r) => ({ name: r.name, path: r.path, state: r.state, reason: r.reason, summary: r.summary, files: (r.files || []).length, add: r.add, del: r.del, cost: r.cost, durationMs: r.durationMs, branch: r.worktree?.branch || null, commit: r.commit, pr: r.pr, finished: r.finished, verify: null })), rules: job.rules, plan: job.plan ? { ok: job.plan.ok, warnings: job.plan.warnings, blocked: job.plan.blocked, levels: job.plan.levels } : null, cost: job.runs.reduce((n, r) => n + (r.cost || 0), 0), durationMs: (job.finishedAt || Date.now()) - (job.startedAt || Date.now()) };
+}
+function dMaybeFinish(job) {
+  if (job.state !== 'reviewing' || job.wave === 'canary') return;
+  if (!job.runs.every((r) => D_TERMINAL.has(r.state) && (r.finished || r.state !== 'done'))) return;
+  job.state = 'finished';
+  job.finishedAt = Date.now();
+  job.report = dReport(job);
+  const done = job.runs.filter((r) => r.state === 'done').length;
+  const failed = job.runs.filter((r) => r.state === 'failed' || r.state === 'stopped').length;
+  inboxItems.unshift({ id: `ib-${uuid()}`, kind: 'dispatch', jobId: job.id, scheduleId: null, scheduleName: job.name, sessionId: null, cwd: job.root, startedAt: job.startedAt, endedAt: job.finishedAt, durationMs: job.report.durationMs, status: failed && !done ? 'failed' : 'completed', reason: failed ? `${failed} of ${job.runs.length} did not finish` : null, summary: `${done} of ${job.runs.length} repositories done.\n` + job.runs.map((r) => `- ${r.name}: ${r.state}${r.summary ? ' — ' + r.summary.slice(0, 120) : ''}`).join('\n'), cost: job.report.cost, files: job.runs.flatMap((r) => (r.files || []).map((f) => ({ ...f, repo: r.name }))).slice(0, 60), read: false, manual: true, dispatch: job.report });
+  broadcast('inbox.changed', inboxItems.filter((i) => !i.read).length);
+  dEmit(job);
+}
+function seedDispatch() {
+  jobs = [];
+  inboxItems = [];
+  const t0 = now - 26 * 3600e3;
+  const old = dNormalize({ name: 'Pin node 22 in CI', brief: 'Pin the Node version in CI to 22 in {{repo.name}}.', targets: ['cli', 'docs', 'infra'].map((n) => ({ path: `${HOME}/code/${n}`, name: n, base: 'main' })), settings: { canary: 0 } }, null);
+  old.plan = dPlan(old);
+  old.state = 'finished';
+  old.wave = 'done';
+  old.startedAt = t0;
+  old.finishedAt = t0 + 9 * 60e3;
+  old.createdAt = t0 - 60e3;
+  old.updatedAt = old.finishedAt;
+  old.runs = old.targets.map((t, i) => ({ id: `run-old-${i}`, jobId: old.id, path: t.path, name: t.name, base: 'main', size: t.size, level: 0, dependsOn: [], wave: 'main', state: i === 2 ? 'failed' : 'done', attempt: 1, sessionId: null, worktree: null, startedAt: t0 + i * 60e3, endedAt: t0 + (i + 3) * 60e3, durationMs: 3 * 60e3, cost: 0.37 - i * 0.1, summary: i === 2 ? '' : `Pinned node 22 in .github/workflows/ci.yml of ${t.name}.`, files: i === 2 ? [] : [{ path: '.github/workflows/ci.yml', add: 1, del: 1 }], add: i === 2 ? 0 : 1, del: i === 2 ? 0 : 1, reason: i === 2 ? 'Stopped after 20 minutes' : null, verify: null, now: null, pending: [], retried: false, commit: i === 2 ? null : `a1b2c3${i}`, pr: null, finished: i === 2 ? null : 'commit', brief: '' }));
+  old.report = dReport(old);
+  jobs.push(old);
+}
+seedDispatch();
+
+const dispatchMethods = {
+  'workspace.scan': ({ root }) => ({ root: root || `${HOME}/code`, depth: 3, at: Date.now(), repos: REPOS }),
+  'dispatch.list': () => jobs.map(dSummary).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)),
+  'dispatch.get': ({ id }) => ({ job: dSummary(dJob(id)), runs: dJob(id).runs }),
+  'dispatch.save': (p) => {
+    const cur = p.id ? jobs.find((j) => j.id === p.id) : null;
+    const job = dNormalize(p, cur);
+    if (cur) Object.assign(cur, job, { plan: null, state: cur.state === 'draft' || cur.state === 'planned' ? 'draft' : cur.state, runs: cur.runs });
+    else jobs.push(job);
+    const j = cur || job;
+    dEmit(j);
+    return dSummary(j);
+  },
+  'dispatch.remove': ({ id }) => {
+    jobs = jobs.filter((j) => j.id !== id);
+    broadcast('dispatch.changed', { id, removed: true });
+    return true;
+  },
+  'dispatch.plan': (p) => {
+    const saved = p.id ? jobs.find((j) => j.id === p.id) : null;
+    const job = saved && !p.targets ? saved : dNormalize(p, saved);
+    const plan = dPlan(job);
+    if (saved) {
+      saved.plan = plan;
+      if (saved.state === 'draft') saved.state = 'planned';
+      dEmit(saved);
+    }
+    return plan;
+  },
+  'dispatch.start': ({ id, wave }) => {
+    const job = dJob(id);
+    if (job.state === 'running') throw new Error('This job is already running.');
+    const plan = (job.plan = dPlan(job));
+    if (plan.blocked) throw new Error(`${plan.blocked} target${plan.blocked === 1 ? ' is' : 's are'} blocked. Fix or deselect ${plan.blocked === 1 ? 'it' : 'them'} first.`);
+    const ok = plan.targets.filter((t) => t.verdict !== 'blocked');
+    const canaryN = wave === 'all' ? 0 : job.settings.canary;
+    const order = [...ok].sort((a, b) => a.level - b.level || a.name.localeCompare(b.name));
+    const canary = new Set(order.filter((t) => t.level === 0).slice(0, canaryN).map((t) => t.path));
+    job.runs = ok.map((t) => ({ id: `run-${uuid()}`, jobId: job.id, path: t.path, name: t.name, base: t.base, size: t.size, level: t.level, dependsOn: t.deps, wave: canary.has(t.path) ? 'canary' : 'main', state: 'queued', attempt: 1, sessionId: null, worktree: null, startedAt: null, endedAt: null, durationMs: 0, cost: 0, summary: '', files: [], add: 0, del: 0, reason: null, verify: null, now: null, pending: [], retried: false, commit: null, pr: null, finished: null, brief: t.brief }));
+    job.state = 'running';
+    job.wave = canary.size ? 'canary' : 'main';
+    job.paused = false;
+    job.startedAt = Date.now();
+    job.finishedAt = null;
+    job.learned = [];
+    job.forecast = null;
+    job.report = null;
+    dEmit(job);
+    dPump(job);
+    return dSummary(job);
+  },
+  'dispatch.continue': ({ id, brief, learn }) => {
+    const job = dJob(id);
+    if (!(job.state === 'reviewing' && job.wave === 'canary')) throw new Error('The job is not waiting after a canary.');
+    if (typeof brief === 'string' && brief.trim()) job.brief = brief;
+    if (typeof learn === 'boolean') job.settings.learn = learn;
+    job.wave = 'main';
+    job.state = 'running';
+    dEmit(job);
+    dPump(job);
+    return dSummary(job);
+  },
+  'dispatch.pause': ({ id }) => {
+    const job = dJob(id);
+    job.paused = true;
+    dEmit(job);
+    return dSummary(job);
+  },
+  'dispatch.resume': ({ id }) => {
+    const job = dJob(id);
+    job.paused = false;
+    dEmit(job);
+    dPump(job);
+    return dSummary(job);
+  },
+  'dispatch.stop': ({ id, runId }) => {
+    const job = dJob(id);
+    const stopRun = (r) => {
+      const s = r.sessionId ? sessions.get(r.sessionId) : null;
+      if (s) {
+        s.aborted = true;
+        for (const p of s.pending.values()) p.resolve({ behavior: 'deny', message: 'Stopped' });
+      }
+      dEndRun(job, r, 'stopped', 'Stopped by you', s);
+    };
+    if (runId) {
+      const r = job.runs.find((x) => x.id === runId);
+      if (r && D_ACTIVE.has(r.state)) stopRun(r);
+      else if (r && r.state === 'queued') {
+        r.state = 'skipped';
+        r.reason = 'Skipped by you';
+        r.endedAt = Date.now();
+        dEmit(job, [r]);
+        dPump(job);
+      }
+      return dSummary(job);
+    }
+    for (const r of job.runs) {
+      if (D_ACTIVE.has(r.state)) stopRun(r);
+      else if (r.state === 'queued') {
+        r.state = 'skipped';
+        r.reason = 'Stopped by you';
+        r.endedAt = Date.now();
+      }
+    }
+    job.state = 'stopped';
+    job.stoppedReason = 'Stopped by you';
+    dEmit(job);
+    return dSummary(job);
+  },
+  'dispatch.retry': ({ id, runId, brief }) => {
+    const job = dJob(id);
+    const old = job.runs.find((x) => x.id === runId);
+    if (!old || !D_TERMINAL.has(old.state)) throw new Error('That run is still going.');
+    if (typeof brief === 'string' && brief.trim()) job.brief = brief;
+    const run = { ...old, id: `run-${uuid()}`, state: 'queued', attempt: (old.attempt || 1) + 1, sessionId: null, worktree: null, startedAt: null, endedAt: null, durationMs: 0, cost: 0, summary: '', files: [], add: 0, del: 0, reason: null, now: null, pending: [], commit: null, pr: null, finished: null, wave: 'main' };
+    old.superseded = run.id;
+    job.runs.push(run);
+    if (job.state !== 'running') {
+      job.state = 'running';
+      job.wave = 'main';
+      job.finishedAt = null;
+    }
+    dEmit(job);
+    dPump(job);
+    return run;
+  },
+  'dispatch.skip': ({ id, runId }) => dispatchMethods['dispatch.stop']({ id, runId }),
+  'dispatch.allow': ({ id, key, requestId }) => {
+    const job = dJob(id);
+    if (!key && requestId) key = job.runs.flatMap((r) => r.pending || []).find((p) => p.requestId === requestId)?.key || null;
+    if (!key) throw new Error('No request to allow.');
+    if (!job.rules.some((r) => r.key === key)) job.rules.push({ key, label: null, at: Date.now(), count: 0 });
+    const rule = job.rules.find((r) => r.key === key);
+    for (const run of job.runs) {
+      const hits = (run.pending || []).filter((p) => p.key === key);
+      if (!hits.length) continue;
+      rule.label = rule.label || hits[0].label;
+      const s = sessions.get(run.sessionId);
+      for (const p of hits) {
+        rule.count += 1;
+        s?.pending.get(p.requestId)?.resolve({ behavior: 'allow', updatedInput: s.pending.get(p.requestId).req.input });
+      }
+    }
+    dEmit(job);
+    return dSummary(job);
+  },
+  'dispatch.review': ({ id }) => {
+    const job = dJob(id);
+    const runs = job.runs.filter((r) => r.state === 'done' && !r.superseded).map((r) => ({ runId: r.id, name: r.name, files: r.files || [], add: r.add || 0, del: r.del || 0 }));
+    const byPath = new Map();
+    for (const r of runs) for (const f of r.files) byPath.set(f.path, [...(byPath.get(f.path) || []), r.name]);
+    const same = [...byPath.entries()].filter(([, names]) => names.length > 1).map(([p, names]) => ({ sig: p, path: p, runs: names, add: 3, del: 1, preview: ['-  node: 20', '+  node: 22'] }));
+    const differ = runs.map((r) => ({ name: r.name, files: r.files.filter((f) => (byPath.get(f.path) || []).length === 1) })).filter((d) => d.files.length);
+    return { id, runs, same, differ, files: runs.reduce((n, r) => n + r.files.length, 0) };
+  },
+  'dispatch.finish': ({ id, runId, action, pr }) => {
+    const job = dJob(id);
+    const runs = runId ? job.runs.filter((r) => r.id === runId) : job.runs.filter((r) => !r.superseded && D_TERMINAL.has(r.state) && !r.finished && (action === 'commit' ? r.state === 'done' : true));
+    const results = runs.map((r) => {
+      r.finished = action;
+      if (action === 'commit') {
+        r.commit = `c0ffee${r.id.slice(-2)}`;
+        if (pr ?? job.settings.pr) r.pr = `https://github.com/acme/${r.name}/pull/${40 + job.runs.indexOf(r)}`;
+      }
+      return { runId: r.id, name: r.name, ok: true, output: '' };
+    });
+    dEmit(job);
+    dMaybeFinish(job);
+    return { job: dSummary(job), results };
+  },
+  'dispatch.export': ({ id }) => {
+    const job = dJob(id);
+    const rep = job.report || dReport(job);
+    return [`# ${job.name}`, '', `${rep.targets.length} repositories · $${rep.cost.toFixed(2)}`, '', '## Brief', '', job.brief, '', '## Repositories', '', '| Repository | State | Files | Cost | Time | Landed |', '|---|---|---|---|---|---|', ...rep.targets.map((t) => `| ${t.name} | ${t.state} | ${t.files} | $${(t.cost || 0).toFixed(2)} | ${Math.round((t.durationMs || 0) / 60e3)} min | ${t.commit || t.finished || ''} |`)].join('\n');
+  },
+};
 
 // ---------------------------------------------------------------- RPC
 
@@ -595,7 +1053,16 @@ const methods = {
   'memory.list': () => ({ notes: [] }),
   'project.fileHistory': () => ({}),
   'schedules.list': () => [],
-  'inbox.list': () => ({ unread: 0, items: [] }),
+  'inbox.list': () => ({ unread: inboxItems.filter((i) => !i.read).length, items: inboxItems }),
+  'inbox.markRead': ({ ids }) => {
+    for (const i of inboxItems) if (!ids || ids.includes(i.id)) i.read = true;
+    return inboxItems.filter((i) => !i.read).length;
+  },
+  'inbox.remove': ({ id }) => {
+    inboxItems = inboxItems.filter((i) => i.id !== id);
+    return true;
+  },
+  ...dispatchMethods,
   'fleet.state': () => {
     const live = Object.fromEntries([...sessions.values()].filter((s) => s.live).map((s) => [s.id, s.state()]));
     const dayStart = new Date();
@@ -619,6 +1086,7 @@ const methods = {
   // ---- test controls
   'mock.reset': () => {
     seed();
+    seedDispatch();
     overrides.clear();
     // the config too: a saved ui (a dragged sidebar width) must not leak into the next test's window
     for (const k of Object.keys(config)) delete config[k];

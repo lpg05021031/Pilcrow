@@ -133,8 +133,14 @@ class Sidebar(QWidget):
         self.page_inbox = NavButton("inbox", "Inbox")
         self.page_inbox.setToolTip("Results of scheduled sessions")
         self.page_inbox.clicked.connect(lambda: store.show_page("session" if store.page == "inbox" else "inbox"))
+        self.page_dispatch = NavButton("send", "Dispatch")
+        self.page_dispatch.setToolTip("One job across many repositories (Ctrl+Shift+D)")
+        self.page_dispatch.clicked.connect(
+            lambda: store.show_page("session") if store.page == "dispatch" else store.show_dispatch(None)
+        )
         pl.addWidget(self.page_overview)
         pl.addWidget(self.page_inbox)
+        pl.addWidget(self.page_dispatch)
         tl.addWidget(pages)
         root.addWidget(top)
 
@@ -178,6 +184,7 @@ class Sidebar(QWidget):
         bind(store.ui_changed, self, lambda _u: self._on_ui())
         bind(store.page_changed, self, lambda _p: self._on_page())
         bind(store.inbox_unread_changed, self, lambda _n: self._on_page())
+        bind(store.dispatch_changed, self, lambda _d: self.rebuild())
         bind(store.config_changed, self, lambda _c: self._on_config())
         bind(theme.theme.changed, self, lambda _t: self._on_config())
         self._on_config()
@@ -222,6 +229,8 @@ class Sidebar(QWidget):
     def _on_page(self) -> None:
         self.page_overview.set_on(store.page == "overview")
         self.page_inbox.set_on(store.page == "inbox")
+        self.page_dispatch.set_on(store.page == "dispatch")
+        self.page_dispatch.set_count(store.dispatch_needs, "needs")
         working = sum(1 for s in store.sessions if not s.get("archived") and s.get("status") in ("running", "starting"))
         needs = sum(
             1
@@ -252,6 +261,13 @@ class Sidebar(QWidget):
                 for s in lst
                 if fuzzy_score(q, f"{s.get('title', '')} {basename(s.get('project') or s.get('cwd') or '')}")
             ]
+        # A dispatch job's runs sit under their job, collapsed, not among the projects.
+        job_sessions: Dict[str, List[Json]] = {}
+        for s in lst:
+            d = s.get("dispatch")
+            if isinstance(d, dict) and d.get("jobId") and s.get("id") != active:
+                job_sessions.setdefault(str(d["jobId"]), []).append(s)
+        lst = [s for s in lst if not (isinstance(s.get("dispatch"), dict) and s.get("id") != active)]
         # The conversation on screen never jumps into "Needs you": you are already looking at it.
         attention = [
             s
@@ -275,7 +291,7 @@ class Sidebar(QWidget):
                 row.hide()
                 row.setParent(None)
                 row.deleteLater()
-        keys = {k for k, _ in ordered}
+        keys = {k for k, _ in ordered} | {f"job:{jid}" for jid in job_sessions}
         for key in list(self._heads):
             if key not in keys:
                 head = self._heads.pop(key)
@@ -335,6 +351,23 @@ class Sidebar(QWidget):
                 if more.text() != text:
                     more.setText(text)
                 wanted.append(more)
+        for jid, items in sorted(job_sessions.items(), key=lambda kv: -(kv[1][0].get("lastModified") or 0)):
+            key = f"job:{jid}"
+            head = self._heads.get(key)
+            if head is None:
+                name = str(
+                    (store.jobs.get(jid) or {}).get("name") or (items[0].get("dispatch") or {}).get("name") or "Job"
+                )
+                head = self._heads[key] = GroupHead(name, name, icon="arrow-up-right", add_tip=f"Open the job {name}")
+                head.toggled.connect(lambda k=key: self._toggle_group(k))
+                head.add_clicked.connect(lambda j=jid: store.open_job(j))
+                self._collapsed.setdefault(key, True)
+            head.set_collapsed(self._collapsed.get(key, True))
+            wanted.append(head)
+            if self._collapsed.get(key, True):
+                continue
+            for s in items:
+                wanted.append(row_for(s))
         note = ""
         if store.sessions_loaded and not sessions:
             note = "No sessions yet. Start one to see it here."
@@ -731,7 +764,15 @@ class GroupHead(QWidget):
     toggled = Signal()
     add_clicked = Signal()
 
-    def __init__(self, label_text: str, path: str, collapsed: bool = False, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self,
+        label_text: str,
+        path: str,
+        collapsed: bool = False,
+        parent: Optional[QWidget] = None,
+        icon: str = "plus",
+        add_tip: str = "",
+    ) -> None:
         super().__init__(parent)
         self.last_modifiers = Qt.KeyboardModifier.NoModifier
         self.setFixedHeight(GROUP_GAP + HEAD_H)
@@ -742,7 +783,9 @@ class GroupHead(QWidget):
         self.btn.setToolTip(tildify(path, (store.info or {}).get("home")))
         self.btn.clicked.connect(self.toggled.emit)
         lay.addWidget(self.btn, 1)
-        self.add = IconBtn("plus", f"New session in {label_text} · Shift+click for options", 13, 22, "text_3", True)
+        self.add = IconBtn(
+            icon, add_tip or f"New session in {label_text} · Shift+click for options", 13, 22, "text_3", True
+        )
         self.add.clicked.connect(self._add)
         lay.addWidget(self.add)
 

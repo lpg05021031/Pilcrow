@@ -105,6 +105,7 @@ class MainWindow(QMainWindow):
         self._session_views: OrderedDict[str, QWidget] = OrderedDict()
         self.overview: Optional[QWidget] = None
         self.inbox: Optional[QWidget] = None
+        self.dispatch: Optional[QWidget] = None
         self.panel: Optional[QWidget] = None
 
         self.boot = Boot(self)
@@ -180,6 +181,13 @@ class MainWindow(QMainWindow):
                 self.inbox = InboxPage()
                 self.pages.addWidget(self.inbox)
             self.pages.setCurrentWidget(self.inbox)
+        elif page == "dispatch":
+            if self.dispatch is None:
+                from .dispatch.page import DispatchPage
+
+                self.dispatch = DispatchPage()
+                self.pages.addWidget(self.dispatch)
+            self.pages.setCurrentWidget(self.dispatch)
         elif session is not None:
             from .session_view import SessionView
 
@@ -215,6 +223,8 @@ class MainWindow(QMainWindow):
             if store.page == "overview"
             else "Inbox — "
             if store.page == "inbox"
+            else "Dispatch — "
+            if store.page == "dispatch"
             else f"{session.get('title')} — "
             if session
             else ""
@@ -322,6 +332,10 @@ class MainWindow(QMainWindow):
         sc("Ctrl+-", lambda: store.zoom(-1))
         sc("Ctrl+0", lambda: store.zoom(0))
         sc("Ctrl+Shift+O", lambda: store.show_page("session" if store.page == "overview" else "overview"))
+        sc(
+            "Ctrl+Shift+D",
+            lambda: store.show_page("session") if store.page == "dispatch" else store.show_dispatch(None),
+        )
         sc("Ctrl+\\", lambda: store.set_ui(panel=not store.ui.panel))
         sc("Ctrl+,", lambda: store.set_dialog("settings", True))
         sc("Ctrl+Q", self._quit)

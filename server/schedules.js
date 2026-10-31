@@ -347,3 +347,11 @@ export function removeItem(id) {
   saveInbox();
   return true;
 }
+
+/** Another module's result (a dispatch job's report) lands in the same inbox. */
+export function pushInbox(item) {
+  inbox.items.unshift({ read: false, ...item, id: item.id || uuid() });
+  if (inbox.items.length > MAX_INBOX) inbox.items.length = MAX_INBOX;
+  saveInbox();
+  return item.id;
+}

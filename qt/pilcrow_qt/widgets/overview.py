@@ -524,6 +524,7 @@ class NeedsCard(Card):
         self._decided = ""
         self._allow_always = False
         self._cwd = ""
+        self._job: str = ""  # the dispatch job this session runs for, if any
         lay = QVBoxLayout(self)
         lay.setContentsMargins(19, 13, 15, 12)
         lay.setSpacing(9)
@@ -560,6 +561,11 @@ class NeedsCard(Card):
         self.always_btn = KeyButton("Always allow")
         self.always_btn.clicked.connect(self.always)
         actions.addWidget(self.always_btn)
+        self.all_btn = KeyButton("Allow for all")
+        self.all_btn.setToolTip("Answer every run of this job that asks the same thing, now and later")
+        self.all_btn.clicked.connect(self.allow_all)
+        self.all_btn.hide()
+        actions.addWidget(self.all_btn)
         self.deny_btn = KeyButton("Deny", "ghost")
         self.deny_btn.clicked.connect(self.deny)
         actions.addWidget(self.deny_btn)
@@ -611,6 +617,8 @@ class NeedsCard(Card):
     def update_from(self, s: Json, st: Json, first: bool, now: float) -> None:
         self._first = first
         self._cwd = str(s.get("cwd") or "")
+        d = s.get("dispatch")
+        self._job = str(d.get("jobId") or "") if isinstance(d, dict) else ""
         pending = st.get("pending") or []
         perm = pending[0] if pending else None
         self._perm = perm
@@ -650,13 +658,14 @@ class NeedsCard(Card):
         decided = bool(self._decided)
         self.allow_btn.setVisible(bool(perm) and not interactive and not decided)
         self.always_btn.setVisible(bool(perm) and not interactive and not decided and self._allow_always)
+        self.all_btn.setVisible(bool(perm) and not interactive and not decided and bool(self._job))
         self.deny_btn.setVisible(bool(perm) and not interactive and not decided)
         self.open_primary.setVisible(bool(perm) and interactive and not decided)
         self.decided_lb.setVisible(decided)
         self.decided_ico.setVisible(decided)
         self.waiting_note.setVisible(not perm)
         self.open_plain.setVisible(not perm)
-        for b in (self.allow_btn, self.always_btn, self.deny_btn):
+        for b in (self.allow_btn, self.always_btn, self.all_btn, self.deny_btn):
             b.setEnabled(not self._busy)
         self.tick(now)
 
@@ -713,6 +722,35 @@ class NeedsCard(Card):
     def deny(self) -> None:
         self.decide(
             {"behavior": "deny", "message": "The user declined this action.", "decisionClassification": "user_reject"}
+        )
+
+    def allow_all(self) -> None:
+        """The dispatch job answers this request for every repository that asks it, now and later."""
+        perm = self._perm
+        if not perm or not self._job or self._busy:
+            return
+        self._busy = True
+        for b in (self.allow_btn, self.always_btn, self.all_btn, self.deny_btn):
+            b.setEnabled(False)
+
+        def ok(_r: Any) -> None:
+            self._decided = "allow"
+            self.decided_lb.setText("Allowed for every repository of the job")
+            self.set_tone("decided")
+            for b in (self.allow_btn, self.always_btn, self.all_btn, self.deny_btn, self.more):
+                b.hide()
+            self.decided_ico.show()
+            self.decided_lb.show()
+            self.update()
+            QTimer.singleShot(900, self._reset)
+
+        def bad(_e: Any) -> None:
+            self._busy = False
+            for b in (self.allow_btn, self.always_btn, self.all_btn, self.deny_btn):
+                b.setEnabled(True)
+
+        store.call("dispatch.allow", {"id": self._job, "requestId": str(perm.get("requestId") or "")}).then(ok).catch(
+            bad
         )
 
     def handle_key(self, key: str) -> bool:

@@ -17,7 +17,7 @@ Changes / Files / Terminal / Preview / Tasks / Session 面板。
 
 | 路徑 | 內容 |
 |---|---|
-| `server/` | Node 伺服器：Claude Agent SDK 驅動、session / 歷史 / git / 檔案 / 終端機 / 排程 / 記憶 |
+| `server/` | Node 伺服器：Claude Agent SDK 驅動、session / 歷史 / git / 檔案 / 終端機 / 排程 / 記憶 / 跨 repo 派工（`dispatch_core.js`） |
 | `web/src/` | React 介面（Vite + TypeScript）；`web/dist/` 是建置結果，不進 git |
 | `electron/`、`bin/pilcrow` | Linux 的 Electron 視窗與啟動器 |
 | `qt/pilcrow_qt/` | **原生桌面視窗（PySide6 / Qt Widgets）**：純 CPU 繪圖，沒有 GPU 的機器也快；接同一個伺服器。見 [qt/ARCHITECTURE.md](qt/ARCHITECTURE.md) |
@@ -25,7 +25,7 @@ Changes / Files / Terminal / Preview / Tasks / Session 面板。
 | `scripts/make-installers.py`、`scripts/installer/*.tmpl` | 把工作樹打包成三個安裝檔；模板是安裝檔的固定部分 |
 | `scripts/release.mjs` | 改版流程：版本號、檢查、build、打包、驗證、commit、tag |
 | `pilcrow-install.sh`、`pilcrow-windows.ps1`、`pilcrow-app.sh` | 發佈產物（見下方「修改介面」與「發佈」） |
-| `DISPATCH.md` | 設計稿：跨 repo 派工（一份 brief、一組 repo、每個 repo 一個 worktree 裡的 session；先 plan、先跑 canary、一次 review、一次收尾） |
+| `DISPATCH.md` | 跨 repo 派工（Dispatch）的設計與現況：一份 brief、一組 repo、每個 repo 一個 worktree 裡的 session；先 plan、先跑 canary、一個權限答所有 repo、一次 review、一次收尾 |
 | `CHANGELOG.md` | 版本紀錄 |
 
 ---

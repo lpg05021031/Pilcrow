@@ -948,6 +948,7 @@ class SessionManager {
         pinned: Boolean(meta.pinned),
         worktree: meta.worktree || null,
         scheduled: meta.scheduled || null,
+        dispatch: meta.dispatch || null,
         status: 'stopped',
         live: false,
       });
@@ -967,6 +968,7 @@ class SessionManager {
         pinned: Boolean(meta.pinned),
         worktree: meta.worktree || null,
         scheduled: meta.scheduled || null,
+        dispatch: meta.dispatch || null,
         status: 'idle',
         live: false,
       });

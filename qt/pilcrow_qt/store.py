@@ -126,6 +126,8 @@ class Store(QObject):
     timeline_changed = Signal(str)
     sched_changed = Signal(int)
     inbox_unread_changed = Signal(int)
+    dispatch_changed = Signal(object)  # {"id": job id, "removed"?: bool} per change; None after a full reload
+    dispatch_view_changed = Signal(object)  # None = the board, "new" = the composer, else a job id
     gateway_models_changed = Signal(object)
     lightbox_changed = Signal(object)
     find_open_changed = Signal(bool)
@@ -160,6 +162,11 @@ class Store(QObject):
         self.page = "session"
         self.inbox_unread = 0
         self.sched_rev = 0
+        # dispatch: job summaries and their runs, kept in line by dispatch.changed deltas
+        self.jobs: Dict[str, Json] = {}
+        self.job_runs: Dict[str, Dict[str, Json]] = {}
+        self.jobs_loaded = False
+        self.dispatch_view: Optional[str] = None
         self.gateway_models: Any = None  # None | "loading" | GatewayModels dict
         self.timeline: Dict[str, List[Json]] = {}
         self.lightbox: Optional[str] = None
@@ -300,6 +307,7 @@ class Store(QObject):
         rpc.on("schedules.changed", lambda _d: self._bump_sched())
         rpc.on("memory.changed", lambda _d: self._bump_sched())
         rpc.on("inbox.changed", self._on_inbox)
+        rpc.on("dispatch.changed", self._on_dispatch)
         rpc.on("timeline.step", self._on_timeline_step)
         hints = QGuiApplication.styleHints()
         if hasattr(hints, "colorSchemeChanged"):
@@ -328,6 +336,7 @@ class Store(QObject):
             self.config_changed.emit(config)
             self.load_gateway_models()
             rpc.call("inbox.list").then(lambda r: self._set_inbox_unread(int((r or {}).get("unread") or 0)))
+            self.load_jobs()
             self._apply_config_ui(config)
             self.apply_theme()
             self.refresh_sessions()
@@ -436,6 +445,81 @@ class Store(QObject):
     def _set_inbox_unread(self, n: int) -> None:
         self.inbox_unread = n
         self.inbox_unread_changed.emit(n)
+
+    # ---------------------------------------------------------------- dispatch
+    def load_jobs(self) -> None:
+        def ok(lst: Any) -> None:
+            self.jobs = {str(j.get("id")): j for j in lst if isinstance(j, dict)} if isinstance(lst, list) else {}
+            self.jobs_loaded = True
+            self.dispatch_changed.emit(None)
+
+        rpc.call("dispatch.list").then(ok).catch(lambda _e: None)
+
+    def _on_dispatch(self, d: Json) -> None:
+        if not isinstance(d, dict):
+            return
+        jid = str(d.get("id") or "")
+        if not jid:
+            return
+        if d.get("removed"):
+            self.jobs.pop(jid, None)
+            self.job_runs.pop(jid, None)
+            if self.dispatch_view == jid:
+                self.dispatch_view = None
+                self.dispatch_view_changed.emit(None)
+            self.dispatch_changed.emit({"id": jid, "removed": True})
+            return
+        job = d.get("job")
+        if isinstance(job, dict):
+            self.jobs[jid] = job
+        runs = d.get("runs")
+        if isinstance(runs, list):
+            cur = self.job_runs.setdefault(jid, {})
+            if d.get("all"):
+                cur.clear()
+            for r in runs:
+                if isinstance(r, dict) and r.get("id"):
+                    cur[str(r["id"])] = r
+        self.dispatch_changed.emit({"id": jid})
+
+    def fetch_job(self, jid: str, done: Optional[Callable[[], None]] = None) -> None:
+        def ok(r: Any) -> None:
+            if not isinstance(r, dict):
+                return
+            job = r.get("job")
+            if isinstance(job, dict):
+                self.jobs[jid] = job
+            self.job_runs[jid] = {str(x["id"]): x for x in (r.get("runs") or []) if isinstance(x, dict) and x.get("id")}
+            self.dispatch_changed.emit({"id": jid})
+            if done is not None:
+                done()
+
+        self.call("dispatch.get", {"id": jid}, quiet=True).then(ok).catch(lambda _e: None)
+
+    def runs_of(self, jid: str) -> List[Json]:
+        """A job's runs in the server's order, the superseded (retried) ones left out."""
+        return [r for r in self.job_runs.get(jid, {}).values() if not r.get("superseded")]
+
+    @property
+    def dispatch_needs(self) -> int:
+        """Requests waiting across jobs, plus the canaries waiting to be read: the sidebar's badge."""
+        n = 0
+        for j in self.jobs.values():
+            if j.get("state") in ("running", "reviewing"):
+                n += int(j.get("needsAction") or 0) + (1 if j.get("canaryWaiting") else 0)
+        return n
+
+    def show_dispatch(self, view: Optional[str] = None) -> None:
+        """The board (None), the composer ("new") or a job's view (its id)."""
+        self.dispatch_view = view
+        if view not in (None, "new"):
+            self.fetch_job(str(view))
+        self.dispatch_view_changed.emit(view)
+        if self.page != "dispatch":
+            self.show_page("dispatch")
+
+    def open_job(self, jid: str) -> None:
+        self.show_dispatch(jid)
 
     def _on_timeline_step(self, d: Json) -> None:
         sid, step = d.get("id"), d.get("step")

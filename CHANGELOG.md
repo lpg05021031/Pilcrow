@@ -3,6 +3,21 @@
 最新版在最上面。`npm run release -- X.Y.Z` 會檢查這裡有沒有該版的說明。
 
 
+- **2.11.0**：**Dispatch：一份 brief、一組 repo、一個 job**（設計與現況見 `DISPATCH.md`）。伺服器新增 `server/dispatch_core.js`
+  與 `server/dispatch.js`：掃描資料夾找 repo（分支、未提交、遠端、大小、CLAUDE.md，以及 package.json / go.mod /
+  Cargo.toml 之間的本地依賴）；開跑前先 plan（不是 repo、分支不存在、brief 空了或太長 → blocked；主 checkout 有未提交、
+  另一個 job 還開著 → warning；依賴排成層級、最壞情況的分鐘數與花費）；每個 target 是一個真 session，在自己的
+  worktree 與分支 `pilcrow/<job>` 上跑；先跑 canary，讀過再放其餘（其餘的 brief 可帶上 canary 的摘要，被依賴的 repo
+  先跑、依賴者拿到它的摘要）；同一個權限請求（工具＋正規化輸入）答一次就答所有 repo，規則記在 job 上；每 run 分鐘上限、
+  平行數、花費上限、API rate limit 整個 job 退避；agent 開始前可跑 prepare 指令（並從主 checkout 複製 `.env` 等檔案）、
+  結束後跑 verify 指令（失敗可送回 agent 一次）；review 把跨 repo 相同的 hunk 分組；收尾可 commit（分支保留、worktree
+  目錄移除）、開 PR（`gh`）、discard 或 keep；報告進 inbox 並可匯出 Markdown；伺服器重啟後活著的 session 接回、其餘標記
+  stopped。Qt 視窗新增側欄的 Dispatch 入口（徽章是等人處理的數量）、看板（需要你的 job 在最上面，請求與 canary 卡
+  就地回答）、job 畫面（每個 repo 一列，canvas 引擎、順序固定、只重畫變了的列；Allow / Deny、Retry / Open、Stop、Skip
+  都在列上；brief 可在主波開跑前改）、新 job 的 composer（target 挑選器＋即時 plan）、控制室卡片上的「Allow for all」、
+  收件匣的報告卡；job 的 session 在側欄收在 job 底下。測試：`test/unit/dispatch.test.ts`（假 session 與真 git repo）、
+  `qt/tests/test_dispatch.py`（對 mock server 完整跑一個 job）。
+
 - **2.10.0**：Qt 對話區整個換成自繪的 canvas 引擎（`qt/pilcrow_qt/canvas/`，設計見 `qt/DESIGN.md`，量測見
   `qt/PERF.md`）。對話不再是一棵 QWidget／QLayout 樹，而是一個 viewport 上的場景：每一列是一個 block，位置由
   Fenwick 樹算、折疊是一個數字（reveal）、每次變動都先讀錨點、改完再把錨點放回原位——所以展開／收起指令與思考過程、
