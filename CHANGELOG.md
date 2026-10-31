@@ -48,6 +48,10 @@
   一百個檔案 5 萬個幾何事件），面板在閒置時先離屏排版畫一次、session 編輯過的語言的 lexer 一回合編一個，
   開啟面板 5 ms、一百張卡填入時每回合 11–13 ms。測試在 `qt/tests/test_pixels.py`、`test_markdown.py`、
   `test_lib_ansi.py`、`test_loading.py`。
+  最後以純 CPU 的效能標準審查整體演算法與資料結構（`qt/REVIEW.md`，每項都附量測）：骨幹（Fenwick 高度、錨點、三級量高、
+  pixmap 快取、grower、會停的時鐘）站得住；要修的是三個會隨規模長大的地方——工具輸入串流時每個 delta 都從頭重解
+  partial JSON（114 KB 的 Write 要花主執行緒 9.7 s，二次方）、每次 flush 都做整段對話長度的清單／字典重建
+  （6000 回合時每個 token 2.8 ms）、以及文件經 HTML 往返建構（富文字區塊 3.2 ms，直接用 QTextCursor 建約可省一半）。
 
 - **2.9.8**：Linux 自繪標題列的標題對齊對話區：從對話卡片的文字欄開始（與 session 標題同一條線），側欄收起時移到最左、
   拖寬側欄時跟著走。

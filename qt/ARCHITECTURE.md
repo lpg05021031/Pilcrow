@@ -53,6 +53,7 @@ qt/
   DESIGN.md            the canvas engine: why the conversation is painted, and how
   UX.md                the layout audit: what each screen says by its shape, and what was changed
   AUDIT.md             the adversarial review: what stalls, flickers or breaks the picture, measured
+  REVIEW.md            the review for speed: algorithms, data structures and design against a CPU-only budget
   tests/stress/        the scripts behind AUDIT.md (streaming, flings, resizes, islands, HiDPI, the window)
 ```
 
