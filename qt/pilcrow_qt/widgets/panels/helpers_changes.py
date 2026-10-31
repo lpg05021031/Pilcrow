@@ -12,7 +12,6 @@ from ... import theme
 from ...lib.fmt import err_text, plural
 from ...store import ConfirmSpec, store
 from ..ui.bits import IconButton, StatusGlyph
-from ..ui.signals import bind
 from .diff_view import DiffView, Num
 from .right_panel import Btn, Hairline, lbl
 
@@ -81,12 +80,9 @@ class HelpersChanges(QWidget):
         self.body_lay.setSpacing(0)
         lay.addWidget(self.body)
         self.hide()
-        bind(store.rt_changed, self, self._on_rt)
+        # No binding of its own: the Changes panel calls sync() from its visibility-gated refresh
+        # and when it is shown, so a hidden tab does no work (qt/PERF.md §4.12).
         self.sync()
-
-    def _on_rt(self, sid: str) -> None:
-        if sid == self.sid:
-            self.sync()
 
     def helpers(self) -> List[Json]:
         rt = store.rt.get(self.sid)
@@ -201,6 +197,7 @@ class HelperSection(QWidget):
         self.h: Json = {}
         self.open = True
         self._loaded_sig: Any = None
+        self._ui_sig: Any = None
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
@@ -248,22 +245,35 @@ class HelperSection(QWidget):
     _files: List[Json] = []
 
     def sync(self, h: Json) -> None:
-        changed = h != self.h
-        self.h = dict(h)
-        if not changed and self._loaded_sig is not None:
-            return
+        self.h = h
         st = str(h.get("state") or "")
-        self.glyph.set_state(GLYPH_STATUS.get(st, "stopped"), int(h.get("pending") or 0), False)
-        self.name.setText(str(h.get("name") or ""))
-        self.state.setText(st.replace("_", " ") + (f" · {h.get('reason')}" if h.get("reason") and st != "done" else ""))
-        self.branch.setText(str(h.get("branch") or ""))
-        self.add.set_value(int(h.get("add") or 0))
-        self.dele.set_value(int(h.get("del") or 0))
         fin = str(h.get("finished") or "")
-        self.finished.setText(
-            {"commit": f"committed {h.get('commit') or ''}", "discard": "discarded", "keep": "kept"}.get(fin, "")
+        ui = (
+            st,
+            str(h.get("name") or ""),
+            str(h.get("reason") or ""),
+            str(h.get("branch") or ""),
+            int(h.get("add") or 0),
+            int(h.get("del") or 0),
+            int(h.get("pending") or 0),
+            fin,
+            str(h.get("commit") or ""),
         )
-        self.finished.setVisible(bool(fin))
+        if ui != self._ui_sig:
+            # the labels follow what they show, not the dict: a new last line or elapsed time touches nothing
+            self._ui_sig = ui
+            self.glyph.set_state(GLYPH_STATUS.get(st, "stopped"), int(h.get("pending") or 0), False)
+            self.name.setText(str(h.get("name") or ""))
+            self.state.setText(
+                st.replace("_", " ") + (f" · {h.get('reason')}" if h.get("reason") and st != "done" else "")
+            )
+            self.branch.setText(str(h.get("branch") or ""))
+            self.add.set_value(int(h.get("add") or 0))
+            self.dele.set_value(int(h.get("del") or 0))
+            self.finished.setText(
+                {"commit": f"committed {h.get('commit') or ''}", "discard": "discarded", "keep": "kept"}.get(fin, "")
+            )
+            self.finished.setVisible(bool(fin))
         sig = (st, int(h.get("files") or 0), int(h.get("add") or 0), fin)
         if sig != self._loaded_sig:
             self._loaded_sig = sig

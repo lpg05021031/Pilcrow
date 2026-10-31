@@ -340,6 +340,7 @@ class ChangesPanel(QWidget):
     def showEvent(self, e) -> None:  # noqa: N802
         # The web remounts this tab each time it is shown; here it stays built and refreshes instead.
         super().showEvent(e)
+        self.helpers.sync()  # a lead's helpers, caught up now that the tab shows
         if self._stale or (self.data is not None and time.monotonic() - self._last_load > 2.5):
             self.load()
 
@@ -359,6 +360,7 @@ class ChangesPanel(QWidget):
             # a hidden tab does no work: it catches up when it is shown
             self._stale = True
             return
+        self.helpers.sync()
         if status == "idle" and was != "idle":
             self.load()
         elif status in ("running", "requires_action") and time.monotonic() - self._last_load > 2.5:

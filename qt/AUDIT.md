@@ -26,6 +26,7 @@ renders. The scripts:
 | `s_layout.py` | Inputs that can only break the layout: unbreakable code spans, 200-character words, a 2000 px image, a 20-column table, tabs, carriage returns, emoji, nested quotes and fences |
 | `s_hidpi.py` | Device pixel ratios 1.25 and 1.5: cached against direct paints, hairlines |
 | `s_misc.py` | A pointer sweep over tool heads and prose; the sidebar with 500 sessions; a 3000-line paste in the composer |
+| `s_helpers.py` | A lead's conversation full of helper notes and cards flung through; in the real window, eight helpers whose state ticks ten times a second while the lead is quiet and while a reply streams: which widgets repaint, which receive a layout pass, what an update costs, with the Changes tab in front and behind (HELPERS.md §11) |
 | `s_app.py`, `s_panel.py`, `s_open.py` | The whole window against the mock server: a reply streaming into the real session view, the panel and the sidebar toggled, a window resize storm, find, and the opening of a long session frame by frame |
 
 ## 2. Findings, worst first

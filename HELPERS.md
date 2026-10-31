@@ -558,8 +558,14 @@ Estimated: server ≈ 450 lines plus 60 in `sessions.js`; Qt ≈ 400; web ≈ 35
   then settled; a note drawn as a note; the sidebar nesting and the lead's warmest dot; the control room
   card's provenance and button; the Changes panel sections and a Discard confirmation naming the
   helpers; the delete dialog's cascade.
-- Smoothness: the probes on a lead with eight running helpers: the bar repaints alone; the conversation
-  does not reflow when chips change.
+- Smoothness (`qt/tests/stress/s_helpers.py`, guarded by `test_helper_updates_touch_only_the_bar` in
+  `qt/tests/test_helpers.py`): eight helpers whose state ticks ten times a second repaint their chips and
+  nothing else — no paint of the conversation, the sidebar, the composer or the header, no layout pass
+  outside the bar, the sessions list not re-emitted — at under 3 ms an update, idle or while a reply
+  streams. The bar places its chips by hand (no QLayout) and paints its own background; the store
+  re-emits the sessions list only when a field the list shows changed; the Changes panel's helper
+  sections follow the panel's visibility gate. A conversation of 960 messages with 60 notes and 180
+  helpers cards flings with no stall over 20 ms and no cold placeholder; a note measures in 0.5 ms.
 
 ## 12. Decisions taken here, open to change
 

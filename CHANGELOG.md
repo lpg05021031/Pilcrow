@@ -29,6 +29,10 @@
   放最前面、notes 自動帶進 brief、plan 擋掉 never、prepare / verify 沒填就用註冊表的預設。Qt 與 web 都有 Settings →
   Repositories（列、就地編輯、掃描資料夾註冊、移除）、composer 的 `@` 列出 repo、session 選單的「Register this
   repository…」、側欄與新 session 對話框用註冊表的名字；RPC `repos.*`，測試 `test/unit/repos.test.ts`、`qt/tests/test_repos.py`。
+  效能：helpers bar 沒有 QLayout——chip 由 bar 自己排、bar 自己畫底色，helper 狀態一秒更新十次時只重畫 chip，對話區、側欄、
+  composer、標題都不重畫也不重排，一次更新不到 3 ms（`qt/tests/stress/s_helpers.py` 量測，`qt/tests/test_helpers.py` 守著）；
+  store 只在 session 清單顯示的欄位變了才重發清單（之前每個 state 事件都重發、側欄都重建一次）；Changes 分頁的 helper 節
+  跟著分頁的可見性走，被別的分頁蓋住時不做事；瀏覽器端的對話區不再滑到 helpers bar 底下。
 
 - **2.11.0**：**Dispatch：一份 brief、一組 repo、一個 job**（設計與現況見 `DISPATCH.md`）。伺服器新增 `server/dispatch_core.js`
   與 `server/dispatch.js`：掃描資料夾找 repo（分支、未提交、遠端、大小、CLAUDE.md，以及 package.json / go.mod /

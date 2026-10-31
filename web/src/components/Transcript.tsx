@@ -1341,7 +1341,7 @@ function parseNotes(text: string) {
  *  and numbers in the head, its handoff as quiet prose, Open at the right. */
 function HelperNote({ item, ctx }: { item: UserItem; ctx: ToolCtx }) {
   const helpers = useStore((s) => s.rt[ctx.sessionId]?.helpers);
-  const { parts, tail } = parseNotes(item.text);
+  const { parts, tail } = useMemo(() => parseNotes(item.text), [item.text]);
   const open = (name: string) => {
     const h = helpers?.find((x) => x.name === name);
     if (h) openSession(h.id);

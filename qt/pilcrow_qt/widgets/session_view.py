@@ -120,22 +120,25 @@ HELPER_ACTIVE = ("queued", "preparing", "running", "needs_action")
 
 
 class HelperChip(QPushButton):
-    """``.helper-chip``: one helper on the bar — a dot in its state's colour, its name, a short state."""
+    """``.helper-chip``: one helper on the bar — a dot in its state's colour, its name, a short state.
+    The bar places it by hand (no QLayout), so a change of text moves nothing outside the bar."""
+
+    H = 22
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.h: Json = {}
         self._text = ""
+        self._key: Optional[tuple] = None
+        self.w = 0
         self.setAutoDefault(False)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(22)
         self.clicked.connect(lambda _c=False: self.h.get("id") and store.open_session(str(self.h["id"])))
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def sync(self, h: Json) -> None:
-        if h == self.h:
-            return
-        self.h = dict(h)
+    def sync(self, h: Json) -> bool:
+        """Take the helper's state; True when what the chip shows changed (its width may have)."""
+        self.h = h
         st = str(h.get("state") or "")
         word = "needs you" if st == "needs_action" else st.replace("_", " ")
         extra = ""
@@ -145,12 +148,19 @@ class HelperChip(QPushButton):
             extra = f"+{int(h.get('add') or 0)} −{int(h.get('del') or 0)}"
         elif st in ("queued", "skipped", "stopped", "failed") and h.get("reason"):
             extra = str(h.get("reason"))
-        self._text = f"{h.get('name')} · {word}" + (f" · {extra}" if extra else "")
-        self.setAccessibleName(self._text)
-        self.setToolTip(" · ".join(x for x in (str(h.get("lastLine") or ""), str(h.get("cwd") or "")) if x))
+        text = f"{h.get('name')} · {word}" + (f" · {extra}" if extra else "")
+        tip = " · ".join(x for x in (str(h.get("lastLine") or ""), str(h.get("cwd") or "")) if x)
+        key = (st, text, tip)
+        if key == self._key:
+            return False
+        self._key = key
+        self._text = text
+        self.setAccessibleName(text)
+        self.setToolTip(tip)
         fm = QFontMetrics(theme.font_ui(theme.FS_SMALL, 500))
-        self.setFixedWidth(min(280, 9 + 8 + 7 + fm.horizontalAdvance(self._text) + 10))
+        self.w = min(280, 9 + 8 + 7 + fm.horizontalAdvance(text) + 10)
         self.update()
+        return True
 
     def text(self) -> str:  # type: ignore[override]
         return self._text
@@ -187,25 +197,32 @@ class HelperChip(QPushButton):
 
 class HelpersBar(QWidget):
     """``.helpers-bar`` (HELPERS.md §6.1): under a lead's header, one chip per helper, the cost, Review.
-    Drawn from ``session.state`` alone; it is the whole picture while the cards scroll away."""
+    Drawn from ``session.state`` alone; it is the whole picture while the cards scroll away.
+
+    The bar has no QLayout: its children are placed in ``_place`` from their own widths, so a helper's
+    state ticking (elapsed time, a new last line) repaints a chip and moves nothing else — the
+    conversation, the composer and the header see no layout pass. Only the bar appearing or going
+    (the first helper, the last one gone) reaches the session view's layout."""
+
+    H = 34
+    PAD_L = 18
+    PAD_R = 14
+    GAP = 6
 
     def __init__(self, sid: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.sid = sid
         self.chips: List[HelperChip] = []
         self._ids: List[str] = []
+        self._shown = 0
         self.setObjectName("helpers-bar")
-        self.setFixedHeight(34)
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(18, 0, 14, 0)
-        lay.setSpacing(6)
-        self.chip_lay = QHBoxLayout()
-        self.chip_lay.setContentsMargins(0, 0, 0, 0)
-        self.chip_lay.setSpacing(6)
-        lay.addLayout(self.chip_lay)
-        lay.addStretch(1)
+        self.setFixedHeight(self.H)
+        # opaque: a chip repainting dirties the bar alone, not the shell, the card and the stack under it
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.cost = label("", tone="faint", size="micro")
-        lay.addWidget(self.cost)
+        self.more = label("", tone="faint", size="micro")
+        self.more.hide()
         self.review = button(
             "Review",
             kind="ghost",
@@ -214,36 +231,105 @@ class HelpersBar(QWidget):
             on_click=lambda: store.set_ui(panel=True, panel_tab="changes"),
             tooltip="The helpers' changes together, in the Changes panel",
         )
-        lay.addWidget(self.review)
+        for w in (self.cost, self.more, self.review):
+            w.setParent(self)
+        self.review.hide()
         self.hide()
         bind(theme.theme.changed, self, lambda _t: self.update())
 
+    def sizeHint(self) -> QSize:  # noqa: N802
+        return QSize(240, self.H)
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        return QSize(0, self.H)
+
     def sync(self, helpers: List[Json], lead: Json) -> None:
         if not helpers:
-            self.hide()
+            if not self.isHidden():
+                self.hide()
             return
         ids = [str(h.get("id")) for h in helpers]
+        changed = False
         if ids != self._ids:
             for c in self.chips:
-                self.chip_lay.removeWidget(c)
                 c.hide()
                 c.deleteLater()
             self.chips = [HelperChip(self) for _ in helpers]
-            for c in self.chips:
-                self.chip_lay.addWidget(c)
             self._ids = ids
+            changed = True
         for c, h in zip(self.chips, helpers):
-            c.sync(h)
+            changed = c.sync(h) or changed
         usd = float(lead.get("cost") or 0)
-        self.cost.setText(cost(usd) if usd else "")
-        self.review.setVisible(
-            any(h.get("state") in ("done", "failed", "stopped") and int(h.get("files") or 0) > 0 for h in helpers)
-        )
-        self.show()
+        cost_text = cost(usd) if usd else ""
+        if cost_text != self.cost.text():
+            self.cost.setText(cost_text)
+            changed = True
+        review = any(h.get("state") in ("done", "failed", "stopped") and int(h.get("files") or 0) > 0 for h in helpers)
+        if review != self.review.isVisibleTo(self):
+            self.review.setVisible(review)
+            changed = True
+        if self.isHidden():
+            self.show()
+            changed = True
+        if changed:
+            self._place()
+
+    def _place(self) -> None:
+        """Chips from the left, the cost and Review from the right; chips that do not fit give way to
+        a ``+N`` count. Geometry only — nothing here reaches a layout above the bar."""
+        w = self.width()
+        y_chip = (self.H - HelperChip.H) // 2
+        right = w - self.PAD_R
+        if self.review.isVisibleTo(self):
+            rh = self.review.sizeHint()
+            self.review.setGeometry(right - rh.width(), (self.H - rh.height()) // 2, rh.width(), rh.height())
+            right -= rh.width() + 8
+        if self.cost.text():
+            ch = self.cost.sizeHint()
+            self.cost.setGeometry(right - ch.width(), (self.H - ch.height()) // 2, ch.width(), ch.height())
+            self.cost.show()
+            right -= ch.width() + 8
+        else:
+            self.cost.hide()
+        x = self.PAD_L
+        shown = 0
+        more_w = 0
+        for i, c in enumerate(self.chips):
+            rest = len(self.chips) - i
+            if rest > 1:
+                fm = QFontMetrics(theme.font_ui(theme.FS_MICRO))
+                more_w = fm.horizontalAdvance(f"+{rest - 1}") + self.GAP
+            else:
+                more_w = 0
+            if x + c.w > right - (more_w if rest > 1 else 0) and i > 0:
+                break
+            c.setGeometry(x, y_chip, c.w, HelperChip.H)
+            if c.isHidden():
+                c.show()
+            x += c.w + self.GAP
+            shown += 1
+        for c in self.chips[shown:]:
+            if not c.isHidden():
+                c.hide()
+        hidden = len(self.chips) - shown
+        if hidden > 0:
+            self.more.setText(f"+{hidden}")
+            mh = self.more.sizeHint()
+            self.more.setGeometry(x, (self.H - mh.height()) // 2, mh.width(), mh.height())
+            self.more.setToolTip(", ".join(str(c.h.get("name")) for c in self.chips[shown:]))
+            self.more.show()
+        elif not self.more.isHidden():
+            self.more.hide()
+        self._shown = shown
+
+    def resizeEvent(self, e) -> None:  # noqa: N802
+        super().resizeEvent(e)
+        self._place()
 
     def paintEvent(self, _e) -> None:  # noqa: N802
         t = theme.tokens()
         p = QPainter(self)
+        p.fillRect(self.rect(), QColor(t.canvas))
         p.fillRect(0, self.height() - 1, self.width(), 1, theme.blend(t.hair, t.canvas))
         p.end()
 

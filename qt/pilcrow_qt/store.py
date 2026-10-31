@@ -406,11 +406,12 @@ class Store(QObject):
         r.st = {**r.st, **st}
         self.rt_changed.emit(sid)
         changed = False
+        vals = (r.st.get("status"), r.st.get("live"), len(r.st.get("pending") or []))
         for s in self.sessions:
-            if s.get("id") == sid:
-                s["status"] = st.get("status")
-                s["live"] = st.get("live")
-                s["pending"] = len(st.get("pending") or [])
+            if s.get("id") == sid and (s.get("status"), s.get("live"), s.get("pending")) != vals:
+                # only a change the list shows re-emits it: a lead's helpers ticking (HELPERS.md) or a
+                # cost update does not rebuild the sidebar
+                s["status"], s["live"], s["pending"] = vals
                 changed = True
         if changed:
             self.sessions_changed.emit(self.sessions)

@@ -5,6 +5,8 @@ finishes them; the inbox gets the record; deleting the lead can take its helpers
 
 from __future__ import annotations
 
+import time
+
 from harness import app_client, mock_server  # noqa: F401
 
 MOCK_PORT = 5433
@@ -124,3 +126,114 @@ def test_a_lead_and_its_helpers(app_client):
     c.wait_until(
         lambda: not any(s["id"] in {sid, *hids.values()} for s in c.store.sessions), 10, "lead and helpers gone"
     )
+
+
+def _helper(k: int, tick: int) -> dict:
+    state = "running" if k < 6 else ("needs_action" if k == 6 else "done")
+    return {
+        "id": f"h{k}",
+        "name": f"helper-{k}",
+        "cwd": f"{HOME}/code/repo{k}",
+        "branch": f"pilcrow/lead/helper-{k}",
+        "worktree": f"{HOME}/code/repo{k}/.worktrees/lead",
+        "state": state,
+        "since": 1,
+        "elapsedMs": 1000 * (tick + 3 * k),
+        "cost": round(0.013 * k + 0.0001 * tick, 4),
+        "files": 3 if state == "done" else 0,
+        "add": 40 if state == "done" else 0,
+        "del": 12 if state == "done" else 0,
+        "pending": 1 if state == "needs_action" else 0,
+        "lastLine": f"Read src/mod{(tick + k) % 23}.ts",
+        "after": [],
+    }
+
+
+def test_helper_updates_touch_only_the_bar(app_client):
+    """Eight helpers ticking (elapsed time, a new last line, the cost) repaint their chips and nothing else:
+    the conversation and the sidebar do not paint, no widget outside the bar receives a layout pass, and
+    the sessions list is not re-emitted (HELPERS.md §11; qt/PERF.md §4.12). The bar arriving is the one
+    layout of the view, and it happens before the count starts."""
+    from PySide6.QtCore import QEvent, QObject
+    from PySide6.QtWidgets import QApplication
+
+    c = app_client
+    c.wait_until(lambda: c.store.config is not None and c.store.sessions, 10, "sessions")
+    sid = c.store.sessions[0]["id"]
+    c.open(sid)
+    v = c.win.session_view
+    cur = c.store.rt[sid].st
+
+    def push(tick: int) -> None:
+        c.store._on_state(
+            {
+                "id": sid,
+                "status": cur.get("status"),
+                "live": cur.get("live"),
+                "pending": cur.get("pending") or [],
+                "helpers": [_helper(k, tick) for k in range(8)],
+                "lead": {"since": 1, "cost": 0.5 + tick * 0.001, "caps": {}, "rules": []},
+            }
+        )
+
+    push(0)
+    c.wait_until(lambda: v.helpers_bar.isVisible() and len(v.helpers_bar.chips) == 8, 5, "the bar")
+    assert v.pill.text() == "Leading"
+    # the window's own idle work first: the side panel is built and painted once off screen after a session
+    # opens (MainWindow._warm_panel), which lays the view out — not a cost of the helpers
+    c.wait_until(lambda: c.win.panel is not None, 5, "the panel prebuilt")
+    c.sleep(600)
+    viewport = v.transcript.view.viewport()
+    bar = v.helpers_bar
+    sidebar = c.win.sidebar
+
+    class Count(QObject):
+        def __init__(self) -> None:
+            super().__init__()
+            self.paints = {"viewport": 0, "bar": 0, "sidebar": 0, "composer": 0}
+            self.who: dict = {}
+            self.layouts: list = []
+
+        def eventFilter(self, obj, e) -> bool:  # noqa: N802
+            t = e.type()
+            if t == QEvent.Type.Paint:
+                for key, w in (("viewport", viewport), ("bar", bar), ("sidebar", sidebar), ("composer", v.composer)):
+                    if obj is w or w.isAncestorOf(obj):
+                        self.paints[key] += 1
+                        if key != "bar":
+                            name = f"{key}/{type(obj).__name__}:{obj.objectName()}"
+                            self.who[name] = self.who.get(name, 0) + 1
+                        break
+            elif t == QEvent.Type.LayoutRequest and obj is not bar:
+                self.layouts.append(f"{type(obj).__name__}:{obj.objectName()}")
+            return False
+
+    lists = []
+    c.store.sessions_changed.connect(lambda s: lists.append(1))
+    cnt = Count()
+    QApplication.instance().installEventFilter(cnt)
+    costs = []
+    try:
+        for tick in range(1, 21):
+            t0 = time.perf_counter()
+            push(tick)
+            costs.append((time.perf_counter() - t0) * 1000)
+            c.sleep(20)
+        c.sleep(150)
+    finally:
+        QApplication.instance().removeEventFilter(cnt)
+    report = {
+        "paints": cnt.paints,
+        "who": cnt.who,
+        "layouts": cnt.layouts,
+        "lists": len(lists),
+        "ms": [round(x, 2) for x in costs],
+    }
+    assert v.helpers_bar.chips[0].text().startswith("helper-0 · running · "), "the chips followed"
+    assert cnt.paints["bar"] > 0, "the chips repainted"
+    assert cnt.paints["viewport"] == 0, report
+    assert cnt.paints["sidebar"] == 0, report
+    assert cnt.paints["composer"] == 0, report
+    assert cnt.layouts == [], report
+    assert not lists, ("the sessions list was re-emitted for a helper tick", report)
+    assert max(costs) < 40, report  # one update on the main thread, offscreen, with headroom
