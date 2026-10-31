@@ -442,7 +442,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\pilcrow-windows.ps1
 ```
 
 選項：`-Dir <路徑>`（預設 `%LOCALAPPDATA%\Programs\Pilcrow`）、`-NoDesktop`、`-NoLaunch`（裝完不開視窗）、
-`-FilesOnly`、`-Uninstall`（移除程式與外殼，設定與對話紀錄保留）、`-Electron`（額外嘗試下載 Electron，通常不需要）；
+`-FilesOnly`、`-Uninstall`（移除程式與外殼，設定與對話紀錄保留）、`-Electron`（額外嘗試下載 Electron，通常不需要）、
+`-Qt`（改用原生 Qt 視窗：PySide6 會裝進 `<安裝目錄>\qt\.venv`，約 150 MB，從你的 pip 來源抓；捷徑與
+`pilcrow-qt` 指令都開 Qt 視窗，不建 WebView2 外殼；適合 VM、遠端桌面這類 Chromium 拿不到真 GPU 的環境——
+Qt 視窗純 CPU 繪圖。再跑一次不帶 `-Qt` 就換回 WebView2）；
 外殼相關：`-Node`、`-Python`、`-WebView2Package`、`-NuGetSource`、`-WebView2Runtime`、`-KeepServer`、
 `-NativeTitleBar`、`-DevTools`、`-SkipSignatureCheck`，意思同 `pilcrow-app.ps1` 的說明。
 

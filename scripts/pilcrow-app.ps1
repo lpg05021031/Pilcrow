@@ -257,7 +257,7 @@ function Find-Python {
   }
   foreach ($c in $cands) {
     $r = Invoke-Native $c[0] ([string[]]($c[1] + @('-c', 'import sys;print(sys.version_info[0])')))
-    if ($r.Code -eq 0 -and $r.Output -eq '3') { return $c }
+    if ($r.Code -eq 0 -and $r.Output -eq '3') { return ,$c }
   }
   return $null
 }

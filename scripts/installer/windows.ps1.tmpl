@@ -21,6 +21,9 @@
 #    -FilesOnly             only write the files (no npm, no desktop shell)
 #    -Uninstall             remove Pilcrow and the desktop shell (settings and conversations are kept)
 #    -Electron              also try to download Electron (not needed; the WebView2 shell is the window)
+#    -Qt                    the native Qt window instead of the WebView2 shell: PySide6 goes into a venv
+#                           under the install folder (about 150 MB from your pip index); for VMs and
+#                           remote desktops where Chromium has no real GPU. Run again without -Qt to go back.
 #    -Node <path>           node.exe for the shell (default: the one found on PATH)
 #    -Python <path>         python.exe (default: PATH / py launcher)
 #    -WebView2Package <p>   WebView2 SDK as .nupkg / .whl / .zip / folder / URL, when pip is not an option
@@ -44,6 +47,7 @@ param(
   [switch]$Force,
   [switch]$Electron,
   [switch]$SkipElectron,
+  [switch]$Qt,
   [string]$Node = '',
   [string]$Python = '',
   [string]$WebView2Package = '',
@@ -118,7 +122,20 @@ function Add-ToUserPath([string]$Folder) {
 
 function Quote-Ps([string]$Text) { return "'" + ($Text -replace "'", "''") + "'" }
 
-function New-Shortcut([string]$Path, [string]$AppDir, [string]$Node) {
+function New-Shortcut([string]$Path, [string]$AppDir, [string]$Node, [string]$QtPythonw = '', [string[]]$QtExtra = @()) {
+  if ($QtPythonw) {
+    # the Qt window: pythonw from the venv, no console, no PowerShell in between
+    $shell = New-Object -ComObject WScript.Shell
+    $lnk = $shell.CreateShortcut($Path)
+    $lnk.TargetPath = $QtPythonw
+    $lnk.Arguments = (@('-m', 'pilcrow_qt_launch', '--node', ('"' + $Node + '"')) + $QtExtra) -join ' '
+    $lnk.WorkingDirectory = $AppDir
+    $ico = Join-Path $AppDir 'assets\icon.ico'
+    if (Test-Path $ico) { $lnk.IconLocation = $ico + ',0' }
+    $lnk.Description = 'Pilcrow (Qt window)'
+    $lnk.Save()
+    return
+  }
   # The launcher is an inline command rather than a .ps1 file, so it works even where policy blocks
   # PowerShell scripts. It prefers Electron when it has been downloaded, else a Chrome / Edge window.
   $electron = Join-Path $AppDir 'node_modules\electron\dist\electron.exe'
@@ -133,6 +150,24 @@ function New-Shortcut([string]$Path, [string]$AppDir, [string]$Node) {
   $lnk.Description = 'Pilcrow - Claude Code desktop'
   $lnk.WindowStyle = 7
   $lnk.Save()
+}
+
+function Find-Python {
+  # @(exe, leading arguments) for a Python 3.9+; the Microsoft Store placeholder python.exe is skipped
+  $cands = @()
+  if ($Python) { $cands += ,@($Python, @()) }
+  if ($env:PILCROW_PYTHON) { $cands += ,@($env:PILCROW_PYTHON, @()) }
+  $py = Get-Command py.exe -ErrorAction SilentlyContinue
+  if ($py) { $cands += ,@($py.Source, @('-3')) }
+  foreach ($n in @('python.exe', 'python3.exe')) {
+    $c = Get-Command $n -ErrorAction SilentlyContinue
+    if ($c -and $c.Source -notlike '*\WindowsApps\*') { $cands += ,@($c.Source, @()) }
+  }
+  foreach ($c in $cands) {
+    $v = Get-NativeOutput $c[0] ([string[]]($c[1] + @('-c', 'import sys;print(sys.version_info[0]*100+sys.version_info[1])')))
+    if ($v -match '^\d+$' -and [int]$v -ge 309) { return ,$c }
+  }
+  return $null
 }
 
 function Invoke-Native([string]$Exe, [string[]]$Arguments) {
@@ -355,15 +390,67 @@ if (-not (Test-Path (Join-Path $electronDir 'package.json'))) {
   }
 }
 
+# ---------------------------------------------------------------- native window (Qt, opt-in)
+
+$QtPythonw = ''
+$QtExtra = @()
+if ($OnWindows -and -not $FilesOnly -and $Qt) {
+  Step 'Native window (Qt): PySide6 in a venv under the install folder'
+  $py = Find-Python
+  if (-not $py) { Die "-Qt needs Python 3.9 or later with venv and pip (python.org or winget; the Microsoft Store placeholder is skipped). Pass -Python <path> to point at one." }
+  $pyExe = $py[0]; $pyPre = [string[]]$py[1]
+  Ok "Python: $pyExe"
+  $venv = Join-Path $Dir 'qt\.venv'
+  $vpy = Join-Path $venv 'Scripts\python.exe'
+  if (-not (Test-Path $vpy)) {
+    Say "  Creating the venv at $venv"
+    $rc = Invoke-Native $pyExe ([string[]]($pyPre + @('-m', 'venv', $venv)))
+    if ($rc -ne 0 -or -not (Test-Path $vpy)) { Die "Could not create a venv at $venv (python -m venv failed; the venv module is part of python.org installs)" }
+  }
+  Say '  Installing PySide6 and the other packages from your pip index (about 150 MB the first time)...'
+  $rc = Invoke-Native $vpy @('-m', 'pip', 'install', '--disable-pip-version-check', '-q', '-r', (Join-Path $Dir 'qt\requirements.txt'))
+  if ($rc -ne 0) { Die "pip could not install qt\requirements.txt. Check that pip reaches your index (pip config list), then run this file again with -Qt." }
+  # A launcher module in the venv: it finds pilcrow_qt next to the venv from its own location, so the
+  # shortcut needs no PYTHONPATH and no path with a code page in it.
+  $site = Join-Path $venv 'Lib\site-packages'
+  if (-not (Test-Path $site)) { New-Item -ItemType Directory -Force $site | Out-Null }
+  $launcher = @(
+    '# Written by the Pilcrow installer: starts the Qt window from the install folder this venv lives in.',
+    'import os, runpy, sys',
+    '',
+    'def main():',
+    '    here = os.path.dirname(os.path.abspath(__file__))',
+    '    qt_dir = os.path.dirname(os.path.dirname(os.path.dirname(here)))',
+    '    sys.path.insert(0, qt_dir)',
+    '    if "--dir" not in sys.argv and "--url" not in sys.argv:',
+    '        sys.argv[1:1] = ["--dir", os.path.dirname(qt_dir)]',
+    '    runpy.run_module("pilcrow_qt", run_name="__main__", alter_sys=True)',
+    '',
+    'if __name__ == "__main__":',
+    '    main()',
+    ''
+  ) -join "`n"
+  [IO.File]::WriteAllText((Join-Path $site 'pilcrow_qt_launch.py'), $launcher, [Text.Encoding]::ASCII)
+  $rc = Invoke-Quiet $vpy @('-c', 'import PySide6, pilcrow_qt_launch')
+  if ($rc -ne 0) { Die "The Qt window does not import (PySide6 or the launcher); run this file again with -Qt and read the messages above" }
+  [IO.File]::WriteAllText((Join-Path $Dir '.launch-env'), ('PILCROW_NODE=' + $NodePath + "`r`n"), (New-Object Text.UTF8Encoding($false)))
+  $QtPythonw = Join-Path $venv 'Scripts\pythonw.exe'
+  if ($KeepServer) { $QtExtra += '--keep-server' }
+  if ($NativeTitleBar) { $QtExtra += '--native-titlebar' }
+  $cmdQt = "@echo off`r`n`"%~dp0..\qt\.venv\Scripts\pythonw.exe`" -m pilcrow_qt_launch %*`r`n"
+  [IO.File]::WriteAllText((Join-Path $Dir 'bin\pilcrow-qt.cmd'), $cmdQt, [Text.Encoding]::ASCII)
+  Ok "Qt window ready: the shortcuts open it, and so does  pilcrow-qt  in a terminal"
+}
+
 # ---------------------------------------------------------------- launcher
 
 if ($OnWindows) {
   Step "Creating shortcuts"
   $cmdText = "@echo off`r`nnode `"%~dp0..\server\main.js`" %*`r`n"
   [IO.File]::WriteAllText((Join-Path $Dir 'bin\pilcrow.cmd'), $cmdText, [Text.Encoding]::ASCII)
-  New-Shortcut $StartMenuLink $Dir $NodePath
+  New-Shortcut $StartMenuLink $Dir $NodePath $QtPythonw $QtExtra
   Ok "Start menu: Pilcrow"
-  if (-not $NoDesktop) { New-Shortcut $DesktopLink $Dir $NodePath; Ok "Desktop shortcut: Pilcrow" }
+  if (-not $NoDesktop) { New-Shortcut $DesktopLink $Dir $NodePath $QtPythonw $QtExtra; Ok "Desktop shortcut: Pilcrow" }
   if (Add-ToUserPath (Join-Path $Dir 'bin')) { Ok "Added the pilcrow command to PATH (takes effect in new terminals)" }
 }
 
@@ -380,7 +467,13 @@ $HostPayload = @'
 {{HOST_PAYLOAD}}
 '@
 
-if ($OnWindows -and -not $FilesOnly) {
+if ($OnWindows -and -not $FilesOnly -and $Qt) {
+  Step 'Desktop shell (WebView2): not built with -Qt (run this file again without -Qt to switch back)'
+  if (-not $NoLaunch) {
+    Say '  Opening the Qt window; it finds or starts the Pilcrow server itself.'
+    Start-Process -FilePath $QtPythonw -ArgumentList (@('-m', 'pilcrow_qt_launch', '--node', ('"' + $NodePath + '"')) + $QtExtra) -WorkingDirectory $Dir | Out-Null
+  }
+} elseif ($OnWindows -and -not $FilesOnly) {
   Step 'Desktop shell (WebView2)'
   if (-not (Test-Path $HostDir)) { New-Item -ItemType Directory -Force $HostDir | Out-Null }
   $hostScript = Join-Path $HostDir 'pilcrow-app.ps1'
@@ -407,7 +500,8 @@ if ($OnWindows -and -not $FilesOnly) {
 Write-Host ''
 Write-Host "Pilcrow $Version installed" -ForegroundColor Green
 if ($OnWindows) {
-  Say "  Start: Pilcrow in the Start menu or on the desktop, or run  pilcrow  in a terminal"
+  if ($Qt) { Say "  Start: Pilcrow in the Start menu or on the desktop (the Qt window), or run  pilcrow-qt  in a terminal" }
+  else { Say "  Start: Pilcrow in the Start menu or on the desktop, or run  pilcrow  in a terminal" }
   Say "  Health check: pilcrow --doctor    Remove: run this file again with -Uninstall"
 }
 Say ("  Docs: " + (Join-Path $Dir 'README.md'))

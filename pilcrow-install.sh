@@ -1001,7 +1001,7 @@ esac
 exit 0
 PILCROW_EOF_1032691f99
   wrote=$((wrote + 1))
-  # ---- CHANGELOG.md (54153 bytes)
+  # ---- CHANGELOG.md (54526 bytes)
   cat > "$D"/'CHANGELOG.md' <<'PILCROW_EOF_06572a96a5'
 # 版本紀錄
 
@@ -1061,7 +1061,9 @@ PILCROW_EOF_1032691f99
   **Windows**：Qt 視窗開啟時依主螢幕可用範圍縮放（1366×768 的筆電、125 % 的 1080p 不再超出螢幕、右側被裁到 resize 才對），
   並記住上次的位置與大小（落在螢幕上才還原）；Windows 的原生標題列透過 DWM 跟主題同色（深色模式、標題、邊框、文字）、
   Windows 11 明確要圓角；畫面時鐘與 16 ms flush 計時器改 PreciseTimer（Windows 預設 15.6 ms 的解析度會把 16 ms 變 31）；
-  WebView2 外殼也明確要圓角。
+  WebView2 外殼也明確要圓角。Windows 安裝檔多了 `-Qt`：PySide6 裝進安裝目錄下的 venv，捷徑與 `pilcrow-qt` 指令
+  直接開 Qt 視窗（由 venv 的 pythonw 啟動，不經 PowerShell、不開主控台），伺服器由視窗自己找到或拉起來，輸出寫到
+  `%LOCALAPPDATA%\Pilcrow\state\qt-server.log`（之前接 pipe 沒人讀，Linux 上寫滿會把伺服器卡住）。
 
 - **2.11.0**：**Dispatch：一份 brief、一組 repo、一個 job**（設計與現況見 `DISPATCH.md`）。伺服器新增 `server/dispatch_core.js`
   與 `server/dispatch.js`：掃描資料夾找 repo（分支、未提交、遠端、大小、CLAUDE.md，以及 package.json / go.mod /
@@ -9109,7 +9111,7 @@ if __name__ == "__main__":
     sys.exit(main())
 PILCROW_EOF_ac1b687abf
   wrote=$((wrote + 1))
-  # ---- qt/pilcrow_qt/app.py (6855 bytes)
+  # ---- qt/pilcrow_qt/app.py (7927 bytes)
   cat > "$D"/'qt/pilcrow_qt/app.py' <<'PILCROW_EOF_99387b6d4f'
 """QApplication setup: fonts, theme, the server to talk to, the main window."""
 
@@ -9174,6 +9176,8 @@ class ServerProcess:
         self.node = node or self._node_from_env() or "node"
         self.proc: Optional[subprocess.Popen] = None
         self.url = ""
+        self.log_path: Optional[Path] = None
+        self.log = None
 
     def _node_from_env(self) -> str:
         env = self.dir / ".launch-env"
@@ -9190,13 +9194,23 @@ class ServerProcess:
                 f"Pilcrow is not installed at {self.dir} (no server/main.js). Run pilcrow-install.sh, or pass --dir."
             )
         env = {**os.environ, "PILCROW_SHELL_ENV": "0"}
+        # Its output goes to a file: a pipe nobody reads fills up and blocks the server's writes
+        # (Node's stdout is synchronous on a pipe on Linux). On Windows, no console window either.
+        log_dir = _state_dir()
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True)
+            self.log_path = log_dir / "qt-server.log"
+            self.log = open(self.log_path, "a", encoding="utf-8", errors="replace")  # noqa: SIM115
+        except OSError:
+            self.log_path, self.log = None, open(os.devnull, "w")  # noqa: SIM115
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
         self.proc = subprocess.Popen(
             [self.node, str(main_js), "--shell=none"],
             cwd=str(self.dir),
             env=env,
-            stdout=subprocess.PIPE,
+            stdout=self.log,
             stderr=subprocess.STDOUT,
-            text=True,
+            creationflags=flags,
         )
         deadline = time.time() + timeout
         while time.time() < deadline:
@@ -9205,19 +9219,31 @@ class ServerProcess:
                 self.url = url
                 return url
             if self.proc.poll() is not None:
-                out = self.proc.stdout.read() if self.proc.stdout else ""
-                raise RuntimeError(f"The Pilcrow server exited right away:\n{out[-2000:]}")
+                raise RuntimeError(f"The Pilcrow server exited right away:\n{self._log_tail()}")
             time.sleep(0.15)
-        raise RuntimeError("The Pilcrow server did not come up within 25 seconds.")
+        raise RuntimeError(f"The Pilcrow server did not come up within 25 seconds.\n{self._log_tail()}")
+
+    def _log_tail(self) -> str:
+        try:
+            if self.log_path is not None:
+                return self.log_path.read_text(encoding="utf-8", errors="replace")[-2000:]
+        except OSError:
+            pass
+        return ""
 
     def stop(self) -> None:
-        if self.proc is None or self.proc.poll() is not None:
-            return
-        try:
-            self.proc.terminate()
-            self.proc.wait(timeout=5)
-        except Exception:  # noqa: BLE001
-            self.proc.kill()
+        if self.proc is not None and self.proc.poll() is None:
+            try:
+                self.proc.terminate()
+                self.proc.wait(timeout=5)
+            except Exception:  # noqa: BLE001
+                self.proc.kill()
+        if self.log is not None:
+            try:
+                self.log.close()
+            except OSError:
+                pass
+            self.log = None
 
 
 # ---------------------------------------------------------------- the app
@@ -70204,7 +70230,7 @@ wider than the column even at its narrowest still breaks a code span rather than
 column. Raw HTML in a reply shows as its text, as the web shows it.
 PILCROW_EOF_0bad3c1577
   wrote=$((wrote + 1))
-  # ---- README.md (26719 bytes)
+  # ---- README.md (27059 bytes)
   cat > "$D"/'README.md' <<'PILCROW_EOF_b335630551'
 # Pilcrow — Claude Code 桌面版（Linux / Windows）
 
@@ -70650,7 +70676,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\pilcrow-windows.ps1
 ```
 
 選項：`-Dir <路徑>`（預設 `%LOCALAPPDATA%\Programs\Pilcrow`）、`-NoDesktop`、`-NoLaunch`（裝完不開視窗）、
-`-FilesOnly`、`-Uninstall`（移除程式與外殼，設定與對話紀錄保留）、`-Electron`（額外嘗試下載 Electron，通常不需要）；
+`-FilesOnly`、`-Uninstall`（移除程式與外殼，設定與對話紀錄保留）、`-Electron`（額外嘗試下載 Electron，通常不需要）、
+`-Qt`（改用原生 Qt 視窗：PySide6 會裝進 `<安裝目錄>\qt\.venv`，約 150 MB，從你的 pip 來源抓；捷徑與
+`pilcrow-qt` 指令都開 Qt 視窗，不建 WebView2 外殼；適合 VM、遠端桌面這類 Chromium 拿不到真 GPU 的環境——
+Qt 視窗純 CPU 繪圖。再跑一次不帶 `-Qt` 就換回 WebView2）；
 外殼相關：`-Node`、`-Python`、`-WebView2Package`、`-NuGetSource`、`-WebView2Runtime`、`-KeepServer`、
 `-NativeTitleBar`、`-DevTools`、`-SkipSignatureCheck`，意思同 `pilcrow-app.ps1` 的說明。
 
@@ -137161,7 +137190,7 @@ pilcrow_sums_all() {
 f48041ec758e132812e82b858fa03244a5f209e98e5b88c1613756b885087ea7  .gitignore
 481fa9450c1acf9cf6a110ab88e3749efa3ca8a3008f4060cd44d29737c74098  assets/icon.svg
 c0a0f73a7de2705a12a997b70b9c85bd2ea7549965fc29bbba4d80471336bd07  bin/pilcrow
-17d10ee34402b7fb613d19e96964cd1b97468a084752afbdf45c74f77e0a759f  CHANGELOG.md
+cb3750f0257fdd4eb1b8b3eb437591ecd3f02b99b2f7f5d02f4dea126cb6b27c  CHANGELOG.md
 2ea634dfdb541b609c8168e17740853b0953c8be3c447179b767f653080933b4  electron/main.cjs
 ac2ffb7c9c0854f8be9d2daf77c7457f007364b16a5a02b1829459c428e80615  electron/preload.cjs
 325bf86a65baab6a0c611c0c0808e94eb612ef6e40f414dc488ccd754dd34177  package-lock.json
@@ -137172,7 +137201,7 @@ beb21af962dc7f22b8e55582419983c0ac383616b6bade9debac1af0eb597441  qt/DESIGN.md
 4e836d611f125778a6111d60b5b9395ec424f9a9623b9469b263c47418362c8c  qt/PERF.md
 cbe97b1d7e6a8a98293ce0284eb2bb8ec914d2856becf70108cf38c5b0dfd8b7  qt/pilcrow_qt/__init__.py
 f4db9d2455ef9e732a62d7febd75525b64afa3a8c9e5a871631ebb9deee289b5  qt/pilcrow_qt/__main__.py
-12d4ebad434a9c8ed2ff72f5a13ac43b8f5a0365861530cc537530c7958496e2  qt/pilcrow_qt/app.py
+5c51b52759a6cf7b760b811f5b2d5196ece377ada44986f4eb1f8f6c16feb959  qt/pilcrow_qt/app.py
 fc04f6b67fc37c1c29eddd41ef3379d06e96334c4e237de5b4080c6d71ffb9c4  qt/pilcrow_qt/assets/fonts-bundle/fonts.tgz.b64.01
 3eaa1d4b7199466b0ca316e045b25583ab38f391936a43a0c0b133156ac83c64  qt/pilcrow_qt/assets/fonts-bundle/fonts.tgz.b64.02
 c274669d12f6b8d511897b64d5aaa4847dc61de28122f1b5e2470600d0896685  qt/pilcrow_qt/assets/fonts-bundle/fonts.tgz.b64.03
@@ -137435,7 +137464,7 @@ ef79f838c5d830f377af7d3f26e171424b08e184226afb95dd5769b2cec6f90e  qt/requirement
 b1176090cd5629fa02fdf8b64cbc7be6d84a0f9bf600fc68190de45e235b4377  qt/REVIEW.md
 ff4a3907a01e1340260df3c5d65193aafd970cd99f2c759e6f6959cc8a991b33  qt/ruff.toml
 88cc44e1fb4adfc93906cd895c8ea048ee39bc818568d6fe3c3b20b814607c49  qt/UX.md
-5c3764684820afc1107ad760d52750a403fb3c524c1d5ff0f6121bc745d0f9d6  README.md
+6ad9b4c027a8b496cc6f5fb5cb0255b9118da981559145b843fbd19a1350f155  README.md
 1895aa441bfdbbb656f26ad56b8829db437b07ab7230627bd22206f4e9f3af7d  scripts/electron.sh
 05fa80c68ab928b887a1a771afd8550c82b4c9ea214e3ad8e240e25885ef3fdc  scripts/install-desktop.sh
 880d9487abbd67833a92409b429ce2d752d22fc1b533bc5e9ceb0680793d218f  scripts/make-icon.mjs
