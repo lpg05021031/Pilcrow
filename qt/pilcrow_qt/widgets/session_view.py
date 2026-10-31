@@ -194,6 +194,7 @@ class SessionView(QWidget):
         self.head_line = hairline()
         self.head_line.hide()
         root.addWidget(self.head_line)
+        self._narrow = False
 
         # ---- notices
         self.mcp = McpNotice(self.sid)
@@ -254,6 +255,14 @@ class SessionView(QWidget):
 
     def open_find(self) -> None:
         self.transcript.open_find()
+
+    def resizeEvent(self, e) -> None:  # noqa: N802
+        super().resizeEvent(e)
+        # The web's container queries: under 560px the crumbs go, the title keeps the room.
+        narrow = self.width() < 560
+        if narrow != self._narrow:
+            self._narrow = narrow
+            self.crumbs.setVisible(not narrow)
 
     def _on_rt(self, sid: str) -> None:
         if sid != self.sid:
@@ -507,10 +516,26 @@ class SessionView(QWidget):
 
 
 class _TitleLabel(QLabel):
+    """The session's title: it gives way to the crumbs and the actions and ends in … when cut."""
+
     double_clicked = Signal()
 
     def mouseDoubleClickEvent(self, _e) -> None:  # noqa: N802
         self.double_clicked.emit()
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        return QSize(40, super().minimumSizeHint().height())
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        p = QPainter(self)
+        p.setFont(self.font())
+        p.setPen(self.palette().color(self.foregroundRole()))
+        r = self.contentsRect()
+        p.drawText(
+            r,
+            int(self.alignment()) | Qt.TextFlag.TextSingleLine,
+            self.fontMetrics().elidedText(self.text(), Qt.TextElideMode.ElideRight, r.width()),
+        )
 
 
 class _TitleEdit(QLineEdit):

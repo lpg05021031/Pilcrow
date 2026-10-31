@@ -111,11 +111,6 @@ class NewSessionSheet(Sheet):
         self.browse_btn = button("Browse", kind="ghost", size="sm", on_click=self._toggle_browser)
         self.browse_btn.setAccessibleName("Browse")
         bl.addWidget(self.browse_btn)
-        self.system_btn = button(
-            "System…", kind="ghost", size="sm", on_click=self._pick_native, tooltip="Use the system folder picker"
-        )
-        self.system_btn.setText("System…")
-        bl.addWidget(self.system_btn)
         sl.addWidget(box)
         self.chips_w = QWidget()
         cl = QHBoxLayout(self.chips_w)
@@ -125,7 +120,7 @@ class NewSessionSheet(Sheet):
         self.chips = Flow(6)
         cl.addWidget(self.chips, 1)
         sl.addWidget(self.chips_w)
-        self.picker = Browser(self._browse_to, self._picked)
+        self.picker = Browser(self._browse_to, self._picked, native=self._pick_native)
         self.browse_listing: Optional[Json] = None
         self.show_browser = not opts.get("cwd") and not rec
         self.picker.setVisible(self.show_browser)

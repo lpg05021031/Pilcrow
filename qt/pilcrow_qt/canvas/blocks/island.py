@@ -6,15 +6,49 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 import shiboken6
+from PySide6.QtCore import QEvent, QObject
 from PySide6.QtWidgets import QWidget
 
 from ..paint import Measurer, PaintState
 from ..scene import Block, Target
 
 
+class _Regrow(QObject):
+    """Watches an island's widget: when its layout asks for room (a line shown later, a row added),
+    the block is measured again so the card never clips what it grew."""
+
+    def __init__(self, block: IslandBlock, widget: QWidget) -> None:
+        super().__init__(widget)
+        self._block = block
+        self._pending = False
+        widget.installEventFilter(self)
+
+    def eventFilter(self, obj: QObject, e: QEvent) -> bool:  # noqa: N802
+        if e.type() == QEvent.Type.LayoutRequest and not self._pending:
+            self._pending = True
+            from PySide6.QtCore import QTimer
+
+            QTimer.singleShot(0, self._regrow)
+        return False
+
+    def _regrow(self) -> None:
+        self._pending = False
+        b = self._block
+        w = b.widget
+        if w is None or not shiboken6.isValid(w) or b.host is None or not shiboken6.isValid(b.host):
+            return
+        view = b.host.parentWidget()
+        lay = w.layout()
+        if lay is not None:
+            lay.activate()
+        want = w.sizeHint().height() + 2 * b.margin
+        if want != b.h and view is not None and hasattr(view, "remeasure"):
+            view.remeasure(b)
+
+
 class IslandBlock(Block):
     KIND = "island"
-    __slots__ = ("make", "widget", "host", "margin", "align", "max_w", "_last_geom", "owned")
+    __slots__ = ("make", "widget", "host", "margin", "align", "max_w", "_last_geom", "owned", "_watch")
 
     def __init__(
         self,
@@ -34,6 +68,7 @@ class IslandBlock(Block):
         self.align = align  # 'fill' or 'center'
         self.max_w = max_w
         self._last_geom = None
+        self._watch: Optional[_Regrow] = None
 
     @property
     def alive(self) -> bool:
@@ -46,6 +81,7 @@ class IslandBlock(Block):
             if self.host is not None and shiboken6.isValid(self.host):
                 self.widget.setParent(self.host)
             self.widget.hide()
+            self._watch = _Regrow(self, self.widget)
         return self.widget
 
     def drop_widget(self) -> None:

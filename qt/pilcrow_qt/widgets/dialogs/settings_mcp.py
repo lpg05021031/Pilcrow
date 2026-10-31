@@ -241,6 +241,7 @@ class McpPage(QWidget):
         servers = self.servers()
         live = self.live()
         by_name = {s.get("name"): s for s in live}
+        self.add_btn.setVisible(bool(servers) or bool(q))  # the intro card holds the first "Add server"
         if not servers and not q:
             intro = Intro(
                 "Give Claude more tools",

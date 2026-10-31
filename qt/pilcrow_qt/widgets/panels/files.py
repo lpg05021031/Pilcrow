@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from PySide6.QtCore import QByteArray, QPoint, QRect, QSize, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QFontMetrics, QKeyEvent, QMouseEvent, QPainter, QPixmap
+from PySide6.QtGui import QColor, QDesktopServices, QFontMetrics, QKeyEvent, QMouseEvent, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QAbstractScrollArea,
     QFrame,
@@ -140,6 +140,7 @@ class FileTree(QAbstractScrollArea):
         self._rows: List[TreeRow] = []
         self._hover = -1
         self._cursor = -1
+        self.note = ""  # shown instead of rows while there are none: reading, empty, or the error
         self.active: Optional[str] = None
         self.on_toggle: Optional[Callable[[str], None]] = None
         self.setFont(theme.font_ui(12.5))
@@ -183,6 +184,11 @@ class FileTree(QAbstractScrollArea):
         off = self.verticalScrollBar().value()
         fm = QFontMetrics(self.font())
         p.setFont(self.font())
+        if not self._rows and self.note:
+            p.setPen(QColor(t.text_4))
+            p.setFont(theme.font_ui(12))
+            p.drawText(QRect(12, 6, vp.width() - 24, 28), Qt.AlignmentFlag.AlignVCenter, self.note)
+            return
         first = max(0, off // ROW_H)
         last = min(len(self._rows), (off + vp.height()) // ROW_H + 2)
         for i in range(first, last):
@@ -916,7 +922,16 @@ class FilesPanel(QWidget):
 
     def render_tree(self) -> None:
         self.tree.active = self.st.active
-        self.tree.set_rows(self._visible_rows())
+        rows = self._visible_rows()
+        if rows:
+            self.tree.note = ""
+        elif self.cwd in self._loading:
+            self.tree.note = "Reading the folder…"
+        elif self._errors.get(self.cwd):
+            self.tree.note = str(self._errors[self.cwd])
+        else:
+            self.tree.note = "Nothing in this folder."
+        self.tree.set_rows(rows)
 
     # ---------------------------------------------------------------- history marks
     def _load_history(self) -> None:

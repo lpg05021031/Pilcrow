@@ -40,11 +40,19 @@ class Toasts(QWidget):
             if w is not None:
                 w.deleteLater()
         for t in store.toasts:
-            self.lay.addWidget(ToastCard(t), 0, Qt.AlignmentFlag.AlignRight)
+            card = ToastCard(t)
+            self.lay.addWidget(card, 0, Qt.AlignmentFlag.AlignRight)
+            card.show()  # a layout shows a new child on the next event-loop turn; the height is needed now
         self.setVisible(bool(store.toasts))
-        self.adjustSize()
         self.reposition()
         self.raise_()
+
+    def _fit_cards(self) -> None:
+        """Each card takes the width its words want (up to the column) and the height they wrap to."""
+        for i in range(self.lay.count()):
+            card = self.lay.itemAt(i).widget()
+            if isinstance(card, ToastCard):
+                card.fit(self.width())
 
     def reposition(self) -> None:
         p = self.parentWidget()
@@ -52,7 +60,13 @@ class Toasts(QWidget):
             return
         bottom = getattr(p.window(), "composer_bottom_inset", lambda: 0)()
         self.setFixedWidth(min(MAX_W, max(120, p.width() - 36)))
-        self.adjustSize()
+        self._fit_cards()
+        # The height is the column's own sum, read after the layout's cached hint is dropped (the
+        # cards' sizes just changed). Reading it before the cards were shown left a rebuilt column
+        # 0px tall, its toasts unseen until the window was resized.
+        self.lay.invalidate()
+        self.lay.activate()
+        self.setFixedHeight(max(0, self.lay.sizeHint().height()))
         self.move(QPoint(p.width() - self.width() - 16, p.height() - self.height() - bottom - 12))
 
 
@@ -91,6 +105,17 @@ class ToastCard(QWidget):
         lay.addWidget(x, 0, Qt.AlignmentFlag.AlignTop)
         bind(theme.theme.changed, self, lambda _t: self._paint())
         self._paint()
+
+    def fit(self, column: int) -> None:
+        """Size to the words: as wide as one line wants (at most the column), as tall as they wrap to."""
+        lay = self.layout()
+        w = min(column, lay.sizeHint().width())
+        self.setFixedWidth(w)
+        self.setFixedHeight(
+            max(
+                self.minimumHeight(), lay.totalHeightForWidth(w) if lay.hasHeightForWidth() else lay.sizeHint().height()
+            )
+        )
 
     def _paint(self) -> None:
         tk = theme.tokens()

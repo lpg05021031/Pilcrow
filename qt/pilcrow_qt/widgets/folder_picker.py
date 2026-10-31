@@ -199,6 +199,7 @@ class Browser(QFrame):
         pick: Callable[[str], None],
         flat: bool = False,
         parent: Optional[QWidget] = None,
+        native: Optional[Callable[[], None]] = None,
     ) -> None:
         super().__init__(parent)
         self._nav, self._pick = nav, pick
@@ -221,6 +222,11 @@ class Browser(QFrame):
         self.up_btn.setFixedSize(24, 24)
         self.up_btn.clicked.connect(self._up)
         hl.addWidget(self.up_btn)
+        if native is not None:
+            self.native_btn = IconButton("folder-open", "Choose a folder with the system dialog…", 13)
+            self.native_btn.setFixedSize(24, 24)
+            self.native_btn.clicked.connect(native)
+            hl.addWidget(self.native_btn)
         self.display = label("", tone="muted", size="small", mono=True)
         self.display.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         hl.addWidget(self.display, 1)

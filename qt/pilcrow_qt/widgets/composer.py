@@ -817,12 +817,29 @@ class ChipButton(LayoutButton):
             return
         self._shown = (text, icon, sub, tone)
         self.text_lb.setText(text)
-        self.text_lb.setVisible(bool(text) and not self._icon_only)
+        compact = getattr(self, "_compact", False)
+        self.text_lb.setVisible(bool(text) and not self._icon_only and not compact)
         self.sub_lb.setText(f"· {sub}" if sub else "")
         self.sub_lb.setVisible(bool(sub))
         self._icon, self._tone = icon, tone
         self.ico.setVisible(bool(icon))
         self._paint()
+
+    def set_compact(self, on: bool) -> None:
+        """Only the icon (the column is narrow): the label and the chevron come back with the room."""
+        if on == getattr(self, "_compact", False):
+            return
+        self._compact = on
+        self.text_lb.setVisible(not on and bool(self.text_lb.text()) and not self._icon_only)
+        self.sub_lb.setVisible(not on and bool(self.sub_lb.text()))
+        self.chev.setVisible(self._chevron and not on)
+        self.layout().setContentsMargins(0 if on else 9, 0, 0 if on else 9, 0)
+        if on:
+            self.setFixedWidth(30)
+        else:
+            self.setMinimumWidth(0)
+            self.setMaximumWidth(16777215)
+        self.updateGeometry()
 
     def set_open(self, on: bool) -> None:
         if on == self._open:
@@ -2583,6 +2600,7 @@ class Composer(QWidget):
     def resizeEvent(self, e) -> None:  # noqa: N802
         super().resizeEvent(e)
         self._apply_column()
+        self.mode_btn.set_compact(self.width() < 420)
         self._autosize()
         self._place_overlays()
 

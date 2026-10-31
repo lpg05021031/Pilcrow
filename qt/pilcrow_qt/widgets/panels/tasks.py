@@ -25,7 +25,7 @@ from ...store import store
 from ..ui.bits import Clickable, Pill, Spinner
 from ..ui.collapse import Collapse
 from ..ui.signals import bind
-from .right_panel import Btn, Card, Refresher, Section, elide, empty_text, lbl
+from .right_panel import Btn, Card, EmptyState, Refresher, Section, elide, lbl
 
 Json = Dict[str, Any]
 STATUS_LABEL = {"completed": "Completed", "failed": "Failed", "stopped": "Stopped", "running": "Running"}
@@ -922,6 +922,7 @@ class TasksPanel(QWidget):
         lay.addWidget(self.scroll)
         self._sections: List[Section] = []
         self._rows: List[TaskRow] = []
+        self._empty_state: Optional[EmptyState] = None
         self._tick = QTimer(self)
         self._tick.setInterval(1000)
         self._tick.timeout.connect(lambda: [r.tick() for r in self._rows])
@@ -950,6 +951,10 @@ class TasksPanel(QWidget):
             s.setParent(None)
             s.deleteLater()
         self._sections = []
+        if self._empty_state is not None:
+            self._lay.removeWidget(self._empty_state)
+            self._empty_state.deleteLater()
+            self._empty_state = None
         self._rows = []
         workflows = [t for t in tasks if t.get("type") == "local_workflow" and not t.get("ambient")]
         own = [
@@ -961,8 +966,17 @@ class TasksPanel(QWidget):
         finished = list(reversed([t for t in own if t.get("status") != "running"][-12:]))
         done = sum(1 for t in (todos or []) if isinstance(t, dict) and t.get("status") == "completed")
 
-        s = Section("To-do list")
+        if not todos and not workflows and not running and not finished:
+            self._empty_state = e = EmptyState(
+                "list-checks",
+                "Nothing on the list yet.",
+                "Claude's plan for multi-step work, its workflows and background commands appear here.",
+            )
+            self._lay.insertWidget(0, e)
+            self._tick.stop()
+            return
         if todos:
+            s = Section("To-do list")
             s.head_faint(f"{done} of {len(todos)} done")
             bar = Bar(4)
             bar.set_parts([(done / len(todos), "text_2")])
@@ -975,9 +989,7 @@ class TasksPanel(QWidget):
                 if isinstance(t, dict):
                     ll.addWidget(_todo_row(t))
             s.add(lst)
-        else:
-            s.add(empty_text("Claude's plan for multi-step work appears here."))
-        self._add_section(s)
+            self._add_section(s)
 
         if workflows:
             s = Section("Workflows")
@@ -986,15 +998,13 @@ class TasksPanel(QWidget):
                 s.add(WorkflowDetail(t, self.sid, tasks))
             self._add_section(s)
 
-        s = Section("Running now")
         if running:
+            s = Section("Running now")
             for t in running:
                 row = TaskRow(t, self.sid, False)
                 self._rows.append(row)
                 s.add(row)
-        else:
-            s.add(empty_text("No background commands or agents running."))
-        self._add_section(s)
+            self._add_section(s)
 
         if finished:
             s = Section("Finished")

@@ -32,7 +32,7 @@ def test_tiles_and_finished_today(app_client):
     assert ov.tile_working.value.text() == "0"
     assert ov.tile_needs.value.text() == "0"
     assert ov.summary.text() == "Nothing running"
-    assert ov.working_empty.isVisible()
+    assert not ov.working_sec.isVisible(), "nothing works: the tile says so, the section stays out"
     assert not ov.needs_sec.isVisible()
     today = [s for s in c.store.sessions if not s.get("archived") and (s.get("lastModified") or 0) >= _day_start_ms()]
     assert len(today) >= 1
@@ -105,7 +105,7 @@ def test_inbox_page(app_client):
     c.wait_until(lambda: c.win.inbox is not None and c.win.inbox.isVisible(), 5, "inbox page")
     ib = c.win.inbox
     c.wait_until(lambda: ib.items is not None and ib.schedules is not None, 5, "inbox.list and schedules.list")
-    assert not ib.run_cards and not ib.sched_cards and ib.rail_empty.isVisible()
+    assert not ib.run_cards and not ib.sched_cards and not ib.rail.isVisible(), "the hero alone says it"
     assert ib.hero_title.text() == "Nothing runs on its own yet."
     now = time.time() * 1000
     sched = {

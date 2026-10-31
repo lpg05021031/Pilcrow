@@ -1045,12 +1045,8 @@ class Overview(QWidget):
         sl.setContentsMargins(0, 0, 0, 0)
         sl.setSpacing(10)
         self.stats_grid = sl
-        self.tile_working = Tile("activity", "Working", lambda: self.jump(self.working_sec))
-        self.tile_needs = Tile(
-            "hourglass",
-            "Needs you",
-            lambda: self.jump(self.needs_sec if self.needs_sec.isVisible() else self.working_sec),
-        )
+        self.tile_working = Tile("activity", "Working", lambda: self.jump(self._first_section()))
+        self.tile_needs = Tile("hourglass", "Needs you", lambda: self.jump(self._first_section()))
         self.tile_finished = Tile("circle-check", "Finished today", lambda: self.jump(self.finished_sec))
         self.tile_spent = Tile("circle-dollar-sign", "Spent today", lambda: self.jump(self.spend_sec))
         self.tiles = [self.tile_working, self.tile_needs, self.tile_finished, self.tile_spent]
@@ -1083,11 +1079,7 @@ class Overview(QWidget):
         self.working_grid.setContentsMargins(0, 0, 0, 0)
         self.working_grid.setSpacing(10)
         wl.addWidget(self.working_grid_host)
-        self.working_empty = EmptyNote(
-            "Nothing is running right now. Sessions you start show up here while Claude works, with what it is doing and what it costs.",
-            mark=True,
-        )
-        wl.addWidget(self.working_empty)
+        self.working_sec.hide()  # shown while something works: the tile and the header say when nothing does
         bl.addWidget(self.working_sec)
 
         # finished today | spend (one column under 760px of content, like the web)
@@ -1315,8 +1307,7 @@ class Overview(QWidget):
             card.update_from(s, self.state_of(sid), self.now, hot)
             card.set_focused(sid == focus_id)
             self.working_grid.addWidget(card, i // cols, i % cols)
-        self.working_grid_host.setVisible(bool(working))
-        self.working_empty.setVisible(not working)
+        self.working_sec.setVisible(bool(working))
 
         # finished today
         self.finished_head.count.set_count(len(finished))
@@ -1354,6 +1345,13 @@ class Overview(QWidget):
             r.tick(self.now)
 
     # ---- keyboard: j/k or arrows move between cards; Enter opens; the first waiting card takes 1/2/3
+    def _first_section(self) -> QWidget:
+        """Where a tile with nothing live behind it leads: the first section on screen."""
+        for sec in (self.needs_sec, self.working_sec, self.finished_sec):
+            if sec.isVisible():
+                return sec
+        return self.finished_sec
+
     def jump(self, section: QWidget) -> None:
         self.scroll.verticalScrollBar().setValue(section.mapTo(self.scroll.widget(), section.rect().topLeft()).y() - 8)
 

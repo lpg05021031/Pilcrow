@@ -84,7 +84,7 @@ def test_seg_picks_and_disables(app_client):
 def test_rtl_display_mirrors_the_web_dir(app_client):
     from pilcrow_qt.widgets.panels.right_panel import rtl_display
 
-    assert rtl_display("./web/src/lib") == "web/src/lib/."
+    assert rtl_display("./web/src/lib") == "web/src/lib"
     assert rtl_display("web/src/lib") == "web/src/lib"
     assert rtl_display("") == ""
 

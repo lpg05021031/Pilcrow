@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import time as _time
 from html import escape
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen
@@ -71,6 +71,7 @@ class Sidebar(QWidget):
         self._mores: Dict[str, MoreButton] = {}
         self._note: Optional[EmptyNote] = None
         self._archived_view = store.ui.show_archived
+        self._archived_head: Optional[ListHead] = None
         self._now_timer = QTimer(self)
         self._now_timer.setInterval(30_000)
         self._now_timer.timeout.connect(self._tick)
@@ -283,6 +284,12 @@ class Sidebar(QWidget):
                 head.setParent(None)
                 head.deleteLater()
         wanted: List[QWidget] = []
+        if show_archived:
+            if self._archived_head is None:
+                self._archived_head = ListHead(
+                    "Archived", "Back to active sessions", lambda: store.set_ui(show_archived=False)
+                )
+            wanted.append(self._archived_head)
 
         def label_for(key: str, text: str, tone: str = "") -> SectionLabel:
             lb = self._labels.get(key)
@@ -684,6 +691,25 @@ class _Pages(QWidget):
 
 
 # ---------------------------------------------------------------- the list
+
+
+class ListHead(QWidget):
+    """The head of a list that replaced the usual one (``Archived``): a back arrow and the name, so
+    the list says what it is and how to leave it."""
+
+    def __init__(self, text: str, back_tip: str, on_back: Callable[[], None], parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setFixedHeight(GROUP_GAP + HEAD_H)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(PAD - 4, GROUP_GAP, PAD, 0)
+        lay.setSpacing(4)
+        self.back = IconBtn("arrow-left", back_tip, 14, 24)
+        self.back.clicked.connect(on_back)
+        lay.addWidget(self.back)
+        self.label = QLabel(text)
+        self.label.setFont(theme.font_ui(theme.FS_UI, 600))
+        lay.addWidget(self.label)
+        lay.addStretch(1)
 
 
 class SectionLabel(QLabel):

@@ -63,7 +63,7 @@ def off_reason(reason: Optional[str]) -> str:
     if reason in ("home folder", "root of a drive", "too close to the root"):
         where = "your home folder" if reason == "home folder" else "a folder this close to the root"
         return f"Snapshots are not taken for {where} — it would be too large. Start the session in a project folder."
-    return reason or "Turn it on in Settings → General."
+    return reason or "Snapshots of the folder after every step, so any point can be revisited or restored."
 
 
 def scrub_positions(steps: List[Json], now: float, track_w: int) -> List[float]:
@@ -729,9 +729,16 @@ class HistoryPanel(QWidget):
             self.list.hide()
             self.loading.hide()
             if self._off is None:
-                self._off = EmptyState(
-                    "history", "The timeline is off for this folder.", off_reason(meta.get("reason"))
-                )
+                reason = meta.get("reason")
+                self._off = EmptyState("history", "The timeline is off for this folder.", off_reason(reason))
+                if not reason or reason == "disabled":
+                    b = Btn(
+                        "Turn on in Settings",
+                        icon="settings-2",
+                        size="sm",
+                        on_click=lambda: store.set_dialog("settings", "general"),
+                    )
+                    self._off.layout().addWidget(b, 0, Qt.AlignmentFlag.AlignHCenter)
                 self._lay.insertWidget(1, self._off)
                 self._lay.addStretch(1)
             return

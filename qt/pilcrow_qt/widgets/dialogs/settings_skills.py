@@ -243,6 +243,7 @@ class SkillsPage(QWidget):
             },
         ]
         total = len(d.get("user") or []) + len(d.get("project") or []) + len(d.get("plugin") or [])
+        self.new_btn.setVisible(not (total == 0 and not q))  # the intro card holds the first "New skill"
         if total == 0 and not q:
             intro = Intro(
                 "Teach Claude how you work",
@@ -295,6 +296,8 @@ class SkillsPage(QWidget):
                 if g["id"] == "project" and not has_project
                 else "None yet."
             )
+            if text == str(g["hint"]):
+                h.hide()  # the empty line says it; the hint at the right would say it again
             e = hint(text)
             e.setContentsMargins(0, 8, 0, 10)
             lay.addWidget(e)

@@ -427,12 +427,10 @@ def placeholder(text: str) -> QWidget:
 
 
 def rtl_display(s: str) -> str:
-    """How ``.cfile-dir`` shows a path: it is laid out right-to-left so the tail stays visible, which
-    moves a leading run of punctuation (``./``) to the end — ``./web/src/lib`` reads ``web/src/lib/.``."""
-    i = 0
-    while i < len(s) and not s[i].isalnum():
-        i += 1
-    return s[i:] + s[:i][::-1] if 0 < i < len(s) else s
+    """How ``.cfile-dir`` shows a folder: ``./web/src/lib`` reads ``web/src/lib``. (The web lays the
+    path out right-to-left to keep its tail visible, which moves the ``./`` to the end; here the
+    label elides from the left instead, so the dot has no reason to travel.)"""
+    return s[2:] if s.startswith("./") else s
 
 
 # ---------------------------------------------------------------- tabs

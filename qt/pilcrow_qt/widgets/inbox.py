@@ -512,7 +512,7 @@ class InboxPage(QWidget):
         self.rail_list.setSpacing(8)
         self.rail_lay.addLayout(self.rail_list)
         self.rail_empty = hint("No schedules yet.")
-        self.rail_empty.hide()
+        self.rail_empty.hide()  # kept for the moment the list empties under a filter; the hero covers the rest
         self.rail_lay.addWidget(self.rail_empty)
         self._place(2)
 
@@ -695,6 +695,8 @@ class InboxPage(QWidget):
             self.sched_cards.append(card)
             self.rail_list.addWidget(card)
         self.rail_empty.setVisible(scheds is not None and not scheds)
+        # With nothing scheduled the rail would only repeat the hero: it comes back with the first schedule.
+        self.rail.setVisible(scheds is None or bool(scheds))
 
     def _empty(self, has_schedules: bool) -> QWidget:
         """``.inbox-empty``: the mark in its glow, a line, a hint and the one button, 440px wide at most."""
