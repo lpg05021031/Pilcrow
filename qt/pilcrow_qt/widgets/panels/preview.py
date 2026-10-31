@@ -171,7 +171,17 @@ class PreviewPanel(QWidget):
         self.refresh()
 
     def _on_rt(self, sid: str) -> None:
-        if sid == self.session_id:
+        if sid != self.session_id:
+            return
+        if not self.isVisible():
+            self._stale = True  # looked at again when the tab is shown
+            return
+        self.refresh()
+
+    def showEvent(self, e) -> None:  # noqa: N802
+        super().showEvent(e)
+        if getattr(self, "_stale", False):
+            self._stale = False
             self.refresh()
 
     def refresh(self) -> None:

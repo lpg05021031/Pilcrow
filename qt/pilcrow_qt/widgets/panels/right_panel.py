@@ -21,7 +21,7 @@ import re
 import time
 from typing import Callable, Dict, List, Optional
 
-from PySide6.QtCore import QObject, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
+from PySide6.QtCore import QEvent, QObject, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPaintEvent, QPen
 from PySide6.QtWidgets import (
     QAbstractButton,
@@ -402,20 +402,39 @@ class Seg(QWidget):
 
 class Refresher(QObject):
     """Runs ``fn`` when the session's runtime changes (at most once per ``interval`` ms) and at once
-    when the file system changes (``Store.bump_fs``)."""
+    when the file system changes (``Store.bump_fs``). A hidden owner (a tab behind another, a closed
+    panel) does no work: it is marked stale and refreshed once when it is shown again."""
 
-    def __init__(self, owner: QWidget, sid: str, fn: Callable[[], None], interval: int = 500, fs: bool = True) -> None:
+    def __init__(
+        self,
+        owner: QWidget,
+        sid: str,
+        fn: Callable[[], None],
+        interval: int = 500,
+        fs: bool = True,
+        visible_only: bool = True,
+    ) -> None:
         super().__init__(owner)
+        self._owner = owner
         self._sid = sid
         self._fn = fn
         self._interval = interval
+        self._visible_only = visible_only
         self._last = 0.0
+        self.stale = False
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self.now)
         bind(store.rt_changed, owner, self._on_rt)
         if fs:
             bind(store.fs_changed, owner, lambda _r: self.now())
+        if visible_only:
+            owner.installEventFilter(self)
+
+    def eventFilter(self, obj, e) -> bool:  # noqa: N802
+        if obj is self._owner and e.type() == QEvent.Type.Show and self.stale:
+            self.now()
+        return False
 
     def _on_rt(self, sid: str) -> None:
         if sid == self._sid:
@@ -430,8 +449,12 @@ class Refresher(QObject):
             self._timer.start(int(wait * 1000) + 1)
 
     def now(self) -> None:
-        self._last = time.monotonic()
         self._timer.stop()
+        if self._visible_only and not self._owner.isVisible():
+            self.stale = True  # caught up when shown
+            return
+        self.stale = False
+        self._last = time.monotonic()
         self._fn()
 
 
@@ -814,7 +837,6 @@ class RightPanel(QWidget):
         self._cwd = ""
         self._pages: Dict[str, QWidget] = {}
         self.setObjectName("rightPanel")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
@@ -829,7 +851,12 @@ class RightPanel(QWidget):
         bind(store.rt_changed, self, self._on_rt)
 
     def _paint(self) -> None:
-        self.setStyleSheet(f"#rightPanel {{ background: {theme.tokens().canvas}; }}")
+        self.update()
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        # painted, not styled: a stylesheet on the panel would re-polish every widget under it on each
+        # theme switch
+        QPainter(self).fillRect(self.rect(), theme.qcolor(theme.tokens().canvas))
 
     # ---- public
     def set_session(self, session: Dict) -> None:

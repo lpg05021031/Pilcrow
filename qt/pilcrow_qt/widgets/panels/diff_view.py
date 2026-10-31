@@ -456,6 +456,9 @@ class DiffGrid(QWidget):
         self._total_h = 0
         self._more: Optional[QPushButton] = None
         self._lh = LINE_H
+        self._longest = 0.0  # the widest line's advance, measured once per rebuild
+        self._digits = (1, 1)  # the number columns' widths, likewise
+        self._fm_cache: Optional[QFontMetricsF] = None
         self.setMouseTracking(True)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -528,6 +531,7 @@ class DiffGrid(QWidget):
 
     def _on_theme(self) -> None:
         self._toks = line_tokens([ln for h in self._hunks for ln in (h.get("lines") or [])], self._path)
+        self._fm_cache = None
         self.update()
 
     def _rebuild(self) -> None:
@@ -539,10 +543,27 @@ class DiffGrid(QWidget):
             for ln in (r.line, r.left, r.right):
                 if ln is not None and ln.get("t") in ("+", "-", " "):
                     self._key_lines[line_key(ln)] = ln
+        self._measure_lines()
         self._relayout()
 
+    def _measure_lines(self) -> None:
+        fm = self._fm()
+        max_o = max_n = 1
+        longest = 0.0
+        for r in self._rows:
+            for ln in (r.line, r.left, r.right):
+                if ln is None:
+                    continue
+                max_o = max(max_o, int(ln.get("o") or 0))
+                max_n = max(max_n, int(ln.get("n") or 0))
+                longest = max(longest, fm.horizontalAdvance(str(ln.get("s") or "")))
+        self._longest = longest
+        self._digits = (len(str(max_o)), len(str(max_n)))
+
     def _fm(self) -> QFontMetricsF:
-        return QFontMetricsF(theme.font_mono(DIFF_FONT_PX))
+        if self._fm_cache is None:
+            self._fm_cache = QFontMetricsF(theme.font_mono(DIFF_FONT_PX))
+        return self._fm_cache
 
     def _segments(self, s: str, avail: float, fm: QFontMetricsF) -> List[Range]:
         """Where a line wraps: between tokens where it can, mid-token only when it must
@@ -574,16 +595,8 @@ class DiffGrid(QWidget):
         lh = LINE_H
         self._lh = lh
         char_w = fm.horizontalAdvance("0")
-        max_o = max_n = 1
-        longest = 0.0
-        for r in self._rows:
-            for ln in (r.line, r.left, r.right):
-                if ln is None:
-                    continue
-                max_o = max(max_o, int(ln.get("o") or 0))
-                max_n = max(max_n, int(ln.get("n") or 0))
-                longest = max(longest, fm.horizontalAdvance(str(ln.get("s") or "")))
-        d_o, d_n = len(str(max_o)), len(str(max_n))
+        longest = self._longest
+        d_o, d_n = self._digits
         width = max(self.width(), 1)
         two = self._dual and self._numbers and self._mode == "unified"
         cols: Dict[str, int] = {}
@@ -738,7 +751,42 @@ class DiffGrid(QWidget):
 
     def resizeEvent(self, e) -> None:  # noqa: N802
         super().resizeEvent(e)
-        self._relayout()
+        # without wrapping the rows' heights do not depend on the width: only the columns move
+        if self._wrap or self._mode == "split" or self._extras:
+            self._relayout()
+        else:
+            self._place_columns()
+
+    def _place_columns(self) -> None:
+        """The width changed but no line wraps: recompute the columns and repaint, keep the rows."""
+        fm = self._fm()
+        char_w = fm.horizontalAdvance("0")
+        d_o, d_n = self._digits
+        width = max(self.width(), 1)
+        two = self._dual and self._numbers and self._mode == "unified"
+        x = 0
+        cols: Dict[str, int] = {}
+        if self._numbers:
+            if two:
+                cols["dn0"] = x
+                cols["nw0"] = int(12 + char_w * d_o + 4)
+                x += cols["nw0"]
+                cols["dn1"] = x
+                cols["nw1"] = int(8 + char_w * d_n + 10)
+                x += cols["nw1"]
+            else:
+                cols["dn0"] = x
+                cols["nw0"] = int(14 + char_w * max(d_o, d_n) + 8)
+                x += cols["nw0"]
+        cols["ds"] = x
+        x += SIGN_W
+        cols["dc"] = x
+        self._cols = cols
+        self._content_w = int(x + self._longest + 18 + 4)
+        if self._more is not None:
+            bw = self._more.sizeHint().width()
+            self._more.setGeometry((width - bw) // 2, self._total_h - 9 - 24, bw, 24)
+        self.update()
 
     # ---- interaction
     def _row_at(self, y: int) -> int:
@@ -1183,19 +1231,38 @@ class DiffView(QWidget):
         if files == self._files and self._rows:
             return
         self._files = [dict(f) for f in files]
-        for r in self._rows:
-            self._lay.removeWidget(r)
-            r.setParent(None)
-            r.deleteLater()
-        self._rows = []
+        # a file whose diff did not change keeps its card (and its grid, its scroll, its open state)
+        had = {r.path: r for r in self._rows}
+        rows: List[DiffFileRow] = []
         for f in self._files:
             path = str(f.get("path") or "")
+            old = had.pop(path, None)
+            if old is not None and old.file == f:
+                rows.append(old)
+                continue
+            if old is not None:
+                self._lay.removeWidget(old)
+                old.hide()
+                old.setParent(None)
+                old.deleteLater()
             open_ = self._open.get(path, len(self._files) <= self.open_threshold)
             row = DiffFileRow(f, self, open_)
             row.toggled.connect(lambda p, o: self._open.__setitem__(p, o))
             row.set_note_count(len(self.notes.get(path) or {}))
-            self._lay.addWidget(row)
-            self._rows.append(row)
+            rows.append(row)
+        for old in had.values():
+            self._lay.removeWidget(old)
+            old.hide()
+            old.setParent(None)
+            old.deleteLater()
+        for i, row in enumerate(rows):
+            item = self._lay.itemAt(i)
+            if item is not None and item.widget() is row:
+                continue
+            self._lay.removeWidget(row)
+            self._lay.insertWidget(i, row)
+            row.show()
+        self._rows = rows
 
     def set_mode(self, mode: str) -> None:
         if mode == self.mode:

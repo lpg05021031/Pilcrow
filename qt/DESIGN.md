@@ -539,14 +539,32 @@ prefers an exact leaf (§4.1); the hold is silent and the invalidation is per ch
 every block has a height from birth, and a fold measures its children under a budget before it
 opens (§5); the drain is one commit and remembers when there is nothing to do.
 
-Phase 3 — people: context menu, keyboard focus and shortcuts, accessibility (`QAccessibleInterface`
-exposing visible blocks), font scale. (Selection and copy, tooltips and find highlighting are in.)
+Phase 3 — people (2.10.0): Tab and Shift+Tab walk the targets on screen (heads, buttons, links,
+toggles) with a painted ring, Enter and Space activate, Escape clears; a double-click selects a word
+and a third click the block; Ctrl+A selects all; the right-click menu offers copy, the block's text,
+the link under the pointer and the card's file; Ctrl+= / Ctrl+- / Ctrl+0 scale the conversation's
+text (prose, code in prose, bubbles, thoughts; the chrome keeps its size), remembered in the ui
+state; `canvas/a11y.py` exposes the viewport to assistive technology as a list of the blocks on
+screen (a fold or a card reads as a button).
 
-Phase 4 — the rest of the window: Refresher discipline and row reconciliation, `RowScene` for the
-Timeline and Tasks lists, `DiffGrid` caching, `Collapse` on the clock, the sidebar diff, hover and
-stylesheet hygiene, sliced loading, the perf budget tests in `qt/tests/test_perf_budget.py` and in
-the release script. The view-mode and theme switches still re-sync every unit and re-polish every
-widget in the window; both belong here.
+Phase 4 — the rest of the window (2.10.0): the Timeline is a list on the engine
+(`panels/timeline_list.py`: a block per step, the picked step's detail as an island); hidden panel
+tabs do nothing (`Refresher` marks them stale and catches up when shown; the Files and Preview tabs
+likewise); the Tasks tab reconciles its rows in place and rebuilds its sections only when the set
+of tasks or their states change; the sidebar keeps its rows, labels and buttons and moves only the
+ones that moved (nothing is re-parented; a row is updated only when its session changed); the
+Changes tab's diff grids measure their lines once and keep their rows on a plain resize, and the
+file cards are kept by path; `Collapse` runs on the shared clock and measures its body at the real
+width; the composer's and the session head's setters, the sidebar row's title and the right panel's
+background no longer restyle when nothing changed (the panel paints its background, so a theme
+switch no longer re-polishes everything under it); a session's snapshot is modelled in slices of
+300 messages per event-loop turn under the loading skeleton; `tests/test_perf_budget.py` asserts
+the budgets of `PERF.md` §5 with headroom on a short bench when `PILCROW_PERF=1`, which
+`npm run release` sets.
+
+Still widgets, by choice: the Tasks tab's cards (they carry Stop buttons, workflow logs and phase
+rows that are better as widgets), the file cards' hover actions in the Changes tab. Still bound by
+Qt's stylesheet machinery: a theme switch re-polishes every widget in the window (`PERF.md` §7).
 
 ## 14. Tests
 

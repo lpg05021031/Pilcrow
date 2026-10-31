@@ -948,8 +948,10 @@ class SendButton(QPushButton):
     def set_state(self, ready: bool, stop: bool, send_with_enter: bool) -> None:
         prev = self.state
         self.state = "stop" if stop else "ready" if ready else "idle"
-        self.setEnabled(ready or stop)
         tip = "Stop (Esc)" if stop else "Send (Enter)" if send_with_enter else "Send (Ctrl+Enter)"
+        if self.state == prev and tip == self.toolTip():
+            return
+        self.setEnabled(ready or stop)
         self.setToolTip(tip)
         self.setAccessibleName("Stop" if stop else "Send")
         if self.state != prev:
@@ -1108,6 +1110,9 @@ class CtxButton(LayoutButton):
         self._paint()
 
     def set_values(self, used: int, total: int) -> None:
+        if (used, total) == getattr(self, "_values", None):
+            return
+        self._values = (used, total)
         pct = used / total if total > 0 else 0.0
         self.ring.set_values(used, total)
         with_num = pct >= 0.5

@@ -19,6 +19,12 @@ from ..paint import Measurer, PaintState, doc_height, draw_doc, rounded
 from ..scene import GRADE_EXACT, Block, Target
 
 BUBBLE_LINE = markdown.px(theme.FS_BODY * 1.55)
+
+
+def bubble_line() -> int:
+    return markdown.px(theme.FS_BODY * theme.scale * 1.55)
+
+
 MENTION = re.compile(r"(@[\w./~-]+[\w/-])")
 PAD_W, PAD_H = 14, 9
 ACTIONS_H = 28
@@ -37,7 +43,7 @@ def render_mentions(text: str, t: theme.Tokens) -> str:
             )
         else:
             out.append(esc)
-    return f'<p style="white-space:pre-wrap;margin:0;line-height:{BUBBLE_LINE}px">{"".join(out)}</p>'
+    return f'<p style="white-space:pre-wrap;margin:0;line-height:{bubble_line()}px">{"".join(out)}</p>'
 
 
 def _pixmap_of(src: str) -> QPixmap:
@@ -90,12 +96,18 @@ class UserBlock(Block):
             return 26 + 8
         avail = int(width * 0.84) - 2 * PAD_W
         lines = (
-            max(1, int(m.fast_height(self.item.text, avail, m.font(theme.FS_BODY), BUBBLE_LINE) / BUBBLE_LINE))
+            max(
+                1,
+                int(
+                    m.fast_height(self.item.text, avail, m.font(theme.FS_BODY * theme.scale), bubble_line())
+                    / bubble_line()
+                ),
+            )
             if self.item.text
             else 0
         )
         attach = (THUMB_H + 10) if self.item.images else (26 + 10 if self.item.files else 0)
-        return lines * BUBBLE_LINE + 2 * PAD_H + attach + ACTIONS_H + (18 if self.queued else 0)
+        return lines * bubble_line() + 2 * PAD_H + attach + ACTIONS_H + (18 if self.queued else 0)
 
     fast_measure = estimate
 

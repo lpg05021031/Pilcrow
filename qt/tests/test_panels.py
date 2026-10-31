@@ -366,7 +366,8 @@ def test_history_panel_with_steps(app_client, monkeypatch):
     from pilcrow_qt.widgets.panels.history import StepDetail
 
     c.wait_until(lambda: len(page._rows) == 3, 5, "step rows")
-    assert [r.title.text() for r in page._rows] == ["Session started", "“Please fix it”", "auth.ts"]
+    assert [r.title for r in page._rows] == ["Session started", "Please fix it", "auth.ts"]
+    assert page.list.isVisible() and all(r.warm for r in page._rows), "the rows are blocks, measured as they show"
     assert page.summary.text().startswith("1 change · ")
     assert page.scrubber.isVisible() and page.scrubber.slider.maximum() == 3 and page.scrubber.slider.value() == 3
     page.pick(3)

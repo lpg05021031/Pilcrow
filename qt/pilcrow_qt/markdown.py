@@ -186,10 +186,24 @@ class Metrics:
 
 PROSE = Metrics.of(theme.FS_BODY, 1.65)
 COMPACT = Metrics.of(theme.FS_UI, 1.65)
+_scaled: dict = {}
 
 
 def metrics(compact: bool) -> Metrics:
-    return COMPACT if compact else PROSE
+    """The prose or compact metrics at the theme's text scale."""
+    k = theme.scale
+    if k == 1.0:
+        return COMPACT if compact else PROSE
+    key = (compact, k)
+    m = _scaled.get(key)
+    if m is None:
+        m = _scaled[key] = Metrics.of((theme.FS_UI if compact else theme.FS_BODY) * k, 1.65)
+    return m
+
+
+def mono_size() -> float:
+    """The size of code in prose at the theme's text scale."""
+    return theme.MONO_SIZE * theme.scale
 
 
 def _md() -> MarkdownIt:
@@ -341,8 +355,8 @@ _BLOCK_NL_RE = re.compile(r"(</(?:p|ul|ol|li|table|thead|tbody|tr|th|td|blockquo
 
 def _post_process(body: str, t: theme.Tokens, base_dir: Optional[str], m: Metrics) -> str:
     mono = theme._MONO_FAMILY or "monospace"
-    code_px = px(theme.MONO_SIZE)
-    code_line = px(theme.MONO_SIZE * 1.6)
+    code_px = px(mono_size())
+    code_line = px(mono_size() * 1.6)
 
     def fence(mt: re.Match) -> str:
         lm = _LANG_RE.search(mt.group(1) or "")

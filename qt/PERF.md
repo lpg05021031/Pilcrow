@@ -311,15 +311,16 @@ Same rig, same scenarios, same machine class (software rasteriser), 600 heavy / 
 
 | scenario | target | canvas 2.10.0 |
 |---|---|---|
-| fold / thinking / tool toggle | 0 layout passes; ≤ 1 scroll adjustment; ≥ 55 fps; no flash; the row below moves only by the animated amount | 0–0.5 layouts; 58–62 fps; 0 flashes; stall max 8 ms. Scroll sets 0 (thinking) to 12 (a card at the live end: the view keeps the end in sight as the card grows, which is the easing, not a correction); the row below moves ≤ 32 px beyond the animation on heavy cards whose children exceed the 14 ms pre-measure budget |
-| streaming (follow and scrolled up) | stall p95 ≤ 8 ms, max ≤ 16 ms; 0 layout passes; scrolled up: 0 px of unexpected shift | follow: p95 9.7 ms, max 131 ms (a 300-line result landing: its body is built then), 0 layouts, CPU 49 %; scrolled up: 0 px, p95 10 ms |
-| wheel fling / scrollbar drag | stall p95 ≤ 8 ms; ≤ 1 frame in 100 over 16 ms; blank fraction ≤ 0.05 | fling: p95 9.6 ms, max 29 ms, 0 placeholder paints, 0 px unexpected shift (the blank fraction of 0.25 is the gaps between rows, which the canvas paints in the exact canvas colour; the widget transcript's rows were never exactly it). Drag: p95 54 ms per screen-sized step (every row new: laid out under the 8 ms deadline, the rest filled in by the drain, 75 placeholder paints over 81 steps) |
-| hover sweep, typing | 0 layout passes in the conversation; 0 px of shift | 0 and 0 |
-| open 600 heavy / 2,000 mixed turns | first paint ≤ 150 ms after the snapshot is modelled; no event-loop stall over 50 ms while modelling | first paint 4 ms; rows 554 / 881 ms after the open (the model itself: 140 ms per 5,000 messages; the units: 300 ms; the window's session view: 290 ms — phase 4 slices the model and the view) |
-| switch session | ≤ 30 ms to first paint; 0 widgets made for a retained session | 110 ms (the sidebar rebuilds its rows: 50 ms; phase 4), 17 widgets (sidebar rows), 0 MB growth over 10 switches |
-| view mode cycle, theme switch | ≤ 100 ms to first paint | view mode 75–117 ms; theme 5.5 s with the Changes panel open — the window-wide stylesheet re-polish and the panel (phase 4); the conversation's share is 7 ms |
-| panel open on any tab while streaming | widgets made per second = 0 on hidden tabs; ≤ 1 refresh a second on the visible one | 5–6 widgets/s on the visible tab, stall p95 25–45 ms (phase 4; the Changes tab now does nothing while hidden and rebuilds its diffs only when the set of edits changed) |
-| idle with a busy-looking session | ≤ 2 % of one core | 10.7 % (the clock at 33 ms repaints the live row; the composer's own marks; phase 4) |
+| fold / thinking / tool toggle | 0 layout passes; ≤ 1 scroll adjustment; ≥ 55 fps; no flash; the row below moves only by the animated amount | 0–0.5 layouts; 58–62 fps; 0 flashes; stall max 10 ms. Scroll sets 0 (thinking) to 12 (a card at the live end: the view keeps the end in sight as the card grows, which is the easing, not a correction); the row below moves ≤ 23 px beyond the animation on heavy cards whose children exceed the 14 ms pre-measure budget |
+| streaming (follow and scrolled up) | stall p95 ≤ 8 ms, max ≤ 16 ms; 0 layout passes; scrolled up: 0 px of unexpected shift | follow: p95 4.6 ms, max 21 ms, 7 frames over 16 ms in a 600-step turn, 0 layouts, CPU 30 %; scrolled up: 0 px, p95 3.1 ms |
+| wheel fling / scrollbar drag | stall p95 ≤ 8 ms; ≤ 1 frame in 100 over 16 ms; blank fraction ≤ 0.05 | fling: p95 5.6 ms, max 15.5 ms, 0 placeholder paints, 0 px unexpected shift (the blank fraction of 0.25 is the gaps between rows, which the canvas paints in the exact canvas colour; the widget transcript's rows were never exactly it). Drag: p95 41 ms per screen-sized step (every row new: laid out under the 8 ms deadline, the rest filled in by the drain) |
+| hover sweep, typing | 0 layout passes in the conversation; 0 px of shift | 0 and 0; typing stall p95 1.5 ms |
+| open 600 heavy / 2,000 mixed turns | first paint ≤ 150 ms after the snapshot is modelled; no event-loop stall over 50 ms while modelling | first rows on screen 255 / 423 ms after the open, the snapshot modelled in slices of 300 messages (whole after 715 / 1,340 ms), first paint 3 ms |
+| switch session | ≤ 30 ms to first paint; 0 widgets made for a retained session | 57 ms (the sidebar's rows move, nothing is made or re-parented), 1 widget, 0 MB growth over 10 switches |
+| view mode cycle, theme switch | ≤ 100 ms to first paint | view mode 106 ms; theme 3.5–4 s with the Changes panel open — the app-wide stylesheet re-polish of every widget in the window (the conversation's share is 7 ms); a theme that moves to palettes instead of a stylesheet is the remaining step |
+| panel open on any tab while streaming | widgets made per second = 0 on hidden tabs; ≤ 1 refresh a second on the visible one | 0 widgets/s on every tab, stall p95 4–5 ms (the Tasks tab updates its rows in place; the Changes tab rebuilds a diff only when an edit landed) |
+| idle with a busy-looking session | ≤ 2 % of one core | 7.2 % (the clock at 33 ms repaints the live row and the composer's mark; quiet 3.3 %) |
+| Timeline with 300 steps | — | first turn 14 ms, stall max 21 ms, 1 widget (was 1,749 ms and 301 widgets): a list on the engine |
 
 ## 6. Running the benchmarks
 
@@ -341,70 +342,74 @@ gap is motion, not flicker), the scrolled-up streaming scenario scrolls up after
 (sending takes the reader to their own message, as it should), and the canvas' placeholder paints are
 counted. The 2.9.8 toggles were re-measured after a rig fix (its rows are clicked on the head widget).
 
-| scenario | measure | 2.9.8 | canvas |
+| scenario | measure | 2.9.8 | canvas 2.10.0 |
 |---|---|---|---|
-| open_cold | mixed 2000 turns: rows on screen | 968 ms | 881 ms |
+| open_cold | mixed 2000 turns: rows on screen | 968 ms | 423 ms |
 | open_cold | mixed: widgets under the content | 1076 | 0 |
-| open_cold | heavy 600 turns: rows on screen | 632 ms | 554 ms |
-| open_cold | heavy: first paint | 31.1 ms | 4.1 ms |
-| open_cold | heavy: RSS added | 25.2 MB | 25.2 MB |
-| view_mode_cycle | → verbose: to first paint | 15041 ms | 117 ms |
+| open_cold | heavy 600 turns: rows on screen | 632 ms | 255 ms |
+| open_cold | heavy: first paint | 31.1 ms | 3.2 ms |
+| open_cold | heavy: RSS added | 25.2 MB | 35 MB |
+| view_mode_cycle | → verbose: to first paint | 15041 ms | 106 ms |
 | view_mode_cycle | → verbose: widgets made | 126 | 0 |
-| theme_toggle | → light: to first paint | 7540 ms | 5496 ms |
+| theme_toggle | → light: to first paint | 7540 ms | 4065 ms |
 | fold_toggle | layout passes per toggle | 118 | 0.5 |
 | fold_toggle | scroll sets per toggle | 5 | 7.5 |
-| fold_toggle | stall max | 41.35 ms | 8.22 ms |
+| fold_toggle | stall max | 41.35 ms | 10.22 ms |
 | fold_toggle | animation fps (min) | 47.3 | 58.1 |
-| fold_toggle | row below: max jump | 12 px | 25 px |
+| fold_toggle | row below: max jump | 12 px | 23 px |
 | fold_toggle | flashes | 0 | 0 |
 | thinking_toggle | layout passes per toggle | 48.8 | 0 |
-| thinking_toggle | animation fps (min) | 37.8 | 62.1 |
+| thinking_toggle | animation fps (min) | 37.8 | 62.4 |
 | tool_toggle | layout passes per toggle | 112 | 0.2 |
-| tool_toggle | stall max | 75.72 ms | 7.81 ms |
-| tool_toggle | animation fps (min) | 34 | 61.8 |
+| tool_toggle | stall max | 75.72 ms | 6.83 ms |
+| tool_toggle | animation fps (min) | 34 | 62.4 |
 | hover_sweep | layout passes (240 moves) | 271 | 0 |
-| hover_sweep | stall p95 | 1.46 ms | 1.11 ms |
-| streaming_follow | stall p95 | 30.57 ms | 9.73 ms |
-| streaming_follow | stall max | 3018.67 ms | 131.26 ms |
-| streaming_follow | stalls over 16 ms | 25 | 58 |
+| hover_sweep | stall p95 | 1.46 ms | 0.82 ms |
+| streaming_follow | stall p95 | 30.57 ms | 4.58 ms |
+| streaming_follow | stall max | 3018.67 ms | 21.46 ms |
+| streaming_follow | stalls over 16 ms | 25 | 7 |
 | streaming_follow | layout passes per second | 20 | 0 |
-| streaming_follow | CPU | 93.5 % | 49 % |
+| streaming_follow | CPU | 93.5 % | 29.8 % |
 | streaming_follow | flashes (filmed turn) | 0 | 0 |
 | streaming_scrolled_up | unexpected shift | 165 px | 0 px |
 | streaming_scrolled_up | scroll sets | 0 | 0 |
-| streaming_scrolled_up | stall p95 | 3592.27 ms | 10.3 ms |
+| streaming_scrolled_up | stall p95 | 3592.27 ms | 3.13 ms |
 | typing | transcript layout passes | 0 | 0 |
-| typing | stall p95 | 5.7 ms | 3.32 ms |
-| resize_window | step p95 | 190.84 ms | 36.87 ms |
+| typing | stall p95 | 5.7 ms | 1.51 ms |
+| resize_window | step p95 | 190.84 ms | 42.69 ms |
 | resize_window | steps over 50 ms | 10 | 0 |
-| switch_session | to first paint p50 | 7805.32 ms | 110.48 ms |
-| switch_session | widgets made per switch | 374 | 17 |
+| switch_session | to first paint p50 | 7805.32 ms | 57.26 ms |
+| switch_session | widgets made per switch | 374 | 1 |
 | switch_session | RSS growth over 10 switches | 90.7 MB | 0 MB |
-| panel_tabs | tasks tab: first turn | 31.5 ms | 37.5 ms |
-| panel_tabs | changes tab: first turn | 40.6 ms | 24.4 ms |
-| panel_tabs | seam drag step p95 | 153.72 ms | 59.67 ms |
-| panel_while_streaming | tasks: panel widgets made / s | 6 | 5 |
-| panel_while_streaming | changes: panel widgets made / s | 6 | 6 |
-| panel_while_streaming | info: panel widgets made / s | 6 | 6 |
-| panel_while_streaming | tasks: stall p95 | 134.21 ms | 45.12 ms |
-| scroll_wheel | fling up: stall p95 | 10.55 ms | 9.56 ms |
-| scroll_wheel | fling up: stall max | 194.08 ms | 28.73 ms |
-| scroll_wheel | fling up: px/s | 6906 | 7289 |
-| scroll_wheel | fling up: blank fraction | 0 | 0.246 |
-| scroll_drag | step p95 | 363.85 ms | 54.43 ms |
-| scroll_drag | steps over 16 ms (of 81) | 58 | 81 |
-| find | search over the whole conversation | 4077 ms | 89 ms |
+| panel_tabs | tasks tab: first turn | 31.5 ms | 25.1 ms |
+| panel_tabs | changes tab: first turn | 40.6 ms | 22.3 ms |
+| panel_tabs | seam drag step p95 | 153.72 ms | 63.06 ms |
+| panel_while_streaming | tasks: panel widgets made / s | 6 | 0 |
+| panel_while_streaming | changes: panel widgets made / s | 6 | 0 |
+| panel_while_streaming | info: panel widgets made / s | 6 | 0 |
+| panel_while_streaming | tasks: stall p95 | 134.21 ms | 5.23 ms |
+| scroll_wheel | fling up: stall p95 | 10.55 ms | 5.63 ms |
+| scroll_wheel | fling up: stall max | 194.08 ms | 15.52 ms |
+| scroll_wheel | fling up: px/s | 6906 | 7366 |
+| scroll_wheel | fling up: blank fraction | 0 | 0.254 |
+| scroll_drag | step p95 | 363.85 ms | 40.63 ms |
+| scroll_drag | steps over 16 ms (of 81) | 58 | 80 |
+| find | search over the whole conversation | 4077 ms | 42 ms |
 | find | widgets after | 21682 | 0 |
-| idle | CPU, quiet | 3.3 % | 4.7 % |
-| idle | CPU, busy-looking | 9.1 % | 10.7 % |
+| idle | CPU, quiet | 3.3 % | 3.3 % |
+| idle | CPU, busy-looking | 9.1 % | 7.2 % |
 
 What moved the numbers: the view is one painted viewport (no layout passes, no widgets made, 0 MB of
 growth over ten switches); every change holds the anchor, so nothing on screen moves that the person
 did not move (0 px scrolled up); folds and cards open on one animated number at 58–62 fps; the parts
 of the history that are not on screen are neither built nor measured (a 2,000-turn conversation
 opens at its end with its units and nothing inside them; verbose opens every fold on screen only);
-find reads the model (89 ms, no widgets); streaming appends to the paragraph's document and the
-Changes panel no longer rebuilds its diffs on every runtime change. What remains is the rest of the
-window — the sidebar rebuilt on every session change, the app-wide stylesheet on a theme switch, the
-panels refreshing while hidden, the composer re-styling its buttons — which is phase 4 of
-`DESIGN.md`.
+find reads the model (42 ms, no widgets); streaming appends to the paragraph's document. Around the
+conversation (phase 4): hidden panel tabs do nothing and catch up when shown, the Tasks tab updates
+rows in place, the Timeline is a list on the engine, the sidebar moves only the rows that moved, the
+composer and the session head restyle only what changed, the snapshot of an opening conversation is
+modelled in slices (the 10 MB more of resident memory on opening is the scene: every unit of the
+history has a block, a key and an estimate from the first frame, which is what makes the scrollbar
+honest and the find instant). What remains is the theme switch, bound to Qt's stylesheet re-polish of every
+widget in the window (3.5–4 s with the Changes panel open); moving the theme from a stylesheet to
+palettes is the next step, outside this design.

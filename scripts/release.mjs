@@ -83,7 +83,8 @@ if (flags.has('--skip-tests')) {
   run('npm', ['run', 'check']);
   run('npm', ['run', 'lint']);
   run('npm', ['run', 'test:unit']);
-  if (existsSync(join(ROOT, 'qt', 'tests'))) run(python, ['-m', 'pytest', 'qt/tests', '-q', '-p', 'no:cacheprovider']);
+  // PILCROW_PERF=1 also runs qt/tests/test_perf_budget.py: the conversation's performance budgets on a short bench
+  if (existsSync(join(ROOT, 'qt', 'tests'))) run(python, ['-m', 'pytest', 'qt/tests', '-q', '-p', 'no:cacheprovider'], { env: { ...process.env, PILCROW_PERF: '1' } });
 }
 
 // ---- build

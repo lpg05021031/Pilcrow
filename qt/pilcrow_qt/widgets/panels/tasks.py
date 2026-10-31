@@ -332,14 +332,14 @@ class TaskRow(Card):
         ml = QVBoxLayout(main)
         ml.setContentsMargins(0, 0, 0, 0)
         ml.setSpacing(2)
-        title = elide(
+        self.title = elide(
             lbl(
                 str(t.get("description") or t.get("subagentType") or t.get("type") or ""),
                 theme.FS_UI,
                 tone="muted" if done else "",
             )
         )
-        ml.addWidget(title)
+        ml.addWidget(self.title)
         sub = QWidget()
         sl = QHBoxLayout(sub)
         sl.setContentsMargins(0, 0, 0, 0)
@@ -363,6 +363,23 @@ class TaskRow(Card):
             lay.addWidget(stop)
         self._paint_icon()
         bind(theme.theme.changed, self, lambda _t: self._paint_icon())
+
+    def update(self, t: Json) -> None:
+        """The same task, a step further: the title and the live line follow without a rebuild."""
+        if t == self.task:
+            return
+        self.task = t
+        self.title.setText(str(t.get("description") or t.get("subagentType") or t.get("type") or ""))
+        if self._done:
+            parts = [str(t.get("status") or "")]
+            if t.get("endedAt"):
+                parts.append(time_ago(float(t["endedAt"])))
+            if t.get("summary"):
+                parts.append(str(t["summary"])[:120])
+            self.sub.setText(" · ".join(parts))
+        else:
+            self.sub.setText(self._live_text())
+        self._paint_icon()
 
     def _live_text(self) -> str:
         t = self.task
@@ -920,23 +937,19 @@ class TasksPanel(QWidget):
         rt = store.rt_of(self.sid)
         tasks: List[Json] = list(rt.get("tasks") or []) if rt else []
         todos = reconstruct_todos(self.sid)
-        key = (
-            rt.rev if rt else 0,
-            [
-                (
-                    t.get("id"),
-                    t.get("status"),
-                    t.get("progress"),
-                    t.get("lastTool"),
-                    (t.get("workflow") or {}).get("updatedAt"),
-                )
-                for t in tasks
-            ],
+        shape = (
+            [(t.get("id"), t.get("status"), (t.get("workflow") or {}).get("updatedAt")) for t in tasks],
             todos,
         )
-        if key == self._key:
+        if shape == self._key:
+            # the same tasks in the same states: the running rows follow their progress in place
+            by_id = {t.get("id"): t for t in tasks}
+            for row in self._rows:
+                t = by_id.get(row.task.get("id"))
+                if t is not None:
+                    row.update(t)
             return
-        self._key = key
+        self._key = shape
         for s in self._sections:
             self._lay.removeWidget(s)
             s.setParent(None)

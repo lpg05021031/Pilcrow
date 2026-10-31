@@ -81,6 +81,7 @@ class TranscriptScene(Scene):
         self.fold_state: Dict[str, bool] = {}
         self.units: List[Unit] = []
         self.settled_units: List[Unit] = []
+        self._settled_keys: List[str] = []  # unit_group_key of each settled unit, kept with it
         self.settled_count = 0
         self._settled_last: Optional[Item] = None
         self.working = WorkingBlock(sid)
@@ -124,10 +125,12 @@ class TranscriptScene(Scene):
         if self.settled_count > len(items) or (
             self.settled_count and items[self.settled_count - 1] is not self._settled_last
         ):
-            self.settled_units, self.settled_count, self._settled_last = [], 0, None
+            self.settled_units, self._settled_keys, self.settled_count, self._settled_last = [], [], 0, None
         b = _boundary(items)
         if b > self.settled_count:
-            self.settled_units.extend(group_turns(items[self.settled_count : b], False))
+            fresh_units = group_turns(items[self.settled_count : b], False)
+            self.settled_units.extend(fresh_units)
+            self._settled_keys.extend(unit_group_key(u) for u in fresh_units)
             self.settled_count = b
             self._settled_last = items[b - 1] if b else None
         tail = group_turns(items[b:], running) if b < len(items) else []
@@ -138,7 +141,7 @@ class TranscriptScene(Scene):
         keys: List[str] = ["skeleton"]
         if loaded and not items and self.empty is not None and self.empty.usable:
             keys.append("empty")
-        unit_keys = [unit_group_key(u) for u in units]
+        unit_keys = self._settled_keys + [unit_group_key(u) for u in tail]
         unit_at = {k: i for i, k in enumerate(unit_keys)}
         keys.extend(unit_keys)
         orphan_perms = [
@@ -330,6 +333,7 @@ class Transcript(QWidget):
         bind(store.sent, self, lambda sid: sid == self.sid and self.scroll_to_bottom())
         bind(store.ui_changed, self, lambda _u: self._on_ui())
         bind(theme.theme.changed, self, lambda _t: self.view.on_theme())
+        bind(theme.theme.scale_changed, self, lambda _k: self.view.on_theme())
         self._sync()
         QTimer.singleShot(0, self._initial_place)
 
@@ -476,6 +480,11 @@ class Transcript(QWidget):
         r = store.rt.get(self.sid)
         m = store.get_model(self.sid)
         v = self.view
+        if r is not None and r.loading and not r.loaded:
+            # the snapshot is still arriving in slices: the view holds the top (no easing towards an
+            # end that moves with every slice) and goes to the end once, when it is whole
+            v.follow.following = False
+            v.follow_ease.stop()
         v.begin()
         try:
             changed = self.scene.sync(m, r, store.ui.view)

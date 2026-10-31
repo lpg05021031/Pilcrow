@@ -484,16 +484,19 @@ class Scene:
         self.dirty_rects: List[Tuple[int, int, int, int]] = []  # scene-coordinate rects to repaint
         self.height_changes = 0
         self.structure_rev = 0  # bumped when blocks come or go
+        self.fresh: List[Block] = []  # blocks registered since the drain last looked (estimates to upgrade)
 
     # ---- registry
     def register(self, b: Block) -> None:
         self.structure_rev += 1
         b.scene = self
         self.by_key[b.key] = b
+        self.fresh.append(b)
         if isinstance(b, Group):
             b._set_scene(self)
             for c in b.walk():
                 self.by_key[c.key] = c
+                self.fresh.append(c)
 
     def unregister(self, b: Block) -> None:
         self.structure_rev += 1

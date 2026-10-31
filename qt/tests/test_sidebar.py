@@ -18,15 +18,17 @@ def _ready(c) -> None:
 
 
 def _rows(c):
+    """The rows as they stand on screen, top to bottom (the sidebar keeps its rows and moves only the
+    ones that moved, so creation order says nothing about place)."""
     from pilcrow_qt.widgets.sidebar import SessionRow
 
-    return [r for r in c.find(SessionRow) if r.isVisible()]
+    return sorted((r for r in c.find(SessionRow) if r.isVisible()), key=lambda r: _at(r, c).y())
 
 
 def _heads(c):
     from pilcrow_qt.widgets.sidebar import GroupHead
 
-    return [h for h in c.find(GroupHead) if h.isVisible()]
+    return sorted((h for h in c.find(GroupHead) if h.isVisible()), key=lambda h: _at(h, c).y())
 
 
 def _at(w, c) -> QPoint:

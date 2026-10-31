@@ -582,10 +582,18 @@ def palette(t: Tokens) -> QPalette:
 # ---------------------------------------------------------------- the live theme
 
 
+# The conversation's text scale (Ctrl+= / Ctrl+- / Ctrl+0): prose, code in prose, bubbles, thoughts.
+# The window's chrome keeps its size; the canvas re-measures what shows under its anchor.
+SCALE_STEPS = (0.85, 1.0, 1.15, 1.3, 1.5)
+scale = 1.0
+
+
 class Theme(QObject):
-    """The theme in force. ``changed`` fires after the stylesheet and palette are re-applied."""
+    """The theme in force. ``changed`` fires after the stylesheet and palette are re-applied;
+    ``scale_changed`` when the conversation's text scale moves."""
 
     changed = Signal(object)  # Tokens
+    scale_changed = Signal(float)
 
     def __init__(self) -> None:
         super().__init__()
@@ -603,6 +611,14 @@ class Theme(QObject):
             app.setPalette(palette(t))
             app.setStyleSheet(stylesheet(t))
         self.changed.emit(t)
+
+    def set_scale(self, value: float) -> None:
+        global scale
+        value = float(min(max(value, SCALE_STEPS[0]), SCALE_STEPS[-1]))
+        if abs(value - scale) < 1e-6:
+            return
+        scale = value
+        self.scale_changed.emit(value)
 
 
 theme = Theme()

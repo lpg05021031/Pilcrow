@@ -15,16 +15,17 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPixmap
+from PySide6.QtGui import QColor, QGuiApplication, QKeySequence, QPainter, QPixmap, QTextCursor
 from PySide6.QtWidgets import QAbstractScrollArea, QToolTip, QWidget
 
 from .. import theme
 from ..lib.fmt import resolve_path
 from ..store import store
+from . import a11y
 from .anchor import Follow
 from .blocks.island import IslandBlock
 from .clock import Tween, clock
-from .paint import FULL, Measurer, PaintState
+from .paint import FULL, Measurer, PaintState, rounded
 from .scene import GRADE_EXACT, GRADE_FAST, Block, Group, Scene, Target
 
 PAD_TOP = 22
@@ -37,6 +38,8 @@ OPEN_BUDGET = 0.014  # measuring a fold's children before it opens, so the revea
 SCROLL_BUDGET = 0.008  # exact measuring on a person's scroll or a resize step; the rest follows in the drain
 WARM_MAX = 600  # warm blocks kept before the far ones are cooled regardless of movement
 TOOLTIP_MS = 600
+TRIPLE_CLICK_MS = 0.4  # a press this soon after a double-click selects the block
+FOCUS_KINDS = ("head", "button", "link", "toggle", "more", "chev", "image")  # what Tab lands on
 
 _measurer: Optional[Measurer] = None
 
@@ -63,7 +66,8 @@ class Selection:
 
     @property
     def empty(self) -> bool:
-        return self.a_key == self.f_key and self.a_pos == self.f_pos
+        """Nothing selected: the same point twice. The same block with no positions is the whole block."""
+        return self.a_key == self.f_key and self.a_pos == self.f_pos and self.a_pos is not None
 
 
 class FollowEase:
@@ -117,15 +121,23 @@ class CanvasView(QAbstractScrollArea):
     scrolled = Signal(bool)  # away from the top
     hovered_block = Signal(object)  # the block under the pointer (or None)
 
-    def __init__(self, scene: Scene, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, scene: Scene, parent: Optional[QWidget] = None, column: str = "reading") -> None:
         super().__init__(parent)
         self.scene = scene
         self.m = measurer()
+        #: 'reading': the centred golden-section column of the conversation; 'fill': the whole width
+        #: less the side gutters (a list in a panel)
+        self.column = column
+        self.gutter = 0 if column == "reading" else 8
+        self.pad_top = PAD_TOP if column == "reading" else 6
+        self.pad_bottom = PAD_BOTTOM if column == "reading" else 12
         self.setFrameShape(QAbstractScrollArea.Shape.NoFrame)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         vp = self.viewport()
+        vp.setAccessibleName("Conversation" if column == "reading" else "List")
+        a11y.install()
         vp.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
         vp.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         vp.setAutoFillBackground(False)
@@ -157,6 +169,8 @@ class CanvasView(QAbstractScrollArea):
         self.focus: Optional[Tuple[str, Target]] = None
         self.selection: Optional[Selection] = None
         self._selecting = False
+        self._dbl_at = 0.0  # when the last double-click happened (a third click selects the block)
+        self._dbl_pos = QPoint()
         self.needle = ""
         self.needle_key = ""
         self.needle_index = -1
@@ -183,10 +197,10 @@ class CanvasView(QAbstractScrollArea):
 
     # ---------------------------------------------------------------- geometry
     def scene_y(self, viewport_y: int) -> int:
-        return viewport_y - PAD_TOP + self.verticalScrollBar().value()
+        return viewport_y - self.pad_top + self.verticalScrollBar().value()
 
     def view_y(self, scene_y: int) -> int:
-        return scene_y + PAD_TOP - self.verticalScrollBar().value()
+        return scene_y + self.pad_top - self.verticalScrollBar().value()
 
     def block_rect(self, b: Block) -> QRect:
         """The block's rect in viewport coordinates."""
@@ -194,10 +208,14 @@ class CanvasView(QAbstractScrollArea):
 
     def _relayout_width(self) -> None:
         vw = self.viewport().width()
-        col = column_width(max(vw, 200))
-        col = min(col, max(200, vw - 48))
+        if self.column == "fill":
+            col = max(120, vw - 2 * self.gutter)
+            self.col_x = self.gutter
+        else:
+            col = column_width(max(vw, 200))
+            col = min(col, max(200, vw - 48))
+            self.col_x = (vw - col) // 2
         self.col_w = col
-        self.col_x = (vw - col) // 2
         if self.scene.width != col:
             self.scene.width = col
             self._deadline = time.perf_counter() + SCROLL_BUDGET
@@ -214,7 +232,7 @@ class CanvasView(QAbstractScrollArea):
         doing, not the person's: it must not change whether the view follows."""
         vb = self.verticalScrollBar()
         vh = self.viewport().height()
-        total = PAD_TOP + self.scene.total + PAD_BOTTOM
+        total = self.pad_top + self.scene.total + self.pad_bottom
         was = self._own
         self._own = True
         try:
@@ -237,7 +255,25 @@ class CanvasView(QAbstractScrollArea):
     def viewportEvent(self, e) -> bool:  # noqa: N802
         if e.type() == QEvent.Type.Leave:
             self._set_hover(None)
+        elif e.type() == QEvent.Type.ContextMenu:
+            self._context_menu(e)
+            return True
         return super().viewportEvent(e)
+
+    def focusInEvent(self, e) -> None:  # noqa: N802
+        super().focusInEvent(e)
+        self._update_focus_rect()
+
+    def focusOutEvent(self, e) -> None:  # noqa: N802
+        super().focusOutEvent(e)
+        self._update_focus_rect()
+
+    def focusNextPrevChild(self, next_: bool) -> bool:  # noqa: N802
+        """Tab moves over the targets on screen before it leaves the view."""
+        if self.hasFocus() and self._focus_step(1 if next_ else -1):
+            return True
+        self._set_focus(None)
+        return super().focusNextPrevChild(next_)
 
     # ---------------------------------------------------------------- the commit
     def begin(self) -> None:
@@ -272,7 +308,7 @@ class CanvasView(QAbstractScrollArea):
             y = self.scene.resolve_anchor(anchor)
             if y is None:
                 return None
-            want = y + PAD_TOP
+            want = y + self.pad_top
             self._set_value(want)
             return want
         finally:
@@ -446,12 +482,15 @@ class CanvasView(QAbstractScrollArea):
             vb.setValue(vb.value() + 40)
         elif k == Qt.Key.Key_Up:
             vb.setValue(vb.value() - 40)
-        elif k == Qt.Key.Key_Escape and self.selection is not None:
+        elif k == Qt.Key.Key_Escape and (self.selection is not None or self.focus is not None):
             self.clear_selection()
-        elif e.matches(Qt.StandardKey.Copy) or (
+            self._set_focus(None)
+        elif e.matches(QKeySequence.StandardKey.Copy) or (
             k == Qt.Key.Key_C and e.modifiers() & Qt.KeyboardModifier.ControlModifier
         ):
             self.copy_selection()
+        elif e.matches(QKeySequence.StandardKey.SelectAll):
+            self.select_all()
         elif k in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space) and self.focus is not None:
             self.activate_focus()
         else:
@@ -550,14 +589,16 @@ class CanvasView(QAbstractScrollArea):
                     break
             # then the estimates of cold blocks everywhere, a slice at a time
             if not more:
-                if not self._upgrade_queue and self._scanned_rev != self.scene.structure_rev:
-                    self._scanned_rev = self.scene.structure_rev
-                    self._upgrade_queue = [
+                if self.scene.fresh:
+                    # what came since the last look, the top of the history first (popped from the end)
+                    fresh = [
                         b
-                        for b in self.scene.root.walk()
+                        for b in self.scene.fresh
                         if b.grade == 0 and not b.warm and not (isinstance(b, Group) and b.children)
                     ]
-                    self._upgrade_queue.reverse()  # pop from the end: the top of the history first
+                    self.scene.fresh = []
+                    fresh.reverse()
+                    self._upgrade_queue = fresh + self._upgrade_queue
                 q = self._upgrade_queue
                 while q:
                     b = q.pop()
@@ -608,14 +649,14 @@ class CanvasView(QAbstractScrollArea):
         st.needle = self.needle
         scroll = self.verticalScrollBar().value()
         live: List[Block] = []
-        y0 = e.rect().top() - PAD_TOP + scroll
-        y1 = e.rect().bottom() + 1 - PAD_TOP + scroll
+        y0 = e.rect().top() - self.pad_top + scroll
+        y1 = e.rect().bottom() + 1 - self.pad_top + scroll
         hover_b = self.hover[0] if self.hover is not None else None
         cold_seen = False
         for b, by in self.scene.leaves_between(y0, y1):
             if b.h <= 0 or isinstance(b, IslandBlock):
                 continue
-            vy = by + PAD_TOP - scroll
+            vy = by + self.pad_top - scroll
             x = self.col_x + b.indent
             w = self.col_w - b.indent
             rect = QRect(x, vy, w, b.h)
@@ -681,6 +722,8 @@ class CanvasView(QAbstractScrollArea):
         p.setClipRect(st.clip if st.clip is not None else rect)
         try:
             b.paint(p, rect.x(), rect.y(), rect.width(), st)
+            if st.focus is not None and self.hasFocus():
+                self._paint_focus_ring(p, rect, st)
         except Exception as ex:  # noqa: BLE001 - one row's painter must not blank the frame
             if not getattr(b, "_paint_failed", False):
                 print(f"[canvas] {b.key} could not paint: {ex!r}")
@@ -695,6 +738,16 @@ class CanvasView(QAbstractScrollArea):
                 "could not draw this row",
             )
         p.restore()
+
+    def _paint_focus_ring(self, p: QPainter, rect: QRect, st: PaintState) -> None:
+        """The keyboard focus: a ring around the target (``:focus-visible``), outside its box."""
+        rx, ry, rw, rh = st.focus.rect  # type: ignore[union-attr]
+        if rw <= 0 or rh <= 0:
+            rw, rh = rect.width(), min(rect.height(), 28)
+            rx, ry = 0, 0
+        ring = QRect(rect.x() + rx - 3, rect.y() + ry - 3, rw + 6, rh + 6)
+        p.setClipRect(ring.adjusted(-2, -2, 2, 2))
+        rounded(p, ring, None, QColor(st.t.accent), theme.R2, 1.5)
 
     def _paint_cached(self, p: QPainter, b: Block, rect: QRect, st: PaintState) -> None:
         dpr = self.viewport().devicePixelRatioF()
@@ -823,6 +876,14 @@ class CanvasView(QAbstractScrollArea):
             return
         self.setFocus()
         pos = e.position().toPoint()
+        if time.monotonic() - self._dbl_at < TRIPLE_CLICK_MS and (pos - self._dbl_pos).manhattanLength() < 6:
+            # the third click: the whole block
+            found = self.scene.leaf_at(self.scene_y(pos.y()))
+            if found is not None and found[0].text():
+                self.selection = Selection(found[0].key, None)
+                self.viewport().update(self.block_rect(found[0]))
+            self._dbl_at = 0.0
+            return
         hit = self.hit(pos)
         self.pressed = hit
         if hit is not None and hit[1].kind in ("button", "head", "toggle", "link", "image", "chev", "more"):
@@ -835,8 +896,9 @@ class CanvasView(QAbstractScrollArea):
             lx = pos.x() - (self.col_x + b.indent)
             ly = self.scene_y(pos.y()) - b.y()
             p0 = b.text_pos_at(lx, ly)
-            self.selection = Selection(b.key, p0)
-            self._selecting = True
+            if p0 is not None:  # a press beside the words selects nothing until it is dragged
+                self.selection = Selection(b.key, p0)
+                self._selecting = True
 
     def mouseReleaseEvent(self, e) -> None:  # noqa: N802
         if e.button() != Qt.MouseButton.LeftButton:
@@ -859,10 +921,93 @@ class CanvasView(QAbstractScrollArea):
     def mouseDoubleClickEvent(self, e) -> None:  # noqa: N802
         pos = e.position().toPoint()
         hit = self.hit(pos)
-        if hit is not None and hit[1].kind in ("text", "row"):
-            b = hit[0]
+        if hit is not None and hit[1].kind not in ("text", "row"):
+            return  # a button or a head: the two clicks were two activations
+        found = self.scene.leaf_at(self.scene_y(pos.y()))
+        if found is None:
+            return
+        b = found[0]
+        self._dbl_at, self._dbl_pos = time.monotonic(), pos
+        lx = pos.x() - (self.col_x + b.indent)
+        ly = self.scene_y(pos.y()) - b.y()
+        word = self.word_at(b, lx, ly)
+        if word is not None:
+            self.selection = Selection(b.key, word[0])
+            self.selection.f_pos = word[1]
+        elif b.text():
             self.selection = Selection(b.key, None)  # the whole block
-            self.viewport().update(self.block_rect(b))
+        else:
+            return
+        self.viewport().update(self.block_rect(b))
+
+    @staticmethod
+    def word_at(b: Block, x: int, y: int) -> Optional[Tuple[int, int]]:
+        """The word under a point of a block that draws a document: (start, end) positions."""
+        pos = b.text_pos_at(x, y)
+        doc = getattr(b, "doc", None)
+        if pos is None or doc is None:
+            return None
+        cur = QTextCursor(doc)
+        cur.setPosition(pos)
+        cur.select(QTextCursor.SelectionType.WordUnderCursor)
+        a, z = cur.selectionStart(), cur.selectionEnd()
+        return (a, z) if z > a else None
+
+    # ---------------------------------------------------------------- the context menu
+    def _context_menu(self, e) -> None:
+        from ..widgets.ui.menu import show_menu_at
+
+        show_menu_at(self.context_items(e.pos()), e.globalPos(), self, 230)
+
+    def context_items(self, pos: QPoint) -> List[Dict[str, Any]]:
+        """The right-click menu at a viewport point: copy, select all, the link or the file there."""
+        hit = self.hit(pos)
+        found = self.scene.leaf_at(self.scene_y(pos.y()))
+        b = found[0] if found is not None else None
+        items: List[Dict[str, Any]] = []
+        has_sel = self.selection is not None and not self.selection.empty
+        items.append(
+            {
+                "label": "Copy",
+                "icon": "copy",
+                "kbd": "Ctrl+C",
+                "disabled": not has_sel,
+                "on_select": self.copy_selection,
+            }
+        )
+        if b is not None and b.text():
+            text = b.selected_text(None, None)
+            items.append({"label": "Copy this message", "icon": "copy", "on_select": lambda t=text: self.copy_text(t)})
+        items.append({"label": "Select all", "icon": "text-select", "kbd": "Ctrl+A", "on_select": self.select_all})
+        if hit is not None and hit[1].kind == "link":
+            href = str(hit[1].data or hit[1].id)
+            cwd = getattr(hit[0], "cwd", "")
+            items.append({"separator": True})
+            items.append(
+                {"label": "Open link", "icon": "external-link", "on_select": lambda h=href, c=cwd: self.open_link(h, c)}
+            )
+            items.append({"label": "Copy link", "icon": "link", "on_select": lambda h=href: self.copy_text(h)})
+        path = getattr(b, "file", None) if b is not None else None
+        if not path and b is not None and b.parent is not None:
+            path = getattr(b.parent, "file", None)
+        if path:
+            items.append({"separator": True})
+            items.append(
+                {"label": "Open file", "icon": "arrow-up-right", "on_select": lambda p=path: store.open_file(p)}
+            )
+            items.append(
+                {"label": "Copy path", "icon": "copy", "mono": True, "on_select": lambda p=path: self.copy_text(p)}
+            )
+        return items
+
+    def select_all(self) -> None:
+        first = self.scene.leaf_at(0)
+        last = self.scene.leaf_at(max(0, self.scene.total - 1))
+        if first is None or last is None:
+            return
+        self.selection = Selection(first[0].key, None)
+        self.selection.f_key, self.selection.f_pos = last[0].key, None
+        self.viewport().update()
 
     def activate(self, b: Block, t: Target) -> None:
         self.begin()
@@ -881,6 +1026,60 @@ class CanvasView(QAbstractScrollArea):
 
     def _focus_for(self, b: Block) -> Optional[Target]:
         return self.focus[1] if (self.focus is not None and self.focus[0] == b.key) else None
+
+    def focusables(self) -> List[Tuple[Block, Target]]:
+        """The targets Tab visits, in reading order over the blocks on screen: a block's own targets
+        (buttons, links, toggles), else its head when it has one."""
+        out: List[Tuple[Block, Target]] = []
+        for b in self.visible_blocks():
+            ts = [t for t in b.targets() if t.kind in FOCUS_KINDS]
+            if not ts:
+                t = b.hit(2, 2)
+                if t is not None and t.kind in FOCUS_KINDS:
+                    ts = [t]
+            out.extend((b, t) for t in ts)
+        return out
+
+    def _focus_step(self, d: int) -> bool:
+        """Move the focus to the next (d=1) or previous (d=-1) target on screen; False at the ends."""
+        ring = self.focusables()
+        if not ring:
+            return False
+        cur = self.focus
+        i = -1
+        if cur is not None:
+            for k, (b, t) in enumerate(ring):
+                if b.key == cur[0] and t == cur[1]:
+                    i = k
+                    break
+        if i < 0:
+            if d < 0:
+                return False
+            nxt = 0
+        else:
+            nxt = i + d
+            if nxt < 0 or nxt >= len(ring):
+                return False
+        b, t = ring[nxt]
+        self._set_focus((b.key, t))
+        self.scroll_to_block(b)
+        return True
+
+    def _set_focus(self, f: Optional[Tuple[str, Target]]) -> None:
+        old = self.focus
+        if old == f:
+            return
+        self.focus = f
+        self._update_focus_rect(old)
+
+    def _update_focus_rect(self, *keys: Optional[Tuple[str, Target]]) -> None:
+        vp = self.viewport()
+        for f in (*keys, self.focus):
+            if f is None:
+                continue
+            b = self.scene.block(f[0])
+            if b is not None:
+                vp.update(self.block_rect(b).adjusted(-8, -4, 8, 4))
 
     # ---------------------------------------------------------------- groups
     def toggle_group(self, g: Group, open_: bool, animate: bool = True) -> None:
@@ -1097,5 +1296,5 @@ class CanvasView(QAbstractScrollArea):
         self._grew = True  # what lies below the place is unseen: the "Latest" pill offers the way down
         self.scroll_tween.stop()
         self.follow_ease.stop()
-        self._set_value(y + PAD_TOP)
+        self._set_value(y + self.pad_top)
         return True

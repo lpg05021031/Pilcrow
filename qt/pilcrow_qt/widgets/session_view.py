@@ -558,10 +558,14 @@ class Crumb(QWidget):
         lay.addWidget(self.ico)
         self.lb = QLabel()
         lay.addWidget(self.lb)
+        self._painted = False
         bind(theme.theme.changed, self, lambda _t: self._paint())
 
     def set(self, icon: str, text: str, tone: str = "") -> None:
+        if (icon, text, tone) == (self._icon, self._text, self._tone) and self._painted:
+            return
         self._icon, self._text, self._tone = icon, text, tone
+        self._painted = True
         self._paint()
 
     def text(self) -> str:
@@ -602,6 +606,8 @@ class CrumbButton(LayoutButton):
         self._paint()
 
     def set_text(self, text: str) -> None:
+        if text == self._text:
+            return
         self._text = text
         self._paint()
 
@@ -609,6 +615,8 @@ class CrumbButton(LayoutButton):
         return self._text
 
     def set_on(self, on: bool) -> None:
+        if on == self._on:
+            return
         self._on = on
         self._paint()
 
@@ -652,6 +660,9 @@ class StatusPill(QWidget):
         bind(theme.theme.changed, self, lambda _t: self._paint())
 
     def set_status(self, status: str, workflow: Optional[str] = None) -> None:
+        if (status, workflow) == getattr(self, "_shown_status", None):
+            return
+        self._shown_status = (status, workflow)
         self.status = status
         show = bool(status) and status not in ("idle", "stopped")
         self.setVisible(show)
@@ -731,12 +742,17 @@ class Diffstat(LayoutButton):
         self._paint()
 
     def set_values(self, ins: int, dele: int, changes: int) -> None:
+        if (ins, dele, changes) == (self.add_n, self.del_n, getattr(self, "_changes", None)):
+            return
+        self._changes = changes
         self.add_n, self.del_n = ins, dele
         self.setToolTip(f"{changes} changed file{'s' if changes > 1 else ''} — review (Alt+1)")
         self.setAccessibleName(self.toolTip())
         self._paint()
 
     def set_on(self, on: bool) -> None:
+        if on == self._on:
+            return
         self._on = on
         self._paint()
 

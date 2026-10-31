@@ -1148,7 +1148,17 @@ class FilesPanel(QWidget):
         self.open_tab(str(d["path"]), d.get("line"))
 
     def _on_rt(self, sid: str) -> None:
-        if sid == self.session_id:
+        if sid != self.session_id:
+            return
+        if not self.isVisible():
+            self._stale = True  # the open files are re-read when the tab is shown again
+            return
+        self._reload_timer.start()
+
+    def showEvent(self, e) -> None:  # noqa: N802
+        super().showEvent(e)
+        if getattr(self, "_stale", False):
+            self._stale = False
             self._reload_timer.start()
 
     def _reload_open_files(self) -> None:

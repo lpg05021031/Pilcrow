@@ -100,13 +100,21 @@ class Ctx:
         return self.theme.qcolor(self.theme.tokens().canvas)
 
     def open(self, sid: str, timeout: float = 60.0) -> Dict[str, float]:
-        """Open a conversation and time the stages: the answer arriving, rows on screen, first paint."""
+        """Open a conversation and time the stages: the first rows on screen (the snapshot is modelled
+        in slices, so rows show before it is whole), the whole of it modelled, the first paint."""
         t0 = time.perf_counter()
         self.store.open_session(sid)
+        self.c.wait_until(
+            lambda: sid in self.store.rt
+            and self.transcript() is not None
+            and getattr(self.transcript(), "sid", sid) == sid
+            and self.transcript().units(),
+            timeout,
+            "rows",
+        )
+        t_rows = time.perf_counter() - t0
         self.c.wait_until(lambda: sid in self.store.rt and self.store.rt[sid].loaded, timeout, f"load {sid}")
         t_loaded = time.perf_counter() - t0
-        self.c.wait_until(lambda: self.transcript() is not None and self.transcript().units(), timeout, "rows")
-        t_rows = time.perf_counter() - t0
         tv = self.transcript()
         self.c.app.processEvents()
         p0 = time.perf_counter()

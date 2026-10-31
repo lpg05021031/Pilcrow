@@ -120,7 +120,10 @@ def test_panel_sits_on_the_canvas_and_the_ink_follows(app_client):
     c.store.set_ui(panel=True, panel_tab="tasks", panel_w=560)
     c.wait_until(lambda: c.win.panel is not None and c.win.panel.page("tasks") is not None, 5, "tasks tab")
     panel = c.win.panel
-    assert theme.tokens().canvas in panel.styleSheet()
+    # the panel paints its background (a stylesheet here would re-polish every tab on a theme switch)
+    assert panel.styleSheet() == ""
+    img = panel.grab().toImage()
+    assert img.pixelColor(2, panel.height() - 3).name() == theme.tokens().canvas
     strip = c.find(TabStrip)[0]
     assert strip.height() == theme.HEADER_H and strip.close.width() == 24  # .icon-btn.sm
     c.wait_until(lambda: strip._ink is not None, 3, "ink")
