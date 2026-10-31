@@ -211,7 +211,7 @@ export interface SessionState {
   model: string;
   effort: Effort;
   activeModel: string | null;
-  usage: { contextTokens: number; contextWindow: number; costUsd: number; outputTokens: number; model: string | null };
+  usage: { contextTokens: number; contextWindow: number; costUsd: number; outputTokens: number; model: string | null; afterCompact?: boolean; compactedFrom?: number };
   mcp?: McpLive[];
   error: string | null;
   suggestion: string | null;

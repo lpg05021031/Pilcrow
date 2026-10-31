@@ -136,7 +136,11 @@ class ToolBlock(Group):
         self.meta = tool_meta(item.name, item.input, ctx.cwd)
         self.file = file_path_of(item.name, item.input) if is_file_tool(item.name) else None
         changed: List[Block] = []
-        if not (rev_changed or perm_changed or ctx_changed or first):
+        # a workflow's body says how far the run is: it follows the task in session.state, not only the item
+        tsig = self._task_sig() if item.name in ("Workflow", "RunWorkflow") else None
+        task_changed = tsig != getattr(self, "_tsig", None)
+        self._tsig = tsig
+        if not (rev_changed or perm_changed or ctx_changed or first or task_changed):
             return changed
         self.sig = (item.rev, item.status, (perm or {}).get("requestId"), ctx.view, self.open)
         # chrome
@@ -145,6 +149,9 @@ class ToolBlock(Group):
         )
         # body
         if self.body.sync(item, ctx):
+            changed.append(self.body)
+        elif task_changed:
+            self.body.rebuild()
             changed.append(self.body)
         # agent children
         kids = item.children or self._loaded_items or []
@@ -186,6 +193,12 @@ class ToolBlock(Group):
             self.open = want
             self.set_reveal(1.0 if want else 0.0)
         return changed
+
+    def _task_sig(self) -> Optional[Tuple[Any, Any]]:
+        rt = store.rt.get(self.ctx.session_id)
+        tasks = (rt.get("tasks") if rt else None) or []
+        t = next((x for x in tasks if isinstance(x, dict) and x.get("toolUseId") == self.item.id), None)
+        return (t.get("status"), (t.get("workflow") or {}).get("updatedAt")) if t else None
 
     def set_loaded_children(self, items: List[Item]) -> None:
         self._loaded_items = items

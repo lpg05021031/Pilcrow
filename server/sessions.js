@@ -12,6 +12,7 @@ import * as memory from './memory.js';
 import * as git from './git.js';
 import { repos } from './repos.js';
 import { AsyncQueue, uuid, IS_ROOT, log, xdg, slugify, cleanEnv, slash } from './util.js';
+import { applyAssistant, applyCompact, fromHistory } from './usage.js';
 
 export const bus = new EventEmitter();
 /** Where other modules (helpers.js) extend a session: in-process MCP servers to attach, permission
@@ -137,7 +138,7 @@ class Session {
     this.commands = null;
     this.models = null;
     const saved = store.getMeta(id) || {};
-    this.usage = { contextTokens: 0, contextWindow: saved.contextWindow || 0, costUsd: saved.costUsd || 0, outputTokens: 0, model: null };
+    this.usage = { contextTokens: 0, contextWindow: saved.contextWindow || 0, costUsd: saved.costUsd || 0, outputTokens: 0, model: null, afterCompact: false };
     this.suggestion = null;
     this.error = null;
     this.stderrTail = '';
@@ -224,7 +225,21 @@ class Session {
   }
 
   emitState() {
+    if (this._stateSoon) {
+      clearTimeout(this._stateSoon);
+      this._stateSoon = null;
+    }
     bus.emit('state', this.state());
+  }
+
+  /** State for a stream of small changes (a workflow's agents reporting): at most one every 120 ms,
+   *  so sixty agents do not mean sixty full states a second to every client. */
+  emitStateSoon() {
+    if (this._stateSoon) return;
+    this._stateSoon = setTimeout(() => {
+      this._stateSoon = null;
+      this.emitState();
+    }, 120);
   }
 
   out(msg) {
@@ -253,20 +268,11 @@ class Session {
   }
 
   recomputeFromHistory(msgs) {
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      const m = msgs[i];
-      if (m.type === 'assistant' && !m.parent_tool_use_id && m.message?.usage) {
-        this.applyUsage(m.message);
-        break;
-      }
-    }
+    fromHistory(this.usage, msgs);
   }
 
   applyUsage(message) {
-    const u = message.usage || {};
-    const total = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.output_tokens || 0);
-    if (total > 0) this.usage.contextTokens = total;
-    if (message.model) this.usage.model = message.model;
+    applyAssistant(this.usage, message);
   }
 
   async snapshot() {
@@ -555,9 +561,14 @@ class Session {
           Object.assign(t, { usage: msg.usage, lastTool: msg.last_tool_name, summary: msg.summary || t.summary, progress: msg.description });
           if (Array.isArray(msg.workflow_progress)) mergeWorkflowProgress(t, msg.workflow_progress);
         }
-        this.emitState();
+        this.emitStateSoon();
         break;
       }
+      case 'compact_boundary':
+        // the context is a summary now; its size comes with the next reply (usage.js)
+        applyCompact(this.usage, msg.compact_metadata);
+        this.emitState();
+        break;
       case 'task_notification': {
         const t = this.tasks.get(msg.task_id) || { id: msg.task_id };
         Object.assign(t, { status: msg.status, summary: msg.summary, outputFile: msg.output_file, usage: msg.usage || t.usage, toolUseId: msg.tool_use_id || t.toolUseId, endedAt: Date.now(), reason: msg.reason });

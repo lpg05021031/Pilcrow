@@ -923,6 +923,7 @@ namespace Pilcrow
             Win32.DwmSetWindowAttribute(Handle, 35, ref cap, 4);   // DWMWA_CAPTION_COLOR（Win11；用原生標題列時生效）
             Win32.DwmSetWindowAttribute(Handle, 36, ref txt, 4);   // DWMWA_TEXT_COLOR
             Win32.DwmSetWindowAttribute(Handle, 34, ref cap, 4);   // DWMWA_BORDER_COLOR
+            int corner = 2; Win32.DwmSetWindowAttribute(Handle, 33, ref corner, 4);   // DWMWA_WINDOW_CORNER_PREFERENCE = DWMWCP_ROUND（Win11；Win10 忽略）
         }
         void ShowSplash(string text)
         {

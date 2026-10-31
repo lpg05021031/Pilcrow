@@ -484,6 +484,25 @@ test('answer cards: the question and the plan open with the dot, carry key boxes
   await page.waitForSelector('.plancard .badge.ok', { timeout: 10_000 });
 });
 
+test('workflow: the Tasks tab draws the run live and settled, and the card in the conversation follows', async ({ page }) => {
+  await open(page, 'sess-tests');
+  await page.click('.icon-btn[title^="Side panel"]');
+  await page.click('.panel-tab[title^="Tasks"]');
+  await send(page, 'run the review workflow');
+  await page.waitForSelector('.wfd', { timeout: 20_000 });
+  expect((await page.locator('.wfd-name').first().innerText()) === 'review-changes', 'the run is named from its meta');
+  await page.waitForFunction(() => document.querySelectorAll('.wfa').length >= 3, null, { timeout: 20_000 });
+  await page.waitForFunction(() => document.body.innerText.includes('Five findings confirmed'), null, { timeout: 40_000 });
+  await sleep(600);
+  expect((await page.locator('.wfd-sub').first().innerText()).startsWith('7 of 8 agents done'), 'the figures settled');
+  expect((await page.locator('.wfd.completed').count()) === 1, 'the card says completed');
+  await page.click('.icon-btn[title="Close panel"]');
+  await page.click('text=Ran an agent');
+  await page.click('.tool[data-tool="Workflow"] .tool-head'); // the card is folded once done; its body carries the figures
+  await page.waitForSelector('.wfi-row', { timeout: 10_000 });
+  expect((await page.locator('.wfi-row').innerText()).includes('7 of 8 agents done'), 'the conversation card carries the run');
+});
+
 // ---------------------------------------------------------------- run
 
 const chosen = tests.filter((t) => !grep || t.name.includes(grep));

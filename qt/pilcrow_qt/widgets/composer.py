@@ -2576,8 +2576,12 @@ class Composer(QWidget):
         if total > 0:
             pct = used / total
             self.ctx_btn.set_values(used, total)
-            tip = f"Context {round(pct * 100)}% used · {context_label(used, total)}"
-            self.ctx_btn.setToolTip(tip + (" — /compact frees space" if pct >= 0.5 else ""))
+            if usage.get("afterCompact"):
+                # the context was compacted; what it holds now is measured at the next reply
+                self.ctx_btn.setToolTip("Context compacted — its size is measured at the next reply")
+            else:
+                tip = f"Context {round(pct * 100)}% used · {context_label(used, total)}"
+                self.ctx_btn.setToolTip(tip + (" — /compact frees space" if pct >= 0.5 else ""))
         has = self.has_content
         self.send_btn.set_state(has, busy and not has, self.send_with_enter)
         suggestion = str(r.get("suggestion") or "") if r and not self.text else ""

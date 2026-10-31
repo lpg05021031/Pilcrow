@@ -12,8 +12,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
-from PySide6.QtCore import QObject, QTimer, Signal
-from PySide6.QtGui import QGuiApplication, Qt
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtGui import QGuiApplication
 
 from . import theme as theme_mod
 from .lib.fmt import err_text, set_home
@@ -180,6 +180,7 @@ class Store(QObject):
         self._flush_timer = QTimer(self)
         self._flush_timer.setSingleShot(True)
         self._flush_timer.setInterval(16)
+        self._flush_timer.setTimerType(Qt.TimerType.PreciseTimer)  # Windows: 16 ms, not the 15.6 ms grid's 31
         self._flush_timer.timeout.connect(self._flush_dirty)
         self._list_timer = QTimer(self)
         self._list_timer.setSingleShot(True)

@@ -42,6 +42,21 @@
   Enter 送出），答完後都收成同一種安靜的記錄。順手修了兩個舊 bug：Qt 的 composer 有焦點（預設狀態）時數字鍵答不了任何
   卡；helper 對話裡 lead 的 brief 畫成一個空的大灰塊。mock 多了 ExitPlanMode 的腳本，提問的回答也照 Claude Code 的格式回傳，
   兩邊的測試都能把三種卡走一遍（`qt/tests/test_islands.py`、`test/e2e/run.mjs`）。
+  **Context 統計**：新的 `server/usage.js` 算 session 的 context——一次回覆讀進去的 input、cache 寫入、cache 讀取三項，
+  跟 Claude Code 自己的 `/context` 與狀態列一樣，不再把回覆的 output 也加進去（那是下一次呼叫的 input）；只算 session
+  自己的回覆，sub-agent 的訊息（帶 `parent_tool_use_id`）不算；compact 之後舊數字作廢——伺服器收到 `compact_boundary`
+  就標成 `afterCompact`，環與 Info 面板寫「Compacted — 下一次回覆才量得到」而不是顯示 compact 前的數字，重新載入歷史時
+  若最後一件事是 compact 也一樣；下一次回覆回來就是新的數字。單元測試 `test/unit/usage.test.ts`、Qt 測試
+  `qt/tests/test_context.py`（mock 多了 compact 腳本）。
+  **Workflow**：伺服器把 `task_progress` 的 state 廣播合併成每 120 ms 最多一次（六十個 agent 回報不再等於每秒六十份完整
+  state 丟給每個 client）；Qt 的 Tasks 面板不再每次進度都重建整張 workflow 卡——數字、進度條、每列文字就地更新，新 agent
+  就地插入，狀態變了的那一列才重建，phase 的狀態也就地改；對話裡的 Workflow 卡片內文跟著 run 走（之前只在工具結果到時
+  才更新）；web 的 Tasks 面板只訂閱 tasks 與對話版本，串流中的回覆不再重畫它。量測見 `qt/PERF.md` §5
+  （`qt/tests/stress/s_workflow.py`）；mock 多了 Workflow 腳本（兩個 phase、八個 agent），Qt 與瀏覽器測試都跑一遍。
+  **Windows**：Qt 視窗開啟時依主螢幕可用範圍縮放（1366×768 的筆電、125 % 的 1080p 不再超出螢幕、右側被裁到 resize 才對），
+  並記住上次的位置與大小（落在螢幕上才還原）；Windows 的原生標題列透過 DWM 跟主題同色（深色模式、標題、邊框、文字）、
+  Windows 11 明確要圓角；畫面時鐘與 16 ms flush 計時器改 PreciseTimer（Windows 預設 15.6 ms 的解析度會把 16 ms 變 31）；
+  WebView2 外殼也明確要圓角。
 
 - **2.11.0**：**Dispatch：一份 brief、一組 repo、一個 job**（設計與現況見 `DISPATCH.md`）。伺服器新增 `server/dispatch_core.js`
   與 `server/dispatch.js`：掃描資料夾找 repo（分支、未提交、遠端、大小、CLAUDE.md，以及 package.json / go.mod /

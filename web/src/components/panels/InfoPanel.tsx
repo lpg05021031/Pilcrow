@@ -58,11 +58,13 @@ export function InfoPanel({ session, cwd }: { session: SessionSummary; cwd: stri
         {/* the gauge fills from empty when the panel opens, and the figures roll to each new value */}
         <div className="gauge-row">
           <RingGauge pct={pct} tone={tone}>
-            {total ? <Num value={pct * 100} format={(v) => `${Math.round(v)}%`} /> : <Num value={used} format={tokens} />}
+            {rt?.usage?.afterCompact ? '—' : total ? <Num value={pct * 100} format={(v) => `${Math.round(v)}%`} /> : <Num value={used} format={tokens} />}
           </RingGauge>
           <div className="gauge-side">
             <div className="gauge-line">
-              {total ? (
+              {rt?.usage?.afterCompact ? (
+                <>Compacted — the context is a summary now; its size is measured at the next reply</>
+              ) : total ? (
                 <>
                   <b className="tnum">
                     <Num value={used} format={tokens} />

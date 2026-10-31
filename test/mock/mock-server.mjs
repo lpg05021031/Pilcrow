@@ -42,6 +42,7 @@ const msg = {
   toolResult: (sid, toolUseId, content, at, structured, isError = false) => ({ type: 'user', uuid: uuid(), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content, is_error: isError }] }, parent_tool_use_id: null, session_id: sid, timestamp: new Date(at).toISOString(), tool_use_result: structured }),
   result: (sid, text, at, ms = 4200, cost = 0.012) => ({ type: 'result', subtype: 'success', uuid: uuid(), session_id: sid, duration_ms: ms, duration_api_ms: ms - 200, is_error: false, num_turns: 1, result: text, total_cost_usd: cost, usage: { input_tokens: 1200, output_tokens: 80, cache_read_input_tokens: 20000 }, modelUsage: { 'claude-mock-1': { inputTokens: 1200, outputTokens: 80, contextWindow: 200000 } } }),
   stream: (sid, event) => ({ type: 'stream_event', uuid: uuid(), session_id: sid, parent_tool_use_id: null, event }),
+  system: (sid, subtype, extra) => ({ type: 'system', subtype, uuid: uuid(), session_id: sid, ...extra }),
 };
 
 /** A finished turn for the history: the question, Claude's words and the work in between. */
@@ -162,6 +163,7 @@ class Sess {
     this.status = 'idle';
     this.live = false;
     this.pending = new Map(); // requestId -> { req, resolve }
+    this.tasks = new Map(); // a workflow's run, as the server keeps it from task_* events
     this.held = [];
     this.mode = 'default';
     this.model = '';
@@ -187,7 +189,7 @@ class Sess {
     return {
       id: this.id, status: this.status, live: this.live, cwd: this.cwd, mode: this.mode, model: this.model, effort: this.effort, activeModel: 'claude-mock-1',
       usage: this.usage, error: null, suggestion: null, compacting: false, mcp: [], activity: this.activity, lastActivity: this.lastActivity, turnStartedAt: this.turnStartedAt, processStartedAt: this.live ? this.createdAt : null, lastReply: this.lastReply,
-      unattended: false, unattendedDenials: 0, pending: [...this.pending.values()].map((p) => p.req), tasks: [], bgTasks: [], queued: [], held: this.held.map((h) => ({ uuid: h.uuid, text: h.text, images: 0, files: [], at: h.at, note: h.note || null, from: h.from || null })),
+      unattended: false, unattendedDenials: 0, pending: [...this.pending.values()].map((p) => p.req), tasks: [...this.tasks.values()], bgTasks: [], queued: [], held: this.held.map((h) => ({ uuid: h.uuid, text: h.text, images: 0, files: [], at: h.at, note: h.note || null, from: h.from || null })),
       init: this.init, commands: null, models: null,
       ...hExtra(this),
       ...this.extra,
@@ -258,6 +260,8 @@ function scriptFor(text) {
   if (/\bmarathon\b/.test(t)) return 'marathon';
   if (/\bperm|permission|run (a |the )?command|dangerous/.test(t)) return 'permission';
   if (/\bplan\b/.test(t)) return 'plan';
+  if (/\bworkflow\b/.test(t)) return 'workflow';
+  if (/\bcompact\b/.test(t)) return 'compact';
   if (/\btool|read|look|check|edit|fix/.test(t)) return 'tools';
   if (/\bask|question/.test(t)) return 'question';
   if (/\bslow\b/.test(t)) return 'slow';
@@ -441,6 +445,65 @@ async function runTurn(s, text) {
       const plan = '# Fix the comment bug\n\n1. Teach the lexer to skip `//` comments to the end of the line.\n2. Add a test for a comment on the last line of a file.\n3. Run the parser tests.';
       const r = await useTool(s, { name: 'ExitPlanMode', input: { plan }, result: 'Plan approved; starting.', structured: { plan, filePath: `${PROJ}/.claude/plans/comment-fix.md` } }, { ask: true });
       await say(s, [{ text: r === 'denied' ? 'Staying in plan mode; tell me what should change.' : 'Starting on the lexer.' }]);
+    } else if (script === 'workflow') {
+      // the Workflow tool: a run of eight agents in two phases, reported the way Claude Code does through task_progress
+      await say(s, [{ text: 'Running the review workflow: two review agents, then a verify pass on each finding.' }]);
+      const wfScript = "export const meta = {\n  name: 'review-changes',\n  description: 'Review the changed files for bugs and for performance, then verify each finding',\n  phases: [{ title: 'Review' }, { title: 'Verify' }],\n}\nconst results = await pipeline(DIMENSIONS, (d) => agent(d.prompt), (r) => parallel(r.findings.map((f) => () => agent(`Verify: ${f.title}`))))\nreturn { confirmed: results.flat().filter((f) => f.verdict?.isReal) }\n";
+      const [{ id }] = await say(s, [{ tool: { name: 'Workflow', input: { script: wfScript } } }]);
+      const taskId = `task_${uuid()}`;
+      const t0 = Date.now();
+      const task = { id: taskId, runId: `wf_${uuid().slice(0, 6)}`, toolUseId: id, description: 'review-changes', type: 'local_workflow', workflowName: 'review-changes', status: 'running', startedAt: t0, workflow: { phases: [{ index: 0, title: 'Review' }, { index: 1, title: 'Verify' }], agents: [], logs: [], updatedAt: t0 } };
+      s.tasks.set(taskId, task);
+      s.out(msg.system(s.id, 'task_started', { task_id: taskId, run_id: task.runId, tool_use_id: id, description: task.description, task_type: 'local_workflow', workflow_name: task.workflowName }));
+      s.emitState();
+      const labels = ['review:bugs', 'review:perf', 'review:tests', 'verify:parse.ts', 'verify:lexer.ts', 'verify:index.ts', 'verify:cli.ts', 'verify:build.ts'];
+      const files = ['src/parse.ts', 'src/lexer.ts', 'test/parse.test.ts'];
+      const agents = labels.map((label, i) => ({ type: 'workflow_agent', index: i, label, phaseIndex: i < 3 ? 0 : 1, phaseTitle: i < 3 ? 'Review' : 'Verify', model: 'claude-mock-1', agentType: i < 3 ? 'general-purpose' : 'Explore', state: 'start', queuedAt: t0, promptPreview: i < 3 ? `Review the changed files for ${label.split(':')[1]} problems. Report findings as JSON.` : `Adversarially verify the finding in ${label.split(':')[1]}: is it real?` }));
+      const steps = 30;
+      const stepMs = pace ? 150 : 8;
+      for (let step = 0; step <= steps && !s.aborted; step++) {
+        const now = Date.now();
+        agents.forEach((a, i) => {
+          const start = i < 3 ? 1 : 12 + (i - 3) * 2;
+          const end = start + (i < 3 ? 10 : 8);
+          if (step >= start && a.state === 'start') { a.startedAt = now; a.state = 'progress'; }
+          if (a.state === 'progress' && step < end) {
+            a.lastProgressAt = now;
+            a.lastToolName = ['Read', 'Grep', 'Bash'][step % 3];
+            a.lastToolSummary = `${a.lastToolName} ${files[(step + i) % 3]}`;
+            a.toolUseCount = (a.toolUseCount || 0) + 1;
+            a.totalTokens = (a.totalTokens || 0) + 1200;
+          } else if (a.state === 'progress' && step >= end) {
+            a.endedAt = now;
+            if (i === 6) { a.state = 'error'; a.error = 'The agent hit its turn limit before deciding.'; } else { a.state = 'done'; a.resultPreview = `${a.label}: ${i < 3 ? '2 findings, both in the lexer.' : 'confirmed; reproduces with a comment on the last line.'}`; }
+          }
+        });
+        const usage = { total_tokens: agents.reduce((n, a) => n + (a.totalTokens || 0), 0), tool_uses: agents.reduce((n, a) => n + (a.toolUseCount || 0), 0), duration_ms: now - t0 };
+        task.usage = usage;
+        task.workflow.agents = agents.map((a) => ({ ...a, updatedAt: now }));
+        if (step === 12) task.workflow.logs.push({ at: now, message: 'Review done: 6 findings; verifying each.' });
+        task.workflow.updatedAt = now;
+        s.out(msg.system(s.id, 'task_progress', { task_id: taskId, description: task.description, usage, last_tool_name: 'Agent', workflow_progress: task.workflow.agents }));
+        s.emitState();
+        await sleep(stepMs);
+      }
+      task.status = 'completed';
+      task.endedAt = Date.now();
+      task.summary = '5 findings confirmed, 1 agent failed';
+      s.out(msg.system(s.id, 'task_notification', { task_id: taskId, status: 'completed', summary: task.summary, tool_use_id: id, usage: task.usage }));
+      s.emitState();
+      s.record(msg.toolResult(s.id, id, JSON.stringify({ confirmed: 5 }, null, 2), Date.now(), { confirmed: 5 }));
+      await say(s, [{ text: 'Five findings confirmed; the verify agent for cli.ts ran out of turns, so that one is unchecked.' }]);
+    } else if (script === 'compact') {
+      // a compaction, the way Claude Code reports it: a compact_boundary, the figure unknown until the next reply
+      const pre = s.usage.contextTokens;
+      s.usage = { ...s.usage, contextTokens: 0, afterCompact: true, compactedFrom: pre };
+      s.record(msg.system(s.id, 'compact_boundary', { compact_metadata: { trigger: 'manual', pre_tokens: pre } }));
+      s.emitState();
+      await sleep(pace ? 600 : 30);
+      await say(s, [{ text: 'Compacted. The summary keeps the decisions and the open questions; the rest is gone.' }]);
+      s.usage = { ...s.usage, contextTokens: 14000, afterCompact: false };
+      s.emitState();
     } else if (script === 'question') {
       await say(s, [{ text: 'Before I go on, one question.' }]);
       await useTool(s, { name: 'AskUserQuestion', input: { questions: [{ question: 'Which style?', header: 'Style', options: [{ label: 'Compact', description: 'Short lines' }, { label: 'Verbose', description: 'Everything' }], multiSelect: false }] }, result: 'Compact' }, { ask: true });

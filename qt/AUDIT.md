@@ -27,6 +27,7 @@ renders. The scripts:
 | `s_hidpi.py` | Device pixel ratios 1.25 and 1.5: cached against direct paints, hairlines |
 | `s_misc.py` | A pointer sweep over tool heads and prose; the sidebar with 500 sessions; a 3000-line paste in the composer |
 | `s_helpers.py` | A lead's conversation full of helper notes and cards flung through; in the real window, eight helpers whose state ticks ten times a second while the lead is quiet and while a reply streams: which widgets repaint, which receive a layout pass, what an update costs, with the Changes tab in front and behind (HELPERS.md §11) |
+| `s_workflow.py` | A workflow of sixty agents reporting ten times a second in the real window: what the Tasks tab builds and repaints per update, the cost on the main thread, with the tab in front, behind another tab, and with the panel closed |
 | `s_app.py`, `s_panel.py`, `s_open.py` | The whole window against the mock server: a reply streaming into the real session view, the panel and the sidebar toggled, a window resize storm, find, and the opening of a long session frame by frame |
 
 ## 2. Findings, worst first

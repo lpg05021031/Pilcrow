@@ -496,7 +496,7 @@ export function Composer({ sessionId, cwd }: { sessionId: string; cwd: string })
             <ChevronDown size={12} className="cbtn-chev" />
           </button>
           {ctxTotal > 0 && (
-            <button className={`ctx-btn${ctxPct > 0.85 ? ' hot' : ''}${ctxPct >= 0.5 ? ' with-num' : ''}`} title={`Context ${Math.round(ctxPct * 100)}% used · ${contextLabel(ctxUsed, ctxTotal)}${ctxPct >= 0.5 ? ' — /compact frees space' : ''}`} aria-label="Context window usage" onClick={() => setUi({ panel: true, panelTab: 'info' })}>
+            <button className={`ctx-btn${ctxPct > 0.85 ? ' hot' : ''}${ctxPct >= 0.5 ? ' with-num' : ''}`} title={rt?.usage?.afterCompact ? 'Context compacted — its size is measured at the next reply' : `Context ${Math.round(ctxPct * 100)}% used · ${contextLabel(ctxUsed, ctxTotal)}${ctxPct >= 0.5 ? ' — /compact frees space' : ''}`} aria-label="Context window usage" onClick={() => setUi({ panel: true, panelTab: 'info' })}>
               <ContextRing used={ctxUsed} total={ctxTotal} size={16} />
               {ctxPct >= 0.5 && (
                 <span className="tnum">

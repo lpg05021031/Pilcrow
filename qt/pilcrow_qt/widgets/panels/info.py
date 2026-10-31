@@ -459,7 +459,8 @@ class InfoPanel(QWidget):
         rl.setSpacing(16)
         self.ring = RingGauge()
         self.ring.set_values(used, total)
-        self.ring.set_text(f"{round(pct * 100)}%" if total else tokens(used))
+        after_compact = bool(usage.get("afterCompact"))
+        self.ring.set_text("—" if after_compact else f"{round(pct * 100)}%" if total else tokens(used))
         rl.addWidget(self.ring)
         side = QWidget()
         sl = QVBoxLayout(side)
@@ -468,7 +469,9 @@ class InfoPanel(QWidget):
         self.gauge_line = lbl("", theme.FS_SMALL, tone="faint")
         self.gauge_line.setTextFormat(Qt.TextFormat.RichText)
         self.gauge_line.setText(
-            f'<b style="color:{t.text}; font-weight:600">{tokens(used)}</b> of {tokens(total)} tokens'
+            "Compacted — the context is a summary now; its size is measured at the next reply"
+            if after_compact
+            else f'<b style="color:{t.text}; font-weight:600">{tokens(used)}</b> of {tokens(total)} tokens'
             if total
             else f"{tokens(used)} of {tokens(total)}"
         )
