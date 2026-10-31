@@ -133,10 +133,13 @@ LEXER_ALIAS = {
     "plaintext": "text",
 }
 
-# The padding of an inline code pill (``.md :not(pre) > code { padding: 0.14em 0.38em }``): QTextDocument
-# cannot pad a span, so two narrow no-break spaces (U+202F, glue: no line break around them) on either side make the room and the view paints the pill
-# under them. They are stripped again when the text is copied.
-PILL_PAD = "\u202f\u202f"
+# The padding of an inline code pill (``.md :not(pre) > code { padding: 0.14em 0.38em }``):
+# QTextDocument cannot pad a span, so a narrow no-break space (U+202F, glue: no line break around it)
+# on either side makes the room and the view paints the pill under it. In the mono face a space is a
+# full cell, far wider than 0.38em, so the pad is set at the font size that makes it that wide
+# (``pill_pad_px``). The pads are stripped again when the text is copied.
+PILL_PAD = "\u202f"
+PILL_PAD_EM = 0.38
 # The left margin that marks a blockquote block for the view (``padding-left: 14px`` plus the 2px rule).
 QUOTE_INDENT = 14
 # A table cell's right padding (``.md td { padding: 7px 14px 7px 0 }``).
@@ -160,6 +163,15 @@ NO_BREAK = "\u2060"
 
 def _no_break(code_html: str) -> str:
     return _UNIT_RE.sub(lambda mt: mt.group(1) + NO_BREAK, code_html)
+
+
+def pill_pad_px(m: Metrics) -> int:
+    """The font size at which one pad character is as wide as the pill's side padding (0.38em of the
+    code size), measured from the mono face's own advance for it."""
+    adv = font_metrics(m.code, mono=True).horizontalAdvance(PILL_PAD)
+    if adv <= 0:
+        return max(1, m.code // 2)
+    return max(1, px(PILL_PAD_EM * m.code * m.code / adv))
 
 
 def lang_label(lang: str) -> str:
@@ -560,11 +572,12 @@ def _post_process(body: str, t: theme.Tokens, base_dir: Optional[str], m: Metric
 
     body = _FENCE_RE.sub(fence, body)
     # Inline code: mono at 0.86em on a pill the view paints; the transparent background is its marker.
+    pad = f'<span style="font-size:{pill_pad_px(m)}px">{PILL_PAD}</span>'
     body = re.sub(
         r"<code>(.*?)</code>",
         lambda mt: (
             f"<code style=\"font-family:'{mono}';font-size:{m.code}px;background-color:rgba(0,0,0,0);white-space:pre\">"
-            f"{_no_break(PILL_PAD + mt.group(1) + PILL_PAD)}</code>"  # the pads stay with the code
+            f"{pad}{_no_break(mt.group(1))}{pad}</code>"  # the pads stay with the code (glue)
         ),
         body,
         flags=re.S,

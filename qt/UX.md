@@ -113,7 +113,7 @@ What the layout was saying wrongly, and what it says now:
 | A task list | `[x]` and `[ ]` as words, after a bullet. | A box in the marker's place, filled with a check when done; the words line up with every other list's. |
 | Bullets | A disc at every depth; markers the colour of the words. | Disc, circle, square as lists nest; markers in the quiet colour (`li::marker`), the words in the text colour. |
 | Chinese in an italic comment | Slanted by synthesis (CJK faces have no italic). | Upright, as `font-synthesis-style: none` keeps it on the web; the Latin around it stays italic. |
-| An inline code span that wrapped | Its padding alone on a line drew an empty pill. | No pill under nothing. |
+| An inline code span | The pill was 14px wider than its words on each side: its padding was two spaces of the mono face, and a mono space is a full cell. | The pad is set at the size that makes it 0.38em of the code, the web's padding, so the pill hugs its words. A span that wrapped no longer draws an empty pill under its padding alone. |
 | Selecting words | A press on plain prose started no selection, only a double or triple click did; a press in the top two pixels of a code line selected to the end of the block. | A press on any words starts a selection, on a target's words or not; a point in the leading of a line is read as on that line. |
 
 What was looked at and kept: the prose measure (14.5px on 24px lines, 0.75em between paragraphs),

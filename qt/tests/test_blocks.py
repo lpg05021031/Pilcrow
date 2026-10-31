@@ -83,18 +83,29 @@ def test_pill_rects_follow_the_code_spans(app):
     b = prose("see `next` and `/undefined` here")
     doc = b.doc
     blk = doc.firstBlock()
-    marked = []
+    marked = []  # each span is a run of marked fragments: a pad, the code, a pad
     it = blk.begin()
+    last_end = -1
     while not it.atEnd():
         fr = it.fragment()
         bg = fr.charFormat().background()
         if bg.style() != Qt.BrushStyle.NoBrush and bg.color().alpha() == 0:
-            marked.append(fr.text().replace(chr(0x2060), ""))  # the no-wrap joiners are not text
+            piece = fr.text().replace(chr(0x2060), "")  # the no-wrap joiners are not text
+            if marked and fr.position() == last_end:
+                marked[-1] += piece
+            else:
+                marked.append(piece)
+            last_end = fr.position() + fr.length()
         it += 1
     assert marked == [
         f"{markdown.PILL_PAD}next{markdown.PILL_PAD}",
         f"{markdown.PILL_PAD}/undefined{markdown.PILL_PAD}",
     ]
+    # the pad is the web's 0.38em of the code size, not a full mono cell
+    pad_w = tl_pad = (
+        blk.layout().lineAt(0).cursorToX(len("see ") + 1)[0] - blk.layout().lineAt(0).cursorToX(len("see "))[0]
+    )
+    assert abs(pad_w - 0.38 * markdown.PROSE.code) < 1.0, (pad_w, tl_pad)
     # the painted pill is the fill-2 tint under the first span's glyphs
     img = painted(b)
     tl = blk.layout()

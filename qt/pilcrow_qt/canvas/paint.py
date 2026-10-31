@@ -173,14 +173,18 @@ def _block_height(b: Any, br: QRectF) -> float:
     return max(br.height(), last.y() + last.height())
 
 
-_PAD_CHARS = markdown.PILL_PAD[0] + markdown.NO_BREAK + " "
+_PAD_CHARS = markdown.PILL_PAD + markdown.NO_BREAK + " "
 
 
 def _pills(p: QPainter, b: Any, br: QRectF, color: QColor) -> None:
+    """The pill under each inline code span of a block: one rounded rectangle per line it covers.
+    A span is the run of consecutive fragments carrying the transparent-background marker (its pads
+    are fragments of their own, at a smaller size)."""
     tl = b.layout()
     if tl is None or tl.lineCount() == 0:
         return
     text = b.text()
+    runs: List[Tuple[int, int, float, float]] = []  # start, end (block positions), ascent, descent
     it = b.begin()
     while not it.atEnd():
         fr = it.fragment()
@@ -189,9 +193,14 @@ def _pills(p: QPainter, b: Any, br: QRectF, color: QColor) -> None:
         if bg.style() == Qt.BrushStyle.NoBrush or bg.color().alpha() != 0:
             continue
         fm = QFontMetricsF(fr.charFormat().font())
-        asc, desc = fm.ascent(), fm.descent()
         start = fr.position() - b.position()
         end = start + fr.length()
+        if runs and runs[-1][1] == start:
+            s0, _e, asc, desc = runs[-1]
+            runs[-1] = (s0, end, max(asc, fm.ascent()), max(desc, fm.descent()))
+        else:
+            runs.append((start, end, fm.ascent(), fm.descent()))
+    for start, end, asc, desc in runs:
         line = tl.lineForTextPosition(start)
         while line.isValid() and line.textStart() < end:
             a = max(start, line.textStart())

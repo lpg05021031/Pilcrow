@@ -42,7 +42,9 @@ def test_metrics_follow_the_css():
 def test_inline_code_is_a_marked_padded_span(app):
     out = markdown.render_html("use `next` here")
     assert "background-color:rgba(0,0,0,0)" in out  # the pill marker the view paints from
-    assert f">{markdown.PILL_PAD}next{markdown.PILL_PAD}</code>" in out.replace(chr(0x2060), "")  # minus the joiners
+    pad = f'<span style="font-size:{markdown.pill_pad_px(markdown.PROSE)}px">{markdown.PILL_PAD}</span>'
+    assert f">{pad}next{pad}</code>" in out.replace(chr(0x2060), "")  # minus the joiners
+    assert 6 <= markdown.pill_pad_px(markdown.PROSE) <= 9  # a 0.38em pad in the mono face
     assert "font-size:12px" in out
     assert '<p style="line-height:24px">' in out
 
