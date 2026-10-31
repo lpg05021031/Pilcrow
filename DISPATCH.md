@@ -10,6 +10,10 @@ session touched, a control room that watches live sessions and answers their per
 a Qt client whose canvas engine draws thousands of rows at 60 Hz on a CPU. Dispatch is the job object
 that ties them together, and the two screens that show it.
 
+The companion design, HELPERS.md, is the other shape of multi-repository work: one session that leads
+other sessions, each with a brief of its own, the split decided by a model turn by turn. The two share
+the worktree sessions, the permission rules, the fan-in review and the record.
+
 ## Status
 
 All three phases are built. The server side is `server/dispatch_core.js` (the state machine, the scan,
@@ -42,6 +46,9 @@ remote. Not built: a lead agent that splits one task into per-repository briefs 
 and sessions on other machines (Pilcrow runs where its server runs).
 
 ## 0. What herdr does, and where the room is
+
+This section is written against the Herdr TUI, the product at the time. The desktop app on herdr-core
+(`hc`) that followed, with its parent and child agents, is covered in HELPERS.md §2.
 
 herdr (herdr.dev, Apache-2.0, one Rust binary) is the runtime many people run their agents on, and it
 is good at being that: panes survive the client closing or an SSH drop because a background server owns
