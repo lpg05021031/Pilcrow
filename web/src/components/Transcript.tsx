@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { ArrowDown, PencilLine, GitFork, ChevronRight, Info, TriangleAlert, CircleAlert, Layers, Paperclip, Terminal as TermIcon, History, Telescope, CircleCheck, Sparkles } from 'lucide-react';
-import { useStore, models, forkSession, insertIntoComposer, toast, call, confirmAction, bumpFs, openLightbox } from '../lib/store';
+import { useStore, models, forkSession, insertIntoComposer, toast, call, confirmAction, bumpFs, openLightbox, openSession } from '../lib/store';
 import type { Item, ToolItem, UserItem, ThinkingItem, TextItem, NoticeItem, ResultItem, CompactItem, CommandOutputItem } from '../lib/transcript';
 import type { PermissionRequest } from '../lib/types';
 import { duration, tokens, cost, truncate, relPath, basename } from '../lib/format';
@@ -689,6 +689,7 @@ const ItemView = memo(
 function UserMessage({ item, ctx }: { item: UserItem; ctx: ToolCtx }) {
   const queued = useStore((s) => s.rt[ctx.sessionId]?.queued?.includes(item.uuid));
   const busy = useStore((s) => ['running', 'starting', 'requires_action'].includes(s.rt[ctx.sessionId]?.status || ''));
+  if (item.note) return <HelperNote item={item} ctx={ctx} />;
   if (item.command) {
     return (
       <div className="msg-user command">
@@ -735,6 +736,11 @@ function UserMessage({ item, ctx }: { item: UserItem; ctx: ToolCtx }) {
   };
   return (
     <div className={`msg-user${queued ? ' queued' : ''}`} lang={langOf(item.text)} id={`msg-${item.uuid}`}>
+      {item.from && (
+        <span className="msg-from" title="Sent by another session">
+          {item.from}
+        </span>
+      )}
       <div className="msg-bubble">
         {(item.images.length > 0 || item.files.length > 0) && (
           <div className="msg-attachments">
@@ -1305,5 +1311,60 @@ function Jump({ onClick }: { onClick: () => void }) {
     <button ref={ref} className="jump" onClick={onClick}>
       <ArrowDown size={14} /> Latest
     </button>
+  );
+}
+
+// ---------------------------------------------------------------- a helper's note to its lead (HELPERS.md §5.4)
+
+const NOTE_RE = /<helper-note\s+([^>]*)>\n?([\s\S]*?)\n?<\/helper-note>/g;
+const ATTR_RE = /(\w+)="([^"]*)"/g;
+
+function parseNotes(text: string) {
+  const parts: Record<string, string>[] = [];
+  const tail: string[] = [];
+  let last = 0;
+  for (const m of text.matchAll(NOTE_RE)) {
+    const before = text.slice(last, m.index).trim();
+    if (before) tail.push(before);
+    const attrs: Record<string, string> = {};
+    for (const a of m[1].matchAll(ATTR_RE)) attrs[a[1]] = a[2];
+    attrs.body = m[2].trim();
+    parts.push(attrs);
+    last = (m.index || 0) + m[0].length;
+  }
+  const rest = text.slice(last).trim();
+  if (rest) tail.push(rest);
+  return { parts, tail: tail.join(' ') };
+}
+
+/** Drawn apart from the person's messages: left-aligned, a rule in the state's colour, the helper's name
+ *  and numbers in the head, its handoff as quiet prose, Open at the right. */
+function HelperNote({ item, ctx }: { item: UserItem; ctx: ToolCtx }) {
+  const helpers = useStore((s) => s.rt[ctx.sessionId]?.helpers);
+  const { parts, tail } = parseNotes(item.text);
+  const open = (name: string) => {
+    const h = helpers?.find((x) => x.name === name);
+    if (h) openSession(h.id);
+    else toast(`${name} is no longer a helper of this session`, 'info');
+  };
+  return (
+    <div className="msg-note" id={`msg-${item.uuid}`}>
+      {(parts.length ? parts : [{ name: 'note', state: '', body: item.text }]).map((p, k) => (
+        <div key={k} className={`note ${p.state || ''}`}>
+          <div className="note-head">
+            <span className="note-name">{p.name}</span>
+            <span className="note-meta faint tnum">
+              {[p.state?.replace('_', ' '), p.elapsed, p.cost, p.files && p.files !== '0' ? `${p.files} files +${p.add || 0} −${p.del || 0}` : ''].filter(Boolean).join(' · ')}
+            </span>
+            <span className="grow" />
+            <button className="btn xs ghost" onClick={() => open(p.name)} title="Open the helper's session">
+              Open
+            </button>
+          </div>
+          {p.body && <div className="note-body">{p.body}</div>}
+        </div>
+      ))}
+      {tail && <div className="note-tail faint small">{tail}</div>}
+    </div>
   );
 }

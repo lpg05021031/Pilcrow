@@ -282,6 +282,11 @@ class ChangesPanel(QWidget):
         self.empty_edits = EmptyState("", "No file edits in this session yet.")
         self.empty_edits.hide()
         self._host_lay.addWidget(self.empty_edits)
+        # a lead's helpers, each worktree a section, with the finish actions (HELPERS.md §6.5)
+        from .helpers_changes import HelpersChanges
+
+        self.helpers = HelpersChanges(session_id)
+        self._host_lay.addWidget(self.helpers)
         self._host_lay.addStretch(1)
         self.scroll.setWidget(host)
         lay.addWidget(self.scroll, 1)

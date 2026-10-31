@@ -4336,3 +4336,195 @@ button.rp-alias:hover {
 .suggest-item .suggest-repo {
   color: var(--plan);
 }
+
+/* ================================================================ helpers (HELPERS.md)
+   A lead's bar under its header, the chips, a helper's note in the conversation, the lead's tools as
+   cards, the Changes panel's sections, the sidebar's nesting. */
+.helpers-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 4px 18px 4px 20px;
+  border-bottom: 1px solid var(--hair);
+  background: var(--chrome);
+  font-size: var(--fs-small);
+}
+.helpers-chips {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+.helper-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 22px;
+  padding: 0 9px 0 8px;
+  border: 0;
+  border-radius: 11px;
+  background: var(--fill-1);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  max-width: 280px;
+  cursor: pointer;
+}
+.helper-chip:hover {
+  background: var(--fill-2);
+}
+.helper-chip.warm {
+  background: var(--warn-wash);
+}
+.helper-chip .dp-glyph {
+  width: 8px;
+  height: 8px;
+}
+.status-pill.leading {
+  color: var(--accent-text);
+}
+.status-pill.leading .status-dot {
+  animation: breathe 1.2s ease-in-out infinite;
+}
+.status-sub {
+  color: var(--text-3);
+  font-weight: 400;
+}
+.side-row.sub {
+  margin-left: 18px;
+}
+.msg-user .msg-from {
+  align-self: flex-end;
+  margin: 0 6px 3px 0;
+  padding: 0 7px;
+  border-radius: 9px;
+  background: var(--plan-wash);
+  color: var(--plan);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.msg-note {
+  display: grid;
+  gap: 6px;
+  max-width: 84%;
+  margin: 18px 0 8px;
+}
+.note {
+  display: grid;
+  gap: 4px;
+  padding: 7px 12px 9px 14px;
+  border-left: 2px solid var(--text-3);
+  border-radius: 0 var(--r-3) var(--r-3) 0;
+  background: var(--fill-1);
+}
+.note.done {
+  border-left-color: var(--ok);
+}
+.note.failed {
+  border-left-color: var(--err);
+}
+.note-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-small);
+}
+.note-name {
+  font-weight: 600;
+}
+.note-meta {
+  font-size: var(--fs-micro);
+}
+.note-body {
+  color: var(--text-2);
+  font-size: var(--fs-small);
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+.note-tail {
+  padding-left: 2px;
+}
+.hb {
+  display: grid;
+  gap: 8px;
+}
+.hb-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hb-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+  font-size: 12.5px;
+}
+.hb-row .dp-word {
+  font-weight: 500;
+}
+.hb-name {
+  font-weight: 600;
+}
+.hb-last {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.hb-fold {
+  display: grid;
+  gap: 4px;
+}
+.hb-fold-body {
+  padding-top: 2px;
+}
+.hc {
+  border-top: 1px solid var(--hair);
+}
+.hc-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+}
+.hc-sec {
+  border-top: 1px solid var(--hair);
+}
+.hc-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 6px 8px;
+  font-size: var(--fs-small);
+  min-width: 0;
+}
+.hc-name {
+  font-weight: 600;
+}
+.hc-body {
+  display: grid;
+  gap: 8px;
+  padding: 0 12px 10px 36px;
+}
+.hc-note {
+  padding: 2px 0 4px;
+}
+.hc-file-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-micro);
+  padding: 2px 0 4px;
+}
+.hc-file-head .mono {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -141,7 +141,7 @@ export function InboxPage() {
                 <span className="ov-count">{g.items.length}</span>
               </h2>
               {g.items.map((it, i) =>
-                it.kind === 'dispatch' ? <DispatchCard key={it.id} it={it} index={i} onRead={() => markOne(it.id)} onRemove={() => remove(it.id)} /> : <RunCard key={it.id} it={it} index={i} onOpen={() => (markOne(it.id), it.sessionId && openSession(it.sessionId))} onRead={() => markOne(it.id)} onRemove={() => remove(it.id)} />,
+                it.kind === 'dispatch' ? <DispatchCard key={it.id} it={it} index={i} onRead={() => markOne(it.id)} onRemove={() => remove(it.id)} /> : it.kind === 'helpers' ? <HelpersCard key={it.id} it={it} index={i} onRead={() => markOne(it.id)} onRemove={() => remove(it.id)} /> : <RunCard key={it.id} it={it} index={i} onOpen={() => (markOne(it.id), it.sessionId && openSession(it.sessionId))} onRead={() => markOne(it.id)} onRemove={() => remove(it.id)} />,
               )}
             </section>
           ))}
@@ -232,6 +232,88 @@ function RunCard({ it, index, onOpen, onRead, onRemove }: { it: InboxItem; index
 }
 
 /** A dispatch job's report: the badge, the name, what landed where, the prose when an agent wrote it, one line per repository. */
+/** A lead's helpers once they are all done (HELPERS.md §6.6): a row per helper with its handoff's first line. */
+function HelpersCard({ it, index, onRead, onRemove }: { it: InboxItem; index: number; onRead: () => void; onRemove: () => void }) {
+  const helpers = it.helpers || [];
+  const done = helpers.filter((h) => h.state === 'done').length;
+  const landed = helpers.filter((h) => h.finished === 'commit').length;
+  const prs = helpers.filter((h) => h.pr).length;
+  const Icon = it.status === 'completed' ? CircleCheck : CircleAlert;
+  const line = `${done} of ${plural(helpers.length, 'helper')} done${landed ? ` · ${landed} committed` : ''}${prs ? ` · ${plural(prs, 'pull request')}` : ''}${it.reason ? ` · ${it.reason}` : ''}`;
+  const firstLine = (handoff: string) =>
+    handoff
+      .split('\n')
+      .map((l) => l.replace(/^[#*\s]+|[*\s]+$/g, ''))
+      .find((l) => l && !/^handoff\b/i.test(l)) || '';
+  const copy = async () => {
+    const md = await call<string>('helpers.export', { leadId: it.leadId }).catch(() => null);
+    if (md) {
+      await copyText(md);
+      toast('Copied as Markdown.', 'info');
+    }
+  };
+  return (
+    <article className={`run dp-report${it.read ? '' : ' unread'} ${it.status}`} onClick={onRead} style={{ animationDelay: `${Math.min(index, 6) * 40}ms` }}>
+      <span className={`run-badge ${it.status}`} aria-hidden="true">
+        <Icon size={15} />
+      </span>
+      <div className="run-main">
+        <div className="run-head">
+          {!it.read && <span className="run-dot" title="New" />}
+          <span className="run-name ellipsis">{it.title || it.scheduleName}</span>
+          <span className="chip tiny">
+            <ArrowUpRight size={10} /> helpers
+          </span>
+          <span className="run-when tnum">
+            {clock(it.endedAt)} · {duration(it.durationMs)}
+          </span>
+        </div>
+        <p className="run-sum">{line}</p>
+        <div className="dp-report-rows">
+          {helpers.slice(0, 12).map((h) => (
+            <div key={h.id} className="dp-report-row">
+              <span className={`dp-glyph ${h.state}`} aria-hidden="true" />
+              <span className="dp-report-name ellipsis">{h.name}</span>
+              <span className="dp-report-what ellipsis faint">{h.state !== 'done' ? h.reason || h.state : firstLine(h.handoff || '') || 'done'}</span>
+              <span className="dp-report-nums tnum faint">
+                {h.files > 0 && (
+                  <>
+                    {plural(h.files, 'file')} <span className="num-add">+{h.add}</span> <span className="num-del">−{h.del}</span>
+                  </>
+                )}
+                {h.cost > 0 && <span> {cost(h.cost)}</span>}
+                {h.commit && <span className="mono"> {h.commit}</span>}
+                {h.pr && (
+                  <a href={h.pr} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
+                    {' '}
+                    PR
+                  </a>
+                )}
+              </span>
+            </div>
+          ))}
+          {helpers.length > 12 && <div className="hint">and {helpers.length - 12} more</div>}
+        </div>
+        <div className="run-foot">
+          {it.cost > 0 && <span className="tnum">{cost(it.cost)}</span>}
+          <div className="grow" />
+          <button className="btn xs ghost" onClick={(e) => (e.stopPropagation(), copy())} title="The helpers' handoffs as Markdown, to the clipboard">
+            <ClipboardPaste size={11} /> Copy Markdown
+          </button>
+          {it.leadId && (
+            <button className="btn xs" onClick={(e) => (e.stopPropagation(), onRead(), openSession(it.leadId!))} title="The lead's conversation">
+              <ArrowUpRight size={11} /> Open the lead
+            </button>
+          )}
+          <button className="icon-btn sm run-x" title="Dismiss" onClick={(e) => (e.stopPropagation(), onRemove())}>
+            <X size={13} />
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
 function DispatchCard({ it, index, onRead, onRemove }: { it: InboxItem; index: number; onRead: () => void; onRemove: () => void }) {
   const rep = it.dispatch;
   const targets = rep?.targets || [];

@@ -666,10 +666,10 @@ async function foldRow(id: string): Promise<() => void> {
   };
 }
 
-export async function deleteSession(id: string, removeWorktree = false) {
+export async function deleteSession(id: string, removeWorktree = false, removeHelpers = false) {
   const unfold = await foldRow(id);
   try {
-    await call('session.delete', { id, removeWorktree });
+    await call('session.delete', { id, removeWorktree, removeHelpers });
   } catch (e) {
     unfold();
     throw e;

@@ -43,9 +43,14 @@ The web client has the same screens over the same RPC (`web/src/components/dispa
 the job view, the composer with playbooks and the plan, the Dispatch entry in the sidebar with its
 badge, the report card in the inbox, and the schedule dialog's playbook choice.
 
+The registry (REPOSITORIES.md) is read since: the scan marks registered repositories and the picker
+puts them first with their notes prefilled, the plan blocks a repository whose policy is *never*, a
+target's notes join the registry's standing notes in the brief, and prepare and verify fall back to
+the registry's defaults.
+
 Pull requests through `gh` are implemented on the server and not yet exercised against a live GitHub
-remote. Not built: a lead agent that splits one task into per-repository briefs (the brief is yours),
-and sessions on other machines (Pilcrow runs where its server runs).
+remote. A lead agent that splits one task into per-repository briefs is the other shape, Helpers
+(HELPERS.md), built since. Not built: sessions on other machines (Pilcrow runs where its server runs).
 
 ## 0. What herdr does, and where the room is
 

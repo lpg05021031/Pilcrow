@@ -130,6 +130,28 @@ def tool_meta(name: str, tool_input: Optional[ToolInput], cwd: Optional[str] = N
     if name in ("ListMcpResourcesTool", "ReadMcpResourceTool"):
         verb = "Read resource" if name == "ReadMcpResourceTool" else "List resources"
         return ToolMeta("plug", verb, s("uri") or s("server") or "")
+    if name.startswith("mcp__helpers__"):
+        # the lead's tools (HELPERS.md): named by what happened, not by the server
+        tool = name[len("mcp__helpers__") :]
+        icon, verb = {
+            "start": ("arrow-up-right", "Started helper"),
+            "wait": ("clock", "Waited for"),
+            "read": ("eye", "Read helper"),
+            "send": ("send", "Told helper"),
+            "stop": ("square", "Stopped helper"),
+            "list": ("list", "Listed helpers"),
+        }.get(tool, ("arrow-up-right", f"Helpers · {tool}"))
+        if tool == "wait":
+            names = i.get("names") if isinstance(i.get("names"), list) else None
+            target = ", ".join(str(n) for n in names) if names else "all helpers"
+        elif tool == "list":
+            target = ""
+        else:
+            target = s("name")
+            where = s("repo") or (_short(s("cwd"), cwd) if s("cwd") else "")
+            if tool == "start" and where:
+                target = f"{target} in {where}"
+        return ToolMeta(icon, verb, target)
     if name.startswith("mcp__"):
         parts = name.split("__")
         server = parts[1] if len(parts) > 1 else ""

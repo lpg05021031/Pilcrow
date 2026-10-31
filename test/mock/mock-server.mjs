@@ -180,14 +180,16 @@ class Sess {
     this.extra = {}; // fields the tests lay over state() (mock.patch): tasks, mcp, …
   }
   summary() {
-    return { id: this.id, title: this.title, firstPrompt: this.messages[0]?.message?.content?.[0]?.text, cwd: this.cwd, project: this.cwd, gitBranch: 'main', lastModified: this.touched, createdAt: this.createdAt, archived: this.archived, pinned: this.pinned, worktree: null, scheduled: this.scheduled || null, dispatch: this.dispatch || null, status: this.status, live: this.live, pending: this.pending.size };
+    const mine = hOf(this.id);
+    return { id: this.id, title: this.title, firstPrompt: this.messages[0]?.message?.content?.[0]?.text, cwd: this.cwd, project: this.worktree?.repoRoot || this.cwd, gitBranch: 'main', lastModified: this.touched, createdAt: this.createdAt, archived: this.archived, pinned: this.pinned, worktree: this.worktree || null, scheduled: this.scheduled || null, dispatch: this.dispatch || null, helper: this.helper ? { leadId: this.helper.leadId, name: this.helper.name, state: hAll.get(this.id)?.state || null } : null, lead: mine.length ? { since: mine[0].startedAt, count: mine.length } : null, status: this.status, live: this.live, pending: this.pending.size };
   }
   state() {
     return {
       id: this.id, status: this.status, live: this.live, cwd: this.cwd, mode: this.mode, model: this.model, effort: this.effort, activeModel: 'claude-mock-1',
       usage: this.usage, error: null, suggestion: null, compacting: false, mcp: [], activity: this.activity, lastActivity: this.lastActivity, turnStartedAt: this.turnStartedAt, processStartedAt: this.live ? this.createdAt : null, lastReply: this.lastReply,
-      unattended: false, unattendedDenials: 0, pending: [...this.pending.values()].map((p) => p.req), tasks: [], bgTasks: [], queued: [], held: this.held.map((h) => ({ uuid: h.uuid, text: h.text, images: 0, files: [], at: h.at })),
+      unattended: false, unattendedDenials: 0, pending: [...this.pending.values()].map((p) => p.req), tasks: [], bgTasks: [], queued: [], held: this.held.map((h) => ({ uuid: h.uuid, text: h.text, images: 0, files: [], at: h.at, note: h.note || null, from: h.from || null })),
       init: this.init, commands: null, models: null,
+      ...hExtra(this),
       ...this.extra,
     };
   }
@@ -251,6 +253,8 @@ seed();
 /** What Claude does with a message: keywords in the prompt pick the script. */
 function scriptFor(text) {
   const t = text.toLowerCase();
+  if (t.startsWith('<helper-note')) return 'note';
+  if (/\bstart (two |some |the )?helpers?\b/.test(t)) return 'helpers';
   if (/\bmarathon\b/.test(t)) return 'marathon';
   if (/\bperm|permission|run (a |the )?command|dangerous/.test(t)) return 'permission';
   if (/\btool|read|look|check|edit|fix/.test(t)) return 'tools';
@@ -373,7 +377,8 @@ async function runTurn(s, text) {
   s.turnSeq++;
   const mine = s.turnSeq;
   s.aborted = false;
-  const script = scriptFor(text);
+  // a helper's brief carries Pilcrow's header; the script comes from the brief itself
+  const script = scriptFor(text.startsWith(H_HEADER) ? text.slice(H_HEADER.length) : text);
   try {
     if (script === 'plain') {
       await say(s, [{ text: `You said “${text.trim().slice(0, 60)}”. Here is a short reply with a list:\n\n- one thing\n- another thing\n\nAnd a line of \`code\` to round it off.` }]);
@@ -410,6 +415,21 @@ async function runTurn(s, text) {
       const r = await useTool(s, BASH('rm -rf build && npm run build', 'Rebuild from scratch', 'built in 4.2s'), { ask: true });
       if (s.aborted) throw new Error('aborted');
       await say(s, [{ text: r === 'denied' ? 'Understood, I did not run it. Tell me how you would like to proceed.' : 'The build finished cleanly in about four seconds.' }]);
+    } else if (script === 'helpers') {
+      // the lead: two helpers, the second after the first, then the turn ends and the notes come back
+      await say(s, [{ text: 'Two parts, two helpers: api first, then web with its handoff.' }]);
+      const a = { name: 'api', repo: 'api', brief: 'Edit the parser and check its tests. End with a Handoff.' };
+      const r1 = await hStart(s, a);
+      await useTool(s, { name: 'mcp__helpers__start', input: a, result: JSON.stringify(r1, null, 2), structured: r1 });
+      if (s.aborted) throw new Error('aborted');
+      const w = { name: 'web', repo: 'order FE', brief: 'Run a command needing permission, then add the button. End with a Handoff.', after: ['api'] };
+      const r2 = await hStart(s, w);
+      await useTool(s, { name: 'mcp__helpers__start', input: w, result: JSON.stringify(r2, null, 2), structured: r2 });
+      if (s.aborted) throw new Error('aborted');
+      await say(s, [{ text: 'Two helpers are working; I will continue when api finishes.' }]);
+    } else if (script === 'note') {
+      const names = [...text.matchAll(/<helper-note name="([^"]+)" state="([^"]+)"/g)].map((m) => `${m[1]} (${m[2]})`);
+      await say(s, [{ text: `Noted: ${names.join(', ')}. I read the handoff; the pieces agree.` }]);
     } else if (script === 'question') {
       await say(s, [{ text: 'Before I go on, one question.' }]);
       await useTool(s, { name: 'AskUserQuestion', input: { questions: [{ question: 'Which style?', header: 'Style', options: [{ label: 'Compact', description: 'Short lines' }, { label: 'Verbose', description: 'Everything' }], multiSelect: false }] }, result: 'Compact' }, { ask: true });
@@ -439,12 +459,17 @@ async function runTurn(s, text) {
   if (s.held.length) setTimeout(() => deliver(s, s.held.shift()), 60);
 }
 
-function deliver(s, { uuid: u, text }) {
+function deliver(s, { uuid: u, text, note = null, from = null }) {
   if (!s.live) {
     s.live = true;
     s.init = { version: '2.0.0-mock', tools: ['Bash', 'Read', 'Edit', 'Write', 'Grep', 'Glob', 'Agent', 'AskUserQuestion'], mcpServers: [], slashCommands: ['compact', 'clear', 'context', 'usage'], model: 'claude-mock-1', capabilities: [] };
   }
-  s.record({ ...msg.user(s.id, text, Date.now()), uuid: u || uuid() });
+  s.record({ ...msg.user(s.id, text, Date.now()), uuid: u || uuid(), ...(note ? { _note: note } : {}), ...(from ? { _from: from } : {}) });
+  const hh = hAll.get(s.id);
+  if (hh && hh.state === 'done') {
+    hh.state = 'running'; // sent more text: it runs again
+    hEmit(hh.leadId);
+  }
   s.status = 'running';
   s.turnStartedAt = Date.now();
   s.touched = Date.now();
@@ -740,8 +765,24 @@ function dEndRun(job, run, state, reason, s) {
 hooks.on('idle', (s) => {
   const hit = dRunBySession(s.id);
   if (hit) dEndRun(hit.job, hit.run, 'done', null, s);
+  const h = hAll.get(s.id);
+  if (h && h.launched && (h.state === 'done' || !H_TERMINAL.has(h.state))) hEnd(h, h.stopping ? 'stopped' : 'done', h.stopping || null);
 });
 hooks.on('permission', ({ s, req }) => {
+  const h = hAll.get(s.id);
+  if (h) {
+    const key = dKey(req);
+    const rules = hLeadRules.get(h.leadId) || [];
+    if (rules.some((r) => r.key === key)) {
+      s.pending.get(req.requestId)?.resolve({ behavior: 'allow', updatedInput: req.input });
+      return;
+    }
+    h.state = 'needs_action';
+    h.pending = s.pending.size;
+    h.lastLine = dLabel(req);
+    hEmit(h.leadId);
+    return;
+  }
   const hit = dRunBySession(s.id);
   if (!hit) return;
   const { job, run } = hit;
@@ -757,6 +798,13 @@ hooks.on('permission', ({ s, req }) => {
   dEmit(job, [run]);
 });
 hooks.on('resolved', ({ s, requestId }) => {
+  const h = hAll.get(s.id);
+  if (h) {
+    h.pending = Math.max(0, s.pending.size - 1);
+    if (!h.pending && h.state === 'needs_action') h.state = 'running';
+    hEmit(h.leadId);
+    return;
+  }
   const hit = dRunBySession(s.id);
   if (!hit) return;
   const { job, run } = hit;
@@ -865,6 +913,220 @@ function seedDispatch() {
   jobs.push(old);
 }
 seedDispatch();
+
+// ---------------------------------------------------------------- helpers: a session that leads other sessions
+// A small model of server/helpers.js: a helper is a mock session fed its brief (so it streams, asks and
+// finishes like any mock turn); the lead's state carries its helpers; a finished helper's handoff comes
+// back to the lead as a note; Allow for all helpers answers by rule; review, finish and the inbox record
+// have the shapes the clients draw.
+const H_TERMINAL = new Set(['done', 'failed', 'stopped', 'skipped']);
+const H_HEADER = 'You are a helper started by another Pilcrow session (the lead) for one part of a larger task. Work only in this folder. The person can see this conversation and will answer your permission requests; the lead cannot. When you finish, end your reply with a section titled **Handoff**.';
+/** @type {Map<string, any>} helperId -> the helper */
+const hAll = new Map();
+/** @type {Map<string, {key: string, label: string}[]>} leadId -> Allow for all helpers rules */
+const hLeadRules = new Map();
+/** @type {Map<string, {texts: string[], timer: any}>} */
+const hNoteBuf = new Map();
+const hOf = (leadId) => [...hAll.values()].filter((h) => h.leadId === leadId).sort((a, b) => a.startedAt - b.startedAt);
+const hByName = (leadId, name) => hOf(leadId).find((h) => h.name === name) || null;
+const hPublic = (h) => ({ name: h.name, id: h.id, cwd: h.cwd, branch: h.worktree?.branch || null, worktree: h.worktree?.path || null, state: h.state, since: h.startedAt, elapsedMs: (h.endedAt || Date.now()) - h.startedAt, cost: Math.round(h.cost * 10000) / 10000, files: h.files.length, add: h.add, del: h.del, pending: h.pending, lastLine: h.lastLine, after: h.after, reason: h.reason || undefined, finished: h.finished || undefined, commit: h.commit || undefined, pr: h.pr || undefined });
+const H_CAPS = { total: 8, parallel: 3, maxMinutes: 30, costUsd: 0 };
+function hExtra(s) {
+  const out = {};
+  const mine = hOf(s.id);
+  if (mine.length) {
+    out.helpers = mine.map(hPublic);
+    out.lead = { since: mine[0].startedAt, cost: Math.round(mine.reduce((n, h) => n + h.cost, 0) * 10000) / 10000, caps: H_CAPS, rules: (hLeadRules.get(s.id) || []).map((r) => r.label) };
+  }
+  if (s.helper) out.helper = { leadId: s.helper.leadId, leadTitle: sessions.get(s.helper.leadId)?.title || s.helper.leadTitle || '', name: s.helper.name, state: hAll.get(s.id)?.state || null };
+  return out;
+}
+function hEmit(leadId) {
+  sessions.get(leadId)?.emitState();
+  broadcast('helpers.changed', { leadId, helpers: hOf(leadId).map(hPublic) });
+  listChanged();
+}
+async function hStart(lead, args) {
+  const name = String(args.name || '');
+  if (!/^[a-z0-9][a-z0-9_-]{0,31}$/.test(name)) throw new Error('A helper needs a name: 1–32 characters of a-z, 0-9, - or _.');
+  if (hByName(lead.id, name)) throw new Error(`A helper named ${name} exists; use another name, or send to it.`);
+  let folder = args.cwd;
+  if (args.repo) {
+    const e = rResolve(args.repo);
+    if (e) folder = e.path;
+    else if (/[\\/~]/.test(args.repo)) folder = args.repo;
+    else throw new Error(`No repository called “${args.repo}”. Use list to see the folders known here, or give a path.`);
+  }
+  if (!folder) throw new Error('A helper needs a folder: give repo (a registered name) or cwd (a path).');
+  const reg = (config.repos || []).find((e) => folder === e.path || folder.startsWith(e.path + '/'));
+  if (reg?.policy === 'never') throw new Error(`${folder} is registered with policy Never (Settings → Repositories); nothing starts there from a lead.`);
+  const after = Array.isArray(args.after) ? args.after.map(String) : [];
+  for (const a of after) if (!hByName(lead.id, a)) throw new Error(`after names ${a}, which is not a helper of yours.`);
+  if (hOf(lead.id).length >= H_CAPS.total) throw new Error(`The cap is ${H_CAPS.total} helpers for this session; stop or finish one first.`);
+  const id = `helper-${uuid().slice(0, 6)}`;
+  const s = new Sess({ id, title: name, cwd: folder, touched: Date.now() });
+  s.createdAt = Date.now();
+  s.worktree = args.worktree === false ? null : { path: `${folder}/.wt/${name}`, branch: `pilcrow/${name}`, base: 'main', repoRoot: folder };
+  s.helper = { leadId: lead.id, name, leadTitle: lead.title };
+  s.mode = lead.mode;
+  sessions.set(id, s);
+  const h = { id, leadId: lead.id, name, cwd: s.worktree?.path || folder, folder, worktree: s.worktree, brief: String(args.brief || ''), after, startedAt: Date.now(), endedAt: null, state: 'queued', reason: null, handoff: '', cost: 0, files: [], add: 0, del: 0, pending: 0, lastLine: '', launched: false, noted: false, stopping: null, finished: null, commit: null, pr: null };
+  hAll.set(id, h);
+  const waiting = after.filter((a) => hByName(lead.id, a)?.state !== 'done');
+  if (!waiting.length) hLaunch(h);
+  else h.reason = `waits for ${waiting.join(', ')}`;
+  hPump(lead.id);
+  hEmit(lead.id);
+  return { name, id, state: h.state, cwd: h.cwd, worktree: s.worktree ? { path: s.worktree.path, branch: s.worktree.branch } : null, ...(h.state === 'queued' ? { queuedBehind: waiting } : {}) };
+}
+function hLaunch(h) {
+  h.launched = true;
+  h.state = 'running';
+  h.reason = null;
+  const s = sessions.get(h.id);
+  const deps = h.after.map((a) => hByName(h.leadId, a)).filter((d) => d && d.state === 'done');
+  let text = `${H_HEADER}\n\n${h.brief}`;
+  const notes = (config.repos || []).find((e) => h.folder === e.path)?.notes;
+  if (notes) text += `\n\n## About this repository\n${notes}`;
+  if (deps.length) text += '\n\n## From helpers you waited for\n' + deps.map((d) => `- ${d.name} (done): worktree ${d.worktree?.path} on branch ${d.worktree?.branch}. Read the change there before you start.\n${(d.handoff || 'no handoff').replace(/^/gm, '  ')}`).join('\n');
+  deliver(s, { uuid: uuid(), text, from: 'lead' });
+}
+function hPump(leadId) {
+  for (const h of hOf(leadId)) {
+    if (h.state !== 'queued') continue;
+    const deps = h.after.map((a) => hByName(leadId, a));
+    const bad = deps.find((d) => !d || (H_TERMINAL.has(d.state) && d.state !== 'done'));
+    if (bad) {
+      h.state = 'skipped';
+      h.reason = `${bad?.name || 'a helper it waited for'} ${bad ? bad.state : 'is gone'}`;
+      h.endedAt = Date.now();
+      hNote(leadId, h);
+      continue;
+    }
+    if (deps.every((d) => d.state === 'done')) hLaunch(h);
+  }
+}
+function hEnd(h, state, reason) {
+  if (H_TERMINAL.has(h.state) && h.state !== 'done') return;
+  const again = h.state === 'done';
+  h.state = state;
+  h.reason = reason;
+  h.endedAt = Date.now();
+  h.stopping = null;
+  const s = sessions.get(h.id);
+  if (s) {
+    h.cost = s.usage.costUsd;
+    const edits = s.messages.filter((m) => m.type === 'assistant').flatMap((m) => m.message.content).filter((c) => c.type === 'tool_use' && (c.name === 'Edit' || c.name === 'Write'));
+    h.files = [...new Set(edits.map((c) => c.input.file_path))].map((p) => ({ path: p, add: 1, del: 1 }));
+    h.add = h.files.length;
+    h.del = h.files.length;
+    if (state === 'done') {
+      const last = s.messages.filter((m) => m.type === 'assistant').at(-1);
+      const text = last?.message.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n') || '';
+      const m = /^(?:#{1,6}\s*\**|\*\*)\s*handoff\b.*$/im.exec(text);
+      h.handoff = m ? text.slice(m.index).trim() : text;
+    }
+  }
+  hEmit(h.leadId);
+  if (!again) hNote(h.leadId, h);
+  hPump(h.leadId);
+  hReport(h.leadId);
+}
+function hNote(leadId, h) {
+  if (h.noted) return;
+  h.noted = true;
+  const body = h.state === 'done' ? h.handoff || 'No handoff; the helper ended without a reply.' : h.reason || h.state;
+  const text = `<helper-note name="${h.name}" state="${h.state}" elapsed="${Math.round(((h.endedAt || Date.now()) - h.startedAt) / 1000)}s" cost="$${h.cost.toFixed(2)}" files="${h.files.length}" add="${h.add}" del="${h.del}">\n${body}\n</helper-note>`;
+  const b = hNoteBuf.get(leadId) || { texts: [], timer: null };
+  b.texts.push(text);
+  clearTimeout(b.timer);
+  b.timer = setTimeout(() => {
+    hNoteBuf.delete(leadId);
+    const lead = sessions.get(leadId);
+    if (!lead) return;
+    const still = hOf(leadId).filter((x) => !H_TERMINAL.has(x.state));
+    const tail = still.length ? `Helpers still going: ${still.map((x) => `${x.name} (${x.state})`).join(', ')}.` : 'No helpers are running now.';
+    const full = b.texts.join('\n\n') + `\n\n${tail} Read more with the helpers read tool.`;
+    if (lead.isBusy()) lead.held.push({ uuid: uuid(), text: full, at: Date.now(), note: 'helper' });
+    else deliver(lead, { uuid: uuid(), text: full, note: 'helper' });
+    lead.emitState();
+  }, Math.max(80, Math.min(pace * 4, 400)));
+  hNoteBuf.set(leadId, b);
+}
+function hReport(leadId) {
+  const mine = hOf(leadId);
+  if (!mine.length || !mine.every((h) => H_TERMINAL.has(h.state)) || !mine.some((h) => h.files.length)) return;
+  const lead = sessions.get(leadId);
+  const done = mine.filter((h) => h.state === 'done').length;
+  const existing = inboxItems.find((i) => i.kind === 'helpers' && i.leadId === leadId);
+  const item = { id: existing?.id || `inbox-${uuid().slice(0, 6)}`, kind: 'helpers', leadId, sessionId: leadId, scheduleName: lead?.title || 'A lead session', title: lead?.title || 'A lead session', cwd: lead?.cwd, startedAt: mine[0].startedAt, endedAt: Date.now(), durationMs: Date.now() - mine[0].startedAt, status: done ? 'completed' : 'failed', reason: done === mine.length ? null : `${mine.length - done} of ${mine.length} did not finish`, summary: `${done} of ${mine.length} helpers done.\n` + mine.map((h) => `- ${h.name}: ${h.state}`).join('\n'), cost: mine.reduce((n, h) => n + h.cost, 0), helpers: mine.map((h) => ({ ...hPublic(h), handoff: h.handoff })), read: existing?.read || false, manual: true };
+  if (existing) Object.assign(existing, item);
+  else inboxItems.unshift(item);
+  broadcast('inbox.changed', inboxItems.filter((i) => !i.read).length);
+}
+const helperMethods = {
+  'helpers.list': ({ leadId }) => ({ helpers: hOf(leadId).map(hPublic), caps: H_CAPS, cost: hOf(leadId).reduce((n, h) => n + h.cost, 0), known: (config.repos || []).map((e) => ({ path: e.path, name: e.name, registered: true, policy: e.policy, about: e.about, allowed: e.policy === 'allowed' })) }),
+  'helpers.allow': ({ leadId, requestId }) => {
+    for (const h of hOf(leadId)) {
+      const p = sessions.get(h.id)?.pending.get(requestId);
+      if (!p) continue;
+      const key = dKey(p.req);
+      const label = dLabel(p.req);
+      const rules = hLeadRules.get(leadId) || [];
+      if (!rules.some((r) => r.key === key)) rules.push({ key, label });
+      hLeadRules.set(leadId, rules);
+      let answered = 0;
+      for (const x of hOf(leadId)) {
+        const xs = sessions.get(x.id);
+        for (const [, pp] of xs?.pending || []) {
+          if (dKey(pp.req) !== key) continue;
+          pp.resolve({ behavior: 'allow', updatedInput: pp.req.input });
+          answered++;
+        }
+      }
+      hEmit(leadId);
+      return { key, label, answered };
+    }
+    throw new Error('That request is gone.');
+  },
+  'helpers.stop': ({ leadId, name }) => {
+    const h = hByName(leadId, name);
+    if (!h) throw new Error(`No helper called ${name}.`);
+    const s = sessions.get(h.id);
+    if (s?.isBusy()) {
+      h.stopping = 'stopped by you';
+      s.aborted = true;
+    } else hEnd(h, 'stopped', 'stopped by you');
+    return hPublic(h);
+  },
+  'helpers.review': ({ leadId }) => {
+    const runs = hOf(leadId)
+      .filter((h) => h.worktree && !['commit', 'discard'].includes(h.finished))
+      .map((h) => ({ runId: h.id, name: h.name, files: h.files, add: h.add, del: h.del }));
+    return { id: leadId, runs, files: runs.reduce((n, r) => n + r.files.length, 0), same: [], differ: runs.map((r) => ({ name: r.name, files: r.files })) };
+  },
+  'helpers.finish': ({ leadId, name, action }) => {
+    const mine = hOf(leadId).filter((h) => (!name || h.name === name) && H_TERMINAL.has(h.state) && !h.finished);
+    for (const h of mine) {
+      h.finished = action === 'pr' ? 'commit' : action;
+      if (action === 'commit' || action === 'pr') h.commit = 'a1b2c3d';
+      if (action === 'pr') h.pr = `https://github.com/acme/${h.name}/pull/7`;
+    }
+    hEmit(leadId);
+    hReport(leadId);
+    return { results: mine.map((h) => ({ name: h.name, ok: true, output: '' })) };
+  },
+  'helpers.export': ({ leadId }) => `# ${sessions.get(leadId)?.title || 'Lead'}: helpers\n\n` + hOf(leadId).map((h) => `## ${h.name} — ${h.state}\n\n${h.handoff}`).join('\n\n') + '\n',
+  'helpers.detach': ({ id }) => {
+    const h = hAll.get(id);
+    if (!h) return false;
+    hAll.delete(id);
+    const s = sessions.get(id);
+    if (s) s.helper = null;
+    hEmit(h.leadId);
+    return true;
+  },
+};
 
 const dispatchMethods = {
   'workspace.scan': ({ root }) => ({ root: root || `${HOME}/code`, depth: 3, at: Date.now(), repos: rAnnotate(REPOS) }),
@@ -1181,7 +1443,17 @@ const methods = {
     S(id).title = title;
     listChanged();
   },
-  'session.delete': ({ id }) => {
+  'session.delete': ({ id, removeHelpers }) => {
+    if (removeHelpers)
+      for (const h of hOf(id)) {
+        sessions.delete(h.id);
+        hAll.delete(h.id);
+      }
+    const h = hAll.get(id);
+    if (h) {
+      hAll.delete(id);
+      hEmit(h.leadId);
+    }
     sessions.delete(id);
     listChanged();
   },
@@ -1273,6 +1545,7 @@ const methods = {
     return true;
   },
   ...dispatchMethods,
+  ...helperMethods,
   'fleet.state': () => {
     const live = Object.fromEntries([...sessions.values()].filter((s) => s.live).map((s) => [s.id, s.state()]));
     const dayStart = new Date();
@@ -1297,6 +1570,10 @@ const methods = {
   'mock.reset': () => {
     seed();
     seedDispatch();
+    hAll.clear();
+    hLeadRules.clear();
+    for (const b of hNoteBuf.values()) clearTimeout(b.timer);
+    hNoteBuf.clear();
     overrides.clear();
     // the config too: a saved ui (a dragged sidebar width) must not leak into the next test's window
     for (const k of Object.keys(config)) delete config[k];

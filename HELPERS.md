@@ -15,8 +15,34 @@ the person meets them with the same glyphs, words and cards.
 
 ## Status
 
-Design only. Nothing in this document is built yet. The phases are in §10; the first is the one to
-start with.
+Phases 1 and 2 are built. The server side is `server/helpers.js`: the in-process MCP server a lead
+gets (`mcp__helpers__start / wait / read / send / stop / list`), the helper records on session meta,
+the states, `start` with a worktree, a `repo` name from the registry (REPOSITORIES.md) or a folder,
+and `after`, the handoff extraction, notes coalesced and held while the lead is busy, the caps and
+every refusal, the permission hook (helpers' tools allowed for a lead; a start allowed in the lead's
+own project and in registered *allowed* folders, asked elsewhere, refused for *never*) and the
+*Always allow* hook that registers a folder, review and finish through Dispatch's hunk grouping and
+git, the inbox record and its Markdown export, and the restart pass. It attaches through the
+extension points of `server/sessions.js` (`mcpServers`, `permission`, `respond`, `state`), the RPC is
+`helpers.*` in `server/main.js`, and `session.delete` takes `removeHelpers`. Tests:
+`test/unit/helpers.test.ts` (fake sessions, real temporary repositories).
+
+The Qt client has the bar under the lead's header, the six cards, the note block with *Open*, the
+helper's crumb and the *lead* tag on its brief, nesting in the sidebar with the lead's warmest dot,
+the *Leading* pill, the control room's provenance and **Allow for all helpers**, the Changes panel's
+helper sections with Commit all / Open pull requests / Keep / Discard, the inbox card, **Detach from
+lead** and the delete cascade (`qt/pilcrow_qt/widgets/session_view.py`, `panels/helpers_changes.py`,
+`canvas/blocks/note.py`; tests in `qt/tests/test_helpers.py` against the mock server's scripted
+helpers). The web client has the same (`web/src/components/HelpersBar.tsx`, `tools/HelpersBody.tsx`,
+`panels/HelpersChanges.tsx`, the note in `Transcript.tsx`; a browser test in `test/e2e/run.mjs`).
+
+Where what is built differs from the text below: the `start` card is drawn settled from the first
+paint (name, folder, worktree, *Open*) rather than live, since the bar already follows the helper;
+the sidebar nests without a fold chevron per lead; the rule keys stayed in `dispatch_core.js` rather
+than a `rules.js` of their own; the caps live in the config's `helpers` without a Settings section
+yet; pull requests go through `gh` and are not yet exercised against a live remote. Phase 3 (briefs
+from playbooks, a scheduled lead, cost caps in Settings) is not built. Helpers run where the server
+runs, like every other session.
 
 ## 1. What it is, in one flow
 

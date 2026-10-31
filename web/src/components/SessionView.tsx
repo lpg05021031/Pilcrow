@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { GitBranch, PanelRight, PanelLeftOpen, Ellipsis, Pencil, GitFork, FolderOpen, Archive, Trash, Copy, SquareTerminal, RotateCcw, Power, FolderGit2, Folder, Settings2, CircleDollarSign, ChevronDown, BookMarked } from 'lucide-react';
+import { GitBranch, PanelRight, PanelLeftOpen, Ellipsis, Pencil, GitFork, FolderOpen, Archive, Trash, Copy, SquareTerminal, RotateCcw, Power, FolderGit2, Folder, Settings2, CircleDollarSign, ChevronDown, BookMarked, ArrowUpRight } from 'lucide-react';
 import { useStore, setUi, VIEW_MODES, renameSession, forkSession, archiveSession, deleteSession, confirmAction, call, insertIntoComposer, toast, openSession, setDialog, setCwd, getModel, repoFor } from '../lib/store';
-import { basename, cost, errText, tildify } from '../lib/format';
+import { basename, cost, errText, plural, tildify } from '../lib/format';
 import { McpNotice } from './McpNotice';
+import { HelpersBar } from './HelpersBar';
 import type { GitInfo, RepoEntry, SessionSummary } from '../lib/types';
 import { Transcript } from './Transcript';
 import { FindBar } from './FindBar';
@@ -41,6 +42,7 @@ function runningWorkflow(tasks?: { type?: string; status: string; workflowName?:
 const STATUS_TEXT: Record<string, string> = {
   running: 'Working',
   starting: 'Starting',
+  leading: 'Leading',
   requires_action: 'Needs you',
   idle: 'Ready',
   stopped: 'Ready',
@@ -54,6 +56,10 @@ export function SessionView({ session }: { session: SessionSummary }) {
   const info = useStore((s) => s.info);
   const cwd = rt?.cwd || session.cwd;
   const status = rt?.status || session.status;
+  // a lead that is quiet while its helpers work is live work too (HELPERS.md §6.1)
+  const helpers = rt?.helpers || [];
+  const activeHelpers = helpers.filter((h) => ['queued', 'preparing', 'running', 'needs_action'].includes(h.state));
+  const shownStatus = (!status || status === 'idle' || status === 'stopped') && activeHelpers.length ? 'leading' : status;
   const fsRev = useStore((s) => s.fsRev);
   const git = useGitInfo(cwd, `${status === 'running' ? Math.floor((rt?.rev || 0) / 40) : status}:${fsRev}`);
   const [editing, setEditing] = useState(false);
@@ -114,6 +120,7 @@ export function SessionView({ session }: { session: SessionSummary }) {
     ...((rt?.usage?.costUsd || 0) > 0 ? [{ label: `Cost so far ${cost(rt!.usage!.costUsd)}`, icon: CircleDollarSign, onSelect: () => setUi({ panel: true, panelTab: 'info' }) }] : []),
     { separator: true },
     ...(rt?.live ? [{ label: 'Stop Claude Code process', hint: 'It restarts on your next message', icon: Power, onSelect: () => call('session.close', { id }) }] : []),
+    ...(rt?.helper ? [{ label: 'Detach from lead', hint: 'An ordinary session from now on; the lead is told', icon: GitBranch, onSelect: () => call('helpers.detach', { id }) }] : []),
     { label: session.archived ? 'Unarchive' : 'Archive', icon: Archive, onSelect: () => archiveSession(id, !session.archived) },
     {
       label: 'Delete…',
@@ -122,11 +129,12 @@ export function SessionView({ session }: { session: SessionSummary }) {
       onSelect: () =>
         confirmAction({
           title: 'Delete this session?',
-          body: 'The conversation history is removed from ~/.claude. Files Claude changed stay as they are.',
+          body: `The conversation history is removed from ~/.claude. Files Claude changed stay as they are.${helpers.length ? ' Its helpers stay as sessions unless you ask.' : ''}`,
           confirm: 'Delete session',
           danger: true,
-          checkbox: session.worktree ? { label: `Also remove the worktree and branch ${session.worktree.branch}`, value: false } : undefined,
-          onConfirm: (checked) => deleteSession(id, checked),
+          // a lead's helpers go with it when asked (HELPERS.md §5.10); a worktree session asks about its tree
+          checkbox: helpers.length ? { label: `Also delete its ${plural(helpers.length, 'helper')} and their worktrees`, value: false } : session.worktree ? { label: `Also remove the worktree and branch ${session.worktree.branch}`, value: false } : undefined,
+          onConfirm: (checked) => deleteSession(id, checked, checked && helpers.length > 0),
         }),
     },
   ];
@@ -191,11 +199,22 @@ export function SessionView({ session }: { session: SessionSummary }) {
                 <span className="ellipsis">{git.branch}</span>
               </span>
             )}
+            {rt?.helper && (
+              <button className="crumb crumb-btn wt" title="Open the lead session" onClick={() => openSession(rt.helper!.leadId)}>
+                <ArrowUpRight size={12} />
+                <span className="ellipsis">helper of {rt.helper.leadTitle || 'a lead session'}</span>
+              </button>
+            )}
           </span>
-          {status && status !== 'idle' && status !== 'stopped' && (
-            <span className={`status-pill ${status}`}>
+          {shownStatus && shownStatus !== 'idle' && shownStatus !== 'stopped' && (
+            <span className={`status-pill ${shownStatus}`}>
               <span className="status-dot" />
-              {STATUS_TEXT[status] || status}
+              {STATUS_TEXT[shownStatus] || shownStatus}
+              {shownStatus === 'leading' && (
+                <span className="status-sub">
+                  · {activeHelpers.length} of {plural(helpers.length, 'helper')}
+                </span>
+              )}
               {status === 'running' && runningWorkflow(rt?.tasks) && (
                 <button className="status-sub status-link" title="Show the workflow in the Tasks panel" onClick={() => setUi({ panel: true, panelTab: 'tasks' })}>
                   · {runningWorkflow(rt?.tasks)}
@@ -220,6 +239,7 @@ export function SessionView({ session }: { session: SessionSummary }) {
         </div>
       </header>
       <McpNotice sessionId={id} />
+      <HelpersBar sessionId={id} />
       {status === 'error' && rt?.error && (
         <Leave className="session-error">
           <span className="grow">{rt.error.split('\n')[0]}</span>

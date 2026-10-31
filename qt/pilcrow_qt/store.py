@@ -871,7 +871,7 @@ class Store(QObject):
     def rename_session(self, sid: str, title: str) -> Call:
         return self.call("session.rename", {"id": sid, "title": title}).then(lambda _r: self.refresh_sessions(True))
 
-    def delete_session(self, sid: str, remove_worktree: bool = False) -> Call:
+    def delete_session(self, sid: str, remove_worktree: bool = False, remove_helpers: bool = False) -> Call:
         def done(_r: Any) -> None:
             self.models.pop(sid, None)
             self.rt.pop(sid, None)
@@ -882,7 +882,9 @@ class Store(QObject):
             self.sessions_changed.emit(self.sessions)
             self.refresh_sessions(True)
 
-        return self.call("session.delete", {"id": sid, "removeWorktree": remove_worktree}).then(done)
+        return self.call(
+            "session.delete", {"id": sid, "removeWorktree": remove_worktree, "removeHelpers": remove_helpers}
+        ).then(done)
 
     def archive_session(self, sid: str, archived: bool) -> Call:
         return self.call("session.archive", {"id": sid, "archived": archived}).then(

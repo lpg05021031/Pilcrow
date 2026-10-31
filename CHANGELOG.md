@@ -3,6 +3,33 @@
 最新版在最上面。`npm run release -- X.Y.Z` 會檢查這裡有沒有該版的說明。
 
 
+- **2.12.0**：**Helpers：一個 session 帶領其他 session**（設計與現況見 `HELPERS.md`）與 **Repositories 註冊表**（見
+  `REPOSITORIES.md`）。Dispatch 是「一份 brief 派給一組 repo」；Helpers 是「一件事拆成幾份，各在自己的 repo 做」，怎麼拆
+  由模型在對話裡逐回合決定。
+  Helpers：伺服器新增 `server/helpers.js`，每個 session 都拿到一組 in-process MCP 工具（`mcp__helpers__start / wait /
+  read / send / stop / list`）。lead 用 `start` 開一個 helper——一個真 session，在自己的資料夾與 worktree 上跑，帶自己的
+  brief；資料夾可以用註冊表的名字或別名（`repo`）也可以用路徑（`cwd`）；`after` 讓它等另一個 helper 完成並接上對方的
+  handoff。helper 結束時 lead 收到一則 note（兩秒內的多則合併、lead 忙著就先等、被 `wait` 蓋到的不另發、lead 已經關了會被
+  喚醒），handoff 從 helper 的最後一則訊息抽出；`wait` 等到 done（needs_action 不算）、`any` 有變就回、超時就回報進度；
+  總數、同時數、每個的分鐘數與花費的上限在 `config.helpers`。權限：helpers 自己的工具對 lead 一律放行；`start` 在 lead
+  自己的專案與註冊為 allowed 的資料夾放行、其他地方要問、`never` 拒絕，Always allow 會把那個資料夾登記為 allowed；
+  同一個權限請求答一次就答所有 helper（規則記在 lead 上）。review 與收尾沿用 Dispatch 的 hunk 分組與 commit / 開 PR
+  （`gh`）/ keep / discard；記錄進 inbox 並可匯出 Markdown；伺服器重啟後還在跑的 helper 標記 stopped、lead 收到一則 note；
+  刪除 lead 可以一併刪掉它的 helpers 與 worktree。RPC `helpers.*`，測試 `test/unit/helpers.test.ts`。
+  Qt 視窗：lead 的標題下多一條 helpers bar（每個 helper 一顆 chip：狀態色點、名字、一句狀態；合計花費；有變更就有
+  Review）、六種工具卡、note 畫成便條（可 Open 那個 helper）、helper 的對話頂端有「helper of …」、brief 標成 lead 送的、
+  側欄把 helpers 收在 lead 底下（lead 的點取最熱的狀態）、狀態膠囊「Leading」、控制室卡片註明是誰的 helper 並有
+  「Allow for all helpers」、Changes 分頁每個 helper 一節（含 diff）加上 Commit all / Open pull requests / Keep / Discard、
+  收件匣的記錄卡、選單的 Detach from lead、刪除對話框的連帶刪除；測試 `qt/tests/test_helpers.py`。web client 有同一套
+  （bar、卡片、便條、側欄巢狀、控制室、Changes 節、收件匣卡），瀏覽器測試在 `test/e2e/run.mjs`。
+  Repositories 註冊表：`server/repos.js`，存在設定檔的 `repos`。每個 repo 有路徑、名字、別名（「order FE」「後端」都行）、
+  一句說明、policy（allowed / ask / never）、預設值（mode、worktree、base、prepare、verify、model）、給 agent 的常備 notes、
+  依賴，與掃描得到的 facts；名字、別名、資料夾名用同一套正規化比對（NFKC、不分大小寫、空白與 `-`、`_` 不計），找不到時
+  給最接近的；摘要附在每個 session 的 system prompt 後面，模型用你的話就找得到 repo。Dispatch 的掃描標出已註冊的、挑選器
+  放最前面、notes 自動帶進 brief、plan 擋掉 never、prepare / verify 沒填就用註冊表的預設。Qt 與 web 都有 Settings →
+  Repositories（列、就地編輯、掃描資料夾註冊、移除）、composer 的 `@` 列出 repo、session 選單的「Register this
+  repository…」、側欄與新 session 對話框用註冊表的名字；RPC `repos.*`，測試 `test/unit/repos.test.ts`、`qt/tests/test_repos.py`。
+
 - **2.11.0**：**Dispatch：一份 brief、一組 repo、一個 job**（設計與現況見 `DISPATCH.md`）。伺服器新增 `server/dispatch_core.js`
   與 `server/dispatch.js`：掃描資料夾找 repo（分支、未提交、遠端、大小、CLAUDE.md，以及 package.json / go.mod /
   Cargo.toml 之間的本地依賴）；開跑前先 plan（不是 repo、分支不存在、brief 空了或太長 → blocked；主 checkout 有未提交、

@@ -313,7 +313,126 @@ def build_body(item: ToolItem, ctx: ToolCtx, block: ToolBodyBlock, m: Measurer) 
         return result_node(item, ctx, block)
     if name in ("Workflow", "RunWorkflow"):
         return workflow_body(item, ctx, block)
+    if name.startswith("mcp__helpers__"):
+        return helpers_body(item, ctx, block)
     return generic_body(item, ctx, block)
+
+
+# ---------------------------------------------------------------- the lead's tools (HELPERS.md)
+
+HELPER_TERMINAL = ("done", "failed", "stopped", "skipped")
+_HELPER_TONE = {"done": "ok", "failed": "err", "running": "accent", "preparing": "accent", "needs_action": "info"}
+
+
+def _helpers_result(item: ToolItem) -> Optional[Json]:
+    s = item.structured
+    if isinstance(s, dict):
+        return s
+    r = item.result
+    if r and r.text and not r.is_error:
+        try:
+            v = json.loads(r.text)
+        except ValueError:
+            return None
+        return v if isinstance(v, dict) else None
+    return None
+
+
+def _helper_row(h: Json, block: ToolBodyBlock, tid: str) -> nd.Node:
+    """One helper as a line: its state as a badge, its name, its last line or reason, Open."""
+    st = str(h.get("state") or "")
+    line = str(h.get("lastLine") or h.get("reason") or "")[:120]
+    parts: List[nd.Node] = [
+        nd.Badge(st.replace("_", " ") or "?", _HELPER_TONE.get(st, "")),
+        nd.Text(str(h.get("name") or ""), theme.FS_UI, 600, "text", wrap=False),
+    ]
+    if line:
+        parts.append(nd.Text(line, theme.FS_SMALL, 400, "text_2", wrap=False))
+    hid = str(h.get("id") or "")
+    if hid:
+        parts.append(nd.Button("Open", tid, kind="ghost", size="xs"))
+        block.on(tid, lambda _t, _v, sid=hid: store.open_session(sid))
+    return nd.Row(parts, 8, (0, 0, 0, 0), [2] if line else [], "center", 24)
+
+
+def helpers_body(item: ToolItem, ctx: ToolCtx, block: ToolBodyBlock) -> nd.Node:
+    tool = item.name[len("mcp__helpers__") :]
+    i = item.input or {}
+    r = item.result
+    col = nd.vstack(spacing=8)
+    if r and r.is_error:
+        col.add(result_node(item, ctx, block, tool_input=i))
+        return col
+    data = _helpers_result(item)
+    if tool == "start":
+        brief = str_(i, "brief")
+        if brief:
+            col.add(
+                nd.Toggle(
+                    "Brief",
+                    "brief",
+                    nd.Surface(nd.note(brief), "inset", "hair", theme.R2, (12, 10, 12, 10)),
+                    bool(block.state.get("brief")),
+                )
+            )
+            block.on("toggle:brief", block.toggle_state("brief"))
+        if data:
+            meta = nd.hstack(spacing=8)
+            wt = data.get("worktree") if isinstance(data.get("worktree"), dict) else {}
+            if wt.get("branch"):
+                meta.add(nd.Badge(str(wt["branch"]), "plan"))
+            if data.get("queuedBehind"):
+                meta.add(nd.faint("waits for " + ", ".join(str(x) for x in data["queuedBehind"]), theme.FS_MICRO))
+            if meta.children:
+                col.add(meta)
+            col.add(_helper_row(data, block, "open"))
+        elif r is None:
+            col.add(nd.faint("Starting…"))
+    elif tool in ("wait", "list"):
+        hs = [h for h in ((data or {}).get("helpers") or []) if isinstance(h, dict)]
+        if data and data.get("timedOut"):
+            still = ", ".join(str(h.get("name")) for h in hs if h.get("state") not in HELPER_TERMINAL) or "none"
+            col.add(nd.faint(f"Timed out; still going: {still}", theme.FS_SMALL))
+        for k, h in enumerate(hs):
+            col.add(_helper_row(h, block, f"open{k}"))
+        if data is None and r is None:
+            col.add(nd.faint("Waiting…" if tool == "wait" else "Running…"))
+        elif not hs:
+            col.add(nd.faint("No helpers.", theme.FS_SMALL))
+    elif tool == "read":
+        text = str((data or {}).get("text") or (r.text if r else ""))
+        if text:
+            short = len(text) <= 1200
+            col.add(
+                nd.Toggle(
+                    f"{str_(i, 'what') or 'summary'} of {str_(i, 'name')}",
+                    "text",
+                    nd.pre(text),
+                    bool(block.state.get("text", short)),
+                )
+            )
+            block.on("toggle:text", block.toggle_state("text"))
+            if data and data.get("truncated"):
+                col.add(
+                    nd.faint(
+                        "Cut at the budget" + (f" · {data.get('more')}" if data.get("more") else ""), theme.FS_MICRO
+                    )
+                )
+        elif r is None:
+            col.add(nd.faint("Reading…"))
+    elif tool == "send":
+        if str_(i, "text"):
+            col.add(nd.Surface(nd.note(str_(i, "text")), "inset", "hair", theme.R2, (12, 10, 12, 10)))
+        if data:
+            col.add(nd.faint(f"delivered {data.get('delivered') or 'now'}", theme.FS_MICRO))
+    elif tool == "stop":
+        if data:
+            col.add(_helper_row(data, block, "open"))
+        elif r is None:
+            col.add(nd.faint("Stopping…"))
+    else:
+        return generic_body(item, ctx, block)
+    return col
 
 
 def bash_body(item: ToolItem, ctx: ToolCtx, block: ToolBodyBlock) -> nd.Node:

@@ -12,7 +12,7 @@ import math
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter
 from PySide6.QtWidgets import (
     QFrame,
@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import icons, theme
-from ..lib.fmt import basename, cost, err_text, tildify
+from ..lib.fmt import basename, cost, duration, err_text, plural, tildify
 from ..store import ConfirmSpec, store
 from .composer import Composer, LayoutButton
 from .folder_picker import FolderPicker
@@ -43,6 +43,7 @@ Json = Dict[str, Any]
 STATUS_TEXT = {
     "running": "Working",
     "starting": "Starting",
+    "leading": "Leading",
     "requires_action": "Needs you",
     "idle": "Ready",
     "stopped": "Ready",
@@ -103,6 +104,148 @@ class _TranscriptPlaceholder(QScrollArea):
 
     def set_scrolled_callback(self, fn: Callable[[bool], None]) -> None:
         self.verticalScrollBar().valueChanged.connect(lambda v: fn(v > 0))
+
+
+HELPER_TONE = {
+    "queued": "text_4",
+    "preparing": "accent",
+    "running": "accent",
+    "needs_action": "warn",
+    "done": "ok",
+    "failed": "err",
+    "stopped": "text_3",
+    "skipped": "text_4",
+}
+HELPER_ACTIVE = ("queued", "preparing", "running", "needs_action")
+
+
+class HelperChip(QPushButton):
+    """``.helper-chip``: one helper on the bar — a dot in its state's colour, its name, a short state."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.h: Json = {}
+        self._text = ""
+        self.setAutoDefault(False)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFixedHeight(22)
+        self.clicked.connect(lambda _c=False: self.h.get("id") and store.open_session(str(self.h["id"])))
+        bind(theme.theme.changed, self, lambda _t: self.update())
+
+    def sync(self, h: Json) -> None:
+        if h == self.h:
+            return
+        self.h = dict(h)
+        st = str(h.get("state") or "")
+        word = "needs you" if st == "needs_action" else st.replace("_", " ")
+        extra = ""
+        if st == "running":
+            extra = duration(float(h.get("elapsedMs") or 0))
+        elif st == "done" and int(h.get("files") or 0):
+            extra = f"+{int(h.get('add') or 0)} −{int(h.get('del') or 0)}"
+        elif st in ("queued", "skipped", "stopped", "failed") and h.get("reason"):
+            extra = str(h.get("reason"))
+        self._text = f"{h.get('name')} · {word}" + (f" · {extra}" if extra else "")
+        self.setAccessibleName(self._text)
+        self.setToolTip(" · ".join(x for x in (str(h.get("lastLine") or ""), str(h.get("cwd") or "")) if x))
+        fm = QFontMetrics(theme.font_ui(theme.FS_SMALL, 500))
+        self.setFixedWidth(min(280, 9 + 8 + 7 + fm.horizontalAdvance(self._text) + 10))
+        self.update()
+
+    def text(self) -> str:  # type: ignore[override]
+        return self._text
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        t = theme.tokens()
+        st = str(self.h.get("state") or "")
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        warm = st == "needs_action"
+        bg = theme.blend(
+            getattr(t, "warn_wash", t.fill_1) if warm else (t.fill_2 if self.underMouse() else t.fill_1), t.canvas
+        )
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(bg)
+        p.drawRoundedRect(QRectF(self.rect()), 11, 11)
+        p.setBrush(QColor(getattr(t, HELPER_TONE.get(st, "text_4"))))
+        if st == "queued":
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QColor(t.text_4))
+        p.drawEllipse(QRectF(9, 7, 8, 8))
+        p.setPen(QColor(t.text))
+        f = theme.font_ui(theme.FS_SMALL, 500)
+        p.setFont(f)
+        fm = QFontMetrics(f)
+        avail = self.width() - 24 - 10
+        p.drawText(
+            QRect(24, 0, avail, self.height()),
+            Qt.AlignmentFlag.AlignVCenter,
+            fm.elidedText(self._text, Qt.TextElideMode.ElideRight, avail),
+        )
+        p.end()
+
+
+class HelpersBar(QWidget):
+    """``.helpers-bar`` (HELPERS.md §6.1): under a lead's header, one chip per helper, the cost, Review.
+    Drawn from ``session.state`` alone; it is the whole picture while the cards scroll away."""
+
+    def __init__(self, sid: str, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.sid = sid
+        self.chips: List[HelperChip] = []
+        self._ids: List[str] = []
+        self.setObjectName("helpers-bar")
+        self.setFixedHeight(34)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(18, 0, 14, 0)
+        lay.setSpacing(6)
+        self.chip_lay = QHBoxLayout()
+        self.chip_lay.setContentsMargins(0, 0, 0, 0)
+        self.chip_lay.setSpacing(6)
+        lay.addLayout(self.chip_lay)
+        lay.addStretch(1)
+        self.cost = label("", tone="faint", size="micro")
+        lay.addWidget(self.cost)
+        self.review = button(
+            "Review",
+            kind="ghost",
+            size="xs",
+            icon="eye",
+            on_click=lambda: store.set_ui(panel=True, panel_tab="changes"),
+            tooltip="The helpers' changes together, in the Changes panel",
+        )
+        lay.addWidget(self.review)
+        self.hide()
+        bind(theme.theme.changed, self, lambda _t: self.update())
+
+    def sync(self, helpers: List[Json], lead: Json) -> None:
+        if not helpers:
+            self.hide()
+            return
+        ids = [str(h.get("id")) for h in helpers]
+        if ids != self._ids:
+            for c in self.chips:
+                self.chip_lay.removeWidget(c)
+                c.hide()
+                c.deleteLater()
+            self.chips = [HelperChip(self) for _ in helpers]
+            for c in self.chips:
+                self.chip_lay.addWidget(c)
+            self._ids = ids
+        for c, h in zip(self.chips, helpers):
+            c.sync(h)
+        usd = float(lead.get("cost") or 0)
+        self.cost.setText(cost(usd) if usd else "")
+        self.review.setVisible(
+            any(h.get("state") in ("done", "failed", "stopped") and int(h.get("files") or 0) > 0 for h in helpers)
+        )
+        self.show()
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        t = theme.tokens()
+        p = QPainter(self)
+        p.fillRect(0, self.height() - 1, self.width(), 1, theme.blend(t.hair, t.canvas))
+        p.end()
 
 
 class SessionView(QWidget):
@@ -202,6 +345,11 @@ class SessionView(QWidget):
         self.error_bar = ErrorBar(self.sid)
         self.error_bar.hide()
         root.addWidget(self.error_bar)
+        # a lead's helpers, one chip each (HELPERS.md §6.1)
+        self.helpers_bar = HelpersBar(self.sid)
+        root.addWidget(self.helpers_bar)
+        self.lead_crumb: Optional[CrumbButton] = None
+        self._lead_id = ""
 
         # ---- conversation and composer
         cwd = self.cwd
@@ -311,7 +459,25 @@ class SessionView(QWidget):
             )
         status = self.status
         tasks = r.get("tasks") if r else None
-        self.pill.set_status(status, running_workflow(tasks) if status == "running" else None)
+        helpers = [h for h in ((r.get("helpers") if r else None) or []) if isinstance(h, dict)]
+        active_helpers = [h for h in helpers if h.get("state") in HELPER_ACTIVE]
+        if status in ("idle", "stopped") and active_helpers:
+            # the lead itself is quiet, its helpers are not: live work, in the accent
+            self.pill.set_status("leading", f"{len(active_helpers)} of {plural(len(helpers), 'helper')}")
+        else:
+            self.pill.set_status(status, running_workflow(tasks) if status == "running" else None)
+        self.helpers_bar.sync(helpers, (r.get("lead") if r else None) or {})
+        helper = r.get("helper") if r and isinstance(r.get("helper"), dict) else None
+        if helper and helper.get("leadId"):
+            if self.lead_crumb is None:
+                self.lead_crumb = CrumbButton("Open the lead session")
+                self.lead_crumb.clicked.connect(lambda: self._lead_id and store.open_session(self._lead_id))
+                self.crumbs.layout().addWidget(self.lead_crumb)
+            self._lead_id = str(helper.get("leadId"))
+            self.lead_crumb.set_text(f"helper of {helper.get('leadTitle') or 'a lead session'}")
+            self.lead_crumb.show()
+        elif self.lead_crumb is not None:
+            self.lead_crumb.hide()
         changes = int(git.get("changed") or 0) + int(git.get("untracked") or 0)
         self.diffstat.setVisible(bool(git.get("isRepo")) and changes > 0)
         if changes > 0:
@@ -518,6 +684,24 @@ class SessionView(QWidget):
                 "on_select": lambda: store.archive_session(sid, not s.get("archived")),
             }
         )
+        if r is not None and isinstance(r.get("helper"), dict):
+            items.append(
+                {
+                    "label": "Detach from lead",
+                    "hint": "An ordinary session from now on; the lead is told",
+                    "icon": "git-branch",
+                    "on_select": lambda: store.call("helpers.detach", {"id": sid}),
+                }
+            )
+        helpers_n = len([h for h in ((r.get("helpers") if r else None) or []) if isinstance(h, dict)])
+        # a lead's helpers go with it when asked (HELPERS.md §5.10); a worktree session asks about its tree
+        checkbox = (
+            {"label": f"Also delete its {plural(helpers_n, 'helper')} and their worktrees", "value": False}
+            if helpers_n
+            else {"label": f"Also remove the worktree and branch {wt.get('branch')}", "value": False}
+            if wt
+            else None
+        )
         items.append(
             {
                 "label": "Delete…",
@@ -527,13 +711,12 @@ class SessionView(QWidget):
                     ConfirmSpec(
                         title="Delete this session?",
                         body="The conversation history is removed from ~/.claude. "
-                        "Files Claude changed stay as they are.",
+                        "Files Claude changed stay as they are."
+                        + (" Its helpers stay as sessions unless you ask." if helpers_n else ""),
                         confirm="Delete session",
                         danger=True,
-                        checkbox={"label": f"Also remove the worktree and branch {wt.get('branch')}", "value": False}
-                        if wt
-                        else None,
-                        on_confirm=lambda checked: store.delete_session(sid, checked),
+                        checkbox=checkbox,
+                        on_confirm=lambda checked: store.delete_session(sid, checked, checked and helpers_n > 0),
                     )
                 ),
             }
@@ -726,14 +909,20 @@ class StatusPill(QWidget):
         self.link.setVisible(bool(workflow))
         if workflow:
             self.link.setText(f"· {workflow}")
-        self.dot.set_live(status in ("running", "starting"))
+        self.dot.set_live(status in ("running", "starting", "leading"))
         self._paint()
 
     def text(self) -> str:
         return self.lb.text()
 
     def _paint(self) -> None:
-        name = "accent_text" if self.status == "requires_action" else "err" if self.status == "error" else "text_3"
+        name = (
+            "accent_text"
+            if self.status in ("requires_action", "leading")
+            else "err"
+            if self.status == "error"
+            else "text_3"
+        )
         weight = 600 if self.status == "requires_action" else 500
         self.lb.setFont(theme.font_ui(theme.FS_SMALL, weight))
         theme.tint(self.lb, fg=name)

@@ -91,6 +91,7 @@ def test_settings_lists_edits_and_scans(app_client):
     spec = c.store.dialogs.get("confirm")
     assert spec is not None and spec.title == "Remove cli from the registry?"
     spec.on_confirm(False)
+    c.store.set_dialog("confirm", None)
     c.wait_until(lambda: len(c.store.repos) == 3 and len(page.rows) == 3, 5, "removed")
     _close(c)
 

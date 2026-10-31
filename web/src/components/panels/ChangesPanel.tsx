@@ -8,6 +8,7 @@ import { DiffView, hunksFromPatch } from '../Code';
 import { Collapse } from '../ui/Collapse';
 import { Spinner, Seg } from '../ui/bits';
 import { FileTouches, useFileHistory } from '../FileTouches';
+import { HelpersChanges } from './HelpersChanges';
 import { str } from '../../lib/tools';
 import { errText } from '../../lib/format';
 
@@ -293,6 +294,8 @@ export function ChangesPanel({ session, cwd }: { session: SessionSummary; cwd: s
         )}
       </div>
 
+      <HelpersChanges sessionId={session.id} />
+
       {noteCount > 0 && (
         <div className="notes-bar">
           <MessageSquareText size={14} />
@@ -329,6 +332,7 @@ function SessionEdits({ sessionId, cwd }: { sessionId: string; cwd: string }) {
       <div className="changes-summary">
         <span className="faint">Not a git repository — showing edits made in this session.</span>
       </div>
+      <HelpersChanges sessionId={sessionId} />
       <div className="changes-files">
         {edits.map((e) => (
           <div key={e.id} className="cfile open">

@@ -35,11 +35,23 @@ export function Sidebar() {
   const list = useRef<HTMLElement>(null);
   useFlip(list, sessions, [q, collapsed, showAll, ui.showArchived, activeId]);
 
-  const { attention, pinned, groups, archivedCount } = useMemo(() => {
+  const { attention, pinned, groups, archivedCount, helpers } = useMemo(() => {
     let list = sessions.filter((s) => (ui.showArchived ? s.archived : !s.archived));
     // Runs started by a schedule live in the inbox; the active one still shows so its row can be found.
     if (!q.trim()) list = list.filter((s) => (!s.scheduled && !s.dispatch) || s.id === activeId);
     if (q.trim()) list = list.filter((s) => fuzzyScore(q, `${s.title} ${basename(s.project || s.cwd)}`));
+    // A lead's helpers sit under it, indented (HELPERS.md §6.3); a helper whose lead is not listed stays
+    // where its folder puts it.
+    const listed = new Set(list.map((s) => s.id));
+    const helperMap = new Map<string, SessionSummary[]>();
+    for (const s of list) {
+      if (s.helper && listed.has(s.helper.leadId) && s.id !== activeId) {
+        if (!helperMap.has(s.helper.leadId)) helperMap.set(s.helper.leadId, []);
+        helperMap.get(s.helper.leadId)!.push(s);
+      }
+    }
+    const nested = new Set([...helperMap.values()].flat().map((s) => s.id));
+    list = list.filter((s) => !nested.has(s.id));
     // The conversation on screen never jumps into "Needs you": you are already looking at it, and its
     // row shows the amber mark where it is. Only other sessions gather there.
     const attention = list.filter((s) => s.id !== activeId && (s.status === 'requires_action' || (s.pending || 0) > 0));
@@ -56,12 +68,20 @@ export function Sidebar() {
       map.get(key)!.items.push(s);
     }
     const groups = [...map.values()].sort((a, b) => (b.items[0]?.lastModified || 0) - (a.items[0]?.lastModified || 0));
-    return { attention, pinned, groups, archivedCount: sessions.filter((s) => s.archived).length };
+    return { attention, pinned, groups, archivedCount: sessions.filter((s) => s.archived).length, helpers: helperMap };
   }, [sessions, q, ui.showArchived, activeId, config?.repos]);
   const working = sessions.filter((s) => !s.archived && (s.status === 'running' || s.status === 'starting')).length;
   const needsAll = sessions.filter((s) => !s.archived && (s.status === 'requires_action' || (s.pending || 0) > 0)).length;
 
   const theme = config?.theme || 'system';
+  // a lead's row, then its helpers' rows indented under it; the lead's dot takes the warmest state of the tree
+  const warmth: Record<string, number> = { requires_action: 3, running: 2, starting: 2 };
+  const rowsFor = (s: SessionSummary, showProject = false) => {
+    const hs = helpers.get(s.id) || [];
+    const warmest = hs.reduce((best, h) => ((warmth[h.status] || 0) > (warmth[best.status] || 0) ? h : best), s);
+    const lead = warmest === s ? s : { ...s, status: warmest.status, pending: Math.max(s.pending || 0, warmest.pending || 0) };
+    return [<Row key={s.id} s={lead} active={s.id === activeId} unread={unread[s.id]} now={now} showProject={showProject} q={q} />, ...hs.map((h) => <Row key={h.id} s={h} active={h.id === activeId} unread={unread[h.id]} now={now} q={q} indent />)];
+  };
   const nextTheme = theme === 'system' ? 'dark' : theme === 'dark' ? 'light' : 'system';
   const ThemeIcon = theme === 'system' ? Monitor : theme === 'dark' ? Moon : Sun;
 
@@ -118,16 +138,12 @@ export function Sidebar() {
         <span className="side-sel" aria-hidden="true" />
         {attention.length > 0 && (
           <Section label="Needs you" tone="accent">
-            {attention.map((s) => (
-              <Row key={s.id} s={s} active={s.id === activeId} unread={unread[s.id]} now={now} showProject q={q} />
-            ))}
+            {attention.flatMap((s) => rowsFor(s, true))}
           </Section>
         )}
         {pinned.length > 0 && (
           <Section label="Pinned">
-            {pinned.map((s) => (
-              <Row key={s.id} s={s} active={s.id === activeId} unread={unread[s.id]} now={now} showProject q={q} />
-            ))}
+            {pinned.flatMap((s) => rowsFor(s, true))}
           </Section>
         )}
         {groups.map((g) => {
@@ -147,9 +163,7 @@ export function Sidebar() {
               <Collapse open={!isCollapsed}>
                 {() => (
                   <>
-                    {g.items.slice(0, limit).map((s) => (
-                      <Row key={s.id} s={s} active={s.id === activeId} unread={unread[s.id]} now={now} q={q} />
-                    ))}
+                    {g.items.slice(0, limit).flatMap((s) => rowsFor(s))}
                     {g.items.length > limit && (
                       <button className="side-more" onClick={() => setShowAll({ ...showAll, [g.key]: true })}>
                         Show {g.items.length - limit} more
@@ -193,7 +207,7 @@ function Section({ label, tone, children }: { label: string; tone?: string; chil
   );
 }
 
-const Row = memo(function Row({ s, active, unread, now, showProject, q }: { s: SessionSummary; active: boolean; unread?: boolean; now: number; showProject?: boolean; q?: string }) {
+const Row = memo(function Row({ s, active, unread, now, showProject, q, indent }: { s: SessionSummary; active: boolean; unread?: boolean; now: number; showProject?: boolean; q?: string; indent?: boolean }) {
   const [renaming, setRenaming] = useState(false);
   // Right-click opens the same actions as the ⋯ button, at the pointer.
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
@@ -222,7 +236,7 @@ const Row = memo(function Row({ s, active, unread, now, showProject, q }: { s: S
   ];
   return (
     <div
-      className={`side-row${active ? ' active' : ''}${unread && !active ? ' unread' : ''}${menuAt ? ' menu-open' : ''}`}
+      className={`side-row${active ? ' active' : ''}${unread && !active ? ' unread' : ''}${menuAt ? ' menu-open' : ''}${indent ? ' sub' : ''}`}
       data-sid={s.id}
       onContextMenu={(e) => {
         if (renaming) return;

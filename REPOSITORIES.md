@@ -8,7 +8,26 @@ folders" with one place, and it gives the model the person's own words for their
 
 ## Status
 
-Design only. HELPERS.md §5.6 and DISPATCH.md §3.1 refer to it; nothing is built.
+Phases 1 and 2 are built. The registry is `server/repos.js`: the entries in the config's `repos`,
+one normalisation for path, name, alias and folder name, the nearest name for a miss, the digest
+appended to every session's system prompt, policy, defaults and notes for Helpers and Dispatch, scan
+and refresh of the facts, register from a session; the RPC is `repos.*` in `server/main.js` with the
+`repos.changed` event; tests in `test/unit/repos.test.ts`. Helpers' `start` takes `repo`, its
+permission hook reads the policy and *Always allow* on a start registers the folder as allowed
+(`server/helpers.js`). Dispatch's scan marks registered repositories, its plan blocks a *never*, its
+briefs carry the notes, and its runs take prepare and verify from the defaults
+(`server/dispatch_core.js`).
+
+The Qt client has Settings → Repositories (`qt/pilcrow_qt/widgets/dialogs/settings_repos.py`: the
+rows with the policy on the row and the rest in place, the scan with register, remove), the
+composer's `@` answering to names and aliases, **Register this repository…** in the session menu, the
+Dispatch picker with registered repositories first and their notes prefilled, and the registry's name
+in the sidebar and the new-session dialog; tests in `qt/tests/test_repos.py`. The web client has the
+same (`web/src/components/settings/ReposPage.tsx`, the composer, the sidebar, the Dispatch composer,
+the session menu).
+
+Phase 3 is not built: Scout does not draft into `notes`, and `machine` is recorded as *local* on every
+entry since every session runs where the server runs.
 
 ## 1. Principles
 

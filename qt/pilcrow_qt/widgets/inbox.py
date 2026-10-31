@@ -233,6 +233,168 @@ class RunCard(Card):
         super().mouseReleaseEvent(e)
 
 
+class HelpersCard(Card):
+    """A lead's helpers once they are all done (``kind: helpers``, HELPERS.md §6.6): the badge, the lead's
+    name, one line per helper with its handoff's first line and numbers, Copy Markdown and Open the lead."""
+
+    def __init__(
+        self,
+        it: Json,
+        on_read: Callable[[], None],
+        on_remove: Callable[[], None],
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__(14, parent)
+        self.it = it
+        self._on_read = on_read
+        status = str(it.get("status") or "")
+        t = theme.tokens()
+        helpers = [x for x in (it.get("helpers") or []) if isinstance(x, dict)]
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(14, 13, 14, 11)
+        lay.setSpacing(12)
+        tone, wash = {"completed": ("ok", "ok_wash"), "failed": ("err", "err_wash")}.get(status, ("warn", "warn_wash"))
+        self.badge = Pill(bg=f"{wash}/raised", radius=15)
+        self.badge.setFixedSize(30, 30)
+        self.badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.badge.setPixmap(icons.pixmap("arrow-up-right", getattr(t, tone), 15))
+        lay.addWidget(self.badge, 0, Qt.AlignmentFlag.AlignTop)
+        main = QVBoxLayout()
+        main.setSpacing(6)
+        head = QHBoxLayout()
+        head.setSpacing(8)
+        self.dot = Box(bg="accent", line="accent_wash/raised", radius=6, line_w=3)
+        self.dot.setFixedSize(13, 13)
+        self.dot.setToolTip("New")
+        self.dot.setVisible(not it.get("read"))
+        head.addWidget(self.dot)
+        self.name = Text(str(it.get("title") or it.get("scheduleName") or ""), theme.FS_UI, 600, "text", wrap=False)
+        head.addWidget(self.name, 1)
+        chip = Pill("helpers", bg="fill_1/raised", radius=9)
+        chip.setContentsMargins(7, 1, 7, 1)
+        chip.setProperty("fs", "micro")
+        theme.tint(chip, fg="text_3")
+        head.addWidget(chip)
+        when = Text(
+            f"{clock(float(it.get('endedAt') or 0))} · {duration(float(it.get('durationMs') or 0))}",
+            theme.FS_MICRO,
+            400,
+            "text_4",
+            wrap=False,
+        )
+        head.addWidget(when)
+        main.addLayout(head)
+        done = sum(1 for x in helpers if x.get("state") == "done")
+        landed = sum(1 for x in helpers if x.get("finished") == "commit")
+        prs = sum(1 for x in helpers if x.get("pr"))
+        line = f"{done} of {plural(len(helpers), 'helper')} done"
+        if landed:
+            line += f" · {landed} committed"
+        if prs:
+            line += f" · {plural(prs, 'pull request')}"
+        if it.get("reason"):
+            line += f" · {it.get('reason')}"
+        self.sum = Text(line, theme.FS_SMALL, 400, "text_2", 1.55)
+        main.addWidget(self.sum)
+        self.rows = QVBoxLayout()
+        self.rows.setSpacing(2)
+        for x in helpers[:12]:
+            row = QHBoxLayout()
+            row.setSpacing(10)
+            st = str(x.get("state") or "")
+            glyph = Text(
+                {"done": "●", "failed": "✕", "stopped": "■", "skipped": "○"}.get(st, "○"),
+                theme.FS_MICRO,
+                400,
+                {"done": "ok", "failed": "err"}.get(st, "text_3"),
+                wrap=False,
+            )
+            glyph.setFixedWidth(12)
+            row.addWidget(glyph)
+            nm = Text(str(x.get("name") or ""), theme.FS_SMALL, 500, "text", wrap=False)
+            nm.setFixedWidth(150)
+            row.addWidget(nm)
+            handoff = str(x.get("handoff") or "").strip()
+            first = next(
+                (
+                    ln.strip(" #*")
+                    for ln in handoff.split("\n")
+                    if ln.strip(" #*") and not ln.strip(" #*").lower().startswith("handoff")
+                ),
+                "",
+            )
+            what = first[:120] if st == "done" else str(x.get("reason") or st)
+            row.addWidget(ElideLabel(what or st), 1)
+            nums = []
+            if x.get("files"):
+                nums.append(
+                    f"{plural(int(x.get('files') or 0), 'file')} <span style='color:{t.ok}'>+{int(x.get('add') or 0)}</span> <span style='color:{t.err}'>−{int(x.get('del') or 0)}</span>"
+                )
+            if float(x.get("cost") or 0):
+                nums.append(cost(float(x.get("cost") or 0)))
+            if x.get("commit"):
+                nums.append(f"<span style='font-family: monospace'>{x.get('commit')}</span>")
+            if x.get("pr"):
+                nums.append(f"<a href='{x.get('pr')}' style='color:{t.accent_text}'>PR</a>")
+            lb = QLabel(" · ".join(nums))
+            lb.setTextFormat(Qt.TextFormat.RichText)
+            lb.setOpenExternalLinks(True)
+            lb.setProperty("fs", "micro")
+            theme.tint(lb, fg="text_3")
+            row.addWidget(lb)
+            w = QWidget()
+            w.setLayout(row)
+            self.rows.addWidget(w)
+        if len(helpers) > 12:
+            self.rows.addWidget(hint(f"and {len(helpers) - 12} more"))
+        main.addLayout(self.rows)
+        foot = QHBoxLayout()
+        foot.setSpacing(12)
+        c = QLabel(cost(float(it.get("cost") or 0)))
+        c.setProperty("fs", "micro")
+        theme.tint(c, fg="text_3")
+        foot.addWidget(c)
+        foot.addStretch(1)
+        self.copy_btn = button(
+            "Copy Markdown",
+            kind="ghost",
+            size="xs",
+            icon="clipboard-paste",
+            tooltip="The helpers' handoffs as Markdown, to the clipboard",
+        )
+        self.copy_btn.setIconSize(QSize(11, 11))
+        self.copy_btn.clicked.connect(self.copy_md)
+        foot.addWidget(self.copy_btn)
+        self.open_btn = button("Open the lead", size="xs", icon="arrow-up-right", tooltip="The lead's conversation")
+        self.open_btn.setIconSize(QSize(11, 11))
+        self.open_btn.clicked.connect(lambda _c=False: (self._on_read(), store.open_session(str(it.get("leadId")))))
+        foot.addWidget(self.open_btn)
+        self.x_btn = IconButton("x", "Dismiss", 13)
+        self.x_btn.setFixedSize(24, 24)
+        self.x_btn.clicked.connect(lambda _c=False: on_remove())
+        foot.addWidget(self.x_btn)
+        main.addLayout(foot)
+        lay.addLayout(main, 1)
+        self.x_btn.setVisible(False)
+
+    def enterEvent(self, e) -> None:  # noqa: N802
+        self.x_btn.setVisible(True)
+        super().enterEvent(e)
+
+    def leaveEvent(self, e) -> None:  # noqa: N802
+        self.x_btn.setVisible(False)
+        super().leaveEvent(e)
+
+    def copy_md(self) -> None:
+        from PySide6.QtGui import QGuiApplication
+
+        def got(md: Any) -> None:
+            QGuiApplication.clipboard().setText(str(md or ""))
+            store.toast("Markdown copied", "success")
+
+        store.call("helpers.export", {"leadId": str(self.it.get("leadId"))}).then(got)
+
+
 class DispatchCard(Card):
     """A dispatch job's report (``kind: dispatch``): the badge, the name, what landed where, cost and
     time, one line per repository, and the ways back to the job."""
@@ -854,6 +1016,8 @@ class InboxPage(QWidget):
                     iid = str(it.get("id"))
                     if it.get("kind") == "dispatch":
                         card = DispatchCard(it, (lambda i=iid: self.mark_one(i)), (lambda i=iid: self.remove(i)))
+                    elif it.get("kind") == "helpers":
+                        card = HelpersCard(it, (lambda i=iid: self.mark_one(i)), (lambda i=iid: self.remove(i)))
                     else:
                         card = RunCard(
                             it,

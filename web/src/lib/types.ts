@@ -30,6 +30,10 @@ export interface SessionSummary {
   scheduled?: { id: string; name: string; at: number; manual?: boolean } | null;
   /** A run of a dispatch job (or its report session); reachable from the job's view. */
   dispatch?: { jobId: string; runId: string | null; name: string; target: string } | null;
+  /** A helper of another session (HELPERS.md): nested under its lead in the sidebar. */
+  helper?: { leadId: string; name: string; state: HelperStateName | null } | null;
+  /** A session that has started helpers. */
+  lead?: { since: number; count: number } | null;
 }
 
 export interface PermissionSuggestion {
@@ -149,6 +153,46 @@ export interface HeldMsg {
   images: number;
   files: string[];
   at: number;
+  /** A message Pilcrow wrote (a helper's news to its lead), not the person's. */
+  note?: string | null;
+  /** Who sent it when not the person ('lead'). */
+  from?: string | null;
+}
+
+// ---- helpers: a session that leads other sessions (server/helpers.js, HELPERS.md)
+export type HelperStateName = 'queued' | 'preparing' | 'running' | 'needs_action' | 'done' | 'failed' | 'stopped' | 'skipped';
+export interface HelperState {
+  name: string;
+  id: string;
+  cwd: string;
+  branch: string | null;
+  worktree: string | null;
+  state: HelperStateName;
+  since: number;
+  elapsedMs: number;
+  cost: number;
+  files: number;
+  add: number;
+  del: number;
+  pending: number;
+  lastLine: string;
+  after: string[];
+  reason?: string;
+  finished?: 'commit' | 'discard' | 'keep';
+  commit?: string;
+  pr?: string;
+}
+export interface LeadState {
+  since: number | null;
+  cost: number;
+  caps: { total: number; parallel: number; maxMinutes: number; costUsd: number };
+  rules: string[];
+}
+export interface HelperOf {
+  leadId: string;
+  leadTitle: string;
+  name: string;
+  state: HelperStateName | null;
 }
 
 export interface SessionState {
@@ -177,6 +221,10 @@ export interface SessionState {
   bgTasks: { task_id: string; task_type: string; description: string; subagent_type?: string }[];
   queued: string[];
   held: HeldMsg[];
+  /** A lead's helpers and its own numbers (HELPERS.md §5.11); a helper's lead. */
+  helpers?: HelperState[];
+  lead?: LeadState;
+  helper?: HelperOf;
   init: null | {
     version: string;
     tools: string[];
@@ -377,10 +425,13 @@ export interface Schedule {
 }
 export interface InboxItem {
   id: string;
-  /** A dispatch job's report, with its per-repository table in `dispatch`. */
-  kind?: 'dispatch';
+  /** A dispatch job's report (`dispatch`), or a lead's helpers once they are all done (`helpers`). */
+  kind?: 'dispatch' | 'helpers';
   jobId?: string;
   dispatch?: DispatchReport;
+  leadId?: string;
+  title?: string;
+  helpers?: (HelperState & { handoff: string })[];
   scheduleId: string | null;
   scheduleName: string;
   sessionId: string | null;
@@ -787,6 +838,8 @@ export interface RawMsg {
   elapsed_time_seconds?: number;
   id?: string;
   _local?: boolean;
+  _note?: string;
+  _from?: string;
 }
 
 /** Models the API endpoint offers (GET /v1/models), as Pilcrow's server read them. */

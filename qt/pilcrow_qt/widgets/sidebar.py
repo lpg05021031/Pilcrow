@@ -269,6 +269,32 @@ class Sidebar(QWidget):
             if isinstance(d, dict) and d.get("jobId") and s.get("id") != active:
                 job_sessions.setdefault(str(d["jobId"]), []).append(s)
         lst = [s for s in lst if not (isinstance(s.get("dispatch"), dict) and s.get("id") != active)]
+        # A lead's helpers sit under it, indented, not among the projects (HELPERS.md §6.3); a helper
+        # whose lead is not listed stays where its folder puts it.
+        listed = {str(s.get("id")) for s in lst}
+        helper_sessions: Dict[str, List[Json]] = {}
+        for s in lst:
+            h = s.get("helper")
+            if isinstance(h, dict) and str(h.get("leadId")) in listed and s.get("id") != active:
+                helper_sessions.setdefault(str(h["leadId"]), []).append(s)
+        nested = {str(s.get("id")) for hs in helper_sessions.values() for s in hs}
+        lst = [s for s in lst if str(s.get("id")) not in nested]
+        warmth = {"requires_action": 3, "running": 2, "starting": 2}
+
+        def with_warmth(s: Json) -> Json:
+            """A lead's dot takes the warmest state of itself and its helpers."""
+            hs = helper_sessions.get(str(s.get("id")))
+            if not hs:
+                return s
+            best = max(hs, key=lambda x: warmth.get(str(x.get("status")), 0))
+            if warmth.get(str(best.get("status")), 0) > warmth.get(str(s.get("status")), 0):
+                return {
+                    **s,
+                    "status": best.get("status"),
+                    "pending": max(int(s.get("pending") or 0), int(best.get("pending") or 0)),
+                }
+            return s
+
         # The conversation on screen never jumps into "Needs you": you are already looking at it.
         attention = [
             s
@@ -314,22 +340,36 @@ class Sidebar(QWidget):
                 lb = self._labels[key] = SectionLabel(text, tone)
             return lb
 
-        def row_for(s: Json, show_project: bool = False) -> SessionRow:
+        def row_for(s: Json, show_project: bool = False, indent: bool = False) -> SessionRow:
             sid = str(s.get("id"))
             r = self._rows.get(sid)
             if r is None:
                 r = self._rows[sid] = SessionRow(sid)
-            r.update(s, active=sid == active, unread=bool(store.unread.get(sid)), show_project=show_project, q=q)
+            r.update(
+                s,
+                active=sid == active,
+                unread=bool(store.unread.get(sid)),
+                show_project=show_project,
+                q=q,
+                indent=indent,
+            )
             return r
+
+        def rows_for(s: Json, show_project: bool = False) -> List[SessionRow]:
+            """A session's row, then its helpers' rows indented under it."""
+            out = [row_for(with_warmth(s), show_project)]
+            for h in helper_sessions.get(str(s.get("id")), []):
+                out.append(row_for(h, False, True))
+            return out
 
         if attention:
             wanted.append(label_for("attention", "Needs you", "accent"))
             for s in attention:
-                wanted.append(row_for(s, True))
+                wanted.extend(rows_for(s, True))
         if pinned:
             wanted.append(label_for("pinned", "Pinned"))
             for s in pinned:
-                wanted.append(row_for(s, True))
+                wanted.extend(rows_for(s, True))
         for key, items in ordered:
             head = self._heads.get(key)
             # a registered repository (REPOSITORIES.md) is called by the person's name for it
@@ -351,7 +391,7 @@ class Sidebar(QWidget):
                 continue
             limit = len(items) if (self._show_all.get(key) or q) else 6
             for s in items[:limit]:
-                wanted.append(row_for(s))
+                wanted.extend(rows_for(s))
             if len(items) > limit:
                 more = self._mores.get(key)
                 if more is None:
@@ -974,12 +1014,17 @@ class SessionRow(QWidget):
         bind(theme.theme.changed, self, lambda _t: self._paint())
 
     # ---- data
-    def update(self, s: Json, active: bool, unread: bool, show_project: bool, q: str) -> None:  # type: ignore[override]
-        sig = (s, active, unread, show_project, q)
+    def update(  # type: ignore[override]
+        self, s: Json, active: bool, unread: bool, show_project: bool, q: str, indent: bool = False
+    ) -> None:
+        sig = (s, active, unread, show_project, q, indent)
         if sig == self._sig:
             self.refresh_time()  # the same row: only the clock moved
             return
-        self._sig = (dict(s), active, unread, show_project, q)
+        self._sig = (dict(s), active, unread, show_project, q, indent)
+        lay = self.layout()
+        if lay is not None:
+            lay.setContentsMargins(PAD + (18 if indent else 0), 0, 4, 0)  # a helper sits under its lead
         self.s = s
         self._active, self._unread, self._show_project = active, unread, show_project
         self._q = q

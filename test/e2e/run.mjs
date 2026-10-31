@@ -432,6 +432,33 @@ test('dispatch: the board lists the finished job, its view has a row per reposit
   expect((await page.locator('.dp-report .dp-report-row').count()) === 3, 'the report card lists the three repositories');
 });
 
+test('helpers: a lead starts two helpers; the bar follows them, the person answers for all, the notes come back, the Changes panel finishes them', async ({ page }) => {
+  await ctl.call('mock.pace', { ms: 0 });
+  await open(page, 'sess-empty');
+  await send(page, 'Start helpers for the api and the web.');
+  await page.waitForFunction(() => document.querySelectorAll('.helpers-bar .helper-chip').length === 2, null, { timeout: 15_000 }); // one chip per helper
+  expect((await page.locator('.helpers-bar .helper-chip').first().innerText()).startsWith('api ·'), 'the first chip is api');
+  await page.waitForSelector('.helper-chip.warm', { timeout: 20_000 }); // web asks a permission
+  await page.waitForSelector('.status-pill.leading', { timeout: 10_000 });
+  expect((await page.locator('.side-row.sub').count()) === 2, 'the helpers sit under the lead in the sidebar');
+  await page.click('.side-page[title^="Every session"]');
+  await page.waitForSelector('.ovc.needs .btn:has-text("Allow for all helpers")', { timeout: 10_000 });
+  expect((await page.locator('.ovc.needs .ovc-proj').first().innerText()).includes('helper of'), 'the card says whose helper asked');
+  await page.click('.ovc.needs .btn:has-text("Allow for all helpers")');
+  await open(page, 'sess-empty');
+  await page.waitForSelector('.msg-note .note', { timeout: 30_000 });
+  await page.waitForFunction(() => document.querySelectorAll('.helper-chip .dp-glyph.done').length === 2, null, { timeout: 30_000 });
+  await page.waitForSelector('.helpers-bar .btn:has-text("Review")', { timeout: 10_000 });
+  await page.click('.helpers-bar .btn:has-text("Review")');
+  await page.waitForSelector('.hc .hc-sec', { timeout: 10_000 });
+  expect((await page.locator('.hc-sec').count()) === 2, 'a Changes section per helper');
+  await page.click('.hc-row .btn:has-text("Keep")');
+  await page.waitForFunction(() => document.querySelectorAll('.hc-sec .chip.tiny').length === 2, null, { timeout: 10_000 });
+  await page.click('.side-page[title="Results of scheduled sessions"]');
+  await page.waitForSelector('.dp-report .chip:has-text("helpers")', { timeout: 10_000 });
+  expect((await page.locator('.dp-report .dp-report-row').count()) === 2, 'the record lists both helpers');
+});
+
 // ---------------------------------------------------------------- run
 
 const chosen = tests.filter((t) => !grep || t.name.includes(grep));

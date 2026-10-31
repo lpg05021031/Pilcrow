@@ -51,6 +51,7 @@ from .misc import (
     notice_mode,
     result_notice,
 )
+from .note import NoteBlock
 from .prose import TextGroup
 from .thinking import ThinkingBlock
 from .tool import SpecialIsland, ToolBlock, is_special
@@ -70,6 +71,9 @@ def _perm(ctx: ToolCtx, item: Item) -> Optional[Json]:
 def make_row(item: Item, ctx: ToolCtx, in_work: bool, sid: str) -> Block:
     k = item.kind
     if k == "user":
+        # a note Pilcrow wrote (a helper's news to its lead) is drawn apart from the person's messages
+        if getattr(item, "note", ""):
+            return NoteBlock(item, sid)
         return UserBlock(item, sid, ctx.cwd)
     if k == "text":
         return TextGroup(item, ctx.cwd, quiet=in_work)
@@ -118,6 +122,8 @@ def sync_row(b: Block, item: Item, ctx: ToolCtx) -> List[Block]:
             return []
         if isinstance(b, ThinkingBlock) and b.view_mode == ctx.view:
             return []
+    if isinstance(b, NoteBlock):
+        return [b] if b.sync(item) else []
     if isinstance(b, UserBlock):
         return [b] if b.sync(item) else []
     if isinstance(b, TextGroup):

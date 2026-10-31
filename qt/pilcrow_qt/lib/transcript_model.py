@@ -43,6 +43,8 @@ class UserItem:
     images: List[str] = field(default_factory=list)
     files: List[str] = field(default_factory=list)
     local: bool = False
+    note: str = ""  # a message Pilcrow wrote, not the person ('helper': a helper's news to its lead)
+    from_: str = ""  # who sent it when not the person ('lead')
     command: Optional[UserCommand] = None
     prev_uuid: Optional[str] = None
     rev: int = 0
@@ -667,6 +669,8 @@ class TranscriptModel:
                 images=images,
                 files=files,
                 local=bool(m.get("_local")),
+                note=str(m.get("_note") or ""),
+                from_=str(m.get("_from") or ""),
                 ts=ts,
                 prev_uuid=prev_chain,
             ),

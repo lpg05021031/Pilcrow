@@ -299,6 +299,10 @@ class CardHead(QWidget):
     def update_from(self, s: Json, st: Json) -> None:
         self.title.setText(str(s.get("title") or ""))
         proj = basename(str(s.get("project") or s.get("cwd") or ""))
+        # a helper says whose it is (HELPERS.md §6.4)
+        helper = st.get("helper") if isinstance(st.get("helper"), dict) else s.get("helper")
+        if isinstance(helper, dict) and helper.get("leadId"):
+            proj = f"helper of {helper.get('leadTitle') or 'a lead session'} · {proj}"
         wt = s.get("worktree") or {}
         branch = wt.get("branch") if isinstance(wt, dict) and wt.get("branch") else s.get("gitBranch")
         if branch:
@@ -525,6 +529,7 @@ class NeedsCard(Card):
         self._allow_always = False
         self._cwd = ""
         self._job: str = ""  # the dispatch job this session runs for, if any
+        self._helper: Optional[Json] = None  # the lead this session helps, if any
         lay = QVBoxLayout(self)
         lay.setContentsMargins(19, 13, 15, 12)
         lay.setSpacing(9)
@@ -619,6 +624,14 @@ class NeedsCard(Card):
         self._cwd = str(s.get("cwd") or "")
         d = s.get("dispatch")
         self._job = str(d.get("jobId") or "") if isinstance(d, dict) else ""
+        h = s.get("helper")
+        self._helper = h if isinstance(h, dict) and h.get("leadId") else None
+        self.all_btn.setText("Allow for all helpers" if self._helper else "Allow for all")
+        self.all_btn.setToolTip(
+            "Answer every helper of this lead that asks the same thing, now and later"
+            if self._helper
+            else "Answer every run of this job that asks the same thing, now and later"
+        )
         pending = st.get("pending") or []
         perm = pending[0] if pending else None
         self._perm = perm
@@ -658,7 +671,7 @@ class NeedsCard(Card):
         decided = bool(self._decided)
         self.allow_btn.setVisible(bool(perm) and not interactive and not decided)
         self.always_btn.setVisible(bool(perm) and not interactive and not decided and self._allow_always)
-        self.all_btn.setVisible(bool(perm) and not interactive and not decided and bool(self._job))
+        self.all_btn.setVisible(bool(perm) and not interactive and not decided and bool(self._job or self._helper))
         self.deny_btn.setVisible(bool(perm) and not interactive and not decided)
         self.open_primary.setVisible(bool(perm) and interactive and not decided)
         self.decided_lb.setVisible(decided)
@@ -727,7 +740,7 @@ class NeedsCard(Card):
     def allow_all(self) -> None:
         """The dispatch job answers this request for every repository that asks it, now and later."""
         perm = self._perm
-        if not perm or not self._job or self._busy:
+        if not perm or not (self._job or self._helper) or self._busy:
             return
         self._busy = True
         for b in (self.allow_btn, self.always_btn, self.all_btn, self.deny_btn):
@@ -735,7 +748,9 @@ class NeedsCard(Card):
 
         def ok(_r: Any) -> None:
             self._decided = "allow"
-            self.decided_lb.setText("Allowed for every repository of the job")
+            self.decided_lb.setText(
+                "Allowed for every helper of the lead" if self._helper else "Allowed for every repository of the job"
+            )
             self.set_tone("decided")
             for b in (self.allow_btn, self.always_btn, self.all_btn, self.deny_btn, self.more):
                 b.hide()
@@ -749,9 +764,13 @@ class NeedsCard(Card):
             for b in (self.allow_btn, self.always_btn, self.all_btn, self.deny_btn):
                 b.setEnabled(True)
 
-        store.call("dispatch.allow", {"id": self._job, "requestId": str(perm.get("requestId") or "")}).then(ok).catch(
-            bad
+        rid = str(perm.get("requestId") or "")
+        call = (
+            store.call("helpers.allow", {"leadId": str(self._helper.get("leadId")), "requestId": rid})
+            if self._helper
+            else store.call("dispatch.allow", {"id": self._job, "requestId": rid})
         )
+        call.then(ok).catch(bad)
 
     def handle_key(self, key: str) -> bool:
         """1/2/3 on the first waiting card; returns whether the key meant something."""

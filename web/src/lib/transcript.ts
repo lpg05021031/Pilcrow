@@ -16,6 +16,10 @@ export interface UserItem extends Base {
   kind: 'user';
   uuid: string;
   text: string;
+  /** A message Pilcrow wrote, not the person ('helper': a helper's news to its lead). */
+  note?: string;
+  /** Who sent it when not the person ('lead'). */
+  from?: string;
   images: string[];
   files: string[];
   local?: boolean;
@@ -424,7 +428,7 @@ export class TranscriptModel {
       this.add({ kind: 'user', id: m.uuid || nid('u'), uuid: m.uuid || '', rev: 0, text: '', images, files, command: { name: cmdName.replace(/^\//, ''), args: (stripTags(text, 'command-args') || '').trim() }, ts }, null);
       return;
     }
-    this.add({ kind: 'user', id: m.uuid || nid('u'), uuid: m.uuid || '', rev: 0, text, images, files, local: Boolean(m._local), ts, prevUuid: prevChain }, null);
+    this.add({ kind: 'user', id: m.uuid || nid('u'), uuid: m.uuid || '', rev: 0, text, images, files, local: Boolean(m._local), note: m._note || '', from: m._from || '', ts, prevUuid: prevChain }, null);
     this.lastTurnTools = [];
   }
 
