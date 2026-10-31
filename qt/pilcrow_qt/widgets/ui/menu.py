@@ -18,10 +18,11 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QApplication, QFrame, QLabel, QMainWindow, QSizePolicy, QVBoxLayout, QWidget
 
 from ... import icons, theme
+from .bits import Hairline, paint_box
 from .signals import bind
 
 Item = Dict[str, Any]
@@ -58,22 +59,19 @@ class Popover(QFrame):
         self._closed = False
         self._anchor: Optional[QWidget] = None
         self.setObjectName("popover")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.lay = QVBoxLayout(self)
         self.lay.setContentsMargins(5, 5, 5, 5)
         self.lay.setSpacing(0)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
+        bind(theme.theme.changed, self, lambda _t: self.update())
         host.installEventFilter(self)
         QApplication.instance().installEventFilter(self)
 
-    def _paint(self) -> None:
+    def paintEvent(self, _e) -> None:  # noqa: N802
         t = theme.tokens()
-        bg = popover_bg(t)
-        self.setStyleSheet(
-            f"#popover {{ background: {bg}; border: 1px solid {theme.blend(t.hair_2, bg).name()}; border-radius: {theme.R3}px; }}"
-        )
+        bg = QColor(popover_bg(t))
+        p = QPainter(self)
+        paint_box(p, QRectF(self.rect()), bg, theme.over(theme.qcolor(t.hair_2), bg), theme.R3)
 
     def set_content(self, w: QWidget) -> QWidget:
         self.lay.addWidget(w)
@@ -331,20 +329,18 @@ class Menu(QWidget):
         sp = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         sp.setHeightForWidth(True)
         self.setSizePolicy(sp)
-        t = theme.tokens()
         for i, it in enumerate(items):
             if it.get("separator"):
-                sep = QFrame(self)
+                sep = Hairline(over=lambda tk: QColor(popover_bg(tk)), parent=self)
                 sep.setObjectName("menu-sep")
-                sep.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-                sep.setStyleSheet(f"#menu-sep {{ background: {theme.blend(t.hair, popover_bg(t)).name()}; }}")
                 self.parts.append(sep)
                 self.rows.append(None)
                 continue
             if it.get("heading"):
                 head = QLabel(str(it["heading"]), self)
                 head.setContentsMargins(9, 8, 9, 4)
-                head.setStyleSheet(f"color: {t.text_3}; font-size: {theme.FS_MICRO}px; font-weight: 600;")
+                head.setFont(theme.font_ui(theme.FS_MICRO, 600))
+                theme.tint(head, fg="text_3")
                 self.parts.append(head)
                 self.rows.append(None)
                 continue

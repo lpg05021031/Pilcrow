@@ -664,6 +664,8 @@ class TerminalPanel(QWidget):
         root.addWidget(Hairline())
         self.host = QWidget()
         self.host.setObjectName("chrome")
+        self.host.setAutoFillBackground(True)
+        theme.tint(self.host, bg="chrome")
         self.host.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         hl = QVBoxLayout(self.host)
         hl.setContentsMargins(12, 8, 4, 4)

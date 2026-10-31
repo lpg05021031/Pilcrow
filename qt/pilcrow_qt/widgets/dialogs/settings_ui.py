@@ -13,8 +13,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from PySide6.QtCore import QEvent, QObject, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QKeyEvent, QPainter
+from PySide6.QtCore import QEvent, QObject, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFontMetrics, QKeyEvent, QPainter
 from PySide6.QtWidgets import (
     QButtonGroup,
     QDialog,
@@ -32,10 +32,10 @@ from PySide6.QtWidgets import (
 
 from ... import icons, theme
 from ...store import store
-from ..ui.bits import IconButton, hairline, label
+from ..ui.bits import Box, IconButton, Pill, hairline, label, paint_box
 from ..ui.menu import Menu, Popover, host_for
 from ..ui.signals import bind
-from .parts import Backdrop, Text, sheet_bg, sheet_css, well_bg
+from .parts import Backdrop, Text, sheet_bg, sheet_line, well_bg, well_line
 from .parts import Switch as _Switch
 
 Json = Dict[str, Any]
@@ -163,10 +163,14 @@ class ElidedLabel(QLabel):
 def elide(lb: QLabel) -> QLabel:
     """``lb``'s text and look on an :class:`ElidedLabel`; the original is discarded."""
     out = ElidedLabel(lb.text())
-    for name in ("tone", "fs", "mono"):
+    for name in ("fs", "mono"):
         if lb.property(name) is not None:
             out.setProperty(name, lb.property(name))
     out.setStyleSheet(lb.styleSheet())
+    out.setFont(lb.font())
+    tint = theme.tint_of(lb)
+    if tint:
+        theme.tint(out, **tint)
     out.setAlignment(lb.alignment())
     lb.deleteLater()
     return out
@@ -333,21 +337,26 @@ class Select(QPushButton):
 
     def _paint(self) -> None:
         t = theme.tokens()
-        surface = sheet_bg(t).name()
-        bg = theme.blend(t.fill_1, surface)
-        hover = theme.blend(t.fill_2, surface)
-        if self._ghost:
-            self.setStyleSheet(
-                f"#select {{ background: transparent; border: none; border-radius: {theme.R2}px; padding: 0; min-height: 26px; max-height: 26px; text-align: left; }}"
-                f' #select:hover, #select[open="true"] {{ background: {hover.name()}; }}'
-            )
-        else:
-            self.setStyleSheet(
-                f"#select {{ background: {bg.name()}; border: 1px solid {theme.blend(t.hair, bg.name()).name()}; border-radius: {theme.R2}px; padding: 0; min-height: 32px; max-height: 32px; text-align: left; }}"
-                f' #select:hover, #select[open="true"] {{ background: {hover.name()}; border-color: {theme.blend(t.hair_2, hover.name()).name()}; }}'
-            )
+        h = 26 if self._ghost else 34  # the web's 32px box inside its 1px line
+        css = f"#select {{ background: transparent; border: none; padding: 0; min-height: {h}px; max-height: {h}px; text-align: left; }}"
+        if self.styleSheet() != css:
+            self.setStyleSheet(css)
         self.chev.setPixmap(icons.pixmap("chevrons-up-down", t.text_3, 13))
         self._show_current()
+        self.update()
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        t = theme.tokens()
+        surface = sheet_bg(t)
+        lit = self.underMouse() or self.property("open") == "true"
+        p = QPainter(self)
+        if self._ghost:
+            bg = theme.over(theme.qcolor(t.fill_2), surface) if lit else None
+            paint_box(p, QRectF(self.rect()), bg, None, theme.R2)
+            return
+        bg = theme.over(theme.qcolor(t.fill_2 if lit else t.fill_1), surface)
+        line = theme.over(theme.qcolor(t.hair_2 if lit else t.hair), bg)
+        paint_box(p, QRectF(self.rect()), bg, line, theme.R2)
 
     # ---- the popup
     def showPopup(self) -> None:  # noqa: N802
@@ -526,45 +535,40 @@ def clear_layout(lay) -> None:
 
 def chip(text: str, tone: str = "", tiny: bool = False) -> QLabel:
     """``.chip``: a small rounded tag. ``tone="warn"`` is the red one (rejected)."""
-    lb = QLabel(text)
-    lb.setAlignment(Qt.AlignmentFlag.AlignCenter)
     h, pad, fs, r = (16, 5, 10, 8) if tiny else (24, 9, 11.5, 12)
-
-    def css(t: theme.Tokens) -> str:
-        if tone == "warn":
-            color, bg, line = t.err, theme.blend(t.err_wash, t.raised).name(), "transparent"
-        else:
-            color, bg, line = t.text_2, theme.blend(t.fill_1, t.raised).name(), theme.blend(t.hair, t.raised).name()
-        return f"QLabel {{ color: {color}; background: {bg}; border: 1px solid {line}; border-radius: {r}px; padding: 0 {pad}px; min-height: {h - 2}px; max-height: {h - 2}px; font-size: {fs}px; }}"
-
-    styled(lb, css)
+    if tone == "warn":
+        lb = Pill(text, bg="err_wash/raised", radius=r)
+        theme.tint(lb, fg="err")
+    else:
+        lb = Pill(text, bg="fill_1/raised", line="hair/raised", radius=r)
+        theme.tint(lb, fg="text_2")
+    lb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    lb.setContentsMargins(pad, 0, pad, 0)
+    lb.setFixedHeight(h)
+    lb.setFont(theme.font_ui(fs))
     return lb
 
 
 def count_chip(n: int) -> QLabel:
     """``.cust-count``: the number beside a group title."""
-    lb = QLabel(str(n))
+    lb = Pill(str(n), bg="fill_2/raised", radius=9)
     lb.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    styled(
-        lb,
-        lambda t: (
-            f"QLabel {{ color: {t.text_3}; background: {theme.blend(t.fill_2, t.raised).name()}; border-radius: 9px; min-width: 12px; padding: 0 5px; min-height: 18px; max-height: 18px; font-size: 11px; }}"
-        ),
-    )
+    lb.setContentsMargins(5, 0, 5, 0)
+    lb.setMinimumWidth(22)
+    lb.setFixedHeight(18)
+    lb.setFont(theme.font_ui(11))
+    theme.tint(lb, fg="text_3")
     return lb
 
 
 def icon_box(name: str, size: int = 36) -> QLabel:
     """``.cust-ico``: an icon on a small inset tile."""
-    lb = QLabel()
+    lb = Pill(bg="inset", line="hair/inset", radius=9)
     lb.setFixedSize(size, size)
     lb.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
     def paint(t: theme.Tokens) -> None:
         lb.setPixmap(icons.pixmap(name, t.text_2, 16))
-        lb.setStyleSheet(
-            f"QLabel {{ background: {t.inset}; border: 1px solid {theme.blend(t.hair, t.inset).name()}; border-radius: 9px; }}"
-        )
 
     paint(theme.tokens())
     bind(theme.theme.changed, lb, paint)
@@ -583,14 +587,12 @@ def icon_label(name: str, color_of: Callable[[theme.Tokens], str], size: int = 1
     return lb
 
 
-class Intro(QFrame):
+class Intro(Box):
     """``.cust-intro``: the inset card that explains a feature before anything exists."""
 
     def __init__(self, title: str, body: str, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        super().__init__(bg="inset", radius=12, parent=parent)
         self.setObjectName("intro")
-        styled(self, lambda t: f"#intro {{ background: {t.inset}; border-radius: 12px; }}")
         lay = vbox(self, 8, (20, 18, 20, 18))
         self.title = Text(title, theme.FS_BODY, 600)
         lay.addWidget(self.title)
@@ -608,7 +610,7 @@ class Intro(QFrame):
         return b
 
 
-class Panel(QFrame):
+class Panel(Box):
     """``.mem-settings`` / ``.radio-list`` / ``.mem-add``: a rounded fill-1 box with a layout inside."""
 
     def __init__(
@@ -618,15 +620,8 @@ class Panel(QFrame):
         border: bool = False,
         parent: Optional[QWidget] = None,
     ) -> None:
-        super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        super().__init__(bg="fill_1/raised", line="hair/raised" if border else None, radius=radius, parent=parent)
         self.setObjectName("panelbox")
-        styled(
-            self,
-            lambda t: (
-                f"#panelbox {{ background: {theme.blend(t.fill_1, t.raised).name()}; border-radius: {radius}px; border: 1px solid {theme.blend(t.hair, t.raised).name() if border else 'transparent'}; }}"
-            ),
-        )
         self.lay = vbox(self, 0, margins)
 
 
@@ -723,7 +718,7 @@ class RadioRow(QPushButton):
         self.setAutoDefault(False)
         self.setAccessibleName(str(mode["label"]))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         self.setObjectName("radio")
         self.setFixedHeight(35)
         lay = QHBoxLayout(self)
@@ -742,17 +737,6 @@ class RadioRow(QPushButton):
         self.check.setFixedSize(16, 16)
         lay.addWidget(self.check)
         danger = mode["id"] == "bypassPermissions"
-        styled(
-            self,
-            lambda t: (
-                f"""
-            #radio {{ background: transparent; border: none; border-radius: 0; padding: 0; min-height: 35px; max-height: 35px; text-align: left; }}
-            #radio:hover {{ background: {theme.blend(t.fill_1, well_bg(t).name()).name()}; }}
-            #radio:checked {{ background: {theme.blend(t.fill_2, well_bg(t).name()).name()}; }}
-            #radio QLabel {{ background: transparent; }}
-        """
-            ),
-        )
         self.toggled.connect(lambda _on: self._paint())
         bind(theme.theme.changed, self, lambda _t: self._paint())
         self._danger = danger
@@ -763,26 +747,30 @@ class RadioRow(QPushButton):
         on = self.isChecked()
         color = t.err if self._danger else (t.text if on else t.text_3)
         self.ico.setPixmap(icons.pixmap(str(self.mode["icon"]), color, 15))
-        self.hint.setStyleSheet(f"color: {t.text_3}; font-size: {theme.FS_SMALL}px;")
-        self.lb.setStyleSheet(f"color: {t.err if self._danger else (t.text if on else t.text_2)};")
+        theme.tint(self.lb, fg="err" if self._danger else ("text" if on else "text_2"))
         self.check.setPixmap(icons.pixmap("check", t.text, 14) if on else icons.pixmap("check", "transparent", 14))
+        self.update()
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        t = theme.tokens()
+        if self.isChecked():
+            bg = theme.over(theme.qcolor(t.fill_2), well_bg(t))
+        elif self.underMouse():
+            bg = theme.over(theme.qcolor(t.fill_1), well_bg(t))
+        else:
+            return
+        p = QPainter(self)
+        p.fillRect(self.rect(), bg)
 
 
-class RadioList(QFrame):
+class RadioList(Box):
     """``.radio-list``: the stacked rows that pick one permission mode."""
 
     changed = Signal(str)
 
     def __init__(self, modes: Sequence[Json], value: str, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        super().__init__(bg=well_bg, line=well_line, radius=theme.R3, parent=parent)
         self.setObjectName("radiolist")
-        styled(
-            self,
-            lambda t: (
-                f"#radiolist {{ background: {well_bg(t).name()}; border: 1px solid {theme.blend(t.hair, well_bg(t).name()).name()}; border-radius: {theme.R3}px; }}"
-            ),
-        )
         lay = vbox(self, 0, (0, 0, 0, 0))
         self.group = QButtonGroup(self)
         self.group.setExclusive(True)
@@ -822,16 +810,26 @@ class FolderChip(QPushButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip(tooltip)
         self.setAccessibleName(text)
-        styled(
-            self,
-            lambda t: (
-                f"""
-            #fchip {{ min-height: 24px; max-height: 24px; padding: 0 10px; border-radius: 13px; font-size: {theme.FS_SMALL}px; color: {t.text_2}; background: {theme.blend(t.fill_1, sheet_bg(t).name()).name()}; border: 1px solid {theme.blend(t.hair, theme.blend(t.fill_1, sheet_bg(t).name()).name()).name()}; }}
-            #fchip:hover {{ background: {theme.blend(t.fill_2, sheet_bg(t).name()).name()}; color: {t.text}; }}
-            #fchip[on="true"] {{ color: {t.text}; background: {theme.blend(t.fill_2, sheet_bg(t).name()).name()}; border-color: {theme.blend(t.hair_3, sheet_bg(t).name()).name()}; }}
-        """
-            ),
-        )
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self.setFixedHeight(24)
+        self._font = theme.font_ui(theme.FS_SMALL)
+        bind(theme.theme.changed, self, lambda _t: self.update())
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        return QSize(QFontMetrics(self._font).horizontalAdvance(self.text()) + 20, 24)
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        t = theme.tokens()
+        surface = sheet_bg(t)
+        on = self.property("on") == "true"
+        lit = on or self.underMouse()
+        bg = theme.over(theme.qcolor(t.fill_2 if lit else t.fill_1), surface)
+        line = theme.over(theme.qcolor(t.hair_3), surface) if on else theme.over(theme.qcolor(t.hair), bg)
+        p = QPainter(self)
+        paint_box(p, QRectF(self.rect()), bg, line, 13)
+        p.setFont(self._font)
+        p.setPen(QColor(t.text if lit else t.text_2))
+        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.text())
 
 
 class Flow(QWidget):
@@ -1069,10 +1067,9 @@ class Sheet(QDialog):
         self.setGeometry(host.rect())
         host.installEventFilter(self)
 
-        self.frame = QFrame(self)
+        self.frame = Box(bg=sheet_bg, line=sheet_line, radius=theme.R4, parent=self)
         self.frame.setObjectName("sheet")
-        self.frame.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        styled(self.frame, sheet_css)
+        self.frame.setContentsMargins(1, 1, 1, 1)  # inside the painted line, as inside the web's border
         fl = vbox(self.frame, 0)
         self.head = QWidget()
         self.head.setFixedHeight(48)

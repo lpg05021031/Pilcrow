@@ -470,15 +470,11 @@ class CodeEditor(QTextEdit):
         self.gutter.update()
 
     def _apply_theme(self) -> None:
-        t = theme.tokens()
         self.setFont(theme.font_mono())
-        # The font goes in the stylesheet too: the app stylesheet's ``*`` rule would override setFont.
-        mono = theme._MONO_FAMILY or "monospace"
-        self.setStyleSheet(
-            f"QTextEdit#code-editor {{ background: {t.canvas}; color: {t.text}; border: none; padding: 0; "
-            f'font-family: "{mono}"; font-size: {theme.MONO_SIZE}px; '
-            f"selection-background-color: {theme.blend(t.selection, t.canvas).name()}; selection-color: {t.text}; }}"
-        )
+        css = "QTextEdit#code-editor { background: palette(window); border: none; padding: 0; }"
+        if self.styleSheet() != css:
+            self.setStyleSheet(css)
+        theme.tint(self, highlight="selection/canvas", highlighted_text="text")
         self._tint_current_line()
         self._update_gutter_width()
 

@@ -59,6 +59,8 @@ class Sidebar(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("sidebar")
+        self.setAutoFillBackground(True)
+        theme.tint(self, bg="chrome")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._q = ""
         self._collapsed: Dict[str, bool] = {}
@@ -90,6 +92,7 @@ class Sidebar(QWidget):
         bl.setSpacing(9)
         bl.addWidget(Mark(15))
         self.brand_name = QLabel("Pilcrow")
+        self.brand_name.setFont(theme.font_ui(14, 600))  # .brand-name: 13.5px at 600, a touch tighter
         bl.addWidget(self.brand_name, 1)
         self.collapse_btn = IconBtn("panel-left-close", "Hide sidebar (Ctrl+B)", 15, 24)
         self.collapse_btn.clicked.connect(lambda: store.set_ui(sidebar=False))
@@ -199,13 +202,10 @@ class Sidebar(QWidget):
         store.set_theme(nxt)
 
     def _on_config(self) -> None:
-        t = theme.tokens()
         cur = (store.config or {}).get("theme") or "system"
         nxt = "dark" if cur == "system" else "light" if cur == "dark" else "system"
         self.theme_btn.set_icon_name("monitor" if cur == "system" else "moon" if cur == "dark" else "sun")
         self.theme_btn.setToolTip(f"Appearance: {cur} — click for {nxt}")
-        # .brand-name: 13.5px at 600, a touch tighter
-        self.brand_name.setStyleSheet(f"color: {t.text}; font-size: 14px; font-weight: 600;")
 
     def _on_ui(self) -> None:
         self.setFixedWidth(store.ui.sidebar_w)
@@ -604,6 +604,9 @@ class SearchRow(QWidget):
         self.icon.setFixedSize(15, 15)
         lay.addWidget(self.icon)
         self.edit = _SearchEdit()
+        self.edit.setStyleSheet(
+            f"QLineEdit {{ background: transparent; border: none; padding: 0; margin: 0; font-size: {theme.FS_UI}px; }}"
+        )
         self.edit.setPlaceholderText("Search")
         self.edit.setFrame(False)
         self.edit.setAccessibleName("Search sessions")
@@ -620,13 +623,7 @@ class SearchRow(QWidget):
     def _paint(self) -> None:
         t = theme.tokens()
         self.icon.setPixmap(icons.pixmap("search", t.text_3, 15))
-        colour = t.text_2 if self.edit.hasFocus() else t.text_3
-        self.edit.setStyleSheet(
-            f"QLineEdit {{ background: transparent; border: none; padding: 0; margin: 0; font-size: {theme.FS_UI}px; color: {colour}; }}"
-        )
-        pal = self.edit.palette()
-        pal.setColor(pal.ColorRole.PlaceholderText, theme.qcolor(t.text_3))
-        self.edit.setPalette(pal)
+        theme.tint(self.edit, fg="text_2" if self.edit.hasFocus() else "text_3", placeholder="text_3")
         self.update()
 
     def eventFilter(self, obj, e: QEvent) -> bool:  # noqa: N802
@@ -698,14 +695,8 @@ class SectionLabel(QLabel):
         self.setFixedHeight(GROUP_GAP + HEAD_H)
         self.setContentsMargins(PAD, GROUP_GAP, PAD, 0)
         self.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
-
-    def _paint(self) -> None:
-        t = theme.tokens()
-        self.setStyleSheet(
-            f"color: {t.accent_text if self._tone == 'accent' else t.text_3}; font-size: {theme.FS_MICRO}px; font-weight: 600;"
-        )
+        self.setFont(theme.font_ui(theme.FS_MICRO, 600))
+        theme.tint(self, fg="accent_text" if tone == "accent" else "text_3")
 
 
 class GroupHead(QWidget):
@@ -837,15 +828,18 @@ class MoreButton(QPushButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedHeight(26)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
-
-    def _paint(self) -> None:
-        t = theme.tokens()
         self.setStyleSheet(
-            f"QPushButton {{ border: none; background: transparent; text-align: left; padding: 0 {PAD}px; min-height: 26px; max-height: 26px; color: {t.text_3}; font-size: {theme.FS_SMALL}px; font-weight: 400; }}"
-            f" QPushButton:hover {{ color: {t.text}; }}"
+            f"QPushButton {{ border: none; background: transparent; text-align: left; padding: 0 {PAD}px; min-height: 26px; max-height: 26px; font-size: {theme.FS_SMALL}px; font-weight: 400; }}"
         )
+        theme.tint(self, fg="text_3")
+
+    def enterEvent(self, e) -> None:  # noqa: N802
+        theme.tint(self, fg="text")
+        super().enterEvent(e)
+
+    def leaveEvent(self, e) -> None:  # noqa: N802
+        theme.tint(self, fg="text_3")
+        super().leaveEvent(e)
 
 
 class EmptyNote(QLabel):
@@ -856,12 +850,8 @@ class EmptyNote(QLabel):
         self.setWordWrap(True)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setContentsMargins(12, 28, 12, 28)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
-
-    def _paint(self) -> None:
-        t = theme.tokens()
-        self.setStyleSheet(f"color: {t.text_3}; font-size: {theme.FS_SMALL}px;")
+        self.setFont(theme.font_ui(theme.FS_SMALL))
+        theme.tint(self, fg="text_3")
 
 
 class SessionRow(QWidget):
@@ -951,9 +941,8 @@ class SessionRow(QWidget):
         look = (t.name, lit, weight)
         if look != getattr(self, "_look", None):
             self._look = look
-            self.title.setStyleSheet(
-                f"color: {t.text if lit else t.text_2}; font-size: {theme.FS_UI}px; font-weight: {weight};"
-            )
+            self.title.setFont(theme.font_ui(theme.FS_UI, weight))
+            theme.tint(self.title, fg="text" if lit else "text_2")
         self.title.refresh()
         QWidget.update(self)
 
@@ -1143,9 +1132,9 @@ class _MetaRow(QWidget):
 
     def _paint(self) -> None:
         t = theme.tokens()
-        css = f"color: {t.text_3}; font-size: {theme.FS_MICRO}px;"
-        self.project.setStyleSheet(css)
-        self.ref.setStyleSheet(css)
+        for lb in (self.project, self.ref):
+            lb.setFont(theme.font_ui(theme.FS_MICRO))
+            theme.tint(lb, fg="text_3")
         if self._icon:
             self.wt_icon.setPixmap(icons.pixmap(self._icon, t.text_3, 11))
 
@@ -1166,18 +1155,14 @@ class _RowEnd(QWidget):
         self.glyph = _RowGlyph()
         lay.addWidget(self.glyph)
         self.time = QLabel()
+        self.time.setFont(theme.font_ui(theme.FS_MICRO))
+        theme.tint(self.time, fg="text_4")
         lay.addWidget(self.time)
         self.menu = IconBtn("ellipsis", "Session actions", 14, 24)
         self.menu.setParent(self)
         self.menu.hide()
         self._quiet = True
         self._hover = False
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
-
-    def _paint(self) -> None:
-        t = theme.tokens()
-        self.time.setStyleSheet(f"color: {t.text_4}; font-size: {theme.FS_MICRO}px;")
 
     def set_quiet(self, quiet: bool) -> None:
         self._quiet = quiet

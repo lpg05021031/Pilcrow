@@ -36,7 +36,7 @@ from ..lib.tools_meta import str_
 from ..lib.workflow import workflow_counts
 from ..store import Runtime, store
 from .dialogs.parts import Badge, Card, ElideLabel, Kbd, LayoutButton, Text, Well, half_hairline, page_column
-from .ui.bits import ContextRing, IconButton, Mark, Spinner, WorkingMark, button
+from .ui.bits import Box, ContextRing, IconButton, Mark, Spinner, WorkingMark, button, paint_box
 from .ui.signals import bind
 
 Json = Dict[str, Any]
@@ -183,10 +183,8 @@ class Tile(LayoutButton):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(13, 0, 13, 0)
         lay.setSpacing(12)
-        self.ico_box = QFrame()
-        self.ico_box.setObjectName("tile-ico")
+        self.ico_box = Box(radius=10)
         self.ico_box.setFixedSize(34, 34)
-        self.ico_box.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         il = QHBoxLayout(self.ico_box)
         il.setContentsMargins(0, 0, 0, 0)
         self.ico = QLabel()
@@ -221,15 +219,16 @@ class Tile(LayoutButton):
         self._tone, self._sub, self._live = tone, sub, live
         self._paint()
 
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        t = theme.tokens()
+        p = QPainter(self)
+        line = theme.blend(t.hair_3 if self.underMouse() else t.hair_2, t.canvas)
+        paint_box(p, QRectF(self.rect()), QColor(t.raised), line, 14)
+
     def _paint(self) -> None:
         t = theme.tokens()
         accent = self._tone == "accent"
-        self.setStyleSheet(
-            f"Tile {{ background: {t.raised}; border: 1px solid {theme.blend(t.hair_2, t.canvas).name()}; border-radius: 14px; text-align: left; padding: 0; }} "
-            f"Tile:hover {{ border-color: {theme.blend(t.hair_3, t.canvas).name()}; }}"
-        )
-        box_bg = theme.blend(t.accent_wash, t.raised).name() if accent else theme.blend(t.fill_1, t.raised).name()
-        self.ico_box.setStyleSheet(f"#tile-ico {{ background: {box_bg}; border-radius: 10px; }}")
+        self.ico_box.set_look(bg="accent_wash/raised" if accent else "fill_1/raised")
         self.ico.setPixmap(
             icons.pixmap(self._icon, t.accent_text if accent else (t.text if self._live else t.text_2), 16)
         )
@@ -248,7 +247,7 @@ class SectionHead(QWidget):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(8)
-        self.glyph = QLabel()
+        self.glyph = Box(bg="accent", line="accent_wash/canvas", radius=6, line_w=2)
         self.glyph.setFixedSize(12, 12)
         self.glyph.setVisible(glyph)
         lay.addWidget(self.glyph)
@@ -260,23 +259,13 @@ class SectionHead(QWidget):
         self.end = Text(end_text, theme.FS_SMALL, 400, "text_3", wrap=False)
         lay.addWidget(self.end)
         self._glyph_on = glyph
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
-
-    def _paint(self) -> None:
-        t = theme.tokens()
-        if self._glyph_on:
-            self.glyph.setStyleSheet(
-                f"QLabel {{ background: {t.accent}; border: 2px solid {theme.blend(t.accent_wash, t.canvas).name()}; border-radius: 6px; }}"
-            )
 
 
-class EmptyNote(QFrame):
+class EmptyNote(Box):
     """``.ov-empty``: a quiet filled box with an icon and a sentence."""
 
     def __init__(self, text: str, icon: str = "", mark: bool = False, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        super().__init__(bg="fill_1/canvas", radius=12, parent=parent)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(16, 14, 16, 14)
         lay.setSpacing(12)
@@ -288,14 +277,6 @@ class EmptyNote(QFrame):
             lay.addWidget(ico, 0, Qt.AlignmentFlag.AlignVCenter)
         self.text = Text(text, theme.FS_SMALL, 400, "text_3", 1.5)
         lay.addWidget(self.text, 1)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
-
-    def _paint(self) -> None:
-        t = theme.tokens()
-        self.setStyleSheet(
-            f"EmptyNote {{ background: {theme.blend(t.fill_1, t.canvas).name()}; border-radius: 12px; }}"
-        )
 
 
 class CardHead(QWidget):
@@ -307,16 +288,13 @@ class CardHead(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(2)
         self.title = ElideLabel()
+        self.title.setFont(theme.font_ui(theme.FS_UI, 560))
+        theme.tint(self.title, fg="text")
         self.proj = ElideLabel()
+        self.proj.setFont(theme.font_ui(theme.FS_MICRO))
+        theme.tint(self.proj, fg="text_3")
         lay.addWidget(self.title)
         lay.addWidget(self.proj)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
-
-    def _paint(self) -> None:
-        t = theme.tokens()
-        self.title.setStyleSheet(f"color: {t.text}; font-size: {theme.FS_UI}px; font-weight: 560;")
-        self.proj.setStyleSheet(f"color: {t.text_3}; font-size: {theme.FS_MICRO}px;")
 
     def update_from(self, s: Json, st: Json) -> None:
         self.title.setText(str(s.get("title") or ""))
@@ -361,7 +339,7 @@ class WorkflowBar(QWidget):
 
 def _micro(text: str = "") -> QLabel:
     lb = QLabel(text)
-    lb.setProperty("tone", "faint")
+    theme.tint(lb, fg="text_3")
     lb.setProperty("fs", "micro")
     return lb
 
@@ -391,6 +369,7 @@ class WorkingCard(Card):
         self.act_ico = QLabel()
         act.addWidget(self.act_ico)
         self.act = ElideLabel()
+        self.act.setFont(theme.font_ui(theme.FS_SMALL))
         act.addWidget(self.act, 1)
         lay.addLayout(act)
         self.wf_row = QWidget()
@@ -434,7 +413,7 @@ class WorkingCard(Card):
 
     def _paint_text(self) -> None:
         t = theme.tokens()
-        self.act.setStyleSheet(f"color: {t.text_3 if self._quiet_act else t.text_2}; font-size: {theme.FS_SMALL}px;")
+        theme.tint(self.act, fg="text_3" if self._quiet_act else "text_2")
         self.wf_ico.setPixmap(icons.pixmap("workflow", t.text_3, 12))
         self.agents_ico.setPixmap(icons.pixmap("bot", t.text_3, 12))
 
@@ -447,7 +426,7 @@ class WorkingCard(Card):
         t = theme.tokens()
         self.act_ico.setPixmap(icons.pixmap(ico, t.text_3, 13))
         self.act.setText(text)
-        self.act.setStyleSheet(f"color: {t.text_3 if quiet else t.text_2}; font-size: {theme.FS_SMALL}px;")
+        theme.tint(self.act, fg="text_3" if quiet else "text_2")
         self.live.setToolTip("Quiet for a while" if stale else "Working")
         wf = running_workflow(st.get("tasks"))
         if wf:
@@ -470,7 +449,7 @@ class WorkingCard(Card):
         self.cost.setText(cost(c_usd) + ("  above median" if hot else "") if c_usd > 0 else "")
         self.cost.setToolTip("Well above the median session today" if hot else "Cost so far")
         self.cost.setVisible(c_usd > 0)
-        self.cost.setStyleSheet(f"color: {t.accent_text if hot else t.text_3}; font-size: {theme.FS_MICRO}px;")
+        theme.tint(self.cost, fg="accent_text" if hot else "text_3")
         cw = int(u.get("contextWindow") or 0)
         self.ring.set_values(int(u.get("contextTokens") or 0), cw)
         self.ring.setVisible(cw > 0)
@@ -498,9 +477,7 @@ class KeyButton(LayoutButton):
 
     def __init__(self, text: str, kind: str = "", parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setProperty("fs", "sm")
-        if kind:
-            self.setProperty("kind", kind)
+        self.kind = kind
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAccessibleName(text)
         self.setAutoDefault(False)
@@ -508,7 +485,6 @@ class KeyButton(LayoutButton):
         lay.setContentsMargins(9, 0, 9, 0)
         lay.setSpacing(6)
         self.label = QLabel(text)
-        self.label.setStyleSheet("background: transparent;")
         self.label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         lay.addWidget(self.label)
         self.kbd = Kbd("")
@@ -519,13 +495,16 @@ class KeyButton(LayoutButton):
         self.set_kind(kind)
 
     def set_kind(self, kind: str) -> None:
+        self.kind = kind
         self.setProperty("kind", kind)
-        t = theme.tokens()
-        self.label.setStyleSheet(
-            f"background: transparent; color: {t.accent_ink if kind == 'primary' else t.text_2 if kind == 'ghost' else t.text}; font-size: {theme.FS_SMALL}px; font-weight: {600 if kind == 'primary' else 400};"
-        )
-        self.style().unpolish(self)
-        self.style().polish(self)
+        self.label.setFont(theme.font_ui(theme.FS_SMALL, 600 if kind == "primary" else 400))
+        theme.tint(self.label, fg="accent_ink" if kind == "primary" else "text_2" if kind == "ghost" else "text")
+        if kind == "primary":
+            self.set_look(bg="accent", hover="accent_2", radius=theme.R2)
+        elif kind == "ghost":
+            self.set_look(hover="fill_2/canvas", radius=theme.R2)
+        else:
+            self.set_look(bg="fill_2/canvas", hover="fill_3/canvas", radius=theme.R2)
 
     def set_key(self, n: Optional[int]) -> None:
         self.kbd.setText(str(n) if n else "")
@@ -606,9 +585,13 @@ class NeedsCard(Card):
 
     def _paint_extra(self) -> None:
         t = theme.tokens()
-        self.wait.setStyleSheet(f"color: {t.accent_text}; font-size: {theme.FS_MICRO}px; padding-top: 2px;")
-        self.tool.setStyleSheet(f"color: {t.text_2}; font-size: {theme.FS_SMALL}px; font-weight: 600;")
-        self.decided_lb.setStyleSheet(f"color: {t.ok}; font-size: {theme.FS_SMALL}px;")
+        self.wait.setFont(theme.font_ui(theme.FS_MICRO))
+        self.wait.setContentsMargins(0, 2, 0, 0)
+        theme.tint(self.wait, fg="accent_text")
+        self.tool.setFont(theme.font_ui(theme.FS_SMALL, 600))
+        theme.tint(self.tool, fg="text_2")
+        self.decided_lb.setFont(theme.font_ui(theme.FS_SMALL))
+        theme.tint(self.decided_lb, fg="ok")
         self.decided_ico.setPixmap(icons.pixmap("circle-check", t.ok, 14))
 
     def paintEvent(self, e) -> None:  # noqa: N802
@@ -632,7 +615,6 @@ class NeedsCard(Card):
         perm = pending[0] if pending else None
         self._perm = perm
         self.head.update_from(s, st)
-        t = theme.tokens()
         interactive = bool(perm and perm.get("interactive"))
         self._allow_always = bool(perm and not perm.get("suppressAlwaysAllowRule") and perm.get("suggestions"))
         if perm:
@@ -640,7 +622,7 @@ class NeedsCard(Card):
             self.tool.setText(str(perm.get("displayName") or perm.get("toolName") or ""))
             self.what.setText(text)
             self.what.setFont(theme.font_mono(12) if mono else theme.font_ui(theme.FS_SMALL))
-            self.what.setStyleSheet(f"color: {t.text};")
+            theme.tint(self.what, fg="text")
             self.note.setText(note)
             self.note.setVisible(bool(note))
             more = len(pending) - 1
@@ -791,11 +773,8 @@ class FinishedRow(LayoutButton):
 
     def _paint(self) -> None:
         t = theme.tokens()
-        bg = theme.blend(t.fill_1, t.raised).name()
-        self.setStyleSheet(
-            f"FinishedRow {{ background: {bg if self._focused else 'transparent'}; border: none; border-radius: 8px; text-align: left; padding: 0; }} "
-            f"FinishedRow:hover {{ background: {bg}; }}"
-        )
+        self.set_look(hover="fill_1/raised", on="fill_1/raised", radius=8)
+        self.look_active = self._focused
         self.title.set_font(weight=600 if self._unread else 400)
         s = self._s
         if s.get("status") == "error":
@@ -890,11 +869,6 @@ class SpendRow(LayoutButton):
         lay.addWidget(self.bar)
         self.amount = Text(cost(amount), theme.FS_MICRO, 400, "text_2", wrap=False)
         lay.addWidget(self.amount)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
-
-    def _paint(self) -> None:
-        self.setStyleSheet("SpendRow { background: transparent; border: none; padding: 0; text-align: left; }")
 
     def _paint_bar(self, _e) -> None:
         t = theme.tokens()
@@ -940,7 +914,7 @@ class Spend(Card):
         self.top_lay.setSpacing(6)
         lay.addWidget(self.top_host)
         self.none = QLabel("No spend recorded today.")
-        self.none.setProperty("tone", "faint")
+        theme.tint(self.none, fg="text_3")
         self.none.hide()
         lay.addWidget(self.none)
         self.rows: List[SpendRow] = []
@@ -1040,7 +1014,7 @@ class Overview(QWidget):
         self.title.setProperty("fs", "title")
         hl.addWidget(self.title)
         self.summary = QLabel()
-        self.summary.setProperty("tone", "faint")
+        theme.tint(self.summary, fg="text_3")
         self.summary.setProperty("fs", "small")
         hl.addWidget(self.summary)
         hl.addStretch(1)

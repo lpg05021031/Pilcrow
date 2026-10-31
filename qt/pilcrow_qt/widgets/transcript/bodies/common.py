@@ -364,15 +364,8 @@ class Badge(QLabel):
 
 def code_more(text: str, on_click: Callable[[], None]) -> QPushButton:
     """`.code-more`: the quiet "Show all N lines" control under a clipped block."""
-    b = bits.button(text, kind="ghost", size="sm", on_click=on_click)
+    b = bits.button(text, kind="more", size="sm", on_click=on_click)
     b.setAccessibleName(text)
-    restyle(
-        b,
-        lambda t: (
-            f"QPushButton {{ color: {t.text_3}; padding: 3px 8px; font-size: {theme.FS_SMALL}px; }} "
-            f"QPushButton:hover {{ color: {t.text}; background: {theme.blend(t.fill_2, t.canvas).name()}; }}"
-        ),
-    )
     return b
 
 

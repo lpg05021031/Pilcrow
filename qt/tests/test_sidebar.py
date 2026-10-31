@@ -185,8 +185,8 @@ def test_active_row_is_a_pill(app_client):
     from pilcrow_qt import theme
 
     assert active.title.font().weight() == 400
-    assert theme.tokens().text in active.title.styleSheet()
-    assert theme.tokens().text_2 in other.title.styleSheet()
+    assert active.title.palette().color(active.title.foregroundRole()).name() == theme.tokens().text
+    assert other.title.palette().color(other.title.foregroundRole()).name() == theme.tokens().text_2
 
 
 def test_needs_you_section_and_glyph(app_client):

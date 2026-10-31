@@ -17,7 +17,7 @@ from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QScrollArea, QSi
 from ... import icons, theme
 from ...lib.fmt import cost, short_model, tildify, tokens
 from ...store import ConfirmSpec, store
-from ..ui.bits import ContextRing, Spinner, copy_text
+from ..ui.bits import Box, ContextRing, Spinner, copy_text
 from ..ui.menu import show_menu_at
 from ..ui.signals import bind
 from .right_panel import Btn, Refresher, Section, elide, empty_text, icon_btn, lbl
@@ -261,7 +261,7 @@ class McpRow(QWidget):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(8)
-        self.dot = QLabel()
+        self.dot = Box(radius=3)
         self.dot.setFixedSize(7, 7)
         lay.addWidget(self.dot)
         lay.addWidget(elide(lbl(str(s.get("name") or ""), theme.FS_SMALL)), 1)
@@ -282,11 +282,11 @@ class McpRow(QWidget):
         bind(theme.theme.changed, self, lambda _t: self._paint())
 
     def _paint(self) -> None:
-        t = theme.tokens()
-        color = {"connected": t.ok, "failed": t.err, "needs-auth": t.accent, "pending": t.accent}.get(
-            self._status, t.text_4
+        self.dot.set_look(
+            bg={"connected": "ok", "failed": "err", "needs-auth": "accent", "pending": "accent"}.get(
+                self._status, "text_4"
+            )
         )
-        self.dot.setStyleSheet(f"background: {color}; border-radius: 3px;")
 
 
 class InfoPanel(QWidget):
@@ -494,12 +494,9 @@ class InfoPanel(QWidget):
                     continue
                 cr = QHBoxLayout()
                 cr.setSpacing(8)
-                sw = QLabel()
-                sw.setFixedSize(8, 8)
                 tone = cat_tone(c)
-                sw.setStyleSheet(
-                    f"background: {theme.blend(getattr(t, tone), t.canvas).name() if tone else 'transparent'}; border-radius: 2px;"
-                )
+                sw = Box(bg=f"{tone}/canvas" if tone else None, radius=2)
+                sw.setFixedSize(8, 8)
                 cr.addWidget(sw)
                 cr.addWidget(lbl(str(c.get("name") or ""), theme.FS_SMALL, tone="muted"), 1)
                 cr.addWidget(lbl(tokens(int(c.get("tokens") or 0)), theme.FS_SMALL, tone="faint", mono=True))
@@ -612,9 +609,8 @@ class InfoPanel(QWidget):
                 r.setSpacing(8)
                 dot = QWidget()
                 dot.setFixedSize(6, 5 + 7)
-                d = QLabel(dot)
+                d = Box(bg="text_4", radius=2, parent=dot)
                 d.setGeometry(0, 7, 5, 5)
-                d.setStyleSheet(f"background: {t.text_4}; border-radius: 2px;")
                 r.addWidget(dot, 0, Qt.AlignmentFlag.AlignTop)
                 r.addWidget(lbl(str(n.get("text") or ""), theme.FS_SMALL, tone="muted", wrap=True), 1)
                 pl.addLayout(r)
@@ -683,7 +679,11 @@ class InfoPanel(QWidget):
                             on_click=lambda: store.call("shell.openPath", {"path": wt.get("path")}),
                         ),
                         Btn(
-                            "Remove", icon="trash", kind="danger", size="sm", on_click=lambda: self._remove_worktree(wt)
+                            "Remove",
+                            icon="trash",
+                            kind="danger-text",
+                            size="sm",
+                            on_click=lambda: self._remove_worktree(wt),
                         ),
                     ]
                 )

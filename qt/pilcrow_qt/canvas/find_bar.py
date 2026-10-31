@@ -10,12 +10,13 @@ from __future__ import annotations
 
 from typing import Callable, List, Optional, Tuple
 
-from PySide6.QtCore import QEvent, Qt, QTimer
+from PySide6.QtCore import QEvent, QRectF, Qt, QTimer
+from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QWidget
 
 from .. import icons, theme
 from ..store import store
-from ..widgets.ui.bits import IconButton
+from ..widgets.ui.bits import IconButton, paint_box
 from ..widgets.ui.signals import bind
 
 _last_query = ""
@@ -42,6 +43,10 @@ class FindBar(QWidget):
         lay.addSpacing(6)
         self.field = QLineEdit()
         self.field.setProperty("quiet", "true")
+        self.field.setStyleSheet(
+            f"QLineEdit {{ font-size: {int(theme.FS_UI + 0.5)}px; background: transparent; border: none; padding: 0; }}"
+        )
+        theme.tint(self.field, fg="text", highlight=lambda t: theme.over(theme.qcolor(t.selection), _glass(t)))
         self.field.setPlaceholderText("Find in conversation")
         self.field.setClearButtonEnabled(False)
         self.field.setAccessibleName("Find in conversation")
@@ -50,6 +55,7 @@ class FindBar(QWidget):
         self.field.installEventFilter(self)
         lay.addWidget(self.field, 1)
         self.count = QLabel()
+        self.count.setFont(theme.font_ui(theme.FS_SMALL))
         lay.addSpacing(6)
         lay.addWidget(self.count)
         lay.addSpacing(6)
@@ -161,17 +167,19 @@ class FindBar(QWidget):
     def _paint(self) -> None:
         t = theme.tokens()
         self.ico.setPixmap(icons.pixmap("search", t.text_3, 14))
-        self.setObjectName("findbar")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        bg = "#252528" if t.dark else t.raised
-        self.setStyleSheet(
-            f"#findbar {{ background: {bg}; border: 1px solid {theme.blend(t.hair_2, bg).name()}; border-radius: 11px; }} "
-            f"QLineEdit {{ font-size: {int(theme.FS_UI + 0.5)}px; color: {t.text}; background: transparent; border: none; padding: 0; "
-            f"selection-background-color: {theme.blend(t.selection, bg).name()}; }}"
-        )
         self._paint_count()
+        self.update()
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        t = theme.tokens()
+        bg = _glass(t)
+        p = QPainter(self)
+        paint_box(p, QRectF(self.rect()), bg, theme.over(theme.qcolor(t.hair_2), bg), 11)
 
     def _paint_count(self) -> None:
-        t = theme.tokens()
-        color = t.err if self.count.property("none") else t.text_3
-        self.count.setStyleSheet(f"QLabel {{ font-size: {int(theme.FS_SMALL + 0.5)}px; color: {color}; }}")
+        theme.tint(self.count, fg="err" if self.count.property("none") else "text_3")
+
+
+def _glass(t: theme.Tokens) -> QColor:
+    """The bar's material: ``#252528`` on dark (the client's popover), raised on light."""
+    return QColor("#252528" if t.dark else t.raised)

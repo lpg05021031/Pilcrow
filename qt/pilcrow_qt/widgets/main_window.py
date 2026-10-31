@@ -40,6 +40,8 @@ class MainWindow(QMainWindow):
 
         central = QWidget()
         central.setObjectName("shell")
+        central.setAutoFillBackground(True)
+        theme.tint(central, bg="chrome")  # the ground: sidebar and shell are chrome, the sheets canvas
         central.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setCentralWidget(central)
         col = QVBoxLayout(central)
@@ -616,7 +618,6 @@ class OfflineBar(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("offline")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(14, 7, 14, 7)
         lay.setSpacing(8)
@@ -624,6 +625,8 @@ class OfflineBar(QWidget):
         self.ico = QLabel()
         lay.addWidget(self.ico)
         self.text = _ElideLabel()
+        self.text.setFont(theme.font_ui(theme.FS_SMALL))
+        theme.tint(self.text, fg="text_2")
         lay.addWidget(self.text)
         lay.addStretch(1)  # centred, like the web's justify-content: center
         self._full = ""
@@ -650,10 +653,13 @@ class OfflineBar(QWidget):
     def _paint(self) -> None:
         t = theme.tokens()
         self.ico.setPixmap(icons.pixmap("wifi-off", t.text_2, 14))
-        self.setStyleSheet(
-            f"#offline {{ background: {theme.blend(t.fill_1, t.canvas).name()}; border-bottom: 1px solid {theme.blend(t.hair, t.canvas).name()}; }}"
-            f" QLabel {{ color: {t.text_2}; font-size: {theme.FS_SMALL}px; }}"
-        )
+        self.update()
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        t = theme.tokens()
+        p = QPainter(self)
+        p.fillRect(self.rect(), theme.blend(t.fill_1, t.canvas))
+        p.fillRect(0, self.height() - 1, self.width(), 1, theme.blend(t.hair, t.canvas))
 
 
 class UpdateNotice(OfflineBar):
@@ -709,9 +715,12 @@ class Boot(QWidget):
         self.mark = WorkingMark(44)
         sl.addWidget(self.mark, 0, Qt.AlignmentFlag.AlignHCenter)
         self.name = label("Pilcrow")
+        self.name.setFont(theme.font_ui(theme.FS_TITLE, 600))
         sl.addWidget(self.name, 0, Qt.AlignmentFlag.AlignHCenter)
         lay.addWidget(stage)
         self.line = label("Connecting")
+        self.line.setFont(theme.font_ui(theme.FS_SMALL))
+        self.setAutoFillBackground(True)
         self.line.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.line.setWordWrap(True)
         self.line.setMaximumWidth(460)
@@ -743,10 +752,7 @@ class Boot(QWidget):
         self._paint()
 
     def _paint(self) -> None:
-        t = theme.tokens()
-        self.setStyleSheet(f"Boot {{ background: {t.canvas}; }}")
-        self.name.setStyleSheet(f"font-size: {theme.FS_TITLE}px; font-weight: 600; color: {t.text};")
-        self.line.setStyleSheet(f"font-size: {theme.FS_SMALL}px; color: {t.err if self._fatal else t.text_2};")
+        theme.tint(self.line, fg="err" if self._fatal else "text_2")
 
     def set_connected(self, on: bool) -> None:
         self._connected = on

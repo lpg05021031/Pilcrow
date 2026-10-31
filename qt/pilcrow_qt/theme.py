@@ -5,19 +5,33 @@ bone rather than blue-grey, with Claude's orange as the single accent. Orange is
 primary action, the send button, attention ("needs you") and focus; lilac marks reasoning and
 nothing else.
 
-Widgets never carry literal colours. They either paint with ``tokens()`` or are styled by the
-global stylesheet through object names and dynamic properties (``setProperty("tone", "accent")``).
+Widgets never carry literal colours. They paint with ``tokens()``, or take their colours from a
+palette: the application palette carries the theme (``palette()`` maps the tokens onto Qt's roles),
+and ``tint()`` gives one widget other roles from the tokens (a fainter text, a chrome background),
+re-applied whenever the theme changes. The application stylesheet (``stylesheet()``) is static: it
+sets geometry and fonts and names colours only as ``palette(role)``, so a theme switch is a palette
+change and a repaint, not a re-parse of every widget's style.
 """
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass, fields
-from typing import Callable, Optional
+from typing import Callable, Dict, Optional, Tuple, Union
 
 from PySide6.QtCore import QEasingCurve, QObject, Signal
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QPalette
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QAbstractSpinBox,
+    QApplication,
+    QComboBox,
+    QLineEdit,
+    QPlainTextEdit,
+    QScrollBar,
+    QTextEdit,
+    QWidget,
+)
 
 # ---------------------------------------------------------------- type scale, radii, spacing
 
@@ -288,7 +302,11 @@ def qcolor(s: str) -> QColor:
 
 def blend(fg: str, bg: str) -> QColor:
     """A translucent token composited over an opaque one: what the eye sees of a hairline on a surface."""
-    f, b = qcolor(fg), qcolor(bg)
+    return over(qcolor(fg), qcolor(bg))
+
+
+def over(f: QColor, b: QColor) -> QColor:
+    """``f`` (translucent) laid over ``b`` (opaque)."""
     a = f.alphaF()
     return QColor(
         int(round(f.red() * a + b.red() * (1 - a))),
@@ -421,118 +439,62 @@ def px_to_pt(px: float) -> float:
 # ---------------------------------------------------------------- the stylesheet
 
 
-def stylesheet(t: Tokens) -> str:
-    """The global QSS, from the tokens. Object names and dynamic properties are the selectors."""
-    ui = _UI_FAMILY or "sans-serif"
-    mono = _MONO_FAMILY or "monospace"
-    hair_on_chrome = blend(t.hair, t.chrome).name()
-    hair_on_canvas = blend(t.hair, t.canvas).name()
-    hair2_on_raised = blend(t.hair_2, t.raised).name()
-    fill1_on_chrome = blend(t.fill_1, t.chrome).name()
-    fill1_on_canvas = blend(t.fill_1, t.canvas).name()
-    fill2_on_chrome = blend(t.fill_2, t.chrome).name()
-    fill2_on_canvas = blend(t.fill_2, t.canvas).name()
-    fill3_on_canvas = blend(t.fill_3, t.canvas).name()
-    sheet_on_scrim = blend(t.glass_2, blend(t.scrim, t.canvas).name()).name()
-    popover_on_sheet = blend(t.glass, sheet_on_scrim).name()
-    return f"""
-    * {{ font-family: "{ui}"; font-size: {FS_UI}px; color: {t.text}; outline: none; }}
-    QWidget {{ background: transparent; }}
-    QMainWindow, #canvas {{ background: {t.canvas}; }}
-    /* the shell: sidebar and ground are chrome; the conversation and the side panel are canvas sheets (Card) */
-    #shell, #chrome, #sidebar {{ background: {t.chrome}; }}
-    QToolTip {{ background: {t.raised_2}; color: {t.text}; border: 1px solid {hair2_on_raised}; padding: 4px 8px; border-radius: {R2}px; font-size: {FS_SMALL}px; }}
+def stylesheet() -> str:
+    """The global QSS. It is applied once: every colour in it is a palette role, so a theme change
+    only swaps the palette (and re-polishes the few native widgets that keep these rules, see
+    :func:`repolish`). Buttons, labels, cards and hairlines are painted or tinted and need no rule.
 
-    /* text */
-    QLabel {{ background: transparent; }}
-    QLabel[tone="muted"] {{ color: {t.text_2}; }}
-    QLabel[tone="faint"] {{ color: {t.text_3}; }}
-    QLabel[tone="accent"] {{ color: {t.accent_text}; }}
-    QLabel[tone="err"] {{ color: {t.err}; }}
-    QLabel[tone="ok"] {{ color: {t.ok}; }}
+    Roles (see :func:`palette`): window = canvas, base = inset, alternate-base = raised, button =
+    raised-2 (floating surfaces), light/midlight/mid = fill-1/2/3 on the canvas, shadow = the hair
+    on the canvas, dark = hair-2 on raised, highlight = the selection, link = accent text,
+    link-visited = the accent, bright-text = the accent's ink."""
+    mono = _MONO_FAMILY or "monospace"
+    dark_arrow, light_arrow = _arrow_files()
+    return f"""
+    * {{ outline: none; }}
+    QToolTip {{ background: palette(button); color: palette(text); border: 1px solid palette(dark); padding: 4px 8px; border-radius: {R2}px; font-size: {FS_SMALL}px; }}
+
+    /* text: sizes by property; colours come from the palette (tint()) */
     QLabel[mono="true"] {{ font-family: "{mono}"; font-size: {MONO_SIZE}px; }}
     QLabel[fs="small"] {{ font-size: {FS_SMALL}px; }}
     QLabel[fs="micro"] {{ font-size: {FS_MICRO}px; }}
     QLabel[fs="title"] {{ font-size: {FS_TITLE}px; font-weight: 600; }}
     QLabel[fs="h"] {{ font-size: {FS_H}px; font-weight: 600; }}
 
-    /* buttons: quiet by default; the primary action is the only orange one */
-    QPushButton {{ background: {fill2_on_canvas}; border: none; border-radius: {R2}px; padding: 7px 12px; color: {t.text}; font-weight: 500; }}
-    QPushButton:hover {{ background: {fill3_on_canvas}; }}
-    QPushButton:pressed {{ background: {fill3_on_canvas}; }}
-    QPushButton:disabled {{ color: {t.text_4}; background: {fill1_on_canvas}; }}
-    QPushButton[kind="primary"] {{ background: {t.accent}; color: {t.accent_ink}; border: none; border-top: 1px solid {blend("rgba(255, 255, 255, 0.18)", t.accent).name()}; }}
-    QPushButton[kind="primary"]:hover {{ background: {t.accent_2}; }}
-    QPushButton[kind="primary"]:disabled {{ background: {fill2_on_canvas}; color: {t.text_4}; border-top: none; }}
-    QPushButton[kind="ghost"] {{ background: transparent; color: {t.text_2}; }}
-    QPushButton[kind="ghost"]:hover, QPushButton[kind="ghost"][active="true"] {{ background: {fill2_on_canvas}; color: {t.text}; }}
-    QPushButton[kind="outline"] {{ background: transparent; border: 1px solid {hair2_on_raised}; }}
-    QPushButton[kind="outline"]:hover {{ background: {fill1_on_canvas}; }}
-    QPushButton[kind="danger"] {{ background: {t.err}; color: white; }}
-    QPushButton[kind="danger-text"] {{ background: transparent; color: {t.err}; }}
-    QPushButton[kind="danger-text"]:hover {{ background: {blend(t.err_wash, t.canvas).name()}; }}
-    QPushButton[kind="link"] {{ background: transparent; border: none; padding: 0; color: {t.text_2}; font-weight: 400; }}
-    QPushButton[kind="link"]:hover {{ color: {t.text}; background: transparent; }}
-    QPushButton[fs="sm"] {{ padding: 5px 10px; font-size: {FS_SMALL}px; }}
-    QPushButton[fs="xs"] {{ padding: 4px 9px; font-size: {FS_SMALL}px; }}
-    QPushButton[fs="lg"] {{ padding: 10px 16px; font-size: 13.5px; border-radius: {R3}px; }}
-    QPushButton[icon-only="true"] {{ background: transparent; border: none; padding: 0; border-radius: {R2}px; color: {t.text_3}; }}
-    QPushButton[icon-only="true"]:hover {{ background: {fill2_on_canvas}; color: {t.text}; }}
-    QPushButton[icon-only="true"][active="true"] {{ background: {fill2_on_canvas}; color: {t.text}; }}
-
     /* fields */
-    QLineEdit, QPlainTextEdit, QTextEdit {{ background: {t.inset}; border: 1px solid {hair_on_canvas}; border-radius: {R2}px; padding: 5px 8px; selection-background-color: {blend(t.selection, t.inset).name()}; color: {t.text}; }}
-    QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus {{ border-color: {blend(t.accent_line, t.inset).name()}; }}
+    QLineEdit, QPlainTextEdit, QTextEdit {{ background: palette(base); border: 1px solid palette(shadow); border-radius: {R2}px; padding: 5px 8px; selection-background-color: palette(highlight); selection-color: palette(highlighted-text); }}
+    QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus {{ border-color: palette(link-visited); }}
     QLineEdit[quiet="true"] {{ background: transparent; border: none; padding: 2px 4px; }}
-    QComboBox {{ background: {blend(t.fill_1, sheet_on_scrim).name()}; border: 1px solid {blend(t.hair, blend(t.fill_1, sheet_on_scrim).name()).name()}; border-radius: {R2}px; padding: 0 8px 0 10px; min-height: 32px; max-height: 32px; color: {t.text}; combobox-popup: 0; }}
-    QComboBox:hover, QComboBox:on {{ background: {blend(t.fill_2, sheet_on_scrim).name()}; border-color: {blend(t.hair_2, blend(t.fill_2, sheet_on_scrim).name()).name()}; }}
-    QComboBox:focus {{ border-color: {blend(t.hair_2, sheet_on_scrim).name()}; }}
+    QComboBox {{ background: palette(light); border: 1px solid palette(shadow); border-radius: {R2}px; padding: 0 8px 0 10px; min-height: 32px; max-height: 32px; combobox-popup: 0; }}
+    QComboBox:hover, QComboBox:on {{ background: palette(midlight); border-color: palette(dark); }}
+    QComboBox:focus {{ border-color: palette(dark); }}
     QComboBox::drop-down {{ subcontrol-origin: padding; subcontrol-position: center right; width: 24px; border: none; background: transparent; }}
-    QComboBox::down-arrow {{ image: url("{_arrow_file(t)}"); width: 13px; height: 13px; }}
-    QComboBox QAbstractItemView {{ background: {popover_on_sheet}; border: 1px solid {blend(t.hair_2, popover_on_sheet).name()}; border-radius: {R3}px; padding: 5px; outline: none; selection-background-color: {blend(t.fill_2, popover_on_sheet).name()}; selection-color: {t.text}; }}
-    QComboBox QAbstractItemView::item {{ min-height: 30px; padding: 0 9px; border-radius: {R2}px; color: {t.text}; }}
-    QComboBox QAbstractItemView::item:hover, QComboBox QAbstractItemView::item:selected {{ background: {blend(t.fill_2, popover_on_sheet).name()}; }}
-    QSpinBox, QDoubleSpinBox {{ background: {t.inset}; border: 1px solid {hair_on_canvas}; border-radius: {R2}px; padding: 4px 8px; min-height: 18px; }}
+    QComboBox::down-arrow {{ image: url("{dark_arrow}"); width: 13px; height: 13px; }}
+    QComboBox[dark="false"]::down-arrow {{ image: url("{light_arrow}"); }}
+    QComboBox QAbstractItemView {{ background: palette(button); border: 1px solid palette(dark); border-radius: {R3}px; padding: 5px; outline: none; selection-background-color: palette(midlight); selection-color: palette(text); }}
+    QComboBox QAbstractItemView::item {{ min-height: 30px; padding: 0 9px; border-radius: {R2}px; }}
+    QComboBox QAbstractItemView::item:hover, QComboBox QAbstractItemView::item:selected {{ background: palette(midlight); }}
+    QSpinBox, QDoubleSpinBox {{ background: palette(base); border: 1px solid palette(shadow); border-radius: {R2}px; padding: 4px 8px; min-height: 18px; }}
     QSpinBox::up-button, QSpinBox::down-button {{ width: 16px; border: none; background: transparent; }}
-    QCheckBox {{ spacing: 8px; }}
-    QCheckBox::indicator {{ width: 15px; height: 15px; border: 1px solid {t.text_4}; border-radius: {R1}px; background: {t.inset}; }}
-    QCheckBox::indicator:checked {{ background: {t.accent}; border-color: {t.accent}; }}
 
     /* scrollbars: thin, quiet, only the thumb */
     QScrollBar:vertical {{ background: transparent; width: 10px; margin: 2px 2px 2px 0; }}
-    QScrollBar::handle:vertical {{ background: {fill2_on_chrome}; border-radius: 4px; min-height: 28px; }}
-    QScrollBar::handle:vertical:hover {{ background: {blend(t.fill_3, t.chrome).name()}; }}
+    QScrollBar::handle:vertical {{ background: palette(midlight); border-radius: 4px; min-height: 28px; }}
+    QScrollBar::handle:vertical:hover {{ background: palette(mid); }}
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical, QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; height: 0; }}
     QScrollBar:horizontal {{ background: transparent; height: 10px; margin: 0 2px 2px 2px; }}
-    QScrollBar::handle:horizontal {{ background: {fill2_on_chrome}; border-radius: 4px; min-width: 28px; }}
+    QScrollBar::handle:horizontal {{ background: palette(midlight); border-radius: 4px; min-width: 28px; }}
+    QScrollBar::handle:horizontal:hover {{ background: palette(mid); }}
     QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal, QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{ background: none; width: 0; }}
     QScrollArea {{ border: none; background: transparent; }}
+    QScrollArea > QWidget > QWidget {{ background: transparent; }}
     QAbstractScrollArea {{ background: transparent; }}
-
-    /* menus and dialogs: floating material */
-    QMenu {{ background: {blend(t.glass, t.canvas).name()}; border: 1px solid {blend(t.hair_2, blend(t.glass, t.canvas).name()).name()}; border-radius: {R3}px; padding: 5px; }}
-    QMenu::item {{ padding: 6px 9px 6px 34px; min-height: 18px; border-radius: {R2}px; color: {t.text}; }}
-    QMenu::item:selected {{ background: {blend(t.fill_2, blend(t.glass, t.canvas).name()).name()}; }}
-    QMenu::item:disabled {{ color: {t.text_3}; }}
-    QMenu::separator {{ height: 1px; background: {hair_on_canvas}; margin: 4px 6px; }}
-    QDialog {{ background: {t.raised}; }}
-    #sheet {{ background: {sheet_on_scrim}; border: 1px solid {blend(t.hair, sheet_on_scrim).name()}; border-radius: {R4}px; }}
-
-    /* splitters and hairlines */
-    QSplitter::handle {{ background: {hair_on_chrome}; }}
-    QSplitter::handle:horizontal {{ width: 1px; }}
-    QFrame[hairline="true"] {{ background: {hair_on_canvas}; max-height: 1px; min-height: 1px; border: none; }}
-    QFrame[hairline-v="true"] {{ background: {hair_on_canvas}; max-width: 1px; min-width: 1px; border: none; }}
-
-    QTabBar::tab {{ background: transparent; padding: 6px 10px; color: {t.text_2}; border: none; }}
-    QTabBar::tab:selected {{ color: {t.text}; border-bottom: 2px solid {t.accent}; }}
-    QProgressBar {{ background: {fill1_on_chrome}; border: none; border-radius: 3px; height: 6px; }}
-    QProgressBar::chunk {{ background: {t.accent}; border-radius: 3px; }}
     """
 
 
-def _arrow_file(t: Tokens) -> str:
-    """A tinted chevron-down for QComboBox, written once per theme to the cache folder (QSS takes a file)."""
+def _arrow_files() -> Tuple[str, str]:
+    """The chevron for QComboBox in each theme's faint colour, written once to the cache folder (QSS
+    takes a file). The stylesheet picks one by the combo's ``dark`` property (set by :func:`repolish`)."""
     import os
 
     from PySide6.QtCore import QStandardPaths
@@ -541,42 +503,193 @@ def _arrow_file(t: Tokens) -> str:
         os.path.expanduser("~"), ".cache", "pilcrow"
     )
     os.makedirs(d, exist_ok=True)
-    path = os.path.join(d, f"chevrons-up-down-{t.name}.svg")
-    if not os.path.exists(path):
-        src = os.path.join(os.path.dirname(__file__), "assets", "icons", "chevrons-up-down.svg")
-        try:
-            with open(src, encoding="utf-8") as f:
-                svg = f.read().replace("currentColor", t.text_3)
-            with open(path, "w", encoding="utf-8") as f:
-                f.write(svg)
-        except OSError:
-            return ""
-    return path.replace("\\", "/")
+    out = []
+    for t in (DARK, LIGHT):
+        path = os.path.join(d, f"chevrons-up-down-{t.name}.svg")
+        if not os.path.exists(path):
+            src = os.path.join(os.path.dirname(__file__), "assets", "icons", "chevrons-up-down.svg")
+            try:
+                with open(src, encoding="utf-8") as f:
+                    svg = f.read().replace("currentColor", t.text_3)
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(svg)
+            except OSError:
+                out.append("")
+                continue
+        out.append(path.replace("\\", "/"))
+    return out[0], out[1]
+
+
+# ---------------------------------------------------------------- the palette
 
 
 def palette(t: Tokens) -> QPalette:
-    """The palette behind the stylesheet, for the few things QSS does not reach (selection, disabled text)."""
+    """The tokens on Qt's colour roles: what every widget paints with unless it is tinted, and what
+    the stylesheet's ``palette(role)`` references resolve to."""
     p = QPalette()
     g = QPalette.ColorGroup
     r = QPalette.ColorRole
+    roles = {
+        r.Window: qcolor(t.canvas),
+        r.WindowText: qcolor(t.text),
+        r.Base: qcolor(t.inset),
+        r.AlternateBase: qcolor(t.raised),
+        r.Text: qcolor(t.text),
+        r.Button: qcolor(t.raised_2),
+        r.ButtonText: qcolor(t.text),
+        r.BrightText: qcolor(t.accent_ink),
+        r.Light: blend(t.fill_1, t.canvas),
+        r.Midlight: blend(t.fill_2, t.canvas),
+        r.Mid: blend(t.fill_3, t.canvas),
+        r.Dark: blend(t.hair_2, t.raised),
+        r.Shadow: blend(t.hair, t.canvas),
+        r.Highlight: blend(t.selection, t.inset),
+        r.HighlightedText: qcolor(t.text),
+        r.Link: qcolor(t.accent_text),
+        r.LinkVisited: qcolor(t.accent),
+        r.ToolTipBase: qcolor(t.raised_2),
+        r.ToolTipText: qcolor(t.text),
+        r.PlaceholderText: qcolor(t.text_4),
+    }
     for group in (g.Active, g.Inactive, g.Disabled):
-        p.setColor(group, r.Window, qcolor(t.canvas))
-        p.setColor(group, r.WindowText, qcolor(t.text))
-        p.setColor(group, r.Base, qcolor(t.inset))
-        p.setColor(group, r.AlternateBase, qcolor(t.chrome))
-        p.setColor(group, r.Text, qcolor(t.text))
-        p.setColor(group, r.Button, qcolor(t.raised))
-        p.setColor(group, r.ButtonText, qcolor(t.text))
-        p.setColor(group, r.Highlight, blend(t.selection, t.canvas))
-        p.setColor(group, r.HighlightedText, qcolor(t.text))
-        p.setColor(group, r.ToolTipBase, qcolor(t.raised_2))
-        p.setColor(group, r.ToolTipText, qcolor(t.text))
-        p.setColor(group, r.PlaceholderText, qcolor(t.text_4))
-        p.setColor(group, r.Link, qcolor(t.accent_text))
-    p.setColor(g.Disabled, r.Text, qcolor(t.text_4))
-    p.setColor(g.Disabled, r.ButtonText, qcolor(t.text_4))
-    p.setColor(g.Disabled, r.WindowText, qcolor(t.text_4))
+        for role, c in roles.items():
+            p.setColor(group, role, c)
+    for role in (r.Text, r.ButtonText, r.WindowText):
+        p.setColor(g.Disabled, role, qcolor(t.text_4))
     return p
+
+
+# ---------------------------------------------------------------- tints
+
+# A colour spec: a token name ("text_2"), tokens laid over one another ("fill_2/canvas": fill-2 over
+# the canvas), a literal ("#rrggbb", "rgba(…)", "transparent"), a QColor, or a function of the tokens.
+Fill = Union[str, QColor, Callable[[Tokens], QColor], None]
+
+# ``tone`` names used by the label factories, as the stylesheet once spelt them.
+TONES = {"muted": "text_2", "faint": "text_3", "accent": "accent_text", "err": "err", "ok": "ok"}
+
+_ROLE_SETS: Dict[str, Tuple[QPalette.ColorRole, ...]] = {
+    "fg": (QPalette.ColorRole.WindowText, QPalette.ColorRole.Text, QPalette.ColorRole.ButtonText),
+    "bg": (QPalette.ColorRole.Window, QPalette.ColorRole.Base, QPalette.ColorRole.Button),
+    "placeholder": (QPalette.ColorRole.PlaceholderText,),
+    "highlight": (QPalette.ColorRole.Highlight,),
+    "highlighted_text": (QPalette.ColorRole.HighlightedText,),
+    "link": (QPalette.ColorRole.Link,),
+}
+_tints: Dict[int, Tuple[QWidget, Dict[str, Fill]]] = {}
+_tint_cache: Dict[Tuple[Tuple[str, str], ...], QPalette] = {}
+
+
+def resolve(spec: Fill, t: Optional[Tokens] = None) -> Optional[QColor]:
+    """A :data:`Fill` as a QColor (None for None)."""
+    if spec is None:
+        return None
+    t = t or theme.tokens
+    if isinstance(spec, QColor):
+        return QColor(spec)
+    if callable(spec):
+        return spec(t)
+    parts = spec.split("/")
+    c = qcolor(_lit(parts[-1], t))
+    for p in reversed(parts[:-1]):
+        c = over(qcolor(_lit(p, t)), c)
+    return c
+
+
+def _lit(name: str, t: Tokens) -> str:
+    """A token's value by name, else the string itself (a literal colour)."""
+    v = getattr(t, name, None)
+    return v if isinstance(v, str) else name
+
+
+def tint(w: QWidget, fg: Fill = None, bg: Fill = None, **roles: Fill) -> QWidget:
+    """Give a widget its own colours from the tokens, for good: ``fg`` fills its text roles, ``bg``
+    its background roles (paint it with ``setAutoFillBackground(True)``), and ``placeholder``,
+    ``highlight``, ``highlighted_text`` and ``link`` the roles of those names. The tint is the whole
+    of the widget's own palette (an earlier tint is replaced) and is applied again on every theme
+    change, so a theme handler is not needed for it. Returns the widget."""
+    spec: Dict[str, Fill] = {}
+    if fg is not None:
+        spec["fg"] = fg
+    if bg is not None:
+        spec["bg"] = bg
+    for k, v in roles.items():
+        if k not in _ROLE_SETS:
+            raise KeyError(k)
+        if v is not None:
+            spec[k] = v
+    key = id(w)
+    if key not in _tints:
+        w.destroyed.connect(lambda *_a, key=key: _tints.pop(key, None))
+    _tints[key] = (w, spec)
+    w.setPalette(_tint_palette(spec, theme.tokens))
+    return w
+
+
+def untint(w: QWidget) -> None:
+    """Back to the application palette."""
+    if _tints.pop(id(w), None) is not None:
+        w.setPalette(QPalette())
+
+
+def tint_of(w: QWidget) -> Dict[str, Fill]:
+    """The tint on a widget (empty when it has none)."""
+    found = _tints.get(id(w))
+    return dict(found[1]) if found is not None else {}
+
+
+def _tint_palette(spec: Dict[str, Fill], t: Tokens) -> QPalette:
+    g = QPalette.ColorGroup
+    cacheable = all(isinstance(v, str) for v in spec.values())
+    key = ((t.name, ""), *sorted((k, v) for k, v in spec.items())) if cacheable else None  # type: ignore[misc]
+    if key is not None:
+        hit = _tint_cache.get(key)
+        if hit is not None:
+            return hit
+    p = QPalette()
+    for k, v in spec.items():
+        c = resolve(v, t)
+        if c is None:
+            continue
+        groups = (g.Active, g.Inactive) if k == "fg" else (g.Active, g.Inactive, g.Disabled)
+        for group in groups:
+            for role in _ROLE_SETS[k]:
+                p.setColor(group, role, c)
+    if key is not None:
+        _tint_cache[key] = p
+    return p
+
+
+def _retint(t: Tokens) -> None:
+    """Every tinted widget takes its colours from the new tokens."""
+    _tint_cache.clear()
+    dead = []
+    for key, (w, spec) in list(_tints.items()):
+        try:
+            w.setPalette(_tint_palette(spec, t))
+        except RuntimeError:  # the C++ widget is gone and destroyed() did not reach us
+            dead.append(key)
+    for key in dead:
+        _tints.pop(key, None)
+
+
+# The native widgets whose stylesheet rules name palette roles: Qt resolves those when it polishes
+# the widget, so after a palette change they are polished again (a few microseconds each).
+_NATIVE = (QLineEdit, QPlainTextEdit, QTextEdit, QAbstractSpinBox, QComboBox, QScrollBar, QAbstractItemView)
+
+
+def repolish(app: QApplication, t: Tokens) -> int:
+    """Re-run the stylesheet on the native widgets whose rules reference the palette. Returns how many."""
+    style = app.style()
+    n = 0
+    for w in app.allWidgets():
+        if isinstance(w, _NATIVE):
+            if isinstance(w, QComboBox):
+                w.setProperty("dark", "true" if t.dark else "false")
+            style.unpolish(w)
+            style.polish(w)
+            n += 1
+    return n
 
 
 # ---------------------------------------------------------------- the live theme
@@ -589,7 +702,7 @@ scale = 1.0
 
 
 class Theme(QObject):
-    """The theme in force. ``changed`` fires after the stylesheet and palette are re-applied;
+    """The theme in force. ``changed`` fires after the palette is swapped and the tints re-applied;
     ``scale_changed`` when the conversation's text scale moves."""
 
     changed = Signal(object)  # Tokens
@@ -598,6 +711,7 @@ class Theme(QObject):
     def __init__(self) -> None:
         super().__init__()
         self._tokens: Tokens = DARK
+        self._styled = False
 
     @property
     def tokens(self) -> Tokens:
@@ -607,9 +721,20 @@ class Theme(QObject):
         t = DARK if dark else LIGHT
         self._tokens = t
         app = QApplication.instance()
-        if app is not None:
-            app.setPalette(palette(t))
-            app.setStyleSheet(stylesheet(t))
+        if isinstance(app, QApplication):
+            pal = palette(t)
+            app.setPalette(pal)
+            # With a stylesheet in force Qt does not hand a palette change from a window down to its
+            # children, so the change above reaches only the windows; a class palette for QWidget is
+            # delivered to every widget (and is the same palette).
+            app.setPalette(pal, "QWidget")
+            if not self._styled:
+                self._styled = True
+                app.setFont(font_ui(FS_UI))
+                app.setStyleSheet(stylesheet())
+            else:
+                repolish(app, t)
+            _retint(t)
         self.changed.emit(t)
 
     def set_scale(self, value: float) -> None:

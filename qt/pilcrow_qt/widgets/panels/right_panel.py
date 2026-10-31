@@ -9,9 +9,8 @@ segmented control (:class:`Seg`), the toolbar row, the section with a heading (`
 state, the hairline-ringed card, and :class:`Refresher`, which re-renders a tab on the session's
 runtime changes without doing so more than twice a second while Claude streams.
 
-Fonts are set per widget through a stylesheet built from ``theme.font_ui``/``font_mono``: the
-application stylesheet's ``*`` rule beats ``QWidget.setFont`` for the size, and ``QLabel[size=…]``
-never matches because ``size`` is already QWidget's own (QSize) property.
+Fonts are set per widget with ``QWidget.setFont`` from ``theme.font_ui``/``font_mono``; colours are
+tints (``theme.tint``), so a theme change costs a repaint and no stylesheet is re-parsed.
 """
 
 from __future__ import annotations
@@ -27,7 +26,6 @@ from PySide6.QtWidgets import (
     QAbstractButton,
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QSizePolicy,
     QStackedWidget,
     QVBoxLayout,
@@ -36,7 +34,8 @@ from PySide6.QtWidgets import (
 
 from ... import icons, theme
 from ...store import store
-from ..ui.bits import IconButton
+from ..ui.bits import Hairline, IconButton  # noqa: F401 - Hairline is re-exported to the panels
+from ..ui.button import Btn  # noqa: F401 - re-exported to the panels
 from ..ui.signals import bind
 
 TABS = [
@@ -52,12 +51,6 @@ NARROW_W = 760  # below this only the chosen tab keeps its name (panels.css cont
 
 
 # ---------------------------------------------------------------- text
-
-
-def font_qss(size: float, weight: int = 400, mono: bool = False) -> str:
-    """The font rule for a widget stylesheet, from the theme's faces (pixel sizes, CSS weights)."""
-    f = theme.font_mono(size, weight) if mono else theme.font_ui(size, weight)
-    return f'font-family: "{f.family()}"; font-size: {f.pixelSize()}px; font-weight: {int(weight)};'
 
 
 class Text(QLabel):
@@ -107,10 +100,11 @@ def lbl(
     ``line_height`` × the size apart (the body's 1.45 unless a rule says otherwise): a single line
     gets that height as its minimum, a wrapped one renders as rich text with the same leading."""
     lb = Text()
-    if tone:
-        lb.setProperty("tone", tone)
-    base = font_qss(size, weight, mono) + (" font-style: italic;" if italic else "")
-    lb.setStyleSheet(base + (f" color: {getattr(theme.tokens(), color)};" if color else ""))
+    f = theme.font_mono(size, weight) if mono else theme.font_ui(size, weight)
+    f.setItalic(italic)
+    lb.setFont(f)
+    if color or tone:
+        theme.tint(lb, fg=color or theme.TONES.get(tone, tone))
     lb.setWordWrap(wrap)
     lh = line_height or 1.45
     if wrap:
@@ -124,15 +118,12 @@ def lbl(
         if (wrap or selectable)
         else Qt.TextInteractionFlag.NoTextInteraction
     )
-    if color:
-        bind(theme.theme.changed, lb, lambda _t, lb=lb, b=base, c=color: set_color(lb, c, b))
     return lb
 
 
 def set_color(lb: QLabel, color: str, base: str = "") -> None:
-    """Recolour a ``lbl`` with a token name; ``base`` is its font rule (kept from the first call)."""
-    base = base or lb.styleSheet().split(" color:")[0]
-    lb.setStyleSheet(f"{base} color: {getattr(theme.tokens(), color)};")
+    """Recolour a ``lbl`` with a token name (``base`` is unused; kept for callers)."""
+    theme.tint(lb, fg=color)
 
 
 def set_rich(lb: QLabel, text: str, line_height: float = 1.45) -> None:
@@ -151,166 +142,6 @@ def elide(lb: QLabel) -> QLabel:
 
 
 # ---------------------------------------------------------------- buttons
-
-
-class Btn(QPushButton):
-    """The ``.btn`` family, painted: a quiet fill by default, one primary per surface, ghost, danger,
-    and the small text-only links (``.link``, ``.wf-foot-btn``, ``.agent-prompt-toggle``, ``.code-more``).
-
-    ``kind``: '' | 'primary' | 'ghost' | 'danger' (ghost + red) | 'link' | 'foot' | 'toggle' | 'more'.
-    ``size``: '' (30px) | 'sm' (26px) | 'xs' (24px).
-    """
-
-    def __init__(
-        self,
-        text: str = "",
-        icon: str = "",
-        kind: str = "",
-        size: str = "sm",
-        icon_size: int = 13,
-        tooltip: str = "",
-        on_click: Optional[Callable[[], None]] = None,
-        parent: Optional[QWidget] = None,
-    ) -> None:
-        super().__init__(text, parent)
-        self.kind, self.size_, self.icon_name, self.icon_px = kind, size, icon, icon_size
-        self._hover = False
-        self._icon_end = False
-        self._on = False
-        self.pad_left: Optional[int] = None  # overrides the variant's left padding (a negative CSS margin)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
-        self.setFlat(True)
-        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
-        if tooltip:
-            self.setToolTip(tooltip)
-        self.setAccessibleName(tooltip or text)
-        if on_click:
-            self.clicked.connect(on_click)
-        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        bind(theme.theme.changed, self, lambda _t: self.update())
-
-    # ---- geometry per variant
-    def _metrics(self) -> Dict[str, float]:
-        m = self._variant()
-        if self.pad_left is not None:
-            m["pl"] = self.pad_left
-        return m
-
-    def _variant(self) -> Dict[str, float]:
-        k, s = self.kind, self.size_
-        if k in ("link", "toggle"):
-            return {"h": 18, "px": 0, "gap": 4, "fs": theme.FS_SMALL, "fw": 400, "r": 0}
-        if k == "foot":
-            return {"h": 22, "px": 7, "pl": 4, "gap": 4, "fs": theme.FS_SMALL, "fw": 400, "r": theme.R1}
-        if k == "more":
-            return {"h": 24, "px": 8, "gap": 4, "fs": theme.FS_SMALL, "fw": 400, "r": theme.R2}
-        if s == "xs":
-            return {"h": 24, "px": 9, "gap": 5, "fs": theme.FS_SMALL, "fw": 500, "r": theme.R2}
-        if s == "sm":
-            return {"h": 26, "px": 10, "gap": 6, "fs": theme.FS_SMALL, "fw": 500, "r": theme.R2}
-        return {"h": 30, "px": 12, "gap": 6, "fs": theme.FS_UI, "fw": 500, "r": theme.R2}
-
-    def set_icon_name(self, name: str) -> None:
-        self.icon_name = name
-        self.update()
-
-    def set_icon_at_end(self, end: bool) -> None:
-        self._icon_end = end
-        self.update()
-
-    def set_on(self, on: bool) -> None:
-        """Pressed in (``.btn.on``): the fill of a hovered button, kept."""
-        self._on = on
-        self.update()
-
-    def sizeHint(self) -> QSize:  # noqa: N802
-        m = self._metrics()
-        fm = QFontMetrics(theme.font_ui(m["fs"], int(m["fw"])))
-        w = m.get("pl", m["px"]) + m["px"]
-        if self.icon_name:
-            w += self.icon_px
-            if self.text():
-                w += m["gap"]
-        w += fm.horizontalAdvance(self.text()) if self.text() else 0
-        return QSize(int(w), int(m["h"]))
-
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
-        return self.sizeHint()
-
-    def setText(self, text: str) -> None:  # noqa: N802
-        super().setText(text)
-        self.updateGeometry()
-        self.update()
-
-    def enterEvent(self, e) -> None:  # noqa: N802
-        self._hover = True
-        self.update()
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:  # noqa: N802
-        self._hover = False
-        self.update()
-        super().leaveEvent(e)
-
-    def _colors(self) -> tuple:
-        """(background, text colour, icon opacity) for the current state."""
-        t = theme.tokens()
-        k = self.kind
-        hover = self._hover and self.isEnabled()
-        if k == "primary":
-            if not self.isEnabled():
-                return theme.blend(t.fill_2, t.canvas), QColor(t.text_4), 1.0
-            return QColor(t.accent_2 if hover else t.accent), QColor(t.accent_ink), 1.0
-        if k == "ghost":
-            return (theme.blend(t.fill_2, t.canvas) if hover else None), QColor(t.text if hover else t.text_2), 0.85
-        if k == "danger":
-            return (theme.blend(t.err_wash, t.canvas) if hover else None), QColor(t.err), 0.85
-        if k in ("link", "toggle"):
-            return None, QColor(t.text if hover else t.text_3), 1.0
-        if k == "foot":
-            return (theme.blend(t.fill_1, t.canvas) if hover else None), QColor(t.text if hover else t.text_3), 0.8
-        if k == "more":
-            return (theme.blend(t.fill_2, t.canvas) if hover else None), QColor(t.text if hover else t.text_3), 1.0
-        return theme.blend(t.fill_3 if (hover or self._on) else t.fill_2, t.canvas), QColor(t.text), 0.85
-
-    def paintEvent(self, _e: QPaintEvent) -> None:  # noqa: N802
-        m = self._metrics()
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        if not self.isEnabled() and self.kind != "primary":
-            p.setOpacity(0.45)
-        bg, fg, icon_alpha = self._colors()
-        if bg is not None:
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(bg)
-            p.drawRoundedRect(QRectF(self.rect()), m["r"], m["r"])
-        font = theme.font_ui(m["fs"], int(m["fw"]))
-        p.setFont(font)
-        fm = QFontMetrics(font)
-        x = m.get("pl", m["px"])
-        tw = fm.horizontalAdvance(self.text()) if self.text() else 0
-        icon_x = x
-        text_x = x
-        if self.icon_name and self.text():
-            if self._icon_end:
-                text_x = x
-                icon_x = x + tw + m["gap"]
-            else:
-                text_x = x + self.icon_px + m["gap"]
-        if self.icon_name:
-            pm = icons.pixmap(self.icon_name, fg, self.icon_px)
-            base = p.opacity()
-            p.setOpacity(base * icon_alpha)
-            p.drawPixmap(int(icon_x), (self.height() - self.icon_px) // 2, pm)
-            p.setOpacity(base)
-        if self.text():
-            p.setPen(fg)
-            p.drawText(
-                QRect(int(text_x), 0, tw + 2, self.height()),
-                Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                self.text(),
-            )
 
 
 def icon_btn(name: str, tooltip: str = "", size: int = 13) -> IconButton:
@@ -456,26 +287,6 @@ class Refresher(QObject):
         self.stale = False
         self._last = time.monotonic()
         self._fn()
-
-
-class Hairline(QWidget):
-    """A one-pixel line in the hair colour over the panel's canvas (``inset 0 -1px 0 var(--hair)``)."""
-
-    def __init__(self, vertical: bool = False, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self._v = vertical
-        if vertical:
-            self.setFixedWidth(1)
-            self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
-        else:
-            self.setFixedHeight(1)
-            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        bind(theme.theme.changed, self, lambda _t: self.update())
-
-    def paintEvent(self, _e) -> None:  # noqa: N802
-        t = theme.tokens()
-        p = QPainter(self)
-        p.fillRect(self.rect(), theme.blend(t.hair, t.canvas))
 
 
 class Toolbar(QWidget):

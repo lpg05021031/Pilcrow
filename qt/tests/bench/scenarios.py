@@ -105,10 +105,12 @@ class Ctx:
         t0 = time.perf_counter()
         self.store.open_session(sid)
         self.c.wait_until(
-            lambda: sid in self.store.rt
-            and self.transcript() is not None
-            and getattr(self.transcript(), "sid", sid) == sid
-            and self.transcript().units(),
+            lambda: (
+                sid in self.store.rt
+                and self.transcript() is not None
+                and getattr(self.transcript(), "sid", sid) == sid
+                and self.transcript().units()
+            ),
             timeout,
             "rows",
         )
@@ -778,10 +780,11 @@ def view_mode_cycle(ctx: Ctx) -> Json:
 
 
 def theme_toggle(ctx: Ctx) -> Json:
-    """Dark → light → dark with a long conversation and the panel open."""
+    """Dark → light → dark with a long conversation and the panel open. The panel's first build is
+    given time to finish so that only the switch itself is timed."""
     ctx.open(ctx.heavy)
     ctx.store.set_ui(panel=True, panel_tab="changes")
-    settle(500)
+    settle(1500)
     out: Json = {}
     for dark in (False, True):
         ctx.counters.reset()

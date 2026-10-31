@@ -7,12 +7,13 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QWidget
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QWidget
 
 from ... import icons, theme
 from ...lib.fmt import tildify
 from ...store import store
-from ..ui.bits import IconButton, button, copy_text, label
+from ..ui.bits import Box, IconButton, button, copy_text, label
 from ..ui.signals import bind
 from .settings_general import Rows, SetRow, config, save
 from .settings_ui import (
@@ -24,7 +25,6 @@ from .settings_ui import (
     line_edit,
     modes_for,
     select_value,
-    styled,
     vbox,
 )
 
@@ -181,14 +181,19 @@ class ClaudePage(Rows):
         self.program_row.title.setToolTip(tildify(str((info.get("claude") or {}).get("path") or ""), home()))
 
 
-class SetupCard(QFrame):
+class SetupCard(Box):
     """``.setup-card`` from Welcome.tsx: what Claude Code needs to reach the API and where it goes, with
     the current endpoint and credential as app.info reports them, and a re-check."""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
+        super().__init__(
+            bg=lambda t: theme.blend(t.raised_2, t.raised) if t.dark else QColor(t.raised),
+            line="accent_ring/raised",
+            radius=14,
+            line_w=1.5,
+            parent=parent,
+        )
         self.setObjectName("setup")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         lay = vbox(self, 8, (16, 14, 16, 12))
         head = QWidget()
         hl = QHBoxLayout(head)
@@ -210,9 +215,8 @@ class SetupCard(QFrame):
             wrap=True,
         )
         lay.addWidget(self.para)
-        snip = QFrame()
+        snip = Box(bg="inset", radius=theme.R3)
         snip.setObjectName("snippet")
-        snip.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         sl = QHBoxLayout(snip)
         sl.setContentsMargins(12, 10, 6, 10)
         sl.setSpacing(6)
@@ -233,15 +237,6 @@ class SetupCard(QFrame):
         self.check.setAccessibleName("Re-check")
         al.addWidget(self.check)
         lay.addWidget(acts)
-        styled(
-            self,
-            lambda t: (
-                f"""
-            #setup {{ background: {theme.blend(t.raised_2, t.raised).name() if t.dark else t.raised}; border: 1.5px solid {theme.blend(t.accent_ring, t.raised).name()}; border-radius: 14px; }}
-            #snippet {{ background: {t.inset}; border-radius: {theme.R3}px; }}
-        """
-            ),
-        )
         bind(theme.theme.changed, self, lambda _t: self.refresh())
         self.refresh()
 

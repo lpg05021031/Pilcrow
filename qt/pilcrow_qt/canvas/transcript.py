@@ -17,7 +17,8 @@ from collections import OrderedDict
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import shiboken6
-from PySide6.QtCore import QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QRect, QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFontMetrics, QPainter
 from PySide6.QtWidgets import QPushButton, QVBoxLayout, QWidget
 
 from .. import icons, theme
@@ -26,6 +27,7 @@ from ..lib.transcript_model import Item, TranscriptModel
 from ..lib.units import Unit, group_turns, live_turn_folds
 from ..store import store
 from ..widgets.transcript.ctx import ToolCtx
+from ..widgets.ui.bits import paint_box
 from ..widgets.ui.signals import bind
 from .blocks.fold import sync_unit_group, unit_group, unit_group_key
 from .blocks.island import IslandBlock
@@ -286,16 +288,21 @@ class Jump(QPushButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAccessibleName("Latest")
         self.setFixedHeight(30)
-        self.setIconSize(QSize(14, 14))
-        self._paint()
-        bind(theme.theme.changed, self, lambda _t: self._paint())
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self._font = theme.font_ui(theme.FS_SMALL, 550)
+        self.setFixedWidth(10 + 14 + 4 + QFontMetrics(self._font).horizontalAdvance(self.text().strip()) + 12)
+        bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def _paint(self) -> None:
+    def paintEvent(self, _e) -> None:  # noqa: N802
         t = theme.tokens()
-        self.setIcon(icons.icon("arrow-down", t.text, 14))
-        self.setStyleSheet(
-            f"QPushButton {{ background: {t.raised}; color: {t.text}; border: 1px solid {theme.blend(t.hair_2, t.raised).name()}; border-radius: 15px; "
-            f"padding: 0 12px 0 10px; font-size: {int(theme.FS_SMALL + 0.5)}px; font-weight: 550; }} QPushButton:hover {{ background: {t.raised_2}; }}"
+        p = QPainter(self)
+        bg = QColor(t.raised_2 if self.underMouse() else t.raised)
+        paint_box(p, QRectF(self.rect()), bg, theme.blend(t.hair_2, t.raised), 15)
+        p.drawPixmap(10, (self.height() - 14) // 2, icons.pixmap("arrow-down", t.text, 14))
+        p.setFont(self._font)
+        p.setPen(QColor(t.text))
+        p.drawText(
+            QRect(28, 0, self.width() - 28 - 12, self.height()), Qt.AlignmentFlag.AlignVCenter, self.text().strip()
         )
 
 

@@ -47,6 +47,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QColor,
+    QFont,
     QFontMetrics,
     QImage,
     QKeyEvent,
@@ -54,7 +55,6 @@ from PySide6.QtGui import (
     QMouseEvent,
     QPainter,
     QPainterPath,
-    QPalette,
     QPen,
     QPixmap,
     QTextBlockFormat,
@@ -78,7 +78,8 @@ from .. import icons, theme
 from ..lib.fmt import bytes_, short_model
 from ..lib.fuzzy import fuzzy_filter
 from ..store import store
-from .ui.bits import ContextRing, context_label
+from .ui.bits import ContextRing, IconButton, LayoutButton, context_label
+from .ui.button import Btn
 from .ui.signals import bind
 
 Json = Dict[str, Any]
@@ -632,22 +633,10 @@ class ComposerEdit(QTextEdit):
         self.setCursor(Qt.CursorShape.IBeamCursor)
         self.viewport().setCursor(Qt.CursorShape.IBeamCursor)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
-        self.apply_line_height()
-
-    def _paint(self) -> None:
-        t = theme.tokens()
         self.setFont(theme.font_ui(theme.FS_BODY))
-        # the size goes through QSS too: the app sheet's `* { font-size }` would override setFont
-        self.setStyleSheet(
-            f"ComposerEdit {{ background: transparent; border: none; padding: 0; color: {t.text};"
-            f" font-size: {int(theme.FS_BODY + 0.5)}px;"
-            f" selection-background-color: {theme.blend(t.selection, t.raised).name()}; }}"
-        )
-        pal = self.palette()
-        pal.setColor(QPalette.ColorRole.PlaceholderText, theme.qcolor(t.text_3))
-        self.setPalette(pal)
+        self.setStyleSheet("ComposerEdit { background: transparent; border: none; padding: 0; }")
+        theme.tint(self, placeholder="text_3", highlight="selection/raised")
+        self.apply_line_height()
 
     def line_extra(self) -> float:
         """What a 22.475px line adds under the font's own ascent + descent (nothing for a taller fallback face)."""
@@ -768,18 +757,6 @@ class ComposerEdit(QTextEdit):
 # ---------------------------------------------------------------- small buttons
 
 
-class LayoutButton(QPushButton):
-    """A QPushButton built from child widgets in a layout: its size comes from the layout, not from its own text."""
-
-    def sizeHint(self):  # noqa: N802
-        lay = self.layout()
-        return lay.sizeHint() if lay is not None else super().sizeHint()
-
-    def minimumSizeHint(self):  # noqa: N802
-        lay = self.layout()
-        return lay.minimumSize() if lay is not None else super().minimumSizeHint()
-
-
 class ChipButton(LayoutButton):
     """A quiet pill with an optional icon, label, sub label and chevron (``.cbtn``): 30px tall, 12px
     medium text, a fill on hover and while its menu is open (the chevron turns on a spring then).
@@ -814,9 +791,12 @@ class ChipButton(LayoutButton):
         self.ico.hide()
         lay.addWidget(self.ico)
         self.text_lb = QLabel()
+        self.text_lb.setFont(theme.font_ui(theme.FS_SMALL, 500))
         self.text_lb.setVisible(not icon_only)
         lay.addWidget(self.text_lb)
         self.sub_lb = QLabel()
+        self.sub_lb.setFont(theme.font_ui(theme.FS_SMALL))
+        theme.tint(self.sub_lb, fg="text_3")
         self.sub_lb.hide()
         lay.addWidget(self.sub_lb)
         # the chevron is painted (it rotates); this keeps its place: 12px less the -2px margin
@@ -855,21 +835,21 @@ class ChipButton(LayoutButton):
     def is_open(self) -> bool:
         return self._open
 
-    def color(self) -> str:
-        t = theme.tokens()
-        tone = {"accent": t.accent_text, "plan": t.plan, "info": t.info, "err": t.err, "set": t.text}.get(self._tone)
+    def color_name(self) -> str:
+        """The token the text and icon take: the tone's, else text (lit) or text-2."""
+        tone = {"accent": "accent_text", "plan": "plan", "info": "info", "err": "err", "set": "text"}.get(self._tone)
         if tone:
             return tone
-        return t.text if (self.underMouse() or self._open) else t.text_2
+        return "text" if (self.underMouse() or self._open) else "text_2"
+
+    def color(self) -> str:
+        return getattr(theme.tokens(), self.color_name())
 
     def _paint(self) -> None:
-        t = theme.tokens()
-        color = self.color()
+        name = self.color_name()
         if self._icon:
-            self.ico.setPixmap(icons.pixmap(self._icon, color, self._icon_size))
-        self.text_lb.setStyleSheet(f"color: {color}; font-size: {theme.FS_SMALL}px; font-weight: 500;")
-        self.sub_lb.setStyleSheet(f"color: {t.text_3}; font-size: {theme.FS_SMALL}px; font-weight: 400;")
-        self.setStyleSheet("QPushButton { border: none; background: transparent; }")
+            self.ico.setPixmap(icons.pixmap(self._icon, getattr(theme.tokens(), name), self._icon_size))
+        theme.tint(self.text_lb, fg=name)
         self.update()
 
     def enterEvent(self, e) -> None:  # noqa: N802
@@ -1095,13 +1075,13 @@ class CtxButton(LayoutButton):
         self.setFixedHeight(30)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAccessibleName("Context window usage")
-        self.setStyleSheet("QPushButton { border: none; background: transparent; }")
         self.lay = QHBoxLayout(self)
         self.lay.setContentsMargins(5, 0, 5, 0)
         self.lay.setSpacing(5)
         self.ring = ContextRing(16)
         self.lay.addWidget(self.ring)
         self.num = QLabel()
+        self.num.setFont(theme.font_ui(theme.FS_MICRO))
         self.num.hide()
         self.lay.addWidget(self.num)
         self._hot = False
@@ -1123,9 +1103,7 @@ class CtxButton(LayoutButton):
         self._paint()
 
     def _paint(self) -> None:
-        t = theme.tokens()
-        color = t.err if self._hot else (t.text if self.underMouse() else t.text_3)
-        self.num.setStyleSheet(f"color: {color}; font-size: {theme.FS_MICRO}px;")
+        theme.tint(self.num, fg="err" if self._hot else ("text" if self.underMouse() else "text_3"))
         self.update()
 
     def enterEvent(self, e) -> None:  # noqa: N802
@@ -1985,6 +1963,10 @@ class QueueTray(QFrame):
         self.head_ico = QLabel()
         hl.addWidget(self.head_ico)
         self.head_text = QLabel()
+        head_font = theme.font_ui(theme.FS_MICRO, 600)
+        head_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.1)
+        self.head_text.setFont(head_font)
+        theme.tint(self.head_text, fg="text_3")
         hl.addWidget(self.head_text, 1)
         self.lay.addWidget(head)
         self.rows = QVBoxLayout()
@@ -1997,9 +1979,6 @@ class QueueTray(QFrame):
     def _paint(self) -> None:
         t = theme.tokens()
         self.head_ico.setPixmap(icons.pixmap("clock-3", t.accent_text, 12))
-        self.head_text.setStyleSheet(
-            f"color: {t.text_3}; font-size: {theme.FS_MICRO}px; font-weight: 600; letter-spacing: 0.1px;"
-        )
         self.update()
 
     def paintEvent(self, _e) -> None:  # noqa: N802
@@ -2104,11 +2083,10 @@ class QueueItem(QWidget):
             self.text_btn.setCursor(Qt.CursorShape.IBeamCursor)
             self.text_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             self.text_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-            color = t.text_4 if not text else t.text_2
             self.text_btn.setStyleSheet(
-                f"QPushButton {{ border: none; text-align: left; padding: 2px 0; color: {color};"
-                f" font-size: {theme.FS_UI}px; background: transparent; }} QPushButton:hover {{ color: {t.text}; }}"
+                f"QPushButton {{ border: none; text-align: left; padding: 2px 0; font-size: {theme.FS_UI}px; background: transparent; }}"
             )
+            theme.tint(self.text_btn, fg="text_4" if not text else "text_2")
             self.text_btn.clicked.connect(lambda: tray.start_edit(h["uuid"]))
             lay.addWidget(self.text_btn, 1)
             if (h.get("images") or 0) > 0:
@@ -2119,33 +2097,20 @@ class QueueItem(QWidget):
         al = QHBoxLayout(self.actions)
         al.setContentsMargins(0, 0, 0, 0)
         al.setSpacing(2)
-        self.now = QPushButton("Now")
-        self.now.setFlat(True)
-        self.now.setToolTip("Send now — interrupts the current step")
-        self.now.setAccessibleName("Send now")
-        self.now.setIcon(icons.icon("zap", t.text_3, 12, hover=t.accent_text))
-        self.now.setIconSize(QSize(12, 12))
-        self.now.setFixedHeight(24)
-        self.now.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.now.setStyleSheet(
-            f"QPushButton {{ border: none; border-radius: {theme.R2}px; padding: 0 8px; color: {t.text_3};"
-            f" font-size: 11px; font-weight: 600; background: transparent; }}"
-            f" QPushButton:hover {{ background: {theme.blend(t.fill_2, t.canvas).name()}; color: {t.accent_text}; }}"
+        self.now = Btn(
+            "Now",
+            icon="zap",
+            kind="more",
+            icon_size=12,
+            tooltip="Send now — interrupts the current step",
+            on_click=lambda: store.send_held_now(tray.sid, h["uuid"]),
         )
-        self.now.clicked.connect(lambda: store.send_held_now(tray.sid, h["uuid"]))
+        self.now.override = {"fs": 11, "fw": 600}
+        self.now.setAccessibleName("Send now")
         al.addWidget(self.now)
-        self.x = QPushButton()
-        self.x.setFlat(True)
+        self.x = IconButton("x", "Remove queued message", 13)
         self.x.setFixedSize(24, 24)
         self.x.setToolTip("Remove")
-        self.x.setAccessibleName("Remove queued message")
-        self.x.setIcon(icons.icon("x", t.text_3, 13, hover=t.text))
-        self.x.setIconSize(QSize(13, 13))
-        self.x.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.x.setStyleSheet(
-            f"QPushButton {{ border: none; border-radius: {theme.R2}px; background: transparent; }}"
-            f" QPushButton:hover {{ background: {theme.blend(t.fill_2, t.canvas).name()}; }}"
-        )
         self.x.clicked.connect(lambda: store.remove_held(tray.sid, h["uuid"]))
         al.addWidget(self.x)
         # the actions keep their room and show under the pointer (opacity 0 → 1 in CSS)
@@ -2186,15 +2151,14 @@ class _QueueEdit(QPlainTextEdit):
 
     def __init__(self, text: str, on_save: Callable[[str], None], on_cancel: Callable[[], None]) -> None:
         super().__init__()
-        t = theme.tokens()
         self._save, self._cancel = on_save, on_cancel
         self._done = False
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.document().setDocumentMargin(0)
         self.setStyleSheet(
-            f"QPlainTextEdit {{ background: {t.inset}; border: 1px solid {theme.blend(t.hair_2, t.canvas).name()};"
-            f" border-radius: {theme.R1}px; padding: 2px 6px; color: {t.text}; font-size: {theme.FS_UI}px; }}"
-            f" QPlainTextEdit:focus {{ border-color: {theme.blend(t.accent_line, t.canvas).name()}; }}"
+            f"QPlainTextEdit {{ background: palette(base); border: 1px solid palette(dark);"
+            f" border-radius: {theme.R1}px; padding: 2px 6px; font-size: {theme.FS_UI}px; }}"
+            " QPlainTextEdit:focus { border-color: palette(link-visited); }"
         )
         self.setPlainText(text)
         lines = min(6, max(1, text.count("\n") + 1))

@@ -99,6 +99,15 @@ class PreviewPanel(QWidget):
         bar.setMinimumHeight(42)
         self.field = QLineEdit(self.url or DEFAULT_URL)
         self.field.setPlaceholderText(DEFAULT_URL)
+        # .input.mono: a quiet fill with a hairline, 12.5px mono; focus lifts it onto the canvas. The
+        # colours are palette roles, re-read when the theme repolishes the field.
+        self.field.setFont(theme.font_mono(12))
+        self.field.setStyleSheet(
+            f"QLineEdit {{ background: palette(light); border: 1px solid palette(shadow); border-radius: {theme.R2}px; padding: 0 10px; }}"
+            "QLineEdit:hover { border-color: palette(dark); }"
+            "QLineEdit:focus { background: palette(window); border-color: palette(mid); }"
+        )
+        theme.tint(self.field, placeholder="text_3")
         self.field.setFixedHeight(28)
         self.field.setAccessibleName("Address")
         self.field.returnPressed.connect(lambda: self.go(self.field.text()))
@@ -146,18 +155,6 @@ class PreviewPanel(QWidget):
         self.refresh()
 
     def _apply_theme(self) -> None:
-        # .input.mono: a quiet fill with a hairline, 12.5px mono; focus lifts it onto the canvas.
-        t = theme.tokens()
-        f = theme.font_mono(12.5)
-        self.field.setStyleSheet(
-            f'QLineEdit {{ font-family: "{f.family()}"; font-size: 12px; background: {theme.blend(t.fill_1, t.canvas).name()}; '
-            f"border: 1px solid {theme.blend(t.hair, t.canvas).name()}; border-radius: {theme.R2}px; padding: 0 10px; color: {t.text}; }}"
-            f"QLineEdit:hover {{ border-color: {theme.blend(t.hair_2, t.canvas).name()}; }}"
-            f"QLineEdit:focus {{ background: {t.canvas}; border-color: {theme.blend(t.hair_3, t.canvas).name()}; }}"
-        )
-        pal = self.field.palette()
-        pal.setColor(pal.ColorRole.PlaceholderText, theme.qcolor(t.text_3))
-        self.field.setPalette(pal)
         self.render()
 
     # ---------------------------------------------------------------- state
@@ -232,12 +229,10 @@ class PreviewPanel(QWidget):
                 or reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute) is not None
             ):
                 self.status.setText("Something is listening there.")
-                self.status.setProperty("tone", "ok")
+                theme.tint(self.status, fg="ok")
             else:
                 self.status.setText("Nothing answered at this address yet.")
-                self.status.setProperty("tone", "faint")
-            self.status.style().unpolish(self.status)
-            self.status.style().polish(self.status)
+                theme.tint(self.status, fg="text_3")
             reply.deleteLater()
 
         reply.finished.connect(done)

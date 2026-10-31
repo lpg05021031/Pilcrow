@@ -30,9 +30,9 @@ from PySide6.QtWidgets import (
 
 from ... import icons, theme
 from ...store import store
-from ..ui.bits import IconButton, hairline
+from ..ui.bits import Box, IconButton, hairline
 from ..ui.signals import bind
-from .parts import Backdrop, Text, sheet_css
+from .parts import Backdrop, Text, sheet_bg, sheet_line
 
 SHEET_TOP = 0.09  # the sheet sits 9% of the way down, like the web's `padding: 9vh`
 SHEET_MAX_H = 860
@@ -82,11 +82,9 @@ class Sheet(QDialog):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
         self.setStyleSheet("QDialog { background: transparent; }")
 
-        self.frame = QFrame(self)
+        self.frame = Box(bg=sheet_bg, line=sheet_line, radius=theme.R4, parent=self)
         self.frame.setObjectName("sheet")
-        self.frame.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.frame.setStyleSheet(sheet_css(theme.tokens()))
-        bind(theme.theme.changed, self.frame, lambda t: self.frame.setStyleSheet(sheet_css(t)))
+        self.frame.setContentsMargins(1, 1, 1, 1)  # inside the painted line, as inside the web's border
         fl = QVBoxLayout(self.frame)
         fl.setContentsMargins(0, 0, 0, 0)
         fl.setSpacing(0)

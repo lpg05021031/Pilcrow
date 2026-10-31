@@ -317,7 +317,7 @@ Same rig, same scenarios, same machine class (software rasteriser), 600 heavy / 
 | hover sweep, typing | 0 layout passes in the conversation; 0 px of shift | 0 and 0; typing stall p95 1.5 ms |
 | open 600 heavy / 2,000 mixed turns | first paint ≤ 150 ms after the snapshot is modelled; no event-loop stall over 50 ms while modelling | first rows on screen 255 / 423 ms after the open, the snapshot modelled in slices of 300 messages (whole after 715 / 1,340 ms), first paint 3 ms |
 | switch session | ≤ 30 ms to first paint; 0 widgets made for a retained session | 57 ms (the sidebar's rows move, nothing is made or re-parented), 1 widget, 0 MB growth over 10 switches |
-| view mode cycle, theme switch | ≤ 100 ms to first paint | view mode 106 ms; theme 3.5–4 s with the Changes panel open — the app-wide stylesheet re-polish of every widget in the window (the conversation's share is 7 ms); a theme that moves to palettes instead of a stylesheet is the remaining step |
+| view mode cycle, theme switch | ≤ 100 ms to first paint | view mode 106 ms; theme 124–146 ms with the Changes panel open (was 3.5–4 s): the theme is a palette now, not a stylesheet — the switch swaps the application palette, re-applies the widgets' tints, polishes the ~100 native fields and scrollbars again and repaints; what remains is the Changes tab's hundred file rows laying out once each, and the conversation's own repaint (7 ms) |
 | panel open on any tab while streaming | widgets made per second = 0 on hidden tabs; ≤ 1 refresh a second on the visible one | 0 widgets/s on every tab, stall p95 4–5 ms (the Tasks tab updates its rows in place; the Changes tab rebuilds a diff only when an edit landed) |
 | idle with a busy-looking session | ≤ 2 % of one core | 7.2 % (the clock at 33 ms repaints the live row and the composer's mark; quiet 3.3 %) |
 | Timeline with 300 steps | — | first turn 14 ms, stall max 21 ms, 1 widget (was 1,749 ms and 301 widgets): a list on the engine |
@@ -351,7 +351,8 @@ counted. The 2.9.8 toggles were re-measured after a rig fix (its rows are clicke
 | open_cold | heavy: RSS added | 25.2 MB | 35 MB |
 | view_mode_cycle | → verbose: to first paint | 15041 ms | 106 ms |
 | view_mode_cycle | → verbose: widgets made | 126 | 0 |
-| theme_toggle | → light: to first paint | 7540 ms | 4065 ms |
+| theme_toggle | → light: to first paint | 7540 ms | 146 ms |
+| theme_toggle | → dark: to first paint | — | 124 ms |
 | fold_toggle | layout passes per toggle | 118 | 0.5 |
 | fold_toggle | scroll sets per toggle | 5 | 7.5 |
 | fold_toggle | stall max | 41.35 ms | 10.22 ms |
@@ -410,6 +411,9 @@ rows in place, the Timeline is a list on the engine, the sidebar moves only the 
 composer and the session head restyle only what changed, the snapshot of an opening conversation is
 modelled in slices (the 10 MB more of resident memory on opening is the scene: every unit of the
 history has a block, a key and an estimate from the first frame, which is what makes the scrollbar
-honest and the find instant). What remains is the theme switch, bound to Qt's stylesheet re-polish of every
-widget in the window (3.5–4 s with the Changes panel open); moving the theme from a stylesheet to
-palettes is the next step, outside this design.
+honest and the find instant). The theme switch, last at 3.5–4 s, is now 124–146 ms with the Changes
+panel open: the theme moved from a stylesheet to palettes (`theme.py`: the application palette carries
+the tokens, `tint()` gives a widget its own roles and is re-applied on a switch, the stylesheet is
+static and names colours only as `palette(role)`; buttons, cards, chips, hairlines and sheets are
+painted), so a switch is a palette change and a repaint, and no widget is re-polished except the
+native fields and scrollbars whose rules read the palette.

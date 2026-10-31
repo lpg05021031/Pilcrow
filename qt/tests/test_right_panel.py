@@ -26,7 +26,8 @@ def test_lbl_sets_size_weight_and_leading(app_client):
     assert h.minimumHeight() == 22  # 15px × the body's 1.45 line height
     small = lbl("x", theme.FS_SMALL, tone="faint")
     small.show()
-    assert _font(small).pixelSize() == 12 and small.property("tone") == "faint"
+    assert _font(small).pixelSize() == 12
+    assert small.palette().color(small.foregroundRole()).name() == theme.tokens().text_3, "tone faint = text-3"
     mono = lbl("sess", 11.5, mono=True)
     mono.show()
     assert _font(mono).family() == theme.font_mono().family() and _font(mono).pixelSize() == 12
@@ -54,9 +55,11 @@ def test_btn_metrics_follow_the_css(app_client):
     assert foot.sizeHint().height() == 22
     foot.set_icon_name("chevron-down")
     assert foot.icon_name == "chevron-down"
-    danger = Btn("Stop", icon="circle-stop", kind="danger", size="sm")
-    _bg, fg, _alpha = danger._colors()
+    danger = Btn("Stop", icon="circle-stop", kind="danger-text", size="sm")
+    _bg, fg, _alpha, _line = danger._colors()
     assert fg.name() == theme.tokens().err
+    filled = Btn("Delete", kind="danger")
+    assert filled._colors()[0].name() == theme.tokens().err and filled.property("kind") == "danger"
 
 
 def test_seg_picks_and_disables(app_client):
@@ -95,7 +98,8 @@ def test_section_and_empty_state_typography(app_client):
     assert _font(s.title).pixelSize() == 15 and _font(s.title).weight() == 600
     faint = s.head_faint("2 of 4 done")
     faint.show()
-    assert _font(faint).pixelSize() == 12 and faint.property("tone") == "faint"
+    assert _font(faint).pixelSize() == 12
+    assert faint.palette().color(faint.foregroundRole()).name() == theme.tokens().text_3
     assert s.body.contentsMargins().top() == 10 and s.body.contentsMargins().bottom() == 18  # .ps padding and gap
     e = EmptyState("history", "Nothing on the timeline yet.", "Each step becomes a point here.")
     e.resize(400, 200)

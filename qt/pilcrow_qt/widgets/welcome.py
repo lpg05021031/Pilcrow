@@ -11,15 +11,15 @@ from __future__ import annotations
 from datetime import datetime
 from typing import List, Optional
 
-from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QRadialGradient
+from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, QSize, Qt
+from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QRadialGradient
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QPlainTextEdit, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
 from .. import icons, theme
 from ..lib.fmt import basename, tildify
 from ..store import store
 from .dialogs.parts import Keys, LayoutButton, Text, page_column
-from .ui.bits import IconButton, Spinner
+from .ui.bits import Box, IconButton, Spinner, paint_box
 from .ui.signals import bind
 
 ICON = 72
@@ -92,19 +92,11 @@ class FolderButton(LayoutButton):
         lay.addWidget(self.chev)
         for w in (self.ico, self.label, self.chev):
             w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
+        self.set_look(hover="fill_2/raised", radius=theme.R2)
+        bind(theme.theme.changed, self, lambda _t: self.update())
 
     def set_folder(self, name: str) -> None:
         self.label.setText(name or "Choose a folder")
-
-    def _paint(self) -> None:
-        t = theme.tokens()
-        self.setStyleSheet(
-            f"#cbtn {{ background: transparent; border: none; border-radius: {theme.R2}px; padding: 0; min-height: 30px; max-height: 30px; }}"
-            f" #cbtn:hover {{ background: {theme.blend(t.fill_2, t.raised).name()}; }}"
-        )
-        self.update()
 
     def paintEvent(self, e) -> None:  # noqa: N802
         super().paintEvent(e)
@@ -185,22 +177,29 @@ class WelcomeChip(QPushButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip(tooltip)
         self.setAccessibleName(text)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self.setFixedHeight(24)
         self._on = False
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
+        self._font = theme.font_ui(theme.FS_SMALL)
+        bind(theme.theme.changed, self, lambda _t: self.update())
 
     def set_on(self, on: bool) -> None:
         self._on = on
-        self._paint()
+        self.update()
 
-    def _paint(self) -> None:
+    def sizeHint(self) -> QSize:  # noqa: N802
+        return QSize(QFontMetrics(self._font).horizontalAdvance(self.text()) + 20, 24)
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
         t = theme.tokens()
-        bg = theme.blend(t.fill_2 if self._on else t.fill_1, t.canvas).name()
-        line = theme.blend(t.hair_3 if self._on else t.hair, bg).name()
-        self.setStyleSheet(
-            f"#wchip {{ min-height: 24px; max-height: 24px; padding: 0 10px; border-radius: 13px; font-size: {theme.FS_SMALL}px; font-weight: 400; color: {t.text if self._on else t.text_2}; background: {bg}; border: 1px solid {line}; }}"
-            f" #wchip:hover {{ background: {theme.blend(t.fill_2, t.canvas).name()}; color: {t.text}; }}"
-        )
+        lit = self._on or self.underMouse()
+        bg = theme.blend(t.fill_2 if lit else t.fill_1, t.canvas)
+        line = theme.blend(t.hair_3 if self._on else t.hair, bg.name())
+        p = QPainter(self)
+        paint_box(p, QRectF(self.rect()), bg, line, 13)
+        p.setFont(self._font)
+        p.setPen(QColor(t.text if lit else t.text_2))
+        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.text())
 
 
 class WelcomeBox(QFrame):
@@ -209,7 +208,7 @@ class WelcomeBox(QFrame):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("wbox")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._focus = False
         self.setFixedWidth(BOX_W)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(1, 1, 1, 1)
@@ -222,6 +221,10 @@ class WelcomeBox(QFrame):
         self.edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.edit.setFixedHeight(74)
         self.edit.setTabChangesFocus(False)
+        self.edit.setStyleSheet(
+            f"#winput {{ background: transparent; border: none; padding: 10px 12px 0 12px; font-size: {theme.FS_BODY}px; }}"
+        )
+        theme.tint(self.edit, fg="text", placeholder="text_3", highlight="selection/raised")
         self.edit.installEventFilter(self)
         lay.addWidget(self.edit)
         bar = QWidget()
@@ -235,19 +238,13 @@ class WelcomeBox(QFrame):
         self.send = SendButton()
         bl.addWidget(self.send)
         lay.addWidget(bar)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
+        bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def _paint(self) -> None:
+    def paintEvent(self, _e) -> None:  # noqa: N802
         t = theme.tokens()
-        self.setStyleSheet(
-            f"#wbox {{ background: {t.raised}; border: 1px solid {theme.blend(t.hair_2, t.raised).name()}; border-radius: {theme.R4}px; }}"
-            f' #wbox[focus="true"] {{ border-color: {theme.blend(t.hair_3, t.raised).name()}; }}'
-            f" #winput {{ background: transparent; border: none; padding: 10px 12px 0 12px; font-size: {theme.FS_BODY}px; color: {t.text}; selection-background-color: {theme.blend(t.selection, t.raised).name()}; }}"
-        )
-        pal = self.edit.palette()
-        pal.setColor(pal.ColorRole.PlaceholderText, theme.qcolor(t.text_3))
-        self.edit.setPalette(pal)
+        p = QPainter(self)
+        line = theme.blend(t.hair_3 if self._focus else t.hair_2, t.raised)
+        paint_box(p, QRectF(self.rect()), QColor(t.raised), line, theme.R4)
 
     def text(self) -> str:
         return self.edit.toPlainText()
@@ -259,9 +256,8 @@ class WelcomeBox(QFrame):
                     self.send.click()
                     return True
             elif e.type() in (QEvent.Type.FocusIn, QEvent.Type.FocusOut):
-                self.setProperty("focus", "true" if e.type() == QEvent.Type.FocusIn else "false")
-                self.style().unpolish(self)
-                self.style().polish(self)
+                self._focus = e.type() == QEvent.Type.FocusIn
+                self.update()
         return super().eventFilter(obj, e)
 
 
@@ -501,12 +497,8 @@ class Welcome(QWidget):
 def _notice(text: str) -> QFrame:
     """``.notice.error``: a line with a warning icon on a red wash."""
     t = theme.tokens()
-    f = QFrame()
+    f = Box(bg="err_wash/canvas", radius=theme.R3)
     f.setObjectName("notice")
-    f.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-    f.setStyleSheet(
-        f"#notice {{ background: {theme.blend(t.err_wash, t.canvas).name()}; border-radius: {theme.R3}px; }}"
-    )
     lay = QHBoxLayout(f)
     lay.setContentsMargins(14, 10, 14, 10)
     lay.setSpacing(10)

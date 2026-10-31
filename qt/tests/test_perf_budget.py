@@ -44,6 +44,7 @@ def results():
             "switch_session",
             "find",
             "view_mode_cycle",
+            "theme_toggle",
         ):
             out[name] = SCENARIOS[name](ctx)
             c.wait_until(lambda: not (c.store.rt.get("sess-heavy") and c.store.rt["sess-heavy"].busy), 90, "idle")
@@ -86,3 +87,10 @@ def test_switch_find_and_view_mode_are_quick(results):
         if isinstance(r, dict):
             assert r["to_paint_ms"] <= 1200, (mode, r)
             assert r["widgets_made"] == 0, (mode, r)
+
+
+def test_theme_switch_is_a_palette_change(results):
+    for name, r in results["theme_toggle"].items():
+        if isinstance(r, dict):
+            assert r["to_paint_ms"] <= 400, (name, r)
+            assert r["window"]["widgets_made"] == 0, (name, r)

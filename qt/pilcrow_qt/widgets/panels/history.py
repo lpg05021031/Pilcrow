@@ -16,7 +16,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QScrollArea, QSlider, QVBoxLa
 from ... import icons, theme
 from ...lib.fmt import basename, duration, err_text, plural
 from ...store import ConfirmSpec, store
-from ..ui.bits import Clickable, Spinner
+from ..ui.bits import Clickable, Pill, Spinner
 from ..ui.collapse import Collapse
 from ..ui.signals import bind
 from .diff_view import DiffView, Num
@@ -287,18 +287,11 @@ class Scrubber(QWidget):
         il.addWidget(axis)
         lay.addWidget(inner)
         lay.addWidget(Hairline())
-        self.label = QLabel(self)
+        self.label = Pill(bg="raised_2", radius=9, parent=self)
         self.label.setFixedHeight(18)
-        self._paint_label()
-        bind(theme.theme.changed, self, lambda _t: self._paint_label())
-
-    def _paint_label(self) -> None:
-        t = theme.tokens()
-        f = theme.font_ui(theme.FS_MICRO)
-        self.label.setStyleSheet(
-            f'font-family: "{f.family()}"; font-size: {theme.FS_MICRO}px; color: {t.text_2}; background: {t.raised_2}; '
-            f"border-radius: 9px; padding: 0 7px;"
-        )
+        self.label.setContentsMargins(7, 0, 7, 0)
+        self.label.setFont(theme.font_ui(theme.FS_MICRO))
+        theme.tint(self.label, fg="text_2")
 
     def set_steps(self, steps: List[Json], sel: Optional[int]) -> None:
         self.steps = steps

@@ -22,11 +22,11 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, 
 
 from ... import icons, theme
 from ...lib.fmt import basename, dirname
-from ..ui.bits import Clickable
+from ..ui.bits import Clickable, Hairline, Pill
 from ..ui.collapse import Collapse
 from ..ui.signals import bind
 from .editor import lexer_for_path, token_color
-from .right_panel import Btn, Card, elide, font_qss, icon_btn, lbl, rtl_display
+from .right_panel import Btn, Card, elide, icon_btn, lbl, rtl_display
 
 Json = Dict[str, Any]
 Range = Tuple[int, int]
@@ -203,18 +203,27 @@ def hunks_from_patch(patch: List[Json]) -> List[Json]:
     return out
 
 
-Tok = Tuple[int, int, Optional[QColor], bool]  # start, end, colour, italic
+Tok = Tuple[int, int, object]  # start, end, Pygments token type (the colour is looked up at paint time)
+_TOKEN_LOOK: Dict[Tuple[str, object], Tuple[Optional[QColor], bool]] = {}
+
+
+def token_look(ttype: object, t: theme.Tokens) -> Tuple[Optional[QColor], bool]:
+    """``token_color`` memoised per theme: tokens are lexed once, coloured whenever they are painted."""
+    key = (t.name, ttype)
+    look = _TOKEN_LOOK.get(key)
+    if look is None:
+        look = _TOKEN_LOOK[key] = token_color(ttype, t)
+    return look
 
 
 def line_tokens(lines: List[Json], path: str) -> Dict[int, List[Tok]]:
-    """Syntax colours per line (by ``id(line)``) from Pygments, in the theme's ``cm_*`` tokens."""
+    """Syntax token runs per line (by ``id(line)``) from Pygments. Theme-free: a theme change only repaints."""
     lexer = lexer_for_path(path) if path else None
     out: Dict[int, List[Tok]] = {}
     if lexer is None:
         return out
     from pygments import lex
 
-    t = theme.tokens()
     for ln in lines:
         s = str(ln.get("s") or "")
         toks: List[Tok] = []
@@ -223,8 +232,7 @@ def line_tokens(lines: List[Json], path: str) -> Dict[int, List[Tok]]:
             value = value.rstrip("\n")
             if not value:
                 continue
-            color, italic = token_color(ttype, t)
-            toks.append((col, col + len(value), color, italic))
+            toks.append((col, col + len(value), ttype))
             col += len(value)
         out[id(ln)] = toks
     return out
@@ -233,12 +241,13 @@ def line_tokens(lines: List[Json], path: str) -> Dict[int, List[Tok]]:
 # ---------------------------------------------------------------- small painted bits
 
 
-class StatusBadge(QLabel):
+class StatusBadge(Pill):
     """The 16px file-status square (``.fstat``): M grey, A/U green, D red, R blue."""
 
     def __init__(self, status: str, untracked: bool = False, parent: Optional[QWidget] = None) -> None:
-        super().__init__("U" if untracked else status, parent)
+        super().__init__("U" if untracked else status, radius=4, parent=parent)
         self._status = "U" if untracked else status
+        self.setFont(theme.font_mono(10, 650))
         self.setFixedSize(16, 16)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setToolTip("Untracked" if untracked else STATUS_LABEL.get(status, status))
@@ -246,16 +255,14 @@ class StatusBadge(QLabel):
         bind(theme.theme.changed, self, lambda _t: self._paint())
 
     def _paint(self) -> None:
-        t = theme.tokens()
         fg, bg = {
-            "A": (t.ok, t.ok_wash),
-            "U": (t.ok, t.ok_wash),
-            "D": (t.err, t.err_wash),
-            "R": (t.info, t.info_wash),
-        }.get(self._status, (t.text_2, t.fill_2))
-        self.setStyleSheet(
-            f"color: {fg}; background: {theme.blend(bg, t.chrome).name()}; border-radius: 4px; {font_qss(10, 650, mono=True)}"
-        )
+            "A": ("ok", "ok_wash"),
+            "U": ("ok", "ok_wash"),
+            "D": ("err", "err_wash"),
+            "R": ("info", "info_wash"),
+        }.get(self._status, ("text_2", "fill_2"))
+        theme.tint(self, fg=fg)
+        self.set_look(bg=f"{bg}/chrome")
 
 
 class Num(QLabel):
@@ -264,6 +271,7 @@ class Num(QLabel):
     def __init__(self, kind: str, n: int = 0, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._kind, self._n = kind, n
+        self.setFont(theme.font_mono(11.5))
         self.setMinimumHeight(17)
         self.set_value(n)
         bind(theme.theme.changed, self, lambda _t: self._paint())
@@ -274,9 +282,7 @@ class Num(QLabel):
         self._paint()
 
     def _paint(self) -> None:
-        t = theme.tokens()
-        color = t.text_4 if not self._n else (t.ok if self._kind == "add" else t.err)
-        self.setStyleSheet(f"color: {color}; {font_qss(11.5, 400, mono=True)}")
+        theme.tint(self, fg="text_4" if not self._n else ("ok" if self._kind == "add" else "err"))
 
 
 class NoteBadge(QLabel):
@@ -372,24 +378,15 @@ class CommentEditor(QWidget):
 
 
 def style_textarea(edit: QPlainTextEdit, size: float = theme.FS_UI) -> None:
-    """``.textarea``: a quiet fill with a hairline, 9px 11px padding, placeholder in the faint colour."""
-    t = theme.tokens()
-
-    def apply() -> None:
-        tk = theme.tokens()
-        edit.setStyleSheet(
-            f"QPlainTextEdit {{ background: {theme.blend(tk.fill_1, tk.canvas).name()}; border: 1px solid {theme.blend(tk.hair, tk.canvas).name()}; "
-            f"border-radius: {theme.R2}px; padding: 8px 10px; color: {tk.text}; {font_qss(size)} "
-            f"selection-background-color: {theme.blend(tk.selection, tk.canvas).name()}; }}"
-            f"QPlainTextEdit:focus {{ background: {tk.canvas}; border-color: {theme.blend(tk.hair_3, tk.canvas).name()}; }}"
-        )
-        pal = edit.palette()
-        pal.setColor(pal.ColorRole.PlaceholderText, theme.qcolor(tk.text_3))
-        edit.setPalette(pal)
-
-    _ = t
-    apply()
-    bind(theme.theme.changed, edit, lambda _t: apply())
+    """``.textarea``: a quiet fill with a hairline, 9px 11px padding, placeholder in the faint colour.
+    The colours are palette roles, re-read when the theme repolishes the field."""
+    edit.setFont(theme.font_ui(size))
+    edit.setStyleSheet(
+        f"QPlainTextEdit {{ background: palette(light); border: 1px solid palette(shadow); border-radius: {theme.R2}px; "
+        "padding: 8px 10px; selection-background-color: palette(highlight); }"
+        "QPlainTextEdit:focus { background: palette(window); border-color: palette(mid); }"
+    )
+    theme.tint(edit, placeholder="text_3")
 
 
 class CommentCard(Card):
@@ -530,7 +527,6 @@ class DiffGrid(QWidget):
         return len(self._rows) if (not self._max_rows or self._expanded) else min(self._max_rows, len(self._rows))
 
     def _on_theme(self) -> None:
-        self._toks = line_tokens([ln for h in self._hunks for ln in (h.get("lines") or [])], self._path)
         self._fm_cache = None
         self.update()
 
@@ -899,7 +895,7 @@ class DiffGrid(QWidget):
                     p.drawRoundedRect(QRectF(x1, yy + 2, x2 - x1, lh - 4), 2, 2)
                 # the code, one coloured run at a time
                 pos = a
-                runs = [(max(a, ts), min(b, te), col, it) for ts, te, col, it in toks if te > a and ts < b] or [
+                runs = [(max(a, ts), min(b, te), *token_look(tt, t)) for ts, te, tt in toks if te > a and ts < b] or [
                     (a, b, None, False)
                 ]
                 for ts, te, col, it in runs:
@@ -1118,14 +1114,12 @@ class DiffFileRow(QWidget):
                 self.head.hover_widgets.append(b)
                 hl.addWidget(b)
         lay.addWidget(self.head)
-        self.head_line = QWidget()
-        self.head_line.setFixedHeight(1)
+        self.head_line = Hairline(over="chrome")
         lay.addWidget(self.head_line)
         self.grid: Optional[DiffGrid] = None
         self.body = Collapse(self._build_body, open_ or simple)
         lay.addWidget(self.body)
-        self.line = QWidget()
-        self.line.setFixedHeight(1)
+        self.line = Hairline()
         lay.addWidget(self.line)
         self._paint()
         bind(theme.theme.changed, self, lambda _t: self._paint())
@@ -1133,9 +1127,6 @@ class DiffFileRow(QWidget):
     def _paint(self) -> None:
         t = theme.tokens()
         self.chev.setPixmap(icons.pixmap("chevron-down" if self.body.is_open else "chevron-right", t.text_3, 13))
-        hair = theme.blend(t.hair, t.canvas).name()
-        self.line.setStyleSheet(f"background: {hair};")
-        self.head_line.setStyleSheet(f"background: {theme.blend(t.hair, t.chrome).name()};")
         self.head_line.setVisible(self.body.is_open)
 
     def _build_body(self) -> QWidget:

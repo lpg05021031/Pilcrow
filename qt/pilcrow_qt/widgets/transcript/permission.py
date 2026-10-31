@@ -20,6 +20,7 @@ from ...lib.tools_meta import str_
 from ...lib.transcript_model import ToolItem
 from ...store import store
 from ..ui import bits
+from ..ui.button import Btn
 from ..ui.signals import bind
 from .bodies.common import Hairline, IconLabel, Row, faint, mono_family, restyle, rich, vbox
 from .ctx import ToolCtx
@@ -188,7 +189,7 @@ class PermissionCard(QWidget):
         default_no = bool(perm.get("defaultToNo"))
         self.allow_btn = bits.button("Allow", kind="" if default_no else "primary", on_click=self.allow)
         self.allow_btn.setAccessibleName("Allow")
-        restyle(self.allow_btn, lambda tk: _perm_button(tk, "" if default_no else "primary"))
+        _perm_button(self.allow_btn)
         actions.add(self.allow_btn)
         if self.first and not default_no:
             actions.add(_key("1"))
@@ -200,25 +201,20 @@ class PermissionCard(QWidget):
                 tooltip="\n".join(describe_suggestion(s, cwd) for s in suggestions),
             )
             self.always_btn.setAccessibleName("Always allow")
-            restyle(self.always_btn, lambda tk: _perm_button(tk, ""))
+            _perm_button(self.always_btn)
             actions.add(self.always_btn)
             if self.first:
                 actions.add(_key("2"))
         self.deny_btn = bits.button("Deny", kind="primary" if default_no else "ghost", on_click=self.deny)
         self.deny_btn.setAccessibleName("Deny")
-        restyle(self.deny_btn, lambda tk: _perm_button(tk, "primary" if default_no else "ghost"))
+        _perm_button(self.deny_btn)
         actions.add(self.deny_btn)
         if self.first:
             actions.add(_key("3" if self.allow_always else "2"))
         actions.stretch()
-        self.note_link = bits.button("Tell Claude what to do instead", kind="ghost", size="sm", on_click=self.show_note)
+        self.note_link = bits.button("Tell Claude what to do instead", kind="more", size="sm", on_click=self.show_note)
         self.note_link.setAccessibleName("Tell Claude what to do instead")
-        restyle(
-            self.note_link,
-            lambda tk: (
-                f"QPushButton {{ color: {tk.text_3}; padding: 4px 6px; }} QPushButton:hover {{ color: {tk.text}; }}"
-            ),
-        )
+        self.note_link.override = {"px": 6}
         actions.add(self.note_link)
         lay.addWidget(actions)
 
@@ -354,25 +350,8 @@ def _key(k: str) -> QWidget:
     return lb
 
 
-def _perm_button(t: theme.Tokens, kind: str) -> str:
-    """`.perm-actions .btn`: 28px tall, 11px sides, 13px text, 7px corners; primary in the accent,
-    the default on a quiet fill, ghost bare in text-2."""
-    base = (
-        f"min-height: 28px; max-height: 28px; padding: 0 11px; font-size: {theme.FS_UI}px; font-weight: 500; "
-        f"border-radius: 7px; border: none;"
-    )
-    if kind == "primary":
-        return (
-            f"QPushButton {{ {base} background: {t.accent}; color: {t.accent_ink}; }} "
-            f"QPushButton:hover {{ background: {t.accent_2}; }} "
-            f"QPushButton:disabled {{ background: {theme.blend(t.fill_2, t.raised).name()}; color: {t.text_4}; }}"
-        )
-    if kind == "ghost":
-        return (
-            f"QPushButton {{ {base} background: transparent; color: {t.text_2}; }} "
-            f"QPushButton:hover {{ background: {theme.blend(t.fill_2, t.raised).name()}; color: {t.text}; }}"
-        )
-    return (
-        f"QPushButton {{ {base} background: {theme.blend(t.fill_2, t.raised).name()}; color: {t.text}; }} "
-        f"QPushButton:hover {{ background: {theme.blend(t.fill_3, t.raised).name()}; }}"
-    )
+def _perm_button(b: Btn) -> Btn:
+    """`.perm-actions .btn`: 28px tall, 11px sides, 13px text, 7px corners (the kind gives the colours)."""
+    b.override = {"h": 28, "px": 11, "fs": theme.FS_UI, "fw": 500, "r": 7}
+    b.updateGeometry()
+    return b

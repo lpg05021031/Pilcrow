@@ -127,16 +127,16 @@ Depth is at most four: root → UnitGroup/FoldGroup → ChapterGroup/StepsGroup 
 
 ```python
 class Scene:
-    root: Group                   # children are UnitGroups in conversation order
-    by_key: Dict[str, Block]      # every block, warm or cold
-    settled_units: List[Unit]     # units before the last user boundary (immutable)
-    settled_items: int            # how many items they cover
-    anchor: Anchor                # see §4
+    root: Group  # children are UnitGroups in conversation order
+    by_key: Dict[str, Block]  # every block, warm or cold
+    settled_units: List[Unit]  # units before the last user boundary (immutable)
+    settled_items: int  # how many items they cover
+    anchor: Anchor  # see §4
     following: bool
-    needle: str                   # the find query, applied to blocks as they warm
-    width: int                    # column width heights are valid for
-    theme: str                    # token set name heights/pixmaps are valid for
-    frame: int                    # paint counter
+    needle: str  # the find query, applied to blocks as they warm
+    width: int  # column width heights are valid for
+    theme: str  # token set name heights/pixmaps are valid for
+    frame: int  # paint counter
 ```
 
 One Scene per session, retained in `store`-adjacent state for the life of the app (LRU of eight
@@ -515,7 +515,7 @@ Back-of-envelope from before the work; the measurements are in `PERF.md` §5 and
 | scrollbar drag step | p95 406 ms | ≤ 8 ms (visible blocks warmed, ≤ 20 × 0.5 ms) |
 | hover sweep, 240 moves | 1,348 layouts | 0 layouts, 2 rects per move |
 | view mode → verbose | 15.7 s | ~10 ms |
-| theme switch | 8.8 s | ~30 ms |
+| theme switch | 8.8 s | ~30 ms for the conversation; 124–146 ms for the window with the Changes panel open, the theme on palettes (§13) |
 | session switch | 7.1 s, 374 widgets | one paint |
 | open 2,000 turns | 868 ms rows, synchronous | ≤ 150 ms to first paint; modelling in slices |
 | find over the conversation | 4.5 s, 22,556 widgets | ~20 ms, 0 widgets |
@@ -563,8 +563,25 @@ the budgets of `PERF.md` §5 with headroom on a short bench when `PILCROW_PERF=1
 `npm run release` sets.
 
 Still widgets, by choice: the Tasks tab's cards (they carry Stop buttons, workflow logs and phase
-rows that are better as widgets), the file cards' hover actions in the Changes tab. Still bound by
-Qt's stylesheet machinery: a theme switch re-polishes every widget in the window (`PERF.md` §7).
+rows that are better as widgets), the file cards' hover actions in the Changes tab.
+
+**The theme on palettes.** The last of the window's costs was the theme switch: 3.5–4 s with the
+Changes panel open, all of it Qt re-polishing every widget against a re-parsed application
+stylesheet that carried the theme's colours, plus some 150 per-widget stylesheets set again from
+theme handlers. The theme is a palette now. `theme.palette(t)` maps the tokens onto Qt's colour
+roles (window = canvas, base = inset, light/midlight/mid = the fills on the canvas, shadow = the hair,
+link = accent text, link-visited = the accent, and so on); `theme.tint(widget, fg=…, bg=…)` gives one
+widget other roles from the tokens (a fainter text, a chrome background, a placeholder colour) and
+is re-applied on every switch from a registry, so the label factories (`bits.label`, `lbl`) need no
+handler; the application stylesheet is static, carries geometry and fonts and names colours only as
+`palette(role)`, and is set once. Buttons are painted (`ui/button.py`: one `Btn` for every kind and
+size, the icon button, the key-capped button), as are cards, wells, chips and pills, hairlines,
+popovers, toasts, the find bar, the Latest pill and the sheets' frames (`ui/bits.py`: `Box`, `Pill`,
+`Hairline`, `paint_box`, a `LayoutButton` with a look). A switch is then: the application palette
+(delivered to every widget through a class palette, since a stylesheet stops a window handing its
+palette down), the tints, a polish of the native fields, combos and scrollbars whose rules read the
+palette (`theme.repolish`, a few microseconds each), and `changed` for the painters — 124–146 ms on
+the 600-turn conversation with the Changes panel open, 30 ms in the small test window.
 
 ## 14. Tests
 

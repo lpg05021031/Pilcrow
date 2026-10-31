@@ -399,6 +399,8 @@ class FileTabs(QWidget):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setObjectName("chrome")
+        self.setAutoFillBackground(True)
+        theme.tint(self, bg="chrome")
         self.box = QHBoxLayout(self)
         self.box.setContentsMargins(6, 6, 6, 0)
         self.box.setSpacing(2)
@@ -432,10 +434,9 @@ class FileTabs(QWidget):
 # ---------------------------------------------------------------- document views
 
 
-def _browser_qss(t: theme.Tokens, size: float) -> str:
-    """A page surface on the canvas; the font is in the rule since the app's ``*`` rule beats setFont."""
-    ui = theme._UI_FAMILY or "sans-serif"
-    return f'QTextBrowser {{ background: {t.canvas}; color: {t.text}; border: none; padding: 0; font-family: "{ui}"; font-size: {size}px; }}'
+# A page surface on the canvas: the window colour of the palette, which Qt re-reads when the theme
+# repolishes the browser (theme.repolish); the font is set with setFont.
+_BROWSER_QSS = "QTextBrowser { background: palette(window); border: none; padding: 0; }"
 
 
 def _top(w: QWidget) -> QWidget:
@@ -470,13 +471,11 @@ class MarkdownView(QTextBrowser):
         self.on_open_path: Optional[Callable[[str], None]] = None
         self._base = ""
         self._text = ""
-        self._apply_theme()
+        self.setFont(theme.font_ui(theme.FS_BODY))
+        self.setStyleSheet(_BROWSER_QSS)
         bind(theme.theme.changed, self, lambda _t: self._apply_theme())
 
     def _apply_theme(self) -> None:
-        t = theme.tokens()
-        self.setFont(theme.font_ui(theme.FS_BODY))
-        self.setStyleSheet(_browser_qss(t, theme.FS_BODY))
         if self._text:
             self.set_markdown(self._text, self._base)
 
@@ -514,6 +513,8 @@ class HtmlPreview(QWidget):
         bar = Row(4, (12, 0, 6, 0))
         bar.setFixedHeight(30)
         bar.setObjectName("chrome")
+        bar.setAutoFillBackground(True)
+        theme.tint(bar, bg="chrome")
         bar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.name = label(basename(path), tone="faint", size="micro", mono=True)
         bar.add(self.name, 1)
@@ -540,12 +541,9 @@ class HtmlPreview(QWidget):
         self.view.setFrameShape(QFrame.Shape.NoFrame)
         self.view.setOpenExternalLinks(True)
         self.view.document().setDocumentMargin(16)
+        self.view.setFont(theme.font_ui(theme.FS_BODY))
+        self.view.setStyleSheet(_BROWSER_QSS)
         lay.addWidget(self.view, 1)
-        self._apply_theme()
-        bind(theme.theme.changed, self, lambda _t: self._apply_theme())
-
-    def _apply_theme(self) -> None:
-        self.view.setStyleSheet(_browser_qss(theme.tokens(), theme.FS_BODY))
 
     def set_saved(self, saved: str, dirty: bool) -> None:
         self.save_btn.setVisible(dirty)
@@ -760,6 +758,7 @@ class FilesPanel(QWidget):
 
         self.editor_host = QWidget()
         self.editor_host.setObjectName("canvas")
+        self.editor_host.setAutoFillBackground(True)  # the palette's window colour: the canvas
         self.editor_host.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         el = QVBoxLayout(self.editor_host)
         el.setContentsMargins(0, 0, 0, 0)

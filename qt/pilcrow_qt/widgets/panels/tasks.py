@@ -22,7 +22,7 @@ from ... import icons, theme
 from ...lib.fmt import duration, plural, short_model, time_ago, tokens
 from ...lib.workflow import WorkflowCounts, agent_state, parse_workflow_meta, workflow_columns, workflow_counts
 from ...store import store
-from ..ui.bits import Clickable, Spinner
+from ..ui.bits import Clickable, Pill, Spinner
 from ..ui.collapse import Collapse
 from ..ui.signals import bind
 from .right_panel import Btn, Card, Refresher, Section, elide, empty_text, lbl
@@ -268,22 +268,15 @@ class HoverRow(QWidget):
             p.drawRoundedRect(QRectF(self.rect()), self.radius, self.radius)
 
 
-class Chip(QLabel):
+class Chip(Pill):
     """A tiny pill: ``.wf-chip`` (×2) and ``.wf-phase-kind`` (parallel)."""
 
     def __init__(self, text: str, round_: bool = False, parent: Optional[QWidget] = None) -> None:
-        super().__init__(text, parent)
-        self._round = round_
-        self._paint()
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-
-    def _paint(self) -> None:
-        t = theme.tokens()
-        f = theme.font_ui(10)
-        self.setStyleSheet(
-            f'font-family: "{f.family()}"; font-size: 10px; color: {t.text_3}; background: {theme.blend(t.fill_2, t.raised).name()}; '
-            f"border-radius: {7 if self._round else 4}px; padding: 0 {5 if self._round else 4}px;"
-        )
+        super().__init__(text, bg="fill_2/raised", radius=7 if round_ else 4, parent=parent)
+        pad = 5 if round_ else 4
+        self.setContentsMargins(pad, 0, pad, 0)
+        self.setFont(theme.font_ui(10))
+        theme.tint(self, fg="text_3")
 
 
 # ---------------------------------------------------------------- rows
@@ -358,7 +351,7 @@ class TaskRow(Card):
         ml.addWidget(sub)
         lay.addWidget(main, 1)
         if not done:
-            stop = Btn("Stop", icon="circle-stop", kind="danger", size="sm", tooltip="Stop this task")
+            stop = Btn("Stop", icon="circle-stop", kind="danger-text", size="sm", tooltip="Stop this task")
             stop.clicked.connect(lambda: store.call("session.stopTask", {"id": sid, "taskId": t.get("id")}))
             lay.addWidget(stop)
         self._paint_icon()
@@ -869,7 +862,9 @@ class WorkflowDetail(Card):
 
             log_btn.clicked.connect(toggle_log)
         if live:
-            stop = Btn("Stop", icon="circle-stop", kind="danger", size="xs", icon_size=12, tooltip="Stop this workflow")
+            stop = Btn(
+                "Stop", icon="circle-stop", kind="danger-text", size="xs", icon_size=12, tooltip="Stop this workflow"
+            )
             stop.clicked.connect(self._stop)
             fl.addWidget(stop)
         fl.addStretch(1)

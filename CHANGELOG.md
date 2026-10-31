@@ -21,6 +21,10 @@
   調整寬度不重排、檔案卡依路徑保留；Collapse 改走共用時鐘並以實際寬度量高；composer／標題列／側欄列不再在沒變時
   重設樣式；開啟 session 時快照分批（每個事件迴圈 300 則）進模型，不再卡住視窗；`qt/tests/test_perf_budget.py`
   在 `PILCROW_PERF=1` 時以短 bench 檢查 `qt/PERF.md` 的目標（`npm run release` 會跑）。
+  主題改走調色盤：`theme.py` 把 token 對到 QPalette 的角色，`theme.tint()` 給單一 widget 自己的顏色（換主題時自動重套），
+  應用程式樣式表改成靜態、顏色只寫 `palette(role)`、只設一次；按鈕（`ui/button.py`）、卡片、藥丸、細線、彈窗、
+  toast、搜尋列與對話框底板都自繪。切換主題變成換調色盤加重畫：600 回合對話＋Changes 面板打開時 124–146 ms
+  （原本 3.5–4 s）。
 
 - **2.9.8**：Linux 自繪標題列的標題對齊對話區：從對話卡片的文字欄開始（與 session 標題同一條線），側欄收起時移到最左、
   拖寬側欄時跟著走。

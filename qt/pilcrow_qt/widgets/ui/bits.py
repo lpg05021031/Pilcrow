@@ -1,33 +1,60 @@
 """Small shared widgets (a port of web/src/components/ui/bits.tsx).
 
-Everything here is painted from the theme tokens and repaints when the theme changes.
+Everything here is painted from the theme tokens, or tinted from them (``theme.tint``), and follows a
+theme change without touching a stylesheet.
 """
 
 from __future__ import annotations
 
 import math
 import time
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QWidget
+from PySide6.QtWidgets import QCheckBox, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QWidget
 
 from ... import icons, theme
+from .button import Btn
 from .signals import bind
 
 
-def hairline(vertical: bool = False) -> QFrame:
-    f = QFrame()
-    f.setProperty("hairline-v" if vertical else "hairline", "true")
-    f.setFrameShape(QFrame.Shape.NoFrame)
-    return f
+class Hairline(QWidget):
+    """A one-pixel line in the hair colour over a surface (``inset 0 -1px 0 var(--hair)``); ``over`` is
+    the surface it lies on (a token name, by default the canvas; or any :data:`theme.Fill`)."""
+
+    def __init__(self, vertical: bool = False, over: theme.Fill = "canvas", parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._v = vertical
+        self._over = over
+        if vertical:
+            self.setFixedWidth(1)
+            self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        else:
+            self.setFixedHeight(1)
+            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        bind(theme.theme.changed, self, lambda _t: self.update())
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        t = theme.tokens()
+        p = QPainter(self)
+        p.fillRect(self.rect(), theme.over(theme.qcolor(t.hair), theme.resolve(self._over, t)))
+
+
+def hairline(vertical: bool = False, over: theme.Fill = "canvas") -> Hairline:
+    return Hairline(vertical, over)
+
+
+def tone(lb: QWidget, name: str) -> QWidget:
+    """Colour a label's text by tone name (muted, faint, accent, err, ok) or token name; '' is the text colour."""
+    theme.tint(lb, fg=theme.TONES.get(name, name) if name else "text")
+    return lb
 
 
 def label(text: str = "", tone: str = "", size: str = "", mono: bool = False, wrap: bool = False) -> QLabel:
     lb = QLabel(text)
     if tone:
-        lb.setProperty("tone", tone)
+        theme.tint(lb, fg=theme.TONES.get(tone, tone))
     if size:
         lb.setProperty("fs", size)
     if mono:
@@ -46,56 +73,210 @@ def button(
     icon: str = "",
     on_click: Optional[Callable[[], None]] = None,
     tooltip: str = "",
-) -> QPushButton:
-    b = QPushButton(text)
-    if kind:
-        b.setProperty("kind", kind)
-    if size:
-        b.setProperty("fs", size)
-    if icon:
-        t = theme.tokens()
-        b.setIcon(icons.icon(icon, t.accent_ink if kind == "primary" else t.text_2, 14, hover=t.text))
-        b.setIconSize(QSize(14, 14))
-    if tooltip:
-        b.setToolTip(tooltip)
-        b.setAccessibleName(tooltip)
-    if on_click:
-        b.clicked.connect(on_click)
-    b.setCursor(Qt.CursorShape.PointingHandCursor)
-    return b
+) -> Btn:
+    """``.btn``: painted (``ui/button.py``). ``kind``: '' | primary | ghost | outline | danger |
+    danger-text | link; ``size``: '' | sm | xs | lg."""
+    return Btn(
+        text,
+        icon=icon,
+        kind=kind,
+        size=size,
+        icon_size=14 if size in ("", "lg") else 13,
+        tooltip=tooltip,
+        on_click=on_click,
+    )
 
 
 class IconButton(QPushButton):
-    """A quiet square button with only an icon (``.icon-btn``). ``active`` tints it as pressed-in."""
+    """A quiet square button with only an icon (``.icon-btn``): a fill under the pointer, and kept
+    while ``active``. The icon is painted in text-2 (or ``color``), text under the pointer."""
 
     def __init__(
         self, name: str, tooltip: str = "", size: int = 15, color: str = "", parent: Optional[QWidget] = None
     ) -> None:
         super().__init__(parent)
         self._name, self._size, self._color = name, size, color
-        self.setProperty("icon-only", "true")
+        self._active = False
+        self._hover = False
         self.setFlat(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedSize(size + 12, size + 12)
         self.setIconSize(QSize(size, size))
         if tooltip:
             self.setToolTip(tooltip)
             self.setAccessibleName(tooltip)
-        self._paint_icon()
-        bind(theme.theme.changed, self, lambda _t: self._paint_icon())
+        bind(theme.theme.changed, self, lambda _t: self.update())
 
     def set_icon_name(self, name: str) -> None:
         self._name = name
-        self._paint_icon()
+        self.update()
 
     def set_active(self, on: bool) -> None:
-        self.setProperty("active", "true" if on else "false")
-        self.style().unpolish(self)
-        self.style().polish(self)
+        if on != self._active:
+            self._active = on
+            self.update()
 
-    def _paint_icon(self) -> None:
+    def enterEvent(self, e) -> None:  # noqa: N802
+        self._hover = True
+        self.update()
+        super().enterEvent(e)
+
+    def leaveEvent(self, e) -> None:  # noqa: N802
+        self._hover = False
+        self.update()
+        super().leaveEvent(e)
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
         t = theme.tokens()
-        self.setIcon(icons.icon(self._name, self._color or t.text_2, self._size, hover=t.text))
+        lit = (self._hover and self.isEnabled()) or self._active
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if lit:
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(theme.blend(t.fill_2, t.canvas))
+            p.drawRoundedRect(QRectF(self.rect()), theme.R2, theme.R2)
+        if not self.isEnabled():
+            p.setOpacity(0.45)
+        color = t.text if lit else (self._color or t.text_2)
+        px = self.iconSize().width()
+        pm = icons.pixmap(self._name, color, px)
+        p.drawPixmap((self.width() - px) // 2, (self.height() - px) // 2, pm)
+
+
+class Check(QCheckBox):
+    """A check box painted from the tokens: a 15px inset square, the accent when checked."""
+
+    BOX, GAP = 15, 8
+
+    def __init__(self, text: str = "", parent: Optional[QWidget] = None) -> None:
+        super().__init__(text, parent)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        bind(theme.theme.changed, self, lambda _t: self.update())
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        fm = self.fontMetrics()
+        return QSize(self.BOX + self.GAP + fm.horizontalAdvance(self.text()) + 2, max(self.BOX + 4, fm.height() + 4))
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        return self.sizeHint()
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        t = theme.tokens()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if not self.isEnabled():
+            p.setOpacity(0.5)
+        y = (self.height() - self.BOX) / 2
+        box = QRectF(0.5, y + 0.5, self.BOX - 1, self.BOX - 1)
+        on = self.isChecked()
+        p.setPen(QPen(QColor(t.accent if on else t.text_4), 1))
+        p.setBrush(QColor(t.accent) if on else QColor(t.inset))
+        p.drawRoundedRect(box, theme.R1, theme.R1)
+        if on:
+            p.drawPixmap(int(box.x() + 2), int(box.y() + 2), icons.pixmap("check", t.accent_ink, 11))
+        p.setFont(self.font())
+        p.setPen(self.palette().color(self.foregroundRole()))
+        p.drawText(
+            QRectF(self.BOX + self.GAP, 0, self.width() - self.BOX - self.GAP, self.height()),
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+            self.text(),
+        )
+
+
+def paint_box(
+    p: QPainter,
+    r: QRectF,
+    bg: Optional[QColor],
+    line: Optional[QColor] = None,
+    radius: float = 0.0,
+    line_w: float = 1.0,
+) -> None:
+    """A rounded box: a fill and, inside its edge, a hairline. Either may be None."""
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    if bg is not None and bg.alpha() > 0:
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(bg)
+        p.drawRoundedRect(r, radius, radius)
+    if line is not None and line.alpha() > 0:
+        p.setPen(QPen(line, line_w))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        h = line_w / 2
+        p.drawRoundedRect(r.adjusted(h, h, -h, -h), max(0.0, radius - h), max(0.0, radius - h))
+
+
+class Box(QFrame):
+    """A rounded box painted from the tokens (the card, chip, well and notice materials): a fill, a
+    hairline, and another fill under the pointer when ``hover`` is given. Children lay out inside it."""
+
+    def __init__(
+        self,
+        bg: theme.Fill = None,
+        line: theme.Fill = None,
+        radius: float = 0.0,
+        hover: theme.Fill = None,
+        line_w: float = 1.0,
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__(parent)
+        self.bg, self.line, self.radius, self.hover, self.line_w = bg, line, radius, hover, line_w
+        self._hover = False
+        if hover is not None:
+            self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        bind(theme.theme.changed, self, lambda _t: self.update())
+
+    def set_look(self, **kw: Any) -> None:
+        for k, v in kw.items():
+            setattr(self, k, v)
+        self.update()
+
+    def enterEvent(self, e) -> None:  # noqa: N802
+        self._hover = True
+        self.update()
+        super().enterEvent(e)
+
+    def leaveEvent(self, e) -> None:  # noqa: N802
+        self._hover = False
+        self.update()
+        super().leaveEvent(e)
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        t = theme.tokens()
+        bg = theme.resolve(self.hover if (self._hover and self.hover is not None) else self.bg, t)
+        p = QPainter(self)
+        paint_box(p, QRectF(self.rect()), bg, theme.resolve(self.line, t), self.radius, self.line_w)
+
+
+class Pill(QLabel):
+    """A label on a painted pill or chip: a fill and a hairline under the text, rounded. Padding is the
+    label's contents margins; the text colour is a tint."""
+
+    def __init__(
+        self,
+        text: str = "",
+        bg: theme.Fill = None,
+        line: theme.Fill = None,
+        radius: float = 0.0,
+        line_w: float = 1.0,
+        parent: Optional[QWidget] = None,
+    ) -> None:
+        super().__init__(text, parent)
+        self.bg, self.line, self.radius, self.line_w = bg, line, radius, line_w
+        bind(theme.theme.changed, self, lambda _t: self.update())
+
+    def set_look(self, **kw: Any) -> None:
+        for k, v in kw.items():
+            setattr(self, k, v)
+        self.update()
+
+    def paintEvent(self, e) -> None:  # noqa: N802
+        t = theme.tokens()
+        p = QPainter(self)
+        paint_box(
+            p, QRectF(self.rect()), theme.resolve(self.bg, t), theme.resolve(self.line, t), self.radius, self.line_w
+        )
+        p.end()
+        super().paintEvent(e)
 
 
 class Mark(QWidget):
@@ -322,3 +503,53 @@ def rounded_path(r: QRectF, radius: float) -> QPainterPath:
     path = QPainterPath()
     path.addRoundedRect(r, radius, radius)
     return path
+
+
+class LayoutButton(QPushButton):
+    """A QPushButton built from child widgets in a layout: its size comes from the layout, not from its
+    own text. It paints nothing of its own unless given a look (``set_look``): a fill, another under the
+    pointer (``hover``) or while ``look_active`` (``on``), a hairline and rounded corners, all from the
+    tokens, so the stylesheet is not involved."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.look_bg: theme.Fill = None
+        self.look_hover: theme.Fill = None
+        self.look_on: theme.Fill = None
+        self.look_line: theme.Fill = None
+        self.look_radius = 0.0
+        self.look_active = False
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+
+    def set_look(
+        self,
+        bg: theme.Fill = None,
+        hover: theme.Fill = None,
+        on: theme.Fill = None,
+        line: theme.Fill = None,
+        radius: float = 0.0,
+    ) -> None:
+        self.look_bg, self.look_hover, self.look_on, self.look_line, self.look_radius = bg, hover, on, line, radius
+        self.update()
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        t = theme.tokens()
+        if self.look_active and self.look_on is not None:
+            bg = self.look_on
+        elif self.underMouse() and self.isEnabled() and self.look_hover is not None:
+            bg = self.look_hover
+        else:
+            bg = self.look_bg
+        if bg is None and self.look_line is None:
+            return
+        p = QPainter(self)
+        paint_box(p, QRectF(self.rect()), theme.resolve(bg, t), theme.resolve(self.look_line, t), self.look_radius)
+
+    def sizeHint(self):  # noqa: N802
+        lay = self.layout()
+        return lay.sizeHint() if lay is not None else super().sizeHint()
+
+    def minimumSizeHint(self):  # noqa: N802
+        lay = self.layout()
+        return lay.minimumSize() if lay is not None else super().minimumSizeHint()

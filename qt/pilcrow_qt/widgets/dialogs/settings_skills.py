@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLineEdit, QWidget
 from ... import icons, theme
 from ...lib.fmt import err_text, tildify, time_ago
 from ...store import ConfirmSpec, store
-from ..ui.bits import IconButton, Spinner, button, label
+from ..ui.bits import IconButton, Spinner, button, hairline, label
 from ..ui.menu import show_menu
 from ..ui.signals import bind
 from .settings_ui import (
@@ -278,7 +278,7 @@ class SkillsPage(QWidget):
         hl.addStretch(1)
         h = elide(mono_label(str(g["hint"])))
         h.setStyleSheet("font-size: 11.5px;")
-        h.setProperty("tone", "faint")
+        theme.tint(h, fg="text_3")
         h.setToolTip(str(g["hint"]))
         h.setMaximumWidth(360)
         h.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -333,12 +333,9 @@ class SkillsPage(QWidget):
         more = IconButton("ellipsis", f"More for {s.get('name')}", 14)
         more.clicked.connect(lambda: self._row_menu(s, g, has_project, more))
         rl.addWidget(more)
-        line = QWidget()
-        line.setFixedHeight(1)
-        line.setStyleSheet(f"background: {theme.blend(theme.tokens().hair, theme.tokens().raised).name()};")
         box = QWidget()
         bl = vbox(box, 0)
-        bl.addWidget(line)
+        bl.addWidget(hairline(over="raised"))
         bl.addWidget(r)
         return box
 

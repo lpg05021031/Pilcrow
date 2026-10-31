@@ -23,10 +23,10 @@ from ... import icons, theme
 from ...lib.fmt import basename, tildify
 from ...store import store
 from ..folder_picker import FolderPicker
-from ..ui.bits import button
+from ..ui.bits import Box, button
 from ..ui.menu import Popover, host_for
 from ..ui.signals import bind
-from .parts import ElideLabel, LayoutButton, Switch, Text, sheet_bg, well_bg
+from .parts import ElideLabel, LayoutButton, Switch, Text, sheet_bg, well_bg, well_line
 from .settings_ui import ModelSelect, Select, input_css, line_edit, styled, text_area
 from .sheet import Sheet
 
@@ -182,12 +182,12 @@ class FolderButton(LayoutButton):
         for w in (self.ico, self.label, self.chev):
             w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.clicked.connect(self.open)
-        styled(
-            self,
-            lambda t: (
-                f"#sdfolder {{ background: {theme.blend(t.fill_1, sheet_bg(t).name()).name()}; border: 1px solid {theme.blend(t.hair, theme.blend(t.fill_1, sheet_bg(t).name()).name()).name()}; border-radius: {theme.R3}px; padding: 0; text-align: left; }}"
-                f' #sdfolder:hover, #sdfolder[open="true"] {{ background: {theme.blend(t.fill_2, sheet_bg(t).name()).name()}; }}'
-            ),
+        self.set_look(
+            bg=lambda t: theme.over(theme.qcolor(t.fill_1), sheet_bg(t)),
+            hover=lambda t: theme.over(theme.qcolor(t.fill_2), sheet_bg(t)),
+            on=lambda t: theme.over(theme.qcolor(t.fill_2), sheet_bg(t)),
+            line=lambda t: theme.over(theme.qcolor(t.hair), theme.over(theme.qcolor(t.fill_1), sheet_bg(t))),
+            radius=theme.R3,
         )
         bind(theme.theme.changed, self, lambda _t: self._paint())
         self._paint()
@@ -224,11 +224,14 @@ class FolderButton(LayoutButton):
             pop.dismiss()
 
         pop.set_content(FolderPicker(self._value, picked))
-        pop.closed.connect(lambda: (self.setProperty("open", "false"), self.style().polish(self)))
+        pop.closed.connect(lambda: self._set_open(False))
         self._pop = pop
         pop.open_at(self, "bottom-start")
-        self.setProperty("open", "true")
-        self.style().polish(self)
+        self._set_open(True)
+
+    def _set_open(self, on: bool) -> None:
+        self.look_active = on
+        self.update()
 
 
 class RadioRow(LayoutButton):
@@ -249,13 +252,19 @@ class RadioRow(LayoutButton):
         self.ico = QLabel()
         lay.addWidget(self.ico)
         self.label = QLabel(label)
+        self.label.setFont(theme.font_ui(theme.FS_UI, 600))
         lay.addWidget(self.label)
         self.hint = ElideLabel(hint_text)
-        self.hint.setProperty("fs", "small")
+        self.hint.setFont(theme.font_ui(theme.FS_SMALL))
+        theme.tint(self.hint, fg="text_3")
         lay.addWidget(self.hint, 1)
         self.check = QLabel()
         self.check.setFixedWidth(16)
         lay.addWidget(self.check)
+        self.set_look(
+            hover=lambda t: theme.over(theme.qcolor(t.fill_1), well_bg(t)),
+            on=lambda t: theme.over(theme.qcolor(t.fill_2), well_bg(t)),
+        )
         self.toggled.connect(lambda _c: self._paint())
         bind(theme.theme.changed, self, lambda _t: self._paint())
         self._paint()
@@ -263,17 +272,11 @@ class RadioRow(LayoutButton):
     def _paint(self) -> None:
         t = theme.tokens()
         on = self.isChecked()
-        fg = t.err if self._danger else (t.text if on else t.text_2)
         self.ico.setPixmap(icons.pixmap(self._icon, t.err if self._danger else (t.text if on else t.text_3), 14))
-        self.label.setStyleSheet(f"color: {fg}; font-weight: 600;")
-        self.hint.setStyleSheet(f"color: {t.text_3}; font-size: {theme.FS_SMALL}px;")
+        theme.tint(self.label, fg="err" if self._danger else ("text" if on else "text_2"))
         self.check.setPixmap(icons.pixmap("check", t.text, 14) if on else icons.pixmap("check", "transparent", 14))
-        well = well_bg(t).name()
-        bg = theme.blend(t.fill_2, well).name() if on else "transparent"
-        self.setStyleSheet(
-            f"QPushButton {{ background: {bg}; border: none; border-radius: 0; text-align: left; padding: 0; min-height: 35px; max-height: 35px; }} "
-            f"QPushButton:hover {{ background: {theme.blend(t.fill_1 if not on else t.fill_2, well).name()}; }}"
-        )
+        self.look_active = on
+        self.update()
 
 
 class ScheduleDialog(Sheet):
@@ -385,15 +388,8 @@ class ScheduleDialog(Sheet):
         self.body_lay.addWidget(_field("When", when))
 
         # ---- mode
-        radios = QWidget()
+        radios = Box(bg=well_bg, line=well_line, radius=theme.R3)
         radios.setObjectName("radio-list")
-        radios.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        styled(
-            radios,
-            lambda t: (
-                f"#radio-list {{ background: {well_bg(t).name()}; border: 1px solid {theme.blend(t.hair, well_bg(t).name()).name()}; border-radius: {theme.R3}px; }}"
-            ),
-        )
         rl = QVBoxLayout(radios)
         rl.setContentsMargins(1, 1, 1, 1)
         rl.setSpacing(0)
@@ -423,13 +419,7 @@ class ScheduleDialog(Sheet):
         ml.addWidget(more_title)
         self.more_sum = Text("", theme.FS_SMALL, 400, "text_3", wrap=False)
         ml.addWidget(self.more_sum, 1)
-        styled(
-            self.more_btn,
-            lambda t: (
-                f"#disclose {{ border: none; background: transparent; border-radius: {theme.R2}px; text-align: left; padding: 0; }}"
-                f" #disclose:hover {{ background: {theme.blend(t.fill_1, sheet_bg(t).name()).name()}; }}"
-            ),
-        )
+        self.more_btn.set_look(hover=lambda t: theme.over(theme.qcolor(t.fill_1), sheet_bg(t)), radius=theme.R2)
         self.more_btn.clicked.connect(self.toggle_more)
         self.body_lay.addWidget(self.more_btn)
 

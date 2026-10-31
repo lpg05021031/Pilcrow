@@ -8,9 +8,10 @@ from typing import List, Optional
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QFontMetricsF, QPainter, QPalette
-from PySide6.QtWidgets import QAbstractButton, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QWidget
+from PySide6.QtWidgets import QAbstractButton, QFrame, QHBoxLayout, QLabel, QSizePolicy, QWidget
 
 from ... import theme
+from ..ui.bits import Box, LayoutButton, Pill, paint_box  # noqa: F401 - LayoutButton is re-exported
 from ..ui.signals import bind
 
 
@@ -34,9 +35,8 @@ class Card(QFrame):
         self._radius = radius
         self._focused = False
         self._tone = ""
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        bind(theme.theme.changed, self, lambda _t: self.update())
 
     def set_focused(self, on: bool) -> None:
         if on != self._focused:
@@ -49,19 +49,17 @@ class Card(QFrame):
             self._paint()
 
     def _paint(self) -> None:
+        self.update()
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
         t = theme.tokens()
-        bg = t.raised
-        if self._tone == "needs":
-            bg = mix(t.accent_wash, t.raised, 0.3).name()
-        elif self._tone == "decided":
-            bg = t.raised
-        border = t.text_3 if self._focused else theme.blend(t.hair_2, t.canvas).name()
-        hover = t.text_3 if self._focused else theme.blend(t.hair_3, t.canvas).name()
-        name = self.metaObject().className()
-        self.setStyleSheet(
-            f"{name} {{ background: {bg}; border: 1px solid {border}; border-radius: {self._radius}px; }} "
-            f"{name}:hover {{ border-color: {hover}; }}"
-        )
+        bg = mix(t.accent_wash, t.raised, 0.3) if self._tone == "needs" else QColor(t.raised)
+        if self._focused:
+            line = QColor(t.text_3)
+        else:
+            line = theme.blend(t.hair_3 if self.underMouse() else t.hair_2, t.canvas)
+        p = QPainter(self)
+        paint_box(p, QRectF(self.rect()), bg, line, self._radius)
 
 
 class Well(QFrame):
@@ -70,38 +68,29 @@ class Well(QFrame):
     def __init__(self, radius: int = 8, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._radius = radius
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
+        bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def _paint(self) -> None:
+    def paintEvent(self, _e) -> None:  # noqa: N802
         t = theme.tokens()
-        name = self.metaObject().className()
-        self.setStyleSheet(
-            f"{name} {{ background: {t.inset}; border: 1px solid {theme.blend(t.hair, t.inset).name()}; border-radius: {self._radius}px; }}"
-        )
+        p = QPainter(self)
+        paint_box(p, QRectF(self.rect()), QColor(t.inset), theme.blend(t.hair, t.inset), self._radius)
 
 
-class Badge(QLabel):
+class Badge(Pill):
     """A count in a pill (``.ov-count``)."""
 
     def __init__(self, n: int = 0, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
+        super().__init__(bg="fill_2/canvas", radius=10, parent=parent)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setFixedHeight(20)
         self.setMinimumWidth(20)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
+        self.setContentsMargins(6, 0, 6, 0)
+        self.setFont(theme.font_ui(11, 600))
+        theme.tint(self, fg="text_2")
         self.set_count(n)
 
     def set_count(self, n: int) -> None:
         self.setText(str(n))
-
-    def _paint(self) -> None:
-        t = theme.tokens()
-        self.setStyleSheet(
-            f"QLabel {{ background: {theme.blend(t.fill_2, t.canvas).name()}; color: {t.text_2}; border-radius: 10px; padding: 0 6px; font-size: 11px; font-weight: 600; }}"
-        )
 
 
 class Kbd(QLabel):
@@ -115,26 +104,28 @@ class Kbd(QLabel):
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setFixedHeight(18)
         self.setMinimumWidth(18)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
+        self.setContentsMargins(5, 0, 5, 0)
+        self.setFont(theme.font_ui(10.5 if quiet else 11, 500))
+        theme.tint(self, fg="text_4" if bare else "text_3")
+        bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def _paint(self) -> None:
-        t = theme.tokens()
-        font = f"font-size: {'10.5' if self._quiet else '11'}px; font-weight: 500;"
-        if self._bare:
-            self.setStyleSheet(f"QLabel {{ background: transparent; color: {t.text_4}; padding: 0 5px; {font} }}")
-            return
-        bg = "transparent" if self._quiet else theme.blend(t.fill_2, t.canvas).name()
-        border = f"border: 1px solid {theme.blend(t.hair_2, t.canvas).name()};" if self._quiet else ""
-        # the web's inset 0 -1px hair under the cap: a one-pixel darker bottom edge
-        bottom = (
-            ""
-            if self._quiet
-            else f"border-bottom: 1px solid {theme.blend(t.hair, theme.blend(t.fill_2, t.canvas).name()).name()};"
-        )
-        self.setStyleSheet(
-            f"QLabel {{ background: {bg}; {border} {bottom} color: {t.text_3}; border-radius: {theme.R1}px; padding: 0 5px; {font} }}"
-        )
+    def paintEvent(self, e) -> None:  # noqa: N802
+        if not self._bare:
+            t = theme.tokens()
+            p = QPainter(self)
+            r = QRectF(self.rect())
+            if self._quiet:
+                paint_box(p, r, None, theme.blend(t.hair_2, t.canvas), theme.R1)
+            else:
+                fill = theme.blend(t.fill_2, t.canvas)
+                paint_box(p, r, fill, None, theme.R1)
+                # the web's inset 0 -1px hair under the cap: a one-pixel darker bottom edge
+                p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+                p.fillRect(
+                    QRectF(theme.R1, r.height() - 1, r.width() - 2 * theme.R1, 1), theme.blend(t.hair, fill.name())
+                )
+            p.end()
+        super().paintEvent(e)
 
 
 class Keys(QWidget):
@@ -218,10 +209,14 @@ def sheet_bg(t: theme.Tokens) -> QColor:
     )
 
 
-def sheet_css(t: theme.Tokens) -> str:
-    """The ``#sheet`` frame: the dialog material with the web's faint light edge, 16px corners."""
-    bg = sheet_bg(t).name()
-    return f"#sheet {{ background: {bg}; border: 1px solid {theme.blend(t.hair, bg).name()}; border-radius: {theme.R4}px; }}"
+def sheet_line(t: theme.Tokens) -> QColor:
+    """The sheet's edge: the hair over its material."""
+    return theme.over(theme.qcolor(t.hair), sheet_bg(t))
+
+
+def well_line(t: theme.Tokens) -> QColor:
+    """A well's edge: the hair over its surface."""
+    return theme.over(theme.qcolor(t.hair), well_bg(t))
 
 
 def popover_bg(t: theme.Tokens) -> QColor:
@@ -240,23 +235,6 @@ def well_bg(t: theme.Tokens, surface: Optional[str] = None) -> QColor:
     if t.dark:
         return theme.blend("rgba(0, 0, 0, 0.22)", surface or sheet_bg(t).name())
     return theme.qcolor(t.inset)
-
-
-class LayoutButton(QPushButton):
-    """A QPushButton sized by the widgets laid out inside it (a plain QPushButton ignores its layout, and
-    would never shrink below its size hint)."""
-
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-
-    def sizeHint(self) -> QSize:  # noqa: N802
-        lay = self.layout()
-        return lay.sizeHint() if lay is not None else super().sizeHint()
-
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
-        lay = self.layout()
-        return lay.minimumSize() if lay is not None else super().minimumSizeHint()
 
 
 class ElideLabel(QLabel):
@@ -290,21 +268,16 @@ def page_column(width: int, padding: int = 0) -> int:
     return max(640, min(int(round(inner * 0.618)), inner - 48, 1080))
 
 
-def half_hairline(surface: str) -> QFrame:
+def half_hairline(surface: str) -> QWidget:
     """A 0.5px CSS hairline (``.ovr + .ovr``, ``.cust-row``): one pixel of the hair at half strength."""
-    f = QFrame()
-    f.setFixedHeight(1)
-    f.setFrameShape(QFrame.Shape.NoFrame)
 
-    def paint(t: theme.Tokens) -> None:
+    def colour(t: theme.Tokens) -> QColor:
         c = theme.qcolor(t.hair)
         c.setAlphaF(c.alphaF() / 2)
-        f.setStyleSheet(
-            f"background: {theme.blend(c.name(QColor.NameFormat.HexArgb), getattr(t, surface, surface)).name()};"
-        )
+        return theme.over(c, theme.qcolor(getattr(t, surface, surface)))
 
-    paint(theme.tokens())
-    bind(theme.theme.changed, f, paint)
+    f = Box(bg=colour)
+    f.setFixedHeight(1)
     return f
 
 
@@ -312,7 +285,7 @@ def hint(text: str, wrap: bool = True) -> QLabel:
     """A quiet explanatory line (``.hint``)."""
     lb = QLabel(text)
     lb.setWordWrap(wrap)
-    lb.setProperty("tone", "faint")
+    theme.tint(lb, fg="text_3")
     lb.setProperty("fs", "small")
     return lb
 
@@ -320,23 +293,23 @@ def hint(text: str, wrap: bool = True) -> QLabel:
 def field_label(text: str) -> QLabel:
     """The label above a form field (``.field > label``)."""
     lb = QLabel(text)
-    t = theme.tokens()
-    lb.setStyleSheet(f"color: {t.text_2}; font-size: {theme.FS_SMALL}px; font-weight: 550;")
+    lb.setFont(theme.font_ui(theme.FS_SMALL, 550))
+    theme.tint(lb, fg="text_2")
     return lb
 
 
 def styled(lb: QLabel, color: str = "", size: float = 0, weight: int = 0, mono: bool = False) -> QLabel:
-    """Give a label an explicit colour, size and weight from the tokens (for the handful of one-off styles)."""
-    parts: List[str] = []
+    """Give a label an explicit colour (a token name or a literal), size and weight (for the handful of
+    one-off styles)."""
     if color:
-        parts.append(f"color: {color};")
+        theme.tint(lb, fg=color)
+    f = theme.font_mono() if mono else lb.font()
     if size:
-        parts.append(f"font-size: {size}px;")
+        f.setPixelSize(max(1, int(size + 0.5)))
     if weight:
-        parts.append(f"font-weight: {weight};")
-    if mono:
-        lb.setFont(theme.font_mono())
-    lb.setStyleSheet(" ".join(parts))
+        f.setWeight(theme._weight(weight))
+    if mono or size or weight:
+        lb.setFont(f)
     return lb
 
 
