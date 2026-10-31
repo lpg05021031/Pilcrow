@@ -16,8 +16,20 @@ from ...ui import bits
 from ...ui.signals import bind
 from ..ctx import ToolCtx
 from ..permission import typing_elsewhere
-from .common import Badge, Hairline, IconLabel, Json, LinkLabel, Row, Surface, code_more, faint, restyle, vbox
-from .generic import markdown_label
+from .common import (
+    Badge,
+    Hairline,
+    IconLabel,
+    Json,
+    LinkLabel,
+    Row,
+    Surface,
+    code_more,
+    faint,
+    markdown_label,
+    restyle,
+    vbox,
+)
 
 
 class PlanBody(QWidget):

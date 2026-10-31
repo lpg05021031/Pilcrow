@@ -25,7 +25,7 @@ from .. import icons, theme
 from ..lib.fmt import basename, cost, duration, plural, tildify, time_ago
 from ..store import ConfirmSpec, store
 from .dialogs.parts import Badge, Card, ElideLabel, LayoutButton, Switch, Text, hint, page_column
-from .ui.bits import IconButton, Mark, Spinner, button
+from .ui.bits import Box, IconButton, Mark, Pill, Spinner, button
 from .ui.menu import show_menu
 from .ui.signals import bind
 
@@ -102,11 +102,11 @@ class RunCard(Card):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(14, 13, 14, 11)
         lay.setSpacing(12)
-        self.badge = QLabel()
+        tone, wash = {"completed": ("ok", "ok_wash"), "failed": ("err", "err_wash")}.get(status, ("warn", "warn_wash"))
+        self.badge = Pill(bg=f"{wash}/raised", radius=15)
         self.badge.setFixedSize(30, 30)
         self.badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        tone, wash = {"completed": (t.ok, t.ok_wash), "failed": (t.err, t.err_wash)}.get(status, (t.warn, t.warn_wash))
-        self.badge.setStyleSheet(f"QLabel {{ background: {theme.blend(wash, t.raised).name()}; border-radius: 15px; }}")
+        tone = getattr(t, tone)
         self.badge.setPixmap(
             icons.pixmap({"completed": "circle-check", "failed": "circle-alert"}.get(status, "circle-stop"), tone, 15)
         )
@@ -115,21 +115,18 @@ class RunCard(Card):
         main.setSpacing(6)
         head = QHBoxLayout()
         head.setSpacing(8)
-        self.dot = QLabel()
+        self.dot = Box(bg="accent", line="accent_wash/raised", radius=6, line_w=3)
         self.dot.setFixedSize(13, 13)
         self.dot.setToolTip("New")
-        self.dot.setStyleSheet(
-            f"QLabel {{ background: {t.accent}; border: 3px solid {theme.blend(t.accent_wash, t.raised).name()}; border-radius: 6px; }}"
-        )
         self.dot.setVisible(not it.get("read"))
         head.addWidget(self.dot)
         self.name = Text(str(it.get("scheduleName") or ""), theme.FS_UI, 600, "text", wrap=False)
         head.addWidget(self.name, 1)
         if it.get("manual"):
-            chip = QLabel("by hand")
-            chip.setStyleSheet(
-                f"QLabel {{ background: {theme.blend(t.fill_1, t.raised).name()}; color: {t.text_3}; border-radius: 999px; padding: 1px 7px; font-size: {theme.FS_MICRO}px; }}"
-            )
+            chip = Pill("by hand", bg="fill_1/raised", radius=9)
+            chip.setContentsMargins(7, 1, 7, 1)
+            chip.setProperty("fs", "micro")
+            theme.tint(chip, fg="text_3")
             head.addWidget(chip)
         when = Text(
             f"{clock(float(it.get('endedAt') or 0))} · {duration(float(it.get('durationMs') or 0))}",
@@ -148,15 +145,16 @@ class RunCard(Card):
         self.long = len(self.summary) > 280
         self.sum = Text("", theme.FS_SMALL, 400, "text_2", 1.55)
         main.addWidget(self.sum)
-        self.more = button("Read more", kind="link")
-        self.more.setStyleSheet(f"color: {t.text_3}; font-size: {theme.FS_MICRO}px; text-decoration: none;")
+        self.more = button("Read more", kind="link", size="sm")
+        self.more.override = {"fs": theme.FS_MICRO}
         self.more.clicked.connect(self.toggle)
         self.more.setVisible(self.long)
         main.addWidget(self.more, 0, Qt.AlignmentFlag.AlignLeft)
         if status != "completed" and it.get("reason") and it.get("summary"):
             reason = QLabel(str(it.get("reason")))
             reason.setWordWrap(True)
-            reason.setStyleSheet(f"color: {t.err}; font-size: {theme.FS_MICRO}px;")
+            reason.setProperty("fs", "micro")
+            theme.tint(reason, fg="err")
             main.addWidget(reason)
         foot = QHBoxLayout()
         foot.setSpacing(12)
@@ -171,14 +169,17 @@ class RunCard(Card):
             fl.setToolTip("\n".join(str(f.get("path") or "") for f in files))
         else:
             fl = QLabel("No files changed")
-        fl.setStyleSheet(f"color: {t.text_3}; font-size: {theme.FS_MICRO}px;")
+        fl.setProperty("fs", "micro")
+        theme.tint(fl, fg="text_3")
         foot.addWidget(fl)
         if float(it.get("cost") or 0) > 0:
             c = QLabel(cost(float(it.get("cost") or 0)))
-            c.setStyleSheet(f"color: {t.text_3}; font-size: {theme.FS_MICRO}px;")
+            c.setProperty("fs", "micro")
+            theme.tint(c, fg="text_3")
             foot.addWidget(c)
         folder = ElideLabel(basename(str(it.get("cwd") or "")))
-        folder.setStyleSheet(f"color: {t.text_3}; font-size: {theme.FS_MICRO}px;")
+        folder.setFont(theme.font_ui(theme.FS_MICRO))
+        theme.tint(folder, fg="text_3")
         folder.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
         foot.addWidget(folder)
         foot.addStretch(1)
@@ -313,9 +314,9 @@ class ScheduleCard(Card):
             text += f"<span style='color:{t.text_3}'>{tail}</span>"
         self.next.setTextFormat(Qt.TextFormat.RichText)
         self.next.setText(text)
-        self.next.setStyleSheet(
-            f"color: {t.err if s.get('error') and not running else t.text_2}; font-size: {theme.FS_MICRO}px; margin-top: 2px;"
-        )
+        self.next.setFont(theme.font_ui(theme.FS_MICRO))
+        self.next.setContentsMargins(0, 2, 0, 0)
+        theme.tint(self.next, fg="err" if s.get("error") and not running else "text_2")
         self.now = now
         self.update()
 
@@ -454,7 +455,7 @@ class InboxPage(QWidget):
         self.title.setProperty("fs", "title")
         hl.addWidget(self.title)
         self.summary = QLabel()
-        self.summary.setProperty("tone", "faint")
+        theme.tint(self.summary, fg="text_3")
         self.summary.setProperty("fs", "small")
         hl.addWidget(self.summary)
         hl.addStretch(1)
@@ -511,7 +512,7 @@ class InboxPage(QWidget):
         self.rail_list.setSpacing(8)
         self.rail_lay.addLayout(self.rail_list)
         self.rail_empty = hint("No schedules yet.")
-        self.rail_empty.hide()
+        self.rail_empty.hide()  # kept for the moment the list empties under a filter; the hero covers the rest
         self.rail_lay.addWidget(self.rail_empty)
         self._place(2)
 
@@ -634,18 +635,14 @@ class InboxPage(QWidget):
         self.run_cards = []
         if self.filter:
             name = next((str(s.get("name")) for s in scheds or [] if s.get("id") == self.filter), "one schedule")
-            chip = QFrame()
-            chip.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-            t = theme.tokens()
-            chip.setStyleSheet(
-                f"QFrame {{ background: {theme.blend(t.fill_1, t.canvas).name()}; border-radius: 999px; }}"
-            )
+            chip = Box(bg="fill_1/canvas", radius=15)
             cl = QHBoxLayout(chip)
             cl.setContentsMargins(12, 4, 6, 4)
             cl.setSpacing(6)
             lb = QLabel(f"Showing runs of <b>{name}</b>")
             lb.setTextFormat(Qt.TextFormat.RichText)
-            lb.setStyleSheet(f"color: {t.text_2}; font-size: {theme.FS_SMALL}px;")
+            lb.setProperty("fs", "small")
+            theme.tint(lb, fg="text_2")
             cl.addWidget(lb)
             x = IconButton("x", "Show every run", 13)
             x.clicked.connect(lambda: self.set_filter(None))
@@ -698,6 +695,8 @@ class InboxPage(QWidget):
             self.sched_cards.append(card)
             self.rail_list.addWidget(card)
         self.rail_empty.setVisible(scheds is not None and not scheds)
+        # With nothing scheduled the rail would only repeat the hero: it comes back with the first schedule.
+        self.rail.setVisible(scheds is None or bool(scheds))
 
     def _empty(self, has_schedules: bool) -> QWidget:
         """``.inbox-empty``: the mark in its glow, a line, a hint and the one button, 440px wide at most."""

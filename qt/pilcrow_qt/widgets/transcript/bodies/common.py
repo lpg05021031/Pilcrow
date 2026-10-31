@@ -17,7 +17,7 @@ from PySide6.QtCore import QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QFont, QFontMetrics, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
-from .... import icons, theme
+from .... import icons, markdown, theme
 from ....lib.fmt import truncate
 from ....lib.transcript_model import ToolItem
 from ....store import store
@@ -364,15 +364,8 @@ class Badge(QLabel):
 
 def code_more(text: str, on_click: Callable[[], None]) -> QPushButton:
     """`.code-more`: the quiet "Show all N lines" control under a clipped block."""
-    b = bits.button(text, kind="ghost", size="sm", on_click=on_click)
+    b = bits.button(text, kind="more", size="sm", on_click=on_click)
     b.setAccessibleName(text)
-    restyle(
-        b,
-        lambda t: (
-            f"QPushButton {{ color: {t.text_3}; padding: 3px 8px; font-size: {theme.FS_SMALL}px; }} "
-            f"QPushButton:hover {{ color: {t.text}; background: {theme.blend(t.fill_2, t.canvas).name()}; }}"
-        ),
-    )
     return b
 
 
@@ -610,3 +603,8 @@ def clear_layout(lay) -> None:
         if w is not None:
             w.setParent(None)
             w.deleteLater()
+
+
+def markdown_label(text: str, cwd: str = "", compact: bool = False) -> QLabel:
+    """A Markdown block as rich text (the <Markdown> component), for results and reports."""
+    return rich(markdown.render_html(text, base_dir=cwd or None, compact=compact))

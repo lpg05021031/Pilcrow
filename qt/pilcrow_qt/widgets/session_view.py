@@ -12,7 +12,7 @@ import math
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from PySide6.QtCore import QPoint, QPointF, Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter
 from PySide6.QtWidgets import (
     QFrame,
@@ -33,7 +33,8 @@ from .composer import Composer, LayoutButton
 from .folder_picker import FolderPicker
 from .mcp_notice import McpNotice
 from .sidebar import IconBtn
-from .ui.bits import Mark, copy_text, hairline, label
+from .ui.bits import Box, Mark, button, copy_text, hairline, label, paint_box
+from .ui.button import Btn
 from .ui.menu import show_menu
 from .ui.signals import bind
 
@@ -64,9 +65,9 @@ def running_workflow(tasks: Optional[List[Json]]) -> Optional[str]:
 
 
 def _make_transcript(session_id: str, cwd: str) -> QWidget:
-    """The real Transcript when it is there, otherwise a stand-in with the same surface so this page runs alone."""
+    """The conversation on the canvas engine, otherwise a stand-in with the same surface so this page runs alone."""
     try:
-        from .transcript.view import Transcript
+        from ..canvas.transcript import Transcript
 
         return Transcript(session_id, cwd)
     except Exception as e:  # noqa: BLE001 — the transcript is built separately; this page must not depend on it
@@ -128,6 +129,8 @@ class SessionView(QWidget):
         # ---- header
         self.head = QWidget()
         self.head.setObjectName("session-head")
+        # The head sits in the rounded sheet (main_window.Card) and must not paint over its corners.
+        self.head.setStyleSheet("#session-head { background: transparent; }")
         self.head.setFixedHeight(theme.HEADER_H)
         hl = QHBoxLayout(self.head)
         hl.setContentsMargins(20, 0, 10, 0)
@@ -191,6 +194,7 @@ class SessionView(QWidget):
         self.head_line = hairline()
         self.head_line.hide()
         root.addWidget(self.head_line)
+        self._narrow = False
 
         # ---- notices
         self.mcp = McpNotice(self.sid)
@@ -252,6 +256,14 @@ class SessionView(QWidget):
     def open_find(self) -> None:
         self.transcript.open_find()
 
+    def resizeEvent(self, e) -> None:  # noqa: N802
+        super().resizeEvent(e)
+        # The web's container queries: under 560px the crumbs go, the title keeps the room.
+        narrow = self.width() < 560
+        if narrow != self._narrow:
+            self._narrow = narrow
+            self.crumbs.setVisible(not narrow)
+
     def _on_rt(self, sid: str) -> None:
         if sid != self.sid:
             return
@@ -268,10 +280,6 @@ class SessionView(QWidget):
         self.head_line.setVisible(bool(on))
 
     def _paint(self) -> None:
-        t = theme.tokens()
-        # The head sits in the rounded sheet (main_window.Card) and must not paint over its corners.
-        self.head.setStyleSheet("#session-head { background: transparent; }")
-        _ = t
         self.render()
 
     # ---------------------------------------------------------------- rendering
@@ -508,10 +516,26 @@ class SessionView(QWidget):
 
 
 class _TitleLabel(QLabel):
+    """The session's title: it gives way to the crumbs and the actions and ends in … when cut."""
+
     double_clicked = Signal()
 
     def mouseDoubleClickEvent(self, _e) -> None:  # noqa: N802
         self.double_clicked.emit()
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802
+        return QSize(40, super().minimumSizeHint().height())
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        p = QPainter(self)
+        p.setFont(self.font())
+        p.setPen(self.palette().color(self.foregroundRole()))
+        r = self.contentsRect()
+        p.drawText(
+            r,
+            int(self.alignment()) | Qt.TextFlag.TextSingleLine,
+            self.fontMetrics().elidedText(self.text(), Qt.TextElideMode.ElideRight, r.width()),
+        )
 
 
 class _TitleEdit(QLineEdit):
@@ -557,24 +581,28 @@ class Crumb(QWidget):
         self.ico = QLabel()
         lay.addWidget(self.ico)
         self.lb = QLabel()
+        self.lb.setFont(theme.font_ui(theme.FS_SMALL))
         lay.addWidget(self.lb)
+        self._painted = False
         bind(theme.theme.changed, self, lambda _t: self._paint())
 
     def set(self, icon: str, text: str, tone: str = "") -> None:
+        if (icon, text, tone) == (self._icon, self._text, self._tone) and self._painted:
+            return
         self._icon, self._text, self._tone = icon, text, tone
+        self._painted = True
         self._paint()
 
     def text(self) -> str:
         return self._text
 
     def _paint(self) -> None:
-        t = theme.tokens()
-        color = t.plan if self._tone == "plan" else t.text_3
+        name = "plan" if self._tone == "plan" else "text_3"
         if self._icon:
-            self.ico.setPixmap(icons.pixmap(self._icon, color, 12))
+            self.ico.setPixmap(icons.pixmap(self._icon, getattr(theme.tokens(), name), 12))
         fm = QFontMetrics(self.lb.font())
         self.lb.setText(fm.elidedText(self._text, Qt.TextElideMode.ElideRight, 220))
-        self.lb.setStyleSheet(f"color: {color}; font-size: {theme.FS_SMALL}px;")
+        theme.tint(self.lb, fg=name)
 
 
 class CrumbButton(LayoutButton):
@@ -595,13 +623,17 @@ class CrumbButton(LayoutButton):
         self.ico = QLabel()
         lay.addWidget(self.ico)
         self.lb = QLabel()
+        self.lb.setFont(theme.font_ui(theme.FS_SMALL))
         lay.addWidget(self.lb)
         self.chev = QLabel()
         lay.addWidget(self.chev)
+        self.set_look(hover="fill_2/canvas", on="fill_2/canvas", radius=theme.R2)
         bind(theme.theme.changed, self, lambda _t: self._paint())
         self._paint()
 
     def set_text(self, text: str) -> None:
+        if text == self._text:
+            return
         self._text = text
         self._paint()
 
@@ -609,22 +641,21 @@ class CrumbButton(LayoutButton):
         return self._text
 
     def set_on(self, on: bool) -> None:
+        if on == self._on:
+            return
         self._on = on
         self._paint()
 
     def _paint(self) -> None:
         t = theme.tokens()
-        color = t.text if self._on else t.text_2
+        name = "text" if self._on else "text_2"
+        color = getattr(t, name)
         self.ico.setPixmap(icons.pixmap("folder", color, 12))
         self.chev.setPixmap(icons.pixmap("chevron-down", color, 11))
         self.lb.setText(QFontMetrics(self.lb.font()).elidedText(self._text, Qt.TextElideMode.ElideRight, 220))
-        self.lb.setStyleSheet(f"color: {color}; font-size: {theme.FS_SMALL}px;")
-        fill = theme.blend(t.fill_2, t.canvas).name()
-        bg = fill if self._on else "transparent"
-        self.setStyleSheet(
-            f"QPushButton {{ border: none; border-radius: {theme.R2}px; background: {bg}; }}"
-            f" QPushButton:hover {{ background: {fill}; }}"
-        )
+        theme.tint(self.lb, fg=name)
+        self.look_active = self._on
+        self.update()
 
 
 class StatusPill(QWidget):
@@ -644,6 +675,10 @@ class StatusPill(QWidget):
         lay.addWidget(self.lb)
         self.link = QPushButton()
         self.link.setFlat(True)
+        self.link.setStyleSheet(
+            f"QPushButton {{ border: none; padding: 0; background: transparent; font-size: {theme.FS_SMALL}px; }}"
+            " QPushButton:hover { text-decoration: underline; }"
+        )
         self.link.setCursor(Qt.CursorShape.PointingHandCursor)
         self.link.setToolTip("Show the workflow in the Tasks panel")
         self.link.setAccessibleName("Show the workflow in the Tasks panel")
@@ -652,6 +687,9 @@ class StatusPill(QWidget):
         bind(theme.theme.changed, self, lambda _t: self._paint())
 
     def set_status(self, status: str, workflow: Optional[str] = None) -> None:
+        if (status, workflow) == getattr(self, "_shown_status", None):
+            return
+        self._shown_status = (status, workflow)
         self.status = status
         show = bool(status) and status not in ("idle", "stopped")
         self.setVisible(show)
@@ -669,15 +707,12 @@ class StatusPill(QWidget):
         return self.lb.text()
 
     def _paint(self) -> None:
-        t = theme.tokens()
-        color = t.accent_text if self.status == "requires_action" else t.err if self.status == "error" else t.text_3
+        name = "accent_text" if self.status == "requires_action" else "err" if self.status == "error" else "text_3"
         weight = 600 if self.status == "requires_action" else 500
-        self.lb.setStyleSheet(f"color: {color}; font-size: {theme.FS_SMALL}px; font-weight: {weight};")
-        self.link.setStyleSheet(
-            f"QPushButton {{ border: none; padding: 0; color: {color}; font-size: {theme.FS_SMALL}px; }}"
-            " QPushButton:hover { text-decoration: underline; }"
-        )
-        self.dot.color = color
+        self.lb.setFont(theme.font_ui(theme.FS_SMALL, weight))
+        theme.tint(self.lb, fg=name)
+        theme.tint(self.link, fg=name)
+        self.dot.color = getattr(theme.tokens(), name)
         self.dot.update()
 
 
@@ -720,43 +755,47 @@ class Diffstat(LayoutButton):
         self.setFixedHeight(26)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(9, 0, 9, 0)
+        lay.setContentsMargins(9, 0, 13, 0)  # 4px of the right is the pill's margin
         lay.setSpacing(6)
         self.add = QLabel()
         self.dele = QLabel()
+        for lb in (self.add, self.dele):
+            lb.setFont(theme.font_ui(theme.FS_SMALL, 600))
         lay.addWidget(self.add)
         lay.addWidget(self.dele)
         self.add_n = self.del_n = 0
+        self.set_look(bg="fill_1/canvas", hover="fill_2/canvas", on="fill_2/canvas", line="hair/canvas", radius=13)
         bind(theme.theme.changed, self, lambda _t: self._paint())
         self._paint()
 
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        t = theme.tokens()
+        bg = self.look_on if self._on else self.look_hover if (self.underMouse() and self.isEnabled()) else self.look_bg
+        p = QPainter(self)
+        r = QRectF(self.rect()).adjusted(0, 0, -4, 0)  # margin-right: 4px
+        paint_box(p, r, theme.resolve(bg, t), theme.resolve(self.look_line, t), self.look_radius)
+
     def set_values(self, ins: int, dele: int, changes: int) -> None:
+        if (ins, dele, changes) == (self.add_n, self.del_n, getattr(self, "_changes", None)):
+            return
+        self._changes = changes
         self.add_n, self.del_n = ins, dele
         self.setToolTip(f"{changes} changed file{'s' if changes > 1 else ''} — review (Alt+1)")
         self.setAccessibleName(self.toolTip())
         self._paint()
 
     def set_on(self, on: bool) -> None:
+        if on == self._on:
+            return
         self._on = on
         self._paint()
 
     def _paint(self) -> None:
-        t = theme.tokens()
         self.add.setText(f"+{self.add_n}")
         self.dele.setText(f"−{self.del_n}")
-        self.add.setStyleSheet(
-            f"color: {t.ok if self.add_n else t.text_4}; font-size: {theme.FS_SMALL}px; font-weight: 600;"
-        )
-        self.dele.setStyleSheet(
-            f"color: {t.err if self.del_n else t.text_4}; font-size: {theme.FS_SMALL}px; font-weight: 600;"
-        )
-        bg = theme.blend(t.fill_2 if self._on else t.fill_1, t.canvas).name()
-        hover = theme.blend(t.fill_2, t.canvas).name()
-        line = theme.blend(t.hair, t.canvas).name()
-        self.setStyleSheet(
-            f"QPushButton {{ background: {bg}; border: 1px solid {line}; border-radius: 13px; margin-right: 4px; }}"
-            f" QPushButton:hover {{ background: {hover}; }}"
-        )
+        theme.tint(self.add, fg="ok" if self.add_n else "text_4")
+        theme.tint(self.dele, fg="err" if self.del_n else "text_4")
+        self.update()
 
 
 class ErrorBar(QWidget):
@@ -766,9 +805,8 @@ class ErrorBar(QWidget):
         super().__init__(parent)
         self.sid = session_id
         self._error = ""
-        host = QWidget()
+        host = Box(bg="err_wash/canvas", radius=theme.R3)
         host.setObjectName("session-error")
-        host.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(20, 4, 20, 0)
         outer.addWidget(host)
@@ -776,28 +814,26 @@ class ErrorBar(QWidget):
         lay.setContentsMargins(14, 8, 8, 8)
         lay.setSpacing(10)
         self.text = QLabel()
+        self.text.setFont(theme.font_ui(theme.FS_SMALL))
+        theme.tint(self.text, fg="err")
         self.text.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         lay.addWidget(self.text, 1)
-        self.btn = QPushButton()
-        self.btn.setProperty("fs", "sm")
+        self.btn = Btn(size="sm", icon_size=13)
         self.btn.clicked.connect(self._act)
         lay.addWidget(self.btn)
         self.host = host
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
 
     def set_error(self, error: str) -> None:
         import re
 
         self._error = error
         self.text.setText(error.split("\n")[0])
-        t = theme.tokens()
         if re.search(r"Settings|not found|No Claude Code", error, re.I):
             self.btn.setText("Settings")
-            self.btn.setIcon(icons.icon("settings-2", t.text_2, 13))
+            self.btn.set_icon_name("settings-2")
         else:
             self.btn.setText("Retry")
-            self.btn.setIcon(icons.icon("rotate-ccw", t.text_2, 13))
+            self.btn.set_icon_name("rotate-ccw")
         self.btn.setAccessibleName(self.btn.text())
 
     def _act(self) -> None:
@@ -806,12 +842,36 @@ class ErrorBar(QWidget):
         else:
             store.insert_into_composer(self.sid, "continue")
 
-    def _paint(self) -> None:
+
+class _Example(QPushButton):
+    """An example prompt (``.example``): a 32px pill on a quiet fill with a hairline, lit under the pointer."""
+
+    def __init__(self, text: str, parent: Optional[QWidget] = None) -> None:
+        super().__init__(text, parent)
+        self.setFlat(True)
+        self.setFixedHeight(32)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self.setAccessibleName(text)
+        bind(theme.theme.changed, self, lambda _t: self.update())
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        return QSize(QFontMetrics(theme.font_ui(theme.FS_UI)).horizontalAdvance(self.text()) + 28, 32)
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
         t = theme.tokens()
-        self.host.setStyleSheet(
-            f"#session-error {{ background: {theme.blend(t.err_wash, t.canvas).name()}; border-radius: {theme.R3}px; }}"
+        hover = self.underMouse() and self.isEnabled()
+        p = QPainter(self)
+        paint_box(
+            p,
+            QRectF(self.rect()),
+            theme.blend(t.fill_2 if hover else t.fill_1, t.canvas),
+            theme.blend(t.hair, t.canvas),
+            16,
         )
-        self.text.setStyleSheet(f"color: {t.err}; font-size: {theme.FS_SMALL}px;")
+        p.setFont(theme.font_ui(theme.FS_UI))
+        p.setPen(QColor(t.text if hover else t.text_2))
+        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.text())
 
 
 class SessionEmpty(QWidget):
@@ -842,11 +902,8 @@ class SessionEmpty(QWidget):
         pl.addStretch(1)
         self.path = label("", tone="faint", mono=True)
         pl.addWidget(self.path)
-        self.change = QPushButton("Change folder")
-        self.change.setProperty("kind", "link")
-        self.change.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.change.setAccessibleName("Change folder")
-        self.change.clicked.connect(view.pick_folder)
+        self.change = button("Change folder", kind="link", icon="folder", on_click=view.pick_folder)
+        self.change.setIconSize(QSize(12, 12))
         self.change.hide()
         pl.addWidget(self.change)
         pl.addStretch(1)
@@ -855,9 +912,8 @@ class SessionEmpty(QWidget):
         self.git.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.git.hide()
         lay.addWidget(self.git)
-        self.mem = QPushButton()
-        self.mem.setProperty("kind", "ghost")
-        self.mem.setProperty("fs", "sm")
+        self.mem = button(kind="ghost", size="sm", icon="book-marked")
+        self.mem.setIconSize(QSize(12, 12))
         self.mem.setToolTip("Notes from earlier sessions in this folder ride along in this session")
         self.mem.clicked.connect(lambda: store.set_dialog("settings", "memory"))
         self.mem.hide()
@@ -868,29 +924,11 @@ class SessionEmpty(QWidget):
         el = _Flow(self.examples)
         self.example_buttons: List[QPushButton] = []
         for e in EXAMPLES:
-            b = QPushButton(e)
-            b.setFlat(True)
-            b.setFixedHeight(32)
-            b.setCursor(Qt.CursorShape.PointingHandCursor)
-            b.setAccessibleName(e)
+            b = _Example(e)
             b.clicked.connect(lambda _c=False, text=e: store.insert_into_composer(self.sid, text, True))
             el.add(b)
             self.example_buttons.append(b)
         lay.addWidget(self.examples, 0, Qt.AlignmentFlag.AlignHCenter)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
-
-    def _paint(self) -> None:
-        t = theme.tokens()
-        self.change.setIcon(icons.icon("folder", t.text_2, 12))
-        self.mem.setIcon(icons.icon("book-marked", t.text_2, 12))
-        fill, line = theme.blend(t.fill_1, t.canvas).name(), theme.blend(t.hair, t.canvas).name()
-        for b in self.example_buttons:
-            b.setStyleSheet(
-                f"QPushButton {{ height: 32px; padding: 0 14px; border-radius: 16px; font-size: {theme.FS_UI}px;"
-                f" color: {t.text_2}; background: {fill}; border: 1px solid {line}; }}"
-                f" QPushButton:hover {{ background: {theme.blend(t.fill_2, t.canvas).name()}; color: {t.text}; }}"
-            )
 
     def refresh_state(self, session: Json, git: Optional[Json], cwd: str, fresh: bool) -> None:
         home = (store.info or {}).get("home")

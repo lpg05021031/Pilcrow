@@ -91,7 +91,7 @@ def test_todo_rows_states_and_finished_section(app_client):
     boxes = c.find(TodoBox, page)
     assert [b.status for b in boxes] == ["completed", "in_progress", "pending"]
     heads = [s.title.text() for s in c.find(Section, page)]
-    assert heads == ["To-do list", "Running now", "Finished"]
+    assert heads == ["To-do list", "Finished"], "a section appears when it has something to show"
     for s in c.find(Section, page):
         assert QFontInfo(s.title.font()).pixelSize() == 15 and QFontInfo(s.title.font()).weight() == 600
     faint = [w.text() for w in c.find(Text, page) if w.text() == "1 of 3 done"]
@@ -100,8 +100,9 @@ def test_todo_rows_states_and_finished_section(app_client):
         w for w in c.find(Text, page) if w.text() in ("Read the auth module", "Guarding the redirect", "Run the tests")
     ]
     assert [w.text() for w in todo_texts] == ["Read the auth module", "Guarding the redirect", "Run the tests"]
-    assert QFontInfo(todo_texts[1].font()).weight() == 500 and todo_texts[1].property("tone") in ("", None)
-    assert todo_texts[2].property("tone") == "muted"
+    assert QFontInfo(todo_texts[1].font()).weight() == 500
+    assert todo_texts[1].palette().color(todo_texts[1].foregroundRole()).name() == theme.tokens().text
+    assert todo_texts[2].palette().color(todo_texts[2].foregroundRole()).name() == theme.tokens().text_2, "muted"
     rows = c.find(TaskRow, page)
     assert [r.task["id"] for r in rows] == ["t-fail", "t-done"]  # newest first, quiet rows without a card
     assert all(r._done for r in rows)

@@ -20,7 +20,6 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 from ... import theme
 from ..sidebar import IconBtn
-from .signals import bind
 
 HEIGHT = 38
 EDGE = 6  # px from the window edge where a press starts a resize
@@ -48,16 +47,12 @@ class TitleBar(QWidget):
         self.close_btn.clicked.connect(window.close)
         for b in (self.min_btn, self.max_btn, self.close_btn):
             lay.addWidget(b)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
+        self.setAutoFillBackground(True)
+        theme.tint(self, bg="chrome")
+        for lb in self.findChildren(QLabel, "titlebar-title"):
+            lb.setFont(theme.font_ui(theme.FS_SMALL, 500))
+            theme.tint(lb, fg="text_2")
         window.installEventFilter(self)
-
-    def _paint(self) -> None:
-        t = theme.tokens()
-        self.setStyleSheet(
-            f"#titlebar {{ background: {t.chrome}; border: none; }}"
-            f" #titlebar-title {{ color: {t.text_2}; font-size: {theme.FS_SMALL}px; font-weight: 500; }}"
-        )
 
     def toggle_max(self) -> None:
         if self._win.isMaximized():

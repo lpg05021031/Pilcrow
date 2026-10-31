@@ -6,12 +6,12 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QPushButton, QSizePolicy, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QPushButton, QSizePolicy, QWidget
 
 from ... import icons, theme
 from ...lib.fmt import basename, tildify, time_ago
 from ...store import ConfirmSpec, store
-from ..ui.bits import IconButton, Spinner, button, label
+from ..ui.bits import Box, IconButton, Spinner, button, hairline, label
 from ..ui.signals import bind
 from .parts import Text
 from .settings_general import save
@@ -64,10 +64,8 @@ class MemoryPage(QWidget):
         self.busy = False
         self.lay = vbox(self, 14, (0, 6, 0, 0))
 
-        intro = QFrame()
+        intro = Box(bg="inset", radius=12)
         intro.setObjectName("intro")
-        intro.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        styled(intro, lambda t: f"#intro {{ background: {t.inset}; border-radius: 12px; }}")
         il = vbox(intro, 8, (20, 18, 20, 18))
         ico = label()
         ico.setFixedSize(16, 16)
@@ -380,10 +378,7 @@ def _setting(title: str, hint_text: str, control: QWidget) -> QWidget:
 
 
 def _sep() -> QWidget:
-    w = QWidget()
-    w.setFixedHeight(1)
-    styled(w, lambda t: f"background: {theme.blend(t.hair, theme.blend(t.fill_1, t.raised).name()).name()};")
-    return w
+    return hairline(over="fill_1/raised")
 
 
 class NoteRow(Panel):

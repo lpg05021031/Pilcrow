@@ -1,12 +1,13 @@
-"""Tool cards and the permission prompt, built from raw messages through the transcript model and
-drawn offscreen (no server): head text, bodies, decisions, keys, and a screenshot of every kind."""
+"""Tool cards and the permission prompt as the canvas draws them: items pushed through the transcript
+model become blocks (no server), whose heads, bodies, decisions and keys are checked, and a
+screenshot of every kind is painted through a real canvas view."""
 
 from __future__ import annotations
 
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
 
 import pytest
 
@@ -18,9 +19,10 @@ if sys.platform == "win32":
 
 from PySide6.QtCore import QCoreApplication, Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
-from PySide6.QtWidgets import QApplication, QLabel, QScrollArea, QVBoxLayout, QWidget  # noqa: E402
+from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget  # noqa: E402
 
 from pilcrow_qt import fonts, theme  # noqa: E402
+from pilcrow_qt.canvas import nodes as nd  # noqa: E402
 from pilcrow_qt.lib.transcript_model import ToolItem, TranscriptModel  # noqa: E402
 from pilcrow_qt.store import store  # noqa: E402
 from pilcrow_qt.widgets.transcript.ctx import ToolCtx  # noqa: E402
@@ -108,13 +110,49 @@ def ctx(pending: Optional[Dict[str, Any]] = None) -> ToolCtx:
     return ToolCtx(session_id="sess", cwd=CWD, pending=pending or {})
 
 
-def card(item: ToolItem, c: Optional[ToolCtx] = None, perm: Optional[dict] = None):
-    from pilcrow_qt.widgets.transcript.tool_card import ToolCard
+def measurer():
+    from pilcrow_qt.canvas.view import measurer
 
-    w = ToolCard(item, c or ctx(), perm)
-    w.show()
-    QCoreApplication.processEvents()
-    return w
+    return measurer()
+
+
+def block(item: ToolItem, c: Optional[ToolCtx] = None, perm: Optional[dict] = None):
+    from pilcrow_qt.canvas.blocks.fold import Flat
+    from pilcrow_qt.canvas.blocks.tool import ToolBlock
+
+    return ToolBlock(item, c or ctx(), perm, lambda items, cc: Flat(items, cc, "sess", in_work=True))
+
+
+def body(b) -> nd.Node:
+    """The card's body, built and laid out at the column width."""
+    b.body.measure(640, measurer())
+    assert b.body.root is not None
+    return b.body.root
+
+
+def nodes(n: nd.Node) -> Iterator[nd.Node]:
+    yield n
+    for c in getattr(n, "children", ()):
+        yield from nodes(c)
+    child = getattr(n, "child", None)
+    if child is not None:
+        yield from nodes(child)
+
+
+def texts(n: nd.Node) -> List[str]:
+    """What the leaves of a node tree say (labels, badges, links, buttons, text)."""
+    out: List[str] = []
+    for x in nodes(n):
+        if getattr(x, "children", None) is not None or getattr(x, "child", None) is not None:
+            continue
+        t = x.text()
+        if t:
+            out.append(t)
+    return out
+
+
+def html(n: nd.Node) -> str:
+    return "\n".join(x._text for x in nodes(n) if isinstance(x, nd.Text))  # noqa: SLF001
 
 
 def pump(ms: int = 30) -> None:
@@ -123,10 +161,6 @@ def pump(ms: int = 30) -> None:
     end = time.monotonic() + ms / 1000
     while time.monotonic() < end:
         QCoreApplication.processEvents()
-
-
-def labels(w: QWidget) -> List[str]:
-    return [lb.text() for lb in w.findChildren(QLabel) if lb.text()]
 
 
 # ---------------------------------------------------------------- heads and bodies
@@ -148,34 +182,30 @@ def test_read_card_head_and_lines(app):
             },
         },
     )
-    w = card(item)
-    assert w.head.verb.text() == "Read"
-    assert w.head.target.text() == "src/a.ts"
-    assert w.head.target._mono is True
-    assert not w.is_open  # a finished read folds to one line
-    w.toggle()
-    pump()
-    from pilcrow_qt.widgets.transcript.bodies.files import ReadBody
-
-    body = w.findChild(ReadBody)
-    assert body is not None and body.link.text() == "src/a.ts"
-    assert body.code.lines == ["const a = 1;", "const b = 2;", "export { a, b };"]
-    html = body.code.html()
-    assert "const" in html and ">3<" in html
+    b = block(item)
+    assert b.meta.verb == "Read"
+    assert b.meta.target == "src/a.ts"
+    assert b.meta.mono is True
+    assert not b.open  # a finished read folds to one line
+    root = body(b)
+    assert "src/a.ts" in texts(root)
+    h = html(root)
+    assert "const" in h and ">3<" in h  # highlighted, numbered
 
 
 def test_read_strips_line_numbers_from_plain_results(app):
-    item = make("Read", {"file_path": "/proj/x.py"}, "     5→def f():\n     6→    pass")
-    w = card(item)
-    w.toggle()
-    from pilcrow_qt.widgets.transcript.bodies.files import ReadBody
+    from pilcrow_qt.canvas.blocks.bodies import strip_line_numbers
 
-    body = w.findChild(ReadBody)
-    assert body.code.start_line == 5
-    assert body.code.lines == ["def f():", "    pass"]
+    assert strip_line_numbers("     5→def f():\n     6→    pass") == ("def f():\n    pass", 5)
+    item = make("Read", {"file_path": "/proj/x.py"}, "     5→def f():\n     6→    pass")
+    h = html(body(block(item)))
+    assert ">5<" in h and ">6<" in h and "def" in h
 
 
 def test_edit_diff_has_add_and_del_rows(app):
+    from pilcrow_qt.canvas.blocks.bodies import edit_hunks
+    from pilcrow_qt.canvas.blocks.tool import diff_stats
+
     old = "a\nb\nc\nd\ne\nf\ng\n"
     new = "a\nb\nc\nD\ne\nf\ng\nh\n"
     item = make(
@@ -184,20 +214,20 @@ def test_edit_diff_has_add_and_del_rows(app):
         "ok",
         structured={"filePath": "/proj/src/a.ts"},
     )
-    w = card(item)
-    assert "+2" in labels(w.head) and "−1" in labels(w.head)
-    w.toggle()
-    pump()
-    assert w.diff_body().diff is not None
-    kinds = [ln.t for ln in w.diff_body().diff.hunks[0].lines]
-    assert kinds.count("+") == 2 and kinds.count("-") == 1
+    b = block(item)
+    assert diff_stats(item) == {"add": 2, "del": 1}  # the +2 −1 at the right of the head
+    hunks, numbered = edit_hunks(item)
+    kinds = [ln.t for ln in hunks[0].lines]
+    assert kinds.count("+") == 2 and kinds.count("-") == 1 and not numbered
     t = theme.tokens()
-    html = w.diff_body().diff.html()
-    assert theme.blend(t.diff_add, t.inset).name() in html
-    assert theme.blend(t.diff_del, t.inset).name() in html
+    h = html(body(b))
+    assert theme.blend(t.diff_add, t.inset).name() in h
+    assert theme.blend(t.diff_del, t.inset).name() in h
 
 
 def test_edit_structured_patch_is_numbered(app):
+    from pilcrow_qt.canvas.blocks.bodies import edit_hunks
+
     patch = [{"oldStart": 10, "oldLines": 2, "newStart": 10, "newLines": 2, "lines": [" x", "-y", "+z"]}]
     item = make(
         "Edit",
@@ -205,12 +235,11 @@ def test_edit_structured_patch_is_numbered(app):
         "ok",
         structured={"structuredPatch": patch},
     )
-    w = card(item)
-    w.toggle()
-    d = w.diff_body().diff
-    assert d.numbers is True
-    assert [(ln.t, ln.o, ln.n) for ln in d.hunks[0].lines] == [(" ", 10, 10), ("-", 11, None), ("+", None, 11)]
-    assert "unchanged line" in d.html()
+    hunks, numbered = edit_hunks(item)
+    assert numbered is True
+    assert [(ln.t, ln.o, ln.n) for ln in hunks[0].lines] == [(" ", 10, 10), ("-", 11, None), ("+", None, 11)]
+    h = html(body(block(item)))
+    assert ">10<" in h and ">11<" in h
 
 
 def test_bash_card_renders_ansi_output(app):
@@ -219,60 +248,49 @@ def test_bash_card_renders_ansi_output(app):
         {"command": "npm test", "description": "Run the tests"},
         "\x1b[32mPASS\x1b[0m 3 tests\n\x1b[1mdone\x1b[0m",
     )
-    w = card(item)
-    assert w.head.verb.text() == "" and w.head.target.text() == "Run the tests"
-    w.toggle()
-    pump()
-    from pilcrow_qt.widgets.transcript.bodies.bash import BashBody
-
-    body = w.findChild(BashBody)
-    html = body.out_label.text()
-    assert theme.tokens().ansi_green in html and "PASS" in html and "font-weight:600" in html
-    assert "npm test" in body.cmd_label.text()
+    b = block(item)
+    assert b.meta.verb == "" and b.meta.target == "Run the tests"
+    h = html(body(b))
+    assert theme.tokens().ansi_green in h and "PASS" in h and "font-weight:600" in h
+    assert "npm test" in h
 
 
 def test_bash_exit_code_and_tail(app):
     out = "\n".join(f"line {i}" for i in range(40))
     item = make("Bash", {"command": "ls"}, "Exit code 2\n" + out, is_error=True)
-    w = card(item)
-    assert w.is_open  # errors open by default
-    from pilcrow_qt.widgets.transcript.bodies.bash import BashBody
-
-    body = w.findChild(BashBody)
-    assert body.exit_code == "2"
-    assert "line 39" in body.out_label.text() and "line 0" not in body.out_label.text()
-    assert "Failed" in labels(w.head)
+    b = block(item)
+    assert b.open  # errors open by default
+    root = body(b)
+    t = texts(root)
+    assert "exit 2" in t and "Show all 40 lines" in t
+    h = html(root)
+    assert "line 39" in h and "line 0\n" not in h
+    # the whole output on request
+    b.body.state["full"] = True
+    b.body.rebuild()
+    assert "line 0" in html(body(b))
 
 
 def test_denied_card_status(app):
     item = make("Bash", {"command": "rm -rf /"}, "The user doesn't want to proceed with this tool use.", is_error=True)
     assert item.status == "denied"
-    w = card(item)
-    assert "declined" in labels(w.head)
-    assert w.head.target._strike is True and w.head.target._color == "text_3"
-    from pilcrow_qt.widgets.transcript.tool_card import IconLabel
-
-    ico = w.head.ico_host.findChild(IconLabel)
-    assert ico is not None and ico._name == "ban" and ico._color == "err"
+    b = block(item)
+    assert not b.open and b.meta.target == "rm -rf /" and b.text() == "Run rm -rf /"
 
 
 def test_write_and_todo_bodies(app):
-    w = card(
-        make("Write", {"file_path": "/proj/new.md", "content": "# Hi\n\ntext"}, "ok", structured={"type": "create"})
-    )
-    assert "+3" in labels(w.head)
+    from pilcrow_qt.canvas.blocks.tool import diff_stats
+
+    w = make("Write", {"file_path": "/proj/new.md", "content": "# Hi\n\ntext"}, "ok", structured={"type": "create"})
+    assert diff_stats(w) == {"add": 3, "del": 0}
     todos = [
         {"content": "Read", "status": "completed"},
         {"content": "Fix it", "activeForm": "Fixing it", "status": "in_progress"},
         {"content": "Test", "status": "pending"},
     ]
-    t = card(make("TodoWrite", {"todos": todos}, "ok"))
-    assert t.head.target.text() == "1/3 done · Fixing it"
-    t.toggle()
-    from pilcrow_qt.widgets.transcript.bodies.todo import TodoBody
-
-    body = t.findChild(TodoBody)
-    assert [x for x in labels(body)] == ["Read", "Fixing it", "Test"]
+    t = block(make("TodoWrite", {"todos": todos}, "ok"))
+    assert t.meta.target == "1/3 done · Fixing it"
+    assert [x for x in texts(body(t)) if x in ("Read", "Fixing it", "Test")] == ["Read", "Fixing it", "Test"]
 
 
 def test_search_body_lists_files(app):
@@ -282,16 +300,13 @@ def test_search_body_lists_files(app):
         "x",
         structured={"filenames": ["/proj/a.ts", "/proj/src/b.ts"], "numFiles": 2},
     )
-    w = card(item)
-    w.toggle()
-    from pilcrow_qt.widgets.transcript.bodies.search import SearchBody
-
-    body = w.findChild(SearchBody)
-    assert body.files == ["/proj/a.ts", "/proj/src/b.ts"]
-    assert "2 files" in labels(body) and "src/b.ts" in labels(body)
+    t = texts(body(block(item)))
+    assert "2 files" in t and "src/b.ts" in t and "a.ts" in t
 
 
 def test_agent_card_with_nested_children(app):
+    from pilcrow_qt.canvas.blocks.tool import ToolBlock
+
     m = TranscriptModel()
     m.push(
         assistant(
@@ -321,45 +336,49 @@ def test_agent_card_with_nested_children(app):
     )
     m.push(tool_result("agent_1", "It lives in lib/parser.ts"))
     agent = m.tools["agent_1"]
-    w = card(agent)
-    assert w.head.verb.text() == "Agent · Explore" and w.head.target.text() == "look around"
-    w.toggle()
-    pump()
-    from pilcrow_qt.widgets.transcript.bodies.agent import AgentBody
-    from pilcrow_qt.widgets.transcript.tool_card import ToolCard
-
-    body = w.findChild(AgentBody)
-    assert body is not None and len(body.children) == 2
-    nested = body.children_host.findChildren(ToolCard)
-    assert [c.item.name for c in nested] == ["Grep"]
+    b = block(agent)
+    assert b.meta.verb == "Agent · Explore" and b.meta.target == "look around"
+    assert b.children_group is not None and b.reports is not None
+    nested = [x for x in b.walk() if isinstance(x, ToolBlock)]
+    assert [x.item.name for x in nested] == ["Grep"]
     assert nested[0].ctx.depth == 1
-    assert "Explore" in labels(body)
+    assert "Explore" in texts(body(b))
+    # the agent's report is its last words already, so it is not shown twice
+    b.reports.measure(640, measurer())
+    assert not b.reports.root.children and b.reports.h == 0
+    # a report that says more than the last words is shown
+    m.push(tool_result("agent_1", "Found it: lib/parser.ts, with a test in lib/parser.test.ts"))
+    agent = m.tools["agent_1"]
+    b2 = block(agent)
+    b2.reports.measure(640, measurer())
+    assert "lib/parser.test.ts" in b2.reports.root.text()
 
 
 def test_generic_and_mcp_body(app):
     item = make("mcp__github__list_issues", {"repo": "a/b", "state": "open"}, "#1 bug\n#2 feature")
-    w = card(item)
-    assert w.head.verb.text() == "Github · list issues"
-    w.toggle()
-    from pilcrow_qt.widgets.transcript.bodies.generic import GenericBody
-
-    body = w.findChild(GenericBody)
-    texts = labels(body)
-    assert "Input" in texts and "Output" in texts
-    assert any("repo" in t and "a/b" in t for t in texts) and any("#2 feature" in t for t in texts)
+    b = block(item)
+    assert b.meta.verb == "Github · list issues"
+    root = body(b)
+    t = texts(root)
+    assert "Input" in t
+    h = html(root)
+    assert "repo" in h and "a/b" in h and "#2 feature" in h
 
 
-def test_refresh_keeps_fold_and_skips_same_rev(app):
+def test_sync_skips_same_rev_and_keeps_the_fold(app):
     item = make("Read", {"file_path": "/proj/a.ts"}, "x")
-    w = card(item)
-    w.toggle()
-    assert w.is_open
-    before = w.body.body()
-    w.refresh(item.rev)
-    assert w.body.body() is before
+    c = ctx()
+    b = block(item, c)
+    body(b)
+    before = b.body.root
+    assert b.sync(item, c, None) == [] and b.body.root is before
+    b.user_open = True
+    b.open = True
+    b.set_reveal(1.0)
     item.rev += 1
-    w.refresh(item.rev)
-    assert w.is_open and w.body.is_open
+    changed = b.sync(item, c, None)
+    assert b.body in changed and b.body.root is None  # built again when it is next measured
+    assert b.open and b.reveal == 1.0
 
 
 # ---------------------------------------------------------------- AskUserQuestion
@@ -377,7 +396,21 @@ ASK_INPUT = {
 }
 
 
+def special(item: ToolItem, perm: Optional[dict] = None):
+    """The question / plan island and its widget, as the canvas builds them."""
+    from pilcrow_qt.canvas.blocks.tool import SpecialIsland, is_special
+
+    assert is_special(item, perm)
+    isl = SpecialIsland(item, ctx({item.id: perm} if perm else {}), perm)
+    w = isl.ensure_widget()
+    w.show()
+    pump()
+    return isl, w
+
+
 def test_ask_body_answers_through_respond(app, respond):
+    from pilcrow_qt.widgets.transcript.bodies.ask import AskBody
+
     item = make("AskUserQuestion", ASK_INPUT)
     perm = {
         "requestId": "req-ask",
@@ -387,20 +420,18 @@ def test_ask_body_answers_through_respond(app, respond):
         "interactive": True,
         "at": 0,
     }
-    w = card(item, ctx({item.id: perm}))
-    from pilcrow_qt.widgets.transcript.bodies.ask import AskBody
-
-    body = w.findChild(AskBody)
-    assert body is not None and body.live
-    assert "Claude has 2 questions" in labels(body)
-    assert not body.send_btn.isEnabled()
-    body.rows[0][0].toggled.emit()  # React
-    body.rows[1][0].toggled.emit()  # ESLint
-    body.rows[1][1].toggled.emit()  # Prettier
-    body.other_fields[1].setText("Biome")
-    body.note_fields[0].setText("keep it simple")
-    assert body.send_btn.isEnabled()
-    body.send_btn.click()
+    _isl, body_w = special(item, perm)
+    assert isinstance(body_w, AskBody) and body_w.live
+    labels = [lb.text() for lb in body_w.findChildren(type(body_w.findChildren(QWidget)[0]))] if False else None
+    assert "Claude has 2 questions" in [lb.text() for lb in _labels(body_w)]
+    assert not body_w.send_btn.isEnabled()
+    body_w.rows[0][0].toggled.emit()  # React
+    body_w.rows[1][0].toggled.emit()  # ESLint
+    body_w.rows[1][1].toggled.emit()  # Prettier
+    body_w.other_fields[1].setText("Biome")
+    body_w.note_fields[0].setText("keep it simple")
+    assert body_w.send_btn.isEnabled()
+    body_w.send_btn.click()
     assert respond == [
         (
             "sess",
@@ -415,6 +446,13 @@ def test_ask_body_answers_through_respond(app, respond):
             },
         )
     ]
+    _ = labels
+
+
+def _labels(w: QWidget) -> List[QWidget]:
+    from PySide6.QtWidgets import QLabel
+
+    return [lb for lb in w.findChildren(QLabel) if lb.text()]
 
 
 def test_ask_single_select_other_clears_choice(app, respond):
@@ -425,25 +463,19 @@ def test_ask_single_select_other_clears_choice(app, respond):
         "input": {"questions": ASK_INPUT["questions"][:1]},
         "suggestions": [],
     }
-    w = card(item, ctx({item.id: perm}))
-    from pilcrow_qt.widgets.transcript.bodies.ask import AskBody
-
-    body = w.findChild(AskBody)
-    body.rows[0][1].toggled.emit()
-    body.other_fields[0].setText("Svelte")
-    assert body.sel[0] == [] and not body.rows[0][1].on
-    body.skip_btn.click()
+    _isl, body_w = special(item, perm)
+    body_w.rows[0][1].toggled.emit()
+    body_w.other_fields[0].setText("Svelte")
+    assert body_w.sel[0] == [] and not body_w.rows[0][1].on
+    body_w.skip_btn.click()
     assert respond[-1][2]["behavior"] == "deny"
 
 
 def test_ask_done_shows_answers(app):
     item = make("AskUserQuestion", ASK_INPUT, "ok", structured={"answers": {"Which framework?": "React"}})
-    w = card(item)
-    from pilcrow_qt.widgets.transcript.bodies.ask import AskBody
-
-    body = w.findChild(AskBody)
-    assert body.answers == ["React", "No answer"]
-    assert "Claude asked a few questions" in labels(body)
+    _isl, body_w = special(item)
+    assert body_w.answers == ["React", "No answer"]
+    assert "Claude asked a few questions" in [lb.text() for lb in _labels(body_w)]
 
 
 # ---------------------------------------------------------------- ExitPlanMode
@@ -453,12 +485,9 @@ def test_plan_body_approves_and_keeps_planning(app, respond):
     plan = "# Plan\n\n1. Do the thing\n2. Test it"
     item = make("ExitPlanMode", {"plan": plan})
     perm = {"requestId": "req-plan", "toolName": "ExitPlanMode", "input": {"plan": plan}, "suggestions": []}
-    w = card(item, ctx({item.id: perm}))
-    from pilcrow_qt.widgets.transcript.bodies.plan import PlanBody
-
-    body = w.findChild(PlanBody)
-    assert "Plan ready for review" in labels(body)
-    body.ask_btn.click()
+    _isl, body_w = special(item, perm)
+    assert "Plan ready for review" in [lb.text() for lb in _labels(body_w)]
+    body_w.ask_btn.click()
     assert respond[-1] == (
         "sess",
         "req-plan",
@@ -468,11 +497,11 @@ def test_plan_body_approves_and_keeps_planning(app, respond):
             "updatedPermissions": [{"type": "setMode", "mode": "default", "destination": "session"}],
         },
     )
-    body._set_busy(False)
-    body.keep_btn.click()
-    assert body.feedback_box.isVisible()
-    body.feedback.setPlainText("Add tests first")
-    body.send_btn.click()
+    body_w._set_busy(False)
+    body_w.keep_btn.click()
+    assert body_w.feedback_box.isVisible()
+    body_w.feedback.setPlainText("Add tests first")
+    body_w.send_btn.click()
     assert respond[-1][2] == {"behavior": "deny", "message": "The user wants changes to the plan: Add tests first"}
 
 
@@ -550,23 +579,24 @@ def test_permission_card_always_allow_and_deny_with_note(app, respond):
     }
 
 
-def test_permission_card_in_tool_card_and_keys_only_for_first(app, respond):
+def test_permission_card_under_the_tool_row_and_keys_only_for_first(app, respond):
     from pilcrow_qt.widgets.transcript.permission import PermissionCard
 
     perm = perm_bash("req-3", defaultToNo=True)
     item = make("Bash", {"command": "npm test"})
     other = perm_bash("req-0")
     c = ctx({"someone-else": other, item.id: perm})
-    w = card(item, c)
-    assert w.awaiting and w.is_open
-    pc = w.findChild(PermissionCard)
-    assert pc is not None and not pc.first and not pc._shortcuts
+    b = block(item, c, perm)
+    assert b.awaiting and b.open and b.head_h == 32
+    assert b.perm_island is not None
+    pc = b.perm_island.ensure_widget()
+    assert isinstance(pc, PermissionCard) and not pc.first and not pc._shortcuts
     assert pc.deny_btn.property("kind") == "primary" and not pc.allow_btn.property("kind")
     pc.allow_btn.click()
     assert respond[-1][1] == "req-3"
-    # The answer arrives: the request leaves the context and the card folds, keeping the stale prompt.
-    w.refresh(item.rev, ctx({}))
-    assert not w.awaiting and not w.perm_collapse.is_open
+    # The answer arrives: the request leaves the context, the prompt goes and the card folds again.
+    b.sync(item, ctx({}), None)
+    assert not b.awaiting and b.perm_island is None and not b.open and b.head_h == 28
 
 
 def test_typing_elsewhere_and_suggestion_helpers(app):
@@ -610,13 +640,11 @@ def test_typing_elsewhere_and_suggestion_helpers(app):
 
 
 def test_screenshot_of_every_card_kind(app):
-    from pilcrow_qt.widgets.transcript.permission import PermissionCard
+    from pilcrow_qt.canvas.blocks.tool import SpecialIsland
+    from pilcrow_qt.canvas.scene import Group, Scene
+    from pilcrow_qt.canvas.transcript import OrphanIsland
+    from pilcrow_qt.canvas.view import CanvasView
 
-    column = QWidget()
-    column.setObjectName("canvas")
-    lay = QVBoxLayout(column)
-    lay.setContentsMargins(24, 16, 24, 16)
-    lay.setSpacing(2)
     items: List[Any] = []
     items.append(
         make(
@@ -700,32 +728,34 @@ def test_screenshot_of_every_card_kind(app):
     bash_perm = perm_bash("req-build")
     pending = {bash_wait.id: bash_perm, ask_item.id: ask_perm, plan_item.id: plan_perm}
     c = ctx(pending)
-    cards = []
-    for it in items:
-        cards.append(card(it, c))
-    for it in (bash_wait, ask_item, plan_item):
-        cards.append(card(it, c))
-    for w in cards:
-        lay.addWidget(w)
-    for w in cards[:6]:
-        w.set_open(True)
-    cards[6].set_open(True)
-    cards[7].set_open(True)
-    orphan = PermissionCard(perm_bash("req-orphan"), c, item=None)
-    lay.addWidget(orphan)
-    lay.addStretch(1)
-    scroll = QScrollArea()
-    scroll.setObjectName("canvas")
-    scroll.setWidgetResizable(True)
-    scroll.setWidget(column)
-    scroll.resize(760, 2400)
-    scroll.show()
+    scene = Scene()
+    view = CanvasView(scene)
+    view.setObjectName("canvas")
+    view.resize(760, 2600)
+    blocks: List[Any] = [block(it, c) for it in items]
+    blocks.append(block(bash_wait, c, bash_perm))
+    blocks.append(SpecialIsland(ask_item, c, ask_perm))
+    blocks.append(SpecialIsland(plan_item, c, plan_perm))
+    blocks.append(OrphanIsland(perm_bash("req-orphan"), c))
+    view.begin()
+    try:
+        for b in blocks:
+            scene.root.append(b)
+            if hasattr(b, "ensure_widget"):
+                view.register_island(b)
+    finally:
+        view.end()
+    for b in blocks[:8]:
+        if isinstance(b, Group):
+            view.toggle_group(b, True, animate=False)
+    view.show()
     pump(200)
-    column.resize(740, max(2400, column.sizeHint().height()))
-    pump(200)
+    assert all(b.warm for b in view.visible_blocks() if not isinstance(b, Group)), "every card on screen is measured"
+    assert view.cold_paints == 0, "nothing was ever painted as a placeholder"
+    assert scene.total > 1500
     out = ROOT / "test" / "out"
     out.mkdir(parents=True, exist_ok=True)
     path = out / "qt-tool-cards.png"
-    column.grab().save(str(path))
+    view.viewport().grab().save(str(path))
     assert path.exists()
-    scroll.close()
+    view.close()

@@ -13,20 +13,30 @@ from __future__ import annotations
 
 import difflib
 import re
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetricsF, QKeyEvent, QLinearGradient, QMouseEvent, QPainter, QPen
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QLayout,
+    QPlainTextEdit,
+    QPushButton,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
 from ... import icons, theme
 from ...lib.fmt import basename, dirname
-from ..ui.bits import Clickable
+from ..ui.bits import Clickable, Hairline, Pill
 from ..ui.collapse import Collapse
 from ..ui.signals import bind
 from .editor import lexer_for_path, token_color
-from .right_panel import Btn, Card, elide, font_qss, icon_btn, lbl, rtl_display
+from .right_panel import Btn, Card, elide, icon_btn, lbl, rtl_display
 
 Json = Dict[str, Any]
 Range = Tuple[int, int]
@@ -203,18 +213,27 @@ def hunks_from_patch(patch: List[Json]) -> List[Json]:
     return out
 
 
-Tok = Tuple[int, int, Optional[QColor], bool]  # start, end, colour, italic
+Tok = Tuple[int, int, object]  # start, end, Pygments token type (the colour is looked up at paint time)
+_TOKEN_LOOK: Dict[Tuple[str, object], Tuple[Optional[QColor], bool]] = {}
+
+
+def token_look(ttype: object, t: theme.Tokens) -> Tuple[Optional[QColor], bool]:
+    """``token_color`` memoised per theme: tokens are lexed once, coloured whenever they are painted."""
+    key = (t.name, ttype)
+    look = _TOKEN_LOOK.get(key)
+    if look is None:
+        look = _TOKEN_LOOK[key] = token_color(ttype, t)
+    return look
 
 
 def line_tokens(lines: List[Json], path: str) -> Dict[int, List[Tok]]:
-    """Syntax colours per line (by ``id(line)``) from Pygments, in the theme's ``cm_*`` tokens."""
+    """Syntax token runs per line (by ``id(line)``) from Pygments. Theme-free: a theme change only repaints."""
     lexer = lexer_for_path(path) if path else None
     out: Dict[int, List[Tok]] = {}
     if lexer is None:
         return out
     from pygments import lex
 
-    t = theme.tokens()
     for ln in lines:
         s = str(ln.get("s") or "")
         toks: List[Tok] = []
@@ -223,8 +242,7 @@ def line_tokens(lines: List[Json], path: str) -> Dict[int, List[Tok]]:
             value = value.rstrip("\n")
             if not value:
                 continue
-            color, italic = token_color(ttype, t)
-            toks.append((col, col + len(value), color, italic))
+            toks.append((col, col + len(value), ttype))
             col += len(value)
         out[id(ln)] = toks
     return out
@@ -233,12 +251,13 @@ def line_tokens(lines: List[Json], path: str) -> Dict[int, List[Tok]]:
 # ---------------------------------------------------------------- small painted bits
 
 
-class StatusBadge(QLabel):
+class StatusBadge(Pill):
     """The 16px file-status square (``.fstat``): M grey, A/U green, D red, R blue."""
 
     def __init__(self, status: str, untracked: bool = False, parent: Optional[QWidget] = None) -> None:
-        super().__init__("U" if untracked else status, parent)
+        super().__init__("U" if untracked else status, radius=4, parent=parent)
         self._status = "U" if untracked else status
+        self.setFont(theme.font_mono(10, 650))
         self.setFixedSize(16, 16)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setToolTip("Untracked" if untracked else STATUS_LABEL.get(status, status))
@@ -246,16 +265,14 @@ class StatusBadge(QLabel):
         bind(theme.theme.changed, self, lambda _t: self._paint())
 
     def _paint(self) -> None:
-        t = theme.tokens()
         fg, bg = {
-            "A": (t.ok, t.ok_wash),
-            "U": (t.ok, t.ok_wash),
-            "D": (t.err, t.err_wash),
-            "R": (t.info, t.info_wash),
-        }.get(self._status, (t.text_2, t.fill_2))
-        self.setStyleSheet(
-            f"color: {fg}; background: {theme.blend(bg, t.chrome).name()}; border-radius: 4px; {font_qss(10, 650, mono=True)}"
-        )
+            "A": ("ok", "ok_wash"),
+            "U": ("ok", "ok_wash"),
+            "D": ("err", "err_wash"),
+            "R": ("info", "info_wash"),
+        }.get(self._status, ("text_2", "fill_2"))
+        theme.tint(self, fg=fg)
+        self.set_look(bg=f"{bg}/chrome")
 
 
 class Num(QLabel):
@@ -264,6 +281,7 @@ class Num(QLabel):
     def __init__(self, kind: str, n: int = 0, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._kind, self._n = kind, n
+        self.setFont(theme.font_mono(11.5))
         self.setMinimumHeight(17)
         self.set_value(n)
         bind(theme.theme.changed, self, lambda _t: self._paint())
@@ -274,9 +292,7 @@ class Num(QLabel):
         self._paint()
 
     def _paint(self) -> None:
-        t = theme.tokens()
-        color = t.text_4 if not self._n else (t.ok if self._kind == "add" else t.err)
-        self.setStyleSheet(f"color: {color}; {font_qss(11.5, 400, mono=True)}")
+        theme.tint(self, fg="text_4" if not self._n else ("ok" if self._kind == "add" else "err"))
 
 
 class NoteBadge(QLabel):
@@ -372,24 +388,15 @@ class CommentEditor(QWidget):
 
 
 def style_textarea(edit: QPlainTextEdit, size: float = theme.FS_UI) -> None:
-    """``.textarea``: a quiet fill with a hairline, 9px 11px padding, placeholder in the faint colour."""
-    t = theme.tokens()
-
-    def apply() -> None:
-        tk = theme.tokens()
-        edit.setStyleSheet(
-            f"QPlainTextEdit {{ background: {theme.blend(tk.fill_1, tk.canvas).name()}; border: 1px solid {theme.blend(tk.hair, tk.canvas).name()}; "
-            f"border-radius: {theme.R2}px; padding: 8px 10px; color: {tk.text}; {font_qss(size)} "
-            f"selection-background-color: {theme.blend(tk.selection, tk.canvas).name()}; }}"
-            f"QPlainTextEdit:focus {{ background: {tk.canvas}; border-color: {theme.blend(tk.hair_3, tk.canvas).name()}; }}"
-        )
-        pal = edit.palette()
-        pal.setColor(pal.ColorRole.PlaceholderText, theme.qcolor(tk.text_3))
-        edit.setPalette(pal)
-
-    _ = t
-    apply()
-    bind(theme.theme.changed, edit, lambda _t: apply())
+    """``.textarea``: a quiet fill with a hairline, 9px 11px padding, placeholder in the faint colour.
+    The colours are palette roles, re-read when the theme repolishes the field."""
+    edit.setFont(theme.font_ui(size))
+    edit.setStyleSheet(
+        f"QPlainTextEdit {{ background: palette(light); border: 1px solid palette(shadow); border-radius: {theme.R2}px; "
+        "padding: 8px 10px; selection-background-color: palette(highlight); }"
+        "QPlainTextEdit:focus { background: palette(window); border-color: palette(mid); }"
+    )
+    theme.tint(edit, placeholder="text_3")
 
 
 class CommentCard(Card):
@@ -456,6 +463,9 @@ class DiffGrid(QWidget):
         self._total_h = 0
         self._more: Optional[QPushButton] = None
         self._lh = LINE_H
+        self._longest = 0.0  # the widest line's advance, measured once per rebuild
+        self._digits = (1, 1)  # the number columns' widths, likewise
+        self._fm_cache: Optional[QFontMetricsF] = None
         self.setMouseTracking(True)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -527,7 +537,7 @@ class DiffGrid(QWidget):
         return len(self._rows) if (not self._max_rows or self._expanded) else min(self._max_rows, len(self._rows))
 
     def _on_theme(self) -> None:
-        self._toks = line_tokens([ln for h in self._hunks for ln in (h.get("lines") or [])], self._path)
+        self._fm_cache = None
         self.update()
 
     def _rebuild(self) -> None:
@@ -539,10 +549,27 @@ class DiffGrid(QWidget):
             for ln in (r.line, r.left, r.right):
                 if ln is not None and ln.get("t") in ("+", "-", " "):
                     self._key_lines[line_key(ln)] = ln
+        self._measure_lines()
         self._relayout()
 
+    def _measure_lines(self) -> None:
+        fm = self._fm()
+        max_o = max_n = 1
+        longest = 0.0
+        for r in self._rows:
+            for ln in (r.line, r.left, r.right):
+                if ln is None:
+                    continue
+                max_o = max(max_o, int(ln.get("o") or 0))
+                max_n = max(max_n, int(ln.get("n") or 0))
+                longest = max(longest, fm.horizontalAdvance(str(ln.get("s") or "")))
+        self._longest = longest
+        self._digits = (len(str(max_o)), len(str(max_n)))
+
     def _fm(self) -> QFontMetricsF:
-        return QFontMetricsF(theme.font_mono(DIFF_FONT_PX))
+        if self._fm_cache is None:
+            self._fm_cache = QFontMetricsF(theme.font_mono(DIFF_FONT_PX))
+        return self._fm_cache
 
     def _segments(self, s: str, avail: float, fm: QFontMetricsF) -> List[Range]:
         """Where a line wraps: between tokens where it can, mid-token only when it must
@@ -574,16 +601,8 @@ class DiffGrid(QWidget):
         lh = LINE_H
         self._lh = lh
         char_w = fm.horizontalAdvance("0")
-        max_o = max_n = 1
-        longest = 0.0
-        for r in self._rows:
-            for ln in (r.line, r.left, r.right):
-                if ln is None:
-                    continue
-                max_o = max(max_o, int(ln.get("o") or 0))
-                max_n = max(max_n, int(ln.get("n") or 0))
-                longest = max(longest, fm.horizontalAdvance(str(ln.get("s") or "")))
-        d_o, d_n = len(str(max_o)), len(str(max_n))
+        longest = self._longest
+        d_o, d_n = self._digits
         width = max(self.width(), 1)
         two = self._dual and self._numbers and self._mode == "unified"
         cols: Dict[str, int] = {}
@@ -738,7 +757,42 @@ class DiffGrid(QWidget):
 
     def resizeEvent(self, e) -> None:  # noqa: N802
         super().resizeEvent(e)
-        self._relayout()
+        # without wrapping the rows' heights do not depend on the width: only the columns move
+        if self._wrap or self._mode == "split" or self._extras:
+            self._relayout()
+        else:
+            self._place_columns()
+
+    def _place_columns(self) -> None:
+        """The width changed but no line wraps: recompute the columns and repaint, keep the rows."""
+        fm = self._fm()
+        char_w = fm.horizontalAdvance("0")
+        d_o, d_n = self._digits
+        width = max(self.width(), 1)
+        two = self._dual and self._numbers and self._mode == "unified"
+        x = 0
+        cols: Dict[str, int] = {}
+        if self._numbers:
+            if two:
+                cols["dn0"] = x
+                cols["nw0"] = int(12 + char_w * d_o + 4)
+                x += cols["nw0"]
+                cols["dn1"] = x
+                cols["nw1"] = int(8 + char_w * d_n + 10)
+                x += cols["nw1"]
+            else:
+                cols["dn0"] = x
+                cols["nw0"] = int(14 + char_w * max(d_o, d_n) + 8)
+                x += cols["nw0"]
+        cols["ds"] = x
+        x += SIGN_W
+        cols["dc"] = x
+        self._cols = cols
+        self._content_w = int(x + self._longest + 18 + 4)
+        if self._more is not None:
+            bw = self._more.sizeHint().width()
+            self._more.setGeometry((width - bw) // 2, self._total_h - 9 - 24, bw, 24)
+        self.update()
 
     # ---- interaction
     def _row_at(self, y: int) -> int:
@@ -851,7 +905,7 @@ class DiffGrid(QWidget):
                     p.drawRoundedRect(QRectF(x1, yy + 2, x2 - x1, lh - 4), 2, 2)
                 # the code, one coloured run at a time
                 pos = a
-                runs = [(max(a, ts), min(b, te), col, it) for ts, te, col, it in toks if te > a and ts < b] or [
+                runs = [(max(a, ts), min(b, te), *token_look(tt, t)) for ts, te, tt in toks if te > a and ts < b] or [
                     (a, b, None, False)
                 ]
                 for ts, te, col, it in runs:
@@ -1070,14 +1124,12 @@ class DiffFileRow(QWidget):
                 self.head.hover_widgets.append(b)
                 hl.addWidget(b)
         lay.addWidget(self.head)
-        self.head_line = QWidget()
-        self.head_line.setFixedHeight(1)
+        self.head_line = Hairline(over="chrome")
         lay.addWidget(self.head_line)
         self.grid: Optional[DiffGrid] = None
         self.body = Collapse(self._build_body, open_ or simple)
         lay.addWidget(self.body)
-        self.line = QWidget()
-        self.line.setFixedHeight(1)
+        self.line = Hairline()
         lay.addWidget(self.line)
         self._paint()
         bind(theme.theme.changed, self, lambda _t: self._paint())
@@ -1085,9 +1137,6 @@ class DiffFileRow(QWidget):
     def _paint(self) -> None:
         t = theme.tokens()
         self.chev.setPixmap(icons.pixmap("chevron-down" if self.body.is_open else "chevron-right", t.text_3, 13))
-        hair = theme.blend(t.hair, t.canvas).name()
-        self.line.setStyleSheet(f"background: {hair};")
-        self.head_line.setStyleSheet(f"background: {theme.blend(t.hair, t.chrome).name()};")
         self.head_line.setVisible(self.body.is_open)
 
     def _build_body(self) -> QWidget:
@@ -1165,9 +1214,17 @@ class DiffView(QWidget):
         self._files: List[Json] = []
         self._open: Dict[str, bool] = {}
         self._rows: List[DiffFileRow] = []
+        self._pending_rows: List[Optional[DiffFileRow]] = []
+        self._gen = 0
         self._lay = QVBoxLayout(self)
         self._lay.setContentsMargins(0, 0, 0, 0)
         self._lay.setSpacing(0)
+        # The list is always exactly as tall as its cards. Without this a card whose grid has just
+        # measured itself makes the list lay out once in its old height (every card squeezed) and
+        # once more when the scroll host catches up: two passes of geometry over every card and
+        # its parts for each card added, tens of thousands of events while a change of a hundred
+        # files comes in.
+        self._lay.setSizeConstraint(QLayout.SizeConstraint.SetMinAndMaxSize)
 
     # ---- public
     def files(self) -> List[Json]:
@@ -1179,23 +1236,77 @@ class DiffView(QWidget):
     def set_actions(self, actions: List[Action]) -> None:
         self.actions = list(actions)
 
+    # Cards are built for this long per turn of the event loop (well under a frame, with the layout
+    # and the paint that follow): the first ones paint before the rest exist, and no turn holds the window.
+    BUDGET_MS = 4.0
+
     def set_files(self, files: List[Json]) -> None:
         if files == self._files and self._rows:
             return
         self._files = [dict(f) for f in files]
-        for r in self._rows:
-            self._lay.removeWidget(r)
-            r.setParent(None)
-            r.deleteLater()
-        self._rows = []
-        for f in self._files:
+        self._gen = getattr(self, "_gen", 0) + 1
+        # a file whose diff did not change keeps its card (and its grid, its scroll, its open state)
+        had = {r.path: r for r in self._rows}
+        rows: List[Optional[DiffFileRow]] = []
+        todo: List[int] = []
+        for i, f in enumerate(self._files):
             path = str(f.get("path") or "")
-            open_ = self._open.get(path, len(self._files) <= self.open_threshold)
-            row = DiffFileRow(f, self, open_)
-            row.toggled.connect(lambda p, o: self._open.__setitem__(p, o))
-            row.set_note_count(len(self.notes.get(path) or {}))
-            self._lay.addWidget(row)
-            self._rows.append(row)
+            old = had.pop(path, None)
+            if old is not None and old.file == f:
+                rows.append(old)
+                continue
+            if old is not None:
+                self._lay.removeWidget(old)
+                old.hide()
+                old.setParent(None)
+                old.deleteLater()
+            rows.append(None)
+            todo.append(i)
+        for old in had.values():
+            self._lay.removeWidget(old)
+            old.hide()
+            old.setParent(None)
+            old.deleteLater()
+        self._pending_rows = rows
+        self._build_rows(todo, self._gen)
+
+    def _make_row(self, i: int) -> DiffFileRow:
+        f = self._files[i]
+        path = str(f.get("path") or "")
+        open_ = self._open.get(path, len(self._files) <= self.open_threshold)
+        row = DiffFileRow(f, self, open_)
+        row.toggled.connect(lambda p, o: self._open.__setitem__(p, o))
+        row.set_note_count(len(self.notes.get(path) or {}))
+        return row
+
+    def _build_rows(self, todo: List[int], gen: int) -> None:
+        """A batch of new cards, placed in order among the kept ones; the rest on the next turn of the
+        event loop, so a change of a hundred files never holds the window."""
+        if gen != getattr(self, "_gen", 0):
+            return  # a newer list came
+        rows = self._pending_rows
+        t0 = time.perf_counter()
+        k = 0
+        while k < len(todo) and (k == 0 or (time.perf_counter() - t0) * 1000 < self.BUDGET_MS):
+            rows[todo[k]] = self._make_row(todo[k])
+            k += 1
+        rest = todo[k:]
+        self._place_rows([r for r in rows if r is not None])
+        if rest:
+            # a timer of the view's own: a view deleted with cards still to come takes it along
+            QTimer.singleShot(0, self, lambda: self._build_rows(rest, gen))
+        else:
+            self._pending_rows = []
+
+    def _place_rows(self, rows: List[DiffFileRow]) -> None:
+        for i, row in enumerate(rows):
+            item = self._lay.itemAt(i)
+            if item is not None and item.widget() is row:
+                continue
+            self._lay.removeWidget(row)
+            self._lay.insertWidget(i, row)
+            row.show()
+        self._rows = rows
 
     def set_mode(self, mode: str) -> None:
         if mode == self.mode:

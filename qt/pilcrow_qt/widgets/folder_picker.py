@@ -9,7 +9,8 @@ from __future__ import annotations
 import re
 from typing import Any, Callable, Dict, List, Optional
 
-from PySide6.QtCore import QSize, Qt
+from PySide6.QtCore import QRectF, QSize, Qt
+from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -25,7 +26,8 @@ from PySide6.QtWidgets import (
 from .. import icons, theme
 from ..lib.fmt import basename, tildify
 from ..store import store
-from .ui.bits import IconButton, button, label
+from .dialogs.parts import well_bg
+from .ui.bits import IconButton, Pill, button, hairline, label, paint_box
 from .ui.signals import bind
 
 Json = Dict[str, Any]
@@ -51,7 +53,6 @@ class FolderPicker(QWidget):
 
         search = QWidget()
         search.setObjectName("fpick-search")
-        search.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         sl = QHBoxLayout(search)
         sl.setContentsMargins(12, 0, 10, 0)
         sl.setSpacing(8)
@@ -64,7 +65,7 @@ class FolderPicker(QWidget):
         self.q.textChanged.connect(lambda _t: self._render())
         self.q.returnPressed.connect(self._enter)
         sl.addWidget(self.q, 1)
-        search.setFixedHeight(36)
+        search.setFixedHeight(35)
         lay.addWidget(search)
         self.search_box = search
 
@@ -80,9 +81,6 @@ class FolderPicker(QWidget):
     def _paint(self) -> None:
         t = theme.tokens()
         self.search_ico.setPixmap(icons.pixmap("search", t.text_3, 13))
-        self.search_box.setStyleSheet(
-            f"#fpick-search {{ border-bottom: 1px solid {theme.blend(t.hair, t.raised).name()}; }}"
-        )
 
     # ---- data
     def _recents(self) -> List[str]:
@@ -201,19 +199,18 @@ class Browser(QFrame):
         pick: Callable[[str], None],
         flat: bool = False,
         parent: Optional[QWidget] = None,
+        native: Optional[Callable[[], None]] = None,
     ) -> None:
         super().__init__(parent)
         self._nav, self._pick = nav, pick
         self.listing: Optional[Json] = None
         self.setObjectName("browser")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._flat = flat
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
         self.head = QWidget()
         self.head.setObjectName("browser-head")
-        self.head.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         hl = QHBoxLayout(self.head)
         hl.setContentsMargins(6, 6, 10, 6)
         hl.setSpacing(4)
@@ -225,32 +222,37 @@ class Browser(QFrame):
         self.up_btn.setFixedSize(24, 24)
         self.up_btn.clicked.connect(self._up)
         hl.addWidget(self.up_btn)
+        if native is not None:
+            self.native_btn = IconButton("folder-open", "Choose a folder with the system dialog…", 13)
+            self.native_btn.setFixedSize(24, 24)
+            self.native_btn.clicked.connect(native)
+            hl.addWidget(self.native_btn)
         self.display = label("", tone="muted", size="small", mono=True)
         self.display.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         hl.addWidget(self.display, 1)
-        self.badge = QLabel("git")
+        self.badge = Pill("git", bg=lambda t: theme.over(theme.qcolor(t.fill_2), well_bg(t)), radius=9)
         self.badge.setObjectName("badge")
+        self.badge.setContentsMargins(7, 0, 7, 0)
+        self.badge.setFont(theme.font_ui(11, 600))
+        theme.tint(self.badge, fg="text_2")
         self.badge.setFixedHeight(19)
         self.badge.hide()
         hl.addWidget(self.badge)
         lay.addWidget(self.head)
+        lay.addWidget(hairline(over=well_bg))
         self.list = _ListArea(220 if not flat else 240)
         self.list.lay.setContentsMargins(4, 4, 4, 4)
         lay.addWidget(self.list)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
+        bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def _paint(self) -> None:
+    def paintEvent(self, _e) -> None:  # noqa: N802
         t = theme.tokens()
-        from .dialogs.parts import well_bg
-
-        bg = well_bg(t).name()
-        ring = "" if self._flat else f"border: 1px solid {theme.blend(t.hair, bg).name()}; border-radius: {theme.R3}px;"
-        self.setStyleSheet(
-            f"#browser {{ background: {bg}; {ring} }}"
-            f" #browser-head {{ border-bottom: 1px solid {theme.blend(t.hair, bg).name()}; }}"
-            f" #badge {{ background: {theme.blend(t.fill_2, bg).name()}; color: {t.text_2}; border-radius: 999px; padding: 0 7px; font-size: 11px; font-weight: 600; }}"
-        )
+        bg = well_bg(t)
+        p = QPainter(self)
+        if self._flat:
+            p.fillRect(self.rect(), bg)
+        else:
+            paint_box(p, QRectF(self.rect()), bg, theme.over(theme.qcolor(t.hair), bg), theme.R3)
 
     def _up(self) -> None:
         if self.listing and self.listing.get("parent"):
@@ -319,12 +321,14 @@ class _Foot(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.setObjectName("fpick-foot")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        t = theme.tokens()
-        self.setStyleSheet(f"#fpick-foot {{ border-top: 1px solid {theme.blend(t.hair, t.raised).name()}; }}")
         self.lay = QHBoxLayout(self)
-        self.lay.setContentsMargins(8, 6, 8, 6)
+        self.lay.setContentsMargins(8, 7, 8, 6)  # a pixel for the hairline along the top
         self.lay.setSpacing(6)
+        bind(theme.theme.changed, self, lambda _t: self.update())
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        t = theme.tokens()
+        QPainter(self).fillRect(0, 0, self.width(), 1, theme.blend(t.hair, t.raised))
 
 
 class _Row(QPushButton):
@@ -337,12 +341,9 @@ class _Row(QPushButton):
         self.setFixedHeight(height)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        t = theme.tokens()
-        bg = theme.blend(t.fill_1, t.raised).name() if on else "transparent"
-        self.setStyleSheet(
-            f"QPushButton {{ border: none; border-radius: {theme.R2}px; background: {bg}; text-align: left; }}"
-            f" QPushButton:hover {{ background: {theme.blend(t.fill_2, t.raised).name()}; }}"
-        )
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self._on = on
+        bind(theme.theme.changed, self, lambda _t: self.update())
         self.lay = QHBoxLayout(self)
         self.lay.setContentsMargins(8, 0, 8, 0)
         self.lay.setSpacing(10)
@@ -353,10 +354,21 @@ class _Row(QPushButton):
         self.lay.addWidget(lb)
         return lb
 
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        t = theme.tokens()
+        if self.underMouse() and self.isEnabled():
+            bg = theme.blend(t.fill_2, t.raised)
+        elif self._on:
+            bg = theme.blend(t.fill_1, t.raised)
+        else:
+            return
+        p = QPainter(self)
+        paint_box(p, QRectF(self.rect()), bg, None, theme.R2)
+
     def add_text(self, text: str, color: str, size: float, mono: bool = False, stretch: int = 0) -> QLabel:
         lb = QLabel(text)
         lb.setFont(theme.font_mono(size) if mono else theme.font_ui(size))
-        lb.setStyleSheet(f"color: {color};")
+        theme.tint(lb, fg=color)
         if stretch:
             lb.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.lay.addWidget(lb, stretch)

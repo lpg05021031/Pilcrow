@@ -70,6 +70,9 @@ class Runtime:
         return self.st.get(key, default)
 
 
+LOAD_SLICE = 300  # messages modelled per event-loop turn while a conversation opens
+
+
 @dataclass
 class Ui:
     sidebar: bool = True
@@ -80,6 +83,7 @@ class Ui:
     show_archived: bool = False
     diff_mode: str = "unified"
     view: str = "normal"
+    font_scale: float = 1.0
 
 
 @dataclass
@@ -465,6 +469,9 @@ class Store(QObject):
             self.ui.diff_mode = ui["diffMode"]
         if ui.get("view") in [v["id"] for v in VIEW_MODES]:
             self.ui.view = ui["view"]
+        if isinstance(ui.get("fontScale"), (int, float)) and ui["fontScale"] in theme_mod.SCALE_STEPS:
+            self.ui.font_scale = float(ui["fontScale"])
+            theme_mod.theme.set_scale(self.ui.font_scale)
         self.ui_changed.emit(self.ui)
 
     def apply_theme(self) -> None:
@@ -516,9 +523,24 @@ class Store(QObject):
                     "panelW": u.panel_w,
                     "diffMode": u.diff_mode,
                     "view": u.view,
+                    "fontScale": u.font_scale,
                 }
             },
         )
+
+    def zoom(self, d: int) -> None:
+        """Ctrl+= / Ctrl+- / Ctrl+0: the conversation's text one step larger or smaller, or back."""
+        steps = theme_mod.SCALE_STEPS
+        if d == 0:
+            nxt = 1.0
+        else:
+            i = min(range(len(steps)), key=lambda k: abs(steps[k] - self.ui.font_scale))
+            nxt = steps[max(0, min(len(steps) - 1, i + d))]
+        if nxt == self.ui.font_scale:
+            return
+        self.set_ui(font_scale=nxt)
+        theme_mod.theme.set_scale(nxt)
+        self.toast(f"Text {round(nxt * 100)}%", "info")
 
     def cycle_view(self) -> None:
         ids = [v["id"] for v in VIEW_MODES]
@@ -584,19 +606,36 @@ class Store(QObject):
         self.patch_rt(sid, loading=True)
 
         def ok(snap: Json) -> None:
-            self._opening.discard(sid)
+            # The snapshot goes into the model in slices, one per event-loop turn, so a long
+            # conversation never holds the window: the view shows the rows it has under the loading
+            # skeleton and the rest follow. Live messages wait in the buffer until the end.
+            msgs = list(snap.get("messages") or [])
+            inflight = list(snap.get("inflight") or [])
             m = TranscriptModel()
-            m.push_all(snap.get("messages") or [])
-            m.push_all(snap.get("inflight") or [])
             self.models[sid] = m
             r = self.rt.setdefault(sid, Runtime())
             r.st = {**r.st, **(snap.get("state") or {})}
             r.meta = snap.get("meta") or {}
-            r.loaded, r.loading, r.rev = True, False, m.rev
-            self.rt_changed.emit(sid)
-            extra = self._buffered.pop(sid, None)
-            if extra:
-                self._on_msgs({"id": sid, "msgs": extra})
+
+            def slice_(i: int) -> None:
+                if self.models.get(sid) is not m:
+                    return  # the session was closed or reopened under us
+                m.push_all(msgs[i : i + LOAD_SLICE])
+                nxt = i + LOAD_SLICE
+                if nxt < len(msgs):
+                    r.rev = m.rev
+                    self.rt_changed.emit(sid)
+                    QTimer.singleShot(0, lambda: slice_(nxt))
+                    return
+                m.push_all(inflight)
+                self._opening.discard(sid)
+                r.loaded, r.loading, r.rev = True, False, m.rev
+                self.rt_changed.emit(sid)
+                extra = self._buffered.pop(sid, None)
+                if extra:
+                    self._on_msgs({"id": sid, "msgs": extra})
+
+            slice_(0)
 
         def bad(e: RpcError) -> None:
             self._opening.discard(sid)

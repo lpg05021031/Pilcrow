@@ -156,17 +156,17 @@ class McpAuthSheet(Sheet):
         waiting = self.start is not None and not self.done and self.error is None
         self.spinner.setVisible(self.start is None and self.error is None or (waiting and has_url))
         self.line_ico.hide()
-        self.line_lb.setStyleSheet("")
+        theme.untint(self.line_lb)
         if self.error is not None:
             self.line_lb.setText(f"Sign-in is not available right now: {self.error}")
-            self.line_lb.setStyleSheet(f"color: {t.err};")
+            theme.tint(self.line_lb, fg="err")
         elif self.start is None:
             self.line_lb.setText(f"Asking {self.name} where to sign in…")
         elif self.done:
             self.line_ico.setPixmap(icons.pixmap("circle-check", t.ok, 16))
             self.line_ico.show()
             self.line_lb.setText(f"Signed in. Claude can use {self.name} now.")
-            self.line_lb.setStyleSheet(f"color: {t.ok};")
+            theme.tint(self.line_lb, fg="ok")
         elif not has_url:
             self.line_ico.setPixmap(icons.pixmap("circle-alert", t.warn, 16))
             self.line_ico.show()

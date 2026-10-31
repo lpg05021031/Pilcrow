@@ -9,8 +9,10 @@ hairline round them; a 9px drag handle straddles each seam and takes 1px of the 
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from typing import Optional
 
+import shiboken6
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QKeySequence, QPainter, QPainterPath, QPen, QShortcut
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QStackedWidget, QVBoxLayout, QWidget
@@ -24,6 +26,7 @@ from .ui.signals import bind
 TAB_KEYS = {"1": "changes", "2": "files", "3": "terminal", "4": "preview", "5": "tasks", "6": "history", "7": "info"}
 
 GROUND_PAD = 8  # .app { padding: 0 8px 8px 0 }
+SESSION_VIEWS_KEPT = 8  # conversations kept built behind the one on screen
 SIDEBAR_MIN, SIDEBAR_MAX = 200, 440  # App.tsx resizeSidebar
 PANEL_MIN, PANEL_SHARE = 340, 0.62  # App.tsx resizePanel
 
@@ -38,6 +41,8 @@ class MainWindow(QMainWindow):
 
         central = QWidget()
         central.setObjectName("shell")
+        central.setAutoFillBackground(True)
+        theme.tint(central, bg="chrome")  # the ground: sidebar and shell are chrome, the sheets canvas
         central.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setCentralWidget(central)
         col = QVBoxLayout(central)
@@ -97,6 +102,7 @@ class MainWindow(QMainWindow):
         self.welcome = Welcome()
         self.pages.addWidget(self.welcome)
         self.session_view: Optional[QWidget] = None
+        self._session_views: OrderedDict[str, QWidget] = OrderedDict()
         self.overview: Optional[QWidget] = None
         self.inbox: Optional[QWidget] = None
         self.panel: Optional[QWidget] = None
@@ -177,16 +183,25 @@ class MainWindow(QMainWindow):
         elif session is not None:
             from .session_view import SessionView
 
-            if self.session_view is None or getattr(self.session_view, "sid", None) != session.get("id"):
-                old = self.session_view
-                self.session_view = SessionView(session)
-                self.pages.addWidget(self.session_view)
-                if old is not None:
+            sid = str(session.get("id"))
+            view = self._session_views.get(sid)
+            if view is None:
+                view = SessionView(session)
+                self.pages.addWidget(view)
+                self._session_views[sid] = view
+                # the last few conversations stay built, so coming back to one is a page flip
+                while len(self._session_views) > SESSION_VIEWS_KEPT:
+                    old_sid, old = next(iter(self._session_views.items()))
+                    if old is view:
+                        break
+                    del self._session_views[old_sid]
                     self.pages.removeWidget(old)
                     old.deleteLater()
             else:
-                self.session_view.update_session(session)
-            self.pages.setCurrentWidget(self.session_view)
+                self._session_views.move_to_end(sid)
+                view.update_session(session)
+            self.session_view = view
+            self.pages.setCurrentWidget(view)
         else:
             self.pages.setCurrentWidget(self.welcome)
         self._on_ui()
@@ -221,6 +236,41 @@ class MainWindow(QMainWindow):
         self.panel_host.setFixedWidth(ui.panel_w)
         self.panel_host.setVisible(panel_open)
         self.body.place()
+        if self.panel is None and session is not None and store.page == "session":
+            # built while the window is idle, so the first open is a flip, not a construction
+            QTimer.singleShot(700, self._prebuild_panel)
+
+    def _prebuild_panel(self) -> None:
+        session = store.active_session()
+        if self.panel is not None or session is None or store.page != "session":
+            return
+        from .panels.right_panel import RightPanel
+
+        self.panel = RightPanel()
+        self.panel_layout.addWidget(self.panel)
+        self.panel.set_session(session)
+        QTimer.singleShot(0, self, self._warm_panel)
+
+    def _warm_panel(self) -> None:
+        """The prebuilt panel laid out and painted once off screen at the size it will open at, so
+        the first open finds its layouts activated, its widgets polished and the font caches warm:
+        a paint of what is there rather than the construction of it. Then, one per turn of the event
+        loop, the syntax lexers the session's edits will need, so the Changes tab's first card does
+        not compile one."""
+        panel = self.panel
+        if panel is None or not shiboken6.isValid(panel):
+            return
+        panel.resize(max(PANEL_MIN, self.panel_host.width()), max(1, self.height()))
+        panel.grab()
+        from .panels.changes import lexer_warmer
+
+        step = lexer_warmer(store.active_id or "")
+
+        def warm() -> None:
+            if step():
+                QTimer.singleShot(0, self, warm)
+
+        QTimer.singleShot(0, self, warm)
 
     # ---- the drag handles (App.tsx resizeSidebar / resizePanel)
     def _drag_sidebar(self, dx: int) -> None:
@@ -267,6 +317,10 @@ class MainWindow(QMainWindow):
         sc("Ctrl+Shift+N", lambda: store.set_dialog("newSession", {}))
         sc("Ctrl+B", lambda: store.set_ui(sidebar=not store.ui.sidebar))
         sc("Ctrl+O", store.cycle_view)
+        sc("Ctrl+=", lambda: store.zoom(1))
+        sc("Ctrl++", lambda: store.zoom(1))
+        sc("Ctrl+-", lambda: store.zoom(-1))
+        sc("Ctrl+0", lambda: store.zoom(0))
         sc("Ctrl+Shift+O", lambda: store.show_page("session" if store.page == "overview" else "overview"))
         sc("Ctrl+\\", lambda: store.set_ui(panel=not store.ui.panel))
         sc("Ctrl+,", lambda: store.set_dialog("settings", True))
@@ -600,7 +654,6 @@ class OfflineBar(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("offline")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(14, 7, 14, 7)
         lay.setSpacing(8)
@@ -608,6 +661,8 @@ class OfflineBar(QWidget):
         self.ico = QLabel()
         lay.addWidget(self.ico)
         self.text = _ElideLabel()
+        self.text.setFont(theme.font_ui(theme.FS_SMALL))
+        theme.tint(self.text, fg="text_2")
         lay.addWidget(self.text)
         lay.addStretch(1)  # centred, like the web's justify-content: center
         self._full = ""
@@ -634,10 +689,13 @@ class OfflineBar(QWidget):
     def _paint(self) -> None:
         t = theme.tokens()
         self.ico.setPixmap(icons.pixmap("wifi-off", t.text_2, 14))
-        self.setStyleSheet(
-            f"#offline {{ background: {theme.blend(t.fill_1, t.canvas).name()}; border-bottom: 1px solid {theme.blend(t.hair, t.canvas).name()}; }}"
-            f" QLabel {{ color: {t.text_2}; font-size: {theme.FS_SMALL}px; }}"
-        )
+        self.update()
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        t = theme.tokens()
+        p = QPainter(self)
+        p.fillRect(self.rect(), theme.blend(t.fill_1, t.canvas))
+        p.fillRect(0, self.height() - 1, self.width(), 1, theme.blend(t.hair, t.canvas))
 
 
 class UpdateNotice(OfflineBar):
@@ -693,9 +751,12 @@ class Boot(QWidget):
         self.mark = WorkingMark(44)
         sl.addWidget(self.mark, 0, Qt.AlignmentFlag.AlignHCenter)
         self.name = label("Pilcrow")
+        self.name.setFont(theme.font_ui(theme.FS_TITLE, 600))
         sl.addWidget(self.name, 0, Qt.AlignmentFlag.AlignHCenter)
         lay.addWidget(stage)
         self.line = label("Connecting")
+        self.line.setFont(theme.font_ui(theme.FS_SMALL))
+        self.setAutoFillBackground(True)
         self.line.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.line.setWordWrap(True)
         self.line.setMaximumWidth(460)
@@ -727,10 +788,7 @@ class Boot(QWidget):
         self._paint()
 
     def _paint(self) -> None:
-        t = theme.tokens()
-        self.setStyleSheet(f"Boot {{ background: {t.canvas}; }}")
-        self.name.setStyleSheet(f"font-size: {theme.FS_TITLE}px; font-weight: 600; color: {t.text};")
-        self.line.setStyleSheet(f"font-size: {theme.FS_SMALL}px; color: {t.err if self._fatal else t.text_2};")
+        theme.tint(self.line, fg="err" if self._fatal else "text_2")
 
     def set_connected(self, on: bool) -> None:
         self._connected = on

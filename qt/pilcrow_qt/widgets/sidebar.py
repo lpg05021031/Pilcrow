@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import time as _time
 from html import escape
-from typing import Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen
@@ -59,13 +59,19 @@ class Sidebar(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("sidebar")
+        self.setAutoFillBackground(True)
+        theme.tint(self, bg="chrome")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self._q = ""
         self._collapsed: Dict[str, bool] = {}
         self._show_all: Dict[str, bool] = {}
         self._rows: Dict[str, SessionRow] = {}
         self._heads: Dict[str, GroupHead] = {}
+        self._labels: Dict[str, SectionLabel] = {}
+        self._mores: Dict[str, MoreButton] = {}
+        self._note: Optional[EmptyNote] = None
         self._archived_view = store.ui.show_archived
+        self._archived_head: Optional[ListHead] = None
         self._now_timer = QTimer(self)
         self._now_timer.setInterval(30_000)
         self._now_timer.timeout.connect(self._tick)
@@ -87,6 +93,7 @@ class Sidebar(QWidget):
         bl.setSpacing(9)
         bl.addWidget(Mark(15))
         self.brand_name = QLabel("Pilcrow")
+        self.brand_name.setFont(theme.font_ui(14, 600))  # .brand-name: 13.5px at 600, a touch tighter
         bl.addWidget(self.brand_name, 1)
         self.collapse_btn = IconBtn("panel-left-close", "Hide sidebar (Ctrl+B)", 15, 24)
         self.collapse_btn.clicked.connect(lambda: store.set_ui(sidebar=False))
@@ -196,13 +203,10 @@ class Sidebar(QWidget):
         store.set_theme(nxt)
 
     def _on_config(self) -> None:
-        t = theme.tokens()
         cur = (store.config or {}).get("theme") or "system"
         nxt = "dark" if cur == "system" else "light" if cur == "dark" else "system"
         self.theme_btn.set_icon_name("monitor" if cur == "system" else "moon" if cur == "dark" else "sun")
         self.theme_btn.setToolTip(f"Appearance: {cur} — click for {nxt}")
-        # .brand-name: 13.5px at 600, a touch tighter
-        self.brand_name.setStyleSheet(f"color: {t.text}; font-size: 14px; font-weight: 600;")
 
     def _on_ui(self) -> None:
         self.setFixedWidth(store.ui.sidebar_w)
@@ -261,23 +265,13 @@ class Sidebar(QWidget):
             groups.setdefault(str(s.get("project") or s.get("cwd") or ""), []).append(s)
         ordered = sorted(groups.items(), key=lambda kv: -(kv[1][0].get("lastModified") or 0))
 
-        # Rebuild the layout, reusing the row and group-head widgets that are still listed (so their
-        # state, their hover and their place stay).
-        while self.list.count() > 1:
-            item = self.list.takeAt(0)
-            w = item.widget()
-            if w is None:
-                continue
-            if isinstance(w, (SessionRow, GroupHead)):
-                w.setParent(None)
-            else:
-                w.hide()  # gone from the screen now; the C++ object follows when the loop gets to it
-                w.setParent(None)
-                w.deleteLater()
+        # The rows and heads are kept across rebuilds; a row that is still listed is updated in place
+        # only when what it shows changed, and the layout is touched only where the order changed.
         keep = {s.get("id") for s in lst}
         for sid in list(self._rows):
             if sid not in keep:
                 row = self._rows.pop(sid)
+                self.list.removeWidget(row)
                 row.hide()
                 row.setParent(None)
                 row.deleteLater()
@@ -285,15 +279,23 @@ class Sidebar(QWidget):
         for key in list(self._heads):
             if key not in keys:
                 head = self._heads.pop(key)
+                self.list.removeWidget(head)
                 head.hide()
                 head.setParent(None)
                 head.deleteLater()
-        idx = 0
+        wanted: List[QWidget] = []
+        if show_archived:
+            if self._archived_head is None:
+                self._archived_head = ListHead(
+                    "Archived", "Back to active sessions", lambda: store.set_ui(show_archived=False)
+                )
+            wanted.append(self._archived_head)
 
-        def add(w: QWidget) -> None:
-            nonlocal idx
-            self.list.insertWidget(idx, w)
-            idx += 1
+        def label_for(key: str, text: str, tone: str = "") -> SectionLabel:
+            lb = self._labels.get(key)
+            if lb is None:
+                lb = self._labels[key] = SectionLabel(text, tone)
+            return lb
 
         def row_for(s: Json, show_project: bool = False) -> SessionRow:
             sid = str(s.get("id"))
@@ -304,13 +306,13 @@ class Sidebar(QWidget):
             return r
 
         if attention:
-            add(SectionLabel("Needs you", "accent"))
+            wanted.append(label_for("attention", "Needs you", "accent"))
             for s in attention:
-                add(row_for(s, True))
+                wanted.append(row_for(s, True))
         if pinned:
-            add(SectionLabel("Pinned"))
+            wanted.append(label_for("pinned", "Pinned"))
             for s in pinned:
-                add(row_for(s, True))
+                wanted.append(row_for(s, True))
         for key, items in ordered:
             head = self._heads.get(key)
             if head is None:
@@ -318,20 +320,58 @@ class Sidebar(QWidget):
                 head.toggled.connect(lambda k=key: self._toggle_group(k))
                 head.add_clicked.connect(lambda k=key: self._new_in(k))
             head.set_collapsed(self._collapsed.get(key, False))
-            add(head)
+            wanted.append(head)
             if self._collapsed.get(key):
                 continue
             limit = len(items) if (self._show_all.get(key) or q) else 6
             for s in items[:limit]:
-                add(row_for(s))
+                wanted.append(row_for(s))
             if len(items) > limit:
-                more = MoreButton(f"Show {len(items) - limit} more")
-                more.clicked.connect(lambda _c=False, k=key: self._show_more(k))
-                add(more)
+                more = self._mores.get(key)
+                if more is None:
+                    more = self._mores[key] = MoreButton("")
+                    more.clicked.connect(lambda _c=False, k=key: self._show_more(k))
+                text = f"Show {len(items) - limit} more"
+                if more.text() != text:
+                    more.setText(text)
+                wanted.append(more)
+        note = ""
         if store.sessions_loaded and not sessions:
-            add(EmptyNote("No sessions yet. Start one to see it here."))
+            note = "No sessions yet. Start one to see it here."
         elif sessions and not ordered and not attention and not pinned:
-            add(EmptyNote("Nothing archived." if show_archived else "No matching sessions."))
+            note = "Nothing archived." if show_archived else "No matching sessions."
+        if note:
+            if self._note is None:
+                self._note = EmptyNote(note)
+            elif self._note.text() != note:
+                self._note.setText(note)
+            wanted.append(self._note)
+        self._place(wanted)
+
+    def _place(self, wanted: List[QWidget]) -> None:
+        """Make the list's layout show ``wanted`` in order, moving only what moved (the stretch at the
+        end stays last). A widget that stays where it is is not touched, so nothing is re-parented."""
+        lay = self.list
+        current: List[QWidget] = []
+        for i in range(lay.count() - 1):
+            w = lay.itemAt(i).widget()
+            if w is not None:
+                current.append(w)
+        if current == wanted:
+            return
+        want = set(wanted)
+        for w in current:
+            if w not in want:
+                lay.removeWidget(w)
+                w.hide()
+        for i, w in enumerate(wanted):
+            item = lay.itemAt(i)
+            cur = item.widget() if item is not None else None
+            if cur is w:
+                continue
+            lay.removeWidget(w)
+            lay.insertWidget(i, w)
+            w.show()
 
     def _toggle_group(self, key: str) -> None:
         self._collapsed[key] = not self._collapsed.get(key, False)
@@ -571,6 +611,9 @@ class SearchRow(QWidget):
         self.icon.setFixedSize(15, 15)
         lay.addWidget(self.icon)
         self.edit = _SearchEdit()
+        self.edit.setStyleSheet(
+            f"QLineEdit {{ background: transparent; border: none; padding: 0; margin: 0; font-size: {theme.FS_UI}px; }}"
+        )
         self.edit.setPlaceholderText("Search")
         self.edit.setFrame(False)
         self.edit.setAccessibleName("Search sessions")
@@ -587,13 +630,7 @@ class SearchRow(QWidget):
     def _paint(self) -> None:
         t = theme.tokens()
         self.icon.setPixmap(icons.pixmap("search", t.text_3, 15))
-        colour = t.text_2 if self.edit.hasFocus() else t.text_3
-        self.edit.setStyleSheet(
-            f"QLineEdit {{ background: transparent; border: none; padding: 0; margin: 0; font-size: {theme.FS_UI}px; color: {colour}; }}"
-        )
-        pal = self.edit.palette()
-        pal.setColor(pal.ColorRole.PlaceholderText, theme.qcolor(t.text_3))
-        self.edit.setPalette(pal)
+        theme.tint(self.edit, fg="text_2" if self.edit.hasFocus() else "text_3", placeholder="text_3")
         self.update()
 
     def eventFilter(self, obj, e: QEvent) -> bool:  # noqa: N802
@@ -656,6 +693,25 @@ class _Pages(QWidget):
 # ---------------------------------------------------------------- the list
 
 
+class ListHead(QWidget):
+    """The head of a list that replaced the usual one (``Archived``): a back arrow and the name, so
+    the list says what it is and how to leave it."""
+
+    def __init__(self, text: str, back_tip: str, on_back: Callable[[], None], parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setFixedHeight(GROUP_GAP + HEAD_H)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(PAD - 4, GROUP_GAP, PAD, 0)
+        lay.setSpacing(4)
+        self.back = IconBtn("arrow-left", back_tip, 14, 24)
+        self.back.clicked.connect(on_back)
+        lay.addWidget(self.back)
+        self.label = QLabel(text)
+        self.label.setFont(theme.font_ui(theme.FS_UI, 600))
+        lay.addWidget(self.label)
+        lay.addStretch(1)
+
+
 class SectionLabel(QLabel):
     """``.side-section-label``: "Needs you" / "Pinned", 14px under whatever is above it."""
 
@@ -665,14 +721,8 @@ class SectionLabel(QLabel):
         self.setFixedHeight(GROUP_GAP + HEAD_H)
         self.setContentsMargins(PAD, GROUP_GAP, PAD, 0)
         self.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
-
-    def _paint(self) -> None:
-        t = theme.tokens()
-        self.setStyleSheet(
-            f"color: {t.accent_text if self._tone == 'accent' else t.text_3}; font-size: {theme.FS_MICRO}px; font-weight: 600;"
-        )
+        self.setFont(theme.font_ui(theme.FS_MICRO, 600))
+        theme.tint(self, fg="accent_text" if tone == "accent" else "text_3")
 
 
 class GroupHead(QWidget):
@@ -804,15 +854,18 @@ class MoreButton(QPushButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedHeight(26)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
-
-    def _paint(self) -> None:
-        t = theme.tokens()
         self.setStyleSheet(
-            f"QPushButton {{ border: none; background: transparent; text-align: left; padding: 0 {PAD}px; min-height: 26px; max-height: 26px; color: {t.text_3}; font-size: {theme.FS_SMALL}px; font-weight: 400; }}"
-            f" QPushButton:hover {{ color: {t.text}; }}"
+            f"QPushButton {{ border: none; background: transparent; text-align: left; padding: 0 {PAD}px; min-height: 26px; max-height: 26px; font-size: {theme.FS_SMALL}px; font-weight: 400; }}"
         )
+        theme.tint(self, fg="text_3")
+
+    def enterEvent(self, e) -> None:  # noqa: N802
+        theme.tint(self, fg="text")
+        super().enterEvent(e)
+
+    def leaveEvent(self, e) -> None:  # noqa: N802
+        theme.tint(self, fg="text_3")
+        super().leaveEvent(e)
 
 
 class EmptyNote(QLabel):
@@ -823,12 +876,8 @@ class EmptyNote(QLabel):
         self.setWordWrap(True)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setContentsMargins(12, 28, 12, 28)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
-
-    def _paint(self) -> None:
-        t = theme.tokens()
-        self.setStyleSheet(f"color: {t.text_3}; font-size: {theme.FS_SMALL}px;")
+        self.setFont(theme.font_ui(theme.FS_SMALL))
+        theme.tint(self, fg="text_3")
 
 
 class SessionRow(QWidget):
@@ -845,6 +894,7 @@ class SessionRow(QWidget):
         self._menu_open = False
         self._show_project = False
         self._q = ""
+        self._sig: Any = None  # what the row showed last (its session dict and flags)
         self.setProperty("data-sid", sid)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedHeight(ROW_H)
@@ -872,6 +922,11 @@ class SessionRow(QWidget):
 
     # ---- data
     def update(self, s: Json, active: bool, unread: bool, show_project: bool, q: str) -> None:  # type: ignore[override]
+        sig = (s, active, unread, show_project, q)
+        if sig == self._sig:
+            self.refresh_time()  # the same row: only the clock moved
+            return
+        self._sig = (dict(s), active, unread, show_project, q)
         self.s = s
         self._active, self._unread, self._show_project = active, unread, show_project
         self._q = q
@@ -909,9 +964,11 @@ class SessionRow(QWidget):
         t = theme.tokens()
         lit = self._active or self._hover or self._menu_open or self._unread
         weight = 600 if self._unread else 400
-        self.title.setStyleSheet(
-            f"color: {t.text if lit else t.text_2}; font-size: {theme.FS_UI}px; font-weight: {weight};"
-        )
+        look = (t.name, lit, weight)
+        if look != getattr(self, "_look", None):
+            self._look = look
+            self.title.setFont(theme.font_ui(theme.FS_UI, weight))
+            theme.tint(self.title, fg="text" if lit else "text_2")
         self.title.refresh()
         QWidget.update(self)
 
@@ -1101,9 +1158,9 @@ class _MetaRow(QWidget):
 
     def _paint(self) -> None:
         t = theme.tokens()
-        css = f"color: {t.text_3}; font-size: {theme.FS_MICRO}px;"
-        self.project.setStyleSheet(css)
-        self.ref.setStyleSheet(css)
+        for lb in (self.project, self.ref):
+            lb.setFont(theme.font_ui(theme.FS_MICRO))
+            theme.tint(lb, fg="text_3")
         if self._icon:
             self.wt_icon.setPixmap(icons.pixmap(self._icon, t.text_3, 11))
 
@@ -1124,18 +1181,14 @@ class _RowEnd(QWidget):
         self.glyph = _RowGlyph()
         lay.addWidget(self.glyph)
         self.time = QLabel()
+        self.time.setFont(theme.font_ui(theme.FS_MICRO))
+        theme.tint(self.time, fg="text_4")
         lay.addWidget(self.time)
         self.menu = IconBtn("ellipsis", "Session actions", 14, 24)
         self.menu.setParent(self)
         self.menu.hide()
         self._quiet = True
         self._hover = False
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
-
-    def _paint(self) -> None:
-        t = theme.tokens()
-        self.time.setStyleSheet(f"color: {t.text_4}; font-size: {theme.FS_MICRO}px;")
 
     def set_quiet(self, quiet: bool) -> None:
         self._quiet = quiet
@@ -1147,6 +1200,10 @@ class _RowEnd(QWidget):
 
     def _apply(self) -> None:
         # .side-row:hover .side-row-status:not(:has(.glyph)) { opacity: 0 }: the time steps aside for the menu
+        state = (self._quiet, self._hover)
+        if state == getattr(self, "_applied", None):
+            return
+        self._applied = state
         self.time.setVisible(self._quiet and not self._hover)
         self.glyph.setVisible(not self._quiet and not self._hover)
         self.menu.setVisible(self._hover)

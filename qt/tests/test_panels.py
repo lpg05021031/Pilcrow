@@ -305,6 +305,16 @@ def test_history_panel_timeline_off(app_client):
     off = [e for e in c.find(EmptyState, page) if e.isVisible()]
     assert off and off[0].text.text() == "The timeline is off for this folder."
     assert off[0].hint.text() == "Timeline is off in the mock"
+    from pilcrow_qt.widgets.panels.right_panel import Btn
+
+    assert not [b for b in c.find(Btn, off[0]) if b.text() == "Turn on in Settings"], "the mock gives its own reason"
+    # When the setting is the reason, the empty state offers it.
+    page._off = None
+    page.meta = {"enabled": False, "reason": None}
+    page.render()
+    c.sleep(30)  # the new block is shown by its layout on the next event-loop turn
+    off = [e for e in c.find(EmptyState, page) if e.isVisible()]
+    assert len(off) == 2 and [b.text() for b in c.find(Btn, off[-1])] == ["Turn on in Settings"]
 
 
 def test_history_panel_with_steps(app_client, monkeypatch):
@@ -366,7 +376,8 @@ def test_history_panel_with_steps(app_client, monkeypatch):
     from pilcrow_qt.widgets.panels.history import StepDetail
 
     c.wait_until(lambda: len(page._rows) == 3, 5, "step rows")
-    assert [r.title.text() for r in page._rows] == ["Session started", "“Please fix it”", "auth.ts"]
+    assert [r.title for r in page._rows] == ["Session started", "Please fix it", "auth.ts"]
+    assert page.list.isVisible() and all(r.warm for r in page._rows), "the rows are blocks, measured as they show"
     assert page.summary.text().startswith("1 change · ")
     assert page.scrubber.isVisible() and page.scrubber.slider.maximum() == 3 and page.scrubber.slider.value() == 3
     page.pick(3)

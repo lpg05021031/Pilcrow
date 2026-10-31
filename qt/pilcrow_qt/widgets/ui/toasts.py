@@ -10,13 +10,14 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, QRectF, Qt
+from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QSystemTrayIcon, QVBoxLayout, QWidget
 
 from ... import icons, theme
 from ...store import Toast, store
 from ..dialogs.parts import Text, toast_bg
-from .bits import IconButton, button
+from .bits import IconButton, Pill, button, paint_box
 from .signals import bind
 
 LEVEL_ICON = {"info": "info", "success": "circle-check", "warning": "triangle-alert", "error": "circle-alert"}
@@ -39,11 +40,19 @@ class Toasts(QWidget):
             if w is not None:
                 w.deleteLater()
         for t in store.toasts:
-            self.lay.addWidget(ToastCard(t), 0, Qt.AlignmentFlag.AlignRight)
+            card = ToastCard(t)
+            self.lay.addWidget(card, 0, Qt.AlignmentFlag.AlignRight)
+            card.show()  # a layout shows a new child on the next event-loop turn; the height is needed now
         self.setVisible(bool(store.toasts))
-        self.adjustSize()
         self.reposition()
         self.raise_()
+
+    def _fit_cards(self) -> None:
+        """Each card takes the width its words want (up to the column) and the height they wrap to."""
+        for i in range(self.lay.count()):
+            card = self.lay.itemAt(i).widget()
+            if isinstance(card, ToastCard):
+                card.fit(self.width())
 
     def reposition(self) -> None:
         p = self.parentWidget()
@@ -51,7 +60,13 @@ class Toasts(QWidget):
             return
         bottom = getattr(p.window(), "composer_bottom_inset", lambda: 0)()
         self.setFixedWidth(min(MAX_W, max(120, p.width() - 36)))
-        self.adjustSize()
+        self._fit_cards()
+        # The height is the column's own sum, read after the layout's cached hint is dropped (the
+        # cards' sizes just changed). Reading it before the cards were shown left a rebuilt column
+        # 0px tall, its toasts unseen until the window was resized.
+        self.lay.invalidate()
+        self.lay.activate()
+        self.setFixedHeight(max(0, self.lay.sizeHint().height()))
         self.move(QPoint(p.width() - self.width() - 16, p.height() - self.height() - bottom - 12))
 
 
@@ -62,7 +77,6 @@ class ToastCard(QWidget):
         super().__init__(parent)
         self.toast = t
         self.setObjectName("toast")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setMinimumHeight(40)
         self.setMaximumWidth(MAX_W)
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Minimum)
@@ -76,8 +90,10 @@ class ToastCard(QWidget):
         self.text.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         lay.addWidget(self.text, 1)
         if t.count > 1:
-            self.count = QLabel(f"×{t.count}")
-            self.count.setObjectName("toast-n")
+            self.count = Pill(f"×{t.count}", bg=lambda tk: theme.over(theme.qcolor(tk.fill_2), toast_bg(tk)), radius=9)
+            self.count.setContentsMargins(6, 0, 6, 0)
+            self.count.setFont(theme.font_ui(10.5))
+            theme.tint(self.count, fg="text_3")
             lay.addWidget(self.count, 0, Qt.AlignmentFlag.AlignVCenter)
         if t.action:
             b = button(str(t.action.get("label", "")), kind="ghost", size="sm")
@@ -90,18 +106,31 @@ class ToastCard(QWidget):
         bind(theme.theme.changed, self, lambda _t: self._paint())
         self._paint()
 
+    def fit(self, column: int) -> None:
+        """Size to the words: as wide as one line wants (at most the column), as tall as they wrap to."""
+        lay = self.layout()
+        w = min(column, lay.sizeHint().width())
+        self.setFixedWidth(w)
+        self.setFixedHeight(
+            max(
+                self.minimumHeight(), lay.totalHeightForWidth(w) if lay.hasHeightForWidth() else lay.sizeHint().height()
+            )
+        )
+
     def _paint(self) -> None:
         tk = theme.tokens()
-        bg = toast_bg(tk).name()
         color = {"info": tk.text_3, "success": tk.ok, "warning": tk.accent_text, "error": tk.err}.get(
             self.toast.level, tk.text_3
         )
-        self.setStyleSheet(
-            f"#toast {{ background: {bg}; border: 1px solid {theme.blend(tk.hair_2, bg).name()}; border-radius: 12px; }}"
-            f" #toast-n {{ background: {theme.blend(tk.fill_2, bg).name()}; color: {tk.text_3}; border-radius: 999px; padding: 0 6px; font-size: 10.5px; }}"
-        )
         self.ico.setPixmap(icons.pixmap(LEVEL_ICON.get(self.toast.level, "info"), color, 15))
         self.ico.setContentsMargins(0, 2, 0, 0)
+        self.update()
+
+    def paintEvent(self, _e) -> None:  # noqa: N802
+        tk = theme.tokens()
+        bg = toast_bg(tk)
+        p = QPainter(self)
+        paint_box(p, QRectF(self.rect()), bg, theme.over(theme.qcolor(tk.hair_2), bg), 12)
 
     def sizeHint(self):  # noqa: N802
         s = super().sizeHint()

@@ -14,6 +14,7 @@ from ... import icons, theme
 from ...lib.fmt import basename, time_ago
 from ...lib.fuzzy import fuzzy_filter
 from ...store import store
+from ..ui.bits import hairline
 from ..ui.signals import bind
 from .parts import Keys, sheet_bg, web_font
 from .sheet import Sheet
@@ -158,20 +159,18 @@ class CommandPalette(Sheet):
         self.input.setProperty("autofocus", True)
         self.input.setPlaceholderText("Search sessions and commands, or type @ for files")
         self.input.setAccessibleName("Search sessions and commands")
-        self.input.setStyleSheet(
-            f"QLineEdit {{ background: transparent; border: none; font-size: 15.5px; padding: 0; color: {t.text}; selection-background-color: {theme.blend(t.selection, sheet_bg(t).name()).name()}; }}"
+        self.input.setStyleSheet("QLineEdit { background: transparent; border: none; font-size: 15.5px; padding: 0; }")
+        theme.tint(
+            self.input,
+            fg="text",
+            placeholder="text_3",
+            highlight=lambda tk: theme.over(theme.qcolor(tk.selection), sheet_bg(tk)),
         )
-        pal = self.input.palette()
-        pal.setColor(pal.ColorRole.PlaceholderText, theme.qcolor(t.text_3))
-        self.input.setPalette(pal)
         self.input.textChanged.connect(self._on_text)
         self.input.installEventFilter(self)
         tl.addWidget(self.input, 1)
         self.body_lay.addWidget(top)
-        line = QFrame()
-        line.setProperty("hairline", "true")
-        line.setFrameShape(QFrame.Shape.NoFrame)
-        self.body_lay.addWidget(line)
+        self.body_lay.addWidget(hairline(over=sheet_bg))
 
         self.list_scroll = QScrollArea()
         self.list_scroll.setWidgetResizable(True)
@@ -185,7 +184,7 @@ class CommandPalette(Sheet):
         self.list_scroll.setWidget(self.list_host)
         self.body_lay.addWidget(self.list_scroll)
         self.empty = QLabel()
-        self.empty.setProperty("tone", "faint")
+        theme.tint(self.empty, fg="text_3")
         self.empty.setContentsMargins(18, 14, 18, 18)
         self.empty.hide()
         self.body_lay.addWidget(self.empty)
@@ -395,16 +394,15 @@ class CommandPalette(Sheet):
         self.rows = []
         self.items = self._compute()
         self._idx = max(0, min(self._idx, len(self.items) - 1))
-        t = theme.tokens()
         last_group = ""
         height = 6 + 10
         for i, c in enumerate(self.items):
             if c.group != last_group:
                 head = QLabel(c.group)
                 head.setFixedHeight(31)  # padding 10 10 5 round an 11px line
-                head.setStyleSheet(
-                    f"color: {t.text_3}; font-size: {theme.FS_MICRO}px; font-weight: 600; padding: 10px 10px 5px;"
-                )
+                head.setContentsMargins(10, 10, 10, 5)
+                head.setFont(theme.font_ui(theme.FS_MICRO, 600))
+                theme.tint(head, fg="text_3")
                 self.list_lay.addWidget(head)
                 last_group = c.group
                 height += 31

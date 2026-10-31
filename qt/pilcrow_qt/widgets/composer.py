@@ -47,6 +47,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QColor,
+    QFont,
     QFontMetrics,
     QImage,
     QKeyEvent,
@@ -54,7 +55,6 @@ from PySide6.QtGui import (
     QMouseEvent,
     QPainter,
     QPainterPath,
-    QPalette,
     QPen,
     QPixmap,
     QTextBlockFormat,
@@ -75,10 +75,12 @@ from PySide6.QtWidgets import (
 )
 
 from .. import icons, theme
+from ..canvas.pixels import hline
 from ..lib.fmt import bytes_, short_model
 from ..lib.fuzzy import fuzzy_filter
 from ..store import store
-from .ui.bits import ContextRing, context_label
+from .ui.bits import ContextRing, IconButton, LayoutButton, context_label
+from .ui.button import Btn
 from .ui.signals import bind
 
 Json = Dict[str, Any]
@@ -419,7 +421,7 @@ def paint_kbd(p: QPainter, x: float, y: float, text: str, small: bool = False) -
         p.setBrush(theme.qcolor(t.fill_2))
         p.drawRoundedRect(r, theme.R1, theme.R1)
         p.setClipPath(_rounded(r, theme.R1))
-        p.fillRect(QRectF(x, y + h - 1, w, 1), theme.qcolor(t.hair))
+        hline(p, x, y + h - 1, w, theme.qcolor(t.hair))
         p.setClipping(False)
     p.setFont(font)
     p.setPen(QColor(t.text_3))
@@ -632,22 +634,43 @@ class ComposerEdit(QTextEdit):
         self.setCursor(Qt.CursorShape.IBeamCursor)
         self.viewport().setCursor(Qt.CursorShape.IBeamCursor)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
-        self.apply_line_height()
-
-    def _paint(self) -> None:
-        t = theme.tokens()
         self.setFont(theme.font_ui(theme.FS_BODY))
-        # the size goes through QSS too: the app sheet's `* { font-size }` would override setFont
-        self.setStyleSheet(
-            f"ComposerEdit {{ background: transparent; border: none; padding: 0; color: {t.text};"
-            f" font-size: {int(theme.FS_BODY + 0.5)}px;"
-            f" selection-background-color: {theme.blend(t.selection, t.raised).name()}; }}"
-        )
-        pal = self.palette()
-        pal.setColor(QPalette.ColorRole.PlaceholderText, theme.qcolor(t.text_3))
-        self.setPalette(pal)
+        self.setStyleSheet("ComposerEdit { background: transparent; border: none; padding: 0; }")
+        theme.tint(self, placeholder="text_3", highlight="selection/raised")
+        self.apply_line_height()
+        # what a change brings in takes the line height at once; the rest of the draft is not read
+        self.document().contentsChange.connect(self._on_contents_change)
+        self._fixing = False
+
+    def _on_contents_change(self, pos: int, _removed: int, added: int) -> None:
+        if self._fixing or added <= 0:
+            return
+        doc = self.document()
+        extra = self.line_extra()
+        block = doc.findBlock(pos)
+        end = doc.findBlock(pos + added)
+        kind = QTextBlockFormat.LineHeightTypes.LineDistanceHeight.value
+        need = False
+        while block.isValid():
+            f = block.blockFormat()
+            if f.lineHeightType() != kind or abs(f.lineHeight() - extra) > 0.01:
+                need = True
+                break
+            if block == end:
+                break
+            block = block.next()
+        if not need:
+            return
+        fmt = QTextBlockFormat()
+        fmt.setLineHeight(extra, kind)
+        cur = QTextCursor(doc)
+        cur.setPosition(pos)
+        cur.setPosition(min(pos + added, doc.characterCount() - 1), QTextCursor.MoveMode.KeepAnchor)
+        self._fixing = True
+        try:
+            cur.mergeBlockFormat(fmt)  # one edit over the whole range, not one per block
+        finally:
+            self._fixing = False
 
     def line_extra(self) -> float:
         """What a 22.475px line adds under the font's own ascent + descent (nothing for a taller fallback face)."""
@@ -684,9 +707,12 @@ class ComposerEdit(QTextEdit):
         return self._composing
 
     def content_height(self) -> int:
-        """What the text wants, in whole lines."""
+        """What the text wants, in whole lines. The document is laid out at the viewport's width by
+        the field itself; setting that width again here would lay the whole draft out twice a key."""
         doc = self.document()
-        doc.setTextWidth(max(10, self.viewport().width()))
+        want = max(10, self.viewport().width())
+        if abs(doc.textWidth() - want) > 0.5:
+            doc.setTextWidth(want)
         line = max(LINE_H, QFontMetrics(self.font()).ascent() + QFontMetrics(self.font()).descent())
         lines = max(1, int(round(doc.documentLayout().documentSize().height() / line)))
         return int(math.ceil(lines * line))
@@ -768,18 +794,6 @@ class ComposerEdit(QTextEdit):
 # ---------------------------------------------------------------- small buttons
 
 
-class LayoutButton(QPushButton):
-    """A QPushButton built from child widgets in a layout: its size comes from the layout, not from its own text."""
-
-    def sizeHint(self):  # noqa: N802
-        lay = self.layout()
-        return lay.sizeHint() if lay is not None else super().sizeHint()
-
-    def minimumSizeHint(self):  # noqa: N802
-        lay = self.layout()
-        return lay.minimumSize() if lay is not None else super().minimumSizeHint()
-
-
 class ChipButton(LayoutButton):
     """A quiet pill with an optional icon, label, sub label and chevron (``.cbtn``): 30px tall, 12px
     medium text, a fill on hover and while its menu is open (the chevron turns on a spring then).
@@ -797,6 +811,7 @@ class ChipButton(LayoutButton):
         self._icon_size = 16 if icon_only else 14
         self._tone = ""
         self._chevron = chevron and not icon_only
+        self._shown: tuple = ()
         self._icon_only = icon_only
         self._open = False
         self._pressed = False
@@ -813,9 +828,12 @@ class ChipButton(LayoutButton):
         self.ico.hide()
         lay.addWidget(self.ico)
         self.text_lb = QLabel()
+        self.text_lb.setFont(theme.font_ui(theme.FS_SMALL, 500))
         self.text_lb.setVisible(not icon_only)
         lay.addWidget(self.text_lb)
         self.sub_lb = QLabel()
+        self.sub_lb.setFont(theme.font_ui(theme.FS_SMALL))
+        theme.tint(self.sub_lb, fg="text_3")
         self.sub_lb.hide()
         lay.addWidget(self.sub_lb)
         # the chevron is painted (it rotates); this keeps its place: 12px less the -2px margin
@@ -832,13 +850,33 @@ class ChipButton(LayoutButton):
         self._paint()
 
     def set(self, text: str, icon: str = "", sub: str = "", tone: str = "") -> None:
+        if (text, icon, sub, tone) == self._shown:
+            return
+        self._shown = (text, icon, sub, tone)
         self.text_lb.setText(text)
-        self.text_lb.setVisible(bool(text) and not self._icon_only)
+        compact = getattr(self, "_compact", False)
+        self.text_lb.setVisible(bool(text) and not self._icon_only and not compact)
         self.sub_lb.setText(f"· {sub}" if sub else "")
         self.sub_lb.setVisible(bool(sub))
         self._icon, self._tone = icon, tone
         self.ico.setVisible(bool(icon))
         self._paint()
+
+    def set_compact(self, on: bool) -> None:
+        """Only the icon (the column is narrow): the label and the chevron come back with the room."""
+        if on == getattr(self, "_compact", False):
+            return
+        self._compact = on
+        self.text_lb.setVisible(not on and bool(self.text_lb.text()) and not self._icon_only)
+        self.sub_lb.setVisible(not on and bool(self.sub_lb.text()))
+        self.chev.setVisible(self._chevron and not on)
+        self.layout().setContentsMargins(0 if on else 9, 0, 0 if on else 9, 0)
+        if on:
+            self.setFixedWidth(30)
+        else:
+            self.setMinimumWidth(0)
+            self.setMaximumWidth(16777215)
+        self.updateGeometry()
 
     def set_open(self, on: bool) -> None:
         if on == self._open:
@@ -851,21 +889,21 @@ class ChipButton(LayoutButton):
     def is_open(self) -> bool:
         return self._open
 
-    def color(self) -> str:
-        t = theme.tokens()
-        tone = {"accent": t.accent_text, "plan": t.plan, "info": t.info, "err": t.err, "set": t.text}.get(self._tone)
+    def color_name(self) -> str:
+        """The token the text and icon take: the tone's, else text (lit) or text-2."""
+        tone = {"accent": "accent_text", "plan": "plan", "info": "info", "err": "err", "set": "text"}.get(self._tone)
         if tone:
             return tone
-        return t.text if (self.underMouse() or self._open) else t.text_2
+        return "text" if (self.underMouse() or self._open) else "text_2"
+
+    def color(self) -> str:
+        return getattr(theme.tokens(), self.color_name())
 
     def _paint(self) -> None:
-        t = theme.tokens()
-        color = self.color()
+        name = self.color_name()
         if self._icon:
-            self.ico.setPixmap(icons.pixmap(self._icon, color, self._icon_size))
-        self.text_lb.setStyleSheet(f"color: {color}; font-size: {theme.FS_SMALL}px; font-weight: 500;")
-        self.sub_lb.setStyleSheet(f"color: {t.text_3}; font-size: {theme.FS_SMALL}px; font-weight: 400;")
-        self.setStyleSheet("QPushButton { border: none; background: transparent; }")
+            self.ico.setPixmap(icons.pixmap(self._icon, getattr(theme.tokens(), name), self._icon_size))
+        theme.tint(self.text_lb, fg=name)
         self.update()
 
     def enterEvent(self, e) -> None:  # noqa: N802
@@ -944,8 +982,10 @@ class SendButton(QPushButton):
     def set_state(self, ready: bool, stop: bool, send_with_enter: bool) -> None:
         prev = self.state
         self.state = "stop" if stop else "ready" if ready else "idle"
-        self.setEnabled(ready or stop)
         tip = "Stop (Esc)" if stop else "Send (Enter)" if send_with_enter else "Send (Ctrl+Enter)"
+        if self.state == prev and tip == self.toolTip():
+            return
+        self.setEnabled(ready or stop)
         self.setToolTip(tip)
         self.setAccessibleName("Stop" if stop else "Send")
         if self.state != prev:
@@ -1089,13 +1129,13 @@ class CtxButton(LayoutButton):
         self.setFixedHeight(30)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAccessibleName("Context window usage")
-        self.setStyleSheet("QPushButton { border: none; background: transparent; }")
         self.lay = QHBoxLayout(self)
         self.lay.setContentsMargins(5, 0, 5, 0)
         self.lay.setSpacing(5)
         self.ring = ContextRing(16)
         self.lay.addWidget(self.ring)
         self.num = QLabel()
+        self.num.setFont(theme.font_ui(theme.FS_MICRO))
         self.num.hide()
         self.lay.addWidget(self.num)
         self._hot = False
@@ -1104,6 +1144,9 @@ class CtxButton(LayoutButton):
         self._paint()
 
     def set_values(self, used: int, total: int) -> None:
+        if (used, total) == getattr(self, "_values", None):
+            return
+        self._values = (used, total)
         pct = used / total if total > 0 else 0.0
         self.ring.set_values(used, total)
         with_num = pct >= 0.5
@@ -1114,9 +1157,7 @@ class CtxButton(LayoutButton):
         self._paint()
 
     def _paint(self) -> None:
-        t = theme.tokens()
-        color = t.err if self._hot else (t.text if self.underMouse() else t.text_3)
-        self.num.setStyleSheet(f"color: {color}; font-size: {theme.FS_MICRO}px;")
+        theme.tint(self.num, fg="err" if self._hot else ("text" if self.underMouse() else "text_3"))
         self.update()
 
     def enterEvent(self, e) -> None:  # noqa: N802
@@ -1754,7 +1795,7 @@ class MenuPopup(_FloatingPanel):
             x0, y = pr.x() + self.PAD, pr.y() + ry
             w = pr.width() - 2 * self.PAD
             if it.get("separator"):
-                p.fillRect(QRectF(x0 + 6, y + 4, w - 12, 1), theme.qcolor(t.hair))
+                hline(p, x0 + 6, y + 4, w - 12, theme.qcolor(t.hair))
                 continue
             if it.get("heading"):
                 p.setFont(micro)
@@ -1976,6 +2017,10 @@ class QueueTray(QFrame):
         self.head_ico = QLabel()
         hl.addWidget(self.head_ico)
         self.head_text = QLabel()
+        head_font = theme.font_ui(theme.FS_MICRO, 600)
+        head_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.1)
+        self.head_text.setFont(head_font)
+        theme.tint(self.head_text, fg="text_3")
         hl.addWidget(self.head_text, 1)
         self.lay.addWidget(head)
         self.rows = QVBoxLayout()
@@ -1988,9 +2033,6 @@ class QueueTray(QFrame):
     def _paint(self) -> None:
         t = theme.tokens()
         self.head_ico.setPixmap(icons.pixmap("clock-3", t.accent_text, 12))
-        self.head_text.setStyleSheet(
-            f"color: {t.text_3}; font-size: {theme.FS_MICRO}px; font-weight: 600; letter-spacing: 0.1px;"
-        )
         self.update()
 
     def paintEvent(self, _e) -> None:  # noqa: N802
@@ -2095,11 +2137,10 @@ class QueueItem(QWidget):
             self.text_btn.setCursor(Qt.CursorShape.IBeamCursor)
             self.text_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             self.text_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-            color = t.text_4 if not text else t.text_2
             self.text_btn.setStyleSheet(
-                f"QPushButton {{ border: none; text-align: left; padding: 2px 0; color: {color};"
-                f" font-size: {theme.FS_UI}px; background: transparent; }} QPushButton:hover {{ color: {t.text}; }}"
+                f"QPushButton {{ border: none; text-align: left; padding: 2px 0; font-size: {theme.FS_UI}px; background: transparent; }}"
             )
+            theme.tint(self.text_btn, fg="text_4" if not text else "text_2")
             self.text_btn.clicked.connect(lambda: tray.start_edit(h["uuid"]))
             lay.addWidget(self.text_btn, 1)
             if (h.get("images") or 0) > 0:
@@ -2110,33 +2151,20 @@ class QueueItem(QWidget):
         al = QHBoxLayout(self.actions)
         al.setContentsMargins(0, 0, 0, 0)
         al.setSpacing(2)
-        self.now = QPushButton("Now")
-        self.now.setFlat(True)
-        self.now.setToolTip("Send now — interrupts the current step")
-        self.now.setAccessibleName("Send now")
-        self.now.setIcon(icons.icon("zap", t.text_3, 12, hover=t.accent_text))
-        self.now.setIconSize(QSize(12, 12))
-        self.now.setFixedHeight(24)
-        self.now.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.now.setStyleSheet(
-            f"QPushButton {{ border: none; border-radius: {theme.R2}px; padding: 0 8px; color: {t.text_3};"
-            f" font-size: 11px; font-weight: 600; background: transparent; }}"
-            f" QPushButton:hover {{ background: {theme.blend(t.fill_2, t.canvas).name()}; color: {t.accent_text}; }}"
+        self.now = Btn(
+            "Now",
+            icon="zap",
+            kind="more",
+            icon_size=12,
+            tooltip="Send now — interrupts the current step",
+            on_click=lambda: store.send_held_now(tray.sid, h["uuid"]),
         )
-        self.now.clicked.connect(lambda: store.send_held_now(tray.sid, h["uuid"]))
+        self.now.override = {"fs": 11, "fw": 600}
+        self.now.setAccessibleName("Send now")
         al.addWidget(self.now)
-        self.x = QPushButton()
-        self.x.setFlat(True)
+        self.x = IconButton("x", "Remove queued message", 13)
         self.x.setFixedSize(24, 24)
         self.x.setToolTip("Remove")
-        self.x.setAccessibleName("Remove queued message")
-        self.x.setIcon(icons.icon("x", t.text_3, 13, hover=t.text))
-        self.x.setIconSize(QSize(13, 13))
-        self.x.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.x.setStyleSheet(
-            f"QPushButton {{ border: none; border-radius: {theme.R2}px; background: transparent; }}"
-            f" QPushButton:hover {{ background: {theme.blend(t.fill_2, t.canvas).name()}; }}"
-        )
         self.x.clicked.connect(lambda: store.remove_held(tray.sid, h["uuid"]))
         al.addWidget(self.x)
         # the actions keep their room and show under the pointer (opacity 0 → 1 in CSS)
@@ -2177,15 +2205,14 @@ class _QueueEdit(QPlainTextEdit):
 
     def __init__(self, text: str, on_save: Callable[[str], None], on_cancel: Callable[[], None]) -> None:
         super().__init__()
-        t = theme.tokens()
         self._save, self._cancel = on_save, on_cancel
         self._done = False
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.document().setDocumentMargin(0)
         self.setStyleSheet(
-            f"QPlainTextEdit {{ background: {t.inset}; border: 1px solid {theme.blend(t.hair_2, t.canvas).name()};"
-            f" border-radius: {theme.R1}px; padding: 2px 6px; color: {t.text}; font-size: {theme.FS_UI}px; }}"
-            f" QPlainTextEdit:focus {{ border-color: {theme.blend(t.accent_line, t.canvas).name()}; }}"
+            f"QPlainTextEdit {{ background: palette(base); border: 1px solid palette(dark);"
+            f" border-radius: {theme.R1}px; padding: 2px 6px; font-size: {theme.FS_UI}px; }}"
+            " QPlainTextEdit:focus { border-color: palette(link-visited); }"
         )
         self.setPlainText(text)
         lines = min(6, max(1, text.count("\n") + 1))
@@ -2446,7 +2473,11 @@ class Composer(QWidget):
 
     @property
     def text(self) -> str:
-        return self.edit.toPlainText()
+        # read many times a keystroke (the draft, the popup, the controls): once per change
+        cached = getattr(self, "_text_cache", None)
+        if cached is None:
+            cached = self._text_cache = self.edit.toPlainText()
+        return cached
 
     @property
     def has_content(self) -> bool:
@@ -2489,7 +2520,7 @@ class Composer(QWidget):
             self.refresh()
 
     def _on_text_changed(self, detect: bool = True) -> None:
-        self.edit.apply_line_height()
+        self._text_cache = None
         _drafts[self.sid] = self.text
         if detect:
             self.hist_pos = -1
@@ -2610,6 +2641,7 @@ class Composer(QWidget):
     def resizeEvent(self, e) -> None:  # noqa: N802
         super().resizeEvent(e)
         self._apply_column()
+        self.mode_btn.set_compact(self.width() < 420)
         self._autosize()
         self._place_overlays()
 

@@ -15,8 +15,7 @@ from ....store import store
 from ...ui import bits
 from ...ui.signals import bind
 from ..ctx import ToolCtx
-from .common import Badge, Hairline, IconLabel, Json, Row, Surface, faint, restyle, vbox
-from .generic import markdown_label
+from .common import Badge, Hairline, IconLabel, Json, Row, Surface, faint, markdown_label, restyle, vbox
 
 
 def extract_answer(text: str, q: str) -> str:
@@ -274,14 +273,9 @@ class AskBody(QWidget):
         bl.addWidget(options)
         note_host = QWidget()
         nl = vbox(note_host)
-        link = bits.button("Add a note", kind="ghost", size="sm")
+        link = bits.button("Add a note", kind="more", size="sm")
         link.setAccessibleName("Add a note")
-        restyle(
-            link,
-            lambda t: (
-                f"QPushButton {{ color: {t.text_3}; padding: 2px 6px; }} QPushButton:hover {{ color: {t.text}; }}"
-            ),
-        )
+        link.override = {"px": 6}
         notes = QLineEdit()
         notes.setPlaceholderText("A note for Claude about this answer")
         notes.setAccessibleName("A note for Claude about this answer")

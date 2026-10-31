@@ -6,6 +6,7 @@ from typing import List, Tuple
 
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
+from ... import theme
 from ..ui.bits import hairline
 from .parts import Keys
 from .sheet import Sheet
@@ -54,7 +55,7 @@ class ShortcutRow(QWidget):
         for p in keys.split(" "):
             if p in _WORDS or (p == "/" and " / " in keys):
                 w = QLabel(p)
-                w.setProperty("tone", "faint")
+                theme.tint(w, fg="text_3")
                 w.setProperty("fs", "small")
                 cl.addWidget(w)
             else:

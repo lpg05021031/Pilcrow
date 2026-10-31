@@ -9,7 +9,7 @@ from PySide6.QtWidgets import QCheckBox, QLabel, QVBoxLayout, QWidget
 
 from ... import theme
 from ...store import ConfirmSpec, store
-from ..ui.bits import button
+from ..ui.bits import Check, button
 from .parts import Well
 from .sheet import Sheet
 
@@ -19,11 +19,10 @@ class ConfirmDialog(Sheet):
         super().__init__(window, "confirm", None, width=440, title=spec.title)
         self.spec = spec
         self.checkbox: Optional[QCheckBox] = None
-        t = theme.tokens()
         if spec.body:
             body = QLabel(spec.body)
             body.setWordWrap(True)
-            body.setStyleSheet(f"color: {t.text_2}; line-height: 1.6;")
+            theme.tint(body, fg="text_2")
             self.body_lay.addWidget(body)
         if spec.list:
             well = Well(theme.R2)
@@ -37,11 +36,11 @@ class ConfirmDialog(Sheet):
                 wl.addWidget(lb)
             if len(spec.list) > 12:
                 more = QLabel(f"and {len(spec.list) - 12} more")
-                more.setProperty("tone", "faint")
+                theme.tint(more, fg="text_3")
                 wl.addWidget(more)
             self.body_lay.addWidget(well)
         if spec.checkbox:
-            self.checkbox = QCheckBox(str(spec.checkbox.get("label", "")))
+            self.checkbox = Check(str(spec.checkbox.get("label", "")))
             self.checkbox.setChecked(bool(spec.checkbox.get("value")))
             self.body_lay.addWidget(self.checkbox)
         self.cancel_btn = button("Cancel", on_click=self.reject)

@@ -40,7 +40,7 @@ def main() -> int:
         c.store.open_session("sess-long")
         c.wait_until(lambda: "sess-long" in c.store.rt and c.store.rt["sess-long"].loaded, 30, "loaded")
         t_loaded = time.perf_counter() - t0
-        from pilcrow_qt.widgets.transcript.view import Transcript
+        from pilcrow_qt.canvas.transcript import Transcript
 
         c.wait_until(lambda: c.find(Transcript), 10, "transcript widget")
         tv = c.find(Transcript)[0]

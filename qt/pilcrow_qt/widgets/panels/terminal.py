@@ -16,7 +16,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import pyte
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QGuiApplication, QKeyEvent, QMouseEvent, QPainter, QWheelEvent
-from PySide6.QtWidgets import QAbstractScrollArea, QFrame, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QAbstractScrollArea, QFrame, QStackedWidget, QVBoxLayout, QWidget
 
 from ... import icons, theme
 from ...lib.fmt import basename, err_text
@@ -664,6 +664,8 @@ class TerminalPanel(QWidget):
         root.addWidget(Hairline())
         self.host = QWidget()
         self.host.setObjectName("chrome")
+        self.host.setAutoFillBackground(True)
+        theme.tint(self.host, bg="chrome")
         self.host.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         hl = QVBoxLayout(self.host)
         hl.setContentsMargins(12, 8, 4, 4)
@@ -681,16 +683,21 @@ class TerminalPanel(QWidget):
 
     @staticmethod
     def _empty_state() -> QWidget:
-        """The web's ``.empty`` here fills the tab (a stretched grid), so its icon sits in the middle of
-        the top half and the sentence in the middle of the bottom half."""
-        e = EmptyState("square-terminal", "The terminal needs python3 (or util-linux `script`) on this machine.")
-        lay = e.layout()
-        lay.setContentsMargins(28, 40, 28, 40)
-        lay.insertStretch(0, 1)
-        lay.insertStretch(2, 2)
+        """One block at the top of the tab, like the other tabs' empty states: the icon, the sentence,
+        and what to do about it."""
+        host = QWidget()
+        lay = QVBoxLayout(host)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(
+            EmptyState(
+                "square-terminal",
+                "The terminal needs python3 (or util-linux `script`) on this machine.",
+                "Install one and open the tab again; the rest of Pilcrow works without it.",
+            )
+        )
         lay.addStretch(1)
-        e.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        return e
+        return host
 
     # ---------------------------------------------------------------- state
     @property
