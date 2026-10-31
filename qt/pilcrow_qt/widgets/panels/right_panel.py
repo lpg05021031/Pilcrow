@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from ... import icons, theme
+from ...canvas.pixels import hline
 from ...store import store
 from ..ui.bits import Hairline, IconButton  # noqa: F401 - Hairline is re-exported to the panels
 from ..ui.button import Btn  # noqa: F401 - re-exported to the panels
@@ -626,7 +627,7 @@ class TabStrip(QWidget):
     def paintEvent(self, _e: QPaintEvent) -> None:  # noqa: N802
         t = theme.tokens()
         p = QPainter(self)
-        p.fillRect(QRect(0, self.height() - 1, self.width(), 1), theme.blend(t.hair, t.canvas))
+        hline(p, 0, self.height() - 1, self.width(), theme.blend(t.hair, t.canvas))
         if self._ink is not None:
             p.setRenderHint(QPainter.RenderHint.Antialiasing)
             p.setPen(Qt.PenStyle.NoPen)

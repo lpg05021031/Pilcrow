@@ -31,6 +31,9 @@ from PySide6.QtGui import (
     QTextCharFormat,
     QTextCursor,
     QTextDocument,
+    QTextFormat,
+    QTextImageFormat,
+    QTextLength,
     QTextOption,
     QTextTable,
     QTransform,
@@ -38,6 +41,7 @@ from PySide6.QtGui import (
 
 from .. import icons, markdown, theme
 from .estimate import Calibration, Metrics
+from .pixels import hline, pen_width, snap
 
 Rect = Tuple[int, int, int, int]
 FULL = "full"
@@ -79,6 +83,65 @@ def tidy_doc(doc: QTextDocument) -> None:
 
 def doc_height(doc: QTextDocument) -> int:
     return max(1, int(math.ceil(doc.size().height())))
+
+
+def fit_doc(doc: QTextDocument, width: int, images: bool = True, wells: bool = True) -> bool:
+    """Fit to the column what the HTML could not size, once the document is laid out: an image
+    wider than the room its block has is scaled down to it (the web's ``max-width: 100%``), and a
+    code well nested in a quote or a list item, whose ``width="100%"`` Qt takes of the frame rather
+    than of the room left by the indent, gets that room as a fixed width. Returns whether anything
+    changed (the layout follows)."""
+    lay = doc.documentLayout()
+    changed = False
+    if wells:
+        for fr in doc.rootFrame().childFrames():
+            if not isinstance(fr, QTextTable):
+                continue
+            tf = fr.format()
+            if not tf.borderCollapse() or tf.width().type() != QTextLength.Type.PercentageLength:
+                continue
+            left = table_rect(doc, lay, fr).left()
+            if left > 0.5 and width - left >= 40:
+                tf.setWidth(QTextLength(QTextLength.Type.FixedLength, width - left))
+                fr.setFormat(tf)
+                changed = True
+    if images:
+        edits: List[Tuple[int, int, QTextImageFormat]] = []
+        b = doc.firstBlock()
+        while b.isValid():
+            if "\ufffc" in b.text():
+                tl = b.layout()
+                it = b.begin()
+                while not it.atEnd():
+                    frag = it.fragment()
+                    it += 1
+                    cf = frag.charFormat()
+                    if not cf.isImageFormat():
+                        continue
+                    imf = cf.toImageFormat()
+                    if imf.hasProperty(QTextFormat.Property.ImageWidth):
+                        continue
+                    res = doc.resource(QTextDocument.ResourceType.ImageResource, QUrl(imf.name()))
+                    if res is None or not hasattr(res, "deviceIndependentSize"):
+                        continue
+                    size = res.deviceIndependentSize()
+                    # the room is what is left of the column from where the image's line starts:
+                    # past the block's margins and indents (a quote's, a list item's)
+                    line = tl.lineForTextPosition(frag.position() - b.position()) if tl is not None else None
+                    left = lay.blockBoundingRect(b).left() + (line.x() if line is not None and line.isValid() else 0)
+                    room = width - left
+                    if size.width() > room >= 40:
+                        imf.setWidth(room)
+                        imf.setHeight(size.height() * room / size.width())
+                        edits.append((frag.position(), frag.length(), imf))
+            b = b.next()
+        for pos, length, imf in edits:
+            cur = QTextCursor(doc)
+            cur.setPosition(pos)
+            cur.setPosition(pos + length, QTextCursor.MoveMode.KeepAnchor)
+            cur.setCharFormat(imf)
+            changed = True
+    return changed
 
 
 def doc_pos_at(doc: QTextDocument, x: float, y: float) -> Optional[int]:
@@ -241,40 +304,35 @@ def _table_rules(p: QPainter, lay: Any, table: QTextTable, fr: QRectF, hair: QCo
             bottom = lay.blockBoundingRect(nxt.firstCursorPosition().block()).top() - pad
         else:
             bottom = fr.bottom()
-        p.fillRect(QRectF(fr.left(), bottom - 1, fr.width(), 1), hair2 if r == 0 else hair)
+        hline(p, fr.left(), bottom - 1, fr.width(), hair2 if r == 0 else hair)
 
 
 WELL_PROP = 0x100000 + 7  # QTextFormat.UserProperty + 7: a block of a well built without a table (grow.py)
 
 
 def well_rects(doc: QTextDocument) -> List[QRectF]:
-    """The rectangles of the wells built from marked blocks (a fence being written), in document
-    coordinates: from the head's padding above its label to the padding under the last line."""
+    """The rectangle of the well built from marked blocks (a fence being written), in document
+    coordinates: from the head's padding above its label to the padding under the last line. A
+    grower builds one well per document (a spacer, the head, the lines, a spacer), so this reads
+    the head from the front and the last line from the back: the cost does not grow with the
+    fence, which is painted after every token."""
     lay = doc.documentLayout()
-    out: List[QRectF] = []
-    top: Optional[float] = None
-    bottom = 0.0
-    b = doc.firstBlock()
-    while b.isValid():
-        bf = b.blockFormat()
-        mark = bf.intProperty(WELL_PROP)
-        br = lay.blockBoundingRect(b)
-        if mark == 1:
-            if top is not None:
-                out.append(QRectF(0, top, doc.textWidth(), bottom - top))
-            top = br.top() - 8
-            bottom = br.top() + 14 + 8
-        elif mark == 2 and top is not None:
-            tl = b.layout()
-            lines = max(1, tl.lineCount() if tl is not None else 1)
-            bottom = br.top() + lines * bf.lineHeight() + 13
-        elif top is not None:
-            out.append(QRectF(0, top, doc.textWidth(), bottom - top))
-            top = None
-        b = b.next()
-    if top is not None:
-        out.append(QRectF(0, top, doc.textWidth(), bottom - top))
-    return out
+    head = doc.firstBlock()
+    while head.isValid() and head.blockFormat().intProperty(WELL_PROP) != 1:
+        head = head.next()
+    if not head.isValid():
+        return []
+    last = doc.lastBlock()
+    while last.isValid() and last.blockFormat().intProperty(WELL_PROP) != 2 and last != head:
+        last = last.previous()
+    top = lay.blockBoundingRect(head).top() - 8
+    bottom = lay.blockBoundingRect(head).top() + 14 + 8
+    if last.isValid() and last != head:
+        bf = last.blockFormat()
+        tl = last.layout()
+        lines = max(1, tl.lineCount() if tl is not None else 1)
+        bottom = lay.blockBoundingRect(last).top() + lines * bf.lineHeight() + 13
+    return [QRectF(0, top, doc.textWidth(), bottom - top)]
 
 
 def paint_decor(p: QPainter, doc: QTextDocument, x: int, y: int, clip: Optional[QRect], t: theme.Tokens) -> None:
@@ -293,10 +351,13 @@ def paint_decor(p: QPainter, doc: QTextDocument, x: int, y: int, clip: Optional[
     else:
         view = QRectF(0, 0, doc.size().width(), doc.size().height())
 
+    pw = pen_width(p)
+
     def well(fr: QRectF) -> None:
+        fr = snap(p, fr)
         p.setBrush(inset)
-        p.setPen(Qt.PenStyle.NoPen if t.dark else QPen(hair, 1))
-        p.drawRoundedRect(fr.adjusted(0.5, 0.5, -0.5, -0.5) if not t.dark else fr, theme.R3, theme.R3)
+        p.setPen(Qt.PenStyle.NoPen if t.dark else QPen(hair, pw))
+        p.drawRoundedRect(fr.adjusted(pw / 2, pw / 2, -pw / 2, -pw / 2) if not t.dark else fr, theme.R3, theme.R3)
         p.setPen(Qt.PenStyle.NoPen)
 
     if doc.firstBlock().blockFormat().intProperty(WELL_PROP):
@@ -327,7 +388,7 @@ def paint_decor(p: QPainter, doc: QTextDocument, x: int, y: int, clip: Optional[
                 nxt = b.next()
                 if nxt.isValid() and nxt.blockFormat().leftMargin() == markdown.QUOTE_INDENT:
                     h += bf.bottomMargin()
-                p.fillRect(QRectF(br.left(), br.top(), 2, h), quote)
+                p.fillRect(snap(p, QRectF(br.left(), br.top(), 2, h)), quote)
             _pills(p, b, br, pill)
         b = b.next()
     p.restore()
@@ -345,8 +406,10 @@ def rounded(
     width: float = 1.0,
 ) -> None:
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    r = QRectF(rect)
+    r = snap(p, QRectF(rect))
     if border is not None:
+        if width <= 1.0:
+            width = pen_width(p)
         p.setPen(QPen(border, width))
         r = r.adjusted(width / 2, width / 2, -width / 2, -width / 2)
     else:
@@ -554,7 +617,7 @@ class Measurer:
         except Exception:  # noqa: BLE001 - a Markdown failure must not take the row down
             body = f"<p>{html.escape(src)}</p>"
         body = link_paths(body)
-        doc = self._doc(self.font(m.base), width)
+        doc = self._doc(self.font(m.base), width, tab_font=self.code_font())
         doc.setIndentWidth(m.list_indent)
         if markdown.CHECK_ON in body:
             for name, on in ((markdown.CHECK_ON, True), (markdown.CHECK_OFF, False)):
@@ -568,7 +631,15 @@ class Measurer:
         doc.setHtml(body)
         tidy_doc(doc)
         doc.setTextWidth(width)
+        images = "<img" in body and body.count("<img") > body.count('<img src="pilcrow-check:')
+        wells = '<table width="100%"' in body
+        if images or wells:
+            fit_doc(doc, width, images=images, wells=wells)
         return doc
+
+    def code_font(self) -> QFont:
+        """The mono face at the size code blocks use (the documents' tab stops are measured in it)."""
+        return self.font(markdown.px(markdown.mono_size()), mono=True)
 
     def html_doc(self, body: str, width: int, font: Optional[QFont] = None, css: str = "") -> QTextDocument:
         doc = self._doc(font or self.font(theme.FS_UI), width)
@@ -581,7 +652,7 @@ class Measurer:
 
     def blank_doc(self, width: int, font: Optional[QFont] = None) -> QTextDocument:
         """An empty document in the prose font (a grower builds a streaming block into it)."""
-        return self._doc(font or self.font(self.prose.base), width)
+        return self._doc(font or self.font(self.prose.base), width, tab_font=self.code_font())
 
     def plain_doc(self, text: str, width: int, font: QFont) -> QTextDocument:
         doc = self._doc(font, width)
@@ -589,11 +660,15 @@ class Measurer:
         doc.setTextWidth(width)
         return doc
 
-    def _doc(self, font: QFont, width: int) -> QTextDocument:
+    def _doc(self, font: QFont, width: int, tab_font: Optional[QFont] = None) -> QTextDocument:
         doc = QTextDocument()
         doc.setDocumentMargin(0)
         doc.setDefaultFont(font)
         doc.setUseDesignMetrics(False)
+        # a tab is TAB_COLS columns of the code face (Qt's default stop is 80px, eleven columns)
+        opt = doc.defaultTextOption()
+        opt.setTabStopDistance(markdown.TAB_COLS * self.fm(tab_font or font).horizontalAdvance("0"))
+        doc.setDefaultTextOption(opt)
         return doc
 
     def check_pixmap(self, on: bool, width: int) -> QPixmap:

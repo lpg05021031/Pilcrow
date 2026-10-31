@@ -75,6 +75,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import icons, theme
+from ..canvas.pixels import hline
 from ..lib.fmt import bytes_, short_model
 from ..lib.fuzzy import fuzzy_filter
 from ..store import store
@@ -420,7 +421,7 @@ def paint_kbd(p: QPainter, x: float, y: float, text: str, small: bool = False) -
         p.setBrush(theme.qcolor(t.fill_2))
         p.drawRoundedRect(r, theme.R1, theme.R1)
         p.setClipPath(_rounded(r, theme.R1))
-        p.fillRect(QRectF(x, y + h - 1, w, 1), theme.qcolor(t.hair))
+        hline(p, x, y + h - 1, w, theme.qcolor(t.hair))
         p.setClipping(False)
     p.setFont(font)
     p.setPen(QColor(t.text_3))
@@ -1794,7 +1795,7 @@ class MenuPopup(_FloatingPanel):
             x0, y = pr.x() + self.PAD, pr.y() + ry
             w = pr.width() - 2 * self.PAD
             if it.get("separator"):
-                p.fillRect(QRectF(x0 + 6, y + 4, w - 12, 1), theme.qcolor(t.hair))
+                hline(p, x0 + 6, y + 4, w - 12, theme.qcolor(t.hair))
                 continue
             if it.get("heading"):
                 p.setFont(micro)

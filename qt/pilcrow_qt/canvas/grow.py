@@ -224,7 +224,9 @@ class FenceGrower(Grower):
 
     def _line_format(self, line: str) -> QTextBlockFormat:
         lead = len(line) - len(line.lstrip(" \t"))
-        cols = lead + 3 * line[:lead].count("\t") + markdown.WRAP_INDENT if len(line) > lead else 0
+        cols = (
+            lead + (markdown.TAB_COLS - 1) * line[:lead].count("\t") + markdown.WRAP_INDENT if len(line) > lead else 0
+        )
         ind = int(cols * self.ch + 0.5)
         bf = QTextBlockFormat()
         bf.setLeftMargin(PAD_LEFT + ind)
@@ -547,7 +549,8 @@ class TableGrower(Grower):
             if i == 1:
                 continue
             rows.append(self._cells(line, head=i == 0))
-        self.widths, self.mins, self.maxs = markdown.table_plan(rows, self.mm, self.width)
+        self.widths, self.mins, self.maxs, self.hards = markdown.table_plan(rows, self.mm, self.width)
+        self.squeezed = markdown.squeezed(self.widths, self.mins)
         return self.render("\n".join(done))
 
     @staticmethod
@@ -563,10 +566,14 @@ class TableGrower(Grower):
         raw = markdown.table_cells(line)[: self.ncol]
         raw += [""] * (self.ncol - len(raw))
         tag = "th" if head else "td"
-        return [
-            (tag, self.aligns[c], link_paths(markdown.render_inline(text, self.mm, colour=False)))
-            for c, text in enumerate(raw)
-        ]
+        sq = getattr(self, "squeezed", ())
+        cells: List[markdown.Cell] = []
+        for c, text in enumerate(raw):
+            inner = link_paths(markdown.render_inline(text, self.mm, colour=False))
+            if c < len(sq) and sq[c]:
+                inner = inner.replace(markdown.NO_BREAK, "")  # a squeezed column lets its code spans break
+            cells.append((tag, self.aligns[c], inner))
+        return cells
 
     def _tables(self) -> List[QTextTable]:
         return [f for f in self.doc.rootFrame().childFrames() if isinstance(f, QTextTable)]
@@ -590,14 +597,17 @@ class TableGrower(Grower):
         tables = self._tables()
         if not tables:
             return False
-        mins, maxs = list(self.mins), list(self.maxs)
+        mins, maxs, hards = list(self.mins), list(self.maxs), list(self.hards)
         for c, (_tag, _align, inner) in enumerate(cells):
-            mx, mn = markdown.cell_widths(inner, self.mm)
+            mx, mn, hd = markdown.cell_widths(inner, self.mm)
             maxs[c] = max(maxs[c], mx + markdown.CELL_PAD)
             mins[c] = max(mins[c], mn + markdown.CELL_PAD)
-        if (mins, maxs) != (self.mins, self.maxs):
-            self.mins, self.maxs = mins, maxs
-            widths = markdown.column_widths(mins, maxs, float(self.width))
+            hards[c] = max(hards[c], hd + markdown.CELL_PAD)
+        if (mins, maxs, hards) != (self.mins, self.maxs, self.hards):
+            self.mins, self.maxs, self.hards = mins, maxs, hards
+            widths = markdown.column_widths(mins, maxs, float(self.width), hards)
+            if markdown.squeezed(widths, mins) != self.squeezed:
+                return False  # a column has just run out of room: the cells of the rows so far are re-rendered
             if widths != self.widths:
                 self.widths = widths
                 for table in tables:

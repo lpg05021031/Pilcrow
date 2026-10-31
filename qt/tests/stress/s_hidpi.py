@@ -9,8 +9,9 @@ import subprocess
 import sys
 
 CODE = r"""
+import os
 import sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.environ["PILCROW_STRESS"])
 from core import app, Session, assistant, user, pump
 app()
 from PySide6.QtCore import QRect
@@ -53,6 +54,11 @@ s.close()
 """
 
 if __name__ == "__main__":
-    env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QT_SCALE_FACTOR=sys.argv[1] if len(sys.argv) > 1 else "1.5")
+    env = dict(
+        os.environ,
+        QT_QPA_PLATFORM="offscreen",
+        QT_SCALE_FACTOR=sys.argv[1] if len(sys.argv) > 1 else "1.5",
+        PILCROW_STRESS=os.path.dirname(os.path.abspath(__file__)),
+    )
     out = subprocess.run([sys.executable, "-c", CODE], env=env, capture_output=True, text=True, timeout=120)
     print("\n".join(line for line in (out.stdout + out.stderr).splitlines() if "propagate" not in line))

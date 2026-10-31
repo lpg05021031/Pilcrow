@@ -69,7 +69,7 @@ def run(kind: str, scrolled_up: bool = False) -> str:
     st = Streamer(s, kind_of)
     per: list = []
     t_all = time.perf_counter()
-    for i, tok in enumerate(tokens):
+    for tok in tokens:
         t0 = time.perf_counter()
         st.delta(tok)
         pump(3)

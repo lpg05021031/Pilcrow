@@ -11,6 +11,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QFontMetricsF, QPainter, 
 from PySide6.QtWidgets import QAbstractButton, QFrame, QHBoxLayout, QLabel, QSizePolicy, QWidget
 
 from ... import theme
+from ...canvas.pixels import hline
 from ..ui.bits import Box, LayoutButton, Pill, paint_box  # noqa: F401 - LayoutButton is re-exported
 from ..ui.signals import bind
 
@@ -120,10 +121,7 @@ class Kbd(QLabel):
                 fill = theme.blend(t.fill_2, t.canvas)
                 paint_box(p, r, fill, None, theme.R1)
                 # the web's inset 0 -1px hair under the cap: a one-pixel darker bottom edge
-                p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-                p.fillRect(
-                    QRectF(theme.R1, r.height() - 1, r.width() - 2 * theme.R1, 1), theme.blend(t.hair, fill.name())
-                )
+                hline(p, theme.R1, r.height() - 1, r.width() - 2 * theme.R1, theme.blend(t.hair, fill.name()))
             p.end()
         super().paintEvent(e)
 

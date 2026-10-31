@@ -6,19 +6,20 @@ Folders that are not git repositories show the edits this session's tools made i
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtGui import QKeyEvent, QPainter
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPlainTextEdit, QScrollArea, QVBoxLayout, QWidget
 
 from ... import icons, theme
-from ...lib.fmt import basename, dirname, err_text, plural
+from ...lib.fmt import basename, dirname, err_text, lang_from_path, plural
 from ...store import ConfirmSpec, store
 from ..ui.bits import Spinner
 from ..ui.menu import show_menu
 from ..ui.signals import bind
 from .diff_view import DiffView, Num, hunks_from_patch, style_textarea
+from .editor import lexer_for_path
 from .right_panel import Btn, EmptyState, Hairline, Refresher, Seg, Toolbar, icon_btn, lbl
 
 Json = Dict[str, Any]
@@ -115,6 +116,29 @@ class NotesBar(QWidget):
 
 
 EDIT_TOOLS = ("Edit", "Write", "MultiEdit")
+
+
+def lexer_warmer(sid: str) -> Callable[[], bool]:
+    """A step that compiles one more of the syntax lexers the session's edits will need (Pygments
+    builds a lexer's state machine on first use, some 30 ms each) and says whether any remain. Run
+    at idle, so the Changes tab's first card does not pay for it."""
+    m = store.models.get(sid)
+    langs: List[str] = []
+    seen = set()
+    for t in m.tools.values() if m else []:
+        if t.name in EDIT_TOOLS:
+            path = str((t.input or {}).get("file_path") or "")
+            lang = lang_from_path(path)
+            if lang not in seen:
+                seen.add(lang)
+                langs.append(path)
+
+    def step() -> bool:
+        if langs:
+            lexer_for_path(langs.pop(0))
+        return bool(langs)
+
+    return step
 
 
 class ChangesPanel(QWidget):

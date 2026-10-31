@@ -24,8 +24,8 @@ from __future__ import annotations
 import html
 import math
 import re
+from collections import OrderedDict
 from dataclasses import dataclass
-from functools import lru_cache
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtGui import QFontMetricsF
@@ -149,6 +149,9 @@ CHECK_ON, CHECK_OFF = "pilcrow-check:on", "pilcrow-check:off"
 CHECK_SIZE = 14
 # A code line that wraps continues this many characters past the line's own indentation.
 WRAP_INDENT = 2
+# A tab in code is this many mono columns: the documents' tab stops (``Measurer._doc``) and the
+# hanging indent of a tab-indented line (``code_lines_html``, ``grow.FenceGrower``) agree on it.
+TAB_COLS = 4
 # A table column squeezed for room keeps at least this many characters of prose a line.
 MIN_CELL_CHARS = 6
 HAN = re.compile("[\u2e80-\u9fff\uac00-\ud7af\uf900-\ufaff\uff00-\uffef]+")
@@ -372,10 +375,38 @@ def _styled(code: str, lang: str, t: theme.Tokens) -> List[Tuple[str, Optional[s
     return out
 
 
-@lru_cache(maxsize=512)
+HL_CACHE_CHARS = 4_000_000  # of source kept highlighted: a session of big fences cannot pin memory
+HL_CACHE_ENTRIES = 512
+_hl_cache: OrderedDict[Tuple[str, str, str], Tuple[str, ...]] = OrderedDict()
+_hl_chars = 0
+
+
 def highlight_lines(code: str, lang: str, theme_name: str) -> Tuple[str, ...]:
     """Each line of ``code`` as escaped HTML with the theme's syntax colours (``<span style="color:…">``
-    runs); plain escaped lines when Pygments has no lexer."""
+    runs); plain escaped lines when Pygments has no lexer. The results are kept, least recently used
+    first out, under a budget of source characters as well as a count."""
+    global _hl_chars
+    key = (code, lang, theme_name)
+    hit = _hl_cache.get(key)
+    if hit is not None:
+        _hl_cache.move_to_end(key)
+        return hit
+    out = tuple(_highlight_lines(code, lang, theme_name))
+    if len(code) <= HL_CACHE_CHARS // 4:
+        _hl_cache[key] = out
+        _hl_chars += len(code)
+        while _hl_cache and (_hl_chars > HL_CACHE_CHARS or len(_hl_cache) > HL_CACHE_ENTRIES):
+            (old_code, _l, _t), _v = _hl_cache.popitem(last=False)
+            _hl_chars -= len(old_code)
+    return out
+
+
+def highlight_cache_size() -> Tuple[int, int]:
+    """(entries, source characters) the highlight cache holds."""
+    return len(_hl_cache), _hl_chars
+
+
+def _highlight_lines(code: str, lang: str, theme_name: str) -> List[str]:
     t = theme.DARK if theme_name == "dark" else theme.LIGHT
     lines = code.split("\n")
     out: List[str] = [""]
@@ -389,7 +420,7 @@ def highlight_lines(code: str, lang: str, theme_name: str) -> Tuple[str, ...]:
     out = out[: len(lines)]
     while len(out) < len(lines):
         out.append("")
-    return tuple(out)
+    return out
 
 
 def token_runs(line: str, lang: str, theme_name: str) -> List[Tuple[int, int, str]]:
@@ -635,7 +666,7 @@ def code_lines_html(code: str, lang: str, theme_name: str, mono: str, size_px: i
     out: List[str] = []
     for raw, hl in zip(code.split("\n"), highlight_lines(code, lang, theme_name)):
         lead = len(raw) - len(raw.lstrip(" \t"))
-        cols = lead + 3 * raw[:lead].count("\t") + WRAP_INDENT if len(raw) > lead else 0
+        cols = lead + (TAB_COLS - 1) * raw[:lead].count("\t") + WRAP_INDENT if len(raw) > lead else 0
         ind = int(cols * ch + 0.5)
         out.append(
             f"<p style=\"font-family:'{mono}';font-size:{size_px}px;margin:0;line-height:{line_px}px;"
@@ -667,45 +698,56 @@ _UNIT_RE_TEXT = re.compile(
 )
 
 
-def _text_widths(fragment: str, fm: QFontMetricsF) -> Tuple[float, float]:
-    """(width on one line, widest unbreakable unit) of an HTML fragment of prose: words, or single
-    CJK characters, are the units a line may break between."""
+def _text_widths(fragment: str, fm: QFontMetricsF) -> Tuple[float, float, float]:
+    """(width on one line, widest unbreakable unit, widest character) of an HTML fragment of prose:
+    words, or single CJK characters, are the units a line may break between; a character is where
+    it breaks when it must."""
     text = html.unescape(_TAG_RE.sub("", fragment))
     if not text.strip():
-        return 0.0, 0.0
+        return 0.0, 0.0, 0.0
     widest = max((fm.horizontalAdvance(u) for u in _UNIT_RE_TEXT.findall(text)), default=0.0)
-    return fm.horizontalAdvance(text), widest
+    hard = max((fm.horizontalAdvance(ch) for ch in set(text) if not ch.isspace()), default=0.0)
+    return fm.horizontalAdvance(text), widest, hard
 
 
-def cell_widths(inner: str, m: Metrics, head: bool = False) -> Tuple[float, float]:
-    """(the width a cell's content wants on one line, the least it can be given) from the prose and
-    the code spans in it; a code span never breaks, and a heading cell is measured in its semibold."""
+def cell_widths(inner: str, m: Metrics, head: bool = False) -> Tuple[float, float, float]:
+    """(the width a cell's content wants on one line, the least it can be given, the least Qt will
+    lay it out in) from the prose and the code spans in it. A code span never breaks, so the least a
+    cell can be given is the span's width; when the table does not fit even so, the spans are let
+    break (``squeezed``) and the layout can go down to the widest character, but never under it.
+    A heading cell is measured in its semibold."""
     fm_t = font_metrics(m.table, weight=600 if head else 400)
     fm_c = font_metrics(m.code, mono=True)
     max_w = 0.0
     min_w = 0.0
+    hard_w = 0.0
     pos = 0
     for mt in _CODE_RE.finditer(inner):
-        w, u = _text_widths(inner[pos : mt.start()], fm_t)
+        w, u, h = _text_widths(inner[pos : mt.start()], fm_t)
         max_w += w
         min_w = max(min_w, u)
+        hard_w = max(hard_w, h)
         code = html.unescape(_TAG_RE.sub("", mt.group(1))).replace(NO_BREAK, "")
         cw = fm_c.horizontalAdvance(code)
         max_w += cw
         min_w = max(min_w, cw)
+        hard_w = max(hard_w, max((fm_c.horizontalAdvance(ch) for ch in set(code) if not ch.isspace()), default=0.0))
         pos = mt.end()
-    w, u = _text_widths(inner[pos:], fm_t)
+    w, u, h = _text_widths(inner[pos:], fm_t)
     max_w += w
     min_w = max(min_w, u)
+    hard_w = max(hard_w, h)
     # prose never squeezes below a few characters a line (CJK would otherwise go one character a line)
     min_w = max(min_w, min(max_w, fm_t.horizontalAdvance("中") * MIN_CELL_CHARS))
-    return max_w, min_w
+    return max_w, min_w, hard_w
 
 
-def column_widths(mins: Sequence[float], maxs: Sequence[float], avail: float) -> List[int]:
+def column_widths(mins: Sequence[float], maxs: Sequence[float], avail: float, hards: Sequence[float] = ()) -> List[int]:
     """Browser-style auto table layout: every column at the width its widest line wants when that
     fits (and at least 60% of the room shared out between them, ``min-width: 60%``); otherwise each
-    at least its widest word, the rest of the room shared in proportion to what they still want."""
+    at least its widest word, the rest of the room shared in proportion to what they still want.
+    When not even that fits, each column keeps the width Qt will not go under (``hards``: its widest
+    character) and the rest is squeezed in proportion, so the table ends where it was planned to."""
     n = len(mins)
     if not n:
         return []
@@ -719,7 +761,12 @@ def column_widths(mins: Sequence[float], maxs: Sequence[float], avail: float) ->
         spare = [w - n for w, n in zip(want, need)]
         shares = _summing_to(spare if sum(spare) > 0 else [1] * n, room - sum(need))
         return [mn + sh for mn, sh in zip(need, shares)]
-    return _summing_to(need, room)
+    floors = [min(nd, int(math.ceil(h))) for nd, h in zip(need, hards)] if len(hards) == n else [0] * n
+    if sum(floors) >= room:
+        return floors  # the columns cannot be narrower: the table is as wide as it must be
+    spare = [nd - fl for nd, fl in zip(need, floors)]
+    shares = _summing_to(spare if sum(spare) > 0 else [1] * n, room - sum(floors))
+    return [fl + sh for fl, sh in zip(floors, shares)]
 
 
 def _summing_to(ws: Sequence[float], total: int) -> List[int]:
@@ -740,25 +787,44 @@ LIST_CHUNK = 40  # items per list while a flat list is being written (a block jo
 Cell = Tuple[str, str, str]  # tag (th/td), align, inner HTML
 
 
-def table_plan(rows: Sequence[Sequence[Cell]], m: Metrics, width: int) -> Tuple[List[int], List[float], List[float]]:
+Plan = Tuple[List[int], List[float], List[float], List[float]]  # widths, and each column's least, most, floor
+
+
+def table_plan(rows: Sequence[Sequence[Cell]], m: Metrics, width: int) -> Plan:
     """Column widths for the rows (see ``column_widths``), with the least and the most each column
-    wants, so a row added later can tell whether the plan still holds."""
+    wants and the floor it cannot go under, so a row added later can tell whether the plan still holds."""
     ncol = max((len(r) for r in rows), default=0)
     mins = [0.0] * ncol
     maxs = [0.0] * ncol
+    hards = [0.0] * ncol
     for row in rows:
         for c, (tag, _align, inner) in enumerate(row):
-            mx, mn = cell_widths(inner, m, head=tag == "th")
+            mx, mn, hd = cell_widths(inner, m, head=tag == "th")
             maxs[c] = max(maxs[c], mx + CELL_PAD)
             # a heading stays on one line: a column is never narrower than its name
             mins[c] = max(mins[c], (mx if tag == "th" else mn) + CELL_PAD)
+            hards[c] = max(hards[c], hd + CELL_PAD)
     avail = float(width) if width > 0 else sum(maxs)
-    return column_widths(mins, maxs, avail), mins, maxs
+    return column_widths(mins, maxs, avail, hards), mins, maxs, hards
 
 
-def table_html(rows: Sequence[Sequence[Cell]], widths: Sequence[int], m: Metrics, top: int, bottom: int) -> str:
+def squeezed(widths: Sequence[int], mins: Sequence[float]) -> Tuple[bool, ...]:
+    """Which columns got less than the least they asked for (the table did not fit the room even so):
+    a code span in such a column may break, since it cannot overhang the cell instead."""
+    return tuple(w < int(math.ceil(mn)) for w, mn in zip(widths, mins))
+
+
+def table_html(
+    rows: Sequence[Sequence[Cell]],
+    widths: Sequence[int],
+    m: Metrics,
+    top: int,
+    bottom: int,
+    squeezed: Sequence[bool] = (),
+) -> str:
     """One ``<table>`` of the rows: cells padded 7px 14px 7px 0 at 0.93em, the first row carrying the
-    column widths; ``top``/``bottom`` are its margins (a continuation chunk has none above)."""
+    column widths; ``top``/``bottom`` are its margins (a continuation chunk has none above). The
+    cells of a ``squeezed`` column lose the joiners that keep a code span on one line."""
     out = [
         f'<table width="{sum(widths)}" cellpadding="0" cellspacing="0" style="margin-top:{top}px;margin-bottom:{bottom}px">'
     ]
@@ -766,6 +832,8 @@ def table_html(rows: Sequence[Sequence[Cell]], widths: Sequence[int], m: Metrics
         out.append("<tr>")
         for c, (tag, align, inner) in enumerate(row):
             width_attr = f' width="{widths[c]}"' if r == 0 and c < len(widths) else ""
+            if c < len(squeezed) and squeezed[c]:
+                inner = inner.replace(NO_BREAK, "")
             out.append(
                 f'<{tag}{width_attr} style="padding-left:0;padding-right:{CELL_PAD}px;padding-top:7px;padding-bottom:7px;'
                 f'font-size:{m.table}px;text-align:{align or "left"}">{inner}</{tag}>'
@@ -786,16 +854,17 @@ def _table(mt: re.Match, t: theme.Tokens, m: Metrics, width: int, chunk: bool = 
             rows.append([(tag, (style or "").replace("text-align:", ""), inner) for tag, style, inner in cells])
     if not rows:
         return ""
-    widths, _mins, _maxs = table_plan(rows, m, width)
+    widths, mins, _maxs, _hards = table_plan(rows, m, width)
+    sq = squeezed(widths, mins)
     top, bottom = px(m.base * 0.4), m.base
     if not chunk or len(rows) <= 1 + TABLE_CHUNK:
-        return table_html(rows, widths, m, top, bottom)
+        return table_html(rows, widths, m, top, bottom, sq)
     groups = [rows[: 1 + TABLE_CHUNK]]
     for i in range(1 + TABLE_CHUNK, len(rows), TABLE_CHUNK):
         groups.append(rows[i : i + TABLE_CHUNK])
     last = len(groups) - 1
     return "".join(
-        table_html(g, widths, m, top if k == 0 else 0, bottom if k == last else 0) for k, g in enumerate(groups)
+        table_html(g, widths, m, top if k == 0 else 0, bottom if k == last else 0, sq) for k, g in enumerate(groups)
     )
 
 

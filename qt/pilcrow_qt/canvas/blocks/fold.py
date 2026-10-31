@@ -38,6 +38,7 @@ from ...lib.units import Unit, WorkUnit
 from ...store import store
 from ...widgets.transcript.ctx import ToolCtx
 from ..paint import Measurer, PaintState, doc_height, draw_doc, rounded
+from ..pixels import vline
 from ..scene import Block, Group, Target
 from .base import chevron, paint_head_tint
 from .misc import (
@@ -413,7 +414,7 @@ class Steps(Group):
 
     def paint(self, p: QPainter, x: int, y: int, w: int, st: PaintState) -> None:
         if len(self.children) > 2:
-            p.fillRect(QRect(x + 8, y + 14, 1, max(0, self.h - 28)), theme.blend(st.t.hair_2, st.t.canvas))
+            vline(p, x + 8, y + 14, self.h - 28, theme.blend(st.t.hair_2, st.t.canvas))
 
 
 # ---------------------------------------------------------------- chapters
@@ -510,7 +511,7 @@ class ChapterGroup(Group):
         hover = st.hover is not None and st.hover.kind == "head"
         # the rail: a dot, and a line down to the next chapter
         if not self.last:
-            p.fillRect(QRect(x + 7, y + 18, 1, self.h - 18 + 12), theme.blend(t.hair_2, t.canvas))
+            vline(p, x + 7, y + 18, self.h - 18 + 12, theme.blend(t.hair_2, t.canvas))
         c = QColor(t.err if self.tally_failed else t.accent if self.live else t.text_4)
         if self.live:
             phase = (st.now % 1.4) / 1.4
@@ -743,7 +744,7 @@ class FoldGroup(Group):
             st.m.draw_text(p, x + w - tw, y + (self.HEAD - st.m.line_h(fm)) / 2, n, fm, QColor(t.text_4))
         # the rule down the left of the open body
         if self.reveal > 0 and self.h > self.HEAD:
-            p.fillRect(QRect(x, y + self.HEAD + 4, 1, max(0, self.h - self.HEAD - 8)), theme.blend(t.hair_2, t.canvas))
+            vline(p, x, y + self.HEAD + 4, self.h - self.HEAD - 8, theme.blend(t.hair_2, t.canvas))
 
     def hit(self, x: int, y: int) -> Optional[Target]:
         return Target("head", "fold", (0, 0, self.h_width or 0, self.HEAD)) if y < self.HEAD else None

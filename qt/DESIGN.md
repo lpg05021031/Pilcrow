@@ -37,7 +37,10 @@ qt/pilcrow_qt/canvas/
   estimate.py     height estimation (formula + fast measure) and its calibration
   anchor.py       anchor choice and correction, follow state, the scroll easing
   scene.py        Block, Group, Scene, incremental reconciliation, warm/cold, prefetch order
-  paint.py        PaintState, the pixmap cache, decoration painters (ported from items.py)
+  paint.py        PaintState, the pixmap cache, decoration painters (ported from items.py), the
+                  fit pass over a laid-out document (images and nested wells to the column)
+  pixels.py       rules and bordered rectangles on the device pixel grid (hline, vline, snap)
+  grow.py         the growers: a fence, a list, a table, a paragraph being written grow in place
   canvas.py       CanvasView(QAbstractScrollArea): events, hit testing, hover, focus, selection,
                   islands, overlays, the paint loop, pixel scrolling
   blocks/
@@ -297,6 +300,16 @@ wraps past its own indentation, a task list's boxes as image resources in the ma
 markers in the quiet colour with the words wrapped in theirs. A prose block keeps the rectangle of
 each code well (`ProseBlock.wells`) and paints a Copy at its corner while the pointer is on it.
 
+What the HTML cannot size before the layout, `fit_doc` fixes after it, once the document knows
+where its blocks are: an image wider than the room its line has (the column less a quote's or a
+list's indent) is scaled down to that room (`max-width: 100%`), and a code well nested in a quote
+or a list item, whose `width="100%"` Qt takes of the frame rather than of the room left by the
+indent, gets that room as a fixed width. The pass runs only for documents whose HTML has an image
+or a nested well, and costs them a second layout of the part it changed. Every document's tab
+stop is four columns of the code face (`markdown.TAB_COLS`; Qt's default is 80 px), and the hanging
+indent of a tab-indented code line counts a tab as the same four, so a wrapped continuation lands
+two columns past the code it belongs to.
+
 ### 6.3 The pixmap cache
 
 A block that is **static** (not streaming, not live, not hovered, not focused, not selected, not
@@ -324,6 +337,19 @@ theme change: `update()`. Qt merges the region.
 Each `paint_block` call is guarded: an exception in one block's painter logs once and paints a faint
 "could not draw this row" marker in its rect; the rest of the frame is unaffected. (In PySide6 an
 exception that escapes `paintEvent` aborts the whole paint: a blank frame.)
+
+### 6.7 Rules on the device grid
+
+At a fractional device pixel ratio (1.25, 1.5: common laptop settings) a one-pixel rule covers a
+row and a half of device pixels and comes out as two rows at two greys. `pixels.py` puts rules on
+whole device pixels wherever the painter's transform (the view's offset, a pixmap's ratio) lands
+them: `hline`/`vline` are `floor(ratio)` pixels thick (one at 1× and 1.5×, two at 2×, what a
+browser draws for `1px`), `snap` moves a rectangle's edges to the grid and `pen_width` is that
+thickness in logical pixels, so a bordered rectangle (a well, a card, a box) has crisp straight
+sides and anti-aliased corners. Every hairline the client paints goes through them: the table
+rules, the quote rule, the wells and `rounded` in the canvas; the Hairline node and widget, the
+divider, the rails beside a thought, a tool and a fold; the composer's, the panel's and the dialogs'
+rules. A rotated or sheared painter is left alone.
 
 ## 7. Reconciliation
 
@@ -511,6 +537,15 @@ diffs by path and updates cards in place.
 (so the target height is right), animates a clip height instead of `maximumHeight` where the body is
 a painted widget, and falls back to the current behaviour for widget bodies in the dialogs where
 trees are tiny.
+
+The Changes tab's file cards are built for 4 ms a turn of the event loop (`DiffView.BUDGET_MS`),
+the first ones on the page before the rest exist, and the list is pinned to the height of its cards
+(`QLayout.SetMinAndMaxSize`): without that, every card added laid the whole list out twice, once in
+its stale height with every card squeezed and once when the scroll host caught up, tens of thousands
+of geometry events for a hundred files. The panel is built hidden while the window is idle after a
+session opens, laid out and painted once off screen at the size it will open at, and the syntax
+lexers the session's edits will need are compiled one per idle turn (Pygments builds a lexer's
+state machine on first use, some 30 ms), so the first open is a paint of what is there.
 
 ### 10.4 Sidebar
 

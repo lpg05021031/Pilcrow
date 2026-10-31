@@ -15,6 +15,7 @@ from PySide6.QtGui import QColor, QPainter, QTextDocument
 from ... import theme
 from ...lib.transcript_model import ThinkingItem
 from ..paint import FULL, Measurer, PaintState, doc_height, doc_pos_at, draw_doc, paint_decor, selection
+from ..pixels import vline
 from ..scene import Block, Group, Target
 from .base import chevron, paint_head_tint
 
@@ -62,7 +63,7 @@ class ThinkingBody(Block):
     def paint(self, p: QPainter, x: int, y: int, w: int, st: PaintState) -> None:
         if self.doc is None:
             return
-        p.fillRect(QRect(x + 1, y + 2, 1, self.h - 6), theme.blend(st.t.hair_2, st.t.canvas))
+        vline(p, x + 1, y + 2, self.h - 6, theme.blend(st.t.hair_2, st.t.canvas))
         clip = QRect(x + 15, y + 2, w - 15, self.h - 4)
         if st.clip is not None:
             clip = clip.intersected(st.clip)

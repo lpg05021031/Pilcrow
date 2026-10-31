@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections import OrderedDict
 from typing import Optional
 
+import shiboken6
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QKeySequence, QPainter, QPainterPath, QPen, QShortcut
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QStackedWidget, QVBoxLayout, QWidget
@@ -248,6 +249,28 @@ class MainWindow(QMainWindow):
         self.panel = RightPanel()
         self.panel_layout.addWidget(self.panel)
         self.panel.set_session(session)
+        QTimer.singleShot(0, self, self._warm_panel)
+
+    def _warm_panel(self) -> None:
+        """The prebuilt panel laid out and painted once off screen at the size it will open at, so
+        the first open finds its layouts activated, its widgets polished and the font caches warm:
+        a paint of what is there rather than the construction of it. Then, one per turn of the event
+        loop, the syntax lexers the session's edits will need, so the Changes tab's first card does
+        not compile one."""
+        panel = self.panel
+        if panel is None or not shiboken6.isValid(panel):
+            return
+        panel.resize(max(PANEL_MIN, self.panel_host.width()), max(1, self.height()))
+        panel.grab()
+        from .panels.changes import lexer_warmer
+
+        step = lexer_warmer(store.active_id or "")
+
+        def warm() -> None:
+            if step():
+                QTimer.singleShot(0, self, warm)
+
+        QTimer.singleShot(0, self, warm)
 
     # ---- the drag handles (App.tsx resizeSidebar / resizePanel)
     def _drag_sidebar(self, dx: int) -> None:

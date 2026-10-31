@@ -77,6 +77,8 @@ until `loaded`, or follow the growing end silently (no easing) while slices arri
 
 **Fixed.** One Pygments lexer per language instead of a lookup per file (70 ms of the stall), the file cards built twelve to an event-loop turn so the first ones paint before the rest exist, and the panel itself built hidden while the window is idle after a session opens, so the first toggle is a flip.
 
+**Then the fill itself.** With a hundred edits the cards still came in at 31–70 ms a turn for twenty turns. Two causes: the cards were built by count (five a turn, 3 ms each) rather than by time, and every card added laid the whole list out twice, once in its stale height (every card squeezed) and once when the scroll host caught up: 50 000 move and resize events for a hundred cards. Now the cards are built for 4 ms a turn, the list is pinned to the height of its cards (`QLayout.SetMinAndMaxSize`: 3 000 events, none on a card already placed), the prebuilt panel is laid out and painted once off screen, and the lexers the session's edits need are compiled one per idle turn instead of by the first card (35 ms). After: the first open is 5 ms, a hundred cards fill in at 11–13 ms a turn (the first two 19 and 24), and the window never misses two frames in a row.
+
 `store.set_ui(panel=True)` the first time in a session: 33 ms to the call's return and a 240 ms
 stall while `RightPanel` and its tabs are built. Later toggles cost 8 ms; the sidebar 6–11 ms. Fix:
 build the panel at idle once a session is open (hidden), or build each tab when it is first shown.
@@ -92,11 +94,15 @@ default block format, debounce the detection, and autosize from the document's s
 
 ### F6 · An image wider than the column is clipped — medium
 
+**Fixed.** Once a document is laid out, an image wider than the room its line has (the column, less a quote's or a list's indent) is scaled down to that room, the web's `max-width: 100%` (`paint.fit_doc`); an image that fits, and a task list's box, are left alone. After: a 2000 px image in a 600 px column is 600 × 18, in a quote 586 wide, nothing past the column (`s_layout.py`).
+
 `![big](...)` of 2000 px in a 600 px column: 1400 px cut off on the right (the web has
 `max-width: 100%`). Fix: after `setHtml`, clamp every `QTextImageFormat` width to the column and
 scale its height.
 
 ### F7 · A fence inside a blockquote overflows the column by the quote's indent — low
+
+**Fixed.** The same pass gives a well nested in a quote or a list item the room left by its indent as a fixed width (Qt took its `100%` of the frame, not of the room). After: a fence in a quote, in a quote in a quote, in a list item, in a nested list and in a quote in a list all end at the column's edge; the top-level well still spans the column. (The note below that a fence in a list item sized correctly was wrong: it overflowed by the list's indent, 40 px, as well.)
 
 The well is a `width="100%"` table; inside a quote that is 100 % of the frame, not of the room left
 by the 14 px margin, so the well runs 14 px past the right edge and is clipped (the light theme loses
@@ -105,12 +111,16 @@ in quotes (the render knows the width and the nesting from the tokens).
 
 ### F8 · Tabs in code: an 80 px tab stop, and a hanging indent that assumes four columns — low
 
+**Fixed.** Every document's tab stop is four columns of the code face (`markdown.TAB_COLS`, set on every document the measurer makes, a grower's included), and the hanging indent counts a tab as four, so a continuation lands two columns past the code it belongs to. After: text after one tab sits at 4.00 columns (31 px, not 80), after two at 8.00; a plain mono document (command output) measures its tabs in its own face.
+
 Tab-indented code (Go, Makefiles): Qt's default tab stop puts text after one tab at 80 px (about
 eleven columns) while the wrapped continuation is indented as if a tab were four columns, so
 continuations land short of the code they belong to. Fix: set the document's tab stop distance to
 four (or eight, the browser's) mono advances and compute the hanging indent from the same number.
 
 ### F9 · Carriage-return progress output shows every intermediate state — low
+
+**Fixed.** Command output is shown as a terminal would have shown it before its colours are read (`lib/ansi.py overwrite`): a carriage return goes back to the start of the line and what follows writes over it, `ESC[K`/`ESC[1K`/`ESC[2K` erase, `ESC[nA`/`ESC[nB` move a line up or down, `ESC[nG`/`ESC[nC`/`ESC[nD` move the column, and the colour of every character survives the rewrite (`\r\n` is a line end). Text with none of those controls comes back as it came (a 20 000-line log in 8 ms); a line nothing writes over is kept whole, so a log with one progress bar pays for the bar. After: the `npm install` bar reads `progress 100%`, and `ESC[2K ESC[1A line` three times over shows one `line`.
 
 `npm install`-style output (`\r progress 10% \r progress 20% …`) renders as
 "progress 0%progress 10%progress 20%…" on one line: the `\r` is dropped and nothing is overwritten.
@@ -119,10 +129,14 @@ Fix: in the ANSI parser, keep only what follows the last `\r` of a line, and hon
 
 ### F10 · Hairlines at a fractional device pixel ratio smear over two rows — low
 
+**Fixed.** Rules go on the device grid (`canvas/pixels.py`): a hairline is `floor(ratio)` device pixels (one at 1× and 1.5×, two at 2×, what a browser draws for `1px`) at the row the painter's transform maps it to, and a bordered rectangle (a well, a card, a box) has its edges snapped and a pen of that thickness, so its straight sides are crisp and only its corners anti-aliased. Used by the table rules, the quote rule, the wells, `rounded`, the Hairline node and widget, the divider, the rails of a thought, a tool and a fold, the composer's, the panel's and the dialogs' rules. After: at 1.25× and 1.5× every rule through a table is one row at the rule's colour, at 2× two (`s_hidpi.py`); cached and direct paints are still identical.
+
 At 1.5× a 1 px rule lands on rows 240 and 241 at two different greys; at 2× it is crisp. Fix: snap
 hairline y to the device grid (`round(y · dpr) / dpr`) or draw them with a cosmetic pen.
 
 ### F11 · An inline code span in a table cell can paint its pill past the cell — low
+
+**Fixed.** The 16 px were not the pill. A table that does not fit even with every column at its least had every column squeezed in proportion, the one holding an `x` to 6 px; Qt lays a column out no narrower than its widest character and its padding (22 px), so the table ended 16 px past the plan. Now each column keeps that floor and the room above the floors is shared out, so the table ends where it was planned to, and the cells of a squeezed column lose the joiners that keep a code span whole, so the span breaks at its slashes and dots instead of wherever it must. A table being written tracks the same floor and starts over from its source the once a column runs out of room. After: the long span wraps to four lines inside its cell, the table and a 20-column one end at the column; a 40-column table is 914 px wide because its floors are, as in a browser.
 
 A span longer than its column (unbreakable by design) overhangs the cell by up to 16 px. The words
 still read; only the pill crosses the rule. Accept, or let a span break when it is wider than the
@@ -133,7 +147,12 @@ column (the web's `white-space: break-spaces` does).
 - A running card repaints on the clock at 31 paints/s, each the head's 30 px strip: 4 % of a core
   over idle. Acceptable; a card with a spinner in a long body would repaint the body.
 - `highlight_lines` keeps 512 highlighted fences in an LRU keyed by the whole source: a session of
-  big fences can pin tens of megabytes of strings. Cap the cache by size, not count.
+  big fences can pin tens of megabytes of strings. Cap the cache by size, not count. **Fixed:** kept
+  under a budget of source characters (4 MB) as well as a count, least recently used first out; a
+  fence over a quarter of the budget is highlighted but not kept.
+- A fence of 3000 lines being written cost 26 ms a token by its end: the rectangle of a grown well
+  was read by walking every block of the document at every paint. **Fixed:** read from the head
+  and the last line, so 3000 lines stream at 5.0 → 5.7 ms a token.
 - A tool result of several megabytes is parsed from JSON on the main thread as it arrives: one stall
   the size of the message. Rare; the server could cap what it sends.
 
@@ -161,8 +180,11 @@ it should not move.
 | The sidebar with 500 sessions | 0.9 ms a rebuild |
 | Find opened on 400 turns and a word typed | 5 ms / < 1 ms |
 | Folds and cards toggled without animation (reduced motion) | no stale pixels after the change |
-| Device pixel ratios 1.25 and 1.5 | cached and direct paints of a block identical |
+| Device pixel ratios 1.25 and 1.5 | cached and direct paints of a block identical; after F10, every rule one device row |
 | A 200-character word, a 200-character URL, 200 Chinese characters, a 20-column table, emoji, entities, nested lists with tables | within the column |
+| After F6–F11: a 2000 px image, a fence in a quote or a list, tabs, a table too wide for its room, a progress bar in output | within the column; the bar's last state |
+| A fence of 3000 lines, a table of 500 rows, a list of 1000 items streamed (after F1 and the well fix) | 5.0 → 5.7, 5.0 → 5.4, 4.3 → 4.0 ms a token |
+| A hundred file cards filling the Changes tab (after F4's second round) | 11–13 ms a turn, 3 000 geometry events where there were 50 000 |
 
 ## 4. Order of work
 
@@ -170,3 +192,6 @@ F1 first: it is the only finding that can freeze the window, and the fix (append
 remake) also removes most of F2's cost for the common case. F3 and F4 are the two things a person
 sees on every long session (the flash, the hitch). F5 and F6 next. F7–F11 are an afternoon between
 them.
+
+All twelve are fixed as of this writing; the numbers under each heading are after the fix, and the
+scripts in `tests/stress/` reproduce them.

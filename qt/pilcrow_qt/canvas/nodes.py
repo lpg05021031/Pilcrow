@@ -17,6 +17,7 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPixmap, QTextDocument
 
 from .. import theme
 from .paint import FULL, Measurer, PaintState, doc_height, draw_doc, find_ranges, paint_decor, rounded, selection
+from .pixels import hline
 from .scene import Target
 
 Pad = Tuple[int, int, int, int]  # left, top, right, bottom
@@ -233,7 +234,7 @@ class Hairline(Node):
         return 1
 
     def paint(self, p: QPainter, ox: int, oy: int, st: PaintState) -> None:
-        p.fillRect(QRect(ox + self.x, oy + self.y, self.w, 1), theme.blend(getattr(st.t, self.token), st.t.canvas))
+        hline(p, ox + self.x, oy + self.y, self.w, theme.blend(getattr(st.t, self.token), st.t.canvas))
 
 
 class Text(Node):
@@ -720,7 +721,7 @@ class Link(Node):
         st.m.draw_text(p, ox + self.x, oy + self.y + 2, shown, f, color)
         if hover:
             w = st.m.text_w(shown, f)
-            p.fillRect(QRectF(ox + self.x, oy + self.y + self.h - 2, w, 1), color)
+            hline(p, ox + self.x, oy + self.y + self.h - 2, w, color)
 
     def text(self) -> str:
         return self.label

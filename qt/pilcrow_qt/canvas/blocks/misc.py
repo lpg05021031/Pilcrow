@@ -18,6 +18,7 @@ from ...lib.transcript_model import CommandOutputItem, CompactItem, NoticeItem, 
 from ...store import store
 from .. import nodes as nd
 from ..paint import Measurer, PaintState, rounded
+from ..pixels import hline
 from ..scene import Block, Target
 from .base import NodeBlock
 
@@ -63,8 +64,8 @@ class DividerBlock(Block):
         cy = y + 18 + 8
         hair = theme.blend(st.t.hair, st.t.canvas)
         left_w = int((w - tw - 24) / 2)
-        p.fillRect(QRect(x, cy, max(0, left_w), 1), hair)
-        p.fillRect(QRect(x + w - left_w, cy, max(0, left_w), 1), hair)
+        hline(p, x, cy, left_w, hair)
+        hline(p, x + w - left_w, cy, left_w, hair)
         st.m.draw_text(p, x + (w - tw) / 2, y + 18 + (16 - st.m.line_h(f)) / 2, self.label, f, QColor(st.t.text_3))
 
     def text(self) -> str:

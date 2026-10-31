@@ -19,6 +19,7 @@ from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
 from ... import icons, theme
+from ...canvas.pixels import hline, vline
 from ...lib.fmt import duration, plural, short_model, time_ago, tokens
 from ...lib.workflow import WorkflowCounts, agent_state, parse_workflow_meta, workflow_columns, workflow_counts
 from ...store import store
@@ -559,8 +560,8 @@ class SubAgentRow(QWidget):
         p = QPainter(self)
         c = theme.blend(t.hair_3, t.raised)
         # the elbow: a stem down from the agent's mark, and a short arm into this row's mark
-        p.fillRect(QRectF(1, 0, 1, self.height() if not self._last else 10), c)
-        p.fillRect(QRectF(1, 9, 7, 1), c)
+        vline(p, 1, 0, self.height() if not self._last else 10, c)
+        hline(p, 1, 9, 7, c)
 
 
 class PhaseRow(QWidget):
@@ -648,7 +649,7 @@ class PhaseRow(QWidget):
                 int(ok.green() * 0.55 + line.green() * 0.45),
                 int(ok.blue() * 0.55 + line.blue() * 0.45),
             )
-        p.fillRect(QRectF(9, 20, 1, self.height() - 20 + 1), line)
+        vline(p, 9, 20, self.height() - 20 + 1, line)
 
 
 class PhaseNode(QWidget):

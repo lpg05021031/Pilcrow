@@ -15,6 +15,7 @@ from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QCheckBox, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QWidget
 
 from ... import icons, theme
+from ...canvas.pixels import hline, pen_width, snap, vline
 from .button import Btn
 from .signals import bind
 
@@ -38,7 +39,11 @@ class Hairline(QWidget):
     def paintEvent(self, _e) -> None:  # noqa: N802
         t = theme.tokens()
         p = QPainter(self)
-        p.fillRect(self.rect(), theme.over(theme.qcolor(t.hair), theme.resolve(self._over, t)))
+        c = theme.over(theme.qcolor(t.hair), theme.resolve(self._over, t))
+        if self._v:
+            vline(p, 0, 0, self.height(), c)
+        else:
+            hline(p, 0, 0, self.width(), c)
 
 
 def hairline(vertical: bool = False, over: theme.Fill = "canvas") -> Hairline:
@@ -192,8 +197,12 @@ def paint_box(
     radius: float = 0.0,
     line_w: float = 1.0,
 ) -> None:
-    """A rounded box: a fill and, inside its edge, a hairline. Either may be None."""
+    """A rounded box: a fill and, inside its edge, a hairline. Either may be None. The edges sit on
+    the device grid and a one-pixel line is one device pixel at a fractional ratio."""
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    r = snap(p, r)
+    if line_w <= 1.0:
+        line_w = pen_width(p)
     if bg is not None and bg.alpha() > 0:
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(bg)

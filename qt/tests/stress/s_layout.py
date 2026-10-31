@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # noqa: E402
 from core import app
 
 from pilcrow_qt.canvas.blocks.prose import ProseBlock
+from pilcrow_qt.canvas.paint import table_rect
 from pilcrow_qt.canvas.view import measurer
 
 
@@ -34,7 +35,8 @@ def overflow(doc) -> float:
         b = b.next()
     for fr in doc.rootFrame().childFrames():
         if isinstance(fr, QTextTable):
-            r = lay.frameBoundingRect(fr)
+            # the layout's frame rectangle starts at the first cell's content: the painted rectangle
+            r = table_rect(doc, lay, fr)
             worst = max(worst, r.right() - w)
     return worst
 

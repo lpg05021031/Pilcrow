@@ -18,6 +18,7 @@ from ...lib.workflow import workflow_counts
 from ...store import store
 from ...widgets.transcript.ctx import ToolCtx
 from ..paint import Measurer, PaintState, rounded
+from ..pixels import vline
 from ..scene import Block, Group, Target
 from .base import chevron, paint_head_tint
 from .bodies import ToolBodyBlock
@@ -423,7 +424,7 @@ class AgentChildren(Group):
         return fn(items, ctx) if fn is not None else []
 
     def paint(self, p: QPainter, x: int, y: int, w: int, st: PaintState) -> None:
-        p.fillRect(QRect(x + 1, y, 1, self.h), st.t.color("hair_2"))
+        vline(p, x + 1, y, self.h, st.t.color("hair_2"))
 
 
 class PermissionIsland(IslandBlock):

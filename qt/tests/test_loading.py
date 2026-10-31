@@ -184,3 +184,62 @@ def test_a_keystroke_in_a_long_draft_reads_the_text_once_and_keeps_the_line_heig
     finally:
         comp.close()
         store.rt.pop(sid, None)
+
+
+def test_cards_added_later_leave_the_ones_already_placed_alone(app):
+    """The diff list is always as tall as its cards: a card placed in a later batch does not make
+    the earlier ones move or resize (that was tens of thousands of geometry events for a hundred files)."""
+    from PySide6.QtCore import QEvent, QObject
+
+    from pilcrow_qt.widgets.panels.diff_view import DiffView
+
+    host = QWidget()
+    lay = QVBoxLayout(host)
+    lay.setContentsMargins(0, 0, 0, 0)
+    v = DiffView(simple=True)
+    lay.addWidget(v)
+    lay.addStretch(1)
+    host.resize(600, 500)
+    host.show()
+    pump(50)
+    files = [
+        {
+            "path": f"/proj/src/f{i}.py",
+            "status": "M",
+            "hunks": [
+                {
+                    "oldStart": 1,
+                    "oldLines": 1,
+                    "newStart": 1,
+                    "newLines": 1 + i % 3,
+                    "lines": [{"t": "+", "s": f"x{k} = {i}", "n": 1 + k} for k in range(1 + i % 3)],
+                }
+            ],
+        }
+        for i in range(40)
+    ]
+    v.set_files(files)
+    first = v.rows()
+    assert 0 < len(first) < 40
+    pump(40)  # the first cards settle (their grids measure at the real width)
+    watched = set()
+    for r in first:
+        watched.update((r, r.body, r.head, r.grid))
+    seen = []
+
+    class F(QObject):
+        def eventFilter(self, obj, ev):  # noqa: N802
+            if obj in watched and ev.type() in (QEvent.Type.Move, QEvent.Type.Resize):
+                seen.append((type(obj).__name__, ev.type().name))
+            return False
+
+    f = F()
+    QApplication.instance().installEventFilter(f)
+    try:
+        pump(600)
+    finally:
+        QApplication.instance().removeEventFilter(f)
+    assert len(v.rows()) == 40
+    assert seen == []
+    assert v.height() == sum(r.height() for r in v.rows())
+    host.close()

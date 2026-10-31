@@ -13,12 +13,22 @@ from __future__ import annotations
 
 import difflib
 import re
+import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetricsF, QKeyEvent, QLinearGradient, QMouseEvent, QPainter, QPen
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QLayout,
+    QPlainTextEdit,
+    QPushButton,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
 from ... import icons, theme
 from ...lib.fmt import basename, dirname
@@ -1209,6 +1219,12 @@ class DiffView(QWidget):
         self._lay = QVBoxLayout(self)
         self._lay.setContentsMargins(0, 0, 0, 0)
         self._lay.setSpacing(0)
+        # The list is always exactly as tall as its cards. Without this a card whose grid has just
+        # measured itself makes the list lay out once in its old height (every card squeezed) and
+        # once more when the scroll host catches up: two passes of geometry over every card and
+        # its parts for each card added, tens of thousands of events while a change of a hundred
+        # files comes in.
+        self._lay.setSizeConstraint(QLayout.SizeConstraint.SetMinAndMaxSize)
 
     # ---- public
     def files(self) -> List[Json]:
@@ -1220,7 +1236,9 @@ class DiffView(QWidget):
     def set_actions(self, actions: List[Action]) -> None:
         self.actions = list(actions)
 
-    BATCH = 5  # cards built per event-loop turn (a frame's worth): the first ones paint before the rest exist
+    # Cards are built for this long per turn of the event loop (well under a frame, with the layout
+    # and the paint that follow): the first ones paint before the rest exist, and no turn holds the window.
+    BUDGET_MS = 4.0
 
     def set_files(self, files: List[Json]) -> None:
         if files == self._files and self._rows:
@@ -1267,12 +1285,16 @@ class DiffView(QWidget):
         if gen != getattr(self, "_gen", 0):
             return  # a newer list came
         rows = self._pending_rows
-        for i in todo[: self.BATCH]:
-            rows[i] = self._make_row(i)
-        rest = todo[self.BATCH :]
+        t0 = time.perf_counter()
+        k = 0
+        while k < len(todo) and (k == 0 or (time.perf_counter() - t0) * 1000 < self.BUDGET_MS):
+            rows[todo[k]] = self._make_row(todo[k])
+            k += 1
+        rest = todo[k:]
         self._place_rows([r for r in rows if r is not None])
         if rest:
-            QTimer.singleShot(0, lambda: self._build_rows(rest, gen))
+            # a timer of the view's own: a view deleted with cards still to come takes it along
+            QTimer.singleShot(0, self, lambda: self._build_rows(rest, gen))
         else:
             self._pending_rows = []
 
