@@ -159,17 +159,19 @@ stop   { name }
   → { name, state: 'stopped' }
 
 list   { }
-  → { helpers: [HelperState...], caps: { parallel, total, maxMinutes, costUsd }, cost }
+  → { helpers: [HelperState...], caps: { parallel, total, maxMinutes, costUsd }, cost,
+      known: [{ path, name, branch, dirty, allowed }] }   the folders a helper may start in without a card (§5.6)
 
 HelperState = { name, id, cwd, branch, worktree, state, since, elapsedMs, cost, files, add, del,
                 pending: number, lastLine, after: string[], reason?: string }
 ```
 
 `wait`, `read` and `list` are answered by Pilcrow itself without a permission card: they change nothing.
-`send` and `stop` likewise: they steer a session the person can see. `start` goes through the normal
-permission card: *Start helper api in ~/code/api (worktree)*, with *Always allow* like any tool. So the
-first fan-out in a project is approved by the person once, and after that the lead is free. In
-`bypassPermissions` nothing asks, as everywhere.
+`send` and `stop` likewise: they steer a session the person can see. `start` goes through a permission
+card, *Start helper api in ~/code/api (worktree)*, and the card's *Always allow* is scoped to the
+folder's repository, not to the tool (§5.6). So the first helper in a repository is approved by the
+person once, and after that the lead may start helpers there freely. In `bypassPermissions` nothing
+asks, as everywhere.
 
 Results are plain text for the model (the MCP `content` text), with the same object as
 `structuredContent` so the clients draw cards from data, not from parsing prose.
@@ -250,6 +252,25 @@ lead asking the same key, now and later. The rule's label is on the lead's bar t
 The lead cannot answer a helper's permission: there is no tool for it, and §5.9 says so. A lead that is
 itself waiting on a permission is `requires_action` as any session; its helpers continue.
 
+**Which folders.** Nothing is configured ahead, and the lead is not given a list to pick from by
+Pilcrow's authority; the person's approval is the access decision, taken where the person already takes
+it. `start` accepts any folder that exists on this machine. Whether it asks depends on the folder:
+
+| The folder is… | `start` |
+|---|---|
+| the lead's own project, or inside it | allowed without a card: the person opened this session here |
+| a repository the person approved before (*Always allow* on an earlier card, remembered per repository root in the config as `helpers.allowedRoots`) | allowed without a card |
+| anything else that exists | a permission card naming the folder; *Allow* once, *Always allow* for that repository root |
+| a folder that does not exist, or the person's home directory itself | an error result |
+
+`list` returns `known`: the lead's project, Pilcrow's recent projects (the twelve the person last opened
+sessions in), and the repositories found one level under the lead's folder (Dispatch's `findRepos`),
+each with its branch, whether its checkout is dirty, and whether it is `allowed` today. The lead is told
+to look there before guessing a path, and that a path the person named in the conversation is the one
+to use even when it is not in the list. Access to files inside a helper is Claude Code's own: the helper's
+tools work in its folder, and an edit outside it asks the person as in any session. Another machine is
+not a folder here; helpers run where the server runs.
+
 A helper's `mode` defaults to the lead's and can be narrower (`acceptEdits` → `default`) but never
 wider; `bypassPermissions` is inherited only when the lead has it. A helper's worktree is its own; a
 helper started with `worktree: false` works in the folder given, and its chip says *in your checkout*.
@@ -289,7 +310,8 @@ The `helpers` server's `instructions`, surfaced to the model when the tools load
 > each with its own brief, worktree and permissions. Use them when a task spans repositories or when
 > parts can run at the same time; for a quick question inside this folder use the Agent tool. One
 > helper, one folder, one brief with a definition of done and how to verify; say what it must not
-> touch. Use `after` for ordered work: the handoff is appended for you. After starting helpers, end your
+> touch. Use a folder the person named; otherwise `list` shows the folders known here and which ones
+> start without asking. A folder outside them asks the person on a permission card. Use `after` for ordered work: the handoff is appended for you. After starting helpers, end your
 > turn and say what you are waiting for; Pilcrow will tell you when a helper finishes, fails or stops.
 > Use `wait` only when you have nothing else to do. A helper waiting on a permission is waiting on the
 > person, not on you; do not poll and do not ask the person to approve on its behalf. Read a result
@@ -510,8 +532,12 @@ Estimated: server ≈ 450 lines plus 60 in `sessions.js`; Qt ≈ 400; web ≈ 35
 
 ## 12. Decisions taken here, open to change
 
-- Every session has the tools; the first `start` asks on a permission card. The alternative, a per-session
-  switch, was rejected as a thing to configure before the first use.
+- Every session has the tools; the first `start` in a repository asks on a permission card. The
+  alternative, a per-session switch, was rejected as a thing to configure before the first use.
+- Which folders a lead may use is decided by the person on that card, remembered per repository root, not
+  by an allow-list configured ahead. The lead's own project is allowed because the person opened the
+  session there. A list of allowed roots in Settings would be the same decision taken earlier; it is not
+  offered until someone asks for it.
 - Depth one. Helpers of helpers would need a tree in the sidebar and a model of a model's model.
 - The lead cannot answer helpers' permissions, even routine ones. Herdr's parent does (`send-keys`); the
   risk of a model approving a model's `rm -rf` is not worth a saved click. If it is wanted later it is a
