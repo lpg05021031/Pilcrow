@@ -233,6 +233,8 @@ class CanvasView(QAbstractScrollArea):
         vb = self.verticalScrollBar()
         vh = self.viewport().height()
         total = self.pad_top + self.scene.total + self.pad_bottom
+        if getattr(self.scene, "loading", False):
+            total = 0  # nothing to scroll while only the skeleton shows
         was = self._own
         self._own = True
         try:
@@ -655,7 +657,11 @@ class CanvasView(QAbstractScrollArea):
         y1 = e.rect().bottom() + 1 - self.pad_top + scroll
         hover_b = self.hover[0] if self.hover is not None else None
         cold_seen = False
-        for b, by in self.scene.leaves_between(y0, y1):
+        leaves = self.scene.leaves_between(y0, y1)
+        if getattr(self.scene, "loading", False):
+            # a conversation still arriving: its skeleton alone, where it sits at the top
+            leaves = [(b, by) for b, by in self.scene.leaves_between(0, 10**9) if b.KIND == "skeleton"]
+        for b, by in leaves:
             if b.h <= 0 or isinstance(b, IslandBlock):
                 continue
             vy = by + self.pad_top - scroll

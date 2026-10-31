@@ -355,21 +355,42 @@ estimates when open. The shape is computed when the group warms, and marked stal
 when the view mode changes, so a view-mode switch costs O(warm groups) — about ten milliseconds —
 and the scroll position is anchored through it.
 
-### 7.3 Streaming into a paragraph
+### 7.3 Streaming into a block
 
-`ProseBlock` holds the Markdown source of one top-level block and its document. On a delta:
+`ProseBlock` holds the Markdown source of one top-level block and its document. Only the last block
+of a streaming text item is ever touched; the earlier blocks keep their documents and pixmaps. A
+block being written has a **grower** (`canvas/grow.py`) that takes each delta into the document
+instead of rendering the block again, so a token costs what the token touches, not what the block
+holds:
 
-- if the block is not inside a fence/list/table and the delta contains none of `` * _ ` [ ] # > | ~ < & \n ``
-  (and no `-` or digit at a line start), the text is appended with a `QTextCursor` at the end,
-  using the format of the last character — O(delta);
-- otherwise the block's HTML is re-rendered (`markdown.render_html` of that block only, ~0.3 ms)
-  and set with `setHtml`;
-- when the text item finishes streaming, the block is re-rendered once from its final source so the
-  markup is exact whatever the append heuristics did.
+- a **paragraph** appends a plain delta with a `QTextCursor` (a delta with any of
+  `` * _ ` [ ] # > | ~ < & \n `` re-renders the block; the layout of the one block is O(paragraph),
+  and a paragraph past `PARA_LIMIT` is kept in pieces cut at whitespace where the markup is balanced,
+  the same pieces whether written or whole, the later ones continuations with no space above);
+- a **fence** is built from blocks rather than a table (a table re-lays all its rows on any change):
+  a spacer of the table's margin, a head block with the language, one block per line, a spacer
+  below; the blocks carry a mark the painter draws the well around (`well_rects`). A line in
+  progress takes its characters; once complete it takes its colours as character formats
+  (`markdown.token_runs`) and its hanging indent; a blank line waits for words to follow it and the
+  closing fence takes its own characters back, so the height is the table well's at every line;
+- a **list** (flat, one marker, no blank lines, no tasks) takes words into its last item and sets
+  the item as inline Markdown (`markdown.render_inline`) once it is complete; a new item is a block
+  in the same `QTextList`, and past `LIST_CHUNK` items a list of its own, numbered on (joining a
+  list costs the list's length);
+- a **table** takes a finished row as a row of its last chunk table (`TABLE_CHUNK` rows each, no
+  space between), its cells as inline Markdown with the formats of the row above, and widens the
+  columns in every chunk when a row needs it.
 
-Only the last ProseBlock of a streaming text item is ever touched; the earlier blocks of the same
-item keep their documents and pixmaps. The thinking "peek" (the last lines of a streaming thought
-under a closed head) is the same document painted through a clip, bottom-aligned.
+Every delta goes in as one edit block (`beginEditBlock`): a change inside a document costs the
+document's bookkeeping, so a row's cells go in together. The grower also says, from the delta's
+lines alone, whether its block stays one block (`continues`), so the reply is not parsed again for
+a token; when it cannot say, only the last block is parsed again (`markdown.grow_pieces`). Anything
+the growers do not take (a nested list, a blank line, a fence inside a quote) returns False and the
+block is rendered from its source as before. When the text item finishes, the grower takes in what
+was still on its way (`finish`: the line's colours, the item's inline markup, the last row) and the
+block keeps the document it grew, which has the render's height, so nothing moves and nothing is
+rendered again. The thinking "peek" (the last lines of a streaming thought under a closed head) is
+a plain document painted through a clip, bottom-aligned.
 
 ## 8. Interaction
 

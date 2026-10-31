@@ -343,24 +343,33 @@ def _lexer(lang: str, code: str):
     return None
 
 
-def _span(esc: str, st: Optional[str]) -> str:
-    """A run of escaped code in a style. CJK faces have no italic and Qt would slant them: in an
-    italic style (comments), the CJK runs stay upright (``font-synthesis-style: none`` on the web)."""
-    if not st:
-        return esc
-    if "italic" in st and HAN.search(esc):
-        up = st.replace(";font-style:italic", "")
-        parts = []
-        pos = 0
-        for mt in HAN.finditer(esc):
-            if mt.start() > pos:
-                parts.append(f'<span style="{st}">{esc[pos : mt.start()]}</span>')
-            parts.append(f'<span style="{up}">{mt.group(0)}</span>')
-            pos = mt.end()
-        if pos < len(esc):
-            parts.append(f'<span style="{st}">{esc[pos:]}</span>')
-        return "".join(parts)
-    return f'<span style="{st}">{esc}</span>'
+def _styled(code: str, lang: str, t: theme.Tokens) -> List[Tuple[str, Optional[str]]]:
+    """``code`` as (text, style) runs: the theme's colour for each Pygments token (None for plain),
+    calls coloured as functions, and CJK text inside an italic style (comments) set upright on its
+    own, since CJK faces have no italic and Qt would slant them (``font-synthesis-style: none``)."""
+    lexer = _lexer(lang, code) if len(code) <= 200000 else None
+    if lexer is None:
+        return [(code, None)]
+    tokens = list(lex(code, lexer))
+    calls = _call_names(tokens)
+    out: List[Tuple[str, Optional[str]]] = []
+    for i, (ttype, value) in enumerate(tokens):
+        if not value:
+            continue
+        st = f"color:{t.cm_function}" if i in calls else _style_for(ttype, t)
+        if st and "italic" in st and HAN.search(value):
+            up = st.replace(";font-style:italic", "")
+            pos = 0
+            for mt in HAN.finditer(value):
+                if mt.start() > pos:
+                    out.append((value[pos : mt.start()], st))
+                out.append((mt.group(0), up))
+                pos = mt.end()
+            if pos < len(value):
+                out.append((value[pos:], st))
+        else:
+            out.append((value, st))
+    return out
 
 
 @lru_cache(maxsize=512)
@@ -369,23 +378,30 @@ def highlight_lines(code: str, lang: str, theme_name: str) -> Tuple[str, ...]:
     runs); plain escaped lines when Pygments has no lexer."""
     t = theme.DARK if theme_name == "dark" else theme.LIGHT
     lines = code.split("\n")
-    lexer = _lexer(lang, code) if len(code) <= 200000 else None
-    if lexer is None:
-        return tuple(html.escape(x) for x in lines)
-    tokens = list(lex(code, lexer))
-    calls = _call_names(tokens)
     out: List[str] = [""]
-    for i, (ttype, value) in enumerate(tokens):
-        st = f"color:{t.cm_function}" if i in calls else _style_for(ttype, t)
+    for value, st in _styled(code, lang, t):
         for k, part in enumerate(value.split("\n")):
             if k:
                 out.append("")
             if part:
-                out[-1] += _span(html.escape(part), st)
+                esc = html.escape(part)
+                out[-1] += f'<span style="{st}">{esc}</span>' if st else esc
     out = out[: len(lines)]
     while len(out) < len(lines):
         out.append("")
     return tuple(out)
+
+
+def token_runs(line: str, lang: str, theme_name: str) -> List[Tuple[int, int, str]]:
+    """One line of code as (start, end, style) runs for a cursor to colour; plain stretches are left out."""
+    t = theme.DARK if theme_name == "dark" else theme.LIGHT
+    out: List[Tuple[int, int, str]] = []
+    pos = 0
+    for value, st in _styled(line, lang, t):
+        if st:
+            out.append((pos, pos + len(value), st))
+        pos += len(value)
+    return out
 
 
 def highlight_html(code: str, lang: str, theme_name: str) -> str:
@@ -424,8 +440,21 @@ def render_html(
             lang = (tok.info or "").strip().split(" ")[0] if tok.type == "fence" else ""
             tok.attrSet("data-lang", lang)
     out = md.renderer.render(tokens, md.options, {})
-    out = _post_process(out, t, base_dir, mm, width)
+    out = _post_process(out, t, base_dir, mm, width, streaming)
     return out
+
+
+def render_inline(text: str, m: Metrics, colour: bool = True) -> str:
+    """The inline Markdown of one list item or table cell as HTML for a cursor to insert: the same
+    code pills and links the block render gives it, wrapped in the text colour when ``colour`` (the
+    words of a list item, whose marker is in the quiet colour)."""
+    t = theme.tokens()
+    if MarkdownIt is None:
+        return html.escape(text)
+    body = parser().renderInline(text)
+    body = _inline_code(body, t, m)
+    body = re.sub(r"<img src=\"(?!https?:|data:|/|pilcrow-check:)([^\"]+)\"", lambda mt: _img(mt, None), body)
+    return f'<span style="color:{t.text}">{body}</span>' if colour else body
 
 
 def fence_sources(src: str) -> List[str]:
@@ -547,7 +576,9 @@ _TABLE_RE = re.compile(r"<table>(.*?)</table>", re.S)
 _BLOCK_NL_RE = re.compile(r"(</(?:p|ul|ol|li|table|thead|tbody|tr|th|td|blockquote)>|<hr[^>]*>)\n")
 
 
-def _post_process(body: str, t: theme.Tokens, base_dir: Optional[str], m: Metrics, width: int = 0) -> str:
+def _post_process(
+    body: str, t: theme.Tokens, base_dir: Optional[str], m: Metrics, width: int = 0, streaming: bool = False
+) -> str:
     mono = theme._MONO_FAMILY or "monospace"
     code_px = px(mono_size())
     code_line = px(mono_size() * 1.6)
@@ -571,9 +602,21 @@ def _post_process(body: str, t: theme.Tokens, base_dir: Optional[str], m: Metric
         )
 
     body = _FENCE_RE.sub(fence, body)
-    # Inline code: mono at 0.86em on a pill the view paints; the transparent background is its marker.
+    body = _inline_code(body, t, m)
+    body = _HEAD_RE.sub(lambda mt: _heading(mt, t, m), body)
+    body = _TABLE_RE.sub(lambda mt: _table(mt, t, m, width, chunk=streaming), body)
+    body = body.replace("<hr>", '<hr width="100%">')
+    body = re.sub(r"<img src=\"(?!https?:|data:|/|pilcrow-check:)([^\"]+)\"", lambda mt: _img(mt, base_dir), body)
+    body = body.replace("<p>", f'<p style="line-height:{m.line}px">')
+    # the newline markdown-it puts after a block would end its paragraph with a space in QTextDocument
+    return _BLOCK_NL_RE.sub(r"\1", body).rstrip("\n")
+
+
+def _inline_code(body: str, t: theme.Tokens, m: Metrics) -> str:
+    """Inline code: mono at 0.86em on a pill the view paints; the transparent background is its marker."""
+    mono = theme._MONO_FAMILY or "monospace"
     pad = f'<span style="font-size:{pill_pad_px(m)}px">{PILL_PAD}</span>'
-    body = re.sub(
+    return re.sub(
         r"<code>(.*?)</code>",
         lambda mt: (
             f"<code style=\"font-family:'{mono}';font-size:{m.code}px;background-color:rgba(0,0,0,0);white-space:pre\">"
@@ -582,13 +625,6 @@ def _post_process(body: str, t: theme.Tokens, base_dir: Optional[str], m: Metric
         body,
         flags=re.S,
     )
-    body = _HEAD_RE.sub(lambda mt: _heading(mt, t, m), body)
-    body = _TABLE_RE.sub(lambda mt: _table(mt, t, m, width), body)
-    body = body.replace("<hr>", '<hr width="100%">')
-    body = re.sub(r"<img src=\"(?!https?:|data:|/|pilcrow-check:)([^\"]+)\"", lambda mt: _img(mt, base_dir), body)
-    body = body.replace("<p>", f'<p style="line-height:{m.line}px">')
-    # the newline markdown-it puts after a block would end its paragraph with a space in QTextDocument
-    return _BLOCK_NL_RE.sub(r"\1", body).rstrip("\n")
 
 
 def code_lines_html(code: str, lang: str, theme_name: str, mono: str, size_px: int, line_px: int) -> str:
@@ -699,31 +735,36 @@ def _summing_to(ws: Sequence[float], total: int) -> List[int]:
     return out
 
 
-def _table(mt: re.Match, t: theme.Tokens, m: Metrics, width: int) -> str:
-    # ``.md table``: 0.93em, cells padded 7px 14px 7px 0; the hairline under each row is painted by the view.
-    rows = [_CELL_RE.findall(row) for row in _ROW_RE.findall(mt.group(1))]
-    rows = [r for r in rows if r]
+TABLE_CHUNK = 40  # body rows per table while a table is being written (a row appends in O(chunk))
+LIST_CHUNK = 40  # items per list while a flat list is being written (a block joins a list in O(list))
+Cell = Tuple[str, str, str]  # tag (th/td), align, inner HTML
+
+
+def table_plan(rows: Sequence[Sequence[Cell]], m: Metrics, width: int) -> Tuple[List[int], List[float], List[float]]:
+    """Column widths for the rows (see ``column_widths``), with the least and the most each column
+    wants, so a row added later can tell whether the plan still holds."""
     ncol = max((len(r) for r in rows), default=0)
-    if not ncol:
-        return ""
     mins = [0.0] * ncol
     maxs = [0.0] * ncol
     for row in rows:
-        for c, (tag, _style, inner) in enumerate(row):
+        for c, (tag, _align, inner) in enumerate(row):
             mx, mn = cell_widths(inner, m, head=tag == "th")
             maxs[c] = max(maxs[c], mx + CELL_PAD)
             # a heading stays on one line: a column is never narrower than its name
             mins[c] = max(mins[c], (mx if tag == "th" else mn) + CELL_PAD)
     avail = float(width) if width > 0 else sum(maxs)
-    widths = column_widths(mins, maxs, avail)
+    return column_widths(mins, maxs, avail), mins, maxs
+
+
+def table_html(rows: Sequence[Sequence[Cell]], widths: Sequence[int], m: Metrics, top: int, bottom: int) -> str:
+    """One ``<table>`` of the rows: cells padded 7px 14px 7px 0 at 0.93em, the first row carrying the
+    column widths; ``top``/``bottom`` are its margins (a continuation chunk has none above)."""
     out = [
-        f'<table width="{sum(widths)}" cellpadding="0" cellspacing="0" '
-        f'style="margin-top:{px(m.base * 0.4)}px;margin-bottom:{m.base}px">'
+        f'<table width="{sum(widths)}" cellpadding="0" cellspacing="0" style="margin-top:{top}px;margin-bottom:{bottom}px">'
     ]
     for r, row in enumerate(rows):
         out.append("<tr>")
-        for c, (tag, style, inner) in enumerate(row):
-            align = (style or "").replace("text-align:", "")
+        for c, (tag, align, inner) in enumerate(row):
             width_attr = f' width="{widths[c]}"' if r == 0 and c < len(widths) else ""
             out.append(
                 f'<{tag}{width_attr} style="padding-left:0;padding-right:{CELL_PAD}px;padding-top:7px;padding-bottom:7px;'
@@ -732,6 +773,72 @@ def _table(mt: re.Match, t: theme.Tokens, m: Metrics, width: int) -> str:
         out.append("</tr>")
     out.append("</table>")
     return "".join(out)
+
+
+def _table(mt: re.Match, t: theme.Tokens, m: Metrics, width: int, chunk: bool = False) -> str:
+    # ``.md table``; the hairline under each row is painted by the view. While the table is being
+    # written (``chunk``) its body rows come in tables of TABLE_CHUNK with no space between, so the
+    # row that arrives next is appended to a small table rather than laid out with all of them.
+    rows: List[List[Cell]] = []
+    for row in _ROW_RE.findall(mt.group(1)):
+        cells = _CELL_RE.findall(row)
+        if cells:
+            rows.append([(tag, (style or "").replace("text-align:", ""), inner) for tag, style, inner in cells])
+    if not rows:
+        return ""
+    widths, _mins, _maxs = table_plan(rows, m, width)
+    top, bottom = px(m.base * 0.4), m.base
+    if not chunk or len(rows) <= 1 + TABLE_CHUNK:
+        return table_html(rows, widths, m, top, bottom)
+    groups = [rows[: 1 + TABLE_CHUNK]]
+    for i in range(1 + TABLE_CHUNK, len(rows), TABLE_CHUNK):
+        groups.append(rows[i : i + TABLE_CHUNK])
+    last = len(groups) - 1
+    return "".join(
+        table_html(g, widths, m, top if k == 0 else 0, bottom if k == last else 0) for k, g in enumerate(groups)
+    )
+
+
+def table_cells(line: str) -> List[str]:
+    """The cells of one table row, split the way markdown-it splits it: on pipes outside code spans,
+    an escaped pipe kept for the inline parser, the outer pipes dropped."""
+    s = line.strip()
+    if s.startswith("|"):
+        s = s[1:]
+    if s.endswith("|") and not s.endswith("\\|"):
+        s = s[:-1]
+    cells: List[str] = []
+    cur: List[str] = []
+    i = 0
+    n = len(s)
+    ticks = 0  # the length of the backtick run that opened the code span we are in (0: none)
+    while i < n:
+        ch = s[i]
+        if ch == "`":
+            j = i
+            while j < n and s[j] == "`":
+                j += 1
+            run = j - i
+            if ticks == 0:
+                ticks = run
+            elif run == ticks:
+                ticks = 0
+            cur.append(s[i:j])
+            i = j
+            continue
+        if ch == "\\" and i + 1 < n:
+            cur.append(s[i : i + 2])
+            i += 2
+            continue
+        if ch == "|" and ticks == 0:
+            cells.append("".join(cur).strip())
+            cur = []
+            i += 1
+            continue
+        cur.append(ch)
+        i += 1
+    cells.append("".join(cur).strip())
+    return cells
 
 
 def _img(mt: re.Match, base_dir: Optional[str]) -> str:
@@ -746,29 +853,112 @@ def _join(base: str, rel: str) -> str:
     return f"{base}/{rel}"
 
 
-def split_blocks(src: str) -> list[str]:
-    """Top-level Markdown blocks, so a streaming reply re-renders only the block being written."""
+PARA_LIMIT = 4000  # a paragraph longer than this is kept in pieces, so a token costs one piece's layout
+PARA_SLACK = 1500  # how far past the limit a piece may run to find a place to break
+_BALANCE = ("`", "*", "_", "~")
+_PAIRS = (("[", "]"), ("(", ")"), ("<", ">"))
+
+
+def _breakable(prefix: str) -> bool:
+    """Can a paragraph be cut after ``prefix`` without cutting an inline construct in two?"""
+    for ch in _BALANCE:
+        if prefix.count(ch) % 2:
+            return False
+    return all(prefix.count(a) == prefix.count(b) for a, b in _PAIRS)
+
+
+def para_pieces(text: str) -> List[str]:
+    """A paragraph in pieces of about PARA_LIMIT characters, cut at whitespace where the inline
+    markup is balanced. The cuts depend only on the text before them, so a paragraph being written
+    is cut where its finished self will be: nothing moves when it is done."""
+    pieces: List[str] = []
+    start = 0
+    while len(text) - start > PARA_LIMIT:
+        cut = -1
+        i = start + PARA_LIMIT
+        stop = min(len(text), start + PARA_LIMIT + PARA_SLACK)
+        while i < stop:
+            if text[i].isspace() and _breakable(text[start:i]):
+                cut = i
+                break
+            i += 1
+        if cut < 0:
+            if stop < len(text):
+                # nowhere to cut in this window: the piece runs on to the next window
+                start_next = start
+                text_len = len(text)
+                while cut < 0 and i < text_len:
+                    if text[i].isspace() and _breakable(text[start_next:i]):
+                        cut = i
+                    i += 1
+            if cut < 0:
+                break
+        pieces.append(text[start:cut])
+        start = cut + 1
+    pieces.append(text[start:])
+    return pieces
+
+
+Piece = Tuple[str, bool, int]  # source, continuation of the piece before, offset of its block in the text
+
+
+def split_pieces(src: str, base: int = 0) -> List[Piece]:
+    """Top-level Markdown blocks as (source, continuation, offset): a streaming reply re-renders only
+    the block being written, and a paragraph past PARA_LIMIT comes as pieces, the later ones marked
+    as continuations (no space above them). ``offset`` is where the piece's block starts in the text
+    (``base`` added), the same for every piece of one paragraph."""
     if not src:
         return []
     if MarkdownIt is None:
-        return [src]
+        return [(src, False, base)]
     try:
         tokens = parser().parse(src)
     except Exception:  # noqa: BLE001
-        return [src]
+        return [(src, False, base)]
     lines = src.split("\n")
-    out: list[str] = []
+    starts = [0]
+    for line in lines:
+        starts.append(starts[-1] + len(line) + 1)
+    out: List[Piece] = []
     depth = 0
     for tok in tokens:
         if tok.nesting == 1:
             if depth == 0 and tok.map:
-                out.append("\n".join(lines[tok.map[0] : tok.map[1]]))
+                block = "\n".join(lines[tok.map[0] : tok.map[1]])
+                at = base + starts[tok.map[0]]
+                if tok.type == "paragraph_open" and len(block) > PARA_LIMIT:
+                    for k, piece in enumerate(para_pieces(block)):
+                        out.append((piece, k > 0, at))
+                else:
+                    out.append((block, False, at))
             depth += 1
         elif tok.nesting == -1:
             depth -= 1
         elif depth == 0 and tok.map:
-            out.append("\n".join(lines[tok.map[0] : tok.map[1]]))
-    return out or [src]
+            out.append(("\n".join(lines[tok.map[0] : tok.map[1]]), False, base + starts[tok.map[0]]))
+    return out or [(src, False, base)]
+
+
+def grow_pieces(old: List[Piece], old_text: str, text: str) -> List[Piece]:
+    """The pieces of ``text``, which extends ``old_text``, from the pieces of ``old_text``: only the
+    last block is parsed again (a block the parser closed cannot take a later block back: what could
+    join it, a rule under a paragraph or a lazy line under an item, was one block with it from the
+    start), the rest stand. The parse costs the tail, not the whole of a long reply."""
+    if not old or not text.startswith(old_text) or len(old) < 2:
+        return split_pieces(text)
+    tail_from = old[-1][2]  # the last block's start (all pieces of a paragraph share it)
+    head = [p for p in old if p[2] < tail_from]
+    return head + split_pieces(text[tail_from:], tail_from)
+
+
+def split_blocks_ex(src: str) -> List[Tuple[str, bool]]:
+    """Top-level Markdown blocks as (source, continuation)."""
+    return [(s, c) for s, c, _at in split_pieces(src)]
+
+
+def split_blocks(src: str) -> list[str]:
+    """Top-level Markdown blocks (a long paragraph in its pieces)."""
+    return [s for s, _cont, _at in split_pieces(src)]
 
 
 PATH_RE = re.compile(r"^(?:\.{0,2}/)?(?:[\w@.+-]+/)*[\w@.+-]+\.[A-Za-z0-9]{1,10}(?::(\d+)(?:-\d+)?)?$")

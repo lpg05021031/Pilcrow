@@ -91,6 +91,7 @@ class TranscriptScene(Scene):
         self.empty: Optional[EmptyIsland] = None
         self.orphans: OrderedDict[str, OrphanIsland] = OrderedDict()
         self.stale = True
+        self.loading = False  # slices still arriving: the view shows the skeleton alone
         self.saved: Optional[Tuple[str, int]] = None  # the remembered place, or None for the live end
         self.saved_following = True
         self.model_rev = -1
@@ -123,6 +124,10 @@ class TranscriptScene(Scene):
         loaded = bool(rt and rt.loaded)
         loading = bool(rt and rt.loading) and not loaded
         running = bool(rt and rt.status in BUSY)
+        # The slices of a conversation being opened go into the scene as they come (so the whole is
+        # ready the moment the last one is), but the view paints the skeleton alone until then and
+        # opens at the end in one step: no frames of the beginning on the way there.
+        self.loading = loading
         # the settled prefix
         if self.settled_count > len(items) or (
             self.settled_count and items[self.settled_count - 1] is not self._settled_last

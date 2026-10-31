@@ -244,6 +244,39 @@ def _table_rules(p: QPainter, lay: Any, table: QTextTable, fr: QRectF, hair: QCo
         p.fillRect(QRectF(fr.left(), bottom - 1, fr.width(), 1), hair2 if r == 0 else hair)
 
 
+WELL_PROP = 0x100000 + 7  # QTextFormat.UserProperty + 7: a block of a well built without a table (grow.py)
+
+
+def well_rects(doc: QTextDocument) -> List[QRectF]:
+    """The rectangles of the wells built from marked blocks (a fence being written), in document
+    coordinates: from the head's padding above its label to the padding under the last line."""
+    lay = doc.documentLayout()
+    out: List[QRectF] = []
+    top: Optional[float] = None
+    bottom = 0.0
+    b = doc.firstBlock()
+    while b.isValid():
+        bf = b.blockFormat()
+        mark = bf.intProperty(WELL_PROP)
+        br = lay.blockBoundingRect(b)
+        if mark == 1:
+            if top is not None:
+                out.append(QRectF(0, top, doc.textWidth(), bottom - top))
+            top = br.top() - 8
+            bottom = br.top() + 14 + 8
+        elif mark == 2 and top is not None:
+            tl = b.layout()
+            lines = max(1, tl.lineCount() if tl is not None else 1)
+            bottom = br.top() + lines * bf.lineHeight() + 13
+        elif top is not None:
+            out.append(QRectF(0, top, doc.textWidth(), bottom - top))
+            top = None
+        b = b.next()
+    if top is not None:
+        out.append(QRectF(0, top, doc.textWidth(), bottom - top))
+    return out
+
+
 def paint_decor(p: QPainter, doc: QTextDocument, x: int, y: int, clip: Optional[QRect], t: theme.Tokens) -> None:
     """The decorations under the text of a Markdown document whose top-left is at (x, y)."""
     lay = doc.documentLayout()
@@ -259,6 +292,17 @@ def paint_decor(p: QPainter, doc: QTextDocument, x: int, y: int, clip: Optional[
         view = QRectF(clip.x() - x, clip.y() - y, clip.width(), clip.height())
     else:
         view = QRectF(0, 0, doc.size().width(), doc.size().height())
+
+    def well(fr: QRectF) -> None:
+        p.setBrush(inset)
+        p.setPen(Qt.PenStyle.NoPen if t.dark else QPen(hair, 1))
+        p.drawRoundedRect(fr.adjusted(0.5, 0.5, -0.5, -0.5) if not t.dark else fr, theme.R3, theme.R3)
+        p.setPen(Qt.PenStyle.NoPen)
+
+    if doc.firstBlock().blockFormat().intProperty(WELL_PROP):
+        for fr in well_rects(doc):
+            if fr.intersects(view):
+                well(fr)
     for frame in doc.rootFrame().childFrames():
         if not isinstance(frame, QTextTable):
             continue
@@ -266,12 +310,10 @@ def paint_decor(p: QPainter, doc: QTextDocument, x: int, y: int, clip: Optional[
         if not fr.intersects(view):
             continue
         if frame.format().borderCollapse():
-            p.setBrush(inset)
-            p.setPen(Qt.PenStyle.NoPen if t.dark else QPen(hair, 1))
-            p.drawRoundedRect(fr.adjusted(0.5, 0.5, -0.5, -0.5) if not t.dark else fr, theme.R3, theme.R3)
-            p.setPen(Qt.PenStyle.NoPen)
+            well(fr)
         else:
-            _table_rules(p, lay, frame, fr, hair, hair2)
+            # a chunk of a table being written (no margin above) continues the rows of the one before
+            _table_rules(p, lay, frame, fr, hair, hair if frame.format().topMargin() == 0 else hair2)
     pos = lay.hitTest(QPointF(0, view.top()), Qt.HitTestAccuracy.FuzzyHit)
     b = doc.findBlock(pos) if pos >= 0 else doc.firstBlock()
     while b.isValid():
@@ -537,6 +579,10 @@ class Measurer:
         doc.setTextWidth(width)
         return doc
 
+    def blank_doc(self, width: int, font: Optional[QFont] = None) -> QTextDocument:
+        """An empty document in the prose font (a grower builds a streaming block into it)."""
+        return self._doc(font or self.font(self.prose.base), width)
+
     def plain_doc(self, text: str, width: int, font: QFont) -> QTextDocument:
         doc = self._doc(font, width)
         doc.setPlainText(text)
@@ -668,6 +714,7 @@ __all__ = [
     "selection",
     "table_rect",
     "tidy_doc",
+    "well_rects",
 ]
 
 _ = (Iterable,)

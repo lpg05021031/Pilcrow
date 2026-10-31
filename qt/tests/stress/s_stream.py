@@ -4,11 +4,8 @@ the main thread stalls, and whether the picture moves when the reader has scroll
 
 from __future__ import annotations
 
-import os
 import sys
 import time
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # noqa: E402
 
 from core import Probe, Session, Streamer, app, assistant, pump, user
 
@@ -72,7 +69,7 @@ def run(kind: str, scrolled_up: bool = False) -> str:
     st = Streamer(s, kind_of)
     per: list = []
     t_all = time.perf_counter()
-    for tok in tokens:
+    for i, tok in enumerate(tokens):
         t0 = time.perf_counter()
         st.delta(tok)
         pump(3)

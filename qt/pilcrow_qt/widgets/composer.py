@@ -637,6 +637,39 @@ class ComposerEdit(QTextEdit):
         self.setStyleSheet("ComposerEdit { background: transparent; border: none; padding: 0; }")
         theme.tint(self, placeholder="text_3", highlight="selection/raised")
         self.apply_line_height()
+        # what a change brings in takes the line height at once; the rest of the draft is not read
+        self.document().contentsChange.connect(self._on_contents_change)
+        self._fixing = False
+
+    def _on_contents_change(self, pos: int, _removed: int, added: int) -> None:
+        if self._fixing or added <= 0:
+            return
+        doc = self.document()
+        extra = self.line_extra()
+        block = doc.findBlock(pos)
+        end = doc.findBlock(pos + added)
+        kind = QTextBlockFormat.LineHeightTypes.LineDistanceHeight.value
+        need = False
+        while block.isValid():
+            f = block.blockFormat()
+            if f.lineHeightType() != kind or abs(f.lineHeight() - extra) > 0.01:
+                need = True
+                break
+            if block == end:
+                break
+            block = block.next()
+        if not need:
+            return
+        fmt = QTextBlockFormat()
+        fmt.setLineHeight(extra, kind)
+        cur = QTextCursor(doc)
+        cur.setPosition(pos)
+        cur.setPosition(min(pos + added, doc.characterCount() - 1), QTextCursor.MoveMode.KeepAnchor)
+        self._fixing = True
+        try:
+            cur.mergeBlockFormat(fmt)  # one edit over the whole range, not one per block
+        finally:
+            self._fixing = False
 
     def line_extra(self) -> float:
         """What a 22.475px line adds under the font's own ascent + descent (nothing for a taller fallback face)."""
@@ -673,9 +706,12 @@ class ComposerEdit(QTextEdit):
         return self._composing
 
     def content_height(self) -> int:
-        """What the text wants, in whole lines."""
+        """What the text wants, in whole lines. The document is laid out at the viewport's width by
+        the field itself; setting that width again here would lay the whole draft out twice a key."""
         doc = self.document()
-        doc.setTextWidth(max(10, self.viewport().width()))
+        want = max(10, self.viewport().width())
+        if abs(doc.textWidth() - want) > 0.5:
+            doc.setTextWidth(want)
         line = max(LINE_H, QFontMetrics(self.font()).ascent() + QFontMetrics(self.font()).descent())
         lines = max(1, int(round(doc.documentLayout().documentSize().height() / line)))
         return int(math.ceil(lines * line))
@@ -2436,7 +2472,11 @@ class Composer(QWidget):
 
     @property
     def text(self) -> str:
-        return self.edit.toPlainText()
+        # read many times a keystroke (the draft, the popup, the controls): once per change
+        cached = getattr(self, "_text_cache", None)
+        if cached is None:
+            cached = self._text_cache = self.edit.toPlainText()
+        return cached
 
     @property
     def has_content(self) -> bool:
@@ -2479,7 +2519,7 @@ class Composer(QWidget):
             self.refresh()
 
     def _on_text_changed(self, detect: bool = True) -> None:
-        self.edit.apply_line_height()
+        self._text_cache = None
         _drafts[self.sid] = self.text
         if detect:
             self.hist_pos = -1

@@ -16,7 +16,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetricsF, QKeyEvent, QLinearGradient, QMouseEvent, QPainter, QPen
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
@@ -1204,6 +1204,8 @@ class DiffView(QWidget):
         self._files: List[Json] = []
         self._open: Dict[str, bool] = {}
         self._rows: List[DiffFileRow] = []
+        self._pending_rows: List[Optional[DiffFileRow]] = []
+        self._gen = 0
         self._lay = QVBoxLayout(self)
         self._lay.setContentsMargins(0, 0, 0, 0)
         self._lay.setSpacing(0)
@@ -1218,14 +1220,18 @@ class DiffView(QWidget):
     def set_actions(self, actions: List[Action]) -> None:
         self.actions = list(actions)
 
+    BATCH = 5  # cards built per event-loop turn (a frame's worth): the first ones paint before the rest exist
+
     def set_files(self, files: List[Json]) -> None:
         if files == self._files and self._rows:
             return
         self._files = [dict(f) for f in files]
+        self._gen = getattr(self, "_gen", 0) + 1
         # a file whose diff did not change keeps its card (and its grid, its scroll, its open state)
         had = {r.path: r for r in self._rows}
-        rows: List[DiffFileRow] = []
-        for f in self._files:
+        rows: List[Optional[DiffFileRow]] = []
+        todo: List[int] = []
+        for i, f in enumerate(self._files):
             path = str(f.get("path") or "")
             old = had.pop(path, None)
             if old is not None and old.file == f:
@@ -1236,16 +1242,41 @@ class DiffView(QWidget):
                 old.hide()
                 old.setParent(None)
                 old.deleteLater()
-            open_ = self._open.get(path, len(self._files) <= self.open_threshold)
-            row = DiffFileRow(f, self, open_)
-            row.toggled.connect(lambda p, o: self._open.__setitem__(p, o))
-            row.set_note_count(len(self.notes.get(path) or {}))
-            rows.append(row)
+            rows.append(None)
+            todo.append(i)
         for old in had.values():
             self._lay.removeWidget(old)
             old.hide()
             old.setParent(None)
             old.deleteLater()
+        self._pending_rows = rows
+        self._build_rows(todo, self._gen)
+
+    def _make_row(self, i: int) -> DiffFileRow:
+        f = self._files[i]
+        path = str(f.get("path") or "")
+        open_ = self._open.get(path, len(self._files) <= self.open_threshold)
+        row = DiffFileRow(f, self, open_)
+        row.toggled.connect(lambda p, o: self._open.__setitem__(p, o))
+        row.set_note_count(len(self.notes.get(path) or {}))
+        return row
+
+    def _build_rows(self, todo: List[int], gen: int) -> None:
+        """A batch of new cards, placed in order among the kept ones; the rest on the next turn of the
+        event loop, so a change of a hundred files never holds the window."""
+        if gen != getattr(self, "_gen", 0):
+            return  # a newer list came
+        rows = self._pending_rows
+        for i in todo[: self.BATCH]:
+            rows[i] = self._make_row(i)
+        rest = todo[self.BATCH :]
+        self._place_rows([r for r in rows if r is not None])
+        if rest:
+            QTimer.singleShot(0, lambda: self._build_rows(rest, gen))
+        else:
+            self._pending_rows = []
+
+    def _place_rows(self, rows: List[DiffFileRow]) -> None:
         for i, row in enumerate(rows):
             item = self._lay.itemAt(i)
             if item is not None and item.widget() is row:

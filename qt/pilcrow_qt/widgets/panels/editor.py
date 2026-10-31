@@ -65,18 +65,26 @@ FOLD_W = 12  # the fold gutter's column
 Run = Tuple[int, int, object]  # (column, length, token type)
 
 
+_LEXERS: Dict[str, object] = {}
+
+
 def lexer_for_path(path: str):
-    """The Pygments lexer for a path, or None when the language is unknown (plain text)."""
+    """The Pygments lexer for a path, or None when the language is unknown (plain text). One lexer
+    per language: finding one by name is a millisecond, and a change touches a hundred files."""
     if lex is None:
         return None
     lang = lang_from_path(path)
     name = _LEXER_ALIAS.get(lang, lang)
     if name == "text":
         return None
+    if name in _LEXERS:
+        return _LEXERS[name]
     try:
-        return get_lexer_by_name(name, stripnl=False, ensurenl=False)
+        lexer = get_lexer_by_name(name, stripnl=False, ensurenl=False)
     except ClassNotFound:
-        return None
+        lexer = None
+    _LEXERS[name] = lexer
+    return lexer
 
 
 def token_color(ttype, t: theme.Tokens) -> Tuple[Optional[QColor], bool]:

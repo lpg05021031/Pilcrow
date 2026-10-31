@@ -15,6 +15,8 @@ os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".
 
 from harness import Client, start_mock  # noqa: E402
 
+from pilcrow_qt import theme  # noqa: E402
+
 
 def main(turns: int) -> None:
     port = 5631
@@ -40,15 +42,19 @@ def main(turns: int) -> None:
                 continue
             vb = tr.view.verticalScrollBar()
             r = store.rt.get("sess-long")
-            st = (vb.value(), vb.maximum(), tr.scene.total, bool(r and r.loaded), tr._placed)
+            # what the frame shows: any pixel in the words' colour means content, not the skeleton
+            img = tr.view.viewport().grab().toImage()
+            text = theme.qcolor(theme.tokens().text).rgb()
+            words = any(img.pixel(x, y) == text for y in range(0, img.height(), 8) for x in range(0, img.width(), 8))
+            st = (vb.value(), vb.maximum(), tr.scene.total, bool(r and r.loaded), tr._placed, words)
             samples.append((round((time.perf_counter() - t0) * 1000), st))
             if r is not None and r.loaded and tr._placed and vb.value() == vb.maximum() and st == last:
                 settled_at = samples[-1][0]
                 break
             last = st
-        flash = [t for t, st in samples if isinstance(st, tuple) and st[0] == 0 and st[2] > 900]
+        flash = [t for t, st in samples if isinstance(st, tuple) and st[5] and not st[3]]
         print(
-            f"open sess-long ({turns} turns): settled at {settled_at}ms; frames showing the TOP with content taller than the viewport: {len(flash)} ({flash[:1]}..{flash[-1:]} ms)"
+            f"open sess-long ({turns} turns): settled at {settled_at}ms; frames showing words before the conversation was whole: {len(flash)} ({flash[:1]}..{flash[-1:]} ms)"
         )
         for t, st in samples[:: max(1, len(samples) // 25)]:
             print("  ", t, st)

@@ -32,6 +32,8 @@ renders. The scripts:
 
 ### F1 · Streaming a long list, table or code block re-renders the whole block every flush — high
 
+**Fixed.** A block being written grows in place (`canvas/grow.py`, DESIGN.md §7.3): a fence takes a line, a list an item, a table a row, as cursor edits into the document it has; the block is rendered from its source only when its shape changes, and when it is done it keeps the document it grew (the render's height, so nothing moves and nothing is rendered again). The reply is not parsed again for a token either: a grower says from the delta's lines whether its block stays one block. After, through the real path (model, flush, scene, paint): a token costs 4 ms in a 1000-item list and 5 ms in a 500-row table or a 300-line fence, flat from the first token to the last and with no stall over 20 ms in the list, where it was 222, 181 and 25 ms and climbing with hundreds of stalls.
+
 | Shape | Per-token cost, first 10 % → last 10 % | Stalls > 20 ms | Worst |
 |---|---|---|---|
 | List, 1000 items | 6 ms → 222 ms | 796 | 284 ms |
@@ -53,6 +55,8 @@ a list gains an item, a table a row: the same append. Until then, a stopgap: a r
 
 ### F2 · One giant paragraph: the whole paragraph is laid out again per token — medium
 
+**Fixed.** A paragraph past `PARA_LIMIT` (6000 characters) is kept in pieces cut at whitespace where the inline markup is balanced; the cuts depend only on the text before them, so a paragraph being written is cut where its finished self will be. The later pieces are continuations with no space above, and a token costs the layout of one piece.
+
 48 KB in one paragraph (no blank line): 3.9 ms → 15 ms per token, 178 stalls, worst 57 ms. 21 KB of
 Chinese: 3.9 → 7.3 ms. The cursor insert is cheap; QTextDocument re-lays the block it touched, which
 is the whole paragraph. Rare in practice (a paragraph seldom passes 5 KB) and inherent to
@@ -60,6 +64,8 @@ QTextDocument; the only real fix is to keep a paragraph past a size in two block
 (no margin, no indent between them).
 
 ### F3 · Opening a long conversation shows its beginning for 0.4 s, then jumps to the end — medium
+
+**Fixed.** The slices still go into the scene as they come, but the view paints the skeleton alone and offers no scrolling until the conversation is whole, then opens at its end in one step. After: of the frames sampled every 20 ms while 1500 turns load, none shows a word of the conversation before it is whole (`s_open.py`).
 
 1500 turns through the mock: the first slice paints at 283 ms with the view at the top; fourteen
 more frames show turn 1 and the slices piling up under it; at 745 ms the whole is loaded and the
@@ -69,11 +75,15 @@ until `loaded`, or follow the growing end silently (no easing) while slices arri
 
 ### F4 · The first open of the side panel stalls 240 ms — medium
 
+**Fixed.** One Pygments lexer per language instead of a lookup per file (70 ms of the stall), the file cards built twelve to an event-loop turn so the first ones paint before the rest exist, and the panel itself built hidden while the window is idle after a session opens, so the first toggle is a flip.
+
 `store.set_ui(panel=True)` the first time in a session: 33 ms to the call's return and a 240 ms
 stall while `RightPanel` and its tabs are built. Later toggles cost 8 ms; the sidebar 6–11 ms. Fix:
 build the panel at idle once a session is open (hidden), or build each tab when it is first shown.
 
 ### F5 · Typing in the composer with a long draft costs 54 ms a keystroke — medium
+
+**Fixed.** The field no longer sets the document's width on every key (which laid the whole draft out twice), fixes the line height on the blocks a change brought in rather than scanning them all, and reads its text once per change instead of seven times.
 
 After a 3000-line paste (149 ms, acceptable) every keystroke takes 54 ms: `_on_text_changed`
 re-applies the line height to the whole document, detects the popup, autosizes and refreshes the

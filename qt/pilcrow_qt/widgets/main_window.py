@@ -235,6 +235,19 @@ class MainWindow(QMainWindow):
         self.panel_host.setFixedWidth(ui.panel_w)
         self.panel_host.setVisible(panel_open)
         self.body.place()
+        if self.panel is None and session is not None and store.page == "session":
+            # built while the window is idle, so the first open is a flip, not a construction
+            QTimer.singleShot(700, self._prebuild_panel)
+
+    def _prebuild_panel(self) -> None:
+        session = store.active_session()
+        if self.panel is not None or session is None or store.page != "session":
+            return
+        from .panels.right_panel import RightPanel
+
+        self.panel = RightPanel()
+        self.panel_layout.addWidget(self.panel)
+        self.panel.set_session(session)
 
     # ---- the drag handles (App.tsx resizeSidebar / resizePanel)
     def _drag_sidebar(self, dx: int) -> None:
