@@ -4,6 +4,7 @@ markers the view paints from, and the Pygments colouring."""
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -51,7 +52,7 @@ def test_fence_has_a_language_head_and_mono_lines(app):
     assert 'width="100%"' in out and "border-collapse:collapse" in out  # the well the view rounds
     assert ">TypeScript</p>" in out
     assert "line-height:20px" in out  # 12.5px mono on 1.6 lines
-    assert "<pre" in out and "const" in out
+    assert "white-space:pre-wrap" in out and "const" in out
     assert "font-style:italic" in markdown.render_html("```py\n# note\nx = 1\n```")
 
 
@@ -69,10 +70,10 @@ def test_headings_become_sized_paragraphs(app):
 
 
 def test_tables_and_quotes(app):
-    out = markdown.render_html("| a | b |\n| --- | --- |\n| 1 | 2 |")
-    assert 'width="60%"' in out
+    out = markdown.render_html("| a | b |\n| --- | --- |\n| 1 | 2 |", width=600)
+    assert 'width="360"' in out  # a small table still spans 60% of the room (min-width: 60%)
     assert (
-        '<th style="padding-left:0;padding-right:14px;padding-top:7px;padding-bottom:7px;font-size:13px;text-align:left;'
+        'style="padding-left:0;padding-right:14px;padding-top:7px;padding-bottom:7px;font-size:13px;text-align:left"'
         in out
     )
     css = markdown.stylesheet(theme.tokens(), markdown.PROSE)
@@ -92,3 +93,67 @@ def test_lang_label_and_path_refs():
     assert markdown.lang_label("py") == "Python" and markdown.lang_label("") == "Text"
     assert markdown.as_path_ref("web/src/lib/a.ts:42") == {"path": "web/src/lib/a.ts", "line": 42}
     assert markdown.as_path_ref("not a path") is None
+
+
+def test_table_columns_are_sized_like_a_browser(app):
+    from pilcrow_qt.markdown import column_widths
+
+    # everything fits: each column as wide as it wants, stretched to 60% of the room
+    assert column_widths([20, 20], [100, 100], 1000) == [300, 300]
+    # the widest lines do not fit: each column at least its widest word, the rest shared
+    assert sum(column_widths([100, 100], [600, 200], 500)) == 500
+    assert column_widths([100, 100], [600, 200], 500)[0] > column_widths([100, 100], [600, 200], 500)[1]
+    # a heading never wraps: its column is at least as wide as its name in semibold
+    wide = (
+        "| Approach | Allocations | Speed | Risk |\n|---|---|---|---|\n"
+        + "| keep | 1 per char | 1× | "
+        + "words " * 60
+        + "|"
+    )
+    out = markdown.render_html(wide, width=600)
+    widths = [int(w) for w in re.findall(r'<th width="(\d+)"', out)]
+    assert len(widths) == 4 and sum(widths) <= 600
+    head = markdown.font_metrics(markdown.PROSE.table, weight=600).horizontalAdvance("Allocations")
+    assert widths[1] >= head + markdown.CELL_PAD
+    assert f'<table width="{sum(widths)}"' in out
+
+
+def test_fence_lines_hang_their_continuations(app):
+    out = markdown.render_html("```py\nx = 1\n    y = 2\n\nz\n```")
+    ps = re.findall(r"<p style=\"[^\"]*\">", out)[1:]  # after the language head
+    assert len(ps) == 4
+    assert "margin-left:0px;text-indent:-0px" in ps[2]  # an empty line hangs nothing
+    ch = markdown.font_metrics(markdown.px(markdown.mono_size()), mono=True).horizontalAdvance("0")
+    assert f"margin-left:{int(2 * ch + 0.5)}px" in ps[0]  # a flush line continues two characters in
+    assert f"margin-left:{int(6 * ch + 0.5)}px" in ps[1]  # an indented one past its own indentation
+    assert "white-space:pre-wrap" in ps[1]
+    assert markdown.fence_sources("a\n\n```py\nx = 1\n```\n\n```\nplain\n```") == ["x = 1", "plain"]
+
+
+def test_task_lists_draw_boxes_in_the_markers_place(app):
+    out = markdown.render_html("- [x] done\n- [ ] todo")
+    assert "list-style-type:none" in out
+    assert f'<img src="{markdown.CHECK_ON}"' in out and f'<img src="{markdown.CHECK_OFF}"' in out
+    assert "[x]" not in out and "[ ]" not in out
+    assert f"text-indent:-{markdown.PROSE.list_indent}px" in out
+    mixed = markdown.render_html("- [x] done\n- plain")
+    assert "list-style-type:none" not in mixed and "[x]" not in mixed  # the bullets stay; the box follows one
+    assert f'<img src="{markdown.CHECK_ON}"' in mixed
+
+
+def test_bullets_change_shape_as_they_nest_and_markers_are_quiet(app):
+    t = theme.tokens()
+    out = markdown.render_html("- one\n  - two\n    - three\n\n1. seven")
+    assert "list-style-type:disc" in out and "list-style-type:circle" in out and "list-style-type:square" in out
+    assert f'<li style="color:{t.text_3}">' in out  # the marker's colour (li::marker)
+    assert f'<span style="color:{t.text}">one</span>' in out  # the words keep theirs
+    assert f'<span style="color:{t.text}">seven</span>' in out
+
+
+def test_cjk_stays_upright_in_italic_comments(app):
+    t = theme.tokens()
+    (line,) = markdown.highlight_lines("# 註解 note", "python", t.name)
+    assert f'<span style="color:{t.cm_comment}">註解</span>' in line  # no font-style on the CJK run
+    assert f'<span style="color:{t.cm_comment};font-style:italic"> note</span>' in line
+    lines = markdown.highlight_lines('s = """a\nb"""\nx = 1', "python", t.name)
+    assert len(lines) == 3 and "b" in lines[1] and "x" in lines[2]  # a token across lines is split per line

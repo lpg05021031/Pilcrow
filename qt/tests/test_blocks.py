@@ -235,3 +235,81 @@ def test_workflow_row_body_reads_the_run_from_the_session(app):
         assert (counts.done, counts.total) == (2, 2)  # the "2/2 agents" at the right of the head
     finally:
         store.rt.pop("sess-wf-test", None)
+
+
+def test_code_well_carries_a_copy_at_its_corner(app):
+    from PySide6.QtCore import QRect
+    from PySide6.QtWidgets import QWidget
+
+    b = prose("before\n\n```ts\nconst a = 1;\n```")
+    wells = b.wells()
+    assert len(wells) == 1 and wells[0][1] == "const a = 1;"
+    r = wells[0][0]
+    cr = b.copy_rect(r)
+    assert cr.right() <= r.right() and cr.top() >= r.top()
+    t = b.hit(cr.center().x(), cr.center().y())
+    assert t is not None and t.kind == "button" and t.id == "copy:0"
+    assert b.hit(int(r.left()) + 20, int(r.top()) + 45).kind == "text"  # the code itself selects
+    assert [x.id for x in b.targets()] == ["copy:0"]
+
+    class View:
+        copied = ""
+
+        def copy_text(self, text: str) -> None:
+            self.copied = text
+
+        def viewport(self):
+            return QWidget()
+
+        def block_rect(self, _b):
+            return QRect(0, 0, 10, 10)
+
+    v = View()
+    b.activate(t, v)
+    assert v.copied == "const a = 1;"
+    assert b._copied[0] == 0  # noqa: SLF001 - the corner says "Copied" for a moment
+
+
+def test_a_written_thought_is_quiet_markdown(app):
+    from pilcrow_qt.canvas.blocks.thinking import ThinkingBlock
+    from pilcrow_qt.lib.transcript_model import ThinkingItem
+
+    m = measurer()
+    done = ThinkingItem(id="th1", text="Plan:\n\n1. read `a.ts`\n2. run it", streaming=False, start_ts=0, end_ts=1000)
+    blk = ThinkingBlock(done)
+    body = blk.children[0]
+    body.measure(700, m)
+    assert body._md and "`" not in body.doc.toPlainText()  # noqa: SLF001
+    assert body.selected_text(None, None).startswith("Plan:\nread a.ts")
+    live = ThinkingItem(id="th2", text="still `thinking`", streaming=True, start_ts=0)
+    blk2 = ThinkingBlock(live)
+    blk2.children[0].measure(700, m)
+    assert not blk2.children[0]._md and "`" in blk2.children[0].doc.toPlainText()  # noqa: SLF001
+
+
+def test_a_node_body_lays_out_from_its_own_edge(app):
+    from pilcrow_qt.canvas import nodes as nd
+    from pilcrow_qt.canvas.blocks.base import NodeBlock
+
+    nb = NodeBlock("nb", lambda m: nd.note("a note"), pad=(4, 0, 0, 0))
+    nb.indent = 28  # nested two levels deep: the view paints it 28px in and 28px narrower
+    nb.measure(600, measurer())
+    assert nb.root.x == 4 and nb.root.w == 596
+
+
+def test_number_gutters_fit_their_widest_number(app):
+    from pilcrow_qt.canvas.blocks.codehtml import code_html, gutter_width
+
+    html, total, shown = code_html("\n".join(f"line {i}" for i in range(1, 13)), path="/p/a.py")
+    assert total == 12 and f'<td width="{gutter_width(12, 14, 12)}"' in html
+    assert gutter_width(120, 14, 12) > gutter_width(12, 14, 12) > gutter_width(1, 14, 12)
+
+
+def test_hit_tests_land_on_the_line_under_the_leading(app):
+    from pilcrow_qt.canvas.paint import doc_pos_at
+
+    b = prose("```ts\nexport function tokens() {\n  const out = [];\n}\n```")
+    r = b.wells()[0][0]
+    first = int(r.top()) + 30 + 1  # the first code line starts under the 30px head
+    positions = {doc_pos_at(b.doc, 60, first + 20 * k + 1) for k in range(3)}  # the top strip of each line
+    assert len(positions) == 3 and max(positions) < b.doc.characterCount() - 1

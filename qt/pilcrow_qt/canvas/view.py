@@ -500,10 +500,12 @@ class CanvasView(QAbstractScrollArea):
 
     # ---------------------------------------------------------------- warming
     def _exact(self, b: Block) -> int:
-        """Measure a block exactly at the column width; returns the height delta."""
+        """Measure a block exactly at the width it is painted at (the column less the block's indent);
+        returns the height delta. ``h_width`` keeps the column width, which is what a width change
+        compares against."""
         if isinstance(b, Group) and not b.shaped:
             self.shape(b)
-        h = b.measure(self.col_w, self.m)
+        h = b.measure(self.col_w - b.indent, self.m)
         self._warm.add(b)
         b.warm = True
         return b.set_height(h, GRADE_EXACT, self.col_w)
@@ -514,10 +516,10 @@ class CanvasView(QAbstractScrollArea):
         if isinstance(b, Group) and b.children:
             for c in self._walk_open(b):
                 if c.h == 0 and c.grade == 0 and not c.warm:
-                    c.set_height(c.estimate(self.col_w, self.m), 0, self.col_w)
+                    c.set_height(c.estimate(self.col_w - c.indent, self.m), 0, self.col_w)
             return
         b.warm = False
-        b.set_height(b.estimate(self.col_w, self.m), 0, self.col_w)
+        b.set_height(b.estimate(self.col_w - b.indent, self.m), 0, self.col_w)
 
     def shape(self, g: Group) -> None:
         """Build a group's children the first time they are needed: they take their estimates, and
@@ -604,7 +606,7 @@ class CanvasView(QAbstractScrollArea):
                     b = q.pop()
                     if b.scene is not self.scene or b.grade != 0 or b.warm:
                         continue
-                    b.set_height(b.fast_measure(self.col_w, self.m), GRADE_FAST, self.col_w)
+                    b.set_height(b.fast_measure(self.col_w - b.indent, self.m), GRADE_FAST, self.col_w)
                     if time.perf_counter() - t0 > budget * 2:
                         more = bool(q)
                         break
@@ -889,13 +891,14 @@ class CanvasView(QAbstractScrollArea):
         if hit is not None and hit[1].kind in ("button", "head", "toggle", "link", "image", "chev", "more"):
             self.viewport().update(self.block_rect(hit[0]))
             return
-        # text: start a selection
+        # text: start a selection (on the block under the pointer, whether or not it named a target)
         self.clear_selection()
-        if hit is not None:
-            b = hit[0]
+        found = self.scene.leaf_at(self.scene_y(pos.y())) if hit is None else None
+        b = hit[0] if hit is not None else found[0] if found is not None else None
+        if b is not None and b.h > 0:
             lx = pos.x() - (self.col_x + b.indent)
             ly = self.scene_y(pos.y()) - b.y()
-            p0 = b.text_pos_at(lx, ly)
+            p0 = b.text_pos_at(lx, ly) if -8 <= lx <= self.col_w - b.indent + 8 else None
             if p0 is not None:  # a press beside the words selects nothing until it is dragged
                 self.selection = Selection(b.key, p0)
                 self._selecting = True
@@ -1101,7 +1104,7 @@ class CanvasView(QAbstractScrollArea):
                     if time.perf_counter() - t0 < OPEN_BUDGET:
                         self._exact(c)
                     elif c.grade < GRADE_FAST and not c.warm:
-                        c.set_height(c.fast_measure(self.col_w, self.m), GRADE_FAST, self.col_w)
+                        c.set_height(c.fast_measure(self.col_w - c.indent, self.m), GRADE_FAST, self.col_w)
             finally:
                 self.end()
         if not animate or store.reduced_motion or not self.isVisible():
@@ -1182,17 +1185,14 @@ class CanvasView(QAbstractScrollArea):
         if s is None:
             return
         hit = self.hit(pos)
-        if hit is None:
-            found = self.scene.leaf_at(self.scene_y(pos.y()))
-            if found is None:
-                return
-            b = found[0]
-            p1 = None
-        else:
-            b = hit[0]
-            lx = pos.x() - (self.col_x + b.indent)
-            ly = self.scene_y(pos.y()) - b.y()
-            p1 = b.text_pos_at(lx, ly)
+        found = self.scene.leaf_at(self.scene_y(pos.y())) if hit is None else None
+        b = hit[0] if hit is not None else found[0] if found is not None else None
+        if b is None:
+            return
+        lx = pos.x() - (self.col_x + b.indent)
+        ly = self.scene_y(pos.y()) - b.y()
+        # over the words (a target's or not) the focus is a position; beside them, the whole block
+        p1 = b.text_pos_at(lx, ly) if -8 <= lx <= self.col_w - b.indent + 8 else None
         if b.key != s.f_key or p1 != s.f_pos:
             s.f_key, s.f_pos = b.key, p1
             self.viewport().update()

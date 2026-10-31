@@ -56,7 +56,7 @@ class NodeBlock(Block):
         if self.root is None:
             self.root = self.builder(m)
         pl, t, r, b = self.pad
-        h = self.root.layout(pl + self.indent, t, max(1, width - pl - r - self.indent), m)
+        h = self.root.layout(pl, t, max(1, width - pl - r), m)
         self.warm = True
         return (h + t + b) if h > 0 else 0
 

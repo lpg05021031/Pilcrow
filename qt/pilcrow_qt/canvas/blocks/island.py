@@ -97,8 +97,7 @@ class IslandBlock(Block):
         self._last_geom = None
 
     def inner_width(self, width: int) -> int:
-        w = width - self.indent
-        return min(w, self.max_w) if self.max_w else w
+        return min(width, self.max_w) if self.max_w else width
 
     def estimate(self, width: int, m: Measurer) -> int:
         return self.h or 120

@@ -267,3 +267,21 @@ def test_accessibility_lists_the_blocks_on_screen(view):
     assert card.role() == QAccessible.Role.Button and iface.indexOfChild(card) == n - 1
     assert card.parent() is iface and card.rect().width() > 100
     assert "rows on screen" in iface.text(QAccessible.Text.Description)
+
+
+def test_dragging_over_words_selects_them(view):
+    from pilcrow_qt.canvas.blocks.prose import ProseBlock
+
+    v = view
+    v.clear_selection()
+    para = _blocks(v, ProseBlock)[0]
+    r = v.block_rect(para)
+    a = QPoint(r.left() + 2, r.top() + 10)
+    b = QPoint(r.left() + 120, r.top() + 10)
+    QTest.mousePress(v.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, a)
+    QTest.mouseMove(v.viewport(), b)
+    QTest.mouseRelease(v.viewport(), Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, b)
+    pump(20)
+    text = v.selected_text()
+    assert text.startswith("The parser") and len(text) < 40
+    v.clear_selection()

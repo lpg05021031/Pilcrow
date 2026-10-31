@@ -16,7 +16,7 @@ import math
 from collections import OrderedDict
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt
+from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt, QUrl
 from PySide6.QtGui import (
     QAbstractTextDocumentLayout,
     QColor,
@@ -81,6 +81,23 @@ def doc_height(doc: QTextDocument) -> int:
     return max(1, int(math.ceil(doc.size().height())))
 
 
+def doc_pos_at(doc: QTextDocument, x: float, y: float) -> Optional[int]:
+    """The text position under a point of a laid-out document, or None beside the words. A fixed
+    line height leaves a strip of leading above each line that Qt's fuzzy hit test answers with a
+    position far from it (the end of the document); a point whose answer lies on another line is
+    tried a little lower, on the line it belongs to."""
+    lay = doc.documentLayout()
+    pos = -1
+    for dy in (0, 3, 6, 9):
+        pos = lay.hitTest(QPointF(x, y + dy), Qt.HitTestAccuracy.FuzzyHit)
+        if pos < 0:
+            return None
+        r = lay.blockBoundingRect(doc.findBlock(pos))
+        if r.top() - 3 <= y + dy <= r.bottom() + 4:
+            return pos  # the position is on a line that holds the point
+    return pos
+
+
 def draw_doc(
     p: QPainter,
     doc: QTextDocument,
@@ -114,9 +131,10 @@ def draw_doc(
 def selection(doc: QTextDocument, a: int, b: int, bg: QColor, fg: Optional[QColor] = None) -> Any:
     """One highlighted range for ``draw_doc``."""
     sel = QAbstractTextDocumentLayout.Selection()
+    end = max(0, doc.characterCount() - 1)  # a range may reach past the words (a source is longer)
     cur = QTextCursor(doc)
-    cur.setPosition(max(0, a))
-    cur.setPosition(max(0, b), QTextCursor.MoveMode.KeepAnchor)
+    cur.setPosition(min(max(0, a), end))
+    cur.setPosition(min(max(0, b), end), QTextCursor.MoveMode.KeepAnchor)
     sel.cursor = cur
     fmt = QTextCharFormat()
     fmt.setBackground(bg)
@@ -155,10 +173,14 @@ def _block_height(b: Any, br: QRectF) -> float:
     return max(br.height(), last.y() + last.height())
 
 
+_PAD_CHARS = markdown.PILL_PAD[0] + markdown.NO_BREAK + " "
+
+
 def _pills(p: QPainter, b: Any, br: QRectF, color: QColor) -> None:
     tl = b.layout()
     if tl is None or tl.lineCount() == 0:
         return
+    text = b.text()
     it = b.begin()
     while not it.atEnd():
         fr = it.fragment()
@@ -174,29 +196,31 @@ def _pills(p: QPainter, b: Any, br: QRectF, color: QColor) -> None:
         while line.isValid() and line.textStart() < end:
             a = max(start, line.textStart())
             z = min(end, line.textStart() + line.textLength())
-            x1 = line.cursorToX(a)[0]
-            x2 = line.cursorToX(z)[0]
-            base = br.top() + line.y() + line.ascent()
-            p.setBrush(color)
-            p.drawRoundedRect(QRectF(br.left() + x1, base - asc - 2, x2 - x1, asc + desc + 4), 5, 5)
+            # a span that wrapped leaves its padding alone on a line: no pill under nothing
+            if text[a:z].strip(_PAD_CHARS):
+                x1 = line.cursorToX(a)[0]
+                x2 = line.cursorToX(z)[0]
+                base = br.top() + line.y() + line.ascent()
+                p.setBrush(color)
+                p.drawRoundedRect(QRectF(br.left() + x1, base - asc - 2, x2 - x1, asc + desc + 4), 5, 5)
             if line.lineNumber() + 1 >= tl.lineCount():
                 break
             line = tl.lineAt(line.lineNumber() + 1)
 
 
-def _table_rect(doc: QTextDocument, lay: Any, table: QTextTable) -> QRectF:
+def table_rect(doc: QTextDocument, lay: Any, table: QTextTable) -> QRectF:
+    """The rectangle a table (a prose table or a code well) covers, in document coordinates. The
+    layout's frame rectangle for a table starts at the first cell's content (inside its padding) and
+    is as tall as the table with both its margins; the cell's padding and the margins are taken off."""
     first = table.cellAt(0, 0)
     cf = first.format().toTableCellFormat()
     top_block = lay.blockBoundingRect(first.firstCursorPosition().block())
     top = top_block.top() - cf.topPadding()
     left = top_block.left() - cf.leftPadding()
     fr = lay.frameBoundingRect(table)
-    after = doc.findBlock(table.lastPosition() + 1)
-    if after.isValid() and after.position() > table.lastPosition():
-        bottom = lay.blockBoundingRect(after).top() - table.format().bottomMargin()
-    else:
-        bottom = top + fr.height()
-    return QRectF(left, top, fr.width(), max(0.0, bottom - top))
+    tf = table.format()
+    height = fr.height() - tf.topMargin() - tf.bottomMargin()
+    return QRectF(left, top, fr.width(), max(0.0, height))
 
 
 def _table_rules(p: QPainter, lay: Any, table: QTextTable, fr: QRectF, hair: QColor, hair2: QColor) -> None:
@@ -229,7 +253,7 @@ def paint_decor(p: QPainter, doc: QTextDocument, x: int, y: int, clip: Optional[
     for frame in doc.rootFrame().childFrames():
         if not isinstance(frame, QTextTable):
             continue
-        fr = _table_rect(doc, lay, frame)
+        fr = table_rect(doc, lay, frame)
         if not fr.intersects(view):
             continue
         if frame.format().borderCollapse():
@@ -347,6 +371,7 @@ class Measurer:
         self._fonts: Dict[Tuple, QFont] = {}
         self._fms: Dict[Tuple, QFontMetricsF] = {}
         self._static: OrderedDict[Tuple, QStaticText] = OrderedDict()
+        self._checks: Dict[Tuple, QPixmap] = {}
         self.refresh()
 
     def refresh(self) -> None:
@@ -358,6 +383,7 @@ class Measurer:
         self._fonts.clear()
         self._fms.clear()
         self._static.clear()
+        self._checks.clear()
         self.pixmaps.clear()
         self.prose = markdown.metrics(False)
         self.compact = markdown.metrics(True)
@@ -465,16 +491,25 @@ class Measurer:
         streaming: bool = False,
         cwd: str = "",
         line_height: Optional[int] = None,
+        size: Optional[float] = None,
     ) -> QTextDocument:
-        """A laid-out document for one Markdown source (a top-level block or a whole text)."""
-        m = markdown.metrics(compact or quiet)
+        """A laid-out document for one Markdown source (a top-level block or a whole text). ``size``
+        picks a style of its own (a thought at 13.5px) over the prose and compact ones."""
+        m = markdown.metrics_for(size) if size else markdown.metrics(compact or quiet)
         try:
-            body = markdown.render_html(src, streaming=streaming, base_dir=cwd or None, compact=compact or quiet)
+            body = markdown.render_html(
+                src, streaming=streaming, base_dir=cwd or None, compact=compact or quiet, width=width, m=m
+            )
         except Exception:  # noqa: BLE001 - a Markdown failure must not take the row down
             body = f"<p>{html.escape(src)}</p>"
         body = link_paths(body)
         doc = self._doc(self.font(m.base), width)
         doc.setIndentWidth(m.list_indent)
+        if markdown.CHECK_ON in body:
+            for name, on in ((markdown.CHECK_ON, True), (markdown.CHECK_OFF, False)):
+                doc.addResource(
+                    QTextDocument.ResourceType.ImageResource, QUrl(name), self.check_pixmap(on, m.list_indent)
+                )
         css = markdown.stylesheet(self.tokens, m)
         if line_height is not None and line_height != m.line:
             css += f" p {{ line-height: {line_height}px; }}"
@@ -505,6 +540,34 @@ class Measurer:
         doc.setDefaultFont(font)
         doc.setUseDesignMetrics(False)
         return doc
+
+    def check_pixmap(self, on: bool, width: int) -> QPixmap:
+        """A task list's box, drawn in the marker's place: ``width`` is the list indent the image
+        spans (the box at its left, the gap to the words after it)."""
+        key = ("check", on, width, self.theme_name)
+        pm = self._checks.get(key)
+        if pm is None:
+            size = markdown.CHECK_SIZE
+            dpr = self.dpr
+            pm = QPixmap(int(width * dpr), int(size * dpr))
+            pm.setDevicePixelRatio(dpr)
+            pm.fill(Qt.GlobalColor.transparent)
+            t = self.tokens
+            p = QPainter(pm)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            rr = QRectF(0.75, 0.75, size - 1.5, size - 1.5)
+            if on:
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(theme.blend(t.fill_3, t.canvas))
+                p.drawRoundedRect(rr, 4, 4)
+                p.drawPixmap(2, 2, icons.pixmap("check", QColor(t.text_2), size - 4))
+            else:
+                p.setPen(QPen(theme.blend(t.hair_3, t.canvas), 1))
+                p.setBrush(Qt.BrushStyle.NoBrush)
+                p.drawRoundedRect(rr, 4, 4)
+            p.end()
+            self._checks[key] = pm
+        return pm
 
     # ---- estimation
     def estimate_markdown(self, src: str, width: int, compact: bool = False) -> int:
@@ -586,6 +649,7 @@ __all__ = [
     "PixmapCache",
     "Rect",
     "doc_height",
+    "doc_pos_at",
     "draw_doc",
     "find_ranges",
     "link_paths",
@@ -593,6 +657,7 @@ __all__ = [
     "rect_of",
     "rounded",
     "selection",
+    "table_rect",
     "tidy_doc",
 ]
 

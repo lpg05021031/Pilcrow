@@ -23,7 +23,8 @@ qt/
                        tint() for a widget's own roles, a static QSS on palette roles
     icons.py           icon(name, color, size) from assets/icons/*.svg (Lucide, currentColor)
     fonts.py           loads assets/fonts/*.ttf (Inter, JetBrains Mono) when present
-    markdown.py        Markdown → QTextDocument/HTML, code blocks highlighted with Pygments
+    markdown.py        Markdown → QTextDocument/HTML, code blocks highlighted with Pygments; the layout
+                       QTextDocument cannot do itself (table columns, wrapped code, task lists)
     widgets/
       main_window.py   sidebar | main column | right panel; global shortcuts (App.tsx)
       sidebar.py       Sidebar.tsx

@@ -104,6 +104,11 @@ class Block:
 elapsed bucket…). The reconciler compares `rev` first (cheap), then `sig` (so a rev bump that
 changed nothing visible costs nothing).
 
+`width`, in `estimate`, `fast_measure` and `measure`, is the width the block is painted at: the
+column less the block's `indent`. The view takes the indent off before it asks, and paints and
+hit-tests the block at `col_x + indent`; a block lays itself out from its own left edge and never
+reads its indent. `h_width` keeps the column width, which is what a width change compares against.
+
 ### 2.3 Group
 
 ```python
@@ -281,9 +286,16 @@ drawn in one call. Icons are `icons.pixmap` (already cached).
 
 The decorations QTextDocument cannot draw (the inline-code pill, the rule beside a quote, the code
 well, table hairlines, the rail of a chapter, the breathing mark) are painted from the layout's
-geometry by the functions ported from `items.py` (`_pills`, `_table_rect`, `_table_rules`,
+geometry by the functions ported from `items.py` (`_pills`, `table_rect`, `_table_rules`,
 `_block_height`). The padding hacks for QTextBrowser (U+202F pads, negative viewport margins) go:
 the pill and the first-line leading are drawn by the painter at the right place.
+
+What QTextDocument cannot lay out from HTML, `markdown.py` lays out before the document is set: a
+table's columns from the widest word and the widest line of every cell (`column_widths`, a
+browser's auto layout), a code block as one paragraph per line with a hanging indent so a long line
+wraps past its own indentation, a task list's boxes as image resources in the marker's place, list
+markers in the quiet colour with the words wrapped in theirs. A prose block keeps the rectangle of
+each code well (`ProseBlock.wells`) and paints a Copy at its corner while the pointer is on it.
 
 ### 6.3 The pixmap cache
 
@@ -381,8 +393,11 @@ copies. Focus survives scrolling (it is a key, not a widget).
 ### 8.3 Selection
 
 `Selection(anchor=(path, pos), focus=(path, pos))`. On press the view records the text position
-under the pointer (`text_pos_at`); on drag it updates the focus and invalidates the blocks whose
-selection changed. `PaintState.selection_for(block)` gives `(a, b)`, `FULL` or `None`; text blocks
+under the pointer (`text_pos_at`, on the block under the pointer whether or not it named a target);
+on drag it updates the focus and invalidates the blocks whose selection changed. Positions come
+from `paint.doc_pos_at`: a fuzzy hit test with a check that the answer lies on a line holding the
+point, since the leading above a line of fixed height is otherwise answered with the end of the
+document. `PaintState.selection_for(block)` gives `(a, b)`, `FULL` or `None`; text blocks
 pass it to the document's draw context, non-text blocks paint a wash when `FULL`. Double-click
 selects a word (`QTextCursor.select(WordUnderCursor)`), triple-click a block. Copy joins
 `selected_text` of the blocks between anchor and focus with blank lines, stripping the pill pads and

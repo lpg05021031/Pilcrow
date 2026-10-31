@@ -91,3 +91,36 @@ Each item names the screen, what the layout was saying wrongly, and what it says
 hero alone, the Tasks tab's sections appearing with their content, the timeline's settings button,
 the file card's folder, the narrow header and composer. The screenshot scenarios in
 `qt/tests/snap.py` and the tour in this audit were re-run after the changes.
+
+## 5. The conversation itself
+
+The reply is where the client is read, so its typography got a pass of its own: a scripted
+conversation holding every case (tables narrow and wide, nested and task lists, fences with lines
+too long for the column, inline code at the ends of lines, headings, quotes, rules, Chinese mixed
+with English and code, a thought, a Read, a command and an edit opened), painted through the real
+canvas at 1480, 1100 and 900 px, in both themes, and after a resize there and back.
+
+What the layout was saying wrongly, and what it says now:
+
+| Case | Was | Now |
+|---|---|---|
+| A table | Every table was 60% of the column whatever it held: a five-column table broke code spans and Chinese in the middle, and a narrow one wrapped its headings. | Columns are sized the way a browser sizes them: from the widest line and the widest word of every cell, within the column. A table that fits takes the room its content wants (and at least 60% of the column); one that does not keeps every column at least as wide as its widest word, a heading on one line, and a few characters of prose a line before anything breaks. |
+| A code line too long for the well | It wrapped onto a line flush with the margin, indistinguishable from the next statement. | It wraps two characters past its own indentation, so it still reads as one line. |
+| A code well | No way to take the code with you but to select it. | Copy sits at the corner while the pointer is on the well, and says Copied for a moment. |
+| Line numbers | A Read of ten lines or more wrapped its numbers digit by digit (the gutter was one pixel wide and grew only as far as one glyph). | The gutter is as wide as its widest number, in the Read and in a diff. |
+| A tool's body | Sat 28–70 px to the right of the verb it belonged to, and lost that much on the right: the "Lines 1–16 of 180" of a Read was cut off. The view painted every block at its indent, and a body laid itself out at that indent once more. | A block is measured at the width it is painted at, the column less its indent, and lays itself out from its own left edge. Bodies start under their verb, as on the web. |
+| A thought | Plain text with its Markdown showing: backticks, `1.`, blank lines. | Once written, a thought is set as quiet Markdown at its own size, so its lists, code spans and paragraphs read like the reply's. While it streams it stays plain, which is what makes it cheap to grow. |
+| A task list | `[x]` and `[ ]` as words, after a bullet. | A box in the marker's place, filled with a check when done; the words line up with every other list's. |
+| Bullets | A disc at every depth; markers the colour of the words. | Disc, circle, square as lists nest; markers in the quiet colour (`li::marker`), the words in the text colour. |
+| Chinese in an italic comment | Slanted by synthesis (CJK faces have no italic). | Upright, as `font-synthesis-style: none` keeps it on the web; the Latin around it stays italic. |
+| An inline code span that wrapped | Its padding alone on a line drew an empty pill. | No pill under nothing. |
+| Selecting words | A press on plain prose started no selection, only a double or triple click did; a press in the top two pixels of a code line selected to the end of the block. | A press on any words starts a selection, on a target's words or not; a point in the leading of a line is read as on that line. |
+
+What was looked at and kept: the prose measure (14.5px on 24px lines, 0.75em between paragraphs),
+the headings' scale, the pill, the quote rule, the hairline rule, the bubble, the 30px head of a well,
+the Bash well with its `$`, the diff's tints and word marks, the 760/560/420 px breakpoints.
+
+Left as it is: a fence does not scroll sideways (the web's `overflow-x: auto`); wrapping with the
+hanging indent reads better in a conversation than a strip that has to be dragged. A table that is
+wider than the column even at its narrowest still breaks a code span rather than overflow the
+column. Raw HTML in a reply shows as its text, as the web shows it.

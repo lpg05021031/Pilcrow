@@ -3,30 +3,59 @@
 Streaming touches only the last block: a plain delta is appended to its document with a cursor,
 anything with Markdown syntax re-renders that block alone, and the block is rendered once more from
 its final source when the item finishes. Finished blocks are never touched again.
+
+A code well in the block carries a Copy at its corner while the pointer is on it (``.md-copy``).
 """
 
 from __future__ import annotations
 
 import re
+import time
 from typing import Any, List, Optional, Tuple
 
-from PySide6.QtCore import QRect, Qt
-from PySide6.QtGui import QColor, QPainter, QTextCursor, QTextDocument
+from PySide6.QtCore import QRect, QRectF, Qt, QTimer
+from PySide6.QtGui import QColor, QPainter, QTextCursor, QTextDocument, QTextTable
 
 from ... import markdown, theme
 from ...lib.transcript_model import TextItem
-from ..paint import FULL, Measurer, PaintState, doc_height, draw_doc, find_ranges, paint_decor, selection
+from ..paint import (
+    FULL,
+    Measurer,
+    PaintState,
+    doc_height,
+    doc_pos_at,
+    draw_doc,
+    find_ranges,
+    paint_decor,
+    rounded,
+    selection,
+    table_rect,
+)
 from ..scene import GRADE_EXACT, GRADE_FAST, Block, Group, Target
 
 PLAIN = re.compile(r"^[^*_`\[\]#>|~<&\\\n]*$")  # a delta that cannot change the markup
 LINE_START_MARK = re.compile(r"(^|\n)\s*([-*+]|\d+[.)])\s")
+COPY_W, COPY_H = 56, 20  # the Copy at a well's corner: room for "Copied" in micro text, 8px sides
+COPIED_FOR = 1.2  # seconds the corner says "Copied"
 
 
 class ProseBlock(Block):
     """One Markdown top-level block (a paragraph, a list, a fence…) as a document."""
 
     KIND = "prose"
-    __slots__ = ("src", "streaming", "compact", "quiet", "cwd", "para", "doc", "_doc_src", "line_h")
+    __slots__ = (
+        "src",
+        "streaming",
+        "compact",
+        "quiet",
+        "cwd",
+        "para",
+        "doc",
+        "_doc_src",
+        "line_h",
+        "_wells",
+        "_copied",
+    )
 
     def __init__(
         self,
@@ -44,6 +73,8 @@ class ProseBlock(Block):
         self.compact, self.quiet, self.cwd, self.para, self.line_h = compact, quiet, cwd, para, line_h
         self.doc: Optional[QTextDocument] = None
         self._doc_src = ""
+        self._wells: Optional[List[Tuple[QRectF, str]]] = None  # (rect, code) of each code well
+        self._copied: Tuple[int, float] = (-1, 0.0)  # which well said "Copied", until when
 
     def mt(self) -> int:
         return self.para  # the space above a paragraph that follows another (0.75em; none above the first)
@@ -94,6 +125,7 @@ class ProseBlock(Block):
         if self.doc is None or self._doc_src != self.src or int(self.doc.textWidth()) != width:
             self.doc = m.markdown_doc(self.src, width, self.compact, self.quiet, self.streaming, self.cwd, self.line_h)
             self._doc_src = self.src
+        self._wells = None
         self.warm = True
         h = doc_height(self.doc) if self.src.strip() else 0
         if self.grade < GRADE_EXACT and self.h:
@@ -103,7 +135,63 @@ class ProseBlock(Block):
     def cool(self) -> None:
         self.doc = None
         self._doc_src = ""
+        self._wells = None
         self.warm = False
+
+    # ---- code wells
+    def wells(self) -> List[Tuple[QRectF, str]]:
+        """Each code well's rectangle (block coordinates) and the code it holds."""
+        if self._wells is None:
+            out: List[Tuple[QRectF, str]] = []
+            if self.doc is not None:
+                codes = markdown.fence_sources(self.src)
+                lay = self.doc.documentLayout()
+                for frame in self.doc.rootFrame().childFrames():
+                    if isinstance(frame, QTextTable) and frame.format().borderCollapse():
+                        code = codes[len(out)] if len(out) < len(codes) else ""
+                        out.append((table_rect(self.doc, lay, frame), code))
+            self._wells = out
+        return self._wells
+
+    @staticmethod
+    def copy_rect(well: QRectF) -> QRect:
+        """Where a well's Copy sits: the right of its 30px head."""
+        return QRect(int(well.right()) - 6 - COPY_W, int(well.top()) + 5, COPY_W, COPY_H)
+
+    def _paint_copies(self, p: QPainter, x: int, y: int, st: PaintState) -> None:
+        hov = st.hover
+        shown = -1
+        if hov is not None and isinstance(hov.id, str) and hov.id.startswith(("well:", "copy:")):
+            shown = int(hov.id.split(":")[1])
+        said, until = self._copied
+        for i, (r, code) in enumerate(self.wells()):
+            copied = i == said and time.monotonic() < until
+            if not code or (i != shown and not copied):
+                continue
+            cr = self.copy_rect(r).translated(x, y)
+            on = hov is not None and hov.kind == "button" and hov.id == f"copy:{i}"
+            if on and not copied:
+                rounded(p, cr, theme.blend(st.t.fill_2, st.t.canvas), None, theme.R1)
+            f = st.m.font(theme.FS_MICRO)
+            label = "Copied" if copied else "Copy"
+            color = QColor(st.t.ok if copied else st.t.text if on else st.t.text_3)
+            tw = st.m.text_w(label, f)
+            st.m.draw_text(p, cr.x() + (COPY_W - tw) / 2, cr.y() + (COPY_H - st.m.line_h(f)) / 2, label, f, color)
+
+    def _copy(self, i: int, view: Any) -> None:
+        wells = self.wells()
+        if i >= len(wells):
+            return
+        view.copy_text(wells[i][1])
+        self._copied = (i, time.monotonic() + COPIED_FOR)
+        self._repaint(view)
+        QTimer.singleShot(int(COPIED_FOR * 1000) + 60, lambda: self._repaint(view))
+
+    def _repaint(self, view: Any) -> None:
+        try:
+            view.viewport().update(view.block_rect(self))
+        except RuntimeError:
+            pass  # the view is gone
 
     # ---- paint
     def paint(self, p: QPainter, x: int, y: int, w: int, st: PaintState) -> None:
@@ -114,6 +202,8 @@ class ProseBlock(Block):
         if st.clip is not None:
             clip = clip.intersected(st.clip)
         paint_decor(p, self.doc, x, top, clip, st.t)
+        if not st.caching:
+            self._paint_copies(p, x, top, st)
         color = QColor(st.t.text_2 if self.quiet else st.t.text)
         sels: List[Any] = []
         if st.needle:
@@ -138,14 +228,34 @@ class ProseBlock(Block):
         href = self.doc.documentLayout().anchorAt(_pt(x, y))
         if href:
             return Target("link", href, (0, 0, 0, 0), href)
+        for i, (r, code) in enumerate(self.wells()):
+            if not code or not r.contains(x, y):
+                continue
+            cr = self.copy_rect(r)
+            if cr.contains(x, y):
+                return Target("button", f"copy:{i}", (cr.x(), cr.y(), cr.width(), cr.height()))
+            return Target("text", f"well:{i}", (int(r.x()), int(r.y()), int(r.width()), int(r.height())))
         return None
 
+    def targets(self) -> List[Target]:
+        out: List[Target] = []
+        for i, (r, code) in enumerate(self.wells()):
+            if code:
+                cr = self.copy_rect(r)
+                out.append(Target("button", f"copy:{i}", (cr.x(), cr.y(), cr.width(), cr.height())))
+        return out
+
     def cursor_for(self, target: Target) -> Optional[Any]:
-        return Qt.CursorShape.PointingHandCursor if target.kind == "link" else Qt.CursorShape.IBeamCursor
+        return Qt.CursorShape.PointingHandCursor if target.kind in ("link", "button") else Qt.CursorShape.IBeamCursor
+
+    def tooltip_for(self, target: Target) -> str:
+        return "Copy the code" if target.kind == "button" else ""
 
     def activate(self, target: Target, view: Any) -> None:
         if target.kind == "link":
             view.open_link(str(target.data), self.cwd)
+        elif target.kind == "button" and isinstance(target.id, str) and target.id.startswith("copy:"):
+            self._copy(int(target.id[5:]), view)
 
     def text(self) -> str:
         return self.src
@@ -156,17 +266,17 @@ class ProseBlock(Block):
     def text_pos_at(self, x: int, y: int) -> Optional[int]:
         if self.doc is None:
             return None
-        pos = self.doc.documentLayout().hitTest(_pt(x, y), Qt.HitTestAccuracy.FuzzyHit)
-        return pos if pos >= 0 else None
+        return doc_pos_at(self.doc, x, y)
 
     def selected_text(self, a: Optional[int], b: Optional[int]) -> str:
         if self.doc is None:
             return self.src
         if a is None or b is None:
             return self.plain()
+        end = self.doc.characterCount() - 1  # the selection may reach past the words (the source is longer)
         cur = QTextCursor(self.doc)
-        cur.setPosition(min(a, b))
-        cur.setPosition(max(a, b), QTextCursor.MoveMode.KeepAnchor)
+        cur.setPosition(min(min(a, b), end))
+        cur.setPosition(min(max(a, b), end), QTextCursor.MoveMode.KeepAnchor)
         return cur.selectedText().replace(" ", "\n").replace(" ", "").replace("⁠", "")
 
     @property

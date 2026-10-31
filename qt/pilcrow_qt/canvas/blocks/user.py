@@ -15,7 +15,7 @@ from ... import markdown, theme
 from ...lib.fmt import rel_path
 from ...lib.transcript_model import UserItem
 from ...store import ConfirmSpec, store
-from ..paint import Measurer, PaintState, doc_height, draw_doc, rounded
+from ..paint import Measurer, PaintState, doc_height, doc_pos_at, draw_doc, rounded
 from ..scene import GRADE_EXACT, Block, Target
 
 BUBBLE_LINE = markdown.px(theme.FS_BODY * 1.55)
@@ -306,12 +306,9 @@ class UserBlock(Block):
     def text_pos_at(self, x: int, y: int) -> Optional[int]:
         if self.doc is None or not self.bubble.contains(x, y):
             return None
-        from PySide6.QtCore import QPointF
-
         lx = x - self.bubble.x() - PAD_W
         ly = y - self.bubble.y() - PAD_H - self.attach_h
-        pos = self.doc.documentLayout().hitTest(QPointF(lx, ly), Qt.HitTestAccuracy.FuzzyHit)
-        return pos if pos >= 0 else None
+        return doc_pos_at(self.doc, lx, ly)
 
     def selected_text(self, a: Optional[int], b: Optional[int]) -> str:
         if self.doc is None or a is None or b is None:

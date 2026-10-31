@@ -6,7 +6,7 @@ from __future__ import annotations
 import html
 from typing import List, Optional, Sequence, Tuple
 
-from ... import theme
+from ... import markdown, theme
 from ...lib.fmt import lang_from_path
 from ...widgets.transcript.bodies.code import LINE, DiffHunk, DiffLine, highlight_lines, mark_html, word_ranges
 
@@ -31,16 +31,24 @@ def code_html(
     shown = lines if expanded else lines[:max_lines]
     hl = highlight_lines("\n".join(shown), language) if len(lines) < 20000 else [html.escape(x) for x in shown]
     hit_bg = theme.blend(t.accent_wash, t.inset).name()
+    gutter = gutter_width(start_line + len(shown) - 1, 14, 12)
     rows: List[str] = []
     for i, body in enumerate(hl):
         n = start_line + i
         bg = f' bgcolor="{hit_bg}"' if highlight_line == n else ""
         rows.append(
-            f'<tr><td width="1" align="right" style="color:{t.text_4};padding-left:14px;padding-right:12px"{bg}>'
+            f'<tr><td width="{gutter}" align="right" style="color:{t.text_4};padding-left:14px;padding-right:12px"{bg}>'
             f'<p style="margin:0;line-height:{LINE}px">{n}</p></td><td style="padding-right:16px"{bg}>'
             f'<p style="margin:0;white-space:pre-wrap;line-height:{LINE}px">{body or "&nbsp;"}</p></td></tr>'
         )
     return f'<table cellspacing="0" cellpadding="0" width="100%">{"".join(rows)}</table>', len(lines), len(shown)
+
+
+def gutter_width(last: int, pad_left: int, pad_right: int) -> int:
+    """The width of a line-number column that holds ``last`` without wrapping its digits (the
+    column's own ``auto`` on the web)."""
+    ch = markdown.font_metrics(12, mono=True).horizontalAdvance("0")
+    return int(ch * max(1, len(str(max(1, last)))) + 0.999) + pad_left + pad_right
 
 
 def diff_html(
@@ -72,6 +80,9 @@ def diff_html(
     hunk_bg = theme.blend(t.fill_1, t.inset).name()
     ui = theme.font_ui().family()
     cols = 3 if numbers else 2
+    last = max([x.o or 0 for _k, x, _h, _i in shown if x] + [x.n or 0 for _k, x, _h, _i in shown if x] + [1])
+    num_w = gutter_width(last, 14, 8)
+    sign_w = int(markdown.font_metrics(12, mono=True).horizontalAdvance("+") + 0.999) + 10
     out: List[str] = []
     for kind, ln, h, hi in shown:
         if kind == "hunk":
@@ -103,11 +114,11 @@ def diff_html(
         if numbers:
             num = ln.o if ln.t == "-" else ln.n
             cells += (
-                f'<td width="1" align="right" style="color:{num_c};padding-left:14px;padding-right:8px"{bga}>'
+                f'<td width="{num_w}" align="right" style="color:{num_c};padding-left:14px;padding-right:8px"{bga}>'
                 f"{line}{num if num is not None else '&nbsp;'}</p></td>"
             )
         cells += (
-            f'<td width="1" align="center" style="color:{sign_c};padding-left:5px;padding-right:5px"{bga}>'
+            f'<td width="{sign_w}" align="center" style="color:{sign_c};padding-left:5px;padding-right:5px"{bga}>'
             f"{line}{sign}</p></td>"
         )
         cells += (

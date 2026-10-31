@@ -1,5 +1,8 @@
 """Thinking: a quiet head ("Thinking", "Thought for 4s", "Reasoned privately"), a peek at the last
-lines while it streams and is closed, and the thought itself behind the head, with a rule beside it."""
+lines while it streams and is closed, and the thought itself behind the head, with a rule beside it.
+
+While a thought streams it is plain text (cheap to grow); once written it is set as quiet Markdown at
+its own size, so its lists, code spans and paragraphs read the way the reply's do."""
 
 from __future__ import annotations
 
@@ -11,7 +14,7 @@ from PySide6.QtGui import QColor, QPainter, QTextDocument
 
 from ... import theme
 from ...lib.transcript_model import ThinkingItem
-from ..paint import FULL, Measurer, PaintState, doc_height, draw_doc, selection
+from ..paint import FULL, Measurer, PaintState, doc_height, doc_pos_at, draw_doc, paint_decor, selection
 from ..scene import Block, Group, Target
 from .base import chevron, paint_head_tint
 
@@ -23,13 +26,14 @@ BODY_LINE = int(BODY_SIZE * 1.65 + 0.5)
 
 class ThinkingBody(Block):
     KIND = "thinking-body"
-    __slots__ = ("owner", "doc", "_src")
+    __slots__ = ("owner", "doc", "_src", "_md")
 
     def __init__(self, owner: ThinkingBlock) -> None:
         super().__init__(f"{owner.key}:body")
         self.owner = owner
         self.doc: Optional[QTextDocument] = None
         self._src = ""
+        self._md = False  # the document is Markdown (a finished thought), not plain text
 
     def estimate(self, width: int, m: Measurer) -> int:
         return m.fast_height(self.owner.item.text, width - 15, m.font(BODY_SIZE), BODY_LINE) + 8
@@ -39,10 +43,14 @@ class ThinkingBody(Block):
         if not text:
             self.doc = None
             return 0
-        if self.doc is None or self._src != text or int(self.doc.textWidth()) != width - 15:
-            self.doc = m.plain_doc(text, width - 15, m.font(BODY_SIZE))
-            _set_line_height(self.doc, BODY_LINE)
-            self._src = text
+        md = not self.owner.item.streaming
+        if self.doc is None or self._src != text or self._md != md or int(self.doc.textWidth()) != width - 15:
+            if md:
+                self.doc = m.markdown_doc(text, width - 15, quiet=True, size=BODY_SIZE)
+            else:
+                self.doc = m.plain_doc(text, width - 15, m.font(BODY_SIZE))
+                _set_line_height(self.doc, BODY_LINE)
+            self._src, self._md = text, md
         self.warm = True
         return doc_height(self.doc) + 8
 
@@ -58,6 +66,8 @@ class ThinkingBody(Block):
         clip = QRect(x + 15, y + 2, w - 15, self.h - 4)
         if st.clip is not None:
             clip = clip.intersected(st.clip)
+        if self._md:
+            paint_decor(p, self.doc, x + 15, y + 2, clip, st.t)
         sels = None
         if st.selection is not None:
             bg = theme.blend(st.t.selection, st.t.canvas)
@@ -71,15 +81,21 @@ class ThinkingBody(Block):
     def text_pos_at(self, x: int, y: int) -> Optional[int]:
         if self.doc is None:
             return None
-        from PySide6.QtCore import QPointF
-
-        pos = self.doc.documentLayout().hitTest(QPointF(x - 15, y - 2), Qt.HitTestAccuracy.FuzzyHit)
-        return pos if pos >= 0 else None
+        return doc_pos_at(self.doc, x - 15, y - 2)
 
     def selected_text(self, a: Optional[int], b: Optional[int]) -> str:
+        if self.doc is None or not self._md:
+            text = self.owner.item.text
+            return text if a is None or b is None else text[min(a, b) : max(a, b)]
         if a is None or b is None:
-            return self.owner.item.text
-        return self.owner.item.text[min(a, b) : max(a, b)]
+            return _clean(self.doc.toPlainText())
+        from PySide6.QtGui import QTextCursor
+
+        end = self.doc.characterCount() - 1
+        cur = QTextCursor(self.doc)
+        cur.setPosition(min(min(a, b), end))
+        cur.setPosition(min(max(a, b), end), QTextCursor.MoveMode.KeepAnchor)
+        return _clean(cur.selectedText())
 
     def cursor_for(self, target: Target) -> Optional[Any]:
         return Qt.CursorShape.IBeamCursor
@@ -221,6 +237,12 @@ class ThinkingBlock(Group):
     @property
     def static(self) -> bool:
         return not self.item.streaming
+
+
+def _clean(text: str) -> str:
+    """Document text as words: paragraph separators as newlines, the padding and joiners of inline
+    code gone."""
+    return text.replace("\u2029", "\n").replace("\u00a0", "").replace("\u202f", "").replace("\u2060", "")
 
 
 def _set_line_height(doc: QTextDocument, px: int) -> None:

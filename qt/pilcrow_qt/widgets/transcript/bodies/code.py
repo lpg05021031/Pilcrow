@@ -12,7 +12,6 @@ import difflib
 import html
 import re
 from dataclasses import dataclass, field
-from functools import lru_cache
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtWidgets import QLabel, QWidget
@@ -22,13 +21,6 @@ from ....lib.ansi import parse_ansi
 from ....lib.fmt import lang_from_path
 from ...ui.signals import bind
 from .common import Surface, code_more, rich, vbox
-
-try:
-    from pygments import lex
-    from pygments.lexers import get_lexer_by_name
-    from pygments.util import ClassNotFound
-except ImportError:  # pragma: no cover
-    lex = None  # type: ignore[assignment]
 
 Range = Tuple[int, int]
 LINE = int(12 * 1.6 + 0.5)  # .code-view / .diff: 12px mono on 1.6 lines
@@ -204,36 +196,11 @@ def word_ranges(hunks: Sequence[DiffHunk]) -> Dict[DiffLine, List[Range]]:
 # ---------------------------------------------------------------- highlighting
 
 
-@lru_cache(maxsize=256)
-def _highlight_lines(code: str, lang: str, theme_name: str) -> Tuple[str, ...]:
-    """Each line of ``code`` as escaped HTML with the theme's syntax colours; plain when there is no lexer."""
-    lines = code.split("\n")
-    plain = tuple(html.escape(x) for x in lines)
-    if lex is None or not lang or lang == "text" or len(code) > 200000:
-        return plain
-    name = markdown.LEXER_ALIAS.get(lang.lower(), lang.lower())
-    try:
-        lexer = get_lexer_by_name(name, stripnl=False)
-    except ClassNotFound:
-        return plain
-    t = theme.DARK if theme_name == "dark" else theme.LIGHT
-    out: List[str] = [""]
-    for ttype, value in lex(code, lexer):
-        st = markdown._style_for(ttype, t)
-        for k, part in enumerate(value.split("\n")):
-            if k:
-                out.append("")
-            if part:
-                esc = html.escape(part)
-                out[-1] += f'<span style="{st}">{esc}</span>' if st else esc
-    out = out[: len(lines)]
-    while len(out) < len(lines):
-        out.append("")
-    return tuple(out)
-
-
 def highlight_lines(code: str, lang: str) -> List[str]:
-    return list(_highlight_lines(code, lang, theme.tokens().name))
+    """Each line of ``code`` as escaped HTML with the theme's syntax colours; plain when there is no lexer."""
+    if not lang or lang == "text":
+        return [html.escape(x) for x in code.split("\n")]
+    return list(markdown.highlight_lines(code, lang, theme.tokens().name))
 
 
 def mark_html(text: str, ranges: Sequence[Range], color: str) -> str:
