@@ -12,7 +12,9 @@ that ties them together, and the two screens that show it.
 
 The companion design, HELPERS.md, is the other shape of multi-repository work: one session that leads
 other sessions, each with a brief of its own, the split decided by a model turn by turn. The two share
-the worktree sessions, the permission rules, the fan-in review and the record.
+the worktree sessions, the permission rules, the fan-in review and the record. REPOSITORIES.md is the
+registry both read: the person's names and aliases for their repositories, the policy for starting work
+there, per-repository defaults and standing notes.
 
 ## Status
 

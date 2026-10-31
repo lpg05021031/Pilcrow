@@ -127,8 +127,10 @@ Tool names as the model sees them: `mcp__helpers__start`, `mcp__helpers__wait`, 
 ### 5.2 The tools
 
 ```
-start  { name, cwd, brief,
-         worktree?: boolean = true when cwd is a git repository,
+start  { name, brief,
+         repo?: string,                       a registered name or alias (REPOSITORIES.md), or a path
+         cwd?: string,                        a folder; one of repo or cwd
+         worktree?: boolean = true when the folder is a git repository,
          base?: string,                       branch to start the worktree from (default: the checkout's)
          after?: string[],                    helper names this one waits for
          mode?: 'default' | 'acceptEdits' | 'plan',   default: the lead's mode; never wider than it
@@ -259,15 +261,18 @@ it. `start` accepts any folder that exists on this machine. Whether it asks depe
 | The folder is… | `start` |
 |---|---|
 | the lead's own project, or inside it | allowed without a card: the person opened this session here |
-| a repository the person approved before (*Always allow* on an earlier card, remembered per repository root in the config as `helpers.allowedRoots`) | allowed without a card |
-| anything else that exists | a permission card naming the folder; *Allow* once, *Always allow* for that repository root |
+| registered (REPOSITORIES.md) with policy *Allowed* | allowed without a card; the entry's defaults and notes apply |
+| registered with policy *Ask*, or not registered but existing | a permission card naming the folder; *Allow* once, *Always allow* registers it as *Allowed* |
+| registered with policy *Never* | an error result with the reason |
 | a folder that does not exist, or the person's home directory itself | an error result |
 
-`list` returns `known`: the lead's project, Pilcrow's recent projects (the twelve the person last opened
-sessions in), and the repositories found one level under the lead's folder (Dispatch's `findRepos`),
-each with its branch, whether its checkout is dirty, and whether it is `allowed` today. The lead is told
-to look there before guessing a path, and that a path the person named in the conversation is the one
-to use even when it is not in the list. Access to files inside a helper is Claude Code's own: the helper's
+`start` takes `repo` (a registered name or alias, or a path) as well as `cwd`; a miss returns the three
+nearest names. `list` returns `known`: the registry first (marked `registered`, with each entry's `about`
+and policy), then Pilcrow's recent projects (the twelve the person last opened sessions in), then the
+repositories found one level under the lead's folder (Dispatch's `findRepos`), each with its branch and
+whether its checkout is dirty. The registry's digest is also in the lead's system prompt, so *the order
+FE* in the person's message is understood before any tool is called. The lead is told to use a folder
+the person named, to look at `list` before guessing a path, and never to write the registry itself. Access to files inside a helper is Claude Code's own: the helper's
 tools work in its folder, and an edit outside it asks the person as in any session. Another machine is
 not a folder here; helpers run where the server runs.
 
@@ -534,10 +539,9 @@ Estimated: server ≈ 450 lines plus 60 in `sessions.js`; Qt ≈ 400; web ≈ 35
 
 - Every session has the tools; the first `start` in a repository asks on a permission card. The
   alternative, a per-session switch, was rejected as a thing to configure before the first use.
-- Which folders a lead may use is decided by the person on that card, remembered per repository root, not
-  by an allow-list configured ahead. The lead's own project is allowed because the person opened the
-  session there. A list of allowed roots in Settings would be the same decision taken earlier; it is not
-  offered until someone asks for it.
+- Which folders a lead may use: the lead's own project outright; registered repositories by their policy
+  (REPOSITORIES.md); anything else on a card, whose *Always allow* registers the folder. The registry is
+  the one place for names, aliases, policy, defaults and standing notes, shared with Dispatch.
 - Depth one. Helpers of helpers would need a tree in the sidebar and a model of a model's model.
 - The lead cannot answer helpers' permissions, even routine ones. Herdr's parent does (`send-keys`); the
   risk of a model approving a model's `rm -rf` is not worth a saved click. If it is wanted later it is a
