@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Play, Ellipsis, Pencil, Trash, CircleCheck, CircleAlert, CircleStop, ArrowUpRight, RotateCw, X, PanelLeftOpen, Check, MailOpen, Pause } from 'lucide-react';
-import { useStore, call, openSession, setUi, toast, confirmAction } from '../lib/store';
+import { Plus, Play, Ellipsis, Pencil, Trash, CircleCheck, CircleAlert, CircleStop, ArrowUpRight, RotateCw, X, PanelLeftOpen, Check, MailOpen, Pause, Send, ClipboardPaste } from 'lucide-react';
+import { useStore, call, openSession, setUi, toast, confirmAction, openJob } from '../lib/store';
+import { copyText } from './ui/bits';
 import type { InboxItem, Schedule } from '../lib/types';
 import { basename, cost, duration, timeAgo, plural, tildify } from '../lib/format';
 import { MenuButton } from './ui/Popover';
@@ -139,9 +140,9 @@ export function InboxPage() {
                 {g.label}
                 <span className="ov-count">{g.items.length}</span>
               </h2>
-              {g.items.map((it, i) => (
-                <RunCard key={it.id} it={it} index={i} onOpen={() => (markOne(it.id), it.sessionId && openSession(it.sessionId))} onRead={() => markOne(it.id)} onRemove={() => remove(it.id)} />
-              ))}
+              {g.items.map((it, i) =>
+                it.kind === 'dispatch' ? <DispatchCard key={it.id} it={it} index={i} onRead={() => markOne(it.id)} onRemove={() => remove(it.id)} /> : <RunCard key={it.id} it={it} index={i} onOpen={() => (markOne(it.id), it.sessionId && openSession(it.sessionId))} onRead={() => markOne(it.id)} onRemove={() => remove(it.id)} />,
+              )}
             </section>
           ))}
         </div>
@@ -219,6 +220,86 @@ function RunCard({ it, index, onOpen, onRead, onRemove }: { it: InboxItem; index
           {it.sessionId && (
             <button className="btn xs" onClick={(e) => (e.stopPropagation(), onOpen())} title="Open the session and continue by hand">
               <ArrowUpRight size={11} /> Open session
+            </button>
+          )}
+          <button className="icon-btn sm run-x" onClick={(e) => (e.stopPropagation(), onRemove())} title="Dismiss" aria-label="Dismiss">
+            <X size={13} />
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+/** A dispatch job's report: the badge, the name, what landed where, the prose when an agent wrote it, one line per repository. */
+function DispatchCard({ it, index, onRead, onRemove }: { it: InboxItem; index: number; onRead: () => void; onRemove: () => void }) {
+  const rep = it.dispatch;
+  const targets = rep?.targets || [];
+  const done = targets.filter((t) => t.state === 'done').length;
+  const landed = targets.filter((t) => t.finished === 'commit').length;
+  const prs = targets.filter((t) => t.pr).length;
+  const Icon = it.status === 'completed' ? CircleCheck : CircleAlert;
+  const line = `${done} of ${plural(targets.length, 'repository', 'repositories')} done${landed ? ` · ${landed} committed` : ''}${prs ? ` · ${plural(prs, 'pull request')}` : ''}${it.reason ? ` · ${it.reason}` : ''}`;
+  const copy = async () => {
+    const md = await call<string>('dispatch.export', { id: it.jobId }).catch(() => null);
+    if (md) {
+      await copyText(md);
+      toast('Report copied as Markdown.', 'info');
+    }
+  };
+  return (
+    <article className={`run dp-report${it.read ? '' : ' unread'} ${it.status}`} onClick={onRead} style={{ animationDelay: `${Math.min(index, 6) * 40}ms` }}>
+      <span className={`run-badge ${it.status}`} aria-hidden="true">
+        <Icon size={15} />
+      </span>
+      <div className="run-main">
+        <div className="run-head">
+          {!it.read && <span className="run-dot" title="New" />}
+          <span className="run-name ellipsis">{it.scheduleName}</span>
+          <span className="chip tiny">
+            <Send size={10} /> dispatch
+          </span>
+          <span className="run-when tnum">
+            {clock(it.endedAt)} · {duration(it.durationMs)}
+          </span>
+        </div>
+        <p className="run-sum">{line}</p>
+        {rep?.prose ? <p className="run-sum dp-prose">{rep.prose}</p> : rep?.proseState === 'writing' ? <p className="run-sum faint">An agent is writing the report…</p> : null}
+        <div className="dp-report-rows">
+          {targets.slice(0, 12).map((t) => (
+            <div key={t.path} className="dp-report-row">
+              <span className={`dp-glyph ${t.state}`} aria-hidden="true" />
+              <span className="dp-report-name ellipsis">{t.name}</span>
+              <span className="dp-report-what ellipsis faint">{t.state !== 'done' ? t.reason || t.state : t.summary || 'done'}</span>
+              <span className="dp-report-nums tnum faint">
+                {t.files > 0 && (
+                  <>
+                    {plural(t.files, 'file')} <span className="num-add">+{t.add}</span> <span className="num-del">−{t.del}</span>
+                  </>
+                )}
+                {t.cost > 0 && <span> {cost(t.cost)}</span>}
+                {t.commit && <span className="mono"> {t.commit}</span>}
+                {t.pr && (
+                  <a href={t.pr} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
+                    {' '}
+                    PR
+                  </a>
+                )}
+              </span>
+            </div>
+          ))}
+          {targets.length > 12 && <div className="hint">and {targets.length - 12} more</div>}
+        </div>
+        <div className="run-foot">
+          {it.cost > 0 && <span className="tnum">{cost(it.cost)}</span>}
+          {rep?.rules?.length ? <span className="faint ellipsis">allowed for every repository: {rep.rules.map((r) => r.label || r.key).join('; ')}</span> : null}
+          <div className="grow" />
+          <button className="btn xs ghost" onClick={(e) => (e.stopPropagation(), copy())} title="The report as Markdown, to the clipboard">
+            <ClipboardPaste size={11} /> Copy Markdown
+          </button>
+          {it.jobId && (
+            <button className="btn xs" onClick={(e) => (e.stopPropagation(), onRead(), openJob(it.jobId!))} title="The job's view, with every run">
+              <ArrowUpRight size={11} /> Open job
             </button>
           )}
           <button className="icon-btn sm run-x" onClick={(e) => (e.stopPropagation(), onRemove())} title="Dismiss" aria-label="Dismiss">

@@ -28,6 +28,8 @@ export interface SessionSummary {
   pending?: number;
   /** Started by a schedule; such sessions live in the inbox rather than the sidebar. */
   scheduled?: { id: string; name: string; at: number; manual?: boolean } | null;
+  /** A run of a dispatch job (or its report session); reachable from the job's view. */
+  dispatch?: { jobId: string; runId: string | null; name: string; target: string } | null;
 }
 
 export interface PermissionSuggestion {
@@ -314,6 +316,10 @@ export interface Cadence {
 }
 export interface Schedule {
   id: string;
+  /** 'prompt' runs a prompt in a folder; 'dispatch' runs a playbook across its repositories. */
+  kind?: 'prompt' | 'dispatch';
+  playbookId?: string | null;
+  playbookName?: string | null;
   name: string;
   cwd: string;
   prompt: string;
@@ -331,11 +337,15 @@ export interface Schedule {
   nextRunAt: number | null;
   cadenceLabel: string;
   error: string | null;
-  running: { sessionId: string; startedAt: number } | null;
+  running: { sessionId: string | null; jobId?: string | null; startedAt: number } | null;
 }
 export interface InboxItem {
   id: string;
-  scheduleId: string;
+  /** A dispatch job's report, with its per-repository table in `dispatch`. */
+  kind?: 'dispatch';
+  jobId?: string;
+  dispatch?: DispatchReport;
+  scheduleId: string | null;
   scheduleName: string;
   sessionId: string | null;
   cwd: string;
@@ -349,6 +359,209 @@ export interface InboxItem {
   files: { path: string; add: number; del: number }[];
   read: boolean;
   manual?: boolean;
+}
+
+// ---- dispatch: one job across many repositories (server/dispatch_core.js)
+export type RunState = 'queued' | 'preparing' | 'running' | 'needs_action' | 'done' | 'failed' | 'stopped' | 'skipped';
+export type JobState = 'draft' | 'planned' | 'running' | 'reviewing' | 'finished' | 'stopped';
+export interface DispatchPending {
+  requestId: string;
+  toolName: string;
+  displayName: string | null;
+  key: string;
+  label: string;
+  interactive: boolean;
+  at: number;
+}
+export interface DispatchRun {
+  id: string;
+  jobId: string;
+  path: string;
+  name: string;
+  base: string;
+  size: string | null;
+  level: number;
+  dependsOn: string[];
+  wave: 'canary' | 'main';
+  state: RunState;
+  attempt: number;
+  sessionId: string | null;
+  worktree: { path: string; branch: string; base: string; repoRoot: string } | null;
+  startedAt: number | null;
+  endedAt: number | null;
+  durationMs: number;
+  cost: number;
+  summary: string;
+  files: { path: string; add: number; del: number }[];
+  add: number;
+  del: number;
+  reason: string | null;
+  verify: { ran: boolean; code: number; tail: string } | null;
+  now: string | null;
+  pending: DispatchPending[];
+  commit: string | null;
+  pr: string | null;
+  finished: 'commit' | 'discard' | 'keep' | null;
+  superseded?: string;
+}
+export interface DispatchSettings {
+  mode: 'ask' | 'acceptEdits' | 'allowlist';
+  allowedTools: string[];
+  model: string;
+  effort: string;
+  parallel: number;
+  maxMinutes: number;
+  costCap: number;
+  canary: number;
+  learn: boolean;
+  prepare: string;
+  copy: string[];
+  verify: string;
+  verifyRetry: boolean;
+  commitMessage: string;
+  pr: boolean;
+  report: 'table' | 'agent';
+  unattended?: boolean;
+  branch?: string;
+}
+export interface DispatchTarget {
+  path: string;
+  name: string;
+  base: string;
+  notes: string;
+  size?: string | null;
+  deps?: string[];
+}
+export interface DispatchPlanTarget {
+  path: string;
+  name: string;
+  base: string;
+  verdict: 'ok' | 'warning' | 'blocked';
+  notes: { kind: 'blocked' | 'warning' | 'note'; text: string }[];
+  brief: string;
+  level: number;
+  deps: string[];
+  size: string | null;
+}
+export interface DispatchPlan {
+  at: number;
+  targets: DispatchPlanTarget[];
+  levels: number;
+  worst: { minutes: number; cost: number | null; runs: number; levels: number };
+  ok: number;
+  warnings: number;
+  blocked: number;
+}
+export interface DispatchRule {
+  key: string;
+  label: string | null;
+  at: number;
+  count: number;
+}
+export interface DispatchReportTarget {
+  name: string;
+  path: string;
+  state: RunState;
+  reason: string | null;
+  summary: string;
+  files: number;
+  add: number;
+  del: number;
+  cost: number;
+  durationMs: number;
+  branch: string | null;
+  commit: string | null;
+  pr: string | null;
+  finished: 'commit' | 'discard' | 'keep' | null;
+  verify: { code: number } | null;
+}
+export interface DispatchReport {
+  at: number;
+  targets: DispatchReportTarget[];
+  rules: DispatchRule[];
+  plan: { ok: number; warnings: number; blocked: number; levels: number } | null;
+  cost: number;
+  durationMs: number;
+  prose?: string | null;
+  proseState?: 'writing' | 'done' | 'failed';
+  proseError?: string | null;
+  proseCost?: number;
+}
+export interface DispatchJob {
+  id: string;
+  name: string;
+  slug: string;
+  brief: string;
+  root: string;
+  targets: DispatchTarget[];
+  settings: DispatchSettings;
+  state: JobState;
+  wave: 'canary' | 'main' | 'done' | null;
+  paused: boolean;
+  createdAt: number;
+  updatedAt: number;
+  startedAt: number | null;
+  finishedAt: number | null;
+  plan: DispatchPlan | null;
+  rules: DispatchRule[];
+  learned: { name: string; summary: string }[];
+  forecast: { cost: number; minutes: number; from: string[]; runs: number } | null;
+  capReached: boolean;
+  report: DispatchReport | null;
+  stoppedReason: string | null;
+  playbookId: string | null;
+  scheduleId: string | null;
+  /** From the summary the server sends: counts per state, the total, cost, requests waiting. */
+  counts: Partial<Record<RunState, number>>;
+  total: number;
+  cost: number;
+  needsAction: number;
+  files: number;
+  canaryWaiting: boolean;
+}
+export interface DispatchDelta {
+  id: string;
+  removed?: boolean;
+  job?: DispatchJob;
+  runs?: DispatchRun[];
+  all?: boolean;
+}
+export interface Playbook {
+  id: string;
+  name: string;
+  brief: string;
+  root: string;
+  settings: DispatchSettings;
+  targets: DispatchTarget[];
+  createdAt: number;
+  updatedAt: number;
+  uses: number;
+  lastUsedAt: number | null;
+}
+export interface WorkspaceRepo {
+  path: string;
+  name: string;
+  branch: string | null;
+  dirty: boolean;
+  changed: number;
+  untracked: number;
+  ahead: number;
+  behind: number;
+  remote: { host: string; owner?: string; repo?: string; url?: string } | null;
+  hasClaudeMd: boolean;
+  size: 'small' | 'medium' | 'large';
+  files: number;
+  kind: string | null;
+  packageName: string | null;
+  lastSession: number | null;
+  deps: string[];
+}
+export interface DispatchReview {
+  id: string;
+  runs: { runId: string; name: string; files: { path: string; add: number; del: number }[]; add: number; del: number }[];
+  same: { sig: string; path: string; runs: string[]; add: number; del: number; preview: string[] }[];
+  differ: { name: string; files: { path: string; add: number; del: number }[] }[];
+  files: number;
 }
 
 export interface DiffFile {

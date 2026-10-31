@@ -312,6 +312,25 @@ class ScheduleDialog(Sheet):
             or ""
         )
 
+        # ---- what runs: a prompt in a folder, or a dispatch playbook across its repositories
+        what = QWidget()
+        wl0 = QHBoxLayout(what)
+        wl0.setContentsMargins(0, 0, 0, 0)
+        wl0.setSpacing(8)
+        self.what = Select("What runs", popup_width=260)
+        self.what.addItem("A prompt in a folder", "prompt", hint="One session, in one folder")
+        self.what.addItem("A dispatch playbook", "dispatch", hint="One job across the playbook's repositories")
+        self.what.setFixedWidth(220)
+        self.what.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.what.currentIndexChanged.connect(lambda _i: self._on_kind())
+        wl0.addWidget(self.what)
+        self.playbook = Select("Playbook", popup_width=300)
+        self.playbook.currentIndexChanged.connect(lambda _i: self._summary())
+        wl0.addWidget(self.playbook, 1)
+        self.body_lay.addWidget(_field("What runs", what))
+        bind(store.playbooks_changed, self, lambda _p: self._fill_playbooks())
+        self._fill_playbooks()
+
         # ---- name, folder
         two = QWidget()
         tl = QGridLayout(two)
@@ -322,7 +341,8 @@ class ScheduleDialog(Sheet):
         self.name.setProperty("autofocus", True)
         tl.addWidget(_field("Name", self.name), 0, 0)
         self.cwd = FolderButton(default_cwd)
-        tl.addWidget(_field("Folder", self.cwd), 0, 1)
+        self.cwd_field = _field("Folder", self.cwd)
+        tl.addWidget(self.cwd_field, 0, 1)
         self.body_lay.addWidget(two)
 
         # ---- prompt
@@ -331,19 +351,28 @@ class ScheduleDialog(Sheet):
             rows=4,
             name="What Claude does each time",
         )
-        self.body_lay.addWidget(
-            _field(
-                "What Claude does each time",
-                self.prompt,
-                Text(
-                    "Nobody is there to answer questions during a run, so say what to assume and what to leave alone.",
-                    theme.FS_SMALL,
-                    400,
-                    "text_3",
-                    1.5,
-                ),
-            )
+        self.prompt_field = _field(
+            "What Claude does each time",
+            self.prompt,
+            Text(
+                "Nobody is there to answer questions during a run, so say what to assume and what to leave alone.",
+                theme.FS_SMALL,
+                400,
+                "text_3",
+                1.5,
+            ),
         )
+        self.body_lay.addWidget(self.prompt_field)
+        self.dispatch_note = Text(
+            "The playbook's brief, repositories and settings are used as saved. Nobody is there to answer, so "
+            "permissions are declined and there is no canary; the report lands in the inbox.",
+            theme.FS_SMALL,
+            400,
+            "text_3",
+            1.5,
+        )
+        self.dispatch_note.hide()
+        self.body_lay.addWidget(self.dispatch_note)
 
         # ---- when
         when = QWidget()
@@ -401,7 +430,8 @@ class ScheduleDialog(Sheet):
             row.clicked.connect(lambda _c=False, mid=m["id"]: self.set_mode(mid))
             self.mode_rows[m["id"]] = row
             rl.addWidget(row)
-        self.body_lay.addWidget(_field("While it runs, Claude may", radios))
+        self.mode_field = _field("While it runs, Claude may", radios)
+        self.body_lay.addWidget(self.mode_field)
 
         # ---- more
         self.more_btn = LayoutButton()
@@ -473,12 +503,54 @@ class ScheduleDialog(Sheet):
 
         self._mode = "acceptEdits"
         self.set_mode(self._mode)
+        if self.spec.get("kind") == "dispatch":
+            self.what.setCurrentIndex(1)
+            if self.spec.get("playbookId"):
+                self._pick_playbook(str(self.spec["playbookId"]))
+        self._on_kind()
         self._on_cadence()
         self._summary()
         if editing:
             store.call("schedules.list", {}, quiet=True).then(self._got_schedules).catch(lambda _e: None)
 
     # ---- loading an existing schedule
+    # ---- what runs
+    def _fill_playbooks(self) -> None:
+        cur = str(self.playbook.currentData() or self.spec.get("playbookId") or "")
+        self.playbook.clear()
+        for pb in store.playbooks:
+            self.playbook.addItem(
+                str(pb.get("name") or "Untitled playbook"),
+                str(pb.get("id")),
+                hint=f"{len(pb.get('targets') or [])} repositories",
+            )
+        if not store.playbooks:
+            self.playbook.addItem("No playbooks yet — save one from a job", "", hint="")
+        self._pick_playbook(cur)
+
+    def _pick_playbook(self, pid: str) -> None:
+        i = self.playbook.findData(pid) if pid else -1
+        self.playbook.setCurrentIndex(i if i >= 0 else 0)
+
+    def what_runs(self) -> str:
+        return str(self.what.currentData() or "prompt")
+
+    def _on_kind(self) -> None:
+        dispatch = self.what_runs() == "dispatch"
+        self.playbook.setVisible(dispatch)
+        self.cwd_field.setVisible(not dispatch)
+        self.prompt_field.setVisible(not dispatch)
+        self.dispatch_note.setVisible(dispatch)
+        self.mode_field.setVisible(not dispatch)
+        self.more_btn.setVisible(not dispatch)
+        if dispatch:
+            self.more_box.hide()
+        elif self._more:
+            self.more_box.show()
+        if dispatch and not self.name.text().strip():
+            self.name.setText(str(self.playbook.currentText() or ""))
+        self.place()
+
     def _got_schedules(self, lst: Any) -> None:
         if self._closed or not isinstance(lst, list):
             return
@@ -486,6 +558,10 @@ class ScheduleDialog(Sheet):
         if s is None:
             return
         self.schedule = s
+        if s.get("kind") == "dispatch":
+            self.what.setCurrentIndex(1)
+            self._pick_playbook(str(s.get("playbookId") or ""))
+            self._on_kind()
         self.name.setText(str(s.get("name") or ""))
         self.cwd.setText(str(s.get("cwd") or ""))
         self.prompt.setPlainText(str(s.get("prompt") or ""))
@@ -599,6 +675,8 @@ class ScheduleDialog(Sheet):
         self.place()
 
     def _summary(self) -> None:
+        if not hasattr(self, "more_chev"):
+            return  # the playbooks filled in before the form was whole
         t = theme.tokens()
         self.more_chev.setPixmap(icons.pixmap("chevron-down" if self._more else "chevron-right", t.text_4, 14))
         model = self.model.value
@@ -616,6 +694,7 @@ class ScheduleDialog(Sheet):
     def values(self) -> Json:
         model = self.model.value
         out: Json = {
+            "kind": self.what_runs(),
             "name": self.name.text().strip(),
             "cwd": self.cwd.text().strip(),
             "prompt": self.prompt.toPlainText(),
@@ -626,6 +705,9 @@ class ScheduleDialog(Sheet):
             "maxMinutes": int(self.max_minutes.value()),
             "enabled": self.enabled.isChecked(),
         }
+        if out["kind"] == "dispatch":
+            out["playbookId"] = str(self.playbook.currentData() or "")
+            out["playbookName"] = str(self.playbook.currentText() or "")
         if self.spec.get("id"):
             out["id"] = self.spec["id"]
         return out
@@ -637,7 +719,10 @@ class ScheduleDialog(Sheet):
         if not v["name"]:
             store.toast("Give the schedule a name.", "warning")
             return
-        if not v["prompt"].strip():
+        if v["kind"] == "dispatch" and not v.get("playbookId"):
+            store.toast("Pick a playbook for the schedule.", "warning")
+            return
+        if v["kind"] != "dispatch" and not v["prompt"].strip():
             store.toast("Write what Claude should do each time.", "warning")
             return
         self._busy = True

@@ -76,8 +76,7 @@ def test_a_job_from_the_composer_through_the_canary_to_the_report(app_client):
     by = {t["name"]: t for t in plan["targets"]}
     assert by["web-ui"]["level"] == 1, "web-ui depends on design-system"
     assert by["web-ui"]["brief"] == "Run a command needing permission in web-ui on main."
-    rows = picker.rows
-    assert rows[f"{HOME}/code/web-ui"].chips.count() == 2, "ok, and after design-system"
+    assert picker.chips_of(f"{HOME}/code/web-ui") == ["ok", "after design-system"], "the plan's verdict on the row"
     assert c.shot("dispatch-composer").exists()
 
     comp.start()
@@ -189,3 +188,93 @@ def test_a_job_from_the_composer_through_the_canary_to_the_report(app_client):
         "newest first"
     )
     assert c.shot("dispatch-board-after").exists()
+
+
+def test_playbooks_run_again_schedule_and_the_written_report(app_client):
+    c = app_client
+    c.call("mock.pace", {"ms": 0})
+    page = _dispatch(c)
+    c.wait_until(lambda: c.store.playbooks, 5, "playbooks")
+    assert [p["name"] for p in c.store.playbooks] == ["Dependency bump", "License headers"]
+    # the composer takes a playbook: its brief, settings and repositories
+    c.store.show_dispatch("new")
+    c.wait_until(lambda: page.composer is not None and page.composer.isVisible(), 5, "composer")
+    comp = page.composer
+    picker = comp.targets
+    c.wait_until(lambda: picker.repos is not None, 10, "workspace.scan")
+    assert len(picker.list.blocks) == 8, "one row per repository, on the canvas"
+    picker.filter.setText("web")
+    assert len(picker.list.blocks) == 1
+    picker.filter.setText("")
+    picker.toggle(f"{HOME}/code/cli")
+    assert picker.count.text() == "1 of 8 selected" and picker.targets()[0]["name"] == "cli"
+    i = comp.playbook.findData("pb-deps")
+    assert i > 0
+    comp.playbook.setCurrentIndex(i)
+    assert comp.brief.toPlainText().startswith("Bump the dependencies in {{repo.name}}")
+    assert comp.name.text() == "Dependency bump"
+    assert comp.verify.text() == "npm test"
+    assert picker.count.text() == "3 of 8 selected"
+    assert [t["name"] for t in picker.targets()] == ["design-system", "docs", "web-ui"]
+    comp.report.setCurrentIndex(comp.report.findData("agent"))
+    assert comp.values()["settings"]["report"] == "agent" and comp.values()["playbookId"] == "pb-deps"
+    c.wait_until(lambda: comp.plan is not None and comp.start_btn.isEnabled(), 10, "the plan")
+    assert c.shot("dispatch-composer-playbook").exists()
+    comp.start()
+    c.wait_until(lambda: page.job_view is not None and page.job_view.isVisible(), 10, "job view")
+    jv = page.job_view
+    jid = jv.jid
+    assert _job(c, jid)["playbookId"] == "pb-deps"
+    c.wait_until(lambda: _job(c, jid).get("canaryWaiting"), 20, "canary done")
+    c.call("dispatch.continue", {"id": jid})
+    c.wait_until(lambda: _job(c, jid)["state"] == "reviewing" and _job(c, jid)["wave"] == "done", 20, "main wave")
+    jv.finish("keep")
+    c.wait_until(lambda: _job(c, jid)["state"] == "finished", 10, "finished")
+    # the written report arrives after the table, and the view and the inbox card show it
+    c.wait_until(lambda: (_job(c, jid).get("report") or {}).get("prose"), 10, "the prose")
+    c.sleep(80)
+    assert jv.prose_box.isVisible() and jv.prose.text().startswith("The brief was carried out the same way")
+    md = c.call("dispatch.export", {"id": jid})
+    assert "# Dependency bump" in md
+    # run again: a new job from the same playbook
+    jv.run_again()
+    c.wait_until(lambda: c.store.dispatch_view not in (None, "new", jid), 10, "a new job from the playbook")
+    jid2 = str(c.store.dispatch_view)
+    c.wait_until(lambda: jid2 in c.store.jobs, 5, "its summary")
+    assert _job(c, jid2)["playbookId"] == "pb-deps" and _job(c, jid2)["name"] == "Dependency bump"
+    c.wait_until(lambda: next(p for p in c.store.playbooks if p["id"] == "pb-deps")["uses"] == 4, 5, "uses")
+    c.call("dispatch.stop", {"id": jid2})
+    # save as playbook: one more, named after the job
+    c.store.open_job(jid)
+    c.sleep(50)
+    jv.save_playbook()
+    c.wait_until(lambda: len(c.store.playbooks) == 3, 5, "a third playbook")
+    # schedule this: the dialog opens for a playbook, saves a dispatch schedule, and Run now starts an unattended job
+    from pilcrow_qt.widgets import dialogs
+
+    jv.schedule_playbook()
+    c.wait_until(lambda: dialogs.current("schedule") is not None, 5, "schedule dialog")
+    dlg = dialogs.current("schedule")
+    c.sleep(50)
+    assert dlg.what_runs() == "dispatch" and dlg.playbook.currentData() == "pb-deps"
+    assert not dlg.prompt_field.isVisible() and not dlg.cwd_field.isVisible() and dlg.dispatch_note.isVisible()
+    assert dlg.name.text() == "Dependency bump", "the name follows the playbook"
+    dlg.name.setText("Nightly bump")
+    assert c.shot("schedule-dispatch").exists()
+    dlg.save()
+    c.wait_until(lambda: dialogs.current("schedule") is None, 5, "dialog closed")
+    scheds = c.call("schedules.list")
+    assert len(scheds) == 1 and scheds[0]["kind"] == "dispatch" and scheds[0]["playbookId"] == "pb-deps"
+    r = c.call("schedules.runNow", {"id": scheds[0]["id"]})
+    c.wait_until(lambda: r["jobId"] in c.store.jobs, 5, "the scheduled job")
+    j3 = _job(c, r["jobId"])
+    assert j3["wave"] == "main" and j3["scheduleId"] == scheds[0]["id"] and j3["settings"]["unattended"]
+    c.wait_until(lambda: _job(c, r["jobId"])["state"] == "reviewing", 20, "the scheduled job ran through")
+    # the inbox: the report card carries the prose
+    c.store.show_page("inbox")
+    c.wait_until(lambda: c.win.inbox is not None and c.win.inbox.run_cards, 5, "inbox cards")
+    from pilcrow_qt.widgets.inbox import DispatchCard
+
+    card = next(w for w in c.win.inbox.run_cards if isinstance(w, DispatchCard) and w.it.get("jobId") == jid)
+    assert card.prose is not None and card.prose.text().startswith("The brief was carried out")
+    assert c.win.inbox.sched_cards and c.win.inbox.sched_cards[0].s["kind"] == "dispatch"

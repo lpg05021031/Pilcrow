@@ -27,8 +27,10 @@ export const DEFAULTS = Object.freeze({
   verifyRetry: true, // a failing verify is sent back to the agent once
   commitMessage: '',
   pr: false,
-  report: 'table',
+  report: 'table', // 'table' | 'agent': one more session writes the prose on top of the table
+  unattended: false, // a scheduled job: nobody answers, so permissions are declined and there is no canary
 });
+export const REPORT_MAX_MIN = 6;
 export const MAX_BRIEF = 60_000;
 export const MAX_FILES = 60;
 export const SIZE_UNITS = { small: 1, medium: 2, large: 4 };
@@ -279,6 +281,7 @@ export function createDispatcher(deps) {
     git,
     snapshots = { steps: () => ({ steps: [] }) },
     pushInbox = () => null,
+    updateInbox = () => null,
     shell, // (cmd, cwd, timeoutMs) -> { code, output }
     run: exec, // execFile as a promise: (cmd, args, opts) -> { code, stdout, stderr }
     which = () => null,
@@ -296,8 +299,9 @@ export function createDispatcher(deps) {
   } = deps;
 
   const events = new EventEmitter();
-  const data = file ? readJson(file, { jobs: [] }) : { jobs: [] };
+  const data = file ? readJson(file, { jobs: [], playbooks: [] }) : { jobs: [], playbooks: [] };
   if (!Array.isArray(data.jobs)) data.jobs = [];
+  if (!Array.isArray(data.playbooks)) data.playbooks = [];
   const timers = new Map(); // runId -> timeout
   const backoffTimers = new Map(); // jobId -> timeout
   const scanCache = new Map(); // root -> { at, result }
@@ -368,6 +372,9 @@ export function createDispatcher(deps) {
     if (!r) throw new Error('No such run.');
     return r;
   };
+  function reportBySession(sid) {
+    return data.jobs.find((j) => j.reportSessionId === sid && j.report?.proseState === 'writing') || null;
+  }
   function runBySession(sid) {
     for (const j of data.jobs) {
       if (j.state !== 'running' && j.state !== 'reviewing') continue;
@@ -467,6 +474,8 @@ export function createDispatcher(deps) {
     if (!['ask', 'acceptEdits', 'allowlist'].includes(settings.mode)) settings.mode = DEFAULTS.mode;
     settings.allowedTools = Array.isArray(settings.allowedTools) ? settings.allowedTools.map(String) : [];
     settings.copy = Array.isArray(settings.copy) ? settings.copy.map(String).filter(Boolean) : [];
+    settings.unattended = Boolean(settings.unattended);
+    settings.report = settings.report === 'agent' ? 'agent' : 'table';
     const name = String(input.name ?? cur?.name ?? '').trim() || 'Untitled job';
     const targets = (input.targets ?? cur?.targets ?? []).map((t) => ({
       path: slash(String(t.path || '')),
@@ -501,7 +510,70 @@ export function createDispatcher(deps) {
       capReached: cur?.capReached || false,
       report: cur?.report || null,
       stoppedReason: cur?.stoppedReason || null,
+      playbookId: input.playbookId ?? cur?.playbookId ?? null,
+      scheduleId: input.scheduleId ?? cur?.scheduleId ?? null,
+      inboxId: cur?.inboxId || null,
+      reportSessionId: cur?.reportSessionId || null,
     };
+  }
+
+  // ---- playbooks: a brief with its settings and a set of targets, kept to run again
+  function normalizePlaybook(input, cur) {
+    const settings = { ...DEFAULTS, ...(cur?.settings || {}), ...(input.settings || {}) };
+    delete settings.unattended;
+    const targets = (input.targets ?? cur?.targets ?? []).map((t) => ({ path: slash(String(t.path || '')), name: String(t.name || path.basename(String(t.path || ''))), base: String(t.base || ''), notes: String(t.notes || '') })).filter((t) => t.path);
+    return {
+      id: cur?.id || uuid(),
+      name: String(input.name ?? cur?.name ?? '').trim() || 'Untitled playbook',
+      brief: String(input.brief ?? cur?.brief ?? ''),
+      root: slash(String(input.root ?? cur?.root ?? '')),
+      settings,
+      targets,
+      createdAt: cur?.createdAt || now(),
+      updatedAt: now(),
+      uses: cur?.uses || 0,
+      lastUsedAt: cur?.lastUsedAt || null,
+    };
+  }
+  function playbooks() {
+    return [...data.playbooks].sort((a, b) => (b.lastUsedAt || b.updatedAt || 0) - (a.lastUsedAt || a.updatedAt || 0));
+  }
+  function savePlaybook(input) {
+    let src = input;
+    if (input.fromJob) {
+      const job = jobOf(input.fromJob);
+      src = { name: input.name || job.name, brief: job.brief, root: job.root, settings: job.settings, targets: job.targets, id: input.id };
+      job.playbookId = job.playbookId || null;
+    }
+    const cur = src.id ? data.playbooks.find((p) => p.id === src.id) : null;
+    const pb = normalizePlaybook(src, cur);
+    if (!pb.brief.trim()) throw new Error('A playbook needs a brief.');
+    if (cur) Object.assign(cur, pb);
+    else data.playbooks.push(pb);
+    if (input.fromJob) jobOf(input.fromJob).playbookId = pb.id;
+    persist();
+    events.emit('playbooks');
+    return cur || pb;
+  }
+  function removePlaybook(id) {
+    const n = data.playbooks.length;
+    data.playbooks = data.playbooks.filter((p) => p.id !== id);
+    if (data.playbooks.length === n) throw new Error('No such playbook.');
+    persist();
+    events.emit('playbooks');
+    return true;
+  }
+  /** A job from a playbook, started at once: what a schedule fires, and what "Run again" does. */
+  async function startFromPlaybook(id, { name, wave, unattended = false, scheduleId = null, targets } = {}) {
+    const pb = data.playbooks.find((p) => p.id === id);
+    if (!pb) throw new Error('No such playbook.');
+    const settings = { ...pb.settings, unattended: Boolean(unattended) };
+    const job = save({ name: name || pb.name, brief: pb.brief, root: pb.root, targets: targets || pb.targets, settings, playbookId: pb.id, scheduleId });
+    pb.uses = (pb.uses || 0) + 1;
+    pb.lastUsedAt = now();
+    persist();
+    events.emit('playbooks');
+    return start(job.id, { wave });
   }
 
   function list() {
@@ -619,7 +691,7 @@ export function createDispatcher(deps) {
     const p = await plan(job.id);
     if (p.blocked) throw new Error(`${p.blocked} target${p.blocked === 1 ? ' is' : 's are'} blocked. Fix or deselect ${p.blocked === 1 ? 'it' : 'them'} first.`);
     if (!p.targets.length) throw new Error('Pick at least one repository.');
-    const canaryN = wave === 'all' ? 0 : job.settings.canary;
+    const canaryN = wave === 'all' || job.settings.unattended ? 0 : job.settings.canary;
     const order = [...p.targets].sort((a, b) => a.level - b.level || (SIZE_UNITS[a.size] || 1.5) - (SIZE_UNITS[b.size] || 1.5) || a.name.localeCompare(b.name));
     const canaryPaths = new Set(order.filter((t) => t.level === 0).slice(0, canaryN).map((t) => t.path));
     job.runs = p.targets.map((t) => ({
@@ -757,7 +829,10 @@ export function createDispatcher(deps) {
       run.worktree = made.worktree;
       store.setMeta(made.id, { dispatch: { jobId: job.id, runId: run.id, name: job.name, target: run.name } });
       session = sessions.find(made.id);
-      if (session) session.dispatch = { jobId: job.id, runId: run.id };
+      if (session) {
+        session.dispatch = { jobId: job.id, runId: run.id };
+        if (job.settings.unattended) session.unattended = true; // nobody will answer: Claude is told so
+      }
       touch(job, run);
       // the worktree isolates files only: copies and the prepare command bring what the agent needs
       for (const rel of job.settings.copy || []) {
@@ -922,6 +997,12 @@ export function createDispatcher(deps) {
 
   // ---- what the sessions say
   function onState(st) {
+    const rj = reportBySession(st.id);
+    if (rj) {
+      if (st.status === 'idle') finishProse(rj, sessions.find(st.id), null);
+      else if (st.status === 'error' || st.status === 'stopped') finishProse(rj, sessions.find(st.id), st.error || 'The report session ended');
+      return;
+    }
     const hit = runBySession(st.id);
     if (!hit) return;
     const { job, run } = hit;
@@ -1221,6 +1302,72 @@ export function createDispatcher(deps) {
       log('dispatch inbox failed', e?.message);
     }
     touch(job);
+    events.emit('finished', { id: job.id, scheduleId: job.scheduleId || null, playbookId: job.playbookId || null, status: item.status, cost: job.report.cost, name: job.name });
+    if (job.settings.report === 'agent') writeProse(job).catch((e) => log('dispatch report failed', e?.message));
+  }
+
+  /** One more session reads every run's summary and writes the prose on top of the table. */
+  async function writeProse(job) {
+    const rep = job.report;
+    const cwd = job.root && fs.existsSync(job.root) ? job.root : job.targets.find((t) => fs.existsSync(t.path))?.path;
+    if (!cwd) {
+      rep.proseState = 'failed';
+      rep.proseError = 'No folder to run the report session in.';
+      touch(job);
+      return;
+    }
+    rep.proseState = 'writing';
+    touch(job);
+    const made = await sessions.create({ cwd, mode: 'default', model: job.settings.model || undefined, title: `${job.name} · report` });
+    store.setMeta(made.id, { dispatch: { jobId: job.id, runId: null, name: job.name, target: 'report' } });
+    const session = sessions.find(made.id) || (await sessions.get(made.id));
+    session.unattended = true; // the report needs no tools and nobody answers
+    job.reportSessionId = made.id;
+    touch(job);
+    const lines = rep.targets.map((t) => `- ${t.name}: ${t.state}${t.reason ? ` (${t.reason})` : ''}; ${t.files || 0} files changed (+${t.add || 0} −${t.del || 0})${t.verify ? `; verify exit ${t.verify.code}` : ''}${t.summary ? `\n  Summary: ${t.summary.slice(0, 600)}` : ''}`);
+    const prompt = [
+      `You are writing the report of a job that ran the same brief across ${rep.targets.length} repositories. Use only what is below; do not use tools or read files.`,
+      '',
+      `Job: ${job.name}`,
+      'Brief:',
+      job.brief,
+      '',
+      'Repositories:',
+      ...lines,
+      '',
+      'Write the report in plain prose, under 250 words, in three short paragraphs: what was done the same way everywhere; where a repository differed or did not finish, and why; what still needs a hand. No headings, no lists, no preamble.',
+    ].join('\n');
+    timers.set(
+      `report:${job.id}`,
+      setTimeout(() => finishProse(job, sessions.find(made.id), `The report took more than ${REPORT_MAX_MIN} minutes`), REPORT_MAX_MIN * 60e3),
+    );
+    try {
+      await session.send({ text: prompt });
+    } catch (e) {
+      finishProse(job, session, e?.message || 'Could not send');
+    }
+  }
+
+  function finishProse(job, session, error) {
+    const rep = job.report;
+    if (!rep || rep.proseState !== 'writing') return;
+    clearTimeout(timers.get(`report:${job.id}`));
+    timers.delete(`report:${job.id}`);
+    const text = error ? '' : session?.lastReply?.text || lastAssistantText(session) || '';
+    rep.proseState = text ? 'done' : 'failed';
+    rep.prose = text || null;
+    rep.proseError = text ? null : error || 'The report session wrote nothing';
+    rep.proseCost = session?.usage?.costUsd || 0;
+    rep.cost = (rep.cost || 0) + rep.proseCost;
+    if (job.inboxId) {
+      try {
+        updateInbox(job.inboxId, { dispatch: rep, summary: text ? text.slice(0, 1200) : undefined });
+      } catch (e) {
+        log('dispatch inbox update failed', e?.message);
+      }
+    }
+    touch(job);
+    setTimeout(() => session?.close?.(), 1500);
   }
 
   function buildReport(job) {
@@ -1247,7 +1394,7 @@ export function createDispatcher(deps) {
       id: uuid(),
       kind: 'dispatch',
       jobId: job.id,
-      scheduleId: null,
+      scheduleId: job.scheduleId || null,
       scheduleName: job.name,
       sessionId: null,
       cwd: job.root || job.targets[0]?.path || '',
@@ -1272,7 +1419,8 @@ export function createDispatcher(deps) {
     const fmtMin = (ms) => `${Math.round((ms || 0) / 60e3)} min`;
     const rows = rep.targets.map((t) => `| ${t.name} | ${t.state}${t.reason ? ` · ${t.reason}` : ''} | ${t.files || 0} (+${t.add || 0} −${t.del || 0}) | ${fmtCost(t.cost)} | ${fmtMin(t.durationMs)} | ${t.commit ? `\`${t.commit}\`` : t.finished || ''}${t.pr ? ` [PR](${t.pr})` : ''} |`);
     const rules = rep.rules?.length ? `\n\n## Allowed for every repository\n\n${rep.rules.map((r) => `- ${r.label || r.key}`).join('\n')}` : '';
-    return [`# ${job.name}`, '', `${rep.targets.length} repositories · ${fmtCost(rep.cost)} · ${fmtMin(rep.durationMs)}${job.state === 'finished' ? '' : ` · ${job.state}`}`, '', '## Brief', '', job.brief, '', '## Repositories', '', '| Repository | State | Files | Cost | Time | Landed |', '|---|---|---|---|---|---|', ...rows, ...rep.targets.filter((t) => t.summary).map((t) => `\n### ${t.name}\n\n${t.summary}`), rules].join('\n');
+    const prose = rep.prose ? ['', rep.prose, ''] : [];
+    return [`# ${job.name}`, '', `${rep.targets.length} repositories · ${fmtCost(rep.cost)} · ${fmtMin(rep.durationMs)}${job.state === 'finished' ? '' : ` · ${job.state}`}`, ...prose, '', '## Brief', '', job.brief, '', '## Repositories', '', '| Repository | State | Files | Cost | Time | Landed |', '|---|---|---|---|---|---|', ...rows, ...rep.targets.filter((t) => t.summary).map((t) => `\n### ${t.name}\n\n${t.summary}`), rules].join('\n');
   }
 
   // ---- lifecycle
@@ -1344,6 +1492,10 @@ export function createDispatcher(deps) {
     finish,
     exportMarkdown,
     inboxItem,
+    playbooks,
+    savePlaybook,
+    removePlaybook,
+    startFromPlaybook,
     pump,
     flush,
     summary,

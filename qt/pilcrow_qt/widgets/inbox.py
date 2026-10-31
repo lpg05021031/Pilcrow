@@ -297,6 +297,13 @@ class DispatchCard(Card):
             line += f" · {it.get('reason')}"
         self.sum = Text(line, theme.FS_SMALL, 400, "text_2", 1.55)
         main.addWidget(self.sum)
+        self.prose: Optional[Text] = None
+        if rep.get("prose"):
+            self.prose = Text(str(rep.get("prose")), theme.FS_SMALL, 400, "text_2", 1.55)
+            main.addWidget(self.prose)
+        elif rep.get("proseState") == "writing":
+            self.prose = Text("An agent is writing the report…", theme.FS_SMALL, 400, "text_3", 1.55)
+            main.addWidget(self.prose)
         self.rows = QVBoxLayout()
         self.rows.setSpacing(2)
         for x in targets[:12]:

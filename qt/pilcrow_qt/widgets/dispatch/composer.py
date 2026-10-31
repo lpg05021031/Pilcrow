@@ -159,6 +159,13 @@ class JobComposer(QWidget):
         self.title.setProperty("fs", "title")
         hl.addWidget(self.title)
         hl.addStretch(1)
+        self.playbook = Select("Playbook", popup_width=300, ghost=True)
+        self.playbook.currentIndexChanged.connect(lambda _i: self._playbook_picked())
+        hl.addWidget(self.playbook)
+        self.save_pb_btn = button(
+            "Save as playbook", kind="ghost", size="sm", icon="book-marked", on_click=self.save_playbook
+        )
+        hl.addWidget(self.save_pb_btn)
         self.plan_btn = button("Plan", kind="ghost", size="sm", on_click=self.replan)
         hl.addWidget(self.plan_btn)
         self.start_btn = button("Start", kind="primary", size="sm", icon="play", on_click=self.start)
@@ -257,6 +264,14 @@ class JobComposer(QWidget):
         self.branch = line_edit("pilcrow/<job>", mono=True, name="Branch")
         self.message = line_edit("chore: {{job.name}}", name="Commit message")
         self.pr = Switch(False, "open pull requests with gh after committing")
+        self.report = Select("Report", popup_width=320)
+        self.report.addItem("The table of repositories", "table", hint="What each run did, landed and cost")
+        self.report.addItem(
+            "The table, with prose written by an agent",
+            "agent",
+            hint="One more session reads the summaries and writes three paragraphs",
+        )
+        self.report.setCurrentIndex(0)
         fin = QWidget()
         fg = QGridLayout(fin)
         fg.setContentsMargins(0, 0, 0, 0)
@@ -264,7 +279,8 @@ class JobComposer(QWidget):
         fg.setVerticalSpacing(10)
         fg.addWidget(field("Branch in every repository", self.branch), 0, 0)
         fg.addWidget(field("Commit message", self.message), 0, 1)
-        fg.addWidget(self.pr, 1, 0, 1, 2)
+        fg.addWidget(field("Report", self.report), 1, 0)
+        fg.addWidget(self.pr, 2, 0, 1, 2)
         bl.addWidget(field("Finish", fin))
 
         # ---- the plan
@@ -290,6 +306,10 @@ class JobComposer(QWidget):
         self.name.textChanged.connect(self._name_changed)
         self.branch.textEdited.connect(lambda _t: self.branch.setProperty("auto", False))
         bind(store.connected_changed, self, lambda on: on and self._changed())
+        self._playbook_id = ""
+        self._filling = False
+        bind(store.playbooks_changed, self, lambda _p: self._fill_playbooks())
+        self._fill_playbooks()
 
     # ---- lifecycle
     def eventFilter(self, obj, e) -> bool:  # noqa: N802
@@ -300,13 +320,93 @@ class JobComposer(QWidget):
 
     def reset(self) -> None:
         """A fresh form (the previous job's text is not what the next one wants)."""
+        self._filling = True
         self.name.setText("")
         self.brief.setPlainText("")
         self.plan = None
         self.plan_box.show_plan(None)
         self.start_btn.setEnabled(False)
         self.targets.set_selected([])
+        self._playbook_id = ""
+        self.playbook.setCurrentIndex(0)
+        self._filling = False
         self.name.setFocus()
+
+    # ---- playbooks: a brief with its settings and repositories, kept to run again
+    def _fill_playbooks(self) -> None:
+        cur = self._playbook_id
+        self._filling = True
+        self.playbook.clear()
+        self.playbook.addItem("No playbook", "", hint="Start from a blank brief")
+        for pb in store.playbooks:
+            self.playbook.addItem(
+                str(pb.get("name") or "Untitled playbook"),
+                str(pb.get("id")),
+                hint=f"{len(pb.get('targets') or [])} repositories · used {int(pb.get('uses') or 0)}×",
+            )
+        i = self.playbook.findData(cur) if cur else -1
+        self.playbook.setCurrentIndex(i if i >= 0 else 0)
+        self._filling = False
+
+    def _playbook_picked(self) -> None:
+        if self._filling:
+            return
+        pid = str(self.playbook.currentData() or "")
+        self._playbook_id = pid
+        pb = next((p for p in store.playbooks if str(p.get("id")) == pid), None)
+        if pb is None:
+            return
+        self.load_playbook(pb)
+
+    def load_playbook(self, pb: Json) -> None:
+        """The playbook's brief, settings and repositories into the form; the name follows it when empty."""
+        self._playbook_id = str(pb.get("id") or "")
+        st = pb.get("settings") or {}
+        if not self.name.text().strip():
+            self.name.setText(str(pb.get("name") or ""))
+        self.brief.setPlainText(str(pb.get("brief") or ""))
+        i = self.mode.findData(str(st.get("mode") or "acceptEdits"))
+        self.mode.setCurrentIndex(i if i >= 0 else 0)
+        self.model.setText(str(st.get("model") or ""))
+        self.parallel.setValue(int(st.get("parallel") or 3))
+        self.max_min.setValue(int(st.get("maxMinutes") or 20))
+        self.cap.setValue(int(st.get("costCap") or 0))
+        self.canary.setValue(int(st.get("canary") if st.get("canary") is not None else 1))
+        self.learn.setChecked(bool(st.get("learn", True)))
+        self.prepare.setText(str(st.get("prepare") or ""))
+        self.verify.setText(str(st.get("verify") or ""))
+        self.verify_retry.setChecked(bool(st.get("verifyRetry", True)))
+        self.message.setText(str(st.get("commitMessage") or ""))
+        self.pr.setChecked(bool(st.get("pr")))
+        ri = self.report.findData(str(st.get("report") or "table"))
+        self.report.setCurrentIndex(ri if ri >= 0 else 0)
+        self.targets.set_targets(
+            str(pb.get("root") or ""), [t for t in (pb.get("targets") or []) if isinstance(t, dict)]
+        )
+        self._changed()
+
+    def save_playbook(self) -> None:
+        v = self.values()
+        name = v["name"] or v["brief"].strip().split("\n")[0][:60]
+        if not v["brief"].strip():
+            store.toast("Write the brief first.", "warning")
+            return
+        payload = {
+            "name": name or "Untitled playbook",
+            "brief": v["brief"],
+            "root": v["root"],
+            "targets": v["targets"],
+            "settings": v["settings"],
+        }
+        if self._playbook_id:
+            payload["id"] = self._playbook_id
+
+        def ok(pb: Any) -> None:
+            self._playbook_id = str((pb or {}).get("id") or "")
+            store.toast(f"Saved as playbook: {name}", "success")
+            store.load_playbooks()
+
+        store.call("dispatch.savePlaybook", payload).then(ok)
 
     # ---- the job as the form holds it
     def _name_changed(self, text: str) -> None:
@@ -320,6 +420,7 @@ class JobComposer(QWidget):
     def values(self) -> Json:
         branch = self.branch.text().strip()
         return {
+            "playbookId": self._playbook_id or None,
             "name": self.name.text().strip(),
             "brief": self.brief.toPlainText(),
             "root": self.targets.root(),
@@ -338,6 +439,7 @@ class JobComposer(QWidget):
                 "branch": branch[len("pilcrow/") :] if branch.startswith("pilcrow/") else branch,
                 "commitMessage": self.message.text().strip(),
                 "pr": self.pr.isChecked(),
+                "report": str(self.report.currentData() or "table"),
             },
         }
 

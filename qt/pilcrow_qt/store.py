@@ -128,6 +128,7 @@ class Store(QObject):
     inbox_unread_changed = Signal(int)
     dispatch_changed = Signal(object)  # {"id": job id, "removed"?: bool} per change; None after a full reload
     dispatch_view_changed = Signal(object)  # None = the board, "new" = the composer, else a job id
+    playbooks_changed = Signal(object)  # the list of playbooks
     gateway_models_changed = Signal(object)
     lightbox_changed = Signal(object)
     find_open_changed = Signal(bool)
@@ -167,6 +168,7 @@ class Store(QObject):
         self.job_runs: Dict[str, Dict[str, Json]] = {}
         self.jobs_loaded = False
         self.dispatch_view: Optional[str] = None
+        self.playbooks: List[Json] = []
         self.gateway_models: Any = None  # None | "loading" | GatewayModels dict
         self.timeline: Dict[str, List[Json]] = {}
         self.lightbox: Optional[str] = None
@@ -308,6 +310,7 @@ class Store(QObject):
         rpc.on("memory.changed", lambda _d: self._bump_sched())
         rpc.on("inbox.changed", self._on_inbox)
         rpc.on("dispatch.changed", self._on_dispatch)
+        rpc.on("dispatch.playbooks", lambda _d: self.load_playbooks())
         rpc.on("timeline.step", self._on_timeline_step)
         hints = QGuiApplication.styleHints()
         if hasattr(hints, "colorSchemeChanged"):
@@ -337,6 +340,7 @@ class Store(QObject):
             self.load_gateway_models()
             rpc.call("inbox.list").then(lambda r: self._set_inbox_unread(int((r or {}).get("unread") or 0)))
             self.load_jobs()
+            self.load_playbooks()
             self._apply_config_ui(config)
             self.apply_theme()
             self.refresh_sessions()
@@ -454,6 +458,13 @@ class Store(QObject):
             self.dispatch_changed.emit(None)
 
         rpc.call("dispatch.list").then(ok).catch(lambda _e: None)
+
+    def load_playbooks(self) -> None:
+        def ok(lst: Any) -> None:
+            self.playbooks = [p for p in lst if isinstance(p, dict)] if isinstance(lst, list) else []
+            self.playbooks_changed.emit(self.playbooks)
+
+        rpc.call("dispatch.playbooks").then(ok).catch(lambda _e: None)
 
     def _on_dispatch(self, d: Json) -> None:
         if not isinstance(d, dict):

@@ -6,7 +6,7 @@ import { store } from './config.js';
 import { sessions, bus, textOfContent } from './sessions.js';
 import * as git from './git.js';
 import * as snapshots from './snapshots.js';
-import { pushInbox } from './schedules.js';
+import { pushInbox, updateInbox } from './schedules.js';
 import { xdg, readJson, writeJson, uuid, log, slash, slugify, run, which, IS_WIN } from './util.js';
 import { createDispatcher } from './dispatch_core.js';
 
@@ -26,6 +26,7 @@ export const dispatch = createDispatcher({
   git,
   snapshots,
   pushInbox,
+  updateInbox,
   shell,
   run,
   which,

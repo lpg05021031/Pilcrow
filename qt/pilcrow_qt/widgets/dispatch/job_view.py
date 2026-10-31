@@ -401,6 +401,15 @@ class JobView(QWidget):
         self.rules.hide()
         bb.addWidget(self.rules)
         self.top_lay.addWidget(self.brief_box)
+        self.prose_box = Box(bg="raised/canvas", line="hair/canvas", radius=theme.R3)
+        pb = QVBoxLayout(self.prose_box)
+        pb.setContentsMargins(12, 9, 12, 9)
+        pb.setSpacing(4)
+        pb.addWidget(Text("Report", theme.FS_MICRO, 600, "text_3", wrap=False))
+        self.prose = Text("", theme.FS_SMALL, 400, "text_2", 1.5)
+        pb.addWidget(self.prose)
+        self.prose_box.hide()
+        self.top_lay.addWidget(self.prose_box)
         self.extra = QVBoxLayout()
         self.extra.setSpacing(6)
         self.top_lay.addLayout(self.extra)
@@ -509,6 +518,20 @@ class JobView(QWidget):
             else ""
         )
         self.rules.setVisible(bool(rules))
+        rep = job.get("report") or {}
+        prose_state = str(rep.get("proseState") or "")
+        if rep.get("prose"):
+            self.prose.setText(str(rep.get("prose")))
+            self.prose.set_color("text_2")
+        elif prose_state == "writing":
+            self.prose.setText("An agent is writing the report from the runs' summaries…")
+            self.prose.set_color("text_3")
+        elif prose_state == "failed":
+            self.prose.setText(
+                f"The written report did not come: {rep.get('proseError') or 'unknown reason'}. The table stands."
+            )
+            self.prose.set_color("text_3")
+        self.prose_box.setVisible(bool(rep.get("prose")) or prose_state in ("writing", "failed"))
         # the canary card and the requests, above the rows
         groups = group_requests(runs)
         sig = (
@@ -701,6 +724,15 @@ class JobView(QWidget):
     def open_menu(self) -> None:
         job = self.job
         items: List[Json] = [
+            {
+                "label": "Run again",
+                "icon": "rotate-cw",
+                "on_select": self.run_again,
+                "hint": "A new job from this brief",
+            },
+            {"label": "Save as playbook", "icon": "book-marked", "on_select": self.save_playbook},
+            {"label": "Schedule this…", "icon": "calendar-clock", "on_select": self.schedule_playbook},
+            {"separator": True},
             {"label": "Copy the report as Markdown", "icon": "clipboard-paste", "on_select": self.export_markdown},
             {"separator": True},
             {"label": "Remove the job", "icon": "trash", "danger": True, "on_select": self.remove_job},
@@ -710,6 +742,36 @@ class JobView(QWidget):
                 0, {"label": "Raise the cost cap and resume", "icon": "circle-dollar-sign", "on_select": self.raise_cap}
             )
         show_menu(items, self.more_btn, align_right=True)
+
+    def _ensure_playbook(self, then: Callable[[str], None]) -> None:
+        """The job's playbook id, saving one from the job when it has none yet."""
+        pid = str(self.job.get("playbookId") or "")
+        if pid and any(str(p.get("id")) == pid for p in store.playbooks):
+            then(pid)
+            return
+        store.call("dispatch.savePlaybook", {"fromJob": self.jid}).then(
+            lambda pb: (store.load_playbooks(), then(str((pb or {}).get("id") or "")))
+        )
+
+    def save_playbook(self) -> None:
+        name = str(self.job.get("name") or "Untitled playbook")
+        store.call("dispatch.savePlaybook", {"fromJob": self.jid, "name": name}).then(
+            lambda _pb: (store.load_playbooks(), store.toast(f"Saved as playbook: {name}", "success"))
+        )
+
+    def run_again(self) -> None:
+        name = str(self.job.get("name") or "Job")
+
+        def go(pid: str) -> None:
+            if pid:
+                store.call("dispatch.startFromPlaybook", {"id": pid, "name": name}).then(
+                    lambda j: store.open_job(str((j or {}).get("id") or ""))
+                )
+
+        self._ensure_playbook(go)
+
+    def schedule_playbook(self) -> None:
+        self._ensure_playbook(lambda pid: pid and store.set_dialog("schedule", {"kind": "dispatch", "playbookId": pid}))
 
     def export_markdown(self) -> None:
         def got(md: Any) -> None:

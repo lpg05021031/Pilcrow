@@ -400,6 +400,38 @@ test('control room: a working session shows as a card with its activity; a waiti
   expect(working >= 0, 'no crash after answering');
 });
 
+test('dispatch: the board lists the finished job, its view has a row per repository, a job runs from the composer', async ({ page }) => {
+  await page.click('.side-page:has-text("Dispatch")');
+  await page.waitForSelector('.dispatch .dp-fin', { timeout: 10_000 });
+  expect((await page.locator('.dp-fin').count()) === 1, 'the seeded finished job is on the board');
+  await page.click('.dp-fin');
+  await page.waitForSelector('.dp-table tbody tr', { timeout: 10_000 });
+  expect((await page.locator('.dp-table tbody tr').count()) === 3, 'three repositories, one row each');
+  expect((await page.locator('.dp-foot').count()) === 1, 'a finished job shows its review foot');
+  await page.click('.dispatch .icon-btn[aria-label="Back"]');
+  await page.click('.dispatch .btn.primary:has-text("New job")');
+  await page.waitForSelector('.dp-targets .dp-target', { timeout: 10_000 });
+  expect((await page.locator('.dp-target').count()) === 8, 'the workspace scan lists eight repositories');
+  await page.click('.dispatch .ghost-select');
+  await page.click('text=Dependency bump');
+  await page.waitForFunction(() => document.querySelectorAll('.dp-target.on').length === 3, null, { timeout: 5000 });
+  expect((await page.inputValue('.dp-form .input')).includes('Dependency bump'), 'the name follows the playbook');
+  await page.waitForSelector('.dispatch .btn.primary:has-text("Start"):not([disabled])', { timeout: 15_000 });
+  expect((await page.locator('.dp-chip.ok').count()) >= 3, 'the plan painted its verdicts on the rows');
+  await ctl.call('mock.pace', { ms: 0 });
+  await page.click('.dispatch .btn.primary:has-text("Start")');
+  await page.waitForSelector('.dp-table tbody tr', { timeout: 15_000 });
+  await page.waitForSelector('.dp-canary', { timeout: 30_000 });
+  await page.click('.dp-canary .btn.primary');
+  await page.waitForSelector('.dp-foot', { timeout: 40_000 });
+  expect((await page.locator('.dp-row.done').count()) === 3, 'all three repositories done after the main wave');
+  await page.click('.dp-foot .btn.ghost:has-text("Keep")');
+  await page.waitForFunction(() => document.querySelector('.dp-foot')?.textContent?.includes('Finished:'), null, { timeout: 10_000 });
+  await page.click('.side-page:has-text("Inbox")');
+  await page.waitForSelector('.dp-report', { timeout: 10_000 });
+  expect((await page.locator('.dp-report .dp-report-row').count()) === 3, 'the report card lists the three repositories');
+});
+
 // ---------------------------------------------------------------- run
 
 const chosen = tests.filter((t) => !grep || t.name.includes(grep));

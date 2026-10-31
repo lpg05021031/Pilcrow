@@ -17,7 +17,12 @@ const DEFAULT_MAX_MIN = 45;
 
 let data = readJson(FILE, { schedules: [] });
 let inbox = readJson(INBOX, { items: [] });
-const running = new Map(); // scheduleId -> { sessionId, startedAt, timer }
+const running = new Map(); // scheduleId -> { sessionId | jobId, startedAt, timer }
+/** How a schedule of kind 'dispatch' runs: (playbookId, { scheduleId, name, unattended }) → job summary. Set by main.js. */
+let dispatchRunner = null;
+export function setDispatchRunner(fn) {
+  dispatchRunner = fn;
+}
 
 function persist() {
   writeJson(FILE, data);
@@ -146,7 +151,7 @@ function withNext(s) {
     error = e.message;
   }
   const run = running.get(s.id);
-  return { ...s, nextRunAt: next, cadenceLabel: describeCadence(s.cadence), error, running: run ? { sessionId: run.sessionId, startedAt: run.startedAt } : null };
+  return { ...s, kind: s.kind || 'prompt', nextRunAt: next, cadenceLabel: describeCadence(s.cadence), error, running: run ? { sessionId: run.sessionId || null, jobId: run.jobId || null, startedAt: run.startedAt } : null };
 }
 
 export function list() {
@@ -155,11 +160,15 @@ export function list() {
 
 export function save(input) {
   const cur = input.id ? data.schedules.find((s) => s.id === input.id) : null;
+  const kind = input.kind || cur?.kind || 'prompt';
   const s = {
     id: cur?.id || uuid(),
+    kind,
+    playbookId: kind === 'dispatch' ? String(input.playbookId || cur?.playbookId || '') : null,
+    playbookName: kind === 'dispatch' ? String(input.playbookName || cur?.playbookName || '') : null,
     name: String(input.name || '').trim() || 'Untitled schedule',
     cwd: slash(String(input.cwd || cur?.cwd || '')),
-    prompt: String(input.prompt || ''),
+    prompt: String(input.prompt ?? cur?.prompt ?? ''),
     cadence: input.cadence || cur?.cadence || { kind: 'daily', time: '09:00' },
     model: input.model ?? cur?.model ?? '',
     effort: input.effort ?? cur?.effort ?? '',
@@ -172,8 +181,12 @@ export function save(input) {
     lastStatus: cur?.lastStatus || null,
     runs: cur?.runs || 0,
   };
-  if (!s.cwd) throw new Error('Pick a folder for the schedule.');
-  if (!s.prompt.trim()) throw new Error('Write what Claude should do each time.');
+  if (kind === 'dispatch') {
+    if (!s.playbookId) throw new Error('Pick a playbook for the schedule.');
+  } else {
+    if (!s.cwd) throw new Error('Pick a folder for the schedule.');
+    if (!s.prompt.trim()) throw new Error('Write what Claude should do each time.');
+  }
   nextRun(s.cadence); // validates cron
   if (cur) Object.assign(cur, s);
   else data.schedules.push(s);
@@ -204,6 +217,17 @@ export async function runNow(id, { manual = true } = {}) {
   if (running.size >= MAX_PARALLEL && !manual) return null; // the tick retries in a minute
   const startedAt = Date.now();
   const stamp = new Date(startedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+  if (s.kind === 'dispatch') {
+    // a job from a playbook, unattended: no canary, permissions declined; its report is the inbox item
+    if (!dispatchRunner) throw new Error('Dispatch is not available.');
+    const job = await dispatchRunner(s.playbookId, { scheduleId: s.id, name: `${s.name} · ${stamp}`, unattended: true, manual });
+    running.set(id, { jobId: job.id, startedAt, timer: null });
+    s.lastRunAt = startedAt;
+    s.runs = (s.runs || 0) + 1;
+    persist();
+    log('schedule dispatch', s.name, job.id);
+    return { jobId: job.id };
+  }
   const { id: sessionId } = await sessions.create({ cwd: s.cwd, worktree: s.worktree ? { name: s.name } : null, mode: s.mode === 'deny' ? 'default' : s.mode, model: s.model || undefined, effort: s.effort || undefined, title: `${s.name} · ${stamp}` });
   store.setMeta(sessionId, { scheduled: { id: s.id, name: s.name, at: startedAt, manual } });
   const session = sessions.find(sessionId);
@@ -344,6 +368,24 @@ export function markRead(ids) {
 
 export function removeItem(id) {
   inbox.items = inbox.items.filter((i) => i.id !== id);
+  saveInbox();
+  return true;
+}
+
+/** A dispatch job started by a schedule ended: the schedule's record moves on (the report is the job's own inbox item). */
+export function noteDispatchFinished(scheduleId, status) {
+  const s = data.schedules.find((x) => x.id === scheduleId);
+  running.delete(scheduleId);
+  if (!s) return;
+  s.lastStatus = status;
+  persist();
+}
+
+/** A later change to an item that is already in the inbox (a report's prose arriving). */
+export function updateInbox(id, patch) {
+  const it = inbox.items.find((i) => i.id === id);
+  if (!it) return false;
+  for (const [k, v] of Object.entries(patch || {})) if (v !== undefined) it[k] = v;
   saveInbox();
   return true;
 }

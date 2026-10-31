@@ -180,7 +180,7 @@ class Sess {
     this.extra = {}; // fields the tests lay over state() (mock.patch): tasks, mcp, …
   }
   summary() {
-    return { id: this.id, title: this.title, firstPrompt: this.messages[0]?.message?.content?.[0]?.text, cwd: this.cwd, project: this.cwd, gitBranch: 'main', lastModified: this.touched, createdAt: this.createdAt, archived: this.archived, pinned: this.pinned, worktree: null, scheduled: null, dispatch: this.dispatch || null, status: this.status, live: this.live, pending: this.pending.size };
+    return { id: this.id, title: this.title, firstPrompt: this.messages[0]?.message?.content?.[0]?.text, cwd: this.cwd, project: this.cwd, gitBranch: 'main', lastModified: this.touched, createdAt: this.createdAt, archived: this.archived, pinned: this.pinned, worktree: null, scheduled: this.scheduled || null, dispatch: this.dispatch || null, status: this.status, live: this.live, pending: this.pending.size };
   }
   state() {
     return {
@@ -327,6 +327,10 @@ async function say(s, parts) {
 async function useTool(s, tool, { ask = false } = {}) {
   const [{ id }] = await say(s, [{ tool }]);
   if (s.aborted) return;
+  if (ask && s.unattended) {
+    s.record(msg.toolResult(s.id, id, 'This session runs with nobody watching, so this action cannot be approved.', Date.now(), undefined, true));
+    return 'denied';
+  }
   if (ask) {
     const requestId = `req_${uuid()}`;
     const decision = await new Promise((resolve) => {
@@ -487,6 +491,10 @@ const D_DEFAULTS = { mode: 'acceptEdits', allowedTools: [], model: '', effort: '
 let jobs = [];
 /** @type {any[]} */
 let inboxItems = [];
+/** @type {any[]} */
+let playbooks = [];
+/** @type {any[]} */
+let schedules = [];
 
 function dRender(brief, job, t, extras = {}) {
   let out = String(brief || '').replace(/\{\{\s*([a-zA-Z_.]+)\s*\}\}/g, (m, k) => ({ 'repo.name': t.name, 'repo.path': t.path, 'repo.branch': t.base || '', 'job.name': job.name, notes: t.notes || '' })[k] ?? m);
@@ -528,12 +536,12 @@ const dJob = (id) => {
   return j;
 };
 function dNormalize(input, cur) {
-  const settings = { ...D_DEFAULTS, ...(cur?.settings || {}), ...(input.settings || {}) };
+  const settings = { ...D_DEFAULTS, unattended: false, ...(cur?.settings || {}), ...(input.settings || {}) };
   settings.parallel = Math.max(1, Math.min(16, Number(settings.parallel) || 3));
   settings.canary = Math.max(0, Math.min(8, Number.isFinite(Number(settings.canary)) ? Number(settings.canary) : 1));
   const name = String(input.name ?? cur?.name ?? '').trim() || 'Untitled job';
   const targets = (input.targets ?? cur?.targets ?? []).map((t) => ({ path: String(t.path || ''), name: String(t.name || String(t.path || '').split('/').pop()), base: String(t.base || ''), notes: String(t.notes || ''), size: t.size || REPO_BY_PATH.get(t.path)?.size || null, deps: Array.isArray(t.deps) ? t.deps : REPO_BY_PATH.get(t.path)?.deps || [] }));
-  return { id: cur?.id || `job-${uuid()}`, name, slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'job', brief: String(input.brief ?? cur?.brief ?? ''), root: String(input.root ?? cur?.root ?? `${HOME}/code`), targets, settings, state: cur?.state || 'draft', wave: cur?.wave || null, paused: cur?.paused || false, createdAt: cur?.createdAt || Date.now(), updatedAt: Date.now(), startedAt: cur?.startedAt || null, finishedAt: cur?.finishedAt || null, plan: cur?.plan || null, rules: cur?.rules || [], runs: cur?.runs || [], learned: cur?.learned || [], forecast: cur?.forecast || null, capReached: false, report: cur?.report || null, stoppedReason: null };
+  return { id: cur?.id || `job-${uuid()}`, name, slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'job', brief: String(input.brief ?? cur?.brief ?? ''), root: String(input.root ?? cur?.root ?? `${HOME}/code`), targets, settings, state: cur?.state || 'draft', wave: cur?.wave || null, paused: cur?.paused || false, createdAt: cur?.createdAt || Date.now(), updatedAt: Date.now(), startedAt: cur?.startedAt || null, finishedAt: cur?.finishedAt || null, plan: cur?.plan || null, rules: cur?.rules || [], runs: cur?.runs || [], learned: cur?.learned || [], forecast: cur?.forecast || null, capReached: false, report: cur?.report || null, stoppedReason: null, playbookId: input.playbookId ?? cur?.playbookId ?? null, scheduleId: input.scheduleId ?? cur?.scheduleId ?? null, inboxId: cur?.inboxId || null, reportSessionId: cur?.reportSessionId || null };
 }
 function dLevels(targets) {
   const paths = new Set(targets.map((t) => t.path));
@@ -600,6 +608,7 @@ function dStartRun(job, run) {
   run.brief = dRender(job.brief, job, run, extras);
   const s = new Sess({ id: `dj-${uuid()}`, title: `${job.name} · ${run.name}`, cwd: run.path, touched: Date.now() });
   s.dispatch = { jobId: job.id, runId: run.id, name: job.name, target: run.name };
+  s.unattended = Boolean(job.settings.unattended);
   s.usage.costUsd = 0;
   sessions.set(s.id, s);
   run.sessionId = s.id;
@@ -702,13 +711,79 @@ function dMaybeFinish(job) {
   job.report = dReport(job);
   const done = job.runs.filter((r) => r.state === 'done').length;
   const failed = job.runs.filter((r) => r.state === 'failed' || r.state === 'stopped').length;
-  inboxItems.unshift({ id: `ib-${uuid()}`, kind: 'dispatch', jobId: job.id, scheduleId: null, scheduleName: job.name, sessionId: null, cwd: job.root, startedAt: job.startedAt, endedAt: job.finishedAt, durationMs: job.report.durationMs, status: failed && !done ? 'failed' : 'completed', reason: failed ? `${failed} of ${job.runs.length} did not finish` : null, summary: `${done} of ${job.runs.length} repositories done.\n` + job.runs.map((r) => `- ${r.name}: ${r.state}${r.summary ? ' — ' + r.summary.slice(0, 120) : ''}`).join('\n'), cost: job.report.cost, files: job.runs.flatMap((r) => (r.files || []).map((f) => ({ ...f, repo: r.name }))).slice(0, 60), read: false, manual: true, dispatch: job.report });
+  job.inboxId = `ib-${uuid()}`;
+  inboxItems.unshift({ id: job.inboxId, kind: 'dispatch', jobId: job.id, scheduleId: job.scheduleId || null, scheduleName: job.name, sessionId: null, cwd: job.root, startedAt: job.startedAt, endedAt: job.finishedAt, durationMs: job.report.durationMs, status: failed && !done ? 'failed' : 'completed', reason: failed ? `${failed} of ${job.runs.length} did not finish` : null, summary: `${done} of ${job.runs.length} repositories done.\n` + job.runs.map((r) => `- ${r.name}: ${r.state}${r.summary ? ' — ' + r.summary.slice(0, 120) : ''}`).join('\n'), cost: job.report.cost, files: job.runs.flatMap((r) => (r.files || []).map((f) => ({ ...f, repo: r.name }))).slice(0, 60), read: false, manual: true, dispatch: job.report });
   broadcast('inbox.changed', inboxItems.filter((i) => !i.read).length);
+  if (job.scheduleId) {
+    const sc = schedules.find((x) => x.id === job.scheduleId);
+    if (sc) {
+      sc.lastStatus = failed && !done ? 'failed' : 'completed';
+      sc.running = null;
+      broadcast('schedules.changed', {});
+    }
+  }
+  if (job.settings.report === 'agent') {
+    // one more session writes the prose; the mock has it ready a moment later
+    job.report.proseState = 'writing';
+    const rs = new Sess({ id: `dj-${uuid()}`, title: `${job.name} · report`, cwd: job.root, touched: Date.now() });
+    rs.dispatch = { jobId: job.id, runId: null, name: job.name, target: 'report' };
+    sessions.set(rs.id, rs);
+    job.reportSessionId = rs.id;
+    setTimeout(() => {
+      const names = job.runs.filter((r) => r.state === 'done').map((r) => r.name);
+      job.report.prose = `The brief was carried out the same way in ${names.join(', ')}: each run changed the same files and finished without asking. Nothing differed between the repositories. Nothing needs a hand.`;
+      job.report.proseState = 'done';
+      job.report.proseCost = 0.004;
+      const it = inboxItems.find((i) => i.id === job.inboxId);
+      if (it) {
+        it.dispatch = job.report;
+        it.summary = job.report.prose;
+      }
+      broadcast('inbox.changed', inboxItems.filter((i) => !i.read).length);
+      dEmit(job);
+    }, 300);
+  }
   dEmit(job);
+}
+function dSavePlaybook(input) {
+  let src = input;
+  if (input.fromJob) {
+    const job = dJob(input.fromJob);
+    src = { id: input.id, name: input.name || job.name, brief: job.brief, root: job.root, settings: job.settings, targets: job.targets };
+  }
+  const cur = src.id ? playbooks.find((p) => p.id === src.id) : null;
+  const settings = { ...D_DEFAULTS, ...(cur?.settings || {}), ...(src.settings || {}) };
+  delete settings.unattended;
+  const pb = { id: cur?.id || `pb-${uuid()}`, name: String(src.name ?? cur?.name ?? '').trim() || 'Untitled playbook', brief: String(src.brief ?? cur?.brief ?? ''), root: String(src.root ?? cur?.root ?? `${HOME}/code`), settings, targets: (src.targets ?? cur?.targets ?? []).map((t) => ({ path: t.path, name: t.name || String(t.path).split('/').pop(), base: t.base || '', notes: t.notes || '' })), createdAt: cur?.createdAt || Date.now(), updatedAt: Date.now(), uses: cur?.uses || 0, lastUsedAt: cur?.lastUsedAt || null };
+  if (!pb.brief.trim()) throw new Error('A playbook needs a brief.');
+  if (cur) Object.assign(cur, pb);
+  else playbooks.push(pb);
+  if (input.fromJob) dJob(input.fromJob).playbookId = pb.id;
+  broadcast('dispatch.playbooks', {});
+  return cur || pb;
+}
+function dStartFromPlaybook(id, { name, wave, unattended = false, scheduleId = null, targets } = {}) {
+  const pb = playbooks.find((p) => p.id === id);
+  if (!pb) throw new Error('No such playbook.');
+  const job = dNormalize({ name: name || pb.name, brief: pb.brief, root: pb.root, targets: targets || pb.targets, settings: { ...pb.settings, unattended: Boolean(unattended) }, playbookId: pb.id, scheduleId }, null);
+  jobs.push(job);
+  pb.uses += 1;
+  pb.lastUsedAt = Date.now();
+  broadcast('dispatch.playbooks', {});
+  return dispatchMethods['dispatch.start']({ id: job.id, wave: unattended ? 'all' : wave });
+}
+const CADENCE_LABEL = { daily: 'Every day', weekdays: 'Weekdays', weekly: 'Every week', hourly: 'Every hour', interval: 'Every few hours', cron: 'On a cron expression' };
+function sWithNext(sc) {
+  return { ...sc, kind: sc.kind || 'prompt', nextRunAt: sc.enabled ? Date.now() + 3600e3 : null, cadenceLabel: `${CADENCE_LABEL[sc.cadence?.kind] || 'Every day'}${sc.cadence?.time ? ` at ${sc.cadence.time}` : ''}`, error: null, running: sc.running || null };
 }
 function seedDispatch() {
   jobs = [];
   inboxItems = [];
+  schedules = [];
+  playbooks = [
+    { id: 'pb-deps', name: 'Dependency bump', brief: 'Bump the dependencies in {{repo.name}} to their latest minor versions, run the tests, fix what breaks. {{notes}}', root: `${HOME}/code`, settings: { ...D_DEFAULTS, canary: 1, verify: 'npm test' }, targets: ['design-system', 'web-ui', 'docs'].map((n) => ({ path: `${HOME}/code/${n}`, name: n, base: 'main', notes: '' })), createdAt: now - 10 * DAY, updatedAt: now - 10 * DAY, uses: 3, lastUsedAt: now - 2 * DAY },
+    { id: 'pb-license', name: 'License headers', brief: 'Add the SPDX header to every source file of {{repo.name}} that lacks one.', root: `${HOME}/code`, settings: { ...D_DEFAULTS, canary: 1 }, targets: [], createdAt: now - 20 * DAY, updatedAt: now - 20 * DAY, uses: 0, lastUsedAt: null },
+  ];
   const t0 = now - 26 * 3600e3;
   const old = dNormalize({ name: 'Pin node 22 in CI', brief: 'Pin the Node version in CI to 22 in {{repo.name}}.', targets: ['cli', 'docs', 'infra'].map((n) => ({ path: `${HOME}/code/${n}`, name: n, base: 'main' })), settings: { canary: 0 } }, null);
   old.plan = dPlan(old);
@@ -895,6 +970,16 @@ const dispatchMethods = {
     dMaybeFinish(job);
     return { job: dSummary(job), results };
   },
+  'dispatch.playbooks': () => [...playbooks].sort((a, b) => (b.lastUsedAt || b.updatedAt) - (a.lastUsedAt || a.updatedAt)),
+  'dispatch.savePlaybook': (p) => dSavePlaybook(p),
+  'dispatch.removePlaybook': ({ id }) => {
+    const n = playbooks.length;
+    playbooks = playbooks.filter((p) => p.id !== id);
+    if (playbooks.length === n) throw new Error('No such playbook.');
+    broadcast('dispatch.playbooks', {});
+    return true;
+  },
+  'dispatch.startFromPlaybook': ({ id, name, wave, targets }) => dStartFromPlaybook(id, { name, wave, targets }),
   'dispatch.export': ({ id }) => {
     const job = dJob(id);
     const rep = job.report || dReport(job);
@@ -1052,7 +1137,49 @@ const methods = {
   'mcp.list': () => ({ file: `${HOME}/.claude.json`, servers: [] }),
   'memory.list': () => ({ notes: [] }),
   'project.fileHistory': () => ({}),
-  'schedules.list': () => [],
+  'schedules.list': () => schedules.map(sWithNext),
+  'schedules.save': (p) => {
+    const cur = p.id ? schedules.find((x) => x.id === p.id) : null;
+    const kind = p.kind || cur?.kind || 'prompt';
+    const sc = { id: cur?.id || `sch-${uuid()}`, kind, playbookId: kind === 'dispatch' ? String(p.playbookId || cur?.playbookId || '') : null, playbookName: kind === 'dispatch' ? String(p.playbookName || cur?.playbookName || '') : null, name: String(p.name || '').trim() || 'Untitled schedule', cwd: String(p.cwd || cur?.cwd || ''), prompt: String(p.prompt ?? cur?.prompt ?? ''), cadence: p.cadence || cur?.cadence || { kind: 'daily', time: '09:00' }, model: p.model ?? cur?.model ?? '', effort: p.effort ?? cur?.effort ?? '', mode: p.mode || cur?.mode || 'acceptEdits', worktree: Boolean(p.worktree ?? cur?.worktree), maxMinutes: Number(p.maxMinutes ?? cur?.maxMinutes ?? 45), enabled: p.enabled ?? cur?.enabled ?? true, createdAt: cur?.createdAt || Date.now(), lastRunAt: cur?.lastRunAt || null, lastStatus: cur?.lastStatus || null, runs: cur?.runs || 0, running: cur?.running || null };
+    if (kind === 'dispatch' && !sc.playbookId) throw new Error('Pick a playbook for the schedule.');
+    if (kind !== 'dispatch' && !sc.prompt.trim()) throw new Error('Write what Claude should do each time.');
+    if (cur) Object.assign(cur, sc);
+    else schedules.push(sc);
+    broadcast('schedules.changed', {});
+    return sWithNext(cur || sc);
+  },
+  'schedules.remove': ({ id }) => {
+    schedules = schedules.filter((x) => x.id !== id);
+    broadcast('schedules.changed', {});
+    return true;
+  },
+  'schedules.toggle': ({ id, enabled }) => {
+    const sc = schedules.find((x) => x.id === id);
+    if (!sc) throw new Error('No such schedule.');
+    sc.enabled = Boolean(enabled);
+    broadcast('schedules.changed', {});
+    return sWithNext(sc);
+  },
+  'schedules.preview': ({ cadence }) => ({ nextRunAt: Date.now() + 3600e3, label: `${CADENCE_LABEL[cadence?.kind] || 'Every day'}${cadence?.time ? ` at ${cadence.time}` : ''}` }),
+  'schedules.runNow': ({ id }) => {
+    const sc = schedules.find((x) => x.id === id);
+    if (!sc) throw new Error('No such schedule.');
+    sc.lastRunAt = Date.now();
+    sc.runs += 1;
+    if (sc.kind === 'dispatch') {
+      const job = dStartFromPlaybook(sc.playbookId, { name: `${sc.name} · now`, unattended: true, scheduleId: sc.id });
+      sc.running = { sessionId: null, jobId: job.id, startedAt: Date.now() };
+      broadcast('schedules.changed', {});
+      return { jobId: job.id };
+    }
+    const s = new Sess({ id: `sr-${uuid()}`, title: `${sc.name} · now`, cwd: sc.cwd || PROJ, touched: Date.now() });
+    s.scheduled = { id: sc.id, name: sc.name, at: Date.now(), manual: true };
+    sessions.set(s.id, s);
+    broadcast('schedules.changed', {});
+    setTimeout(() => deliver(s, { text: sc.prompt }), 30);
+    return { sessionId: s.id };
+  },
   'inbox.list': () => ({ unread: inboxItems.filter((i) => !i.read).length, items: inboxItems }),
   'inbox.markRead': ({ ids }) => {
     for (const i of inboxItems) if (!ids || ids.includes(i.id)) i.read = true;

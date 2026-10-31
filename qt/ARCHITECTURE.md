@@ -44,7 +44,8 @@ qt/
       dispatch/        one job across many repositories (DISPATCH.md): board.py (every job, requests
                        answered on the card), job_view.py (one row per repository on the canvas
                        engine, the review foot), composer.py (a new job, the plan as you type),
-                       targets.py (the workspace scan as a picker), common.py (states, the bar)
+                       targets.py (the workspace scan as a picker, rows on the canvas engine),
+                       common.py (states, the bar)
       panels/          changes, files (+editor), terminal, preview, tasks, history (its timeline
                        is a list on the canvas engine: timeline_list.py), info
       dialogs/         new_session, settings (+pages), schedule, mcp_auth, palette, shortcuts, confirm

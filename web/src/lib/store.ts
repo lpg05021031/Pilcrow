@@ -5,7 +5,7 @@ import { rpc } from './rpc';
 import { TranscriptModel } from './transcript';
 import { setHome } from './format';
 import { EASE_EXIT, reducedMotion } from './motion';
-import type { AppInfo, Config, SessionState, SessionSummary, PermissionMode, Effort, RawMsg, GatewayModels, TimelineStep, PermissionDecision } from './types';
+import type { AppInfo, Config, SessionState, SessionSummary, PermissionMode, Effort, RawMsg, GatewayModels, TimelineStep, PermissionDecision, DispatchJob, DispatchRun, DispatchDelta, Playbook } from './types';
 import type { PilcrowNative } from './globals';
 import { errText } from './format';
 
@@ -97,13 +97,20 @@ interface State {
   /** Timeline steps per session, pushed by the server as they are recorded. */
   timeline: Record<string, TimelineStep[]>;
   /** What the main column shows: the open session, or one of the app-wide pages. */
-  page: 'session' | 'overview' | 'inbox';
+  page: 'session' | 'overview' | 'inbox' | 'dispatch';
+  /** Dispatch: job summaries and their runs, kept in line by dispatch.changed deltas. */
+  jobs: Record<string, DispatchJob>;
+  jobRuns: Record<string, Record<string, DispatchRun>>;
+  jobsLoaded: boolean;
+  /** The dispatch page: null = the board, 'new' = the composer, else a job id. */
+  dispatchView: null | 'new' | string;
+  playbooks: Playbook[];
   /** Unread results in the inbox (scheduled runs). */
   inboxUnread: number;
   /** Bumped when schedules or the inbox change on the server. */
   schedRev: number;
   /** Edit or create a schedule; `null` closed, `{}` new. */
-  scheduleDialog: null | { id?: string; cwd?: string };
+  scheduleDialog: null | { id?: string; cwd?: string; kind?: 'prompt' | 'dispatch'; playbookId?: string };
   /** An image opened full-size over the app. */
   lightbox: string | null;
   /** The find bar is open: every row of the conversation must be on the page to be searched. */
@@ -130,6 +137,11 @@ export const useStore = create<State>(() => ({
   gatewayModels: null,
   timeline: {},
   page: 'session',
+  jobs: {},
+  jobRuns: {},
+  jobsLoaded: false,
+  dispatchView: null,
+  playbooks: [],
   inboxUnread: 0,
   schedRev: 0,
   scheduleDialog: null,
@@ -353,6 +365,8 @@ export function initApp() {
       set({ info, config });
       loadGatewayModels();
       rpc.call<{ unread: number }>('inbox.list').then((r) => set({ inboxUnread: r.unread })).catch(() => {});
+      loadJobs();
+      loadPlaybooks();
       applyConfigUi(config);
       applyTheme();
       refreshSessions();
@@ -380,6 +394,8 @@ export function initApp() {
   rpc.on('schedules.changed', () => set({ schedRev: get().schedRev + 1 }));
   rpc.on('memory.changed', () => set({ schedRev: get().schedRev + 1 }));
   rpc.on('inbox.changed', (unread: number) => set({ inboxUnread: typeof unread === 'number' ? unread : get().inboxUnread, schedRev: get().schedRev + 1 }));
+  rpc.on('dispatch.changed', (d: DispatchDelta) => onDispatch(d));
+  rpc.on('dispatch.playbooks', () => loadPlaybooks());
   rpc.on('timeline.step', ({ id, step }: { id: string; step: TimelineStep }) => {
     const cur = get().timeline[id];
     if (!cur) return; // nobody has asked for this session's timeline yet
@@ -696,9 +712,69 @@ export function openFile(path: string, line?: number) {
   setUi({ panel: true, panelTab: 'files' });
 }
 
-export function showPage(page: 'session' | 'overview' | 'inbox') {
+export function showPage(page: 'session' | 'overview' | 'inbox' | 'dispatch') {
   set({ page });
 }
+
+// ---- dispatch: one job across many repositories
+export function loadJobs() {
+  rpc
+    .call<DispatchJob[]>('dispatch.list')
+    .then((lst) => set({ jobs: Object.fromEntries((lst || []).map((j) => [j.id, j])), jobsLoaded: true }))
+    .catch(() => {});
+}
+export function loadPlaybooks() {
+  rpc
+    .call<Playbook[]>('dispatch.playbooks')
+    .then((lst) => set({ playbooks: lst || [] }))
+    .catch(() => {});
+}
+function onDispatch(d: DispatchDelta) {
+  if (!d?.id) return;
+  const st = get();
+  if (d.removed) {
+    const jobs = { ...st.jobs };
+    delete jobs[d.id];
+    const jobRuns = { ...st.jobRuns };
+    delete jobRuns[d.id];
+    set({ jobs, jobRuns, dispatchView: st.dispatchView === d.id ? null : st.dispatchView });
+    return;
+  }
+  const jobs = d.job ? { ...st.jobs, [d.id]: d.job } : st.jobs;
+  let jobRuns = st.jobRuns;
+  if (d.runs) {
+    const cur = d.all ? {} : { ...(st.jobRuns[d.id] || {}) };
+    for (const r of d.runs) cur[r.id] = r;
+    jobRuns = { ...st.jobRuns, [d.id]: cur };
+  }
+  set({ jobs, jobRuns });
+}
+export function fetchJob(id: string) {
+  return rpc
+    .call<{ job: DispatchJob; runs: DispatchRun[] }>('dispatch.get', { id })
+    .then((r) => {
+      const st = get();
+      set({ jobs: { ...st.jobs, [id]: r.job }, jobRuns: { ...st.jobRuns, [id]: Object.fromEntries(r.runs.map((x) => [x.id, x])) } });
+    })
+    .catch(() => {});
+}
+/** A job's runs in the server's order, the superseded (retried) ones left out. */
+export function runsOf(runs: Record<string, Record<string, DispatchRun>>, id: string): DispatchRun[] {
+  return Object.values(runs[id] || {}).filter((r) => !r.superseded);
+}
+/** Requests waiting across jobs, plus the canaries waiting to be read: the sidebar's badge. */
+export function dispatchNeeds(jobs: Record<string, DispatchJob>): number {
+  let n = 0;
+  for (const j of Object.values(jobs)) if (j.state === 'running' || j.state === 'reviewing') n += (j.needsAction || 0) + (j.canaryWaiting ? 1 : 0);
+  return n;
+}
+/** The board (null), the composer ('new') or a job's view (its id). */
+export function showDispatch(view: null | 'new' | string) {
+  set({ dispatchView: view });
+  if (view && view !== 'new') fetchJob(view);
+  if (get().page !== 'dispatch') set({ page: 'dispatch' });
+}
+export const openJob = (id: string) => showDispatch(id);
 
 export function setTimeline(id: string, steps: TimelineStep[]) {
   set({ timeline: { ...get().timeline, [id]: steps } });

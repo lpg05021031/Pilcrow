@@ -111,6 +111,9 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
   schedules.events.on('inbox', () => broadcast('inbox.changed', schedules.inboxList().unread));
   schedules.start();
   dispatch.events.on('changed', (d) => broadcast('dispatch.changed', d));
+  dispatch.events.on('playbooks', () => broadcast('dispatch.playbooks', {}));
+  dispatch.events.on('finished', (d) => d.scheduleId && schedules.noteDispatchFinished(d.scheduleId, d.status));
+  schedules.setDispatchRunner((playbookId, opts) => dispatch.dispatch.startFromPlaybook(playbookId, opts));
   dispatch.start();
   memory.events.on('changed', (d) => broadcast('memory.changed', d));
   term.terminals.on('data', (d) => broadcast('term.data', d));
@@ -262,6 +265,10 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
     'dispatch.review': ({ id }) => dispatch.dispatch.review(id),
     'dispatch.finish': ({ id, runId, action, message, pr }) => dispatch.dispatch.finish(id, { runId, action, message, pr }),
     'dispatch.export': ({ id }) => dispatch.dispatch.exportMarkdown(id),
+    'dispatch.playbooks': () => dispatch.dispatch.playbooks(),
+    'dispatch.savePlaybook': (p) => dispatch.dispatch.savePlaybook({ ...p, root: p.root ? expandHome(p.root) : p.root, targets: p.targets ? p.targets.map((t) => ({ ...t, path: expandHome(t.path) })) : p.targets }),
+    'dispatch.removePlaybook': ({ id }) => dispatch.dispatch.removePlaybook(id),
+    'dispatch.startFromPlaybook': ({ id, name, wave, targets }) => dispatch.dispatch.startFromPlaybook(id, { name, wave, targets }),
     // ---- control room: every live session at a glance, plus spend
     'fleet.state': async () => {
       const list = await sessions.list();

@@ -41,6 +41,7 @@ class FakeSession {
   closed = false;
   interrupted = 0;
   dispatch: any = null;
+  unattended = false;
   bus: EventEmitter;
   constructor(id: string, cwd: string, bus: EventEmitter) {
     this.id = id;
@@ -131,6 +132,7 @@ function harness({ realWorktrees = false, file = null as string | null, shell = 
   const bus = new EventEmitter();
   const sessions = new FakeSessions(bus, realWorktrees);
   const inbox: any[] = [];
+  const inboxUpdates: any[] = [];
   const shellCalls: any[] = [];
   const meta: Record<string, any> = {};
   const store = { meta, setMeta: (id: string, patch: any) => (meta[id] = { ...(meta[id] || {}), ...patch }), getMeta: (id: string) => meta[id] || null, getConfig: () => ({}) };
@@ -141,6 +143,7 @@ function harness({ realWorktrees = false, file = null as string | null, shell = 
     store,
     git,
     pushInbox: (item: any) => inbox.push(item),
+    updateInbox: (id: string, patch: any) => inboxUpdates.push({ id, patch }),
     shell: async (cmd: string, cwd: string, timeout: number) => {
       shellCalls.push({ cmd, cwd, timeout });
       return shell ? shell(cmd, cwd) : { code: 0, output: 'ok' };
@@ -150,7 +153,7 @@ function harness({ realWorktrees = false, file = null as string | null, shell = 
     textOfContent: (c: any) => (Array.isArray(c) ? c.filter((x) => x.type === 'text').map((x) => x.text).join('\n') : ''),
   });
   d.begin();
-  return { d, bus, sessions, inbox, shellCalls, store };
+  return { d, bus, sessions, inbox, inboxUpdates, shellCalls, store };
 }
 
 let root: string;
@@ -610,5 +613,93 @@ describe('finishing on real worktrees', () => {
     expect(h.d.get(job.id).job.state).toBe('finished');
     expect(h.inbox[0].dispatch.targets.map((t: any) => t.finished)).toEqual(['commit', 'commit', 'discard']);
     h.d.end();
+  });
+});
+
+describe('playbooks, schedules and the written report', () => {
+  it('saves a playbook from a job and starts an unattended job from it: no canary, permissions declined, the schedule told', async () => {
+    const h = harness();
+    const { job } = await jobWithRepos(h, { canary: 1 }, 'Do {{repo.name}}.', false);
+    const pb = h.d.savePlaybook({ fromJob: job.id, name: 'Eslint bump' });
+    expect(pb.targets.map((t: any) => t.name)).toEqual(['a', 'b', 'c']);
+    expect(pb.brief).toBe('Do {{repo.name}}.');
+    expect(pb.settings.canary).toBe(1);
+    expect(h.d.playbooks().map((p: any) => p.id)).toEqual([pb.id]);
+    expect(h.d.get(job.id).job.playbookId).toBe(pb.id);
+    expect(() => h.d.savePlaybook({ name: 'empty' })).toThrow(/needs a brief/);
+    const finished: any[] = [];
+    h.d.events.on('finished', (e) => finished.push(e));
+    const j2 = await h.d.startFromPlaybook(pb.id, { name: 'Nightly · 1', unattended: true, scheduleId: 'sch-1' });
+    await sleep(40);
+    expect(j2.name).toBe('Nightly · 1');
+    expect(j2.wave).toBe('main'); // unattended: nobody would read a canary
+    expect(j2.scheduleId).toBe('sch-1');
+    let { runs } = h.d.get(j2.id);
+    expect(runs.map((r: any) => r.state)).toEqual(['running', 'running', 'running']);
+    const mine = [...h.sessions.all.values()].filter((x) => x.dispatch?.jobId === j2.id);
+    expect(mine).toHaveLength(3);
+    expect(mine.every((x) => x.unattended)).toBe(true);
+    for (const r of runs) {
+      const x = h.sessions.find(r.sessionId)!;
+      x.say(`ok ${r.name}`, 0.01);
+      x.idle();
+    }
+    await sleep(60);
+    ({ runs } = h.d.get(j2.id));
+    expect(runs.every((r: any) => r.state === 'done')).toBe(true);
+    await h.d.finish(j2.id, { action: 'keep' });
+    expect(finished).toHaveLength(1);
+    expect(finished[0]).toMatchObject({ id: j2.id, scheduleId: 'sch-1', playbookId: pb.id, status: 'completed' });
+    expect(h.inbox[0]).toMatchObject({ kind: 'dispatch', scheduleId: 'sch-1', scheduleName: 'Nightly · 1' });
+    expect(h.d.playbooks()[0]).toMatchObject({ uses: 1 });
+    expect(h.d.playbooks()[0].lastUsedAt).toBeGreaterThan(0);
+    h.d.removePlaybook(pb.id);
+    expect(h.d.playbooks()).toHaveLength(0);
+    expect(() => h.d.removePlaybook(pb.id)).toThrow(/No such playbook/);
+    h.d.end();
+  });
+
+  it('an agent writes the prose of the report once the job is finished, and the inbox item follows', async () => {
+    const h = harness();
+    const { job } = await jobWithRepos(h, { canary: 0, report: 'agent' }, undefined, false);
+    await h.d.start(job.id);
+    await sleep(40);
+    const { runs } = h.d.get(job.id);
+    for (const r of runs) {
+      const x = h.sessions.find(r.sessionId)!;
+      x.say(`done in ${r.name}`, 0.01);
+      x.idle();
+    }
+    await sleep(60);
+    await h.d.finish(job.id, { action: 'keep' });
+    await sleep(40);
+    let j = h.d.get(job.id).job;
+    expect(j.state).toBe('finished');
+    expect(j.report.proseState).toBe('writing');
+    expect(h.inbox).toHaveLength(1);
+    const rs = h.sessions.find(j.reportSessionId)!;
+    expect(rs.unattended).toBe(true);
+    expect(h.sessions.created.at(-1)).toMatchObject({ title: 'Bump eslint · report', mode: 'default' });
+    expect(h.sessions.created.at(-1).worktree).toBeUndefined();
+    expect(rs.sent[0]).toContain('writing the report of a job that ran the same brief across 3 repositories');
+    expect(rs.sent[0]).toContain('- a: done; 0 files changed');
+    expect(rs.sent[0]).toContain('Summary: done in a');
+    rs.say('Everything went the same way in all three. Nothing differed. Nothing needs a hand.', 0.02);
+    rs.idle();
+    await sleep(20);
+    j = h.d.get(job.id).job;
+    expect(j.report.proseState).toBe('done');
+    expect(j.report.prose).toContain('Everything went the same way');
+    expect(j.report.proseCost).toBe(0.02);
+    expect(h.inboxUpdates).toHaveLength(1);
+    expect(h.inboxUpdates[0].id).toBe(h.inbox[0].id);
+    expect(h.inboxUpdates[0].patch.summary).toContain('Everything went the same way');
+    expect(h.inboxUpdates[0].patch.dispatch.prose).toContain('Everything');
+    expect(h.d.exportMarkdown(job.id)).toContain('Everything went the same way');
+    expect(rs.closed).toBe(false); // closes a moment later
+    await sleep(1600);
+    expect(rs.closed).toBe(true);
+    h.d.end();
+    void runs;
   });
 });

@@ -15,8 +15,14 @@
   stopped。Qt 視窗新增側欄的 Dispatch 入口（徽章是等人處理的數量）、看板（需要你的 job 在最上面，請求與 canary 卡
   就地回答）、job 畫面（每個 repo 一列，canvas 引擎、順序固定、只重畫變了的列；Allow / Deny、Retry / Open、Stop、Skip
   都在列上；brief 可在主波開跑前改）、新 job 的 composer（target 挑選器＋即時 plan）、控制室卡片上的「Allow for all」、
-  收件匣的報告卡；job 的 session 在側欄收在 job 底下。測試：`test/unit/dispatch.test.ts`（假 session 與真 git repo）、
-  `qt/tests/test_dispatch.py`（對 mock server 完整跑一個 job）。
+  收件匣的報告卡；job 的 session 在側欄收在 job 底下。
+  第三期：**playbook**（brief＋設定＋一組 repo，從 composer 或 job 存、在 composer 載入、Run again 用它再開一個 job）；
+  **排程可以派工**（排程對話框多了「A dispatch playbook」：到點用 playbook 開一個無人值守的 job——沒有 canary、權限一律
+  拒絕——報告進 inbox）；**agent 寫的報告**（收尾設定選「table, with prose written by an agent」，job 結束後多一個 session
+  讀各 repo 的摘要寫三段話，放在 job 畫面、inbox 卡片與 Markdown 匯出裡）；Qt 的 target 挑選器改成 canvas 引擎的列，
+  幾百個 repo 也是一個畫面；**web client** 有同一套畫面（看板、job 畫面、composer、側欄入口、inbox 卡片、排程對話框）。
+  測試：`test/unit/dispatch.test.ts`（假 session 與真 git repo）、`qt/tests/test_dispatch.py`（對 mock server 完整跑一個 job、
+  playbook、排程、報告）。
 
 - **2.10.0**：Qt 對話區整個換成自繪的 canvas 引擎（`qt/pilcrow_qt/canvas/`，設計見 `qt/DESIGN.md`，量測見
   `qt/PERF.md`）。對話不再是一棵 QWidget／QLayout 樹，而是一個 viewport 上的場景：每一列是一個 block，位置由

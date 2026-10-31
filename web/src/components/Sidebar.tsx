@@ -1,7 +1,7 @@
 import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { EASE, reducedMotion } from '../lib/motion';
-import { Plus, Search, Settings, Sun, Moon, Monitor, ChevronRight, Archive, FolderGit2, GitBranch, Pin, Ellipsis, Pencil, GitFork, Trash, PinOff, ArchiveRestore, X, SquarePen, SlidersHorizontal, PanelLeftClose, LayoutGrid, Inbox } from 'lucide-react';
-import { foldingRows, useStore, openSession, setDialog, setTheme, setUi, archiveSession, pinSession, forkSession, deleteSession, confirmAction, renameSession, quickNewSession, showPage } from '../lib/store';
+import { Plus, Search, Settings, Sun, Moon, Monitor, ChevronRight, Archive, FolderGit2, GitBranch, Pin, Ellipsis, Pencil, GitFork, Trash, PinOff, ArchiveRestore, X, SquarePen, SlidersHorizontal, PanelLeftClose, LayoutGrid, Inbox, Send } from 'lucide-react';
+import { foldingRows, useStore, openSession, setDialog, setTheme, setUi, archiveSession, pinSession, forkSession, deleteSession, confirmAction, renameSession, quickNewSession, showPage, showDispatch, dispatchNeeds } from '../lib/store';
 import type { SessionSummary } from '../lib/types';
 import { basename, timeAgo, tildify } from '../lib/format';
 import { fuzzyScore } from '../lib/fuzzy';
@@ -23,6 +23,8 @@ export function Sidebar() {
   const unread = useStore((s) => s.unread);
   const page = useStore((s) => s.page);
   const inboxUnread = useStore((s) => s.inboxUnread);
+  const jobs = useStore((s) => s.jobs);
+  const dispatchNeedsN = dispatchNeeds(jobs);
   const config = useStore((s) => s.config);
   const info = useStore((s) => s.info);
   const ui = useStore((s) => s.ui);
@@ -36,7 +38,7 @@ export function Sidebar() {
   const { attention, pinned, groups, archivedCount } = useMemo(() => {
     let list = sessions.filter((s) => (ui.showArchived ? s.archived : !s.archived));
     // Runs started by a schedule live in the inbox; the active one still shows so its row can be found.
-    if (!q.trim()) list = list.filter((s) => !s.scheduled || s.id === activeId);
+    if (!q.trim()) list = list.filter((s) => (!s.scheduled && !s.dispatch) || s.id === activeId);
     if (q.trim()) list = list.filter((s) => fuzzyScore(q, `${s.title} ${basename(s.project || s.cwd)}`));
     // The conversation on screen never jumps into "Needs you": you are already looking at it, and its
     // row shows the amber mark where it is. Only other sessions gather there.
@@ -98,6 +100,11 @@ export function Sidebar() {
             <Inbox size={15} />
             <span className="grow">Inbox</span>
             {inboxUnread > 0 && <span className="side-page-n unread tnum">{inboxUnread}</span>}
+          </button>
+          <button className={`side-page${page === 'dispatch' ? ' on' : ''}`} onClick={() => (page === 'dispatch' ? showPage('session') : showDispatch(null))} title="One job across many repositories (Ctrl+Shift+D)">
+            <Send size={15} />
+            <span className="grow">Dispatch</span>
+            {dispatchNeedsN > 0 && <span className="side-page-n needs tnum">{dispatchNeedsN}</span>}
           </button>
         </div>
       </div>

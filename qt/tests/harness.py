@@ -175,6 +175,7 @@ class Client:
         st.job_runs.clear()
         st.jobs_loaded = False
         st.dispatch_view = None
+        st.playbooks = []
         st._buffered.clear()
         st._opening.clear()
         # Drafts and history are kept per session for the life of the app; a test must not inherit them.

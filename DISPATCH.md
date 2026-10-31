@@ -12,23 +12,34 @@ that ties them together, and the two screens that show it.
 
 ## Status
 
-Phases 1 and 2 are built. The server side is `server/dispatch_core.js` (the state machine, the scan,
-the plan, briefs, rules, waves, prepare and verify, review, finish, the report) wired to the real
-sessions, git, snapshots and inbox in `server/dispatch.js`, with the RPC in `server/main.js`
-(`workspace.scan`, `dispatch.*`) and the `dispatch.changed` event; its tests are
-`test/unit/dispatch.test.ts` (fake sessions and the bus; real temporary repositories and worktrees
-for the scan, the plan, the review and the finishing). The Qt client has the board, the job view (rows
-on the canvas engine, patched in place from the deltas), the composer with the target picker and the
-plan as you type, Allow for all on the board, in the job view and on the control room's cards, the
-canary card with the forecast and the brief editable before the main wave, the review foot with
-Commit / Open PRs / Keep / Discard, the report as its own card in the inbox with the Markdown export,
-and the job's runs grouped under the job in the sidebar (`qt/pilcrow_qt/widgets/dispatch/`, tests in
-`qt/tests/test_dispatch.py` against `test/mock/mock-server.mjs`, which models the engine so a job can
-be driven end to end offscreen). Pull requests through `gh` are implemented on the server and not yet
-exercised against a live GitHub remote.
+All three phases are built. The server side is `server/dispatch_core.js` (the state machine, the scan,
+the plan, briefs, rules, waves, prepare and verify, review, finish, the report, playbooks, the
+agent-written report) wired to the real sessions, git, snapshots and inbox in `server/dispatch.js`,
+with the RPC in `server/main.js` (`workspace.scan`, `dispatch.*`) and the `dispatch.changed`,
+`dispatch.playbooks` and `finished` events; `server/schedules.js` runs a schedule of kind `dispatch`
+through a playbook (unattended: no canary, permissions declined, the report is the inbox item). Its
+tests are `test/unit/dispatch.test.ts` (fake sessions and the bus; real temporary repositories and
+worktrees for the scan, the plan, the review and the finishing; playbooks, the unattended job, the
+written report).
 
-Left for phase 3: playbooks and saved target sets, the agent-written report, the web client's screens,
-dispatch on a schedule, and a row-scene target picker for workspaces of hundreds of repositories.
+The Qt client has the board, the job view (rows on the canvas engine, patched in place from the
+deltas), the composer with the target picker (also rows on the canvas engine, so a workspace of
+hundreds is one surface) and the plan as you type, playbooks (load one into the composer, save one from
+the composer or a job, Run again, Schedule this), Allow for all on the board, in the job view and on the
+control room's cards, the canary card with the forecast and the brief editable before the main wave,
+the review foot with Commit / Open PRs / Keep / Discard, the written report under the brief, the report
+as its own card in the inbox with the Markdown export, the schedule dialog's "A dispatch playbook"
+choice, and the job's runs grouped under the job in the sidebar (`qt/pilcrow_qt/widgets/dispatch/`,
+tests in `qt/tests/test_dispatch.py` against `test/mock/mock-server.mjs`, which models the engine so a
+job can be driven end to end offscreen).
+
+The web client has the same screens over the same RPC (`web/src/components/dispatch/`): the board,
+the job view, the composer with playbooks and the plan, the Dispatch entry in the sidebar with its
+badge, the report card in the inbox, and the schedule dialog's playbook choice.
+
+Pull requests through `gh` are implemented on the server and not yet exercised against a live GitHub
+remote. Not built: a lead agent that splits one task into per-repository briefs (the brief is yours),
+and sessions on other machines (Pilcrow runs where its server runs).
 
 ## 0. What herdr does, and where the room is
 

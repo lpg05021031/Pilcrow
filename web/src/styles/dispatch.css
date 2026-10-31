@@ -1,0 +1,449 @@
+/* ================================================================ dispatch
+   One job across many repositories (DISPATCH.md). The board follows the control room's shapes; the
+   job view is one row per repository, the state carried by a glyph and a colour, never by a position;
+   the composer is the dialog forms laid out as a page. */
+.dispatch {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.dp-body {
+  gap: 22px;
+}
+.dp-form {
+  max-width: 920px;
+  margin: 0 auto;
+  width: 100%;
+}
+.dp-form > .field + .field,
+.dp-form > .ns-two,
+.dp-form > .dp-inline,
+.dp-form > .dp-box {
+  margin-top: 0;
+}
+
+/* ---- the job card */
+.dp-card {
+  gap: 8px;
+}
+.dp-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.dp-name {
+  font-weight: 600;
+  flex: none;
+  max-width: 40%;
+}
+.dp-scope {
+  flex: none;
+  font-size: var(--fs-small);
+}
+.dp-counts {
+  flex: none;
+  font-size: var(--fs-small);
+  color: var(--text-2);
+}
+.dp-cost {
+  flex: none;
+  font-size: var(--fs-small);
+}
+.dp-bar {
+  display: flex;
+  gap: 2px;
+  height: 6px;
+  flex: 1 1 120px;
+  max-width: 220px;
+}
+.dp-seg {
+  flex: 1;
+  border-radius: 2px;
+  background: var(--fill-2);
+}
+.dp-seg.done {
+  background: var(--ok);
+}
+.dp-seg.running,
+.dp-seg.preparing {
+  background: var(--accent);
+  animation: dp-breathe 1.6s ease-in-out infinite;
+}
+.dp-seg.needs_action {
+  background: var(--warn);
+}
+.dp-seg.failed {
+  background: var(--err);
+}
+.dp-seg.stopped {
+  background: var(--text-3);
+}
+@keyframes dp-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dp-seg.running,
+  .dp-seg.preparing {
+    animation: none;
+  }
+}
+
+/* ---- a request waiting, the canary waiting */
+.dp-ask,
+.dp-canary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 7px 10px 7px 12px;
+  border-radius: 8px;
+  font-size: var(--fs-small);
+  position: relative;
+}
+.dp-ask {
+  background: var(--warn-wash);
+}
+.dp-canary {
+  background: var(--plan-wash);
+}
+.dp-ask::before,
+.dp-canary::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 3px;
+  border-radius: 1.5px;
+  background: var(--warn);
+}
+.dp-canary::before {
+  background: var(--plan);
+}
+.dp-ask-tool {
+  font-weight: 600;
+  flex: none;
+}
+.dp-ask-what {
+  min-width: 0;
+  flex: 1 1 auto;
+  font-size: 12px;
+}
+.dp-ask-who {
+  flex: none;
+  font-size: var(--fs-micro);
+}
+.dp-learn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 14px;
+  font-size: var(--fs-small);
+}
+
+/* ---- the finished rows */
+.dp-fin {
+  width: 100%;
+  cursor: pointer;
+}
+
+/* ---- the job view */
+.dp-top {
+  display: grid;
+  gap: 8px;
+  padding: 6px 20px 8px;
+}
+.dp-box {
+  display: grid;
+  gap: 4px;
+  padding: 9px 12px;
+  border-radius: var(--r-3);
+  background: var(--card);
+  box-shadow: inset 0 0 0 0.5px var(--hair);
+}
+.dp-box-h {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  color: var(--text-3);
+  letter-spacing: 0.02em;
+}
+.dp-box-h b {
+  font-size: var(--fs-ui);
+  color: var(--text);
+}
+.dp-brief {
+  margin: 0;
+  font-size: var(--fs-small);
+  line-height: 1.5;
+  color: var(--text-2);
+  white-space: pre-wrap;
+}
+.dp-rules {
+  font-size: var(--fs-micro);
+}
+.dp-runs {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 12px;
+}
+.dp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.dp-table th {
+  position: sticky;
+  top: 0;
+  background: var(--canvas);
+  text-align: left;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-4);
+  padding: 6px 8px 8px;
+  border-bottom: 1px solid var(--hair);
+}
+.dp-table th.num,
+.dp-table td.num {
+  text-align: right;
+}
+.dp-table td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--hair);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+.dp-row {
+  cursor: pointer;
+}
+.dp-row:hover td {
+  background: var(--fill-1);
+}
+.dp-row.needs_action td {
+  background: var(--warn-wash);
+}
+.dp-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 112px;
+}
+.dp-word.done {
+  color: var(--ok);
+}
+.dp-word.failed {
+  color: var(--err);
+}
+.dp-word.running,
+.dp-word.preparing {
+  color: var(--accent-text);
+}
+.dp-word.needs_action {
+  color: var(--warn);
+}
+.dp-word.queued,
+.dp-word.skipped,
+.dp-word.stopped {
+  color: var(--text-3);
+}
+.dp-repo {
+  font-weight: 500;
+}
+.dp-now {
+  color: var(--text-2);
+  max-width: 420px;
+}
+.dp-now > .ellipsis {
+  display: inline-block;
+  max-width: 260px;
+  vertical-align: middle;
+}
+.dp-now.ok {
+  color: var(--ok);
+}
+.dp-now.err {
+  color: var(--err);
+}
+.dp-acts {
+  display: inline-flex;
+  gap: 6px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.dp-glyph {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--text-4);
+}
+.dp-glyph.done {
+  background: var(--ok);
+}
+.dp-glyph.running,
+.dp-glyph.preparing {
+  background: var(--accent);
+  animation: dp-breathe 1.6s ease-in-out infinite;
+}
+.dp-glyph.needs_action {
+  background: var(--warn);
+}
+.dp-glyph.failed {
+  background: var(--err);
+}
+.dp-glyph.stopped {
+  background: var(--text-3);
+}
+.dp-glyph.queued,
+.dp-glyph.skipped {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--text-4);
+}
+.dp-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 20px 10px;
+  border-top: 1px solid var(--hair);
+  font-size: var(--fs-small);
+  color: var(--text-2);
+}
+
+/* ---- the composer */
+.dp-inline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.dp-model {
+  max-width: 220px;
+}
+.dp-targets-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dp-folder {
+  max-width: 260px;
+}
+.dp-targets {
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  border-radius: var(--r-3);
+  background: var(--inset);
+  box-shadow: inset 0 0 0 0.5px var(--hair);
+  max-height: 320px;
+  overflow: auto;
+}
+.dp-target {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+  border-radius: var(--r-2);
+}
+.dp-target:hover {
+  background: var(--fill-1);
+}
+.dp-target-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 30px;
+  padding: 0 6px;
+  cursor: pointer;
+  font-size: var(--fs-ui);
+}
+.dp-target-main input {
+  accent-color: var(--accent);
+}
+.dp-target-name {
+  font-weight: 500;
+}
+.dp-notes {
+  grid-column: 1 / -1;
+  margin: 0 6px 6px 30px;
+}
+.dp-chip {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 9px;
+  background: var(--fill-2);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.dp-chip.ok {
+  background: var(--ok-wash);
+  color: var(--ok);
+}
+.dp-chip.warning {
+  background: var(--warn-wash);
+  color: var(--warn);
+}
+.dp-chip.blocked {
+  background: var(--err-wash);
+  color: var(--err);
+}
+.dp-chip.info {
+  background: var(--info-wash);
+  color: var(--info);
+}
+.dp-plan-row {
+  display: grid;
+  grid-template-columns: 60px minmax(0, 1fr);
+  gap: 10px;
+  font-size: var(--fs-small);
+  color: var(--text-2);
+  line-height: 1.45;
+}
+.dp-plan-tag {
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  color: var(--text-3);
+}
+.dp-plan-tag.blocked {
+  color: var(--err);
+}
+.dp-plan-tag.warning {
+  color: var(--warn);
+}
+
+/* ---- the inbox card */
+.dp-report-rows {
+  display: grid;
+  gap: 2px;
+}
+.dp-report-row {
+  display: grid;
+  grid-template-columns: 12px 150px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--fs-small);
+}
+.dp-report-name {
+  font-weight: 500;
+}
+.dp-report-nums {
+  font-size: var(--fs-micro);
+}
+.dp-prose {
+  white-space: pre-wrap;
+}
