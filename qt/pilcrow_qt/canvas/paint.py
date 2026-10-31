@@ -81,6 +81,9 @@ def tidy_doc(doc: QTextDocument) -> None:
             cur.setBlockFormat(bf)
 
 
+_build_failed = False
+
+
 def doc_height(doc: QTextDocument) -> int:
     return max(1, int(math.ceil(doc.size().height())))
 
@@ -608,7 +611,49 @@ class Measurer:
         size: Optional[float] = None,
     ) -> QTextDocument:
         """A laid-out document for one Markdown source (a top-level block or a whole text). ``size``
-        picks a style of its own (a thought at 13.5px) over the prose and compact ones."""
+        picks a style of its own (a thought at 13.5px) over the prose and compact ones. Built from
+        the token stream with a cursor (canvas/build.py); the HTML renderer stands in if that fails."""
+        from . import build
+
+        m = markdown.metrics_for(size) if size else markdown.metrics(compact or quiet)
+        doc = self._doc(self.font(m.base), width, tab_font=self.code_font())
+        doc.setIndentWidth(m.list_indent)
+        try:
+            tokens = markdown.parse_tokens(src, streaming) if src else []
+            b = build.Builder(doc, m, self.tokens, self, width, cwd, streaming, line_height)
+            b.run(tokens)
+        except Exception as ex:  # noqa: BLE001 - a builder failure must not take the row down
+            global _build_failed
+            if not _build_failed:
+                _build_failed = True
+                print(f"[canvas] document builder failed, HTML renderer used: {ex!r}")
+            return self.markdown_doc_html(src, width, compact, quiet, streaming, cwd, line_height, size)
+        if b.used_checks:
+            for name, on in ((markdown.CHECK_ON, True), (markdown.CHECK_OFF, False)):
+                doc.addResource(
+                    QTextDocument.ResourceType.ImageResource, QUrl(name), self.check_pixmap(on, m.list_indent)
+                )
+        tidy_doc(doc)
+        doc.setTextWidth(width)
+        if b.used_images:
+            fit_doc(doc, width, images=True, wells=False)
+        doc.setProperty("pilcrow_wells", b.wells)
+        doc.size()  # laid out: every caller measures it next, and a block's lines exist from here on
+        return doc
+
+    def markdown_doc_html(
+        self,
+        src: str,
+        width: int,
+        compact: bool = False,
+        quiet: bool = False,
+        streaming: bool = False,
+        cwd: str = "",
+        line_height: Optional[int] = None,
+        size: Optional[float] = None,
+    ) -> QTextDocument:
+        """The same document through the HTML renderer and Qt's importer: the reference the builder
+        is tested against, and what stands in should the builder fail."""
         m = markdown.metrics_for(size) if size else markdown.metrics(compact or quiet)
         try:
             body = markdown.render_html(

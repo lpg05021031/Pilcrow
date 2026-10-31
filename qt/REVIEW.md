@@ -49,6 +49,8 @@ Everything else is a constant factor within budget, or a rare path, and is liste
 
 ### R1 · A tool input that streams is parsed from the start on every delta — high, quadratic
 
+**Fixed.** The scan that finds what is open in the JSON is kept as state on the tool item (`PartialScanner`) and advanced by each delta; the repair looks at the tail of the text only; and the parse runs once per flush of the view (`TranscriptModel.refresh_inputs`, called by the store before it emits) and at the block's end, not per delta. After: the same 114 KB `Write` costs 0.16 s of main-thread time over its whole stream where it cost 9.7 s; a delta is 4–7 µs, a flush's parse 0.02 → 0.20 ms as the input grows.
+
 **Evidence.** `tests` on a 114 KB `Write` input fed to `TranscriptModel.push` as 2871 deltas of
 40 bytes: 9.7 s in total, 0.35 ms per delta in the first tenth, 6.65 ms in the last. Alone,
 `parse_partial_json` on 57 KB of unfinished JSON takes 3.4 ms; on the finished 115 KB, 0.18 ms
@@ -76,6 +78,8 @@ JIT and a second thread for painting, which is why it was never noticed there.)
 
 ### R2 · A flush does work proportional to the whole conversation — medium-high, O(n) per token
 
+**Fixed.** The settled prefix's keys and the index of every settled unit are kept across flushes and only ever extended; `reconcile` no longer builds a list of every child's key or walks the settled prefix, it compares from the settled index on (one check behind it that the contract held). The scene also remembers how many settled units its children were last synced against (`_synced_settled`): units that settled since (the turn that was live, or one a loading slice had cut in two) get one more sync, and a scene from the cache that meets the conversation loaded again (new items, the same user uuids, so the unit keys agree) starts from zero and syncs every unit, which `tests/test_scene_sync.py` pins down. After: `scene.sync` with nothing changed is 0.08 ms at 1500 turns and 0.25 ms at 6000 (was 0.59 and 3.46); a token through the flush is 0.29 and 0.62 ms (was 0.92 and 2.83). The remainder is two list concatenations of pointers, microseconds per thousand.
+
 **Evidence.** `scene.sync` with nothing changed: 0.59 ms at 1500 turns (4501 items), 3.46 ms at 6000
 (18 001 items). A token through `rt_changed` (model push, sync, measure, commit): 0.92 ms → 2.83 ms.
 Profiled at 6000 turns, 30 flushes: `reconcile` 47 ms of its own time (1.6 ms each), `sync` 42 ms
@@ -101,6 +105,8 @@ already O(tail); the *lists and dicts* around them are not. At 6000 turns this i
 
 ### R3 · Documents are built through an HTML round trip — medium, constant factor 2–3×
 
+**Fixed, and the estimate corrected.** `canvas/build.py` writes the document from markdown-it's tokens with a cursor: paragraphs, headings, quotes, lists with quiet markers and task boxes, code wells, tables with planned columns and streaming chunks, pills with their pads and joiners, links, images, rules; the margins follow the same first-child/last-child rule Qt's importer applied, decided in one pass over the tokens. Over a corpus of forty constructs it is pixel-identical to the renderer in height, words, block formats, lists and character formats (`tests/test_build.py`), and it differs where the renderer was wrong: a path in a code span is a link again (lost since the pill got its pads), an indented code block is a well, code in a list item keeps the text colour. The growers write an item's or a cell's words through it too, so no HTML is parsed anywhere in the conversation. Measured fairly, with both documents laid out: a rich block 2.92 → 2.56 ms (−13 %), a paragraph 0.43 → 0.36, a 60-line fence 8.4 → 6.7 (−20 %), a 40-item list 6.4 → 4.4 (−30 %), a 30-row table 6.8 → 5.4 (−20 %). Not the 2× estimated above: of the rich block's 2.6 ms, markdown-it's parse is 0.5, the build 0.9 and Qt's layout 1.1, and the layout was never the round trip's to save. The HTML renderer stays as `markdown_doc_html`, the reference the builder is tested against and what stands in should it ever fail.
+
 **Evidence.** A 725-character rich block (heading, paragraph, list, table, fence, quote; 469 px):
 `markdown_doc` 3.23 ms = markdown-it parse 0.54 + its HTML render 0.05 + the post-processing regex
 passes 0.43 + `setHtml` 0.71 + layout 0.80 + glue 0.7. A 540-character plain paragraph: 0.32 ms by
@@ -123,7 +129,8 @@ decorations the view paints (pills, wells, rules) already key on formats, not on
 the growers, cursor construction of a 60-line fence is well under a millisecond.
 
 **Expected.** Exact measurement 3.2 ms → ~1.4 ms for a rich block; a paragraph 0.32 → 0.12 ms. The
-drain warms twice the blocks per frame; the open of a long session settles in half the time.
+drain warms twice the blocks per frame; the open of a long session settles in half the time. (What
+came of it is above: 13–30 %, the layout being the larger half of what remains.)
 
 ### R4 · Opening a long conversation costs 0.1 ms per message, in slices — medium
 
@@ -229,6 +236,31 @@ the budget as *k* screens at the current ratio.
 | Caches: fonts, metrics, 4000 `QStaticText`s, 4 MB of highlighted source, one lexer per language | hits are dictionary lookups | right |
 | Deadline in `_remeasure_visible`, budgets in `_drain` (8 ms, 2 ms in a fling) | placeholders instead of stalls | right |
 | Theme as a palette swap | 124–146 ms for 600 turns and an open panel | acceptable; widgets, not the engine |
+
+## 3b. Smoothness, measured after the fixes
+
+`tests/stress/s_smooth.py` records the times at which the view paints during the motions a person
+makes, and which widgets of the real window repaint while a reply streams. A late frame is one more
+than 25 ms after the one before.
+
+| Motion | Frames | Pacing |
+|---|---|---|
+| A fling of 60 notches through 1500 turns | 61 frames over 995 ms | median 16.8 ms, p90 17.2, worst 19.6, 0 late; 0 placeholders, 0 stale |
+| A fold of 600 turns opened | 16 frames over 240 ms | median 15.9, worst 16.5, 0 late; the anchor kept |
+| The same fold closed | 11 frames over 160 ms | median 15.9, worst 16.9, 0 late |
+| Zoom in / out (Ctrl+= / Ctrl+-) | one frame each | the call 7–10 ms, the frame 10 ms after it; the block under the top edge stays at the same pixel |
+| Theme switch | one frame | 15 ms |
+| The real window: a reply streaming (~100 words) | 13 viewport paints | 6 of them the streaming block's line only; **7 are the whole viewport, and those flushes also repaint the whole shell** (sidebar, panel, cards): see below |
+
+**Open, found by the probe.** While a reply streams with the view following it, every flush that
+moves the scroll repaints the whole viewport, not the strip that moved (the view's pixel scrolling
+blits only for a person's scroll), and the same flushes repaint the whole shell: `Shell.place()`
+ends with `self.update()` (the ground's shadow) and `place()` runs from `_on_ui`, which the stream
+reaches; a full repaint of the shell is a paint event for every card, tab and file row under it,
+166 under the panel during one short reply. Neither shows as flicker (Qt double-buffers), but both
+are work the conversation does to widgets that did not change, and the standard here is that it
+does none. Next: blit on a following scroll as on a person's; have `place()` repaint only the ground
+around the cards, and only when a seam moved.
 
 ## 4. On threads, and why the answer is still "no"
 

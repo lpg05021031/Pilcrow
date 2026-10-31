@@ -375,23 +375,24 @@ def _styled(code: str, lang: str, t: theme.Tokens) -> List[Tuple[str, Optional[s
     return out
 
 
+Lines = Tuple[Tuple[Tuple[str, Optional[str]], ...], ...]  # per line, (text, style) runs
 HL_CACHE_CHARS = 4_000_000  # of source kept highlighted: a session of big fences cannot pin memory
 HL_CACHE_ENTRIES = 512
-_hl_cache: OrderedDict[Tuple[str, str, str], Tuple[str, ...]] = OrderedDict()
+_hl_cache: OrderedDict[Tuple[str, str, str], Lines] = OrderedDict()
 _hl_chars = 0
 
 
-def highlight_lines(code: str, lang: str, theme_name: str) -> Tuple[str, ...]:
-    """Each line of ``code`` as escaped HTML with the theme's syntax colours (``<span style="color:…">``
-    runs); plain escaped lines when Pygments has no lexer. The results are kept, least recently used
-    first out, under a budget of source characters as well as a count."""
+def styled_lines(code: str, lang: str, theme_name: str) -> Lines:
+    """Each line of ``code`` as (text, style) runs with the theme's syntax colours (style None for
+    plain text); one plain run a line when Pygments has no lexer. The results are kept, least
+    recently used first out, under a budget of source characters as well as a count."""
     global _hl_chars
     key = (code, lang, theme_name)
     hit = _hl_cache.get(key)
     if hit is not None:
         _hl_cache.move_to_end(key)
         return hit
-    out = tuple(_highlight_lines(code, lang, theme_name))
+    out = _styled_lines(code, lang, theme_name)
     if len(code) <= HL_CACHE_CHARS // 4:
         _hl_cache[key] = out
         _hl_chars += len(code)
@@ -401,26 +402,34 @@ def highlight_lines(code: str, lang: str, theme_name: str) -> Tuple[str, ...]:
     return out
 
 
-def highlight_cache_size() -> Tuple[int, int]:
-    """(entries, source characters) the highlight cache holds."""
-    return len(_hl_cache), _hl_chars
-
-
-def _highlight_lines(code: str, lang: str, theme_name: str) -> List[str]:
+def _styled_lines(code: str, lang: str, theme_name: str) -> Lines:
     t = theme.DARK if theme_name == "dark" else theme.LIGHT
-    lines = code.split("\n")
-    out: List[str] = [""]
+    n = code.count("\n") + 1
+    out: List[List[Tuple[str, Optional[str]]]] = [[]]
     for value, st in _styled(code, lang, t):
         for k, part in enumerate(value.split("\n")):
             if k:
-                out.append("")
+                out.append([])
             if part:
-                esc = html.escape(part)
-                out[-1] += f'<span style="{st}">{esc}</span>' if st else esc
-    out = out[: len(lines)]
-    while len(out) < len(lines):
-        out.append("")
-    return out
+                out[-1].append((part, st))
+    out = out[:n]
+    while len(out) < n:
+        out.append([])
+    return tuple(tuple(line) for line in out)
+
+
+def highlight_lines(code: str, lang: str, theme_name: str) -> Tuple[str, ...]:
+    """Each line of ``code`` as escaped HTML with the theme's syntax colours (``<span style="color:…">``
+    runs); plain escaped lines when Pygments has no lexer."""
+    return tuple(
+        "".join(f'<span style="{st}">{html.escape(text)}</span>' if st else html.escape(text) for text, st in line)
+        for line in styled_lines(code, lang, theme_name)
+    )
+
+
+def highlight_cache_size() -> Tuple[int, int]:
+    """(entries, source characters) the highlight cache holds."""
+    return len(_hl_cache), _hl_chars
 
 
 def token_runs(line: str, lang: str, theme_name: str) -> List[Tuple[int, int, str]]:
@@ -443,6 +452,15 @@ def highlight_html(code: str, lang: str, theme_name: str) -> str:
 # ---------------------------------------------------------------- rendering
 
 
+def parse_tokens(src: str, streaming: bool = False) -> list:
+    """markdown-it's block tokens for ``src``; while streaming, an unterminated code fence is closed
+    so the block reads as code."""
+    text = src
+    if streaming and len(re.findall(r"^```", text, flags=re.M)) % 2 == 1:
+        text += "\n```"
+    return parser().parse(text)
+
+
 def render_html(
     src: str,
     streaming: bool = False,
@@ -452,7 +470,9 @@ def render_html(
     m: Optional[Metrics] = None,
 ) -> str:
     """Markdown → HTML body for ``QTextDocument.setHtml``/``QLabel`` rich text. ``width`` is the room
-    the document will be laid out in: tables size their columns to it (0: no table sizing)."""
+    the document will be laid out in: tables size their columns to it (0: no table sizing). The
+    conversation's documents are built from the tokens instead (canvas/build.py); this is for the
+    rich-text labels elsewhere, and the reference the builder is tested against."""
     if not src:
         return ""
     text = src
@@ -473,6 +493,14 @@ def render_html(
     out = md.renderer.render(tokens, md.options, {})
     out = _post_process(out, t, base_dir, mm, width, streaming)
     return out
+
+
+def inline_tokens(text: str) -> list:
+    """The inline tokens of one line of Markdown (a list item's words, a table cell's)."""
+    if MarkdownIt is None:
+        return []
+    parsed = parser().parseInline(text, {})
+    return list(parsed[0].children or []) if parsed else []
 
 
 def render_inline(text: str, m: Metrics, colour: bool = True) -> str:
@@ -696,6 +724,34 @@ _ROW_RE = re.compile(r"<tr>(.*?)</tr>", re.S)
 _UNIT_RE_TEXT = re.compile(
     "[\\u2e80-\\u9fff\\uac00-\\ud7af\\uf900-\\ufaff\\uff00-\\uffef]|[^\\s\\u2e80-\\u9fff\\uac00-\\ud7af\\uf900-\\ufaff\\uff00-\\uffef]+"
 )
+
+
+_ADVANCES: Dict[int, Dict[str, float]] = {}  # per font metrics (by identity: they are kept per size), per text
+
+
+def advance(fm: QFontMetricsF, text: str) -> float:
+    """``fm.horizontalAdvance(text)`` remembered per font and text: the words and characters of a
+    table are measured over and over (every cell, every row that arrives)."""
+    table = _ADVANCES.get(id(fm))
+    if table is None:
+        table = _ADVANCES[id(fm)] = {}
+    w = table.get(text)
+    if w is None:
+        if len(table) > 20000:
+            table.clear()
+        w = table[text] = fm.horizontalAdvance(text)
+    return w
+
+
+def text_widths_plain(text: str, fm: QFontMetricsF, hard: bool = True) -> Tuple[float, float, float]:
+    """(width on one line, widest unbreakable unit, widest character) of plain words; the widest
+    character only when asked (a table that fits its room never needs it)."""
+    if not text.strip():
+        return 0.0, 0.0, 0.0
+    units = _UNIT_RE_TEXT.findall(text)
+    widest = max((advance(fm, u) for u in units), default=0.0)
+    hard_w = max((advance(fm, ch) for ch in set(text) if not ch.isspace()), default=0.0) if hard else 0.0
+    return (advance(fm, text) if len(units) > 1 else widest), widest, hard_w
 
 
 def _text_widths(fragment: str, fm: QFontMetricsF) -> Tuple[float, float, float]:

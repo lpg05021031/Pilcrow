@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, ClassVar, Dict, Iterable, List, Optional, Sequence, Union
 
-from .partial_json import parse_partial_json
+from .partial_json import PartialScanner, parse_partial_json
 
 log = logging.getLogger(__name__)
 
@@ -116,6 +116,9 @@ class ToolItem:
     rev: int = 0
     ts: Optional[float] = None
     _parent: Optional[str] = None
+    #: while the input streams: where its JSON stands, and whether ``input`` lags ``input_json``
+    _scan: Optional[PartialScanner] = field(default=None, repr=False)
+    input_stale: bool = False
 
 
 @dataclass(eq=False)
@@ -259,6 +262,9 @@ class TranscriptModel:
         # items rather than the whole conversation (a history of thousands of turns is replayed on open,
         # and a scan of everything per turn made that quadratic). A dict keeps insertion order like a JS Set.
         self._unsettled: Dict[Item, None] = {}
+        # Tools whose input JSON grew since ``refresh_inputs`` last parsed it: the parse happens once
+        # per flush of the view, not once per delta (a big file being written is thousands of deltas).
+        self._stale_inputs: Dict[str, ToolItem] = {}
 
     def _settle_retry(self, failed: bool = False) -> None:
         """A response arrived after retries: turn the warning into a quiet note."""
@@ -331,6 +337,22 @@ class TranscriptModel:
                 self._add(NoticeItem(id=_nid("n"), level="info", text="Conversation cleared", tag="divider"), None)
         except Exception:  # noqa: BLE001 - one bad message must not take the transcript down
             log.exception("transcript push failed: %r", m)
+
+    def refresh_inputs(self) -> bool:
+        """Parse the inputs of the tools whose JSON grew since the last call (the view's flush calls
+        this, so a stream of deltas costs one parse per frame); returns whether any input changed."""
+        if not self._stale_inputs:
+            return False
+        changed = False
+        for t in list(self._stale_inputs.values()):
+            t.input_stale = False
+            sc = t._scan
+            parsed = sc.parse(t.input_json) if sc is not None else parse_partial_json(t.input_json)
+            if parsed and isinstance(parsed, dict):
+                t.input = parsed
+                changed = True
+        self._stale_inputs.clear()
+        return changed
 
     def _seen_before(self, m: RawMsg) -> bool:
         uuid = m.get("uuid")
@@ -419,10 +441,16 @@ class TranscriptModel:
             elif dt == "thinking_delta" and item.kind == "thinking":
                 item.text += d.get("thinking") or ""
             elif dt == "input_json_delta" and item.kind == "tool":
-                item.input_json += d.get("partial_json") or ""
-                parsed = parse_partial_json(item.input_json)
-                if parsed and isinstance(parsed, dict):
-                    item.input = parsed
+                piece = d.get("partial_json") or ""
+                item.input_json += piece
+                sc = item._scan
+                if sc is None:
+                    sc = item._scan = PartialScanner()
+                    sc.feed(item.input_json)
+                else:
+                    sc.feed(piece)
+                item.input_stale = True
+                self._stale_inputs[item.id] = item
             else:
                 return
             self._bump(item)
@@ -436,8 +464,11 @@ class TranscriptModel:
                     parsed = json.loads(item.input_json or "{}")
                     if isinstance(parsed, dict):
                         item.input = parsed
+                    item.input_stale = False
+                    self._stale_inputs.pop(item.id, None)
                 except ValueError:
-                    pass  # keep partial
+                    self.refresh_inputs()  # keep what can be read of it
+                item._scan = None
                 if item.status == "streaming":
                     item.status = "running"
             elif item.kind == "text":

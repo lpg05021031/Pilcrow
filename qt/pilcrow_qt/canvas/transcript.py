@@ -84,8 +84,12 @@ class TranscriptScene(Scene):
         self.units: List[Unit] = []
         self.settled_units: List[Unit] = []
         self._settled_keys: List[str] = []  # unit_group_key of each settled unit, kept with it
+        self._settled_at: Dict[str, int] = {}  # unit key → index among the units, for the settled ones
         self.settled_count = 0
         self._settled_last: Optional[Item] = None
+        # how many settled units the root's children were synced against last time: a unit that
+        # settled since (it was the live turn, or the slice boundary cut it) gets one more sync
+        self._synced_settled = 0
         self.working = WorkingBlock(sid)
         self.skeleton = SkeletonBlock()
         self.empty: Optional[EmptyIsland] = None
@@ -128,16 +132,21 @@ class TranscriptScene(Scene):
         # ready the moment the last one is), but the view paints the skeleton alone until then and
         # opens at the end in one step: no frames of the beginning on the way there.
         self.loading = loading
-        # the settled prefix
+        # The settled prefix: the units before the last user message, their keys and their indices,
+        # kept across flushes and only ever extended, so a flush costs the tail of the conversation
+        # (the turn under way) and not its history.
         if self.settled_count > len(items) or (
             self.settled_count and items[self.settled_count - 1] is not self._settled_last
         ):
-            self.settled_units, self._settled_keys, self.settled_count, self._settled_last = [], [], 0, None
+            self.settled_units, self._settled_keys, self._settled_at = [], [], {}
+            self.settled_count, self._settled_last, self._synced_settled = 0, None, 0
         b = _boundary(items)
         if b > self.settled_count:
-            fresh_units = group_turns(items[self.settled_count : b], False)
-            self.settled_units.extend(fresh_units)
-            self._settled_keys.extend(unit_group_key(u) for u in fresh_units)
+            for u in group_turns(items[self.settled_count : b], False):
+                k = unit_group_key(u)
+                self._settled_at[k] = len(self.settled_units)
+                self.settled_units.append(u)
+                self._settled_keys.append(k)
             self.settled_count = b
             self._settled_last = items[b - 1] if b else None
         tail = group_turns(items[b:], running) if b < len(items) else []
@@ -148,9 +157,13 @@ class TranscriptScene(Scene):
         keys: List[str] = ["skeleton"]
         if loaded and not items and self.empty is not None and self.empty.usable:
             keys.append("empty")
-        unit_keys = self._settled_keys + [unit_group_key(u) for u in tail]
-        unit_at = {k: i for i, k in enumerate(unit_keys)}
-        keys.extend(unit_keys)
+        head_n = len(keys)
+        n_settled = len(self.settled_units)
+        tail_keys = [unit_group_key(u) for u in tail]
+        tail_at = {k: n_settled + i for i, k in enumerate(tail_keys)}
+        settled_at = self._settled_at
+        keys += self._settled_keys
+        keys += tail_keys
         orphan_perms = [
             p
             for p in (rt.pending if rt else [])
@@ -160,8 +173,13 @@ class TranscriptScene(Scene):
         orphan_at = {k: i for i, k in enumerate(orphan_keys)}
         keys.extend(orphan_keys)
         keys.append("working")
-        n_settled = len(self.settled_units)
-        resync_from = max(0, n_settled - 1) if not self.shapes_stale else 0
+        # the units settled before the last sync are by contract what their children show; those that
+        # settled since (the turn that was live, or one a loading slice had cut) are synced once more
+        resync_from = min(self._synced_settled, n_settled) if not self.shapes_stale else 0
+
+        def unit_at(k: str) -> int:
+            i = settled_at.get(k)
+            return tail_at[k] if i is None else i
 
         def make(i: int) -> Block:
             k = keys[i]
@@ -176,22 +194,23 @@ class TranscriptScene(Scene):
                 o = OrphanIsland(p, ctx)
                 self.orphans[k] = o
                 return o
-            u = units[unit_at[k]]
+            u = units[unit_at(k)]
             return unit_group(u, ctx, self.sid, self.fold_state)
 
         def update(blk: Block, i: int) -> List[Block]:
             k = keys[i]
             if k in ("skeleton", "empty", "working") or k.startswith("orphan:"):
                 return []
-            ui = unit_at[k]
+            ui = unit_at(k)
             if ui < resync_from:
                 return []
             return sync_unit_group(blk, units[ui], ctx)  # type: ignore[arg-type]
 
         from .blocks.fold import reconcile
 
-        changed.extend(reconcile(self.root, keys, make, update, settled=1 + resync_from))
+        changed.extend(reconcile(self.root, keys, make, update, settled=head_n + resync_from))
         self.shapes_stale = False
+        self._synced_settled = n_settled
         # the skeleton and the working line
         if self.skeleton.shown != loading:
             self.skeleton.shown = loading
@@ -347,7 +366,7 @@ class Transcript(QWidget):
         bind(theme.theme.changed, self, lambda _t: self.view.on_theme())
         bind(theme.theme.scale_changed, self, lambda _k: self.view.on_theme())
         self._sync()
-        QTimer.singleShot(0, self._initial_place)
+        QTimer.singleShot(0, self, self._initial_place)
 
     # ---- public (the API session_view.py and the find bar use)
     def viewport(self) -> QWidget:
@@ -514,7 +533,7 @@ class Transcript(QWidget):
         finally:
             v.end()
         if r is not None and r.loaded and not self._placed:
-            QTimer.singleShot(0, self._initial_place)
+            QTimer.singleShot(0, self, self._initial_place)
 
     def _initial_place(self) -> None:
         r = store.rt.get(self.sid)

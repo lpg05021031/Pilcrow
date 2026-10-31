@@ -38,7 +38,8 @@ from PySide6.QtGui import (
 )
 
 from .. import markdown, theme
-from .paint import Measurer, link_paths
+from . import build
+from .paint import Measurer
 
 # A code well built from blocks: the head carries 1, each line 2 (QTextDocument has no other place
 # for a mark the painter can read back).
@@ -78,7 +79,15 @@ class Grower:
         self.mm = markdown.metrics(compact or quiet)
         self.t = theme.tokens()
         self.done_ = False  # finished: the block keeps this document
+        self._writer: Optional[build.Builder] = None
         self.doc: QTextDocument = self.build(src)
+
+    @property
+    def writer(self) -> build.Builder:
+        """The builder that writes inline words (an item's, a cell's) into this grower's document."""
+        if self._writer is None or self._writer.doc is not self.doc:
+            self._writer = build.Builder(self.doc, self.mm, self.t, self.m, self.width, self.cwd)
+        return self._writer
 
     @staticmethod
     def accepts(src: str) -> bool:
@@ -507,13 +516,15 @@ class ListGrower(Grower):
         if mt is None:
             return False
         block = self.doc.lastBlock()
-        bf, bcf = block.blockFormat(), block.charFormat()
         cur = QTextCursor(block)
         cur.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
-        cur.insertHtml(link_paths(markdown.render_inline(mt.group("body"), self.mm)))
-        # an HTML fragment brings a block format of its own: the item keeps the list's
-        cur.setBlockFormat(bf)
-        cur.setBlockCharFormat(bcf)
+        cur.removeSelectedText()
+        build.insert_inline(
+            cur,
+            markdown.inline_tokens(mt.group("body")),
+            build.Inline(self.m.font(self.mm.base), self.t.text),
+            self.writer,
+        )
         self.items.append(self.tail)
         self.tail = None
         return True
@@ -544,12 +555,12 @@ class TableGrower(Grower):
         self.ncol = len(markdown.table_cells(done[0]))
         self.aligns = [self._align(c) for c in markdown.table_cells(done[1])][: self.ncol]
         self.aligns += ["left"] * (self.ncol - len(self.aligns))
-        rows: List[List[markdown.Cell]] = []
+        rows: List[List[build.Cell]] = []
         for i, line in enumerate(done):
             if i == 1:
                 continue
             rows.append(self._cells(line, head=i == 0))
-        self.widths, self.mins, self.maxs, self.hards = markdown.table_plan(rows, self.mm, self.width)
+        self.widths, self.mins, self.maxs, self.hards = build.plan_columns(rows, self.mm, self.width)
         self.squeezed = markdown.squeezed(self.widths, self.mins)
         return self.render("\n".join(done))
 
@@ -562,18 +573,11 @@ class TableGrower(Grower):
             return "right"
         return "left"
 
-    def _cells(self, line: str, head: bool = False) -> List[markdown.Cell]:
+    def _cells(self, line: str, head: bool = False) -> List[build.Cell]:
         raw = markdown.table_cells(line)[: self.ncol]
         raw += [""] * (self.ncol - len(raw))
         tag = "th" if head else "td"
-        sq = getattr(self, "squeezed", ())
-        cells: List[markdown.Cell] = []
-        for c, text in enumerate(raw):
-            inner = link_paths(markdown.render_inline(text, self.mm, colour=False))
-            if c < len(sq) and sq[c]:
-                inner = inner.replace(markdown.NO_BREAK, "")  # a squeezed column lets its code spans break
-            cells.append((tag, self.aligns[c], inner))
-        return cells
+        return [(tag, self.aligns[c], markdown.inline_tokens(text)) for c, text in enumerate(raw)]
 
     def _tables(self) -> List[QTextTable]:
         return [f for f in self.doc.rootFrame().childFrames() if isinstance(f, QTextTable)]
@@ -598,8 +602,8 @@ class TableGrower(Grower):
         if not tables:
             return False
         mins, maxs, hards = list(self.mins), list(self.maxs), list(self.hards)
-        for c, (_tag, _align, inner) in enumerate(cells):
-            mx, mn, hd = markdown.cell_widths(inner, self.mm)
+        for c, (_tag, _align, kids) in enumerate(cells):
+            mx, mn, hd = build.inline_widths(kids, self.mm)
             maxs[c] = max(maxs[c], mx + markdown.CELL_PAD)
             mins[c] = max(mins[c], mn + markdown.CELL_PAD)
             hards[c] = max(hards[c], hd + markdown.CELL_PAD)
@@ -622,17 +626,20 @@ class TableGrower(Grower):
             prev = last
             last.appendRows(1)
             r = last.rows() - 1
-        for c, (_tag, _align, inner) in enumerate(cells):
+        font = self.m.font(self.mm.table)
+        sq = self.squeezed
+        for c, (_tag, _align, kids) in enumerate(cells):
             cell = last.cellAt(r, c)
-            # the cell above: in this table, or the last row of the table before
+            # the cell above: in this table, or the last row of the table before (its format is
+            # the cell's own: paddings, font; the block's alignment comes with its format)
             model = last.cellAt(r - 1, c) if r > 0 else prev.cellAt(prev.rows() - 1, c)
             cell.setFormat(model.format())
             cur = cell.firstCursorPosition()
-            if inner:
-                cur.insertHtml(f'<span style="font-size:{self.mm.table}px">{inner}</span>')
-            # the HTML fragment brings a block format of its own: the cell takes the one above's
             cur.setBlockFormat(model.firstCursorPosition().blockFormat())
-            cur.setBlockCharFormat(model.firstCursorPosition().blockCharFormat())
+            if kids:
+                build.insert_inline(
+                    cur, kids, build.Inline(font, None, squeezed=bool(sq[c]) if c < len(sq) else False), self.writer
+                )
         return True
 
     def _set_widths(self, table: QTextTable) -> None:

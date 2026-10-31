@@ -38,7 +38,8 @@ qt/pilcrow_qt/canvas/
   anchor.py       anchor choice and correction, follow state, the scroll easing
   scene.py        Block, Group, Scene, incremental reconciliation, warm/cold, prefetch order
   paint.py        PaintState, the pixmap cache, decoration painters (ported from items.py), the
-                  fit pass over a laid-out document (images and nested wells to the column)
+                  fit pass over a laid-out document (images to the column)
+  build.py        Markdown → QTextDocument from the token stream with a cursor (no HTML round trip)
   pixels.py       rules and bordered rectangles on the device pixel grid (hline, vline, snap)
   grow.py         the growers: a fence, a list, a table, a paragraph being written grow in place
   canvas.py       CanvasView(QAbstractScrollArea): events, hit testing, hover, focus, selection,
@@ -293,12 +294,22 @@ geometry by the functions ported from `items.py` (`_pills`, `table_rect`, `_tabl
 `_block_height`). The padding hacks for QTextBrowser (U+202F pads, negative viewport margins) go:
 the pill and the first-line leading are drawn by the painter at the right place.
 
-What QTextDocument cannot lay out from HTML, `markdown.py` lays out before the document is set: a
-table's columns from the widest word and the widest line of every cell (`column_widths`, a
-browser's auto layout), a code block as one paragraph per line with a hanging indent so a long line
-wraps past its own indentation, a task list's boxes as image resources in the marker's place, list
-markers in the quiet colour with the words wrapped in theirs. A prose block keeps the rectangle of
-each code well (`ProseBlock.wells`) and paints a Copy at its corner while the pointer is on it.
+A document is written from markdown-it's token stream with a cursor (`canvas/build.py`), not through
+an HTML string and Qt's importer: paragraphs, headings, quotes, lists with quiet markers and task
+boxes, code wells, tables, pills, links, images and rules go in as blocks and character formats
+directly, and the growers write an item's or a cell's words through the same `insert_inline`. The
+margins between blocks follow the rule Qt's importer applied to the HTML (a block's top margin is
+the largest of its element's and those of every enclosing element it is the first child of; the
+bottom likewise for last children), decided in one pass over the tokens. What no document can lay
+out on its own, the builder decides first: a table's columns from the widest word and the widest
+line of every cell (`column_widths`, a browser's auto layout; the floor a column cannot go under
+only when the table does not fit even so), a code block as one paragraph per line with a hanging
+indent so a long line wraps past its own indentation, a task list's boxes as image resources in the
+marker's place. The HTML renderer (`markdown.render_html`, `Measurer.markdown_doc_html`) remains the
+reference the builder is tested against over a corpus of every construct (`tests/test_build.py`)
+and what stands in should the builder fail. A prose block keeps the rectangle and the code of each
+well (the builder leaves the code on the document) and paints a Copy at its corner while the pointer
+is on it.
 
 What the HTML cannot size before the layout, `fit_doc` fixes after it, once the document knows
 where its blocks are: an image wider than the room its line has (the column less a quote's or a
@@ -352,6 +363,12 @@ divider, the rails beside a thought, a tool and a fold; the composer's, the pane
 rules. A rotated or sheared painter is left alone.
 
 ## 7. Reconciliation
+
+A flush costs the tail of the conversation, never its history: the settled units (those before the
+last user message), their keys and their indices are kept across flushes and only extended, and
+`reconcile` compares children from the settled index on. A tool input that streams keeps the scan
+of its JSON as state on the item and is parsed once per flush (`TranscriptModel.refresh_inputs`),
+not per delta. REVIEW.md has the numbers.
 
 ### 7.1 Units, incrementally
 

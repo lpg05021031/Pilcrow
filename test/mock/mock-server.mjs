@@ -457,6 +457,7 @@ const listChanged = () => {
   listTimer = setTimeout(() => broadcast('sessions.changed', {}), 50);
 };
 const config = { theme: 'dark', fontSize: 14.5, sendKey: 'enter', claudeBinary: 'auto', defaultModel: '', defaultMode: 'default', defaultEffort: '', worktreeRoot: '', idleTimeoutMin: 30, notifications: false, promptSuggestions: false, showThinking: false, recentProjects: [PROJ, OTHER], ui: { sidebar: true, panel: false, view: 'normal' } };
+const configDefaults = JSON.parse(JSON.stringify(config)); // what mock.reset puts back
 const S = (id) => {
   const s = sessions.get(id);
   if (!s) throw new Error('Unknown session: ' + id);
@@ -619,6 +620,9 @@ const methods = {
   'mock.reset': () => {
     seed();
     overrides.clear();
+    // the config too: a saved ui (a dragged sidebar width) must not leak into the next test's window
+    for (const k of Object.keys(config)) delete config[k];
+    Object.assign(config, JSON.parse(JSON.stringify(configDefaults)));
     listChanged();
     return true;
   },

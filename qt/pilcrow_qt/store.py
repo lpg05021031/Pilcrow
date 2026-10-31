@@ -204,6 +204,7 @@ class Store(QObject):
             m = self.models.get(sid)
             if m is None:
                 continue
+            m.refresh_inputs()  # the tool inputs that streamed since the last flush, parsed once
             r = self.rt.setdefault(sid, Runtime(loaded=True))
             r.rev = m.rev
             self.rt_changed.emit(sid)
@@ -623,11 +624,13 @@ class Store(QObject):
                 m.push_all(msgs[i : i + LOAD_SLICE])
                 nxt = i + LOAD_SLICE
                 if nxt < len(msgs):
+                    m.refresh_inputs()
                     r.rev = m.rev
                     self.rt_changed.emit(sid)
                     QTimer.singleShot(0, lambda: slice_(nxt))
                     return
                 m.push_all(inflight)
+                m.refresh_inputs()
                 self._opening.discard(sid)
                 r.loaded, r.loading, r.rev = True, False, m.rev
                 self.rt_changed.emit(sid)

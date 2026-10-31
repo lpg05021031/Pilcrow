@@ -25,6 +25,7 @@ Changes / Files / Terminal / Preview / Tasks / Session 面板。
 | `scripts/make-installers.py`、`scripts/installer/*.tmpl` | 把工作樹打包成三個安裝檔；模板是安裝檔的固定部分 |
 | `scripts/release.mjs` | 改版流程：版本號、檢查、build、打包、驗證、commit、tag |
 | `pilcrow-install.sh`、`pilcrow-windows.ps1`、`pilcrow-app.sh` | 發佈產物（見下方「修改介面」與「發佈」） |
+| `DISPATCH.md` | 設計稿：跨 repo 派工（一份 brief、一組 repo、每個 repo 一個 worktree 裡的 session；先 plan、先跑 canary、一次 review、一次收尾） |
 | `CHANGELOG.md` | 版本紀錄 |
 
 ---

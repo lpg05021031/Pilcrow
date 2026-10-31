@@ -65,6 +65,9 @@ class Client:
         theme.apply(True)
         # PILCROW_MOTION=1 runs the suite with animations on
         store.reduced_motion = os.environ.get("PILCROW_MOTION") != "1"
+        # The tests measure the window against the web's CSS, where the title bar is the platform's and
+        # outside the client area; Linux's own bar (custom_titlebar) has a test of its own that asks for it.
+        os.environ.setdefault("PILCROW_TITLEBAR", "native")
         if not getattr(store, "_inited", False):
             store.init()
             store._inited = True  # type: ignore[attr-defined]
@@ -143,11 +146,16 @@ class Client:
 
     def close(self) -> None:
         """Close the window and the socket, and put the store back to its blank state for the next test."""
+        st = self.store
+        st._ui_save_timer.stop()  # a layout change still waiting to be saved would land in the next test's mock
+        try:
+            self.call("mock.reset", timeout=3)  # the mock's saved config goes back to its defaults too
+        except Exception:  # noqa: BLE001
+            pass
         self.rpc.close()
         self.win.close()
         self.win.deleteLater()
         self.sleep(150)  # the socket's close round-trip; a new client must not inherit a closing one
-        st = self.store
         st.active_id = None
         st.rt.clear()
         st.models.clear()

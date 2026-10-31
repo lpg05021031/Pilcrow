@@ -52,6 +52,14 @@
   pixmap 快取、grower、會停的時鐘）站得住；要修的是三個會隨規模長大的地方——工具輸入串流時每個 delta 都從頭重解
   partial JSON（114 KB 的 Write 要花主執行緒 9.7 s，二次方）、每次 flush 都做整段對話長度的清單／字典重建
   （6000 回合時每個 token 2.8 ms）、以及文件經 HTML 往返建構（富文字區塊 3.2 ms，直接用 QTextCursor 建約可省一半）。
+  三項都修了：工具輸入串流時的 partial JSON 掃描改成帶狀態、逐段推進，只在畫面 flush 時解析一次
+  （114 KB 的 Write 整段串流從主執行緒 9.7 s 降到 0.16 s，單個 delta 幾微秒）；每次 flush 只碰尾端，已定的前綴
+  連同鍵與索引跨 flush 保留（6000 回合時 scene.sync 從 3.46 ms 降到 0.25 ms，一個 token 2.83 → 0.62 ms）；
+  對話區的文件改由 markdown-it 的 token 直接用 QTextCursor 建（`canvas/build.py`），不再經 HTML 字串、
+  regex 後處理與 Qt 的 HTML 解析器，四十種結構與原本的渲染逐像素相同（`tests/test_build.py`），並順手修了
+  三個舊錯（行內程式碼裡的路徑又能點了、縮排程式碼區塊是井、清單裡的程式碼不再變暗）；公平量測（兩邊都排版完）
+  快 13–30%，不是審查估的兩倍——剩下的大半是 Qt 的排版本身。另外量了順暢度（`tests/stress/s_smooth.py`）：
+  1500 回合甩動 61 幀中位數 16.8 ms、最差 19.6、無遲到幀；fold 展開／收起每幀 16 ms、錨點不動。
 
 - **2.9.8**：Linux 自繪標題列的標題對齊對話區：從對話卡片的文字欄開始（與 session 標題同一條線），側欄收起時移到最左、
   拖寬側欄時跟著走。

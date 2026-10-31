@@ -329,7 +329,7 @@ def test_the_highlight_cache_is_bounded_by_source_size_not_count(app, monkeypatc
     entries, chars = markdown.highlight_cache_size()
     assert chars <= 200_000 and entries < 30 and entries >= 5
     # a hit is the same object; the newest stays, the oldest went
-    assert markdown.highlight_lines(big + "\n29", "", t.name) is markdown.highlight_lines(big + "\n29", "", t.name)
+    assert markdown.styled_lines(big + "\n29", "", t.name) is markdown.styled_lines(big + "\n29", "", t.name)
     assert (big + "\n0", "", t.name) not in markdown._hl_cache
     # a source over a quarter of the budget is highlighted but not kept
     n = markdown.highlight_cache_size()[0]
