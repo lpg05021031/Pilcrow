@@ -9,13 +9,24 @@ hairline round them; a 9px drag handle straddles each seam and takes 1px of the 
 
 from __future__ import annotations
 
+import os
+import sys
 from collections import OrderedDict
 from typing import Optional, Tuple
 
 import shiboken6
-from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QKeySequence, QPainter, QPainterPath, QPen, QRegion, QShortcut
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, QRect, QRectF, QSettings, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QGuiApplication, QKeySequence, QPainter, QPainterPath, QPen, QRegion, QShortcut
+from PySide6.QtWidgets import (
+    QGraphicsOpacityEffect,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QSizePolicy,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from .. import icons, theme
 from ..canvas.clock import Tween
@@ -420,7 +431,6 @@ class MainWindow(QMainWindow):
 
 def fit_size(want_w: int = 1480, want_h: int = 940) -> Tuple[int, int]:
     """The default window size, clamped to the primary screen's available area with a margin."""
-    from PySide6.QtGui import QGuiApplication
 
     screen = QGuiApplication.primaryScreen()
     if screen is None:
@@ -431,7 +441,6 @@ def fit_size(want_w: int = 1480, want_h: int = 940) -> Tuple[int, int]:
 
 def _settings():
     """QSettings when the application has a name (the real app); tests run without persistence."""
-    from PySide6.QtCore import QCoreApplication, QSettings
 
     if not QCoreApplication.organizationName():
         return None
@@ -460,14 +469,11 @@ def save_geometry(win: QMainWindow) -> None:
 def apply_windows_frame(win: QMainWindow) -> None:
     """Windows: the native title bar in the theme's colours (dark mode, caption, border, text) and
     rounded corners on Windows 11 — through DWM, like the WebView2 shell does. A no-op elsewhere."""
-    import sys
 
     if sys.platform != "win32":
         return
     try:
-        import ctypes
-
-        from PySide6.QtGui import QColor
+        import ctypes  # Windows only
 
         hwnd = int(win.winId())
         dwm = ctypes.windll.dwmapi
@@ -492,8 +498,6 @@ def apply_windows_frame(win: QMainWindow) -> None:
 
 
 def custom_titlebar() -> bool:
-    import os
-    import sys
 
     pref = os.environ.get("PILCROW_TITLEBAR", "").lower()
     if pref in ("custom", "native"):
@@ -892,7 +896,6 @@ class Boot(QWidget):
         if store.reduced_motion:
             self.hide()
             return
-        from PySide6.QtWidgets import QGraphicsOpacityEffect
 
         eff = QGraphicsOpacityEffect(self)
         self.setGraphicsEffect(eff)

@@ -4,10 +4,12 @@ labels that elide. Everything paints from the theme tokens and follows a theme c
 from __future__ import annotations
 
 import math
+import time
 from typing import Dict, List, Optional
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QFontMetricsF, QPainter, QPalette
+from PySide6.QtCore import Qt as _Qt
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QFontMetricsF, QPainter, QPalette, QTextLayout, QTextOption
 from PySide6.QtWidgets import QAbstractButton, QFrame, QHBoxLayout, QLabel, QSizePolicy, QWidget
 
 from ... import theme
@@ -296,9 +298,6 @@ class Backdrop:
         self.ms = 0.0
         if host is None or _BLUR_OK is False or host.width() < 2 or host.height() < 2:
             return
-        import time
-
-        from PySide6.QtCore import Qt as _Qt
 
         t0 = time.perf_counter()
         try:
@@ -450,7 +449,6 @@ class Text(QWidget):
         if known is not None:
             self._lines, self._laid_w = known, width
             return known
-        from PySide6.QtGui import QTextLayout, QTextOption
 
         lay = QTextLayout(self._text, self.qfont())
         opt = QTextOption()

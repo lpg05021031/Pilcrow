@@ -16,8 +16,9 @@ from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 
 from ... import theme
 from ...lib.fmt import duration, plural, rel_path, truncate
+from ...lib.fmt import tokens as fmt_tokens
 from ...lib.tools_meta import HELPER_RING, HELPER_TONE, helper_text_tone, helper_word, str_
-from ...lib.transcript_model import ToolItem
+from ...lib.transcript_model import ToolItem, TranscriptModel
 from ...lib.workflow import parse_workflow_meta, workflow_counts
 from ...store import store
 from ...widgets.transcript.bodies.code import ansi_html, compute_hunks, hunks_from_patch
@@ -799,7 +800,6 @@ def agent_top(item: ToolItem, ctx: ToolCtx, block: ToolBodyBlock) -> nd.Node:
         uses = usage.get("tool_uses", usage.get("toolUses", 0)) or 0
         total = usage.get("total_tokens", usage.get("totalTokens", 0)) or 0
         ms = usage.get("duration_ms")
-        from ...lib.fmt import tokens as fmt_tokens
 
         meta.add(
             nd.faint(
@@ -828,7 +828,6 @@ def agent_top(item: ToolItem, ctx: ToolCtx, block: ToolBodyBlock) -> nd.Node:
 
         def load(_t: Target, view: Any) -> None:
             def ok(msgs: Any) -> None:
-                from ...lib.transcript_model import TranscriptModel
 
                 mdl = TranscriptModel()
                 mdl.push_all(msgs or [])

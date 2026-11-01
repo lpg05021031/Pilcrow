@@ -223,8 +223,7 @@ the budget as *k* screens at the current ratio.
 - `item.text += delta` and `item.input_json += delta` copy the string each token: a 50 KB reply is
   ~25 ms of copying over its whole life. Fine.
 - `TranscriptModel._seen` (message uuids) grows without bound: ~100 bytes a message. Fine.
-- `Scene.dirty_from` and `_commit` call `Block.y()` (O(depth · log n)) per dirty block: dirty blocks
-  are few. Fine.
+- `_commit` calls `Block.y()` (O(depth · log n)) per dirty block: dirty blocks are few. Fine.
 - `_selection_for` is evaluated per visible block per paint while a selection exists, three `y()`
   each: 19 blocks, microseconds. Fine.
 

@@ -18,6 +18,7 @@ from PySide6.QtWidgets import QCheckBox, QFrame, QHBoxLayout, QLabel, QPushButto
 from ... import icons, theme
 from ...canvas.clock import clock
 from ...canvas.pixels import hline, pen_width, snap, vline
+from ...lib.fmt import tokens as fmt_tokens
 from ...store import store
 from .button import Btn
 from .signals import bind
@@ -603,7 +604,6 @@ class ContextRing(QWidget):
 
 
 def context_label(used: int, total: int) -> str:
-    from ...lib.fmt import tokens as fmt_tokens
 
     return f"{fmt_tokens(used)} of {fmt_tokens(total)}"
 

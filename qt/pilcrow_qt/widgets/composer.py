@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import base64
 import math
+import os
 import re
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -32,6 +33,7 @@ from PySide6.QtCore import (
     QEvent,
     QIODevice,
     QMimeData,
+    QMimeDatabase,
     QPoint,
     QPointF,
     QRect,
@@ -1977,9 +1979,6 @@ class Composer(QWidget):
             self.add_files(paths)
 
     def add_files(self, paths: List[str]) -> None:
-        import os
-
-        from PySide6.QtCore import QMimeDatabase
 
         db = QMimeDatabase()
         for path in paths:

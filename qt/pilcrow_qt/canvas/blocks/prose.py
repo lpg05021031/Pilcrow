@@ -16,7 +16,7 @@ import re
 import time
 from typing import Any, List, Optional, Tuple
 
-from PySide6.QtCore import QRect, QRectF, Qt, QTimer
+from PySide6.QtCore import QPointF, QRect, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter, QTextCursor, QTextDocument, QTextTable
 
 from ... import markdown, theme
@@ -310,7 +310,6 @@ class ProseBlock(Block):
 
 
 def _pt(x: int, y: int):
-    from PySide6.QtCore import QPointF
 
     return QPointF(x, y)
 

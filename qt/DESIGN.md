@@ -44,7 +44,9 @@ qt/pilcrow_qt/canvas/
   grow.py         the growers: a fence, a list, a table, a paragraph being written grow in place
   nodes.py        the mini-layout (columns, rows, text, icons, boxes) the card bodies are built from
   view.py         CanvasView(QAbstractScrollArea): commit and anchor, prefetch, the paint loop,
-                  hit testing, hover, focus, selection, islands, pixel scrolling, the scroll easing
+                  islands, pixel scrolling, the scroll easing
+  input.py        ViewInput, the view's other half: hit testing, hover, clicks, focus, selection and
+                  copy, the context menu, links
   a11y.py         the viewport as an accessible list of its blocks; the events the view sends
   find_bar.py     Ctrl+F over the whole conversation
   blocks/
@@ -63,7 +65,7 @@ qt/pilcrow_qt/canvas/
 ```
 
 `fenwick.py`, `estimate.py`, `anchor.py`, `scene.py` import nothing from Qt. `paint.py` and the
-blocks paint with QtGui. `view.py` is the QtWidgets file; the panels' lists (the Timeline, a
+blocks paint with QtGui. `view.py` and `input.py` are the QtWidgets files; the panels' lists (the Timeline, a
 dispatch job's rows, the target picker) are scenes of their own blocks on the same view.
 
 ## 2. Data structures
@@ -85,22 +87,24 @@ class Block:
         "key",        # stable identity: item id, unit key, or "<item>:<part>"
         "rev",        # the item rev this block was last synced from
         "sig",        # visual signature: what paint depends on; equal → no repaint
+        "gen",        # moves on when the block is rebuilt with rev and sig unchanged (§6.3)
         "parent",     # the Group that holds it (None for the root)
         "index",      # position in the parent's children (kept in sync by the parent)
         "h",          # current height used for layout
+        "gap",        # the room above it inside its parent (the collapsed margins)
         "grade",      # 0 estimated · 1 fast-measured · 2 exact
         "h_width",    # the width the height was measured for
         "warm",       # documents / static text are materialised
-        "last_seen",  # frame counter of the last paint (for cooling)
         "indent",     # nesting indent in px (agent children)
-        "focusables", # tuple of target ids, in tab order
+        "scene",      # the Scene it is in (None once dropped)
     )
-    def estimate(self, ctx) -> int
-    def fast_measure(self, width, ctx) -> int
-    def measure(self, width, ctx) -> int         # exact; materialises what it needs
+    def estimate(self, width, m) -> int
+    def fast_measure(self, width, m) -> int
+    def measure(self, width, m) -> int           # exact; materialises what it needs
     def cool(self) -> None                        # drop documents, pixmaps; keep h
-    def paint(self, p, rect, st) -> None
-    def hit(self, pt) -> Optional[Target]         # pt in block coordinates
+    def paint(self, p, x, y, w, st) -> None       # top-left at (x, y), w wide, viewport coordinates
+    def hit(self, x, y) -> Optional[Target]       # block coordinates
+    def hover_rect(self, target) -> rect          # what a hover on target changes (§8.1)
     def activate(self, target, view) -> None
     def cursor_for(self, target) -> Qt.CursorShape
     def tooltip_for(self, target) -> str
@@ -108,7 +112,7 @@ class Block:
     def text_pos_at(self, pt) -> Optional[int]    # for selection; None where there is no text
     def selected_text(self, a, b) -> str          # a..b positions, or whole when a is None
     def live(self) -> bool                        # wants clock ticks
-    def tick(self, now) -> Optional[QRect]        # rect to repaint on a tick, or None
+    def tick(self, now) -> Optional[rect]         # rect to repaint on a tick, or None
 ```
 
 `sig` is a tuple the block builds from the item (status, text length, result presence, error flag,
@@ -556,8 +560,13 @@ Scene syncs when shown (O(live turn)). Switching costs one paint.
 `store._load_session` pushes the snapshot into the model in slices of 300 messages per event-loop
 turn (a zero timer chain), under the loading skeleton; the Scene is built when the model is complete
 (blocks are small: ~16,000 in a few hundred milliseconds, spread over slices as well). The first
-paint needs only the last screen's blocks exact. `orjson` parses the messages when it is installed
-(it is optional, not in requirements.txt); the standard library does otherwise.
+paint needs only the last screen's blocks exact. The snapshot arrives as one WebSocket message and is
+parsed on the GUI thread: `orjson` (in requirements.txt) when it is installed, the standard library
+otherwise. Parsing on another thread would buy nothing in CPython: both parsers hold the GIL for the
+whole parse, so the GUI thread would wait the same time for the lock. The parse is therefore the
+floor of the longest turn while opening: with the standard library, 5.6 ms for the 1.1 MB snapshot
+of 120 heavy turns and 38 ms for the 5.7 MB one of 600; the longest turns measured (bench
+`open_cold`) are 43 ms / 26 ms at 120 heavy / 200 mixed turns and 60 ms / 69 ms at 600 / 2,000.
 
 ## 9. The clock
 
@@ -721,7 +730,11 @@ popovers, toasts, the find bar, the Latest pill and the sheets' frames (`ui/bits
 (delivered to every widget through a class palette, since a stylesheet stops a window handing its
 palette down), the tints, a polish of the native fields, combos and scrollbars whose rules read the
 palette (`theme.repolish`, a few microseconds each), and `changed` for the painters — 124–146 ms on
-the 600-turn conversation with the Changes panel open, 30 ms in the small test window.
+the 600-turn conversation with the Changes panel open, 30 ms in the small test window. No
+per-widget stylesheet names a colour either: labels are tinted, badges, key caps, the segmented
+control and a sheet's fields paint their boxes (`settings_ui.paint_field`), text buttons and chips
+are `Btn`s with a look of their own (`Btn.set_look`); `test_theme` reads every `setStyleSheet` in the
+package and the names it is built from for a literal colour or an interpolated token.
 
 ## 14. Tests
 

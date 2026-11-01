@@ -8,7 +8,7 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QRect, QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QPainter, QPen
 
 from ... import theme
 from ...lib.fmt import duration
@@ -16,7 +16,11 @@ from ...lib.tools_meta import ToolMeta, file_path_of, is_file_tool, str_, tool_m
 from ...lib.transcript_model import Item, ToolItem
 from ...lib.workflow import workflow_counts
 from ...store import store
+from ...widgets.transcript.bodies.ask import AskBody
+from ...widgets.transcript.bodies.code import compute_hunks
+from ...widgets.transcript.bodies.plan import PlanBody
 from ...widgets.transcript.ctx import ToolCtx
+from ...widgets.transcript.permission import PermissionCard
 from ..paint import Measurer, PaintState, rounded
 from ..pixels import vline
 from ..scene import Block, Group, Target
@@ -59,8 +63,6 @@ def diff_stats(item: ToolItem) -> Optional[Dict[str, int]]:
         return {"add": add, "del": dele}
     i = item.input or {}
     if item.name == "Edit" and "old_string" in i and item.input_done:
-        from ...widgets.transcript.bodies.code import compute_hunks
-
         for h in compute_hunks(str(i.get("old_string") or ""), str(i.get("new_string") or "")):
             for ln in h.lines:
                 if ln.t == "+":
@@ -251,8 +253,6 @@ class ToolBlock(Group):
         struck = it.status in ("denied", "interrupted")
         ft = st.m.font(12.5 if meta.mono else theme.FS_UI, 400, meta.mono)
         if struck:
-            from PySide6.QtGui import QFont
-
             ft = QFont(ft)
             ft.setStrikeOut(True)
         meta_w = meta_width(st, self._meta_parts(st))
@@ -428,7 +428,6 @@ class PermissionIsland(IslandBlock):
         super().__init__(f"perm:{item.id}", self._make)
 
     def _make(self):
-        from ...widgets.transcript.permission import PermissionCard
 
         return PermissionCard(self.perm, self.ctx, self.item, stale=False)
 
@@ -452,8 +451,6 @@ class SpecialIsland(IslandBlock):
         self.rev = item.rev
 
     def _make(self):
-        from ...widgets.transcript.bodies.ask import AskBody
-        from ...widgets.transcript.bodies.plan import PlanBody
 
         if self.item.name == "AskUserQuestion":
             return AskBody(self.item, self.ctx, self.perm)

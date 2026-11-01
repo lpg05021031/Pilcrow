@@ -27,7 +27,7 @@ from ...lib.folds import (
 from ...lib.folds import (
     StepsGroup as StepsSpec,
 )
-from ...lib.transcript_model import Item, ToolItem
+from ...lib.transcript_model import Item, ToolItem, UserItem
 from ...lib.units import Unit, WorkUnit
 from ...store import store
 from ...widgets.transcript.ctx import ToolCtx
@@ -66,9 +66,9 @@ def make_row(item: Item, ctx: ToolCtx, in_work: bool, sid: str) -> Block:
     k = item.kind
     if k == "user":
         # a note Pilcrow wrote (a helper's news to its lead) is drawn apart from the person's messages
-        if getattr(item, "note", ""):
+        if isinstance(item, UserItem) and item.note:
             return NoteBlock(item, sid)
-        if getattr(item, "from_", ""):
+        if isinstance(item, UserItem) and item.from_:
             return FromLeadBlock(item, sid)
         return UserBlock(item, sid, ctx.cwd)
     if k == "text":

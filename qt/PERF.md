@@ -272,8 +272,10 @@ the live turn only.
 
 The history snapshot is modelled in slices (a few hundred messages per event-loop turn) behind the
 loading skeleton, so the window stays responsive during the longest load; the first paint waits
-only for the blocks of the last screen to be measured. `orjson`, when installed (it is optional),
-parses the snapshot several times faster than the standard library.
+only for the blocks of the last screen to be measured. The snapshot is one message parsed on the GUI
+thread (`orjson` from requirements.txt, else the standard library; a parsing thread would wait on
+the GIL all the same), so its parse is the floor of the longest turn: 5.6 ms per 1.1 MB with the
+standard library, 38 ms for 600 heavy turns.
 
 ### 4.11 One clock
 

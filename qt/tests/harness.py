@@ -15,6 +15,7 @@ streaming pace, touch a session).
 
 from __future__ import annotations
 
+import copy
 import os
 import socket
 import subprocess
@@ -31,6 +32,9 @@ sys.path.insert(0, str(ROOT / "qt"))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 if sys.platform == "win32":
     os.environ.setdefault("QT_QPA_FONTDIR", os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"))
+
+
+_BLANK: dict = {}  # the store's fields as store.init() left them (Client keeps them, close() restores them)
 
 
 def free_port() -> int:
@@ -62,7 +66,7 @@ def start_mock(port: int, long: int = 60) -> subprocess.Popen:
 
 class Client:
     def __init__(self, port: int) -> None:
-        from PySide6.QtCore import QCoreApplication, QEvent
+        from PySide6.QtCore import QCoreApplication, QEvent, QObject
         from PySide6.QtWidgets import QApplication
 
         from pilcrow_qt import fonts
@@ -82,6 +86,13 @@ class Client:
         if not getattr(store, "_inited", False):
             store.init()
             store._inited = True  # type: ignore[attr-defined]
+            # the store as the app starts it: every plain field (not its timers), restored by close()
+            for k, v in vars(store).items():
+                if k not in ("reduced_motion", "_inited") and not isinstance(v, QObject):
+                    try:
+                        _BLANK[k] = copy.deepcopy(v)
+                    except (TypeError, copy.Error):
+                        pass
         self.store = store
         self.rpc = rpc
         # A widget a test showed on its own (a label, a view) is a top-level window at (0, 0): left
@@ -167,28 +178,10 @@ class Client:
         self.win.close()
         self.win.deleteLater()
         self.sleep(150)  # the socket's close round-trip; a new client must not inherit a closing one
-        st.active_id = None
-        st.rt.clear()
-        st.models.clear()
-        st.sessions = []
-        st.sessions_loaded = False
-        st.page = "session"
-        for k in list(st.dialogs):
-            st.dialogs[k] = None if k not in ("settings", "palette", "shortcuts") else False
-        st.toasts = []
-        # The layout a test dragged or opened (panel, widths) must not leak into the next one.
-        for k, v in (("panel", False), ("sidebar", True), ("sidebar_w", 268), ("panel_w", 560)):
-            if hasattr(st.ui, k):
-                setattr(st.ui, k, v)
-        st.unread.clear()
-        st.timeline.clear()
-        st.jobs.clear()
-        st.job_runs.clear()
-        st.jobs_loaded = False
-        st.dispatch_view = None
-        st.playbooks = []
-        st._buffered.clear()
-        st._opening.clear()
+        # every plain field back to how the app started (sessions, runtimes, dialogs, the layout a
+        # test dragged or opened, buffers): nothing a test did leaks into the next one
+        for k, v in _BLANK.items():
+            setattr(st, k, copy.deepcopy(v))
         # Drafts and history are kept per session for the life of the app; a test must not inherit them.
         try:
             from pilcrow_qt.widgets import composer

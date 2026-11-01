@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtWidgets import QHBoxLayout, QSizePolicy, QWidget
 
 from ... import icons, theme
@@ -177,7 +177,6 @@ class MemoryPage(QWidget):
         self.load()
 
     def eventFilter(self, obj, e) -> bool:
-        from PySide6.QtCore import QEvent
 
         if obj is self.draft and e.type() == QEvent.Type.KeyPress:
             if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and e.modifiers() & Qt.KeyboardModifier.ControlModifier:
@@ -432,7 +431,6 @@ class NoteRow(Panel):
         self.edit.installEventFilter(self)
 
     def eventFilter(self, obj, e) -> bool:
-        from PySide6.QtCore import QEvent
 
         if obj is self.edit and e.type() == QEvent.Type.KeyPress:
             if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and e.modifiers() & Qt.KeyboardModifier.ControlModifier:

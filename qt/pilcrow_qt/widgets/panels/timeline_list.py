@@ -22,6 +22,7 @@ from ...canvas.paint import Measurer, PaintState, rounded
 from ...canvas.scene import Block, Scene, Target
 from ...canvas.view import CanvasView
 from ...lib.fmt import plural
+from ...store import store
 from ..ui.bits import draw_mark
 
 Json = Dict[str, Any]
@@ -124,7 +125,6 @@ class StepBlock(NodeBlock):
         return nd.hstack(*parts, spacing=6, stretch=[1], pad=ROW_PAD, valign="top")
 
     def _jump(self, _t: Target, _view: Any) -> None:
-        from ...store import store
 
         store.toast("That step is not in the conversation view.", "info")
 

@@ -6,7 +6,7 @@ from __future__ import annotations
 from typing import Any, Callable, Optional
 
 import shiboken6
-from PySide6.QtCore import QEvent, QObject
+from PySide6.QtCore import QEvent, QObject, QTimer
 from PySide6.QtWidgets import QWidget
 
 from ..paint import Measurer, PaintState
@@ -26,8 +26,6 @@ class _Regrow(QObject):
     def eventFilter(self, obj: QObject, e: QEvent) -> bool:
         if e.type() == QEvent.Type.LayoutRequest and not self._pending:
             self._pending = True
-            from PySide6.QtCore import QTimer
-
             QTimer.singleShot(0, self._regrow)
         return False
 

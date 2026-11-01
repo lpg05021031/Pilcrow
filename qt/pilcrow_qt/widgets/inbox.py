@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
 
 from PySide6.QtCore import QEvent, QRectF, QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QColor, QGuiApplication, QPainter, QRadialGradient
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -381,7 +381,6 @@ class HelpersCard(Card):
         super().leaveEvent(e)
 
     def copy_md(self) -> None:
-        from PySide6.QtGui import QGuiApplication
 
         def got(md: Any) -> None:
             QGuiApplication.clipboard().setText(str(md or ""))
@@ -551,7 +550,6 @@ class DispatchCard(Card):
         super().leaveEvent(e)
 
     def copy_md(self) -> None:
-        from PySide6.QtGui import QGuiApplication
 
         def got(md: Any) -> None:
             QGuiApplication.clipboard().setText(str(md or ""))
@@ -746,7 +744,6 @@ class EmptyHero(QWidget):
         t = theme.tokens()
         if not t.dark or self.mark is None:
             return
-        from PySide6.QtGui import QRadialGradient
 
         c = self.mark.geometry().center()
         cx, cy = c.x() + 0.5, c.y() + 12.5

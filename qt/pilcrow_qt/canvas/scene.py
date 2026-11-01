@@ -15,8 +15,10 @@ from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Tuple
 
 from .fenwick import Fenwick
 
-if TYPE_CHECKING:  # pragma: no cover
-    from .paint import Measurer
+if TYPE_CHECKING:  # pragma: no cover - the types only: this module never imports Qt
+    from PySide6.QtGui import QPainter
+
+    from .paint import Measurer, PaintState
 
 GRADE_ESTIMATE, GRADE_FAST, GRADE_EXACT = 0, 1, 2
 Path = Tuple[int, ...]
@@ -110,7 +112,7 @@ class Block:
         self.warm = False
 
     # ---- painting and interaction (block coordinates: origin at the block's top-left)
-    def paint(self, p: Any, x: int, y: int, w: int, st: Any) -> None:
+    def paint(self, p: QPainter, x: int, y: int, w: int, st: PaintState) -> None:
         """Draw the block with its top-left at (x, y) and width ``w`` (viewport coordinates)."""
 
     def hit(self, x: int, y: int) -> Optional[Target]:
@@ -483,6 +485,9 @@ class Scene:
         self.root.scene = self
         self.by_key: Dict[str, Block] = {}
         self.width = 0
+        #: a conversation still arriving: the view shows ``skeleton`` alone, nothing to scroll
+        self.loading = False
+        self.skeleton: Optional[Block] = None
         #: block → the offset into it from which the picture may have moved (its own height, a gap
         #: above it, a child added or removed, a reveal); the view turns these into repaints
         self.dirty: Dict[Block, int] = {}

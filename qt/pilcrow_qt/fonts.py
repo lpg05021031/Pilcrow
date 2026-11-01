@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtGui import QFontDatabase
+from PySide6.QtWidgets import QApplication
 
 from . import theme
 
@@ -57,7 +58,6 @@ def load() -> tuple[str, str]:
     # The application font is the UI face itself. A widget stylesheet that sets only font-size or
     # font-weight makes Qt resolve the rest from the application font, not from the global rule's
     # family, so without this Linux draws those widgets in DejaVu (Windows in Segoe UI).
-    from PySide6.QtWidgets import QApplication
 
     app = QApplication.instance()
     if app is not None:

@@ -10,9 +10,9 @@ from __future__ import annotations
 
 from typing import Callable, Optional
 
-from PySide6.QtCore import QPoint, QRectF, Qt
+from PySide6.QtCore import QPoint, QRectF, QSize, Qt
 from PySide6.QtGui import QPainter
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QSystemTrayIcon, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QSizePolicy, QSystemTrayIcon, QVBoxLayout, QWidget
 
 from ... import icons, theme
 from ...store import Toast, store
@@ -135,7 +135,6 @@ class ToastCard(QWidget):
     def sizeHint(self):
         s = super().sizeHint()
         # hug the text: the layout's hint, but never wider than the column
-        from PySide6.QtCore import QSize
 
         return QSize(min(MAX_W, s.width()), max(40, s.height()))
 
@@ -158,8 +157,6 @@ def system_notify(title: str, body: str, on_click: Optional[Callable[[], None]] 
     if not QSystemTrayIcon.isSystemTrayAvailable():
         return
     if _tray is None:
-        from PySide6.QtWidgets import QApplication
-
         app = QApplication.instance()
         _tray = QSystemTrayIcon(app.windowIcon() if app else None)
         _tray.setToolTip("Pilcrow")

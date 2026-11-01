@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 
 try:  # a history snapshot is megabytes of JSON parsed on the GUI thread; orjson does it several times faster
     from orjson import loads as _loads
-except ImportError:  # not a requirement: the standard library parses the same messages
+except ImportError:  # in requirements.txt; an install without it parses with the standard library
     _loads = json.loads
 
 Params = Dict[str, Any]

@@ -5,6 +5,7 @@ edited in place. Facts are scanned, never typed."""
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QEvent, Qt
@@ -476,7 +477,6 @@ class RepoRow(Panel):
 
     # ---- data in
     def sync(self, e: Json, force: bool = False) -> None:
-        import json
 
         snap = json.dumps(e, sort_keys=True, default=str)
         if snap == self._snapshot and not force:

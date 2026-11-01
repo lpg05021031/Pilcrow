@@ -31,7 +31,18 @@ QUICK = (
     "find",
     "theme_toggle",
 )
-MORE = ("tool_toggle", "typing", "streaming_scrolled_up", "scroll_wheel", "view_mode_cycle")
+MORE = (
+    "tool_toggle",
+    "typing",
+    "streaming_scrolled_up",
+    "scroll_wheel",
+    "scroll_drag",
+    "select_drag",
+    "view_mode_cycle",
+    "panel_tabs",
+    "tasks_fold_toggle",
+    "idle",
+)
 
 # the budgets, against the targets of PERF.md §5
 STALL_P95_MS = 12  # target 8
@@ -44,6 +55,14 @@ FIRST_PAINT_MS = 150  # target 150 after the snapshot is modelled (measured ≈ 
 MODELLING_STALL_MS = 75  # target 50: no long task while a snapshot is modelled
 RESIZE_STEP_P95_MS = 50  # target 33, two frames a step; none over 50
 FIND_MS = 150  # target 100 over the whole conversation
+DRAG_STEP_P95_MS = 50  # scrollbar drag, a screen a step, target 33 (measured 34)
+DRAG_STEP_MAX_MS = 80  # target 50 (measured 51)
+DRAG_COLD_PAINTS = 30  # placeholders over the 81 steps (measured 16-19)
+SEAM_STEP_P95_MS = 60  # the panel seam dragged 12px a step, target 40 (measured 39)
+TAB_FIRST_TURN_MS = 100  # the slowest tab's first show, target 66 (the terminal's, measured 14-66)
+SELECT_PX_PER_MOVE = 60_000  # a selection drag repaints the rows it changed (measured 24k; the viewport is 460k)
+FOLD_STALL_MAX_MS = 25  # a Collapse in the Tasks tab, target 16 (measured 8)
+IDLE_BUSY_CPU_PCT = 4.5  # target 3: a busy-looking conversation, the clock at 20 Hz (measured 2.6-3.2)
 
 
 @pytest.fixture(scope="module")
@@ -147,3 +166,28 @@ def test_view_mode_cycle_is_quick(results):
         if isinstance(r, dict):
             assert r["to_paint_ms"] <= TO_PAINT_MS, (mode, r)
             assert r["widgets_made"] == 0, (mode, r)
+
+
+@full_only
+def test_dragging_the_scrollbar_and_the_seam_and_showing_a_tab_stay_under_their_budgets(results):
+    d = results["scroll_drag"]
+    assert d["step"]["p95"] <= DRAG_STEP_P95_MS and d["step"]["max"] <= DRAG_STEP_MAX_MS, d["step"]
+    assert d["cold_paints"] <= DRAG_COLD_PAINTS and d["widgets_made"] == 0, d
+    tabs = results["panel_tabs"]
+    assert tabs["drag"]["step"]["p95"] <= SEAM_STEP_P95_MS and tabs["drag"]["layout"] == 0, tabs["drag"]
+    slowest = max(t["first_turn_ms"] for t in tabs["tabs"].values())
+    assert slowest <= TAB_FIRST_TURN_MS, tabs["tabs"]
+
+
+@full_only
+def test_a_selection_drag_repaints_what_changed_and_a_panel_fold_is_under_a_frame(results):
+    s = results["select_drag"]
+    assert s["paint_px_per_move"] <= SELECT_PX_PER_MOVE and s["layout"] == 0, s
+    f = results["tasks_fold_toggle"]
+    assert f["stall_max_ms"] <= FOLD_STALL_MAX_MS, f
+
+
+@full_only
+def test_a_busy_looking_conversation_costs_little_while_nothing_happens(results):
+    r = results["idle"]
+    assert r["busy_look_cpu_pct"] <= IDLE_BUSY_CPU_PCT, r

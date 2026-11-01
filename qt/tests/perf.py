@@ -50,10 +50,11 @@ def main() -> int:
         p0 = time.perf_counter()
         tv.grab()  # forces a full paint of what is on screen
         t_paint = time.perf_counter() - p0
-        drawn = sum(1 for u in getattr(tv, "pages", []) if getattr(u, "drawn", True)) if hasattr(tv, "pages") else -1
+        leaves = [b for b in tv.scene.root.walk() if not hasattr(b, "children")]
+        warm = sum(1 for b in leaves if b.warm)
         print(
-            f"open {args.turns} turns: transcript loaded {t_loaded * 1000:.0f} ms, rows on screen {t_rows * 1000:.0f} ms, first paint {t_paint * 1000:.1f} ms"
-            + (f", pages drawn {drawn}" if drawn >= 0 else "")
+            f"open {args.turns} turns: transcript loaded {t_loaded * 1000:.0f} ms, rows on screen {t_rows * 1000:.0f} ms,"
+            f" first paint {t_paint * 1000:.1f} ms, blocks measured {warm} of {len(leaves)}"
         )
 
         # ---- idle CPU: a real event loop (the harness's polling sleep would be the cost itself)
@@ -94,7 +95,7 @@ def main() -> int:
             tv.viewport().repaint()
             steps += 1
         print(
-            f"scroll to the top in {steps} steps: {(time.perf_counter() - t0) * 1000 / max(1, steps):.1f} ms per step (pages drawn on the way)"
+            f"scroll to the top in {steps} steps: {(time.perf_counter() - t0) * 1000 / max(1, steps):.1f} ms per step (blocks measured on the way)"
         )
         c.close()
         return 0

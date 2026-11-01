@@ -329,7 +329,6 @@ class NewSessionSheet(Sheet):
         rl.addWidget(self.wt_switch)
         wl.addWidget(r)
         self.base = combo([(b, b) for b in self.branches], getattr(self, "base_v", ""), name="Start from")
-        from PySide6.QtWidgets import QLineEdit
 
         self.wt_name_edit = QLineEdit()
         self.wt_name_edit.setPlaceholderText("murphy-yield")

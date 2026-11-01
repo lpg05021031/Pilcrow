@@ -8,6 +8,7 @@ column is the golden section of the pane (``--col``), the box 640px wide, the ic
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import List, Optional
 
@@ -33,7 +34,6 @@ def greeting(name: Optional[str], hour: Optional[int] = None) -> str:
     if not name:
         return part
     # An OS login like "tester" reads better as a name; leave real names ("Lin Wei-Ting") alone.
-    import re
 
     shown = name[0].upper() + name[1:] if re.match(r"^[a-z][a-z0-9._-]*$", name) else name
     return f"{part}, {shown}"

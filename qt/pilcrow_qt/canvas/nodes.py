@@ -9,19 +9,25 @@ targets back to its handlers. A tree is built when its block warms and dropped w
 
 from __future__ import annotations
 
+import html as _html
 import math
+import re
 from typing import Any, Callable, Iterator, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPixmap, QTextDocument
 
 from .. import theme
+from ..lib.fmt import truncate
 from .paint import Measurer, PaintState, doc_height, draw_doc, find_selections, paint_decor, rounded, set_line_height
 from .pixels import hline
 from .scene import Target
 
 Pad = Tuple[int, int, int, int]  # left, top, right, bottom
 NO_PAD: Pad = (0, 0, 0, 0)
+
+
+_TAG = re.compile(r"<[^>]+>")  # the markup of a node's HTML text, for its words
 
 
 class Node:
@@ -342,9 +348,7 @@ class Text(Node):
 
     def text(self) -> str:
         if self.html:
-            import re
-
-            return re.sub(r"<[^>]+>", "", self._text)
+            return _TAG.sub("", self._text)
         return self._text
 
     def set_text(self, text: str) -> None:
@@ -870,9 +874,6 @@ def label(text: str) -> Text:
 
 def pre(text: str, err: bool = False, limit: int = 60000, size: int = 12) -> Surface:
     """Preformatted mono text on an inset well."""
-    import html as _html
-
-    from ..lib.fmt import truncate
 
     lh = int(size * 1.55 + 0.5)
     body = (

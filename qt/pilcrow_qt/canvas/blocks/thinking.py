@@ -10,7 +10,7 @@ import time
 from typing import Any, Optional, Tuple
 
 from PySide6.QtCore import QRect, Qt
-from PySide6.QtGui import QColor, QPainter, QTextDocument
+from PySide6.QtGui import QColor, QPainter, QTextCursor, QTextDocument
 
 from ... import theme
 from ...lib.transcript_model import ThinkingItem
@@ -100,7 +100,6 @@ class ThinkingBody(Block):
             return text if a is None or b is None else text[min(a, b) : max(a, b)]
         if a is None or b is None:
             return _clean(self.doc.toPlainText())
-        from PySide6.QtGui import QTextCursor
 
         end = self.doc.characterCount() - 1
         cur = QTextCursor(self.doc)

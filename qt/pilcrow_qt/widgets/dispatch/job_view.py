@@ -6,8 +6,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
 
-from PySide6.QtCore import QRect, QRectF, Qt, QTimer
-from PySide6.QtGui import QClipboard, QGuiApplication, QPainter
+from PySide6.QtCore import QRect, QRectF, Qt, QTimer, QUrl
+from PySide6.QtGui import QClipboard, QDesktopServices, QGuiApplication, QPainter
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from ... import theme
@@ -213,9 +213,6 @@ class RunBlock(NodeBlock):
 
     def activate(self, target: Target, view: Any) -> None:
         if target.kind == "link" and target.id == "pr":
-            from PySide6.QtCore import QUrl
-            from PySide6.QtGui import QDesktopServices
-
             QDesktopServices.openUrl(QUrl(str(self.run.get("pr") or "")))
             return
         super().activate(target, view)

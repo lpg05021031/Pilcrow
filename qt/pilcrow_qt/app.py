@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import faulthandler
 import json
 import os
 import subprocess
 import sys
 import time
+import traceback
 from pathlib import Path
 from typing import Callable, List, Optional
 
@@ -255,8 +257,6 @@ def run(
 
 def _crash_log() -> None:
     """A native crash (segfault in Qt) leaves a Python traceback in the host log instead of nothing."""
-    import faulthandler
-
     try:
         log_dir = _state_dir().parent / "pilcrow-host" if sys.platform != "win32" else _state_dir()
         log_dir.mkdir(parents=True, exist_ok=True)
@@ -266,7 +266,6 @@ def _crash_log() -> None:
         faulthandler.enable(file=f, all_threads=True)
 
         def hook(exc_type, exc, tb) -> None:
-            import traceback
 
             traceback.print_exception(exc_type, exc, tb, file=f)
             f.flush()

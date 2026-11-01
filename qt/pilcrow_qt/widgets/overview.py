@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QEvent, QObject, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QColor, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -779,7 +779,6 @@ class FinishedRow(LayoutButton):
 
 
 def _dot(color: str, size: int):
-    from PySide6.QtGui import QPixmap
 
     pm = QPixmap(size, size)
     pm.fill(Qt.GlobalColor.transparent)

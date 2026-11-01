@@ -10,6 +10,7 @@ started from ``--dir`` (``server/main.js --shell=none``) and stopped again when 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 from .app import run
@@ -30,8 +31,6 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = ap.parse_args(argv)
     if args.native_titlebar:
-        import os
-
         os.environ["PILCROW_TITLEBAR"] = "native"
     return run(
         url=args.url,

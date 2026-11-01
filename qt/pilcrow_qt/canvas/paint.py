@@ -14,9 +14,11 @@ from __future__ import annotations
 import html
 import logging
 import math
+import re
 import weakref
 from collections import OrderedDict
 from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote
 
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt, QUrl
 from PySide6.QtGui import (
@@ -45,7 +47,7 @@ from PySide6.QtGui import (
 from .. import icons, markdown, theme
 from . import build
 from .build import trim_margins
-from .estimate import Calibration, Metrics
+from .estimate import Calibration, Metrics, estimate_markdown
 from .pixels import hline, pen_width, snap
 
 log = logging.getLogger(__name__)
@@ -789,17 +791,15 @@ class Measurer:
 
     # ---- estimation
     def estimate_markdown(self, src: str, width: int, compact: bool = False) -> int:
-        from .estimate import estimate_markdown
 
         return estimate_markdown(src, width, self.metrics_compact if compact else self.metrics)
 
 
+_CODE_SPAN = re.compile(r"<code( style=\"[^\"]*\")>([^<]*)</code>")
+
+
 def link_paths(body: str) -> str:
     """Inline code spans that look like file paths become links (``pilcrow-path://``)."""
-    import re
-    from urllib.parse import quote
-
-    code_re = re.compile(r"<code( style=\"[^\"]*\")>([^<]*)</code>")
 
     def repl(m: re.Match[str]) -> str:
         ref = markdown.as_path_ref(html.unescape(m.group(2)))
@@ -811,7 +811,7 @@ def link_paths(body: str) -> str:
             f"{m.group(0)}</a>"
         )
 
-    return code_re.sub(repl, body)
+    return _CODE_SPAN.sub(repl, body)
 
 
 # ---------------------------------------------------------------- paint state

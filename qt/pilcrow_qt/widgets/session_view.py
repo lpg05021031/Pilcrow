@@ -9,6 +9,7 @@ Composer stacked. The git information behind the crumbs and the diffstat is refr
 from __future__ import annotations
 
 import math
+import re
 import time
 from typing import Any, Dict, List, Optional
 
@@ -28,7 +29,7 @@ from .. import icons, theme
 from ..canvas.transcript import Transcript
 from ..lib.fmt import basename, cost, duration, err_text, plural, tildify
 from ..lib.workflow import running_workflow
-from ..store import ConfirmSpec, store
+from ..store import VIEW_MODES, ConfirmSpec, store
 from .composer import Composer, LayoutButton
 from .folder_picker import FolderPicker
 from .mcp_notice import McpNotice
@@ -681,7 +682,6 @@ class SessionView(QWidget):
             },
             {"separator": True},
         ]
-        from ..store import VIEW_MODES
 
         for v in VIEW_MODES:
             items.append(
@@ -1070,7 +1070,6 @@ class ErrorBar(QWidget):
         self.host = host
 
     def set_error(self, error: str) -> None:
-        import re
 
         self._error = error
         self.text.setText(error.split("\n")[0])

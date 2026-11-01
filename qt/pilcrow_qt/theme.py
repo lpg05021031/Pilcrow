@@ -16,10 +16,11 @@ change and a repaint, not a re-parse of every widget's style.
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional, Tuple, Union
 
-from PySide6.QtCore import QEasingCurve, QObject, QPointF, Signal
+from PySide6.QtCore import QEasingCurve, QObject, QPointF, QStandardPaths, Signal
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -548,9 +549,6 @@ def stylesheet() -> str:
 def _arrow_files() -> Tuple[str, str]:
     """The chevron for QComboBox in each theme's faint colour, written once to the cache folder (QSS
     takes a file). The stylesheet picks one by the combo's ``dark`` property (set by :func:`repolish`)."""
-    import os
-
-    from PySide6.QtCore import QStandardPaths
 
     d = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.CacheLocation) or os.path.join(
         os.path.expanduser("~"), ".cache", "pilcrow"

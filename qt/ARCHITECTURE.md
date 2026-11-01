@@ -33,7 +33,8 @@ qt/
                        question and plan forms (bodies/ask, bodies/plan), code/diff helpers
     canvas/            the conversation itself (Transcript.tsx), as one painted viewport: see
                        DESIGN.md — scene.py (blocks, groups, Fenwick trees), view.py (the
-                       QAbstractScrollArea: commit, anchor, prefetch, paint, input), transcript.py
+                       QAbstractScrollArea: commit, anchor, prefetch, paint; input.py: hits, hover,
+                       focus, selection, the context menu and links, a part of the view), transcript.py
                        (the session's scene, reconciled from the model), blocks/ (prose, user,
                        thinking, tool cards and their node-tree bodies, folds, islands, a helper's note: note.py), nodes.py
                        (the mini-layout bodies are built from), paint.py (documents, caches),
