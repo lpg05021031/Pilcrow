@@ -119,6 +119,11 @@ class Block:
     def targets(self) -> List[Target]:
         return []
 
+    def hover_rect(self, target: Target) -> Tuple[int, int, int, int]:
+        """The part of the block whose picture depends on the pointer being on ``target`` (block
+        coordinates): the target's own rect, unless the block lights up more of itself on hover."""
+        return target.rect
+
     def activate(self, target: Target, view: Any) -> None:
         pass
 

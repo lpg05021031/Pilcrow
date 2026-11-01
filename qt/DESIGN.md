@@ -352,9 +352,11 @@ the find bar are children of the view, not of the viewport, and stay put.
 
 ### 6.5 Dirty rectangles
 
-A streamed token: `update(block_rect)`. A tick on a spinner: `update(14×14)`. A fold frame:
-`update(fold_top … bottom)`. A hover: `update(old_target_rect ∪ new_target_rect)`. A resize or a
-theme change: `update()`. Qt merges the region.
+A streamed token: `update(block_rect)`. A tick on a breathing mark: `update(20 × line)`, the whole
+line only when its figure (the elapsed seconds) changes. A fold frame: `update(fold_top … bottom)`.
+A hover: `update(old_hover_rect ∪ new_hover_rect)` (§8.1). A selection drag: the rows between the
+old edge and the new (§8.3). A resize or a theme change: `update()`. Qt merges the region, and the
+paint loop skips every block outside it.
 
 ### 6.6 Robustness
 
@@ -453,11 +455,17 @@ a plain document painted through a clip, bottom-aligned.
 ### 8.1 Hit testing and hover
 
 `CanvasView.hit(pos)`: root descent to the UnitGroup, recursive descent to the leaf, then the
-block's `hit(local)` returns a `Target(kind, id, rect)` or None. Hover state is `(block key,
-target id)`; on change, the old and new target rects are invalidated, the cursor set from
-`cursor_for`, the tooltip timer armed (`QToolTip.showText` after 600 ms at rest). Chevrons and
-"Open in Files" buttons occupy reserved space and are painted at alpha 0 when not hovered: no
-geometry depends on hover.
+block's `hit(local)` returns a `Target(kind, id, rect)` or None. Hover state is `(block, target)`;
+on change, the old and the new target's `hover_rect` are invalidated (`Block.hover_rect`: the
+target's own rect, widened by the 8px a head's tint reaches past the column; a block that lights up
+more of itself on any hover says so — the user bubble's actions, a result's details, a helper
+card's head — and a target whose look does not change, a link in prose or a thought's words, says
+nothing), the cursor is set from `cursor_for`, the tooltip timer armed (`QToolTip.showText` after
+600 ms at rest). A hovered block paints directly (not from its pixmap) inside that clip. Chevrons
+and "Open in Files" buttons occupy reserved space and are not painted until hovered: no geometry
+depends on hover. Bench `hover_sweep`: 7.6 kpx repainted per pointer move over a heavy conversation
+(8.6 kpx when the whole block was invalidated); `test_canvas_input` pins a head, a link and a move
+inside one target.
 
 ### 8.2 Activation and focus
 
@@ -471,7 +479,11 @@ copies. Focus survives scrolling (it is a key, not a widget).
 
 `Selection(anchor=(path, pos), focus=(path, pos))`. On press the view records the text position
 under the pointer (`text_pos_at`, on the block under the pointer whether or not it named a target);
-on drag it updates the focus and invalidates the blocks whose selection changed. Positions come
+on drag it updates the focus and invalidates the rows between the old focus and the new, both
+included (the anchor's row too when the focus crossed it, since it lies between): a drag inside one
+paragraph repaints that paragraph, and every row outside the selection keeps painting from its
+pixmap. Bench `select_drag`: 24 kpx per pointer move and a p95 turn of 1.1 ms over a heavy
+conversation (203 kpx and 4.4 ms when every move repainted the viewport). Positions come
 from `paint.doc_pos_at`: a fuzzy hit test with a check that the answer lies on a line holding the
 point, since the leading above a line of fixed height is otherwise answered with the end of the
 document. `PaintState.selection_for(block)` gives `(a, b)`, `FULL` or `None`; text blocks
@@ -549,13 +561,20 @@ paint needs only the last screen's blocks exact. `orjson` parses the messages wh
 
 ## 9. The clock
 
-`clock.py`: one `QTimer` for every animation in the process, 33 ms while only indicators are live
-(breathing marks, spinners, rails, elapsed counters), 16 ms while an animation runs (a fold's
+`clock.py`: one `QTimer` for every animation in the process, 50 ms while only indicators are live
+(breathing marks, spinners, rails, elapsed counters: a 1.2–1.8 s breath reads the same at 20 frames
+a second, for two thirds of the repaints of 30), 16 ms while an animation runs (a fold's
 reveal, the scroll easing, the composer's springs, a menu's rows unfolding, the window's handles
 and tab underline), stopped when nothing subscribes. The other `QTimer`s in the widgets are not
-animations: debounces, toasts that expire, polling, a deferred layout. Subscribers are weak references with a `tick(now)` that returns the rect to
-repaint. The canvas subscribes once and fans out to its live blocks on screen; off-screen live blocks
-do not tick. An elapsed counter repaints its meta rectangle; its width is reserved for "99m 59s".
+animations: debounces, toasts that expire, polling, a deferred layout, the terminal's cursor blink.
+Subscribers are weak references with a `tick(now)`. The canvas subscribes once and fans out to its
+live blocks on screen; off-screen live blocks do not tick; a live block's tick returns the rect to
+repaint (its breathing mark, the whole line when its elapsed figure changes). The widgets that move
+are `ui/bits.Indicator`s (the working mark, the status glyph and dot, spinners, the sidebar's row
+glyph, the to-do box, the dispatch bar): one subscribes on show while it is live and leaves on hide,
+and a tick is its `update()`. The card frame and the shell skip a repaint that falls inside the
+sheet, where they draw nothing. Bench `idle`, a finished conversation that looks busy: 5.2 % of a
+core on separate timers at 33–60 ms → 2.6–3.2 % on the clock (quiet: 0.0–0.6 %).
 
 ## 10. The side panel and the sidebar
 
@@ -580,10 +599,13 @@ diffs by path and updates cards in place.
 
 ### 10.3 Panel disclosure
 
-`Collapse` is reimplemented on the clock: it measures its body at the real width before animating
-(so the target height is right), animates a clip height instead of `maximumHeight` where the body is
-a painted widget, and falls back to the current behaviour for widget bodies in the dialogs where
-trees are tiny.
+`Collapse` (the panels' and the dialogs' widget disclosures) runs on the clock and measures its body
+at the real width before animating, so the reveal lands where the content ends. It animates its own
+`maximumHeight`: each frame relays the body at the clipped height and moves what follows it, so a
+frame costs a layout pass of the panel. The bench's `tasks_fold_toggle` (the Tasks tab's workflow
+card, opened and closed three times) measures it: 77 layout requests and 1,570 paints per toggle,
+the longest turn 8 ms — under a frame, which is why it stays. The conversation's folds do not work
+this way: they are one number in a Fenwick tree and paint through a clip (§8.4).
 
 The Changes tab's file cards are built for 4 ms a turn of the event loop (`DiffView.BUDGET_MS`),
 the first ones on the page before the rest exist, and the list is pinned to the height of its cards

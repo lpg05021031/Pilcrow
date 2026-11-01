@@ -114,6 +114,9 @@ class ThinkingBody(Block):
     def hit(self, x: int, y: int) -> Optional[Target]:
         return Target("text", "body", (0, 0, self.h_width, self.h))
 
+    def hover_rect(self, target: Target) -> Tuple[int, int, int, int]:
+        return (0, 0, 0, 0)  # the words look the same under the pointer
+
     @property
     def static(self) -> bool:
         return not self.owner.item.streaming

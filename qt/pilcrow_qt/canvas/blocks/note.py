@@ -197,6 +197,9 @@ class _Card(Group):
             return Target("button", "open", (r.x(), r.y(), r.width(), r.height()))
         return Target("head", "card", (0, 0, self.h_width or 0, self.head_h))
 
+    def hover_rect(self, target: Target) -> Tuple[int, int, int, int]:
+        return (0, 0, self.h_width or 0, self.head_h)  # the open arrow lights the whole head
+
     def cursor_for(self, target: Target) -> Optional[Any]:
         return Qt.CursorShape.PointingHandCursor
 

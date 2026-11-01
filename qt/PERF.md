@@ -279,10 +279,13 @@ parses the snapshot several times faster than the standard library.
 
 All breathing marks, spinners, rails, elapsed counters, the scroll easing and the composer's springs
 and every other animation in the window share one timer (`canvas/clock.py`) that runs only while
-something live is on screen, at 30 Hz for indicators and 60 Hz during an animation. (The widgets'
-other timers are not animations: debounces, toasts, polling.) A
-tick repaints the small rectangles that changed. A counter changing from "12s" to "13s" repaints
-its rectangle; nothing is relaid out.
+something live is on screen, at 20 Hz for indicators and 60 Hz during an animation. The widget
+indicators (the sidebar's row glyph, the status pill's dot, the working mark, spinners, the to-do
+box, the dispatch bar) are `ui/bits.Indicator`s: on the clock only while shown and live, so a hidden
+tab or a scrolled-away row costs nothing. (The widgets' other timers are not animations: debounces,
+toasts, polling, the terminal's cursor blink.) A tick repaints the small rectangles that changed: a
+live fold or the working line repaints its mark, and its whole line only when the elapsed figure
+moves on a second; nothing is relaid out.
 
 ### 4.12 The side panel and the sidebar
 
@@ -292,7 +295,9 @@ its rectangle; nothing is relaid out.
 - The Changes tab diffs the file list by path and updates file cards in place; file cards paint
   their hover actions instead of showing and hiding widgets.
 - Panel disclosure (`Collapse`) measures its body at the real width before animating and runs on the
-  shared clock; panel trees are shallow, so a relayout per frame there costs a millisecond.
+  shared clock. It animates `maximumHeight`, so the panel relays out each frame: the Tasks tab's
+  workflow card measures 77 layout requests and 1,570 paints per toggle and a longest turn of 8 ms
+  (bench `tasks_fold_toggle`), under a frame; the conversation's folds are one number instead (§4.4).
 - The sidebar diffs its ordered list of rows and moves only the rows that moved; it no longer
   reparents every row on every `sessions.changed`.
 - Nothing calls `setStyleSheet` or `setVisible` from a hover or a refresh. Colours and fonts are set

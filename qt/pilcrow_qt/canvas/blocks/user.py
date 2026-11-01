@@ -278,6 +278,9 @@ class UserBlock(Block):
             )
         return Target("row", "row", (0, 0, self.h_width or 0, self.h))
 
+    def hover_rect(self, target: Target) -> Tuple[int, int, int, int]:
+        return (0, 0, self.h_width or 0, self.h)  # the actions under the bubble show on any hover
+
     def cursor_for(self, target: Target) -> Optional[Any]:
         if target.kind in ("button", "image"):
             return Qt.CursorShape.PointingHandCursor

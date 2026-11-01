@@ -843,9 +843,11 @@ class CanvasView(QAbstractScrollArea):
         for h in (old, hit):
             if h is not None:
                 try:
-                    vp.update(self.block_rect(h[0]).adjusted(-8, 0, 8, 0))
+                    r = self._hover_rect(*h)
                 except RuntimeError:
-                    pass
+                    continue
+                if not r.isEmpty():
+                    vp.update(r)
         cursor = hit[0].cursor_for(hit[1]) if hit is not None else None
         vp.setCursor(cursor if cursor is not None else Qt.CursorShape.ArrowCursor)
         self.hovered_block.emit(hit[0] if hit is not None else None)
@@ -853,6 +855,15 @@ class CanvasView(QAbstractScrollArea):
         QToolTip.hideText()
         if hit is not None and hit[0].tooltip_for(hit[1]):
             self._tip_timer.start()
+
+    def _hover_rect(self, b: Block, t: Target) -> QRect:
+        """What a hover on ``t`` changes, in viewport coordinates: the block's ``hover_rect``, with
+        the 8px either side a head's tint reaches past the column."""
+        x, y, w, h = b.hover_rect(t)
+        if w <= 0 or h <= 0:
+            return QRect()
+        br = self.block_rect(b)
+        return QRect(br.x() + x - 8, br.y() + y, w + 16, h)
 
     def _rehover(self) -> None:
         from PySide6.QtGui import QCursor
@@ -1209,13 +1220,27 @@ class CanvasView(QAbstractScrollArea):
         # over the words (a target's or not) the focus is a position; beside them, the whole block
         p1 = b.text_pos_at(lx, ly) if -8 <= lx <= self.col_w - b.indent + 8 else None
         if b.key != s.f_key or p1 != s.f_pos:
+            old = s.f_key
             s.f_key, s.f_pos = b.key, p1
-            self.viewport().update()
+            # only the rows between the old edge and the new one changed (the anchor's row too when
+            # the edge crossed it, which lies between them)
+            self._update_span(old, b.key)
 
     def clear_selection(self) -> None:
-        if self.selection is not None:
+        s = self.selection
+        if s is not None:
             self.selection = None
+            self._update_span(s.a_key, s.f_key)
+
+    def _update_span(self, a_key: str, b_key: str) -> None:
+        """Repaint the rows from one block to another, both included."""
+        a, b = self.scene.block(a_key), self.scene.block(b_key)
+        if a is None or b is None:
             self.viewport().update()
+            return
+        first, last = self._order(a, b)
+        y0 = self.view_y(first.y())
+        self.viewport().update(QRect(0, y0, self.viewport().width(), self.view_y(last.y() + last.h) - y0))
 
     def selected_text(self) -> str:
         s = self.selection

@@ -13,7 +13,7 @@ from __future__ import annotations
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from PySide6.QtCore import QPoint
+from PySide6.QtCore import QPoint, Qt
 from PySide6.QtWidgets import QWidget
 
 from . import rig
@@ -445,7 +445,37 @@ def hover_sweep(ctx: Ctx) -> Json:
 
     p = pump(30, until=lambda: paced.done, on_frame=frame)
     ctx.counters.drop("transcript")
-    return {"moves": len(ys), "stall": p.report(), **sc.snapshot()}
+    snap = sc.snapshot()
+    return {"moves": len(ys), "stall": p.report(), "paint_px_per_move": round(snap["paint_px"] / len(ys)), **snap}
+
+
+def select_drag(ctx: Ctx) -> Json:
+    """Press at the top of the screen and drag a selection down over the rows in 6px steps."""
+    from PySide6.QtTest import QTest
+
+    ctx.open(ctx.heavy)
+    tv = ctx.transcript()
+    vp = tv.viewport()
+    settle(300)
+    sc = ctx.scope("transcript", tv)
+    x = vp.width() // 3
+    QTest.mousePress(vp, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(x, 40))
+    settle(50)
+    ctx.counters.reset()
+    ys = list(range(46, vp.height() - 40, 6))
+    paced = Paced(120, len(ys))
+
+    def frame() -> None:
+        for _ in range(paced.due()):
+            move(vp, QPoint(x, ys[paced.sent - 1]))
+
+    p = pump(30, until=lambda: paced.done, on_frame=frame)
+    snap = sc.snapshot()
+    ctx.counters.drop("transcript")
+    QTest.mouseRelease(vp, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(x, ys[-1]))
+    tv.view.clear_selection()
+    settle(100)
+    return {"moves": len(ys), "stall": p.report(), "paint_px_per_move": round(snap["paint_px"] / len(ys)), **snap}
 
 
 def streaming_follow(ctx: Ctx) -> Json:
@@ -620,6 +650,46 @@ def panel_tabs(ctx: Ctx) -> Json:
     out["drag"] = {"step": rig.summary(steps), "layout": sc.layout, "paint": sc.paint}
     ctx.counters.drop("panel")
     return out
+
+
+def tasks_fold_toggle(ctx: Ctx) -> Json:
+    """Open and close the Tasks tab's workflow card (a ``Collapse``: its height animates by
+    ``maximumHeight``, so the panel's layout runs each frame), three times."""
+    from pilcrow_qt.widgets.panels.tasks import WorkflowDetail
+
+    sid = "sess-tests"
+    ctx.c.open(sid)
+    ctx.c.call("mock.pace", {"ms": 0})
+    ctx.c.call("session.send", {"id": sid, "text": "run the review workflow"})
+    ctx.c.wait_until(
+        lambda: ctx.store.rt[sid].status == "idle"
+        and any(t.get("type") == "local_workflow" for t in ctx.store.rt[sid].st.get("tasks") or []),
+        30,
+        "the mock's workflow",
+    )
+    ctx.store.set_ui(panel=True, panel_tab="tasks")
+    settle(800)
+    panel = ctx.win.panel_host
+    cards = [r for r in ctx.c.find(WorkflowDetail, panel) if r.isVisible()]
+    assert cards, "no workflow card in the Tasks tab"
+    row = cards[0]
+    sc = ctx.scope("panel", panel)
+    frames: List[Json] = []
+    for _ in range(3):
+        for _open in (True, False):
+            ctx.counters.reset()
+            row._toggle()
+            p = pump(0.6)
+            frames.append({"stall_max_ms": p.report()["max"], "layout": sc.layout, "paint": sc.paint})
+    ctx.counters.drop("panel")
+    ctx.store.set_ui(panel=False)
+    settle(300)
+    return {
+        "toggles": len(frames),
+        "layout_per_toggle": round(sum(f["layout"] for f in frames) / len(frames), 1),
+        "paint_per_toggle": round(sum(f["paint"] for f in frames) / len(frames), 1),
+        "stall_max_ms": max(f["stall_max_ms"] for f in frames),
+    }
 
 
 def panel_while_streaming(ctx: Ctx) -> Json:
@@ -866,6 +936,7 @@ SCENARIOS: Dict[str, Callable[[Ctx], Json]] = {
     "thinking_toggle": thinking_toggle,
     "tool_toggle": tool_toggle,
     "hover_sweep": hover_sweep,
+    "select_drag": select_drag,
     "streaming_follow": streaming_follow,
     "streaming_scrolled_up": streaming_scrolled_up,
     "typing": typing,
@@ -873,6 +944,7 @@ SCENARIOS: Dict[str, Callable[[Ctx], Json]] = {
     "switch_session": switch_session,
     "panel_tabs": panel_tabs,
     "panel_while_streaming": panel_while_streaming,
+    "tasks_fold_toggle": tasks_fold_toggle,
     "scroll_wheel": scroll_wheel,
     "scroll_drag": scroll_drag,
     "find": find,

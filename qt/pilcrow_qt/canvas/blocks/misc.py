@@ -336,6 +336,9 @@ class ResultBlock(Block):
             )
         return Target("row", "result", (0, 0, self.h_width or 0, self.h))
 
+    def hover_rect(self, target: Target) -> Tuple[int, int, int, int]:
+        return (0, 0, self.h_width or 0, self.h)  # the details and the fork show on any hover
+
     def cursor_for(self, target: Target) -> Optional[Any]:
         return Qt.CursorShape.PointingHandCursor if target.kind == "button" else None
 
