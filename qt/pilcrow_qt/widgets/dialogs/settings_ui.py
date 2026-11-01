@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QEvent, QObject, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QKeyEvent, QPainter
+from PySide6.QtGui import QColor, QKeyEvent, QPainter
 from PySide6.QtWidgets import (
     QButtonGroup,
     QDialog,
@@ -34,7 +34,7 @@ from ... import icons, theme
 from ...lib.models import model_options
 from ...store import store
 from ..ui.bits import Box, IconButton, IconLabel, Pill, hairline, label, paint_box
-from ..ui.button import Btn
+from ..ui.button import Btn, chip_button
 from ..ui.menu import MenuPopover, host_for
 from ..ui.signals import bind
 from .parts import Backdrop, ElideLabel, Text, sheet_bg, sheet_line, well_bg, well_line
@@ -768,36 +768,9 @@ class RadioList(Box):
         self.changed.emit(mid)
 
 
-class FolderChip(QPushButton):
-    """``.folder-chip``: a recent folder as a pill; ``on`` marks the chosen one."""
-
-    def __init__(self, text: str, tooltip: str = "", parent: Optional[QWidget] = None) -> None:
-        super().__init__(text, parent)
-        self.setAutoDefault(False)
-        self.setObjectName("fchip")
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip(tooltip)
-        self.setAccessibleName(text)
-        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
-        self.setFixedHeight(24)
-        self._font = theme.font_ui(theme.FS_SMALL)
-        bind(theme.theme.changed, self, lambda _t: self.update())
-
-    def sizeHint(self) -> QSize:
-        return QSize(QFontMetrics(self._font).horizontalAdvance(self.text()) + 20, 24)
-
-    def paintEvent(self, _e) -> None:
-        t = theme.tokens()
-        surface = sheet_bg(t)
-        on = self.property("on") == "true"
-        lit = on or self.underMouse()
-        bg = theme.over(theme.qcolor(t.fill_2 if lit else t.fill_1), surface)
-        line = theme.over(theme.qcolor(t.hair_3), surface) if on else theme.over(theme.qcolor(t.hair), bg)
-        p = QPainter(self)
-        paint_box(p, QRectF(self.rect()), bg, line, 13)
-        p.setFont(self._font)
-        p.setPen(QColor(t.text if lit else t.text_2))
-        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.text())
+def folder_chip(text: str, tooltip: str = "") -> Btn:
+    """``.folder-chip``: a recent folder as a pill on the sheet."""
+    return chip_button(text, tooltip, over=sheet_bg)
 
 
 class Flow(QWidget):

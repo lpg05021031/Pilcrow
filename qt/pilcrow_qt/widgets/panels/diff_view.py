@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 
 from ... import icons, theme
 from ...lib.fmt import basename, dirname
-from ..ui.bits import Clickable, Hairline, Pill
+from ..ui.bits import Clickable, Hairline, Pill, reveal_on_hover
 from ..ui.collapse import Collapse
 from ..ui.signals import bind
 from .editor import lexer_for_path, token_color
@@ -1039,18 +1039,9 @@ class _Head(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.hover_widgets: List[QWidget] = []
+        reveal_on_hover(self, self.hover_widgets)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         bind(theme.theme.changed, self, lambda _t: self.update())
-
-    def enterEvent(self, e) -> None:
-        for w in self.hover_widgets:
-            w.setVisible(True)
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:
-        for w in self.hover_widgets:
-            w.setVisible(False)
-        super().leaveEvent(e)
 
     def paintEvent(self, _e) -> None:
         p = QPainter(self)

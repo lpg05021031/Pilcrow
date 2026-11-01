@@ -510,6 +510,7 @@ class NavButton(QAbstractButton):
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)  # Qt repaints it on enter and leave
         self._icon = icon_name
         self._text = text
         self._kbd = kbd
@@ -539,14 +540,6 @@ class NavButton(QAbstractButton):
     def mousePressEvent(self, e) -> None:
         self.last_modifiers = e.modifiers()
         super().mousePressEvent(e)
-
-    def enterEvent(self, e) -> None:
-        self.update()
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:
-        self.update()
-        super().leaveEvent(e)
 
     def set_on(self, on: bool) -> None:
         if on != self._on:
@@ -631,6 +624,7 @@ class SearchRow(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)  # Qt repaints it on enter and leave
         self.setFixedHeight(30)
         self.setCursor(Qt.CursorShape.IBeamCursor)
         lay = QHBoxLayout(self)
@@ -670,14 +664,6 @@ class SearchRow(QWidget):
     def mousePressEvent(self, e) -> None:
         self.edit.setFocus(Qt.FocusReason.MouseFocusReason)
         super().mousePressEvent(e)
-
-    def enterEvent(self, e) -> None:
-        self.update()
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:
-        self.update()
-        super().leaveEvent(e)
 
     def paintEvent(self, _e) -> None:
         fill = "fill_2" if self.edit.hasFocus() else "fill_1" if self.underMouse() else ""
@@ -814,6 +800,7 @@ class _GroupToggle(QAbstractButton):
 
     def __init__(self, text: str, collapsed: bool, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)  # Qt repaints it on enter and leave
         self.setText(text)
         self._collapsed = collapsed
         self._angle = 0.0 if collapsed else 90.0
@@ -841,14 +828,6 @@ class _GroupToggle(QAbstractButton):
     def _turn(self, v) -> None:
         self._angle = float(v)
         self.update()
-
-    def enterEvent(self, e) -> None:
-        self.update()
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:
-        self.update()
-        super().leaveEvent(e)
 
     def paintEvent(self, _e) -> None:
         t = theme.tokens()

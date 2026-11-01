@@ -141,7 +141,6 @@ class IconButton(QPushButton):
         self._name, self._size, self._color, self._over, self._reveal = name, size, color, over, reveal
         self._shown = not reveal
         self._active = False
-        self._hover = False
         self.last_modifiers = Qt.KeyboardModifier.NoModifier
         self.setFlat(True)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
@@ -176,21 +175,11 @@ class IconButton(QPushButton):
             self._active = on
             self.update()
 
-    def enterEvent(self, e) -> None:
-        self._hover = True
-        self.update()
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:
-        self._hover = False
-        self.update()
-        super().leaveEvent(e)
-
     def paintEvent(self, _e) -> None:
         if not self._shown:
             return
         t = theme.tokens()
-        lit = (self._hover and self.isEnabled()) or self._active
+        lit = (self.underMouse() and self.isEnabled()) or self._active
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         if lit:
@@ -390,7 +379,6 @@ class Box(QFrame):
     ) -> None:
         super().__init__(parent)
         self.bg, self.line, self.radius, self.hover, self.line_w = bg, line, radius, hover, line_w
-        self._hover = False
         if hover is not None:
             self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         bind(theme.theme.changed, self, lambda _t: self.update())
@@ -400,19 +388,9 @@ class Box(QFrame):
             setattr(self, k, v)
         self.update()
 
-    def enterEvent(self, e) -> None:
-        self._hover = True
-        self.update()
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:
-        self._hover = False
-        self.update()
-        super().leaveEvent(e)
-
     def paintEvent(self, _e) -> None:
         t = theme.tokens()
-        bg = theme.resolve(self.hover if (self._hover and self.hover is not None) else self.bg, t)
+        bg = theme.resolve(self.hover if (self.underMouse() and self.hover is not None) else self.bg, t)
         p = QPainter(self)
         paint_box(p, QRectF(self.rect()), bg, theme.resolve(self.line, t), self.radius, self.line_w)
 
@@ -660,6 +638,29 @@ class Clickable(QObject):
             self.clicked.emit()
             return True
         return False
+
+
+class _Reveal(QObject):
+    """Shows its widgets while the pointer is on the widget it watches (:func:`reveal_on_hover`)."""
+
+    def __init__(self, owner: QWidget, widgets: List[QWidget]) -> None:
+        super().__init__(owner)
+        self.widgets = widgets
+        owner.installEventFilter(self)
+
+    def eventFilter(self, _obj: QObject, e: QEvent) -> bool:
+        if e.type() in (QEvent.Type.Enter, QEvent.Type.Leave):
+            for w in self.widgets:
+                w.setVisible(e.type() == QEvent.Type.Enter)
+        return False
+
+
+def reveal_on_hover(owner: QWidget, widgets: List[QWidget]) -> None:
+    """Show ``widgets`` only while the pointer is on ``owner`` (``opacity: 0`` until the row or the
+    card is hovered). They start hidden; the list may grow later, it is read at each enter."""
+    for w in widgets:
+        w.hide()
+    _Reveal(owner, widgets)
 
 
 def copy_text(text: str) -> None:

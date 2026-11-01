@@ -6,6 +6,9 @@ import time
 from datetime import datetime
 
 from harness import app_client, mock_server
+from PySide6.QtCore import QPoint
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
 
 
 def _overview(c):
@@ -194,5 +197,13 @@ def test_inbox_page(app_client):
     ib.sched_cards[1].main.click()
     assert ib.filter == "s2" and len(ib.run_cards) == 0
     ib.set_filter(None)
-    ib.run_cards[0].x_btn.click()  # inbox.remove is quiet on the mock, which does not know it
+    # the card's Dismiss shows while the pointer is on the card (ui.bits.reveal_on_hover)
+    card = ib.run_cards[0]
+    QTest.mouseMove(card, QPoint(-30, -30))
+    QApplication.processEvents()
+    assert not card.x_btn.isVisible()
+    QTest.mouseMove(card, card.rect().center())
+    QApplication.processEvents()
+    assert card.x_btn.isVisible()
+    card.x_btn.click()  # inbox.remove is quiet on the mock, which does not know it
     assert [r.it["id"] for r in ib.run_cards] == ["i2"]

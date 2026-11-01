@@ -140,14 +140,14 @@ def test_memory_page(app_client):
 def test_new_session_dialog(app_client):
     c = app_client
     from pilcrow_qt.widgets.dialogs.new_session import NewSessionSheet, open_new_session
-    from pilcrow_qt.widgets.dialogs.settings_ui import FolderChip
+    from pilcrow_qt.widgets.ui.button import Btn
 
     c.wait_until(lambda: c.store.sessions_loaded, 10, "sessions")
     s = open_new_session(c.win, {})
     assert isinstance(s, NewSessionSheet)
     c.sleep(300)
     assert s.path.text() == "/home/tester/code/pilcrow"
-    chips = [ch.text() for ch in c.find(FolderChip, s.frame) if ch.isVisible()]
+    chips = [ch.text() for ch in c.find(Btn, s.chips) if ch.isVisible()]
     assert chips == ["web", "api", "legacy-api", "website"], chips  # registered repositories first, by name
     assert "Options" in _labels(c, s.frame)
     assert _button(c, "Create session", s.frame)

@@ -24,7 +24,7 @@ from .. import icons, theme
 from ..lib.fmt import basename, clock, cost, duration, now_ms, plural, tildify, time_ago
 from ..store import ConfirmSpec, store
 from .dialogs.parts import Badge, Card, ElideLabel, LayoutButton, Switch, Text, hint
-from .ui.bits import Box, IconButton, Mark, Pill, Spinner, button
+from .ui.bits import Box, IconButton, Mark, Pill, Spinner, button, reveal_on_hover
 from .ui.menu import show_menu
 from .ui.signals import bind
 
@@ -194,15 +194,7 @@ class RunCard(Card):
         main.addLayout(foot)
         lay.addLayout(main, 1)
         self._render()
-        self.x_btn.setVisible(False)  # ``.run-x { opacity: 0 }`` until the card is hovered
-
-    def enterEvent(self, e) -> None:
-        self.x_btn.setVisible(True)
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:
-        self.x_btn.setVisible(False)
-        super().leaveEvent(e)
+        reveal_on_hover(self, [self.x_btn])  # ``.run-x { opacity: 0 }`` until the card is hovered
 
     def _render(self) -> None:
         self.sum.setText(self.summary if self._open or not self.long else self.summary[:280] + "…")
@@ -366,15 +358,7 @@ class HelpersCard(Card):
         foot.addWidget(self.x_btn)
         main.addLayout(foot)
         lay.addLayout(main, 1)
-        self.x_btn.setVisible(False)
-
-    def enterEvent(self, e) -> None:
-        self.x_btn.setVisible(True)
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:
-        self.x_btn.setVisible(False)
-        super().leaveEvent(e)
+        reveal_on_hover(self, [self.x_btn])  # ``.run-x { opacity: 0 }`` until the card is hovered
 
     def copy_md(self) -> None:
         def got(md: Any) -> None:
@@ -534,15 +518,7 @@ class DispatchCard(Card):
         foot.addWidget(self.x_btn)
         main.addLayout(foot)
         lay.addLayout(main, 1)
-        self.x_btn.setVisible(False)
-
-    def enterEvent(self, e) -> None:
-        self.x_btn.setVisible(True)
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:
-        self.x_btn.setVisible(False)
-        super().leaveEvent(e)
+        reveal_on_hover(self, [self.x_btn])  # ``.run-x { opacity: 0 }`` until the card is hovered
 
     def copy_md(self) -> None:
         def got(md: Any) -> None:

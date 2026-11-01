@@ -12,15 +12,17 @@ import re
 from datetime import datetime
 from typing import List, Optional
 
-from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPainterPath, QRadialGradient
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QPlainTextEdit, QPushButton, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QRadialGradient
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QPlainTextEdit, QSizePolicy, QVBoxLayout, QWidget
 
 from .. import icons, theme
 from ..lib.fmt import basename, tildify
 from ..store import store
 from .dialogs.parts import Keys, LayoutButton, Text
-from .ui.bits import Box, IconButton, IconLabel, Spinner, paint_box
+from .ui.bits import Box, IconButton, IconLabel, paint_box
+from .ui.button import Btn, chip_button
+from .ui.send import SendButton
 from .ui.signals import bind
 
 ICON = 72
@@ -74,6 +76,7 @@ class FolderButton(LayoutButton):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)  # Qt repaints it on enter and leave
         self.setObjectName("cbtn")
         self.setAutoDefault(False)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -107,99 +110,6 @@ class FolderButton(LayoutButton):
         p.setOpacity(0.55)
         p.drawPixmap(self.chev.x(), self.chev.y(), icons.pixmap("chevron-down", t.text if hover else t.text_2, 12))
         self.label.set_color("text" if hover else "text_2")
-
-    def enterEvent(self, e) -> None:
-        self.update()
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:
-        self.update()
-        super().leaveEvent(e)
-
-
-class SendButton(QPushButton):
-    """``.send``: a 32px circle; a quiet ring until there is text, then Claude's orange."""
-
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self.setAutoDefault(False)
-        self.setFixedSize(32, 32)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip("Start (Enter)")
-        self.setAccessibleName("Start")
-        self.setStyleSheet("QPushButton { background: transparent; border: none; padding: 0; }")
-        self._ready = False
-        self._busy = False
-        self.spinner = Spinner(14, parent=self)
-        self.spinner.move(9, 9)
-        self.spinner.hide()
-        bind(theme.theme.changed, self, lambda _t: self.update())
-
-    def set_state(self, ready: bool, busy: bool) -> None:
-        self._ready, self._busy = ready, busy
-        self.spinner.setVisible(busy)
-        self.update()
-
-    def paintEvent(self, _e) -> None:
-        t = theme.tokens()
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        r = QRectF(0.5, 0.5, 31, 31)
-        if self._ready:
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor(t.accent_2 if self.underMouse() and self.isEnabled() else t.accent))
-            p.drawEllipse(QRectF(0, 0, 32, 32))
-            ink = t.accent_ink
-        else:
-            p.setPen(theme.blend(t.hair_2, t.raised))
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawEllipse(r)
-            ink = t.text_3
-        if not self._busy:
-            p.drawPixmap(8, 8, icons.pixmap("arrow-up", ink, 16, stroke=2.25))
-
-    def enterEvent(self, e) -> None:
-        self.update()
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:
-        self.update()
-        super().leaveEvent(e)
-
-
-class WelcomeChip(QPushButton):
-    """``.folder-chip``: a recent folder as a 26px pill; ``on`` marks the chosen one."""
-
-    def __init__(self, text: str, tooltip: str, parent: Optional[QWidget] = None) -> None:
-        super().__init__(text, parent)
-        self.setObjectName("wchip")
-        self.setAutoDefault(False)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip(tooltip)
-        self.setAccessibleName(text)
-        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
-        self.setFixedHeight(24)
-        self._on = False
-        self._font = theme.font_ui(theme.FS_SMALL)
-        bind(theme.theme.changed, self, lambda _t: self.update())
-
-    def set_on(self, on: bool) -> None:
-        self._on = on
-        self.update()
-
-    def sizeHint(self) -> QSize:
-        return QSize(QFontMetrics(self._font).horizontalAdvance(self.text()) + 20, 24)
-
-    def paintEvent(self, _e) -> None:
-        t = theme.tokens()
-        lit = self._on or self.underMouse()
-        bg = theme.blend(t.fill_2 if lit else t.fill_1, t.canvas)
-        line = theme.blend(t.hair_3 if self._on else t.hair, bg.name())
-        p = QPainter(self)
-        paint_box(p, QRectF(self.rect()), bg, line, 13)
-        p.setFont(self._font)
-        p.setPen(QColor(t.text if lit else t.text_2))
-        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.text())
 
 
 class WelcomeBox(QFrame):
@@ -235,7 +145,7 @@ class WelcomeBox(QFrame):
         bl.addWidget(self.folder_btn)
         bl.addStretch(1)
         bl.addSpacing(2)
-        self.send = SendButton()
+        self.send = SendButton("Start")
         bl.addWidget(self.send)
         lay.addWidget(bar)
         bind(theme.theme.changed, self, lambda _t: self.update())
@@ -267,7 +177,7 @@ class Welcome(QWidget):
         self.picked = ""
         self.busy = False
         self.recents: List[str] = []
-        self.chips: List[WelcomeChip] = []
+        self.chips: List[Btn] = []
 
         self.side_btn = IconButton("panel-left-open", "Show sidebar (Ctrl+B)", 16, parent=self)
         self.side_btn.setFixedSize(28, 28)
@@ -397,7 +307,7 @@ class Welcome(QWidget):
         self.chips = []
         if len(self.recents) > 1:
             for r in self.recents:
-                ch = WelcomeChip(basename(r), tildify(r, home))
+                ch = chip_button(basename(r), tildify(r, home))
                 ch.set_on(r == cwd)
                 ch.clicked.connect(lambda _c=False, path=r: self.pick(path))
                 self.chips_lay.insertWidget(self.chips_lay.count() - 1, ch)
@@ -440,7 +350,7 @@ class Welcome(QWidget):
 
     def _sync_send(self) -> None:
         ready = bool(self.box.text().strip())
-        self.box.send.set_state(ready, self.busy)
+        self.box.send.set_state(ready, busy=self.busy)
         self.box.send.setEnabled(ready and not self.busy and store.connected)
 
     def go(self) -> None:

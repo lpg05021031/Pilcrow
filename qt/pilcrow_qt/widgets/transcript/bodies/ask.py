@@ -81,7 +81,6 @@ class OptionRow(QWidget):
         super().__init__(parent)
         self.label = label
         self.on = False
-        self._hover = False
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAccessibleName(label)
@@ -109,15 +108,8 @@ class OptionRow(QWidget):
         self.update()
 
     def enterEvent(self, e) -> None:
-        self._hover = True
         self.hovered.emit()
-        self.update()
         super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:
-        self._hover = False
-        self.update()
-        super().leaveEvent(e)
 
     def focusInEvent(self, e) -> None:
         self.hovered.emit()
@@ -136,7 +128,7 @@ class OptionRow(QWidget):
 
     def paintEvent(self, _e) -> None:
         t = theme.tokens()
-        if self.on or self._hover:
+        if self.on or self.underMouse():
             p = QPainter(self)
             p.fillRect(self.rect(), t.color("fill_2" if self.on else "fill_1"))
 

@@ -23,7 +23,6 @@ from .settings_ui import (
     EFFORTS,
     MODES,
     Flow,
-    FolderChip,
     ModelSelect,
     RadioList,
     Sheet,
@@ -31,6 +30,7 @@ from .settings_ui import (
     combo,
     combo_value,
     field,
+    folder_chip,
     home,
     modes_for,
     open_sheet,
@@ -262,9 +262,9 @@ class NewSessionSheet(Sheet):
             reg = store.repo_for(r)
             if reg and str(reg.get("path") or "").rstrip("/") == r.rstrip("/"):
                 tip = " · ".join(x for x in (str(reg.get("about") or ""), tildify(r, home())) if x)
-                ch = FolderChip(str(reg.get("name") or basename(r)), tip)
+                ch = folder_chip(str(reg.get("name") or basename(r)), tip)
             else:
-                ch = FolderChip(basename(r), tildify(r, home()))
+                ch = folder_chip(basename(r), tildify(r, home()))
             ch.clicked.connect(lambda _c=False, p=r: self.set_cwd(p))
             self.chips.add(ch)
         self.schedule_relayout()
