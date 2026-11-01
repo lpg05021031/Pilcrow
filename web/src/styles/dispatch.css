@@ -96,56 +96,32 @@
   }
 }
 
-/* ---- a request waiting, the canary waiting */
-.dp-ask,
-.dp-canary {
-  display: flex;
+/* ---- a request waiting, the canary waiting: on the board, wells inside the job's card (the control
+   room's `.ovc-well`); in the job view, cards of their own (`.ovc.needs`) */
+.ovc-well.dp-ask,
+.ovc-well.dp-canary {
   align-items: center;
   gap: 10px;
-  min-width: 0;
-  padding: 7px 10px 7px 12px;
-  border-radius: 8px;
-  font-size: var(--fs-small);
-  position: relative;
+  padding: 6px 8px 6px 10px;
 }
-.dp-ask {
-  background: var(--warn-wash);
-}
-.dp-canary {
-  background: var(--plan-wash);
-}
-.dp-ask::before,
-.dp-canary::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 6px;
-  bottom: 6px;
-  width: 3px;
-  border-radius: 1.5px;
-  background: var(--warn);
-}
-.dp-canary::before {
-  background: var(--plan);
-}
-.dp-ask-tool {
-  font-weight: 600;
-  flex: none;
-}
-.dp-ask-what {
-  min-width: 0;
+.ovc-well.dp-ask .ovc-perm-what {
   flex: 1 1 auto;
-  font-size: 12px;
+  white-space: nowrap;
 }
 .dp-ask-who {
   flex: none;
   font-size: var(--fs-micro);
 }
+.dp-canary-text b {
+  font-weight: 560;
+}
+.dp-card.needs {
+  cursor: pointer;
+}
 .dp-learn {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding-left: 14px;
   font-size: var(--fs-small);
 }
 
@@ -157,6 +133,10 @@
 }
 
 /* ---- the job view */
+.status-pill.review,
+.status-pill.paused {
+  color: var(--text-3);
+}
 .dp-top {
   display: grid;
   gap: 8px;
@@ -330,6 +310,36 @@
 }
 
 /* ---- the composer */
+.dp-label-line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.dp-label-line .faint {
+  font-size: var(--fs-small);
+  font-weight: 400;
+}
+.dp-form .ns-disclose {
+  margin: 0;
+}
+.dp-options {
+  display: grid;
+  gap: 18px;
+  padding: 6px 8px 4px;
+}
+.dp-group {
+  display: grid;
+  gap: 8px;
+}
+.dp-group-h {
+  font-size: var(--fs-small);
+  font-weight: 600;
+  color: var(--text-2);
+}
+.dp-box.dp-plan {
+  padding: 9px 12px;
+}
 .dp-inline {
   display: flex;
   align-items: center;

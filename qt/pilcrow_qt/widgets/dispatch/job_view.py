@@ -20,12 +20,13 @@ from ...canvas.view import CanvasView
 from ...lib.fmt import cost as fmt_cost
 from ...lib.fmt import plural
 from ...store import ConfirmSpec, store
-from ..dialogs.parts import Switch, Text
+from ..dialogs.parts import Text
 from ..dialogs.settings_ui import text_area
+from ..session_view import StatusPill
 from ..ui.bits import Box, IconButton, button
 from ..ui.menu import show_menu
 from ..ui.signals import bind
-from .board import CanaryRow, RequestRow
+from .cards import CanaryCard, RequestCard
 from .common import (
     ACTIVE,
     STATE_TONE,
@@ -35,7 +36,6 @@ from .common import (
     elapsed_text,
     group_requests,
     job_cost_text,
-    job_state_text,
     now_ms,
     paint_glyph,
 )
@@ -43,7 +43,9 @@ from .common import (
 Json = Dict[str, Any]
 ROW_PAD = (10, 0, 10, 0)
 ROW_H = 34
-COLS = {"state": 112, "branch": 150, "elapsed": 56, "files": 92, "cost": 58}
+# the fixed columns; repository and now share the rest; the actions keep their own column at the end,
+# in the head too, so a row with buttons and one without line up
+COLS = {"state": 112, "branch": 150, "elapsed": 56, "files": 92, "cost": 58, "acts": 150}
 
 
 class Cell(nd.Container):
@@ -159,7 +161,8 @@ class RunBlock(NodeBlock):
             acts += [nd.Button("Skip", "skip", kind="ghost", size="xs")]
         elif state == "done" and r.get("pr"):
             acts += [nd.Link("PR", "pr", size=theme.FS_MICRO, data=r.get("pr"))]
-        parts: List[nd.Node] = [state_cell, name, branch, elapsed, files, cost, now, *acts]
+        acts_cell = Cell(nd.hstack(*acts, spacing=6), COLS["acts"], right=True)
+        parts: List[nd.Node] = [state_cell, name, branch, elapsed, files, cost, now, acts_cell]
         return nd.Row(parts, 10, ROW_PAD, [1, 6], "center", ROW_H)
 
     def _now_text(self, r: Json, state: str) -> tuple:
@@ -201,6 +204,7 @@ class RunBlock(NodeBlock):
         elif self.run.get("state") == "needs_action":
             rounded(p, QRect(x, y, w, self.h), theme.blend(st.t.warn_wash, st.t.canvas), None, theme.R2)
         super().paint(p, x, y, w, st)
+        paint_rule(p, x, y + self.h - 1, w, st)
 
     def hit(self, x: int, y: int) -> Optional[Target]:
         t = super().hit(x, y)
@@ -231,20 +235,25 @@ class RunBlock(NodeBlock):
         return (0, 0, ROW_PAD[0] + 20, self.h) if self.live() else None
 
 
+def paint_rule(p: QPainter, x: int, y: int, w: int, st: PaintState) -> None:
+    """The hairline under a row (``.dp-table td``), on the device grid."""
+    p.fillRect(QRect(x, y, w, 1), theme.blend(st.t.hair, st.t.canvas))
+
+
 class HeadBlock(NodeBlock):
-    """The column titles."""
+    """The column titles, in the rows' own cells, so they stand over their columns."""
 
     KIND = "run-head"
 
     def __init__(self) -> None:
-        super().__init__("run:head", self._build, (0, 0, 0, 0), est_h=24)
+        super().__init__("run:head", self._build, (0, 0, 0, 0), est_h=26)
 
     def _build(self, m: Measurer) -> nd.Node:
         def t(s: str, w: Optional[int] = None, right: bool = False) -> nd.Node:
             n = nd.Text(s.upper(), 10.5, 600, "text_4", wrap=False)
             return Cell(n, w, right) if w else n
 
-        return nd.hstack(
+        parts: List[nd.Node] = [
             t("state", COLS["state"]),
             t("repository"),
             t("branch", COLS["branch"]),
@@ -252,10 +261,13 @@ class HeadBlock(NodeBlock):
             t("Δ files", COLS["files"], True),
             t("cost", COLS["cost"], True),
             t("now"),
-            spacing=10,
-            stretch=[1, 6],
-            pad=(10, 4, 10, 6),
-        )
+            Cell(nd.hstack(), COLS["acts"], True),
+        ]
+        return nd.Row(parts, 10, (10, 4, 10, 6), [1, 6], "center", 26)
+
+    def paint(self, p: QPainter, x: int, y: int, w: int, st: PaintState) -> None:
+        super().paint(p, x, y, w, st)
+        paint_rule(p, x, y + self.h - 1, w, st)
 
     @property
     def static(self) -> bool:
@@ -362,6 +374,10 @@ class JobView(QWidget):
         self.title = QLabel("Job")
         self.title.setProperty("fs", "title")
         hl.addWidget(self.title)
+        # the job's state as the sessions show theirs: the pill beside the title
+        self.pill = StatusPill()
+        self.pill.hide()
+        hl.addWidget(self.pill)
         self.meta = QLabel()
         theme.tint(self.meta, fg="text_3")
         self.meta.setProperty("fs", "small")
@@ -488,18 +504,7 @@ class JobView(QWidget):
             self.meta.setText("")
             return
         self.title.setText(str(job.get("name") or "Untitled job"))
-        self.meta.setText(
-            " · ".join(
-                x
-                for x in (
-                    plural(int(job.get("total") or 0), "repo"),
-                    job_state_text(job, self.now),
-                    job_cost_text(job) if float(job.get("cost") or 0) else "",
-                    elapsed_text(job, self.now) if job.get("state") in ("finished", "stopped") else "",
-                )
-                if x
-            )
-        )
+        self._meta()
         st = str(job.get("state") or "")
         self.pause_btn.setVisible(st == "running")
         self.edit_btn.setVisible(
@@ -513,7 +518,7 @@ class JobView(QWidget):
         p = job.get("plan") or {}
         bits = []
         if p:
-            bits.append(f"Plan: {int(p.get('ok') or 0)} ok")
+            bits.append(f"plan · {int(p.get('ok') or 0)} of {len(p.get('targets') or [])} ready")
             if int(p.get("warnings") or 0):
                 bits.append(f"{int(p.get('warnings') or 0)} warning{'s' if int(p.get('warnings') or 0) != 1 else ''}")
             if int(p.get("blocked") or 0):
@@ -556,11 +561,9 @@ class JobView(QWidget):
                 if w is not None:
                     w.deleteLater()
             if job.get("canaryWaiting"):
-                card = CanaryRow(job)
-                self.extra.addWidget(card)
-                self.extra.addWidget(self._learn_row(job))
+                self.extra.addWidget(CanaryCard(job))
             for g in groups[:6]:
-                self.extra.addWidget(RequestRow(self.jid, g))
+                self.extra.addWidget(RequestCard(self.jid, g, self.now))
         self.list.sync(self.jid, runs, self.now)
         # the foot: the review and the ways to finish
         reviewing = st in ("reviewing", "finished", "stopped") and not job.get("canaryWaiting")
@@ -580,21 +583,46 @@ class JobView(QWidget):
             else:
                 self._review_text()
 
-    def _learn_row(self, job: Json) -> QWidget:
-        row = QWidget()
-        rl = QHBoxLayout(row)
-        rl.setContentsMargins(14, 0, 0, 0)
-        rl.setSpacing(8)
-        sw = Switch(
-            bool((job.get("settings") or {}).get("learn", True)), "let the rest learn from the canary's summary"
+    def _meta(self) -> None:
+        """The pill says the state; the meta line the size, the cost and the time."""
+        job = self.job
+        st = str(job.get("state") or "")
+        status, label = "idle", None
+        if st == "running":
+            if job.get("paused"):
+                status, label = "paused", "Paused"
+            elif job.get("capReached"):
+                status, label = "requires_action", "Cost cap reached"
+            elif int(job.get("needsAction") or 0):
+                status, label = "requires_action", "Needs you"
+            else:
+                status, label = "running", "Running"
+        elif st == "reviewing":
+            if job.get("canaryWaiting"):
+                status, label = "requires_action", "Canary done"
+            elif int(job.get("needsAction") or 0):
+                status, label = "requires_action", "Needs you"
+            else:
+                status, label = "review", "In review"
+        self.pill.set_status(status, None, label)
+        started = float(job.get("startedAt") or 0)
+        when = ""
+        if st in ("finished", "stopped"):
+            when = elapsed_text(job, self.now)
+        elif started and st in ("running", "reviewing"):
+            when = clock_mmss(self.now - started)
+        self.meta.setText(
+            " · ".join(
+                x
+                for x in (
+                    plural(int(job.get("total") or 0), "repo"),
+                    job_cost_text(job) if float(job.get("cost") or 0) else "",
+                    when,
+                    str(job.get("stoppedReason") or "").lower() if st == "stopped" else "",
+                )
+                if x
+            )
         )
-        sw.toggled.connect(
-            lambda on: store.call("dispatch.save", {"id": self.jid, "settings": {"learn": bool(on)}}, quiet=True)
-        )
-        rl.addWidget(sw)
-        rl.addWidget(Text("let the rest learn from the canary's summary", theme.FS_SMALL, 400, "text_2", wrap=False))
-        rl.addStretch(1)
-        return row
 
     def load_review(self) -> None:
         jid = self.jid
@@ -646,19 +674,13 @@ class JobView(QWidget):
         job = self.job
         if not job:
             return
-        if job.get("state") == "running":
-            self.meta.setText(
-                " · ".join(
-                    x
-                    for x in (
-                        plural(int(job.get("total") or 0), "repo"),
-                        job_state_text(job, self.now),
-                        job_cost_text(job) if float(job.get("cost") or 0) else "",
-                    )
-                    if x
-                )
-            )
+        if job.get("state") in ("running", "reviewing"):
+            self._meta()
             self.list.sync(self.jid, store.runs_of(self.jid), self.now)
+            for i in range(self.extra.count()):
+                w = self.extra.itemAt(i).widget()
+                if isinstance(w, RequestCard):
+                    w.tick(self.now)
 
     # ---- actions
     def toggle_edit(self) -> None:

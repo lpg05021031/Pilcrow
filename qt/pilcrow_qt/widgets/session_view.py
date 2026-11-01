@@ -994,17 +994,18 @@ class StatusPill(QWidget):
         lay.addWidget(self.link)
         bind(theme.theme.changed, self, lambda _t: self._paint())
 
-    def set_status(self, status: str, workflow: Optional[str] = None) -> None:
-        if (status, workflow) == getattr(self, "_shown_status", None):
+    def set_status(self, status: str, workflow: Optional[str] = None, label: Optional[str] = None) -> None:
+        """``status`` picks the colour and the dot; ``label`` replaces the status word (a job's own)."""
+        if (status, workflow, label) == getattr(self, "_shown_status", None):
             return
-        self._shown_status = (status, workflow)
+        self._shown_status = (status, workflow, label)
         self.status = status
         show = bool(status) and status not in ("idle", "stopped")
         self.setVisible(show)
         if not show:
             self.dot.set_live(False)
             return
-        self.lb.setText(STATUS_TEXT.get(status, status))
+        self.lb.setText(label or STATUS_TEXT.get(status, status))
         self.link.setVisible(bool(workflow))
         if workflow:
             self.link.setText(f"· {workflow}")

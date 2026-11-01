@@ -2,11 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Pause, Play, Square, Ellipsis, GitCommitHorizontal, GitPullRequestArrow, ExternalLink, RotateCw, BookMarked, CalendarClock, ClipboardPaste, Trash, CircleDollarSign } from 'lucide-react';
 import { useStore, call, openSession, respond, confirmAction, toast, showDispatch, openJob, runsIn, loadPlaybooks } from '../../lib/store';
 import type { DispatchJob, DispatchReview, DispatchRun, Playbook } from '../../lib/types';
-import { cost, plural } from '../../lib/format';
+import { cost, duration, plural } from '../../lib/format';
 import { Switch, useNow, copyText } from '../ui/bits';
 import { MenuButton } from '../ui/Popover';
-import { CanaryRow, RequestRow } from './Board';
-import { ACTIVE, Glyph, STATE_WORD, TERMINAL, clockMmss, elapsedText, groupRequests, jobCostText, jobStateText } from './common';
+import { ACTIVE, Glyph, STATE_WORD, TERMINAL, askedBy, clockMmss, elapsedText, groupRequests, jobCostText, type RequestGroup } from './common';
 
 /**
  * A job's view: the header with its state and controls, the brief and the plan, the canary waiting
@@ -168,10 +167,9 @@ export function JobView({ id }: { id: string }) {
           <ArrowLeft size={16} />
         </button>
         <h1 className="ov-title ellipsis">{job.name || 'Untitled job'}</h1>
+        <JobPill job={job} />
         <span className="ov-sum tnum">
-          {plural(job.total || 0, 'repo')} · {jobStateText(job, now)}
-          {job.cost ? ` · ${jobCostText(job)}` : ''}
-          {st === 'finished' || st === 'stopped' ? ` · ${elapsedText(job, now)}` : ''}
+          {[plural(job.total || 0, 'repo'), job.cost ? jobCostText(job) : '', st === 'finished' || st === 'stopped' ? elapsedText(job, now) : job.startedAt ? clockMmss(now - job.startedAt) : '', st === 'stopped' ? (job.stoppedReason || '').toLowerCase() : ''].filter(Boolean).join(' · ')}
         </span>
         <div className="grow" />
         {st === 'running' && (
@@ -193,7 +191,7 @@ export function JobView({ id }: { id: string }) {
           <div className="dp-box-h">
             <span>Brief</span>
             <span className="faint">
-              {job.plan ? `Plan: ${job.plan.ok} ok${job.plan.warnings ? ` · ${plural(job.plan.warnings, 'warning')}` : ''}${job.plan.blocked ? ` · ${job.plan.blocked} blocked` : ''}${job.plan.levels > 1 ? ` · ${job.plan.levels} levels` : ''}` : ''}
+              {job.plan ? `plan · ${job.plan.ok} of ${job.plan.targets?.length || job.total || 0} ready${job.plan.warnings ? ` · ${plural(job.plan.warnings, 'warning')}` : ''}${job.plan.blocked ? ` · ${job.plan.blocked} blocked` : ''}${job.plan.levels > 1 ? ` · ${job.plan.levels} levels` : ''}` : ''}
             </span>
             <div className="grow" />
             {canEdit && (
@@ -213,17 +211,9 @@ export function JobView({ id }: { id: string }) {
             <p className={`dp-brief${rep.prose ? '' : ' faint'}`}>{rep.prose || (rep.proseState === 'writing' ? 'An agent is writing the report from the runs’ summaries…' : `The written report did not come: ${rep.proseError || 'unknown reason'}. The table stands.`)}</p>
           </div>
         )}
-        {job.canaryWaiting && (
-          <>
-            <CanaryRow job={job} />
-            <div className="dp-learn">
-              <Switch on={job.settings.learn !== false} onChange={(on) => call('dispatch.save', { id, settings: { learn: on } }, { quiet: true }).catch(() => {})} label="let the rest learn from the canary's summary" />
-              <span className="faint">let the rest learn from the canary’s summary</span>
-            </div>
-          </>
-        )}
+        {job.canaryWaiting && <CanaryCard job={job} runs={runs} />}
         {groups.slice(0, 6).map((g) => (
-          <RequestRow key={g.key} jobId={id} group={g} />
+          <RequestCard key={g.key} jobId={id} group={g} now={now} />
         ))}
       </div>
       <div className="dp-runs">
@@ -272,6 +262,120 @@ export function JobView({ id }: { id: string }) {
         </footer>
       )}
     </div>
+  );
+}
+
+/** The job's state as the sessions show theirs: the pill beside the title; nothing once it is over. */
+function JobPill({ job }: { job: DispatchJob }) {
+  let cls = '';
+  let label = '';
+  if (job.state === 'running') {
+    if (job.paused) [cls, label] = ['paused', 'Paused'];
+    else if (job.capReached) [cls, label] = ['requires_action', 'Cost cap reached'];
+    else if (job.needsAction) [cls, label] = ['requires_action', 'Needs you'];
+    else [cls, label] = ['running', 'Running'];
+  } else if (job.state === 'reviewing') {
+    if (job.canaryWaiting) [cls, label] = ['requires_action', 'Canary done'];
+    else if (job.needsAction) [cls, label] = ['requires_action', 'Needs you'];
+    else [cls, label] = ['review', 'In review'];
+  }
+  if (!cls) return null;
+  return (
+    <span className={`status-pill ${cls}`}>
+      <span className="status-dot" />
+      {label}
+    </span>
+  );
+}
+
+/** The canary finished (`.ovc.needs`): its name, how it went, its summary in the well, Continue with the forecast, and whether the rest learn from it. */
+function CanaryCard({ job, runs }: { job: DispatchJob; runs: DispatchRun[] }) {
+  const names = job.learned.map((l) => l.name).join(', ') || 'the canary';
+  const canary = runs.filter((r) => r.wave === 'canary');
+  const bits = canary.flatMap((r) => [r.startedAt && r.endedAt ? clockMmss(r.endedAt - r.startedAt) : '', r.cost ? cost(r.cost) : '', r.files?.length ? plural(r.files.length, 'file') : '']).filter(Boolean);
+  const summary = (job.learned[0]?.summary || '').split('\n')[0].slice(0, 300);
+  const f = job.forecast;
+  const openCanary = () => {
+    const run = canary.find((r) => r.sessionId);
+    if (run?.sessionId) openSession(run.sessionId);
+  };
+  return (
+    <article className="ovc needs dp-canary">
+      <span className="ovc-rail" aria-hidden="true" />
+      <div className="ovc-row">
+        <div className="ovc-head">
+          <span className="ovc-title">Canary {names} finished</span>
+          {bits.length > 0 && <span className="ovc-proj tnum">{bits.join(' · ')}</span>}
+        </div>
+      </div>
+      {summary && (
+        <div className="ovc-well">
+          <span className="ovc-perm-what">{summary}</span>
+        </div>
+      )}
+      <div className="ovc-actions">
+        <button className="btn sm primary" onClick={() => call('dispatch.continue', { id: job.id }).catch(() => {})}>
+          <Play size={12} /> Continue
+        </button>
+        <button className="btn sm ghost" onClick={openCanary}>
+          Open canary
+        </button>
+        {f && (
+          <span className="faint tnum">
+            forecast {cost(f.cost)} · {f.minutes} min for {plural(f.runs, 'repo')}
+          </span>
+        )}
+      </div>
+      <div className="dp-learn">
+        <Switch on={job.settings.learn !== false} onChange={(on) => call('dispatch.save', { id: job.id, settings: { learn: on } }, { quiet: true }).catch(() => {})} label="the rest learn from its summary" />
+        <span className="faint">the rest learn from its summary</span>
+      </div>
+    </article>
+  );
+}
+
+/** A request group (`.ovc.needs`): the tool as the title, who asked under it, how long it has waited, what it asks in the well, the answers. */
+function RequestCard({ jobId, group, now }: { jobId: string; group: RequestGroup; now: number }) {
+  const first = group.asks[0];
+  const [tool, ...rest] = group.label.split(': ');
+  const what = rest.join(': ');
+  const allowOne = () => first && respond(first.run.sessionId || '', first.pending.requestId, { behavior: 'allow', decisionClassification: 'user_temporary' });
+  const allowAll = () => call('dispatch.allow', { id: jobId, key: group.key });
+  const denyOne = () => first && respond(first.run.sessionId || '', first.pending.requestId, { behavior: 'deny', message: 'The user declined this action.', decisionClassification: 'user_reject' });
+  const open = () => first?.run.sessionId && openSession(first.run.sessionId);
+  return (
+    <article className="ovc needs dp-ask">
+      <span className="ovc-rail" aria-hidden="true" />
+      <div className="ovc-row">
+        <div className="ovc-head">
+          <span className="ovc-title">{what ? tool : group.label}</span>
+          <span className="ovc-proj">{askedBy(group.names)}</span>
+        </div>
+        <span className="ovc-wait tnum">{group.at && now - group.at >= 1000 ? `waiting ${duration(now - group.at)}` : ''}</span>
+      </div>
+      <div className="ovc-well">
+        <span className="ovc-perm-what mono">{what || group.label}</span>
+      </div>
+      <div className="ovc-actions">
+        {group.interactive ? (
+          <button className="btn sm primary" onClick={open}>
+            Open to respond
+          </button>
+        ) : (
+          <>
+            <button className="btn sm primary" onClick={allowOne}>
+              Allow
+            </button>
+            <button className="btn sm" onClick={allowAll} title="Answer every run of this job that asks the same thing, now and later">
+              Allow for all{group.asks.length > 1 ? ` · ${group.asks.length}` : ''}
+            </button>
+            <button className="btn sm ghost" onClick={denyOne}>
+              Deny
+            </button>
+          </>
+        )}
+      </div>
+    </article>
   );
 }
 

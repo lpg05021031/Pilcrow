@@ -43,7 +43,7 @@ def test_board_shows_the_jobs_and_the_sidebar_entry(app_client):
     jv = page.job_view
     c.wait_until(lambda: len(jv.list.runs) == 3, 5, "the job's runs")
     assert jv.title.text() == "Pin node 22 in CI"
-    assert "finished" in jv.meta.text()
+    assert jv.pill.isHidden() and "$0.81" in jv.meta.text(), "a finished job has no state pill; its cost and time"
     assert jv.foot.isVisible(), "a finished job shows its review foot"
     c.wait_until(lambda: jv.review_text.text().startswith("Finished:"), 5, "review text")
     assert "2 of 3 done" in jv.review_text.text() and "2 committed" in jv.review_text.text()
@@ -92,11 +92,12 @@ def test_a_job_from_the_composer_through_the_canary_to_the_report(app_client):
     assert c.store.dispatch_needs == 1
     assert c.win.sidebar.page_dispatch._count == 1
     c.sleep(80)
-    from pilcrow_qt.widgets.dispatch.board import RequestRow
+    from pilcrow_qt.widgets.dispatch.cards import RequestCard
 
-    reqs = c.find(RequestRow, jv)
+    reqs = c.find(RequestCard, jv)
     assert len(reqs) == 1 and reqs[0].tool.text() == "Bash"
     assert reqs[0].who.text() == "asked by design-system"
+    assert jv.pill.text() == "Needs you"
     row_before = jv.list.scene.block(f"run:{runs['design-system']['id']}")
     assert row_before is not None
     assert c.shot("dispatch-job-asking").exists()
@@ -123,13 +124,13 @@ def test_a_job_from_the_composer_through_the_canary_to_the_report(app_client):
     assert [r["name"] for r in jv.list.runs] == ["design-system", "docs", "web-ui"], "dependencies first, then by name"
 
     c.sleep(80)
-    from pilcrow_qt.widgets.dispatch.board import CanaryRow
+    from pilcrow_qt.widgets.dispatch.cards import CanaryCard
 
-    canary = c.find(CanaryRow, jv)
+    canary = c.find(CanaryCard, jv)
     assert len(canary) == 1 and canary[0].text.text().startswith("Canary design-system finished")
     assert canary[0].forecast.text().startswith("forecast $")
     assert jv.list.scene.block(f"run:{runs['design-system']['id']}") is row_before, "the row was patched, not rebuilt"
-    assert "canary done" in jv.meta.text()
+    assert jv.pill.text() == "Canary done"
     assert jv.rules.isVisible() and "rm -rf build" in jv.rules.text()
     # the brief can change before the rest run: the main wave fixes files instead of asking
     assert jv.edit_btn.isVisible()
@@ -338,6 +339,8 @@ def test_hidden_dispatch_pages_do_nothing_until_shown(app_client):
 
 
 def test_the_sidebar_rebuilds_only_when_the_jobs_change(app_client):
+    """The handler itself, not the mock's traffic: a run's progress leaves the rows alone, a job's name
+    rebuilds them."""
     c = app_client
     _dispatch(c)
     sb = c.win.sidebar
@@ -346,11 +349,13 @@ def test_the_sidebar_rebuilds_only_when_the_jobs_change(app_client):
     orig = sb.rebuild
     sb.rebuild = lambda: n.__setitem__("k", n["k"] + 1)
     try:
-        c.store._on_dispatch({"id": jid, "job": dict(c.store.jobs[jid], cost=9), "runs": [], "all": False})
-        c.sleep(30)
+        sb._on_dispatch()  # the jobs as they are: the signature settles
+        n["k"] = 0
+        c.store.jobs[jid] = dict(c.store.jobs[jid], cost=9)
+        sb._on_dispatch()
         assert n["k"] == 0, "a run's progress is not the sidebar's business"
-        c.store._on_dispatch({"id": jid, "job": dict(c.store.jobs[jid], name="Renamed"), "runs": [], "all": False})
-        c.sleep(30)
+        c.store.jobs[jid] = dict(c.store.jobs[jid], name="Renamed")
+        sb._on_dispatch()
         assert n["k"] == 1, "a job's name is"
     finally:
         sb.rebuild = orig
@@ -363,6 +368,9 @@ def test_the_composers_switches_say_what_they_do(app_client):
     c.wait_until(lambda: page.composer is not None and page.composer.isVisible(), 5, "composer")
     from pilcrow_qt.widgets.dialogs.parts import Text
 
+    assert not page.composer.options.is_open, "the settings wait behind Options"
+    page.composer.set_options_open(True)
+    c.sleep(50)
     words = {t.text() for t in c.find(Text, page.composer)}
     assert {
         "the rest learn from the canary",

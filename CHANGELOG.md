@@ -75,6 +75,12 @@
    job（現在有「run of …」麵包屑可以回到工作頁，跟 helper 的「helper of …」一樣）；完成列改成跟控制室一樣有 hover；
    web 端 state 欄跑出表格列、完成列名稱被擠到看不見、收件匣卡片的按鈕溢出，都修了。順手：`Text` 的換行結果依寬度
    快取、一行字寬度沒變就不觸發重排；側欄頁籤的徽章數字沒變就不重繪。
+   **Dispatch 重新設計**（兩個 client 同步）：工作頁的狀態改用 session 的 status pill（Running／Needs you／Canary
+   done／In review／Paused），標題後面只剩規模、花費、時間；canary 完成與等待回答改成控制室「需要你」的卡片語法（色底、
+   左側 rail、標題與副標、well 裡放摘要或指令、按鈕一列），不再是帶色橫幅；表格的動作欄固定寬度、標題列也有，列與列之間
+   有細線，欄位對齊；看板上需要你的工作是同一種卡片，請求與 canary 是卡片裡的 well。新工作表單縮成名稱、brief、目標
+   三件事：plan 的結論放在 Targets 標籤旁、注意事項只在有話說時出現在清單下方，其餘設定收進「Options」（跟新 session
+   對話框同款的展開列，收起時一行讀出目前設定），Plan 按鈕拿掉（打字時就會算）。
 
 - **2.11.0**：**Dispatch：一份 brief、一組 repo、一個 job**（設計與現況見 `DISPATCH.md`）。伺服器新增 `server/dispatch_core.js`
   與 `server/dispatch.js`：掃描資料夾找 repo（分支、未提交、遠端、大小、CLAUDE.md，以及 package.json / go.mod /

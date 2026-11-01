@@ -94,7 +94,7 @@ export function Board() {
   );
 }
 
-/** A request waiting on a job: what, who asked, and Allow / Allow for all / Deny. */
+/** A request waiting on a job, as one line in a well (`.ovc-well`): the tool, what it asks, who asked, the answers. */
 export function RequestRow({ jobId, group }: { jobId: string; group: RequestGroup }) {
   const first = group.asks[0];
   const [tool, ...rest] = group.label.split(': ');
@@ -104,23 +104,24 @@ export function RequestRow({ jobId, group }: { jobId: string; group: RequestGrou
   const denyOne = () => first && respond(first.run.sessionId || '', first.pending.requestId, { behavior: 'deny', message: 'The user declined this action.', decisionClassification: 'user_reject' });
   const open = () => first?.run.sessionId && openSession(first.run.sessionId);
   return (
-    <div className="dp-ask" onClick={(e) => e.stopPropagation()}>
-      <span className="dp-ask-tool">{what ? tool : group.label}</span>
-      {what && <span className="dp-ask-what mono ellipsis">{what}</span>}
+    <div className="ovc-well dp-ask" onClick={(e) => e.stopPropagation()}>
+      <span className="ovc-perm-tool">{what ? tool : group.label}</span>
+      {what && <span className="ovc-perm-what mono ellipsis">{what}</span>}
       <span className="dp-ask-who faint">{askedBy(group.names)}</span>
+      <span className="grow" />
       {group.interactive ? (
-        <button className="btn perm primary" onClick={open}>
+        <button className="btn sm primary" onClick={open}>
           Open to respond
         </button>
       ) : (
         <>
-          <button className="btn perm primary" onClick={allowOne}>
+          <button className="btn sm primary" onClick={allowOne}>
             Allow
           </button>
-          <button className="btn perm" onClick={allowAll} title="Answer every run of this job that asks the same thing, now and later">
+          <button className="btn sm" onClick={allowAll} title="Answer every run of this job that asks the same thing, now and later">
             Allow for all{group.asks.length > 1 ? ` · ${group.asks.length}` : ''}
           </button>
-          <button className="btn perm ghost" onClick={denyOne}>
+          <button className="btn sm ghost" onClick={denyOne}>
             Deny
           </button>
         </>
@@ -140,9 +141,9 @@ export function CanaryRow({ job }: { job: DispatchJob }) {
     else openJob(job.id);
   };
   return (
-    <div className="dp-canary" onClick={(e) => e.stopPropagation()}>
-      <span className="grow">
-        Canary <b>{names}</b> finished. Read it and continue.
+    <div className="ovc-well dp-canary" onClick={(e) => e.stopPropagation()}>
+      <span className="grow dp-canary-text">
+        Canary <b>{names}</b> finished.
       </span>
       {f && (
         <span className="faint tnum">
@@ -163,7 +164,8 @@ function JobCard({ job, now, detail }: { job: DispatchJob; now: number; detail: 
   const myRuns = useStore((s) => s.jobRuns[job.id]);
   const groups = detail ? groupRequests(runsIn(myRuns)).slice(0, 4) : [];
   return (
-    <article className="ovc dp-card" data-card={job.id} onClick={() => openJob(job.id)} role="button" tabIndex={0}>
+    <article className={`ovc dp-card${detail ? ' needs' : ''}`} data-card={job.id} onClick={() => openJob(job.id)} role="button" tabIndex={0}>
+      {detail && <span className="ovc-rail" aria-hidden="true" />}
       <div className="dp-line">
         <span className="dp-name ellipsis">{job.name || 'Untitled job'}</span>
         <span className="dp-scope faint">

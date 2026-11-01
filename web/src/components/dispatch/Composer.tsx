@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Play, Folder, ChevronDown, RefreshCw, Pencil, BookMarked } from 'lucide-react';
+import { Collapse } from '../ui/Collapse';
 import { useStore, call, showDispatch, openJob, loadPlaybooks, toast, defaultCwd } from '../../lib/store';
 import type { DispatchPlan, DispatchSettings, DispatchTarget, Playbook, WorkspaceRepo } from '../../lib/types';
 import { basename, dirname, plural, tildify } from '../../lib/format';
@@ -33,6 +34,7 @@ export function Composer() {
   const [planning, setPlanning] = useState(false);
   const [playbookId, setPlaybookId] = useState('');
   const [starting, setStarting] = useState(false);
+  const [showOptions, setShowOptions] = useState(false);
   const folderBtn = useRef<HTMLButtonElement>(null);
   const planSeq = useRef(0);
 
@@ -143,6 +145,31 @@ export function Composer() {
     }
   };
   const set = <K extends keyof DispatchSettings>(k: K, v: DispatchSettings[K]) => setSettings((s) => ({ ...s, [k]: v }));
+  // one line of what Options hold: the defaults read as a sentence, so most people never open it
+  const summary = [
+    settings.mode === 'acceptEdits' ? 'allow edits' : 'ask for everything',
+    `${settings.parallel} parallel`,
+    `${settings.maxMinutes} min each`,
+    settings.canary ? `canary ${settings.canary}` : 'no canary',
+    settings.costCap ? `cap $${settings.costCap}` : '',
+    settings.model,
+    settings.prepare ? `prepare: ${settings.prepare}` : '',
+    settings.verify ? `verify: ${settings.verify}` : '',
+    branch ? `branch ${branch}` : '',
+    settings.pr ? 'pull requests' : '',
+    settings.report === 'agent' ? 'written report' : '',
+  ]
+    .filter(Boolean)
+    .join(' · ');
+  const planSummary = (() => {
+    if (!plan) return planning ? 'planning…' : '';
+    const bits = [`${plan.ok + plan.warnings} of ${targets.length || plan.targets.length} ready`];
+    if (plan.warnings) bits.push(plural(plan.warnings, 'warning'));
+    if (plan.blocked) bits.push(`${plan.blocked} blocked`);
+    if (plan.worst.minutes) bits.push(`up to ${plan.worst.minutes} min`);
+    if (plan.worst.levels > 1) bits.push(`${plan.worst.levels} levels`);
+    return bits.join(' · ') + (planning ? ' · planning…' : '');
+  })();
   const planRows = (plan?.targets || [])
     .flatMap((t) => (t.notes || []).filter((n) => n.kind !== 'note' || /Runs after/.test(n.text)).map((n) => ({ t, n })))
     .sort((a, b) => ({ blocked: 0, warning: 1, note: 2 })[a.n.kind] - ({ blocked: 0, warning: 1, note: 2 })[b.n.kind]);
@@ -184,7 +211,10 @@ export function Composer() {
           <div className="hint">Variables: {VARIABLES}. Each repository gets its own copy; a target’s notes land in {'{{notes}}'}.</div>
         </div>
         <div className="field">
-          <label>Targets</label>
+          <label className="dp-label-line">
+            <span>Targets</span>
+            <span className="faint tnum">{planSummary}</span>
+          </label>
           <div className="dp-targets-top">
             <button ref={folderBtn} className={`ns-folder sd-folder dp-folder${picking ? ' on' : ''}`} onClick={() => setPicking(!picking)} title={tildify(root, info?.home)}>
               <Folder size={14} className="ns-folder-ico" />
@@ -222,90 +252,98 @@ export function Composer() {
             ))}
           </div>
         </div>
-        <div className="field">
-          <label>Run</label>
-          <div className="dp-inline">
-            <Select value={settings.mode} options={[{ value: 'acceptEdits', label: 'Allow edits in the worktree' }, { value: 'ask', label: 'Ask for everything' }]} onChange={(v) => set('mode', v)} width={260} />
-            <input className="input dp-model" value={settings.model} placeholder="default model" onChange={(e) => set('model', e.target.value)} />
+        {planRows.length > 0 && (
+          <div className="dp-box dp-plan">
+            {planRows.map(({ t, n }, i) => (
+              <div key={i} className="dp-plan-row">
+                <span className={`dp-plan-tag ${n.kind}`}>{n.kind === 'note' ? 'order' : n.kind}</span>
+                <span>
+                  {t.name} · {n.text}
+                </span>
+              </div>
+            ))}
           </div>
-          <div className="dp-inline">
-            <span className="sd-inline">parallel</span>
-            <input className="input sd-num" type="number" min={1} max={16} value={settings.parallel} onChange={(e) => set('parallel', Math.max(1, Math.min(16, Number(e.target.value) || 3)))} />
-            <span className="sd-inline">minutes each</span>
-            <input className="input sd-num" type="number" min={1} max={240} value={settings.maxMinutes} onChange={(e) => set('maxMinutes', Math.max(1, Math.min(240, Number(e.target.value) || 20)))} />
-            <span className="sd-inline">cost cap $</span>
-            <input className="input sd-num" type="number" min={0} value={settings.costCap} onChange={(e) => set('costCap', Math.max(0, Number(e.target.value) || 0))} />
-            <span className="sd-inline">canary</span>
-            <input className="input sd-num" type="number" min={0} max={8} value={settings.canary} onChange={(e) => set('canary', Math.max(0, Math.min(8, Number(e.target.value) || 0)))} />
+        )}
+        <button className={`ns-disclose${showOptions ? ' open' : ''}`} onClick={() => setShowOptions(!showOptions)} aria-expanded={showOptions}>
+          <ChevronDown size={14} className="ns-disclose-chev" />
+          <span className="ns-disclose-title">Options</span>
+          {!showOptions && <span className="ns-disclose-summary ellipsis">{summary}</span>}
+        </button>
+        <Collapse open={showOptions} className="ns-options dp-options">
+          <div className="dp-group">
+            <div className="dp-group-h">Run</div>
+            <div className="ns-two">
+              <div className="field">
+                <label>Permissions</label>
+                <Select value={settings.mode} options={[{ value: 'acceptEdits', label: 'Allow edits in the worktree' }, { value: 'ask', label: 'Ask for everything' }]} onChange={(v) => set('mode', v)} width={260} />
+              </div>
+              <div className="field">
+                <label>Model</label>
+                <input className="input dp-model" value={settings.model} placeholder="default model" onChange={(e) => set('model', e.target.value)} />
+              </div>
+            </div>
+            <div className="dp-inline">
+              <span className="sd-inline">parallel</span>
+              <input className="input sd-num" type="number" min={1} max={16} value={settings.parallel} onChange={(e) => set('parallel', Math.max(1, Math.min(16, Number(e.target.value) || 3)))} />
+              <span className="sd-inline">minutes each</span>
+              <input className="input sd-num" type="number" min={1} max={240} value={settings.maxMinutes} onChange={(e) => set('maxMinutes', Math.max(1, Math.min(240, Number(e.target.value) || 20)))} />
+              <span className="sd-inline">cost cap $</span>
+              <input className="input sd-num" type="number" min={0} value={settings.costCap} onChange={(e) => set('costCap', Math.max(0, Number(e.target.value) || 0))} />
+              <span className="sd-inline">canary</span>
+              <input className="input sd-num" type="number" min={0} max={8} value={settings.canary} onChange={(e) => set('canary', Math.max(0, Math.min(8, Number(e.target.value) || 0)))} />
+            </div>
+            <div className="dp-learn">
+              <Switch on={settings.learn} onChange={(v) => set('learn', v)} label="the rest learn from the canary" />
+              <span className="faint">the rest learn from the canary</span>
+            </div>
           </div>
-          <div className="dp-inline">
-            <Switch on={settings.learn} onChange={(v) => set('learn', v)} label="the rest learn from the canary" />
-            <span className="faint">the rest learn from the canary</span>
+          <div className="dp-group">
+            <div className="dp-group-h">Before and after each run</div>
+            <div className="ns-two">
+              <div className="field">
+                <label>Prepare (before the agent, in the worktree)</label>
+                <input className="input mono" value={settings.prepare} placeholder="npm ci" onChange={(e) => set('prepare', e.target.value)} />
+              </div>
+              <div className="field">
+                <label>Verify (after the agent)</label>
+                <input className="input mono" value={settings.verify} placeholder="npm test" onChange={(e) => set('verify', e.target.value)} />
+              </div>
+            </div>
+            <div className="dp-learn">
+              <Switch on={settings.verifyRetry} onChange={(v) => set('verifyRetry', v)} label="send a failing verify back to the agent once" />
+              <span className="faint">send a failing verify back to the agent once</span>
+            </div>
           </div>
-        </div>
-        <div className="ns-two">
-          <div className="field">
-            <label>Prepare (before the agent, in the worktree)</label>
-            <input className="input mono" value={settings.prepare} placeholder="npm ci" onChange={(e) => set('prepare', e.target.value)} />
-          </div>
-          <div className="field">
-            <label>Verify (after the agent)</label>
-            <input className="input mono" value={settings.verify} placeholder="npm test" onChange={(e) => set('verify', e.target.value)} />
-          </div>
-        </div>
-        <div className="dp-inline">
-          <Switch on={settings.verifyRetry} onChange={(v) => set('verifyRetry', v)} label="send a failing verify back to the agent once" />
-          <span className="faint">send a failing verify back to the agent once</span>
-        </div>
-        <div className="field">
-          <label>Finish</label>
-          <div className="ns-two">
-            <div className="field">
-              <label>Branch in every repository</label>
-              <input
-                className="input mono"
-                value={branch}
-                placeholder="pilcrow/<job>"
-                onChange={(e) => {
-                  setBranch(e.target.value);
-                  setBranchAuto(false);
-                }}
-              />
+          <div className="dp-group">
+            <div className="dp-group-h">Finish</div>
+            <div className="ns-two">
+              <div className="field">
+                <label>Branch in every repository</label>
+                <input
+                  className="input mono"
+                  value={branch}
+                  placeholder="pilcrow/<job>"
+                  onChange={(e) => {
+                    setBranch(e.target.value);
+                    setBranchAuto(false);
+                  }}
+                />
+              </div>
+              <div className="field">
+                <label>Commit message</label>
+                <input className="input" value={settings.commitMessage} placeholder="chore: {{job.name}}" onChange={(e) => set('commitMessage', e.target.value)} />
+              </div>
             </div>
             <div className="field">
-              <label>Commit message</label>
-              <input className="input" value={settings.commitMessage} placeholder="chore: {{job.name}}" onChange={(e) => set('commitMessage', e.target.value)} />
+              <label>Report</label>
+              <Select value={settings.report} options={[{ value: 'table', label: 'The table of repositories', hint: 'What each run did, landed and cost' }, { value: 'agent', label: 'The table, with prose written by an agent', hint: 'One more session reads the summaries and writes three paragraphs' }]} onChange={(v) => set('report', v)} width={360} />
+            </div>
+            <div className="dp-learn">
+              <Switch on={settings.pr} onChange={(v) => set('pr', v)} label="open pull requests with gh after committing" />
+              <span className="faint">open pull requests with gh after committing</span>
             </div>
           </div>
-          <div className="dp-inline">
-            <Select value={settings.report} options={[{ value: 'table', label: 'The table of repositories', hint: 'What each run did, landed and cost' }, { value: 'agent', label: 'The table, with prose written by an agent', hint: 'One more session reads the summaries and writes three paragraphs' }]} onChange={(v) => set('report', v)} width={360} />
-            <Switch on={settings.pr} onChange={(v) => set('pr', v)} label="open pull requests with gh after committing" />
-            <span className="faint">open pull requests with gh after committing</span>
-          </div>
-        </div>
-        <div className="dp-box dp-plan">
-          <div className="dp-box-h">
-            <b>Plan</b>
-            <span className="faint">{plan ? `${plan.ok} ok${plan.warnings ? ` · ${plural(plan.warnings, 'warning')}` : ''}${plan.blocked ? ` · ${plan.blocked} blocked` : ''}` : ''}</span>
-            {planning && <span className="faint">planning…</span>}
-            <div className="grow" />
-            {plan && (
-              <span className="faint tnum">
-                worst case {plural(plan.worst.runs, 'run')} · {plan.worst.minutes} min{plan.worst.cost ? ` · $${Math.round(plan.worst.cost)} cap` : ''}
-                {plan.worst.levels > 1 ? ` · ${plan.worst.levels} levels` : ''}
-              </span>
-            )}
-          </div>
-          {!plan && !planning && <div className="hint">Pick repositories and write the brief; the plan appears here as you type.</div>}
-          {planRows.map(({ t, n }, i) => (
-            <div key={i} className="dp-plan-row">
-              <span className={`dp-plan-tag ${n.kind}`}>{n.kind === 'note' ? 'order' : n.kind}</span>
-              <span>
-                {t.name} · {n.text}
-              </span>
-            </div>
-          ))}
-        </div>
+        </Collapse>
       </div>
     </div>
   );
