@@ -3,7 +3,7 @@
 // empty), and actions answer { ok, output } with git's own words, for the person to read.
 import fs from 'node:fs';
 import path from 'node:path';
-import { run, looksBinary } from './util.js';
+import { run, looksBinary, slash, under } from './util.js';
 
 const GIT = ['-c', 'core.quotePath=false', '-c', 'color.ui=false'];
 const MAX_UNTRACKED = 200; // untracked files shown in a diff, or counted for the header's line totals
@@ -11,9 +11,34 @@ const COUNT_FILE_BYTES = 1024 * 1024; // larger untracked files are not counted
 const COUNT_BUDGET_BYTES = 8 * 1024 * 1024; // read per info(), which the header asks for every few seconds
 const MAX_FILE_BYTES = 768 * 1024;
 const MAX_LINES_PER_FILE = 4000;
+// The whole diff is one answer in one WebSocket frame: past these, files keep their stats and come back
+// without hunks (truncated), for the panel to open on their own.
+const DIFF_BUDGET_LINES = 10_000;
+const DIFF_BUDGET_BYTES = 1024 * 1024; // of line text
+const LINE_CACHE_MAX = 2000; // untracked files whose line count is remembered
 
 export function git(cwd, args, opts = {}) {
   return run('git', [...GIT, ...args], { cwd, timeout: 30_000, ...opts });
+}
+
+/** path -> { size, mtimeMs, lines }: the header asks for info() every few seconds while Claude works,
+ *  and an untracked file that has not changed need not be read again to count its lines. */
+const lineCache = new Map();
+
+/** An untracked file's lines, from the cache when its size and time are the same; null when it is too
+ *  large to count. `read` is false once the caller's read budget is spent (a hit still counts). */
+async function untrackedLines(file, read) {
+  const st = await fs.promises.stat(file);
+  if (st.size >= COUNT_FILE_BYTES) return { lines: null, bytes: 0 };
+  const hit = lineCache.get(file);
+  if (hit && hit.size === st.size && hit.mtimeMs === st.mtimeMs) return { lines: hit.lines, bytes: 0 };
+  if (!read) return { lines: null, bytes: 0 };
+  const buf = await fs.promises.readFile(file);
+  const lines = lineCount(buf);
+  lineCache.delete(file);
+  if (lineCache.size >= LINE_CACHE_MAX) lineCache.delete(lineCache.keys().next().value);
+  lineCache.set(file, { size: st.size, mtimeMs: st.mtimeMs, lines });
+  return { lines, bytes: buf.length };
 }
 
 /** Lines in a file's bytes, the way a diff counts them (a last line without a newline counts). */
@@ -71,13 +96,10 @@ export async function info(cwd) {
   }
   let budget = COUNT_BUDGET_BYTES;
   for (const rel of untracked) {
-    if (budget <= 0) break;
     try {
-      const file = path.join(out.root, rel);
-      if ((await fs.promises.stat(file)).size >= COUNT_FILE_BYTES) continue;
-      const buf = await fs.promises.readFile(file);
-      budget -= buf.length;
-      out.insertions += lineCount(buf);
+      const { lines, bytes } = await untrackedLines(path.join(out.root, rel), budget > 0);
+      budget -= bytes;
+      out.insertions += lines || 0;
     } catch {
       /* unreadable or gone: skip */
     }
@@ -194,6 +216,7 @@ export function parseUnifiedDiff(text) {
   for (const f of files) {
     if (!f.path) f.path = f.oldPath;
     if (f.status === 'R' && f.oldPath === f.path) f.status = 'M';
+    if (f.truncated) f.hunks = []; // a file is shown whole or not at all
   }
   return files;
 }
@@ -225,8 +248,37 @@ async function untrackedAsDiff(root, rel) {
 }
 
 /**
+ * Keep the whole diff within DIFF_BUDGET_LINES and DIFF_BUDGET_BYTES, in path order: a file that does
+ * not fit keeps its stats and comes back with no hunks and `truncated`. Returns how many it cut.
+ * @param {DiffFile[]} files
+ */
+function withinBudget(files) {
+  let lines = 0;
+  let bytes = 0;
+  let cut = 0;
+  for (const f of files) {
+    let n = 0;
+    let b = 0;
+    for (const h of f.hunks) {
+      n += h.lines.length;
+      for (const l of h.lines) b += l.s.length;
+    }
+    if (lines + n > DIFF_BUDGET_LINES || bytes + b > DIFF_BUDGET_BYTES) {
+      f.hunks = [];
+      f.truncated = true;
+      cut++;
+    } else {
+      lines += n;
+      bytes += b;
+    }
+  }
+  return cut;
+}
+
+/**
  * Working tree vs `base` (default HEAD), including untracked files. Two or three git processes besides
- * status(): the merge base when `base` is a branch, and the diff itself.
+ * status(): the merge base when `base` is a branch, and the diff itself. Within the total budget
+ * (withinBudget); `truncated` is how many files it left without hunks.
  * @param {string} cwd @param {{ base?: string }} [opts]
  */
 export async function diff(cwd, { base } = {}) {
@@ -244,7 +296,8 @@ export async function diff(cwd, { base } = {}) {
   const files = parseUnifiedDiff(r.stdout);
   for (const f of await Promise.all(untracked.map((rel) => untrackedAsDiff(i.root, rel)))) if (f) files.push(f);
   files.sort((a, b) => a.path.localeCompare(b.path));
-  return { isRepo: true, root: i.root, base: baseLabel, baseRef, branch: i.branch, files, error: r.code ? r.stderr : null };
+  const truncated = withinBudget(files);
+  return { isRepo: true, root: i.root, base: baseLabel, baseRef, branch: i.branch, files, truncated, error: r.code ? r.stderr : null };
 }
 
 /** Commit everything (or `paths`) in the repository `cwd` is in. @param {string} cwd @param {{ message: string, paths?: string[] }} opts */
@@ -260,8 +313,8 @@ export async function commit(cwd, { message, paths }) {
 export async function discard(cwd, { path: rel, untracked }) {
   const { info: i } = await status(cwd);
   if (!i.isRepo) return { ok: false, output: 'Not a git repository' };
-  const full = path.resolve(i.root, rel);
-  if (!full.startsWith(i.root + path.sep)) return { ok: false, output: 'Path is outside the repository' };
+  const full = slash(path.resolve(i.root, rel));
+  if (full === slash(i.root) || !under(i.root, full)) return { ok: false, output: 'Path is outside the repository' };
   if (untracked) {
     fs.rmSync(full, { force: true, recursive: true });
     return { ok: true, output: '' };

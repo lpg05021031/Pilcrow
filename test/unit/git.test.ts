@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- the server module is plain JavaScript */
-// git.js: the unified-diff parser, and info()/diff()/discard() on a real repository in a temp folder.
-import { beforeAll, describe, expect, it } from 'vitest';
+// git.js: the unified-diff parser, and info()/diff()/discard() on a real repository in a temp folder:
+// the total budget of a diff, and the line counts of untracked files read once until they change.
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -127,8 +128,57 @@ describe('on a real repository', () => {
     const outside = path.join(path.dirname(repo), 'keep-me.txt');
     fs.writeFileSync(outside, 'x');
     expect(await git.discard(repo, { path: '../keep-me.txt', untracked: true })).toEqual({ ok: false, output: 'Path is outside the repository' });
+    expect(await git.discard(repo, { path: '.', untracked: true })).toEqual({ ok: false, output: 'Path is outside the repository' }); // not the repository itself
     expect(fs.existsSync(outside)).toBe(true);
     expect(await git.discard(repo, { path: 'new/c.bin', untracked: true })).toEqual({ ok: true, output: '' });
     expect(fs.existsSync(path.join(repo, 'new', 'c.bin'))).toBe(false);
+  });
+
+  it('info counts an untracked file from its last read until its size or time changes', async () => {
+    const f = path.join(repo, 'new', 'b.txt');
+    await git.info(repo);
+    const read = vi.spyOn(fs.promises, 'readFile');
+    try {
+      expect((await git.info(repo)).insertions).toBe(5); // a.txt +2, b.txt 3
+      expect(read).not.toHaveBeenCalled();
+      fs.writeFileSync(f, 'b1\nb2\nb3\nb4\n');
+      expect((await git.info(repo)).insertions).toBe(6);
+      expect(read).toHaveBeenCalledTimes(1);
+    } finally {
+      read.mockRestore();
+      fs.writeFileSync(f, 'b1\nb2\nb3');
+    }
+  });
+});
+
+describe('the budget of one diff', () => {
+  const lines = (n: number, width = 10) => Array.from({ length: n }, (_, i) => `${i}`.padEnd(width, 'x')).join('\n') + '\n';
+  const repoWith = (files: Record<string, string>) => {
+    const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pilcrow-budget-')));
+    execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: dir });
+    for (const [rel, text] of Object.entries(files)) fs.writeFileSync(path.join(dir, rel), text);
+    return dir;
+  };
+
+  it('leaves out the hunks of the files past the line budget, keeps their stats, and says how many', async () => {
+    const d: any = await git.diff(repoWith({ 'a.txt': lines(4000), 'b.txt': lines(4000), 'c.txt': lines(4000), 'd.txt': lines(10) }));
+    expect(d.files.map((f: any) => [f.path, f.additions, f.truncated, f.hunks.length])).toEqual([
+      ['a.txt', 4000, false, 1],
+      ['b.txt', 4000, false, 1],
+      ['c.txt', 4000, true, 0], // 12 000 lines would be past 10 000
+      ['d.txt', 10, false, 1], // a smaller file after it still fits
+    ]);
+    expect(d.truncated).toBe(1);
+  });
+
+  it('does the same past the byte budget, and a file too large on its own has no hunks either', async () => {
+    const d: any = await git.diff(repoWith({ 'a.txt': lines(2000, 300), 'b.txt': lines(2000, 300), 'huge.txt': lines(5000) }));
+    expect(d.files.map((f: any) => [f.path, f.truncated, f.hunks.length])).toEqual([
+      ['a.txt', false, 1],
+      ['b.txt', true, 0], // 1.2 MB of text would be past 1 MB
+      ['huge.txt', true, 0], // past 4000 lines for one file
+    ]);
+    expect(d.truncated).toBe(1);
+    expect(JSON.stringify(d).length).toBeLessThan(1.5 * 1024 * 1024);
   });
 });

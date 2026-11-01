@@ -75,7 +75,7 @@ export function renderDiff(files, { maxChars = READ_DEFAULT, only = '' } = {}) {
   const list = files.filter((f) => !only || f.path === only || f.path.endsWith('/' + only));
   for (const f of list) {
     const head = `--- a/${f.path}\n+++ b/${f.path}\n`;
-    const body = (f.hunks || []).map((h) => `@@ -${h.oldStart},${h.oldLines} +${h.newStart},${h.newLines} @@\n` + (h.lines || []).map((l) => l.t + l.s).join('\n')).join('\n');
+    const body = f.truncated ? `(too large to show: +${f.additions || 0} −${f.deletions || 0})` : (f.hunks || []).map((h) => `@@ -${h.oldStart},${h.oldLines} +${h.newStart},${h.newLines} @@\n` + (h.lines || []).map((l) => l.t + l.s).join('\n')).join('\n');
     const text = head + body + '\n';
     if (used + text.length > maxChars) {
       const room = Math.max(0, maxChars - used - head.length - 40);

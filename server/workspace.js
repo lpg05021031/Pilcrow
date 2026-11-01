@@ -97,13 +97,16 @@ export function groupHunks(diffs) {
       add += fa;
       del += fd;
       files.push({ path: f.path, add: fa, del: fd });
-      const body = (f.hunks || [])
-        .flatMap((h) => h.lines || [])
-        .filter((l) => l.t === '+' || l.t === '-')
-        .map((l) => l.t + l.s)
-        .join('\n');
+      // a file too large to show has no hunks to compare: it is never "the same change" as another
+      const body = f.truncated
+        ? `\0${d.runId}`
+        : (f.hunks || [])
+            .flatMap((h) => h.lines || [])
+            .filter((l) => l.t === '+' || l.t === '-')
+            .map((l) => l.t + l.s)
+            .join('\n');
       const sig = crypto.createHash('sha1').update(f.path + '\n' + body).digest('hex').slice(0, 16);
-      const g = groups.get(sig) || { sig, path: f.path, runs: [], add: fa, del: fd, preview: body.split('\n').slice(0, 8) };
+      const g = groups.get(sig) || { sig, path: f.path, runs: [], add: fa, del: fd, preview: f.truncated ? [] : body.split('\n').slice(0, 8) };
       g.runs.push(d.name);
       groups.set(sig, g);
     }
