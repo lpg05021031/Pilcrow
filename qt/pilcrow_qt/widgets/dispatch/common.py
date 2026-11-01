@@ -3,18 +3,17 @@ the state glyph, and the small words that describe a job."""
 
 from __future__ import annotations
 
-import math
 import time
 from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
 from ... import theme
 from ...lib.fmt import cost as fmt_cost
 from ...lib.fmt import duration, plural
-from ..ui.signals import bind
+from ..ui.bits import Indicator
 
 Json = Dict[str, Any]
 
@@ -52,10 +51,6 @@ STATE_RANK = {
 }
 ACTIVE = ("preparing", "running", "needs_action")
 TERMINAL = ("done", "failed", "stopped", "skipped")
-
-
-def now_ms() -> float:
-    return time.time() * 1000
 
 
 def clock_mmss(ms: float) -> str:
@@ -155,22 +150,18 @@ def asked_by(names: List[str]) -> str:
     return f"asked by {names[0]}, {names[1]} and {len(names) - 2} more"
 
 
-class SegmentBar(QWidget):
+class SegmentBar(Indicator):
     """The job's progress: one segment per run, in the colour of its state, in the bar's own order
-    (done first, then the ones that ask, the live ones, the queued, the failed)."""
+    (done first, then the ones that ask, the live ones, the queued, the failed). The live segments
+    breathe on the clock."""
 
     ORDER = ("done", "needs_action", "running", "preparing", "queued", "failed", "stopped", "skipped")
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._states: List[str] = []
-        self._phase0 = time.monotonic()
-        self._timer = QTimer(self)
-        self._timer.setInterval(60)
-        self._timer.timeout.connect(self.update)
         self.setFixedHeight(6)
         self.setMinimumWidth(80)
-        bind(theme.theme.changed, self, lambda _t: self.update())
 
     def set_counts(self, counts: Json) -> None:
         states: List[str] = []
@@ -179,13 +170,7 @@ class SegmentBar(QWidget):
         if states != self._states:
             self._states = states
             self.update()
-        from ...store import store
-
-        live = any(s in ("running", "preparing") for s in states) and not store.reduced_motion
-        if live and not self._timer.isActive():
-            self._timer.start()
-        elif not live:
-            self._timer.stop()
+        self.set_live(any(s in ("running", "preparing") for s in states))
 
     def paintEvent(self, _e) -> None:
         t = theme.tokens()
@@ -200,69 +185,32 @@ class SegmentBar(QWidget):
             return
         gap = 2 if n <= 40 else 1
         seg = (w - gap * (n - 1)) / n
-        phase = (time.monotonic() - self._phase0) % 1.6 / 1.6
+        alpha = theme.breath(time.monotonic(), 1.6, 0.55) if self.moving else 1.0
         x = 0.0
         for s in self._states:
             tone = STATE_TONE.get(s, "text_4")
             c = QColor(theme.blend(getattr(t, tone), t.canvas)) if tone.startswith("text") else QColor(getattr(t, tone))
-            if s in ("running", "preparing") and self._timer.isActive():
-                c.setAlphaF(0.55 + 0.45 * (0.5 - 0.5 * math.cos(phase * 2 * math.pi)))
+            if s in ("running", "preparing"):
+                c.setAlphaF(alpha)
             p.setBrush(c)
             p.drawRoundedRect(QRectF(x, 0, max(1.0, seg), h), 2, 2)
             x += seg + gap
 
 
-class RunGlyph(QWidget):
-    """The state dot of a run: the session pill's colours; hollow when queued; breathing while it runs."""
-
-    def __init__(self, state: str = "queued", parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self._state = state
-        self._t0 = time.monotonic()
-        self._timer = QTimer(self)
-        self._timer.setInterval(60)
-        self._timer.timeout.connect(self.update)
-        self.setFixedSize(14, 14)
-        bind(theme.theme.changed, self, lambda _t: self.update())
-        self.set_state(state)
-
-    def set_state(self, state: str) -> None:
-        self._state = state
-        from ...store import store
-
-        live = state in ("running", "preparing") and not store.reduced_motion
-        if live and not self._timer.isActive():
-            self._timer.start()
-        elif not live:
-            self._timer.stop()
-        self.update()
-
-    def paintEvent(self, _e) -> None:
-        paint_glyph(
-            QPainter(self),
-            QRectF(self.rect()),
-            self._state,
-            theme.tokens(),
-            self._t0 if self._timer.isActive() else None,
-        )
-
-
-def paint_glyph(p: QPainter, r: QRectF, state: str, t: theme.Tokens, breathing_since: Optional[float]) -> None:
-    """The run glyph, drawn into ``r`` (14px square): shared by the widget and the canvas rows."""
+def paint_glyph(p: QPainter, r: QRectF, state: str, t: theme.Tokens, breathing: bool) -> None:
+    """The run glyph, drawn into ``r`` (14px square); a live run's dot breathes (the row is live on
+    the canvas clock)."""
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
     p.setPen(Qt.PenStyle.NoPen)
     cx, cy = r.center().x(), r.center().y()
     tone = STATE_TONE.get(state, "text_4")
     c = QColor(theme.blend(getattr(t, tone), t.canvas)) if tone.startswith("text") else QColor(getattr(t, tone))
     if state in ("queued", "skipped"):
-        from PySide6.QtGui import QPen
-
         p.setPen(QPen(c, 1.5))
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawEllipse(QPointF(cx, cy), 3.75, 3.75)
         return
-    if state in ("running", "preparing") and breathing_since is not None:
-        phase = (time.monotonic() - breathing_since) % 1.6 / 1.6
-        c.setAlphaF(0.5 + 0.5 * (0.5 - 0.5 * math.cos(phase * 2 * math.pi)))
+    if state in ("running", "preparing") and breathing:
+        c.setAlphaF(theme.breath(time.monotonic(), 1.6, 0.5))
     p.setBrush(c)
     p.drawEllipse(QPointF(cx, cy), 4.5, 4.5)

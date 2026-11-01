@@ -36,7 +36,7 @@ from ..canvas.clock import Tween
 from ..lib.fmt import basename, tildify, time_ago
 from ..lib.fuzzy import fuzzy_score
 from ..store import ConfirmSpec, store
-from .ui.bits import Mark
+from .ui.bits import Indicator, Mark
 from .ui.menu import show_menu, show_menu_at
 from .ui.signals import bind
 
@@ -1169,7 +1169,6 @@ class SessionRow(QWidget):
         edit.setFixedHeight(20)
         edit.setStyleSheet(f"font-size: {theme.FS_UI}px; padding: 0 2px;")  # .side-rename: 12.5px
         self.rename_edit = edit
-        lay = self.title.parentWidget().layout() if self.title.parentWidget() else None
         col = self.layout().itemAt(0).layout()
         col.replaceWidget(self.title, edit)
         self.title.hide()
@@ -1189,7 +1188,6 @@ class SessionRow(QWidget):
 
         edit.editingFinished.connect(done)
         edit.returnPressed.connect(edit.clearFocus)
-        _ = lay
 
 
 class _ElideLabel(QLabel):
@@ -1311,7 +1309,7 @@ class _RowEnd(QWidget):
         self.menu.move(self.width() - 24, 0)
 
 
-class _RowGlyph(QWidget):
+class _RowGlyph(Indicator):
     """``.glyph``: an 11px turning arc while working, the accent dot with its halo when a session
     needs you, red on error, a small neutral dot for unread activity."""
 
@@ -1321,29 +1319,10 @@ class _RowGlyph(QWidget):
         self._status = ""
         self._pending = 0
         self._unread = False
-        self._t0 = _time.monotonic()
-        self._timer = QTimer(self)
-        self._timer.setInterval(40)
-        self._timer.timeout.connect(self.update)
-        bind(theme.theme.changed, self, lambda _t: self.update())
 
     def set_state(self, status: str, pending: int = 0, unread: bool = False) -> None:
         self._status, self._pending, self._unread = status, pending, unread
-        live = status in ("running", "starting") and not store.reduced_motion
-        if live and not self._timer.isActive():
-            self._timer.start()
-        elif not live:
-            self._timer.stop()
-        self.update()
-
-    def hideEvent(self, e) -> None:
-        self._timer.stop()
-        super().hideEvent(e)
-
-    def showEvent(self, e) -> None:
-        if self._status in ("running", "starting") and not store.reduced_motion:
-            self._timer.start()
-        super().showEvent(e)
+        self.set_live(status in ("running", "starting"))
 
     def paintEvent(self, _e) -> None:
         t = theme.tokens()
@@ -1362,7 +1341,7 @@ class _RowGlyph(QWidget):
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.setPen(QPen(theme.qcolor(t.fill_3), 1.5))
             p.drawEllipse(r)
-            ang = int(((_time.monotonic() - self._t0) % 0.9) / 0.9 * 360)
+            ang = int((_time.monotonic() % 0.9) / 0.9 * 360) if self.moving else 0
             p.setPen(QPen(QColor(t.text_2), 1.5))
             p.drawArc(r, (90 - ang) * 16, -90 * 16)
         elif self._status == "error":

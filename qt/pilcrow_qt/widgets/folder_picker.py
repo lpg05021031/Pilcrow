@@ -261,10 +261,8 @@ class Browser(QFrame):
     def show_listing(self, b: Json) -> None:
         self.listing = b
         t = theme.tokens()
-        home = (store.info or {}).get("home")
         self.up_btn.setEnabled(bool(b.get("parent")))
         self.display.setText(str(b.get("display") or ""))
-        _ = home
         self.badge.setVisible(bool(b.get("repo")))
         lay = self.list.lay
         while lay.count():

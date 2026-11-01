@@ -25,7 +25,6 @@ from .settings_ui import (
     combo_value,
     hint,
     home,
-    mono_label,
     select_value,
     styled,
     text_area,
@@ -468,6 +467,3 @@ class NoteRow(Panel):
             self.page.patch(str(self.n.get("id") or ""), {"text": text})
             return
         self.cancel_edit()
-
-
-_ = mono_label

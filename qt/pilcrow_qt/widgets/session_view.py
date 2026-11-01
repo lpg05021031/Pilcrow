@@ -32,7 +32,7 @@ from .composer import Composer, LayoutButton
 from .folder_picker import FolderPicker
 from .mcp_notice import McpNotice
 from .sidebar import IconBtn
-from .ui.bits import Box, Mark, button, copy_text, hairline, label, paint_box
+from .ui.bits import Box, Indicator, Mark, button, copy_text, hairline, label, paint_box
 from .ui.button import Btn
 from .ui.menu import Popover, host_for, show_menu
 from .ui.signals import bind
@@ -918,7 +918,6 @@ class StatusPill(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.status = ""
-        self._t0 = time.monotonic()
         self.setFixedHeight(22)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(4, 0, 4, 0)
@@ -977,30 +976,20 @@ class StatusPill(QWidget):
         self.dot.update()
 
 
-class _Dot(QWidget):
+class _Dot(Indicator):
+    """The status pill's dot, breathing while the session works."""
+
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.color = ""
         self.setFixedSize(6, 6)
-        self._t0 = time.monotonic()
-        self._timer = QTimer(self)
-        self._timer.setInterval(60)
-        self._timer.timeout.connect(self.update)
-
-    def set_live(self, on: bool) -> None:
-        if on and not store.reduced_motion:
-            self._timer.start()
-        else:
-            self._timer.stop()
-        self.update()
 
     def paintEvent(self, _e) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         c = QColor(self.color or theme.tokens().text_3)
-        if self._timer.isActive():
-            phase = (time.monotonic() - self._t0) % 1.2 / 1.2
-            c.setAlphaF(0.45 + 0.55 * (0.5 - 0.5 * math.cos(phase * 2 * math.pi)))
+        if self.moving:
+            c.setAlphaF(theme.breath(time.monotonic(), 1.2, 0.45))
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(c)
         p.drawEllipse(QPointF(3, 3), 3, 3)

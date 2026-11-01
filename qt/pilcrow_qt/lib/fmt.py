@@ -27,6 +27,11 @@ def _js_num(n: Any) -> str:
     return str(n)
 
 
+def now_ms() -> float:
+    """The wall clock in milliseconds, the unit of every timestamp the server sends (``Date.now()``)."""
+    return time.time() * 1000
+
+
 def time_ago(ms: Optional[float], now: Optional[float] = None, short: bool = False) -> str:
     """Relative time. `short` gives the compact form used in lists ("now", "4m", "3h", "2d")."""
     if not ms:

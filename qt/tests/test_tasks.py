@@ -109,7 +109,6 @@ def test_todo_rows_states_and_finished_section(app_client):
         rows[0].layout().contentsMargins().left() == 2 and rows[0].layout().contentsMargins().top() == 4
     )  # .task-row.done
     assert "failed · 2m ago · exit 1" == rows[0].sub.text()
-    _ = theme
     c.store.rt[SID].st["tasks"] = []
     c.store.rt_changed.emit(SID)
 

@@ -4,7 +4,6 @@ sessions, so a result can be continued by hand."""
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
 
@@ -22,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import icons, theme
-from ..lib.fmt import basename, cost, duration, plural, tildify, time_ago
+from ..lib.fmt import basename, cost, duration, now_ms, plural, tildify, time_ago
 from ..store import ConfirmSpec, store
 from .dialogs.parts import Badge, Card, ElideLabel, LayoutButton, Switch, Text, hint, page_column
 from .ui.bits import Box, IconButton, Mark, Pill, Spinner, button
@@ -30,10 +29,6 @@ from .ui.menu import show_menu
 from .ui.signals import bind
 
 Json = Dict[str, Any]
-
-
-def now_ms() -> float:
-    return time.time() * 1000
 
 
 def clock(ms: float) -> str:

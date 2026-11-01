@@ -8,7 +8,7 @@ from typing import Callable, List, Optional
 
 from PySide6.QtCore import QEvent, QObject, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetricsF, QPainter
-from PySide6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QLineEdit, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QScrollArea, QVBoxLayout, QWidget
 
 from ... import icons, theme
 from ...lib.fmt import basename, time_ago
@@ -460,6 +460,3 @@ def _quit(window: QWidget) -> None:
     from . import quit_app
 
     quit_app(window)
-
-
-_ = QApplication

@@ -16,7 +16,7 @@ from ...lib.fmt import rel_path
 from ...lib.transcript_model import UserItem
 from ...store import ConfirmSpec, store
 from ..paint import Measurer, PaintState, doc_height, doc_pos_at, draw_doc, rounded
-from ..scene import GRADE_EXACT, Block, Target
+from ..scene import Block, Target
 
 BUBBLE_LINE = markdown.px(theme.FS_BODY * 1.55)
 
@@ -388,6 +388,3 @@ class UserBlock(Block):
             )
 
         store.call("session.rewind", {"id": sid, "messageId": item.uuid, "dryRun": True}).then(dry)
-
-
-_ = GRADE_EXACT

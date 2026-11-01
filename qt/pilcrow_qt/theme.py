@@ -19,7 +19,7 @@ import math
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional, Tuple, Union
 
-from PySide6.QtCore import QEasingCurve, QObject, Signal
+from PySide6.QtCore import QEasingCurve, QObject, QPointF, Signal
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -435,10 +435,14 @@ def ease_exit() -> QEasingCurve:
     return c
 
 
-def _pt(x: float, y: float):
-    from PySide6.QtCore import QPointF
-
+def _pt(x: float, y: float) -> QPointF:
     return QPointF(x, y)
+
+
+def breath(now: float, period: float, low: float) -> float:
+    """``@keyframes breathe``: an opacity that eases from ``low`` up to 1 and back once a ``period``
+    (seconds), on a cosine; ``now`` is ``time.monotonic()``, so every mark breathes in step."""
+    return low + (1.0 - low) * (0.5 - 0.5 * math.cos((now % period) / period * 2 * math.pi))
 
 
 # ---------------------------------------------------------------- fonts

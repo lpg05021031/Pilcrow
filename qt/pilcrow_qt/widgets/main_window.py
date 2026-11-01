@@ -14,14 +14,14 @@ from typing import Optional, Tuple
 
 import shiboken6
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QKeySequence, QPainter, QPainterPath, QPen, QShortcut
+from PySide6.QtGui import QColor, QFontMetrics, QKeySequence, QPainter, QPainterPath, QPen, QRegion, QShortcut
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QStackedWidget, QVBoxLayout, QWidget
 
 from .. import icons, theme
 from ..canvas.clock import Tween
 from ..store import store
 from .sidebar import Sidebar
-from .ui.bits import Mark, Row, label
+from .ui.bits import label
 from .ui.signals import bind
 
 TAB_KEYS = {"1": "changes", "2": "files", "3": "terminal", "4": "preview", "5": "tasks", "6": "history", "7": "info"}
@@ -558,7 +558,7 @@ class Shell(QWidget):
         super().resizeEvent(e)
         self.place()
 
-    def paintEvent(self, _e) -> None:
+    def paintEvent(self, e) -> None:
         # box-shadow 0 1px 2px: black at 18% on dark, 4% on light, blurred over the ground
         t = theme.tokens()
         strength = 0.18 if t.dark else 0.04
@@ -567,6 +567,8 @@ class Shell(QWidget):
             if card is None or card.isHidden():
                 continue
             r = card.geometry().adjusted(0, Card.TOP, 0, 0)
+            if r.adjusted(2, 2, -2, -2).contains(e.rect()):
+                continue  # a repaint inside the sheet: the shadow is outside it
             for d, k in ((1, 0.75), (2, 0.36), (3, 0.17)):
                 c = QColor(0, 0, 0, int(255 * strength * k))
                 p.fillRect(QRect(r.left() + 1, r.bottom() + d, r.width() - 2, 1), c)
@@ -625,10 +627,14 @@ class _CardFrame(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
 
-    def paintEvent(self, _e) -> None:
+    def paintEvent(self, e) -> None:
         t = theme.tokens()
         r = self._card.sheet_rect()
         radius = Card.RADIUS
+        # what it draws lies along the edges: a repaint inside them (a breathing mark, a streamed
+        # line) has nothing here to draw over
+        if e.region().subtracted(QRegion(r.adjusted(radius, radius, -radius, -radius))).isEmpty():
+            return
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         outside = QPainterPath()
@@ -912,6 +918,3 @@ class Boot(QWidget):
         self._fade_t = Tween(eff.setOpacity, self.hide, ms=320, curve=theme.ease_exit)
         self._fade_t.jump(1.0)
         self._fade_t.go(0.0)
-
-
-_ = (QEvent, Mark, Row)

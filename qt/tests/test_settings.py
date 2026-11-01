@@ -5,7 +5,7 @@ from __future__ import annotations
 from harness import app_client, mock_server
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QLabel, QLineEdit, QPlainTextEdit, QPushButton
+from PySide6.QtWidgets import QLabel, QLineEdit, QPushButton
 
 
 def _labels(c, parent=None):
@@ -245,9 +245,6 @@ def test_new_session_options_screenshot(app_client):
         assert s.picker.isVisible() and not s.chips_w.isVisible()
         assert c.shot("new-session-browse").exists()
     _close_all(c)
-
-
-_ = QPlainTextEdit
 
 
 def test_claude_tab_selects_open_the_menu(app_client):

@@ -9,7 +9,6 @@ state plus ``fleet.state`` polled every 20 s; nothing here needs a transcript lo
 from __future__ import annotations
 
 import math
-import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -28,7 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import icons, theme
-from ..lib.fmt import basename, cost, duration, plural, rel_path, time_ago
+from ..lib.fmt import basename, cost, duration, now_ms, plural, rel_path, time_ago
 from ..lib.tools_meta import str_
 from ..lib.workflow import workflow_counts
 from ..store import Runtime, store
@@ -40,10 +39,6 @@ from .ui.signals import bind
 Json = Dict[str, Any]
 FLEET_EVERY_MS = 20_000
 STALE_MS = 45_000
-
-
-def now_ms() -> float:
-    return time.time() * 1000
 
 
 def perm_summary(p: Json, cwd: str) -> Tuple[str, bool, str]:

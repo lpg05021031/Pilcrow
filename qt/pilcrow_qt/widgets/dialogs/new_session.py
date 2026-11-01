@@ -8,7 +8,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QWidget
+from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QWidget
 
 from ... import icons, theme
 from ...lib.fmt import basename, err_text, tildify
@@ -484,6 +484,3 @@ def open_new_session(window: QWidget, opts: Any) -> Optional[NewSessionSheet]:
     s = NewSessionSheet(window, opts if isinstance(opts, dict) else {})
     s.open()
     return s
-
-
-_ = QSizePolicy

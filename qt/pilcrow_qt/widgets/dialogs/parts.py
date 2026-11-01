@@ -349,11 +349,6 @@ class Backdrop:
         p.fillRect(w.rect(), theme.qcolor(t.scrim))
 
 
-def blur_enabled() -> Optional[bool]:
-    """Whether the blurred backdrop is on (None until the first sheet measured it)."""
-    return _BLUR_OK
-
-
 # ---------------------------------------------------------------- text laid out like the browser
 # A QLabel sets its own line height from the font (about 1.2×); the web lays text on 1.45× lines
 # (``.hint`` 1.5×, prose 1.55×), which is where most of the vertical rhythm of a page comes from.

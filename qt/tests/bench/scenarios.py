@@ -13,11 +13,11 @@ from __future__ import annotations
 import time
 from typing import Any, Callable, Dict, List, Optional
 
-from PySide6.QtCore import QPoint, Qt
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtCore import QPoint
+from PySide6.QtWidgets import QWidget
 
 from . import rig
-from .rig import Film, Paced, click, move, pump, rss_mb, settle, type_text, wheel, y_in
+from .rig import Film, Paced, click, idle_cpu, move, pump, rss_mb, settle, type_text, wheel, y_in
 
 Json = Dict[str, Any]
 
@@ -843,16 +843,17 @@ def find(ctx: Ctx) -> Json:
 
 
 def idle(ctx: Ctx) -> Json:
-    """CPU while nothing happens: a finished conversation, then one that looks busy (timers run)."""
+    """CPU while nothing happens, in a real event loop: a finished conversation, then one that looks
+    busy (the working marks breathe, the elapsed counters count)."""
     ctx.open(ctx.heavy)
     settle(500)
-    p_quiet = pump(3.0)
+    quiet = idle_cpu(3.0)
     ctx.c.call("mock.patch", {"id": ctx.heavy, "state": {"status": "running", "turnStartedAt": time.time() * 1000}})
     settle(500)
-    p_busy = pump(3.0)
+    busy = idle_cpu(3.0)
     ctx.c.call("mock.patch", {"id": ctx.heavy, "state": {"status": "idle", "turnStartedAt": None}})
     settle(300)
-    return {"quiet_cpu_pct": p_quiet.report()["cpu_pct"], "busy_look_cpu_pct": p_busy.report()["cpu_pct"]}
+    return {"quiet_cpu_pct": quiet, "busy_look_cpu_pct": busy}
 
 
 SCENARIOS: Dict[str, Callable[[Ctx], Json]] = {
@@ -877,5 +878,3 @@ SCENARIOS: Dict[str, Callable[[Ctx], Json]] = {
     "find": find,
     "idle": idle,
 }
-
-_ = (Optional, QApplication, Qt)

@@ -64,7 +64,6 @@ class Block:
         "grade",
         "h_width",
         "warm",
-        "last_seen",
         "indent",
         "scene",
     )
@@ -81,7 +80,6 @@ class Block:
         self.grade = GRADE_ESTIMATE
         self.h_width = 0
         self.warm = False
-        self.last_seen = 0
         self.indent = 0
         self.scene: Optional[Scene] = None
 
@@ -475,7 +473,6 @@ class Scene:
         self.root.scene = self
         self.by_key: Dict[str, Block] = {}
         self.width = 0
-        self.frame = 0
         #: block → the offset into it from which the picture may have moved (its own height, a gap
         #: above it, a child added or removed, a reveal); the view turns these into repaints
         self.dirty: Dict[Block, int] = {}
@@ -546,12 +543,6 @@ class Scene:
         cur = self.dirty.get(b)
         if cur is None or offset < cur:
             self.dirty[b] = offset
-
-    @property
-    def dirty_from(self) -> Optional[int]:
-        """The lowest scene y from which the picture may have moved (None when nothing changed)."""
-        ys = [b.y() + off for b, off in self.dirty.items() if b.scene is self]
-        return min(ys) if ys else None
 
     def note_block(self, b: Block) -> None:
         self.dirty_rects.append((0, b.y(), self.width or 1, b.h))

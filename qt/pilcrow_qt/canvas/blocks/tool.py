@@ -276,7 +276,6 @@ class ToolBlock(Group):
         cx += chev_w
         if self.file:
             on = st.hover is not None and st.hover.kind == "button" and st.hover.id == "open-file"
-            p.setOpacity(1.0 if (hover or on) else 0.0 if st.caching else 0.0)
             if hover or on:
                 if on:
                     rounded(
@@ -289,12 +288,10 @@ class ToolBlock(Group):
                 p.drawPixmap(
                     int(cx), y + (head_h - 13) // 2, st.m.icon("arrow-up-right", QColor(t.text if on else t.text_3), 13)
                 )
-            p.setOpacity(1.0)
             self._meta_rects["open-file"] = QRect(int(cx) - x - 4, (head_h - 22) // 2, 22, 22)
         # meta, right-aligned
         self._paint_meta(p, x + w, y, head_h, st)
         # the rule down the left of an open body (the agent children get their own rail)
-        _ = x
 
     def _paint_status(self, p: QPainter, x: int, y: int, st: PaintState) -> None:
         t = st.t

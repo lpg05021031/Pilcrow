@@ -12,7 +12,6 @@ and the public methods the rest of the client uses (``set_empty``, ``open_find``
 
 from __future__ import annotations
 
-import time
 from collections import OrderedDict
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -32,7 +31,7 @@ from ..widgets.ui.signals import bind
 from .blocks.fold import sync_unit_group, unit_group, unit_group_key
 from .blocks.island import IslandBlock
 from .blocks.misc import SkeletonBlock, WorkingBlock
-from .scene import GRADE_EXACT, Block, Group, Scene
+from .scene import Block, Group, Scene
 from .view import CanvasView
 
 BUSY = ("running", "starting", "requires_action")
@@ -590,6 +589,3 @@ class Transcript(QWidget):
 
     def keyPressEvent(self, e) -> None:
         self.view.keyPressEvent(e)
-
-
-_ = (GRADE_EXACT, time)

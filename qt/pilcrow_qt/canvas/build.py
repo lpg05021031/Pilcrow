@@ -38,7 +38,6 @@ from PySide6.QtGui import (
     QTextImageFormat,
     QTextLength,
     QTextListFormat,
-    QTextTable,
     QTextTableCellFormat,
     QTextTableFormat,
 )
@@ -837,6 +836,3 @@ def _task_lists(tokens: Sequence[Any]) -> set:
         if items and items == tasks:
             out.add(i)
     return out
-
-
-_ = (QTextTable,)

@@ -7,7 +7,6 @@ module gives them groups and blocks.
 
 from __future__ import annotations
 
-import math
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -18,7 +17,6 @@ from ... import theme
 from ...lib.fmt import duration
 from ...lib.folds import (
     ExploreSeg,
-    ItemGroup,
     ToolSeg,
     explore_label,
     group_items,
@@ -33,7 +31,8 @@ from ...lib.transcript_model import Item, ToolItem
 from ...lib.units import Unit, WorkUnit
 from ...store import store
 from ...widgets.transcript.ctx import ToolCtx
-from ..paint import Measurer, PaintState, rounded
+from ...widgets.ui.bits import draw_mark
+from ..paint import Measurer, PaintState
 from ..pixels import vline
 from ..scene import Block, Group, Target
 from .base import chevron, paint_head_tint
@@ -43,7 +42,6 @@ from .misc import (
     NoticeBlock,
     ResultBlock,
     compact_label,
-    draw_mark,
     notice_mode,
     result_notice,
 )
@@ -343,7 +341,7 @@ class Steps(Group):
     MT = 6
     MB = 6
     COLLAPSE_AT = 10
-    __slots__ = ("_expand_ref", "ctx", "expanded", "items", "live_run", "sid")
+    __slots__ = ("ctx", "expanded", "items", "live_run", "sid")
 
     def __init__(self, items: List[ToolItem], ctx: ToolCtx, sid: str, key: str, live: bool = False) -> None:
         super().__init__(key, head_h=0, open_=True)
@@ -411,7 +409,6 @@ class Steps(Group):
                 return b.sync(s.items, ctx) if isinstance(b, Explore) else []
             return sync_row(b, s.item, ctx)
 
-        self._expand_ref = None
         return reconcile(self, keys, make, update)
 
     def _expand(self) -> None:
@@ -437,7 +434,7 @@ class FoldGroup(Group):
     MB = 14
     CHILD_INDENT = 14
     HEAD = 30
-    __slots__ = ("ctx", "inner", "sid", "state", "summary", "unit")
+    __slots__ = ("_second", "ctx", "inner", "sid", "state", "summary", "unit")
 
     def __init__(self, unit: WorkUnit, ctx: ToolCtx, sid: str, state: Dict[str, bool]) -> None:
         super().__init__(unit.key, head_h=self.HEAD, pad_top=6, pad_bottom=4, open_=False)
@@ -447,6 +444,7 @@ class FoldGroup(Group):
         self.state = state  # the fold toggles the person made, per key
         self.summary = work_summary(unit.work)
         self.inner: Optional[Flat] = None
+        self._second = -1  # the elapsed second last painted
         self.shaped = False  # the inside is built the first time it is needed (opened, revealed, found)
         self.sync(unit, ctx)
         self.set_open(self.wants_open)
@@ -533,9 +531,9 @@ class FoldGroup(Group):
         live = self.unit.live
         cx = x
         if live:
-            phase = ((st.now) % 1.8) / 1.8
-            alpha = 0.55 + 0.45 * (0.5 - 0.5 * math.cos(phase * 2 * math.pi))
-            draw_mark(p, QRectF(x, y + (self.HEAD - 16) / 2, 16, 16), t, alpha)
+            draw_mark(p, QRectF(x, y + (self.HEAD - 16) / 2, 16, 16), t, theme.breath(st.now, 1.8, 0.55))
+            if st.clip is not None and st.clip.right() < x + 26 and st.clip.bottom() < y + self.HEAD:
+                return  # a frame of the breathing mark alone (``tick``)
             cx += 20 + 6
         f = st.m.font(theme.FS_UI, 500 if live else 400)
         doing = live_label(self.unit.work) if live else None
@@ -582,11 +580,6 @@ class FoldGroup(Group):
         self.state[self.key] = now
         view.toggle_group(self, now)
 
-    def open_now(self) -> None:
-        self.state[self.key] = True
-        self.open = True
-        self.set_reveal(1.0)
-
     def text(self) -> str:
         return self.summary.text
 
@@ -594,7 +587,14 @@ class FoldGroup(Group):
         return bool(self.unit.live)
 
     def tick(self, now: float) -> Optional[Tuple[int, int, int, int]]:
-        return (0, 0, 100000, self.HEAD) if self.unit.live else None
+        """The breathing mark each frame; the whole head when the elapsed figure moves on a second."""
+        if not self.unit.live:
+            return None
+        s = int(self._elapsed() // 1000)
+        if s != self._second:
+            self._second = s
+            return (0, 0, 100000, self.HEAD)
+        return (0, 0, 20, self.HEAD)
 
     @property
     def static(self) -> bool:
@@ -622,6 +622,3 @@ def unit_group_key(unit: Unit) -> str:
     the shape rides in the key."""
     fold = isinstance(unit, WorkUnit) and any(it.kind == "tool" for it in unit.work)
     return unit.key if fold else unit.key + (":flat" if isinstance(unit, WorkUnit) else "")
-
-
-_ = (ItemGroup, rounded)

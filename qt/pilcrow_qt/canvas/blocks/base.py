@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from PySide6.QtCore import QRect, QRectF, Qt
+from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QColor, QPainter
 
 from ... import theme
 from ..nodes import Node
 from ..paint import Measurer, PaintState, rounded
-from ..scene import GRADE_EXACT, Block, Target
+from ..scene import Block, Target
 
 Handler = Callable[[Target, Any], None]
 
@@ -143,10 +142,3 @@ def elapsed_text(ms: float) -> str:
     from ...lib.fmt import duration
 
     return duration(ms)
-
-
-def now_ms() -> float:
-    return time.time() * 1000
-
-
-_ = (QRectF, GRADE_EXACT)

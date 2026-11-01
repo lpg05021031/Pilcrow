@@ -3,7 +3,7 @@ and paints its verdicts on the targets, and Start is enabled when nothing is blo
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QScrollArea, QVBoxLayout, QWidget
@@ -601,6 +601,3 @@ class JobComposer(QWidget):
             self.start_btn.setEnabled(True)
 
         store.call("dispatch.save", v).then(saved).catch(not_saved)
-
-
-_ = (Callable, List)

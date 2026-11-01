@@ -239,7 +239,6 @@ class PreviewPanel(QWidget):
 
     # ---------------------------------------------------------------- render
     def render(self) -> None:
-        t = theme.tokens()
         for c in self._chips:
             self.chips_box.removeWidget(c)
             c.deleteLater()
@@ -254,7 +253,6 @@ class PreviewPanel(QWidget):
         self.chips_line.setVisible(bool(self.detected))
         self.reload_btn.setEnabled(bool(self.url))
         self.open_btn.setEnabled(bool(self.url))
-        _ = t
         if self.url:
             self.body.set_icon("globe")
             self.body.set_text(self.url, "The preview opens in your browser in this client.")

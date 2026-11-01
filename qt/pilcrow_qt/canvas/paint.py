@@ -16,7 +16,7 @@ import logging
 import math
 import weakref
 from collections import OrderedDict
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt, QUrl
 from PySide6.QtGui import (
@@ -878,5 +878,3 @@ __all__ = [
     "tidy_doc",
     "well_rects",
 ]
-
-_ = (Iterable,)

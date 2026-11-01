@@ -93,7 +93,6 @@ def test_number_keys_answer_the_first_card(app_client):
     assert ov.handle_key(0, "3")  # deny
     c.wait_until(lambda: "sess-tests" not in ov.needs_cards, 10, "card leaves")
     c.wait_until(lambda: c.store.rt["sess-tests"].status == "idle", 20, "turn finishes")
-    _ = time
 
 
 def test_inbox_page(app_client):

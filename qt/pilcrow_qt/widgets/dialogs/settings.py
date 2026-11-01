@@ -10,11 +10,11 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QPushButton, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QPushButton, QScrollArea, QWidget
 
 from ... import theme
 from ...store import store
-from ..ui.bits import Mark, hairline
+from ..ui.bits import Mark
 from ..ui.signals import bind
 from .parts import Text, sheet_bg
 from .settings_ui import Sheet, open_sheet, styled, vbox
@@ -180,6 +180,3 @@ def open_settings(window: QWidget, page: Any) -> Optional[SettingsSheet]:
     s = SettingsSheet(window, section)
     s.open()
     return s
-
-
-_ = (hairline, QVBoxLayout)

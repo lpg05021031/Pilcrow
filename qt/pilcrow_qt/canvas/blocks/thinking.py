@@ -183,7 +183,6 @@ class ThinkingBlock(Group):
     def paint(self, p: QPainter, x: int, y: int, w: int, st: PaintState) -> None:
         t = st.t
         hover = st.hover is not None and st.hover.kind == "head"
-        head = QRect(x, y, w, HEAD_H)
         f = st.m.font(theme.FS_UI, 500 if self.item.streaming else 400)
         title = self.title(time.time())
         tw = int(st.m.text_w(title, f))
@@ -211,7 +210,6 @@ class ThinkingBlock(Group):
             full = doc_height(self.peek_doc)
             off = max(0, full - ph)
             draw_doc(p, self.peek_doc, x + 15, y + HEAD_H + 2 - off, clip, QColor(t.text_3))
-        _ = head
 
     def hit(self, x: int, y: int) -> Optional[Target]:
         if y < HEAD_H:

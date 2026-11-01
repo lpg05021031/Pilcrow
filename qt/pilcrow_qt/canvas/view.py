@@ -169,7 +169,6 @@ class CanvasView(QAbstractScrollArea):
         self._last_value = 0
         self._last_user_scroll = 0.0
         self._grew = False
-        self.frame = 0
         self.cold_paints = 0  # placeholders painted where a block was not warm yet (a bench counter)
         self.hover: Optional[Tuple[Block, Target]] = None
         self.pressed: Optional[Tuple[Block, Target]] = None
@@ -645,8 +644,6 @@ class CanvasView(QAbstractScrollArea):
 
     # ---------------------------------------------------------------- painting
     def paintEvent(self, e) -> None:
-        self.frame += 1
-        self.scene.frame = self.frame
         vp = self.viewport()
         t = self.m.tokens
         p = QPainter(vp)
@@ -800,8 +797,6 @@ class CanvasView(QAbstractScrollArea):
             if r is not None:
                 br = self.block_rect(b)
                 vp.update(QRect(br.x() + r[0], br.y() + r[1], min(r[2], br.width()), min(r[3], br.height())))
-        if self.scroll_tween.running:
-            pass
 
     # ---------------------------------------------------------------- islands
     def register_island(self, b: IslandBlock) -> None:

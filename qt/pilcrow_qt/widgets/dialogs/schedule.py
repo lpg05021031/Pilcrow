@@ -5,9 +5,9 @@ model, the time limit, the worktree and whether it is enabled. ``schedules.save`
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
-from PySide6.QtCore import QSize, Qt, QTime, QTimer, Signal
+from PySide6.QtCore import Qt, QTime, QTimer, Signal
 from PySide6.QtGui import QIntValidator
 from PySide6.QtWidgets import (
     QGridLayout,
@@ -649,7 +649,6 @@ class ScheduleDialog(Sheet):
         err = r.get("error")
         nxt = r.get("nextRunAt")
         label = str(r.get("label") or "")
-        t = theme.tokens()
         if err:
             self.preview_lb.set_color("err")
             self.preview_lb.setText(str(err))
@@ -660,7 +659,6 @@ class ScheduleDialog(Sheet):
         else:
             self.preview_lb.set_color("text_3")
             self.preview_lb.setText(label)
-        _ = t
 
     # ---- mode, more
     def set_mode(self, mode: str) -> None:
@@ -758,6 +756,3 @@ def _row(title: str, note: str, control: QWidget) -> QWidget:
     lay.addLayout(col, 1)
     lay.addWidget(control, 0, Qt.AlignmentFlag.AlignVCenter)
     return box
-
-
-_ = (QSize, basename, List)
