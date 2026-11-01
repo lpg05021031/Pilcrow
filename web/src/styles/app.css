@@ -1182,6 +1182,10 @@ body.resizing iframe {
 .menu-item.active {
   background: var(--fill-2);
 }
+/* the lit row is the focus indicator in a menu */
+.menu-item:focus-visible {
+  outline: none;
+}
 .menu-item:disabled {
   color: var(--text-3);
   cursor: default;

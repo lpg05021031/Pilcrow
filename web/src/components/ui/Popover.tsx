@@ -110,8 +110,10 @@ export function Menu({ items, onClose, id, label }: { items: MenuItem[]; onClose
   const ref = useRef<HTMLDivElement>(null);
   const selectable = items.flatMap((it, i) => (it.separator || it.heading || it.disabled ? [] : [i]));
   const focusAt = (i: number | undefined) => ref.current?.querySelector<HTMLElement>(`[data-i="${i}"]`)?.focus();
+  // A frame later: the popover is hidden until it has been placed, and a hidden row cannot take focus.
   useEffect(() => {
-    focusAt(selectable.find((i) => items[i].checked) ?? selectable[0]);
+    const t = requestAnimationFrame(() => focusAt(selectable.find((i) => items[i].checked) ?? selectable[0]));
+    return () => cancelAnimationFrame(t);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps -- once, as the menu opens
   const onKeyDown = (e: React.KeyboardEvent) => {
     const at = selectable.indexOf(active);

@@ -22,6 +22,7 @@
     "test:e2e": "node test/e2e/run.mjs",
     "test:webkit": "node test/webkit/run.mjs",
     "test:perf": "node test/e2e/perf.mjs",
+    "test:ux": "node test/e2e/ux.mjs",
     "release": "node scripts/release.mjs",
     "installers": "python scripts/make-installers.py --verify"
   },
