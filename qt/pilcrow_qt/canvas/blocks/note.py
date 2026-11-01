@@ -174,7 +174,7 @@ class _Card(Group):
     # ---- paint and hits
     def paint(self, p: QPainter, x: int, y: int, w: int, st: PaintState) -> None:
         hover = st.hover is not None and st.hover.kind in ("head", "button")
-        hover_open = st.hover is not None and st.hover.kind == "button" and st.hover.id == "open"
+        hover_open = st.lit("button", "open")
         paint_card_head(
             p,
             x,
@@ -196,6 +196,14 @@ class _Card(Group):
         if r is not None and r.contains(x, y) and self.open_target():
             return Target("button", "open", (r.x(), r.y(), r.width(), r.height()))
         return Target("head", "card", (0, 0, self.h_width or 0, self.head_h))
+
+    def targets(self) -> List[Target]:
+        """The head, then the arrow that opens the session (where the head last painted it)."""
+        out = [Target("head", "card", (0, 0, self.h_width or 0, self.head_h))]
+        r = self._rects.get("open")
+        if r is not None and self.open_target():
+            out.append(Target("button", "open", (r.x(), r.y(), r.width(), r.height())))
+        return out
 
     def hover_rect(self, target: Target) -> Tuple[int, int, int, int]:
         return (0, 0, self.h_width or 0, self.head_h)  # the open arrow lights the whole head

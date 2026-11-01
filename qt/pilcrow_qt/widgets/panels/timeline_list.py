@@ -121,7 +121,17 @@ class StepBlock(NodeBlock):
         else:
             parts.append(nd.Text("—", theme.FS_MICRO, 400, "text_3", wrap=False))
         if s.get("toolUseId") or s.get("uuid"):
-            parts.append(nd.Button("", "jump", icon="arrow-up-right", kind="ghost", size="xs", icon_px=13))
+            parts.append(
+                nd.Button(
+                    "",
+                    "jump",
+                    icon="arrow-up-right",
+                    kind="ghost",
+                    size="xs",
+                    icon_px=13,
+                    name="Show in the conversation",
+                )
+            )
         return nd.hstack(*parts, spacing=6, stretch=[1], pad=ROW_PAD, valign="top")
 
     def _jump(self, _t: Target, _view: Any) -> None:

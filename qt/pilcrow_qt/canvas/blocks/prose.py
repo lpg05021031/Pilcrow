@@ -199,8 +199,9 @@ class ProseBlock(Block):
     def _paint_copies(self, p: QPainter, x: int, y: int, st: PaintState) -> None:
         hov = st.hover
         shown = -1
-        if hov is not None and isinstance(hov.id, str) and hov.id.startswith(("well:", "copy:")):
-            shown = int(hov.id.split(":")[1])
+        for on in (hov, st.focus):  # the pointer on a well, or the keyboard on its Copy
+            if on is not None and isinstance(on.id, str) and on.id.startswith(("well:", "copy:")):
+                shown = int(on.id.split(":")[1])
         said, until = self._copied
         for i, (r, code) in enumerate(self.wells()):
             copied = i == said and time.monotonic() < until

@@ -278,7 +278,7 @@ class ToolBlock(Group):
         )
         cx += chev_w
         if self.file:
-            on = st.hover is not None and st.hover.kind == "button" and st.hover.id == "open-file"
+            on = st.lit("button", "open-file")
             if hover or on:
                 if on:
                     rounded(
@@ -368,6 +368,14 @@ class ToolBlock(Group):
         if self.file and r is not None and r.contains(x, y):
             return Target("button", "open-file", (r.x(), r.y(), r.width(), r.height()))
         return Target("head", "tool", (0, 0, self.h_width or 0, self.head_h))
+
+    def targets(self) -> List[Target]:
+        """The head, then Open in Files (where the head last painted it)."""
+        out = [Target("head", "tool", (0, 0, self.h_width or 0, self.head_h))]
+        r = self._meta_rects.get("open-file")
+        if self.file and r is not None:
+            out.append(Target("button", "open-file", (r.x(), r.y(), r.width(), r.height())))
+        return out
 
     def cursor_for(self, target: Target) -> Optional[Any]:
         return Qt.CursorShape.PointingHandCursor

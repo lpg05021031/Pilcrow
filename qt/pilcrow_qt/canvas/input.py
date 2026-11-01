@@ -278,14 +278,15 @@ class ViewInput:
     def focusables(self) -> List[Tuple[Block, Target]]:
         """The targets Tab visits, in reading order over the blocks on screen: a block's own targets
         (buttons, links, toggles), else its head when it has one."""
-        out: List[Tuple[Block, Target]] = []
-        for b in self.visible_blocks():
-            ts = [t for t in b.targets() if t.kind in FOCUS_KINDS]
-            if not ts:
-                head = self.head_target(b)
-                ts = [head] if head is not None else []
-            out.extend((b, t) for t in ts)
-        return out
+        return [(b, t) for b in self.visible_blocks() for t in self.block_targets(b)]
+
+    def block_targets(self, b: Block) -> List[Target]:
+        """What Tab visits in one block: its own targets (buttons, links, toggles), else its head."""
+        ts = [t for t in b.targets() if t.kind in FOCUS_KINDS]
+        if not ts:
+            head = self.head_target(b)
+            ts = [head] if head is not None else []
+        return ts
 
     @staticmethod
     def head_target(b: Block) -> Optional[Target]:
@@ -325,7 +326,7 @@ class ViewInput:
         self.focus = f
         self._update_focus_rect(old)
         if f is not None:
-            a11y.announce(self, f[0], QAccessible.Event.Focus)
+            a11y.announce(self, f[0], QAccessible.Event.Focus, f[1])
 
     def _update_focus_rect(self, *keys: Optional[Tuple[str, Target]]) -> None:
         vp = self.viewport()

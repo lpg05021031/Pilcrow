@@ -26,15 +26,17 @@ Path = Tuple[int, ...]
 
 class Target:
     """What the pointer is on inside a block: a kind (``head``, ``link``, ``button``…), an id the
-    block understands, and the rect in block coordinates."""
+    block understands, the rect in block coordinates, and the words it is read with (a button's
+    label; else the block's ``tooltip_for`` names it)."""
 
-    __slots__ = ("kind", "id", "rect", "data")
+    __slots__ = ("kind", "id", "rect", "data", "name")
 
-    def __init__(self, kind: str, id_: str, rect: Tuple[int, int, int, int], data: Any = None) -> None:
+    def __init__(self, kind: str, id_: str, rect: Tuple[int, int, int, int], data: Any = None, name: str = "") -> None:
         self.kind = kind
         self.id = id_
         self.rect = rect  # x, y, w, h in block coordinates
         self.data = data
+        self.name = name
 
     def __eq__(self, other: object) -> bool:
         return isinstance(other, Target) and other.kind == self.kind and other.id == self.id

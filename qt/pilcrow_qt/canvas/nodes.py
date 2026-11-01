@@ -570,7 +570,7 @@ BUTTON_METRICS = {
 class Button(Node):
     """A painted button: kinds '' (quiet fill), 'primary', 'ghost', 'danger', 'link', 'more'."""
 
-    __slots__ = ("label", "icon", "kind", "size", "tid", "enabled", "icon_px")
+    __slots__ = ("label", "icon", "kind", "size", "tid", "enabled", "icon_px", "name")
 
     def __init__(
         self,
@@ -581,6 +581,7 @@ class Button(Node):
         size: str = "sm",
         enabled: bool = True,
         icon_px: int = 13,
+        name: str = "",
     ) -> None:
         super().__init__()
         self.label, self.tid, self.icon, self.kind, self.size, self.enabled, self.icon_px = (
@@ -592,6 +593,7 @@ class Button(Node):
             enabled,
             icon_px,
         )
+        self.name = name or label  # what an icon-only button is read as
 
     def _m(self) -> dict:
         if self.kind in ("link", "more"):
@@ -623,7 +625,7 @@ class Button(Node):
         return self.h
 
     def target(self) -> Target:
-        return Target("button", self.tid, (self.x, self.y, self.w, self.h))
+        return Target("button", self.tid, (self.x, self.y, self.w, self.h), name=self.name)
 
     def hit(self, x: int, y: int) -> Optional[Target]:
         return self.target() if self.enabled else None
@@ -697,7 +699,7 @@ class Link(Node):
         return self.h
 
     def target(self) -> Target:
-        return Target("link", self.tid, (self.x, self.y, self.w, self.h), self.data)
+        return Target("link", self.tid, (self.x, self.y, self.w, self.h), self.data, self.label)
 
     def hit(self, x: int, y: int) -> Optional[Target]:
         return self.target()
@@ -746,7 +748,7 @@ class Image(Node):
             p.drawPixmap(ox + self.x, oy + self.y, self._scaled)
 
     def hit(self, x: int, y: int) -> Optional[Target]:
-        return Target("image", self.tid, (self.x, self.y, self.w, self.h))
+        return Target("image", self.tid, (self.x, self.y, self.w, self.h), name="Image")
 
     def cool(self) -> None:
         self._scaled = None
@@ -782,7 +784,7 @@ class Toggle(Node):
         self.child.shift(dx, dy)
 
     def head_target(self) -> Target:
-        return Target("toggle", self.tid, (self.x, self.y, self.w, 22))
+        return Target("toggle", self.tid, (self.x, self.y, self.w, 22), name=self.label)
 
     def hit(self, x: int, y: int) -> Optional[Target]:
         if y < self.y + 22:
