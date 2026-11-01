@@ -6,7 +6,7 @@ import { store } from './config.js';
 import { sessions, bus } from './sessions.js';
 import * as snapshots from './snapshots.js';
 import * as inbox from './inbox.js';
-import { MAX_FILES, SUMMARY_MAX, capRun, changesOf } from './runs.js';
+import { CLOSE_AFTER_MS, MAX_FILES, SUMMARY_MAX, capRun, changesOf } from './runs.js';
 import { xdg, readJson, jsonFile, uuid, log, slash, lastAssistantText } from './util.js';
 
 export const events = new EventEmitter();
@@ -300,7 +300,7 @@ function finishRun(s, session, entry, status, reason) {
   persist();
   bus.emit('list-changed');
   // The process is not needed any more; the transcript stays and the session reopens on demand.
-  setTimeout(() => session.close(), 1500);
+  setTimeout(() => session.close(), CLOSE_AFTER_MS);
   log('schedule done', s.name, status);
 }
 

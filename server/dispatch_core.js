@@ -8,9 +8,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { readJson, jsonFile, lastAssistantText, fmtCost } from './util.js';
+import { readJson, jsonFile, lastAssistantText, fmtCost, roundUsd } from './util.js';
 import { findRepos, joinNotes, manifestOf, ruleKey, ruleLabel } from './workspace.js';
-import { ACTIVE, MAX_FILES, SUMMARY_MAX, TERMINAL, capRun, changesOf, land, review as reviewRuns, tally } from './runs.js';
+import { ACTIVE, CLOSE_AFTER_MS, MAX_FILES, SUMMARY_MAX, TERMINAL, capRun, changesIn, land, review as reviewRuns, tally } from './runs.js';
 
 export const DEFAULTS = Object.freeze({
   mode: 'acceptEdits', // 'ask' | 'acceptEdits' | 'allowlist'
@@ -39,7 +39,6 @@ const COALESCE_MS = 16;
 // The file is saved at most this often: a running job changes many times a second (what each run is
 // doing now), and every save rewrites the whole file. end() writes what is left.
 const SAVE_MS = 1000;
-const CLOSE_AFTER_MS = 1500; // a finished run's process lingers this long for its last messages
 const SCAN_TTL_MS = 60_000; // a workspace scan walks folders; the picker asks again on every open
 const MAX_BACKOFF_MS = 60_000; // a rate-limited run waits twice as long each time, up to this
 const MAX_FINISHED = 40; // finished jobs kept, the newest; each one's report stays in the inbox
@@ -176,7 +175,7 @@ export function createDispatcher(deps) {
       files += (r.files || []).length;
     }
     const { runs, ...rest } = job;
-    return { ...rest, counts, total: runs.length, cost: Math.round(cost * 10000) / 10000, needsAction: needs, files, canaryWaiting: job.state === 'reviewing' && job.wave === 'canary' };
+    return { ...rest, counts, total: runs.length, cost: roundUsd(cost), needsAction: needs, files, canaryWaiting: job.state === 'reviewing' && job.wave === 'canary' };
   }
   function touch(job, runOrRuns) {
     job.updatedAt = now();
@@ -683,10 +682,7 @@ export function createDispatcher(deps) {
       run.worktree = made.worktree;
       store.setMeta(made.id, { dispatch: { jobId: job.id, runId: run.id, name: job.name, target: run.name } });
       session = sessions.find(made.id);
-      if (session) {
-        session.dispatch = { jobId: job.id, runId: run.id };
-        if (job.settings.unattended) session.unattended = true; // nobody will answer: Claude is told so
-      }
+      if (session && job.settings.unattended) session.unattended = true; // nobody will answer: Claude is told so
       touch(job, run);
       // the worktree isolates files only: copies and the prepare command bring what the agent needs
       for (const rel of job.settings.copy || []) {
@@ -771,14 +767,14 @@ export function createDispatcher(deps) {
 
   /** What the run changed (its steps and its worktree's diff), what it cost and what it said last. */
   async function collect(job, run, session) {
+    if (!started) return; // quitting (end()): no git process starts after it
     let steps = [];
     try {
       if (session) steps = snapshots.steps(session).steps || [];
     } catch {
       /* no snapshots */
     }
-    const d = run.worktree?.path ? await git.diff(run.worktree.path, { base: run.worktree.base }).catch(() => null) : null;
-    const ch = changesOf({ steps, since: run.startedAt || 0, diff: d?.files || [] });
+    const ch = await changesIn(git, run.worktree?.path, run.worktree?.base, { steps, since: run.startedAt || 0 });
     run.files = ch.files.slice(0, MAX_FILES);
     run.add = ch.add;
     run.del = ch.del;
@@ -1131,7 +1127,7 @@ export function createDispatcher(deps) {
     rep.cost = (rep.cost || 0) + rep.proseCost;
     if (job.inboxId) {
       try {
-        updateInbox(job.inboxId, { dispatch: rep, summary: text ? text.slice(0, 1200) : undefined });
+        updateInbox(job.inboxId, { dispatch: rep, summary: text ? text.slice(0, SUMMARY_MAX) : undefined });
       } catch (e) {
         log('dispatch inbox update failed', e?.message);
       }

@@ -30,6 +30,8 @@ export const uuid = () => crypto.randomUUID();
 /** A short, stable file name for a folder (the timeline's shadow repository, the project's notes). */
 export const folderKey = (cwd) => crypto.createHash('sha1').update(slash(cwd)).digest('hex').slice(0, 16);
 export const fmtCost = (usd) => `$${(usd || 0).toFixed(2)}`;
+/** A cost in dollars as the windows get it: to a hundredth of a cent, without the float noise of a sum. */
+export const roundUsd = (usd) => Math.round((usd || 0) * 10000) / 10000;
 
 /** The text of a message's content: a string, or its text blocks joined. */
 export function textOfContent(content) {

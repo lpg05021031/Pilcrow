@@ -417,14 +417,19 @@ describe('what a routine state costs', () => {
 });
 
 describe('quitting', () => {
-  it('starts no process once the server is quitting, not even for a held message', async () => {
+  it('starts no process once the server is quitting, not even for a held message, nor a timeline step', async () => {
     const { id, s, q } = await live();
     await s.send({ text: 'held' });
+    q.emit({ type: 'assistant', session_id: id, parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'tool_use', id: 'w1', name: 'Write', input: { file_path: 'x' } }] } });
+    q.emit({ type: 'user', session_id: id, parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'w1', content: 'ok' }] } });
+    await until(() => s.turnTools.length === 1);
     sessions.stop();
     q.emit(result(id)); // the turn ends: the held message would start a process
     const before = sdk.queries.length;
     await expect(s.send({ text: 'too late' })).rejects.toThrow(/quitting/);
     await new Promise((r) => setTimeout(r, 120));
     expect(sdk.queries.length).toBe(before);
+    await until(() => s.q === null); // the process ended, which would take the turn's step
+    expect(vi.mocked(snapshots.record).mock.calls.filter(([, w]: any) => w.kind === 'tool')).toEqual([]);
   });
 });

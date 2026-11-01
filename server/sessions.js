@@ -216,6 +216,11 @@ class Session {
     /** A scheduled run with nobody watching: permissions are declined with a reason (schedules.js). */
     this.unattended = false;
     this.unattendedDenials = 0;
+    /** @type {Promise<void> | null} Claude Code starting (ensureStarted), shared by the requests that wait for it */
+    this.starting = null;
+    /** @type {Promise<void> | null} the running process's message loop; settles when the process has ended */
+    this.consumed = null;
+    this.draining = false; // a held message is being handed over (drainHeld)
   }
 
   get meta() {
@@ -618,7 +623,7 @@ class Session {
    */
   recordTurn() {
     const tools = this.turnTools.splice(0);
-    if (!tools.length) return;
+    if (!tools.length || quitting) return; // quitting: no git process may start after stop()
     const [first] = tools;
     const label = tools.length === 1 ? first.label : `${first.label} and ${tools.length - 1} more`;
     snapshots.record(this, { kind: 'tool', tool: [...new Set(tools.map((t) => t.tool))].join(', '), toolUseId: first.toolUseId, label });

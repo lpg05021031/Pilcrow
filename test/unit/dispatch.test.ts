@@ -41,7 +41,6 @@ class FakeSession {
   activity: any = null;
   closed = false;
   interrupted = 0;
-  dispatch: any = null;
   unattended = false;
   bus: EventEmitter;
   constructor(id: string, cwd: string, bus: EventEmitter) {
@@ -129,7 +128,7 @@ class FakeSessions {
   }
 }
 
-function harness({ realWorktrees = false, file = null as string | null, shell = null as any } = {}) {
+function harness({ realWorktrees = false, file = null as string | null, shell = null as any, gitImpl = git as any } = {}) {
   const bus = new EventEmitter();
   const sessions = new FakeSessions(bus, realWorktrees);
   const inbox: any[] = [];
@@ -142,7 +141,7 @@ function harness({ realWorktrees = false, file = null as string | null, shell = 
     sessions,
     bus,
     store,
-    git,
+    git: gitImpl,
     pushInbox: (item: any) => inbox.push(item),
     updateInbox: (id: string, patch: any) => inboxUpdates.push({ id, patch }),
     shell: async (cmd: string, cwd: string, timeout: number) => {
@@ -551,6 +550,19 @@ describe('a job through its life', () => {
     h.d.end();
   });
 
+  it('once ended (the server quitting) a run that ends starts no git process', async () => {
+    const diff = vi.fn(async () => ({ isRepo: true, files: [] }));
+    const h = harness({ gitImpl: { ...git, diff } });
+    const { job } = await jobWithRepos(h, { canary: 0 });
+    await h.d.start(job.id);
+    await sleep(40);
+    h.d.end();
+    h.d.stop(job.id);
+    await sleep(40);
+    expect(h.d.get(job.id).runs.filter((r: any) => r.state === 'stopped').length).toBeGreaterThan(0);
+    expect(diff).not.toHaveBeenCalled();
+  });
+
   it('after a restart a run whose session is gone reads stopped, and the job can be finished', async () => {
     const file = path.join(root, 'dispatch.json');
     const h = harness({ file });
@@ -655,7 +667,7 @@ describe('playbooks, schedules and the written report', () => {
     expect(j2.scheduleId).toBe('sch-1');
     let { runs } = h.d.get(j2.id);
     expect(runs.map((r: any) => r.state)).toEqual(['running', 'running', 'running']);
-    const mine = [...h.sessions.all.values()].filter((x) => x.dispatch?.jobId === j2.id);
+    const mine = [...h.sessions.all.values()].filter((x) => h.store.getMeta(x.id)?.dispatch?.jobId === j2.id);
     expect(mine).toHaveLength(3);
     expect(mine.every((x) => x.unattended)).toBe(true);
     for (const r of runs) {

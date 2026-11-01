@@ -11,9 +11,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
-import { TERMINAL, ACTIVE, capRun, changesOf, land, review as reviewRuns, tally } from './runs.js';
+import { TERMINAL, ACTIVE, capRun, changesIn, land, review as reviewRuns, tally } from './runs.js';
 import { findRepos, ruleKey, ruleLabel } from './workspace.js';
-import { absolute, fmtCost, textOfContent, under } from './util.js';
+import { absolute, fmtCost, roundUsd, textOfContent, under } from './util.js';
 
 export const STATES = ['queued', 'preparing', 'running', 'needs_action', 'done', 'failed', 'stopped', 'skipped'];
 export const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/;
@@ -170,7 +170,7 @@ export function createHelpers(deps) {
       state: h.state,
       since: h.startedAt,
       elapsedMs: (h.endedAt || now()) - (h.launchedAt || h.startedAt),
-      cost: Math.round((h.cost || 0) * 10000) / 10000,
+      cost: roundUsd(h.cost),
       files: h.files || 0,
       add: h.add || 0,
       del: h.del || 0,
@@ -394,10 +394,8 @@ export function createHelpers(deps) {
   /** Files, additions and deletions of a helper's worktree against its base. */
   async function collect(h) {
     const dir = h.worktree?.path || h.cwd;
-    if (!dir || !exists(dir)) return;
-    const d = await git.diff(dir, { base: h.worktree?.base }).catch(() => null);
-    if (!d) return; // not a repository, or gone
-    const ch = changesOf({ diff: d.files || [] });
+    if (!started || !dir || !exists(dir)) return; // not after end() (quitting): no git process starts then
+    const ch = await changesIn(git, dir, h.worktree?.base);
     h.files = ch.files.length;
     h.add = ch.add;
     h.del = ch.del;
@@ -664,7 +662,7 @@ export function createHelpers(deps) {
   }
   function list(leadId) {
     const mine = helpersOf(leadId);
-    return { helpers: mine.map(publicState), caps: caps(), cost: Math.round(mine.reduce((s, h) => s + (h.cost || 0), 0) * 10000) / 10000, known: known(leadId) };
+    return { helpers: mine.map(publicState), caps: caps(), cost: roundUsd(mine.reduce((s, h) => s + (h.cost || 0), 0)), known: known(leadId) };
   }
 
   // ---- what the clients ask for
@@ -705,7 +703,7 @@ export function createHelpers(deps) {
     if (m.lead || helpersOf(id).length) {
       const mine = helpersOf(id);
       out.helpers = mine.map(publicState);
-      out.lead = { since: m.lead?.since || null, cost: Math.round(mine.reduce((s, h) => s + (h.cost || 0), 0) * 10000) / 10000, caps: caps(), rules: (m.lead?.rules || []).map((r) => r.label) };
+      out.lead = { since: m.lead?.since || null, cost: roundUsd(mine.reduce((s, h) => s + (h.cost || 0), 0)), caps: caps(), rules: (m.lead?.rules || []).map((r) => r.label) };
     }
     if (m.helper) out.helper = { leadId: m.helper.leadId, leadTitle: store.getMeta(m.helper.leadId)?.title || m.helper.leadTitle || '', name: m.helper.name, state: helpers.get(id)?.state || m.helper.state || null };
     return out;
@@ -764,7 +762,7 @@ export function createHelpers(deps) {
         mine.map((h) => ({ ...h, gist: h.handoff })),
         `helper${mine.length === 1 ? '' : 's'} done`,
       ),
-      cost: Math.round(mine.reduce((s, h) => s + (h.cost || 0), 0) * 10000) / 10000,
+      cost: roundUsd(mine.reduce((s, h) => s + (h.cost || 0), 0)),
       helpers: mine.map((h) => ({ ...publicState(h), handoff: h.handoff || '' })),
       title,
     };

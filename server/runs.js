@@ -12,6 +12,7 @@ export const ACTIVE = new Set(['preparing', 'running', 'needs_action']);
 /** After the cap's interrupt, how long a run has to settle before it is ended anyway. */
 export const STOP_GRACE_MS = 3000;
 export const SUMMARY_MAX = 1200; // characters of an inbox item's summary
+export const CLOSE_AFTER_MS = 1500; // a finished run's process lingers this long for its last messages
 export const MAX_FILES = 60; // changed files a run's record and an inbox item list
 const GIST_MAX = 160; // characters of a run's own summary on its line of an inbox summary
 const PR_TIMEOUT_MS = 60_000;
@@ -67,6 +68,20 @@ export function changesOf({ steps = [], since = 0, diff = [] }) {
     }
   }
   return { files: [...files.values()], add, del };
+}
+
+/**
+ * What a run changed in `dir` against `base` (git.diff), counted with its timeline steps since `since`
+ * when it has any (changesOf). A folder that is gone or not a repository has changed nothing.
+ * @param {typeof import('./git.js')} git
+ * @param {string | null | undefined} dir
+ * @param {string | undefined} base
+ * @param {{ steps?: Parameters<typeof changesOf>[0]['steps'], since?: number }} [from]
+ */
+export async function changesIn(git, dir, base, from = {}) {
+  const d = dir ? await git.diff(dir, { base }).catch(() => null) : null;
+  // every file of a parsed diff has a path (parseUnifiedDiff falls back to the old one)
+  return changesOf({ ...from, diff: /** @type {{ path: string }[]} */ (d?.files || []) });
 }
 
 /**
