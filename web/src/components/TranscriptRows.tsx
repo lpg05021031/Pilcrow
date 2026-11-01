@@ -11,6 +11,7 @@ import { ToolCard, type ToolCtx } from './tools/ToolCard';
 import { HelperNote, FromLead } from './tools/HelpersBody';
 import { useNow } from './ui/hooks';
 import { CopyButton } from './ui/clipboard';
+import { onActivate } from './ui/keys';
 import { WorkingMark } from './ui/brand';
 import { useSmoothText, useThrottled } from '../lib/motion';
 import { Collapse } from './ui/Collapse';
@@ -97,7 +98,7 @@ function UserMessage({ item, ctx }: { item: UserItem; ctx: ToolCtx }) {
         {(item.images.length > 0 || item.files.length > 0) && (
           <div className="msg-attachments">
             {item.images.map((src, k) => (
-              <img key={k} src={src} className="msg-thumb" alt="Attached image" onClick={() => openLightbox(src)} />
+              <img key={k} src={src} className="msg-thumb" alt="Attached image" role="button" tabIndex={0} aria-label="Show the attached image full size" onClick={() => openLightbox(src)} onKeyDown={onActivate(() => openLightbox(src))} />
             ))}
             {item.files.map((f) => (
               <span key={f} className="msg-file">

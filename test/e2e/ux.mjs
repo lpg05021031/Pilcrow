@@ -292,6 +292,144 @@ test('every control on the main screens has a name a screen reader can say', asy
   expect(!problems.length, `unnamed controls:\n${problems.join('\n')}`);
 });
 
+/** An element's computed colour, and the colour a token resolves to, as the same rgb() text. */
+const inks = (page, sel, token) =>
+  page.evaluate(
+    ([sel, token]) => {
+      const probe = document.body.appendChild(document.createElement('span'));
+      probe.style.color = `var(${token})`;
+      const want = getComputedStyle(probe).color;
+      probe.remove();
+      return { got: [...document.querySelectorAll(sel)].map((el) => getComputedStyle(el).color), want };
+    },
+    [sel, token],
+  );
+
+test('the / and @ lists are listboxes the arrows walk; a lit row keeps its words legible; a pick goes into the message', async ({ page }) => {
+  await open(page, 'sess-login');
+  const box = page.getByRole('textbox', { name: 'Message to Claude' });
+  await box.click();
+  await page.keyboard.type('/');
+  await page.waitForSelector('.suggest [role="listbox"] [role="option"]');
+  const state = () =>
+    page.evaluate(() => {
+      const ta = document.activeElement;
+      const id = ta.getAttribute('aria-activedescendant');
+      const opt = id && document.getElementById(id);
+      return { id, selected: opt?.getAttribute('aria-selected'), text: opt?.textContent?.trim(), list: document.getElementById(ta.getAttribute('aria-controls'))?.getAttribute('role'), n: document.querySelectorAll('.suggest [role="option"]').length };
+    });
+  const a = await state();
+  expect(a.list === 'listbox' && a.selected === 'true' && a.n > 1, `the field points at a selected option of its listbox (${JSON.stringify(a)})`);
+  await page.keyboard.press('ArrowDown');
+  const b = await state();
+  expect(b.id !== a.id && b.selected === 'true', `ArrowDown moves the active option (${a.text} → ${b.text})`);
+  const lit = await inks(page, '.suggest-item.active .suggest-hint, .suggest-item.active .suggest-slash', '--text');
+  expect(lit.got.length && lit.got.every((c) => c === lit.want), `the lit row's hint is in --text, as tokens.css asks on its fill (${JSON.stringify(lit)})`);
+  await page.keyboard.press('Enter');
+  const picked = await box.inputValue();
+  expect(/^\/\S+/.test(picked) && picked.length > 1, `Enter puts the command in the message (${JSON.stringify(picked)})`);
+  await box.fill('');
+  await page.keyboard.type('look at @sto');
+  await page.waitForFunction(() => [...document.querySelectorAll('.suggest [role="option"]')].some((o) => o.textContent.includes('store.ts')), null, { timeout: 5000 });
+  const files = await state();
+  expect(files.list === 'listbox' && files.selected === 'true', `@ opens the file listbox (${JSON.stringify(files)})`);
+  for (let i = 0; i < 10 && !(await state()).text.includes('store.ts'); i++) await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  expect((await box.inputValue()).includes('@web/src/lib/store.ts'), `the file is mentioned (${await box.inputValue()})`);
+  await page.waitForSelector('.suggest', { state: 'detached', timeout: 3000 });
+});
+
+test('a lit row in a menu and the open session in the sidebar set their faint words in --text', async ({ page }) => {
+  await open(page, 'sess-login');
+  const side = await inks(page, '.side-row.active .side-row-meta, .side-row.active .side-time', '--text');
+  expect(side.got.length && side.got.every((c) => c === side.want), `the open session's folder and time (${JSON.stringify(side)})`);
+  await page.locator('.composer .cbtn.mode').focus();
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => document.activeElement?.closest('[role="menu"]'), null, { timeout: 3000 });
+  await page.keyboard.press('ArrowDown');
+  await page.waitForSelector('.menu-item.active .menu-hint', { timeout: 3000 });
+  const menu = await inks(page, '.menu-item.active .menu-hint, .menu-item.active kbd', '--text');
+  expect(menu.got.length && menu.got.every((c) => c === menu.want), `the lit menu row's hint (${JSON.stringify(menu)})`);
+  await page.keyboard.press('Escape');
+});
+
+test('messages sent while Claude works wait in a named queue, each with named actions', async ({ page }) => {
+  await open(page, 'sess-empty');
+  const box = page.getByRole('textbox', { name: 'Message to Claude' });
+  await box.fill('run the marathon');
+  await box.press('Enter');
+  await page.waitForSelector('.session-head .status-pill', { timeout: 10_000 });
+  await box.fill('and then the tests');
+  await box.press('Enter');
+  const queue = page.getByRole('list', { name: 'Queued messages' });
+  await queue.waitFor({ timeout: 10_000 });
+  expect((await queue.getByRole('listitem').count()) === 1, 'the held message is listed');
+  await settled(page);
+  const bare = (await unnamed(page)).filter((p) => p.includes('queue'));
+  expect(!bare.length, `every control of the queue is named:\n${bare.join('\n')}`);
+  await page.getByRole('button', { name: 'Remove queued message' }).click();
+  await page.waitForFunction(() => !document.querySelector('.queue:not([data-ghost])'), null, { timeout: 5000 });
+  await ctl.call('session.interrupt', { id: 'sess-empty' });
+});
+
+test('an image opens full size as a named dialog from the keyboard; Esc puts it back and the focus with it', async ({ page }) => {
+  // A 1×1 PNG, attached to a message of the person's.
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg==';
+  await ctl.call('mock.messages', { id: 'sess-login', msgs: [{ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'what is this?' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } }] } }] });
+  await open(page, 'sess-login');
+  const thumb = page.getByRole('button', { name: 'Show the attached image full size' });
+  await thumb.waitFor({ timeout: 10_000 });
+  await thumb.focus();
+  await page.keyboard.press('Enter');
+  const dialog = page.getByRole('dialog', { name: 'Image' });
+  await dialog.waitFor({ timeout: 3000 });
+  expect((await focused(page, '.lightbox')).inside, 'the focus goes into it');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.lightbox:not([data-ghost])', { state: 'detached', timeout: 3000 });
+  const back = await page.evaluate(() => document.activeElement?.classList.contains('msg-thumb'));
+  expect(back, 'the focus is back on the thumbnail');
+});
+
+test('a part that fails to draw says so in place, offers to try again, and the rest keeps working', async ({ page }) => {
+  // A search whose structured result is not the shape the card reads: its body throws as it draws.
+  const id = 'toolu_bad_result';
+  await ctl.call('mock.messages', {
+    id: 'sess-login',
+    msgs: [
+      { type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'search for it' }] } },
+      { type: 'assistant', message: { id: 'msg_bad', role: 'assistant', content: [{ type: 'tool_use', id, name: 'Grep', input: { pattern: 'next' } }] } },
+      { type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: '3 files' }] }, tool_use_result: { filenames: 'not a list' } },
+    ],
+  });
+  await open(page, 'sess-login');
+  await page.locator('.work-head').last().click();
+  await page.locator('.tool[data-tool="Grep"] .tool-head').last().click();
+  const fault = page.getByRole('alert').filter({ hasText: 'could not be drawn' });
+  await fault.waitFor({ timeout: 5000 });
+  expect(await fault.getByRole('button', { name: 'Try again' }).count(), 'with a way to try again');
+  const box = page.getByRole('textbox', { name: 'Message to Claude' });
+  await box.fill('still here');
+  expect((await box.inputValue()) === 'still here', 'the rest of the window keeps working');
+  expect((await page.locator('.msg-user-text').count()) > 2, 'and the rest of the conversation is drawn');
+});
+
+test('the timeline takes the keyboard and shows where its focus is', async ({ page }) => {
+  // The mock keeps no snapshots; two steps of the conversation stand in for a timeline.
+  const step = (n, kind, extra) => ({ n, at: Date.now() - (3 - n) * 60e3, kind, tool: null, toolUseId: null, uuid: null, label: '', commit: null, changed: false, files: [], add: 0, del: 0, ...extra });
+  await ctl.call('mock.answer', { method: 'timeline.steps', result: { cwd: '/home/me/pilcrow', enabled: true, reason: null, steps: [step(1, 'start'), step(2, 'tool', { tool: 'Edit', toolUseId: 'toolu_edit', label: 'Edit auth.ts', changed: true, files: [{ path: 'web/src/lib/auth.ts', status: 'M', add: 1, del: 1 }], add: 1, del: 1 })] } });
+  await open(page, 'sess-login');
+  await page.keyboard.press('Alt+6');
+  await page.waitForSelector('.history .tl-row', { timeout: 10_000 });
+  await page.keyboard.press('Shift'); // the last input was the keyboard: focus shows as :focus-visible
+  await page.locator('.history').focus();
+  const ring = await page.evaluate(() => {
+    const cs = getComputedStyle(document.querySelector('.history'));
+    return { style: cs.outlineStyle, width: parseFloat(cs.outlineWidth), visible: document.querySelector('.history').matches(':focus-visible') };
+  });
+  expect(ring.visible && ring.style === 'solid' && ring.width >= 2, `a ring of its own (${JSON.stringify(ring)})`);
+  expect((await page.getByRole('button', { name: 'Show in the conversation' }).count()) > 0, 'the jump to the conversation is a named button');
+});
+
 test('light theme: no surface is left dark', async ({ page }) => {
   await ctl.call('config.set', { theme: 'light' });
   await page.reload();
@@ -355,8 +493,8 @@ test('reduced motion: nothing waits, menus and dialogs open at once, the app sti
     await page.keyboard.press('Control+Shift+O');
     await page.waitForSelector('.ov-stats', { timeout: 5000 });
     await settled(page);
-    const inline = await page.evaluate(() => [...document.querySelectorAll('[style*="animation-delay"]')].map((el) => getComputedStyle(el).animationDelay));
-    expect(inline.every((d) => parseFloat(d) === 0), `inline stagger delays are cancelled (${inline.join(', ')})`);
+    const staggered = await page.evaluate(() => [...document.querySelectorAll('[style*="--i"]')].map((el) => getComputedStyle(el).animationDelay));
+    expect(staggered.length > 0 && staggered.every((d) => parseFloat(d) === 0), `staggered entrances do not wait (${staggered.join(', ')})`);
     await page.keyboard.press('Control+k');
     await page.waitForSelector('.palette');
     const sheet = await page.evaluate(() => getComputedStyle(document.querySelector('.dialog')).animationDuration);

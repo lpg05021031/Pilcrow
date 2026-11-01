@@ -6,6 +6,7 @@ import type { ToolItem } from '../../lib/transcript';
 import { truncate } from '../../lib/format';
 import { setDialog, call, toast, useStore, openLightbox } from '../../lib/store';
 import { Spinner } from '../ui/bits';
+import { onActivate } from '../ui/keys';
 import type { ToolInput } from '../../lib/types';
 import type { ToolCtx } from './ToolCard';
 
@@ -124,7 +125,7 @@ export function ResultText({ item, label, input, ctx }: { item: ToolItem; label?
           <pre className="tool-pre">{truncate(r.text, 60000)}</pre>
         ))}
       {r.images.map((src, k) => (
-        <img key={k} className="tool-img" src={src} alt="Tool output" onClick={() => openLightbox(src)} />
+        <img key={k} className="tool-img" src={src} alt="Tool output" role="button" tabIndex={0} aria-label="Show the image full size" onClick={() => openLightbox(src)} onKeyDown={onActivate(() => openLightbox(src))} />
       ))}
     </div>
   );
