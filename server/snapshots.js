@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { run, xdg, slash, log, readJson, writeJson, privateDir, HOME } from './util.js';
+import { run, xdg, slash, log, readJson, readJsonAsync, writeJson, writeJsonAsync, privateDir, under, HOME } from './util.js';
 import { parseUnifiedDiff } from './git.js';
 
 export const events = new EventEmitter();
@@ -14,6 +14,7 @@ export const events = new EventEmitter();
 const ROOT = path.join(xdg('data'), 'timeline');
 const EXCLUDES = ['.git/', 'node_modules/', '.venv/', 'venv/', '__pycache__/', '*.pyc', '.pytest_cache/', '.mypy_cache/', '.ruff_cache/', '.cache/', '.gradle/', '.idea/', '.vs/', 'target/debug/', 'target/release/', '.terraform/', '.pilcrow/'];
 const MAX_STEPS = 600;
+const MAX_CACHED = 50; // sessions whose steps stay in memory (the most recently used)
 const SLOW_MS = 12_000;
 
 /** Tools whose completion may have changed files. MCP tools are opaque, so they count too. */
@@ -26,7 +27,7 @@ const stepsFile = (cwd, sid) => path.join(dirOf(cwd), `steps-${sid}.json`);
 const ready = new Map(); // cwd -> Promise<boolean>
 const queues = new Map(); // cwd -> Promise chain, so two sessions in one folder never race
 const disabled = new Map(); // cwd -> reason
-const cache = new Map(); // sid -> steps[]
+const cache = new Map(); // sid -> steps[], least recently used first
 
 function sg(cwd, args, opts = {}) {
   return run('git', ['-c', 'core.quotePath=false', '-c', 'color.ui=false', '-c', 'core.autocrlf=false', '-c', 'user.name=Pilcrow', '-c', 'user.email=pilcrow@localhost', '--git-dir', dirOf(cwd), '--work-tree', cwd, ...args], {
@@ -78,13 +79,17 @@ async function ensure(cwd) {
 }
 
 function loadSteps(cwd, sid) {
-  if (!cache.has(sid)) cache.set(sid, readJson(stepsFile(cwd, sid), []));
-  return cache.get(sid);
+  const steps = cache.get(sid) || readJson(stepsFile(cwd, sid), []);
+  cache.delete(sid);
+  cache.set(sid, steps);
+  if (cache.size > MAX_CACHED) cache.delete(cache.keys().next().value);
+  return steps;
 }
 
+/** Off the event loop and atomic; take() awaits it inside the folder's queue, so writes never overlap. */
 function saveSteps(cwd, sid, steps) {
   cache.set(sid, steps);
-  writeJson(stepsFile(cwd, sid), steps);
+  return writeJsonAsync(stepsFile(cwd, sid), steps);
 }
 
 async function statsBetween(cwd, from, to) {
@@ -186,7 +191,7 @@ async function take(session, { kind, tool, toolUseId, label, uuid: msgUuid, only
   if (external) out.push({ ...step, n: step.n + 1, kind, changed: false, files: [], add: 0, del: 0 });
   steps.push(...out);
   if (steps.length > MAX_STEPS) steps.splice(0, steps.length - MAX_STEPS);
-  saveSteps(cwd, sid, steps);
+  await saveSteps(cwd, sid, steps);
   for (const s of out) events.emit('step', { id: sid, step: publicStep(s) });
   return out[out.length - 1];
 }
@@ -264,7 +269,7 @@ export async function restore(session, { n, paths }) {
     for (const p of paths) {
       if (inTarget.has(p)) continue;
       const abs = path.join(cwd, p);
-      if (abs.startsWith(path.resolve(cwd)) && fs.existsSync(abs)) fs.rmSync(abs, { force: true });
+      if (under(path.resolve(cwd), abs) && abs !== path.resolve(cwd)) fs.rmSync(abs, { force: true });
     }
   } else {
     const r = await sg(cwd, ['read-tree', '--reset', '-u', target.commit]);
@@ -275,15 +280,16 @@ export async function restore(session, { n, paths }) {
 }
 
 /** Steps recorded by every session in a folder — the raw material for "who touched this file". */
-export function folderSteps(cwd) {
+export async function folderSteps(cwd) {
   const dir = dirOf(cwd);
-  if (!fs.existsSync(dir)) return [];
+  const names = await fs.promises.readdir(dir).catch(() => []);
   const out = [];
-  for (const f of fs.readdirSync(dir)) {
+  for (const f of names) {
     const m = f.match(/^steps-(.+)\.json$/);
     if (!m) continue;
     const sid = m[1];
-    for (const s of cache.get(sid) || readJson(path.join(dir, f), [])) if (s.files?.length) out.push({ sessionId: sid, ...publicStep(s) });
+    const steps = cache.get(sid) || (await readJsonAsync(path.join(dir, f), []));
+    for (const s of steps) if (s.files?.length) out.push({ sessionId: sid, ...publicStep(s) });
   }
   return out;
 }

@@ -104,7 +104,7 @@ class FakeSessions {
       if (this.realWorktrees) {
         const info = await git.info(p.cwd);
         const dir = path.join(path.dirname(p.cwd), '.wt', `${path.basename(p.cwd)}-${id}`);
-        worktree = await git.createWorktree({ repo: info.root, base: p.worktree.base || 'main', branch: `pilcrow/${p.worktree.name}`, dir });
+        worktree = (await git.createWorktree({ repo: info.root, base: p.worktree.base || 'main', branch: `pilcrow/${p.worktree.name}`, dir })).worktree;
         cwd = worktree.path;
       } else {
         worktree = { path: `${p.cwd}/.wt/${id}`, branch: `pilcrow/${p.worktree.name}`, base: p.worktree.base || 'main', repoRoot: p.cwd };

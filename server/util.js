@@ -112,9 +112,21 @@ export function tildify(p) {
   return same(p.slice(0, HOME.length + 1), HOME + '/') ? '~' + p.slice(HOME.length) : p;
 }
 
+const WHICH_TTL_MS = 30_000; // long enough to spare the stats, short enough to see a fresh install
+const whichCache = new Map(); // `${PATH}\0${cmd}` -> { at, found }
+
 /** Locate an executable on PATH (like `which`; on Windows also tries the PATHEXT extensions). */
 export function which(cmd) {
   if (!cmd) return null;
+  const key = `${process.env.PATH || process.env.Path || ''}\0${cmd}`;
+  const hit = whichCache.get(key);
+  if (hit && Date.now() - hit.at < WHICH_TTL_MS) return hit.found;
+  const found = search(cmd);
+  whichCache.set(key, { at: Date.now(), found });
+  return found;
+}
+
+function search(cmd) {
   const exts = IS_WIN ? ['', ...(process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean).map((e) => e.toLowerCase())] : [''];
   const hasDir = cmd.includes('/') || (IS_WIN && cmd.includes('\\'));
   if (hasDir) {
@@ -163,6 +175,23 @@ export function readJson(file, fallback) {
   }
 }
 
+export async function readJsonAsync(file, fallback) {
+  try {
+    return JSON.parse(await fs.promises.readFile(file, 'utf8'));
+  } catch {
+    return fallback;
+  }
+}
+
+const BINARY_SNIFF = 8000; // bytes looked at for a NUL, as git does
+
+/** Whether a file's bytes look binary (a NUL early on), as git decides it. */
+export function looksBinary(buf) {
+  const n = Math.min(buf.length, BINARY_SNIFF);
+  for (let i = 0; i < n; i++) if (buf[i] === 0) return true;
+  return false;
+}
+
 /** Create a folder only this user can open (0700), tightening it if it already exists. */
 export function privateDir(dir) {
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -177,7 +206,7 @@ export function privateDir(dir) {
 /** Atomic JSON write (temp file + rename). Pilcrow's own files are private to the user (0600). */
 export function writeJson(file, data) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-  const tmp = `${file}.${process.pid}.tmp`;
+  const tmp = tempPath(file);
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
   fs.renameSync(tmp, file);
 }
@@ -194,6 +223,18 @@ export function coalesce(fn, ms) {
       fn();
     }, ms);
   };
+}
+
+let tmpSeq = 0;
+/** A temp file beside `file` for an atomic write; unique per write, so overlapping writes stay whole. */
+export const tempPath = (file) => `${file}.${process.pid}.${++tmpSeq}.tmp`;
+
+/** writeJson without blocking the event loop. */
+export async function writeJsonAsync(file, data) {
+  await fs.promises.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+  const tmp = tempPath(file);
+  await fs.promises.writeFile(tmp, JSON.stringify(data), { mode: 0o600 });
+  await fs.promises.rename(tmp, file);
 }
 
 export function debounce(fn, ms) {

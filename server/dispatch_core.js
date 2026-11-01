@@ -37,6 +37,10 @@ export const SIZE_UNITS = { small: 1, medium: 2, large: 4 };
 const SKIP_DIRS = new Set(['node_modules', 'vendor', 'target', 'dist', 'build', '.git', '.hg', '.svn', '__pycache__', '.venv', 'venv']);
 const RATE_LIMIT = /rate.?limit|429|overloaded|too many requests/i;
 const COALESCE_MS = 16;
+// The file is saved at most this often: a running job changes many times a second (what each run is
+// doing now), and every save rewrites the whole file. end() writes what is left.
+const SAVE_MS = 1000;
+const CLOSE_AFTER_MS = 1500; // a finished run's process lingers this long for its last messages
 
 // ---------------------------------------------------------------- pure helpers
 
@@ -325,9 +329,11 @@ export function createDispatcher(deps) {
 
   // ---- persistence and events
   function persist() {
-    if (!file) return;
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => writeJson(file, data), 150);
+    if (!file || saveTimer) return;
+    saveTimer = setTimeout(() => {
+      saveTimer = null;
+      writeJson(file, data);
+    }, SAVE_MS);
   }
   function flushNow() {
     if (file) writeJson(file, data);
@@ -1008,8 +1014,7 @@ export function createDispatcher(deps) {
       .catch(() => null)
       .then(() => {
         touch(job, run);
-        if (s && state !== 'failed') setTimeout(() => s.close?.(), 1500);
-        else if (s) setTimeout(() => s.close?.(), 1500);
+        if (s) setTimeout(() => s.close?.(), CLOSE_AFTER_MS);
         log('dispatch run', job.name, run.name, state, reason || '');
         pump();
       });
@@ -1391,7 +1396,7 @@ export function createDispatcher(deps) {
       }
     }
     touch(job);
-    setTimeout(() => session?.close?.(), 1500);
+    setTimeout(() => session?.close?.(), CLOSE_AFTER_MS);
   }
 
   function buildReport(job) {
@@ -1493,6 +1498,7 @@ export function createDispatcher(deps) {
     clearTimeout(flushTimer);
     flushTimer = null;
     clearTimeout(saveTimer);
+    saveTimer = null;
     flushNow();
   }
 

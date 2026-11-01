@@ -224,7 +224,7 @@ function rpcMethods({ shell, quit, listChanged }) {
       const list = await sessions.list();
       const titles = Object.fromEntries(list.map((s) => [s.id, { title: s.title, firstPrompt: s.firstPrompt || null, lastModified: s.lastModified }]));
       const byPath = {};
-      for (const st of snapshots.folderSteps(pathParam(cwd, 'cwd'))) {
+      for (const st of await snapshots.folderSteps(pathParam(cwd, 'cwd'))) {
         for (const f of st.files) {
           (byPath[f.path] ||= []).push({ sessionId: st.sessionId, title: titles[st.sessionId]?.title || 'Session', about: titles[st.sessionId]?.firstPrompt || null, at: st.at, n: st.n, toolUseId: st.toolUseId, kind: st.kind, add: f.add, del: f.del });
         }
@@ -317,9 +317,9 @@ function rpcMethods({ shell, quit, listChanged }) {
     'session.gateway': async ({ cwd }) => gatewayInfo(cwd),
     'models.gateway': async ({ cwd, force }) => gatewayModels(cwd, { force: Boolean(force), version: VERSION }),
 
-    // Without a folder, git would answer for whatever folder the server runs in.
-    'git.info': ({ cwd }) => git.info(str(cwd, 'cwd')),
-    'git.diff': ({ cwd, base }) => git.diff(str(cwd, 'cwd'), { base }),
+    // Without a folder, git would answer for whatever folder the server runs in (info and diff say isRepo: false).
+    'git.info': ({ cwd }) => git.info(cwd),
+    'git.diff': ({ cwd, base }) => git.diff(cwd, { base }),
     'git.branches': ({ cwd }) => git.branches(str(cwd, 'cwd')),
     'git.commit': ({ cwd, message, paths }) => git.commit(str(cwd, 'cwd'), { message: str(message, 'message'), paths }),
     'git.discard': ({ cwd, path: p, untracked }) => git.discard(str(cwd, 'cwd'), { path: str(p, 'path'), untracked }),

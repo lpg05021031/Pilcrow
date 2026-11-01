@@ -10,7 +10,7 @@
 // file formats stay whatever the installed CLI expects.
 import fs from 'node:fs';
 import path from 'node:path';
-import { HOME, IS_WIN, slash, expandHome, claudeConfigDir, cleanEnv, run, readJson, log } from './util.js';
+import { HOME, IS_WIN, slash, expandHome, claudeConfigDir, cleanEnv, run, readJson, writeJson, log } from './util.js';
 
 const SKILL_NAME_RE = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 
@@ -310,6 +310,6 @@ export function approveProjectMcp({ cwd, name, approved }) {
   (approved ? en : dis).add(name);
   proj.enabledMcpjsonServers = [...en];
   proj.disabledMcpjsonServers = [...dis];
-  fs.writeFileSync(file, JSON.stringify(root, null, 2));
+  writeJson(file, root); // atomic: Claude Code reads and rewrites this file all the time
   return listMcp({ cwd });
 }

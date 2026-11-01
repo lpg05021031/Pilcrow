@@ -474,7 +474,7 @@ export function createHelpers(deps) {
     if (changed) {
       persist(h);
       emitLead(h.leadId);
-      if (h.state === 'needs_action') settleWaits(h.leadId, 'any');
+      if (h.state === 'needs_action') settleWaits(h.leadId);
     }
   }
   function onPermission({ id, request }) {
@@ -550,7 +550,7 @@ export function createHelpers(deps) {
   }
 
   // ---- wait
-  function settleWaits(leadId, trigger = 'change') {
+  function settleWaits(leadId) {
     const l = leads.get(leadId);
     if (!l) return;
     for (const w of [...l.waits]) {
@@ -563,7 +563,6 @@ export function createHelpers(deps) {
         w.resolve({ timedOut: false, helpers: mine.map(publicState) });
       }
     }
-    void trigger;
   }
   function wait(leadId, args = {}) {
     const all = helpersOf(leadId);
@@ -594,6 +593,7 @@ export function createHelpers(deps) {
     const base = { name: h.name, state: h.state };
     if (what === 'summary') return { ...base, ...cut(h.handoff || (TERMINAL.has(h.state) ? h.reason || 'No handoff.' : `Still ${h.state}; nothing to summarize yet.`)) };
     const session = sessions.find?.(h.id) || (await sessions.get(h.id).catch(() => null));
+    await session?.loadHistory?.(); // a session reopened, or one whose transcript was let go when idle
     if (what === 'last') return { ...base, ...cut(lastAssistantText(session) || 'Nothing said yet.') };
     if (what === 'files') {
       await collect(h);

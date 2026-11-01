@@ -56,6 +56,9 @@ const REAP_EVERY_MS = 60_000;
 const STDERR_TAIL = 8000; // characters of Claude Code's stderr kept for an error report
 const TASK_PROMPT_MAX = 4000;
 const MAX_TOOL_USES = 400;
+const MAX_TASKS = 100; // finished tasks kept for the panel; running ones always stay
+const MCP_AUTH_POLL_MS = 2000; // after an MCP sign-in starts, look for the server's reconnect this often…
+const MCP_AUTH_POLLS = 90; // …for three minutes
 
 /** Processes Pilcrow is shutting down on purpose (idle, settings change): their end is not an error.
  *  Kept per process, so a later crash of the session's next process is still reported. */
@@ -167,6 +170,8 @@ class Session {
     this.compacting = false;
     this.mcp = []; // last known MCP server statuses for this process
     this.mcpTimer = null;
+    this.mcpAuthTimer = null;
+    this._stateSoon = null;
     this.lastActivity = Date.now();
     this.outbox = [];
     this.flushTimer = null;
@@ -180,6 +185,8 @@ class Session {
     this.held = [];
     /** tool_use id -> { name, input } for tools in flight, so a tool_result can be read back. */
     this.toolUses = new Map();
+    /** The turn's file-touching tool calls so far; one timeline step covers them when the turn settles. */
+    this.turnTools = [];
     /** What Claude is doing right now, for views that do not load the transcript. */
     this.activity = null;
     this.turnStartedAt = null;
@@ -269,27 +276,47 @@ class Session {
 
   out(msg) {
     this.outbox.push(msg);
-    if (!this.flushTimer) {
-      this.flushTimer = setTimeout(() => {
-        this.flushTimer = null;
-        const msgs = this.outbox.splice(0);
-        if (msgs.length) bus.emit('msgs', { id: this.id, msgs });
-      }, OUTBOX_MS);
-    }
+    this.flushTimer ??= setTimeout(() => this.flushOut(), OUTBOX_MS);
+  }
+
+  flushOut() {
+    clearTimeout(this.flushTimer);
+    this.flushTimer = null;
+    const msgs = this.outbox.splice(0);
+    if (msgs.length) bus.emit('msgs', { id: this.id, msgs });
   }
 
   async loadHistory() {
     if (this.loaded) return;
-    if (!this.loading) {
-      this.loading = (async () => {
-        const msgs = await history.loadTranscript(this.id, this.cwd);
-        const seen = new Set(this.messages.map((m) => m.uuid));
-        this.messages = [...msgs.filter((m) => !seen.has(m.uuid)), ...this.messages];
-        this.recomputeFromHistory(msgs);
-        this.loaded = true;
-      })();
-    }
+    this.loading ??= (async () => {
+      const msgs = await history.loadTranscript(this.id, this.cwd);
+      const seen = new Set(this.messages.map((m) => m.uuid));
+      this.messages = [...msgs.filter((m) => !seen.has(m.uuid)), ...this.messages];
+      this.recomputeFromHistory(msgs);
+      this.loaded = true;
+    })().finally(() => (this.loading = null));
     await this.loading;
+  }
+
+  /**
+   * Let go of the transcript of a session nobody is using (no process, nothing pending): it can be
+   * megabytes, and the server runs for weeks. The next open reads it from disk again.
+   */
+  release() {
+    if (!this.persisted || !this.loaded || this.loading || this.q || this.starting || this.pending.size || this.held.length) return false;
+    this.messages = [];
+    this.inflight = [];
+    this.toolUses.clear();
+    this.loaded = false;
+    return true;
+  }
+
+  /** Keep every running task and only the newest finished ones: a long session runs thousands. */
+  trimTasks() {
+    for (const [id, t] of this.tasks) {
+      if (this.tasks.size <= MAX_TASKS) break;
+      if (t.status !== 'running' && t.status !== 'pending') this.tasks.delete(id);
+    }
   }
 
   recomputeFromHistory(msgs) {
@@ -397,7 +424,14 @@ class Session {
   async consume(q, input) {
     let err = null;
     try {
-      for await (const msg of q) this.onMessage(msg);
+      for await (const msg of q) {
+        // One message Pilcrow cannot read must not end the session; the next one may be fine.
+        try {
+          this.onMessage(msg);
+        } catch (e) {
+          log('message not handled', this.id, msg?.type, msg?.subtype, e);
+        }
+      }
     } catch (e) {
       err = e;
     }
@@ -414,6 +448,7 @@ class Session {
     this.queuedUuids.clear();
     this.turnStartedAt = null;
     this.activity = null;
+    this.recordTurn(); // a turn the process did not finish still changed files
     // Nothing is streaming any more, and background work died with the process.
     this.inflight = [];
     this.bgTasks = [];
@@ -466,6 +501,7 @@ class Session {
         if (entry?.contextWindow) this.usage.contextWindow = entry.contextWindow;
         this.usage.outputTokens = Object.values(mu).reduce((s, x) => s + (x.outputTokens || 0), 0);
         store.setMeta(this.id, { contextWindow: this.usage.contextWindow || null, costUsd: this.usage.costUsd || null, turnEnd: Date.now() });
+        this.recordTurn();
         this.markDelivered(msg.user_message_uuids || (msg.user_message_uuid ? [msg.user_message_uuid] : null));
         if (!(msg.queued_turn_count > 0)) {
           this.status = 'idle';
@@ -534,8 +570,20 @@ class Session {
     const use = this.toolUses.get(c.tool_use_id);
     if (!use) return;
     this.toolUses.delete(c.tool_use_id);
-    if (!snapshots.FILE_TOOLS.has(use.name) || store.getConfig().timeline === false) return;
-    snapshots.record(this, { kind: 'tool', tool: use.name, toolUseId: c.tool_use_id, label: toolLabel(use.name, use.input, this.cwd) });
+    if (snapshots.FILE_TOOLS.has(use.name) && store.getConfig().timeline !== false) this.turnTools.push({ tool: use.name, toolUseId: c.tool_use_id, label: toolLabel(use.name, use.input, this.cwd) });
+  }
+
+  /**
+   * The timeline step for the file-touching tool calls of a turn, taken once the turn settles: a
+   * snapshot costs six git processes, and a busy turn makes dozens of calls. It points at the first
+   * call, where the changes began.
+   */
+  recordTurn() {
+    const tools = this.turnTools.splice(0);
+    if (!tools.length) return;
+    const [first] = tools;
+    const label = tools.length === 1 ? first.label : `${first.label} and ${tools.length - 1} more`;
+    snapshots.record(this, { kind: 'tool', tool: [...new Set(tools.map((t) => t.tool))].join(', '), toolUseId: first.toolUseId, label });
   }
 
   markDelivered(uuids) {
@@ -572,6 +620,7 @@ class Session {
         if (this.status === 'idle') setTimeout(() => this.drainHeld(), DRAIN_MS);
         break;
       case 'task_started':
+        this.trimTasks();
         this.tasks.set(msg.task_id, { id: msg.task_id, runId: msg.run_id, toolUseId: msg.tool_use_id, parentTaskId: msg.parent_task_id, description: msg.description, type: msg.task_type, subagentType: msg.subagent_type, workflowName: msg.workflow_name, ownedBySubagent: Boolean(msg.owned_by_subagent), background: msg.is_backgrounded, ambient: msg.ambient, status: 'running', startedAt: Date.now(), prompt: typeof msg.prompt === 'string' ? msg.prompt.slice(0, TASK_PROMPT_MAX) : undefined });
         this.emitState();
         break;
@@ -724,6 +773,7 @@ class Session {
     if (shouldQuery === false) sdkMsg.shouldQuery = false;
     this.input.push(sdkMsg);
     if (!this.turnStartedAt) this.turnStartedAt = Date.now();
+    this.recordTurn(); // a message steering a turn in progress: what was done so far comes first
     if (store.getConfig().timeline !== false) snapshots.record(this, { kind: 'message', uuid: u, label: text.replace(/\s+/g, ' ').trim().slice(0, 120) });
     this.setActivity({ kind: 'thinking', label: 'Thinking' });
     this.suggestion = null;
@@ -895,19 +945,20 @@ class Session {
     if (typeof this.q.mcpAuthenticate !== 'function') throw new Error('This Claude Code build cannot start MCP sign-in from here; run `claude mcp` in a terminal');
     const r = await this.q.mcpAuthenticate(name);
     log('mcp auth started', this.id, name, r?.redirectScheme, r?.callbackPort);
-    // Poll for the reconnect that follows a completed sign-in.
+    // Poll for the reconnect that follows a completed sign-in; close() or a new sign-in stops it.
+    clearTimeout(this.mcpAuthTimer);
     let tries = 0;
     const tick = () => {
-      tries++;
+      this.mcpAuthTimer = null;
       this.mcpStatus()
         .then((list) => {
           const s = (list || []).find((x) => x.name === name);
           if (s && s.status !== 'needs-auth' && s.status !== 'pending') return;
-          if (tries < 90) setTimeout(tick, 2000).unref?.();
+          if (++tries < MCP_AUTH_POLLS && this.q) this.mcpAuthTimer = setTimeout(tick, MCP_AUTH_POLL_MS);
         })
         .catch(() => {});
     };
-    setTimeout(tick, 2500).unref?.();
+    this.mcpAuthTimer = setTimeout(tick, MCP_AUTH_POLL_MS);
     return r || null;
   }
 
@@ -934,7 +985,13 @@ class Session {
     return r?.skills?.length ?? null;
   }
 
+  /** End the Claude Code process (the session stays and starts again on demand), and the timers with it. */
   close() {
+    clearTimeout(this._stateSoon);
+    clearTimeout(this.mcpTimer);
+    clearTimeout(this.mcpAuthTimer);
+    this._stateSoon = this.mcpTimer = this.mcpAuthTimer = null;
+    this.flushOut(); // what is batched for the clients goes now, not after the process is gone
     if (!this.q) return;
     closing.add(this.q);
     try {
@@ -1073,7 +1130,9 @@ class SessionManager {
       const repoName = path.basename(info.mainRoot || info.root);
       const root = cfg.worktreeRoot || path.join(xdg('data'), 'worktrees');
       const dir = path.join(root, repoName, `${slug}-${id.slice(0, 6)}`);
-      const wt = await git.createWorktree({ repo: info.mainRoot || info.root, base: worktree.base || info.branch || 'HEAD', branch: `pilcrow/${slug}`, dir });
+      const made = await git.createWorktree({ repo: info.mainRoot || info.root, base: worktree.base || info.branch || 'HEAD', branch: `pilcrow/${slug}`, dir });
+      if (!made.ok) throw new Error(made.output);
+      const wt = made.worktree;
       meta.cwd = slash(wt.path);
       meta.project = slash(wt.repoRoot);
       meta.worktree = wt;
@@ -1119,11 +1178,20 @@ class SessionManager {
     return { id: r.sessionId };
   }
 
+  /**
+   * Every minute: close the Claude Code process of a session idle past the timeout, and, once it is
+   * closed, let go of its transcript. Background work and pending permissions keep both.
+   */
   reap() {
-    const mins = store.getConfig().idleTimeoutMin || 30;
+    const idleMs = (store.getConfig().idleTimeoutMin || 30) * 60e3;
     for (const s of this.sessions.values()) {
+      if (Date.now() - s.lastActivity <= idleMs || s.pending.size) continue;
+      if (!s.q) {
+        if (s.release()) log('released idle session', s.id);
+        continue;
+      }
       const backgroundWork = s.bgTasks.length > 0 || [...s.tasks.values()].some((t) => t.status === 'running');
-      if (s.q && s.status === 'idle' && !s.pending.size && !backgroundWork && Date.now() - s.lastActivity > mins * 60e3) {
+      if (s.status === 'idle' && !backgroundWork) {
         log('closing idle session', s.id);
         s.close();
       }
