@@ -234,7 +234,7 @@ export function createDispatcher(deps) {
     if (!root || !fs.existsSync(root)) throw new Error('Pick a folder that exists.');
     const hit = scanCache.get(root);
     if (hit && !force && now() - hit.at < SCAN_TTL_MS) return hit.result;
-    const dirs = findRepos(root, depth);
+    const dirs = await findRepos(root, depth);
     const repos = [];
     const metaAll = store.meta || {};
     let i = 0;

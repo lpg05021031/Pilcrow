@@ -646,7 +646,7 @@ export function createHelpers(deps) {
     await s.interrupt();
     return { name: h.name, state: 'stopped' };
   }
-  function known(leadId) {
+  async function known(leadId) {
     const out = new Map();
     const add = (p, more) => {
       const key = slash(p).replace(/\/+$/, '');
@@ -657,12 +657,12 @@ export function createHelpers(deps) {
     const lp = leadProject(leadId);
     if (lp) add(lp, { registered: out.has(lp), allowed: true, about: out.get(lp)?.about || 'this session’s project' });
     for (const p of store.getConfig().recentProjects || []) if (exists(p)) add(p, { registered: false, allowed: startPolicy(leadId, slash(p)) === 'allow' });
-    if (lp && exists(lp)) for (const d of findRepos(lp, 1)) add(d, { registered: false, allowed: startPolicy(leadId, slash(d)) === 'allow' });
+    if (lp && exists(lp)) for (const d of await findRepos(lp, 1)) add(d, { registered: false, allowed: startPolicy(leadId, slash(d)) === 'allow' });
     return [...out.values()];
   }
-  function list(leadId) {
+  async function list(leadId) {
     const mine = helpersOf(leadId);
-    return { helpers: mine.map(publicState), caps: caps(), cost: roundUsd(mine.reduce((s, h) => s + (h.cost || 0), 0)), known: known(leadId) };
+    return { helpers: mine.map(publicState), caps: caps(), cost: roundUsd(mine.reduce((s, h) => s + (h.cost || 0), 0)), known: await known(leadId) };
   }
 
   // ---- what the clients ask for

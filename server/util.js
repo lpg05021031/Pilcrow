@@ -322,6 +322,21 @@ export function flushSaves() {
   }
 }
 
+/**
+ * For a long synchronous walk over folders: `await tick()` at each step gives the event loop a turn once
+ * every `ms` of work, so the walk holds it no longer than that while taking hardly longer in all. (The
+ * same walk with fs.promises and Promise.all is several times slower, and its burst of completions holds
+ * the loop as long as the synchronous one did.)
+ */
+export function slicer(ms = 4) {
+  let since = performance.now();
+  return async () => {
+    if (performance.now() - since < ms) return;
+    await new Promise((r) => setImmediate(r));
+    since = performance.now();
+  };
+}
+
 export function debounce(fn, ms) {
   let t;
   return (...args) => {

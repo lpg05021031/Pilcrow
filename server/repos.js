@@ -288,7 +288,7 @@ export function createRegistry(deps) {
   async function scan(root, depth = 3) {
     const r = absolute(root);
     if (!exists(r)) throw new Error('Pick a folder that exists.');
-    const dirs = findRepos(r, depth).map(slash);
+    const dirs = (await findRepos(r, depth)).map(slash);
     const known = new Set(all().map((e) => e.path));
     const found = [];
     let i = 0;
