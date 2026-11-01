@@ -11,7 +11,7 @@ import urllib.request
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
@@ -38,7 +38,7 @@ def _hello(url: str, timeout: float = 1.5) -> Optional[dict]:
         return None
 
 
-def existing_server() -> Optional[str]:
+def existing_server(timeout: float = 1.5) -> Optional[str]:
     """The Pilcrow server already running for this user (its lock file names the port), if any."""
     lock = _state_dir() / "instance.json"
     try:
@@ -49,7 +49,7 @@ def existing_server() -> Optional[str]:
     if not port:
         return None
     url = f"http://127.0.0.1:{port}/"
-    j = _hello(url)
+    j = _hello(url, timeout)
     return url if j and (not info.get("pid") or j.get("pid") == info.get("pid")) else None
 
 
@@ -63,6 +63,8 @@ class ServerProcess:
         self.url = ""
         self.log_path: Optional[Path] = None
         self.log = None
+        self.timeout = 0.0
+        self.deadline = 0.0
 
     def _node_from_env(self) -> str:
         env = self.dir / ".launch-env"
@@ -72,7 +74,8 @@ class ServerProcess:
                     return line.split("=", 1)[1].strip().strip("'\"")
         return ""
 
-    def start(self, timeout: float = 25.0) -> str:
+    def start(self, timeout: float = 25.0) -> None:
+        """Launch the server and return at once; :meth:`poll` says when it answers."""
         main_js = self.dir / "server" / "main.js"
         if not main_js.exists():
             raise RuntimeError(
@@ -97,16 +100,22 @@ class ServerProcess:
             stderr=subprocess.STDOUT,
             creationflags=flags,
         )
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            url = existing_server()
-            if url:
-                self.url = url
-                return url
-            if self.proc.poll() is not None:
-                raise RuntimeError(f"The Pilcrow server exited right away:\n{self._log_tail()}")
-            time.sleep(0.15)
-        raise RuntimeError(f"The Pilcrow server did not come up within 25 seconds.\n{self._log_tail()}")
+        self.timeout = timeout
+        self.deadline = time.monotonic() + timeout
+
+    def poll(self) -> Optional[str]:
+        """The server's URL once it answers, else None; raises RuntimeError when it exited or the time is up."""
+        url = existing_server(timeout=0.5)
+        if url:
+            self.url = url
+            return url
+        if self.proc is not None and self.proc.poll() is not None:
+            raise RuntimeError(f"The Pilcrow server exited right away:\n{self._log_tail()}")
+        if time.monotonic() > self.deadline:
+            raise RuntimeError(
+                f"The Pilcrow server did not come up within {self.timeout:g} seconds.\n{self._log_tail()}"
+            )
+        return None
 
     def _log_tail(self) -> str:
         try:
@@ -168,14 +177,33 @@ def run(
 
     server: Optional[ServerProcess] = None
     target = url or existing_server()
-    if not target:
+    if target:
+        rpc.connect_to(target)
+    else:
+        # The server takes a few seconds to boot: wait for it on a timer, so the window paints and
+        # answers meanwhile instead of sitting there frozen until it is up.
         server = ServerProcess(install_dir, node)
         try:
-            target = server.start()
+            server.start()
         except RuntimeError as e:
             win.show_fatal(str(e))
-            return app.exec()
-    rpc.connect_to(target)
+        else:
+            waiting = QTimer(app)
+            waiting.setInterval(150)
+
+            def poll() -> None:
+                try:
+                    found = server.poll()
+                except RuntimeError as e:
+                    waiting.stop()
+                    win.show_fatal(str(e))
+                    return
+                if found:
+                    waiting.stop()
+                    rpc.connect_to(found)
+
+            waiting.timeout.connect(poll)
+            waiting.start()
 
     def shutdown() -> None:
         rpc.close()
@@ -222,4 +250,3 @@ def _system_reduced_motion() -> bool:
 
 
 __all__ = ["run", "existing_server", "ServerProcess"]
-_ = (QTimer, Qt)
