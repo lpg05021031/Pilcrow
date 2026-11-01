@@ -1638,9 +1638,7 @@ const methods = {
   'fs.browse': ({ dir }) => ({ dir, parent: null, dirs: [], files: [] }),
   'fs.index': () => ['web/src/lib/store.ts', 'web/src/lib/transcript.ts', 'server/main.js', 'README.md'],
   'fs.read': ({ path: p }) => ({ path: p, size: 10, mtime: Date.now(), text: '// mock file\n' }),
-  'fs.exists': () => true,
   'term.list': () => [],
-  'shell.which': () => null,
   // ---- test controls
   'mock.reset': () => {
     seed();

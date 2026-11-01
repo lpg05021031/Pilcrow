@@ -102,8 +102,21 @@ function need(ok, name) {
   if (!ok) throw new AppError('invalid_params', `${name} is missing or has the wrong type`);
 }
 
+/** An optional string param: absent (undefined, null or '') reads as undefined. */
+function optStr(v, name) {
+  need(v === undefined || v === null || typeof v === 'string', name);
+  return v || undefined;
+}
+
 /** A path param, with ~ expanded. */
 const pathParam = (v, name = 'path') => expandHome(str(v, name));
+/** An optional path param (a folder to work in), with ~ expanded. */
+const optPath = (v, name = 'cwd') => expandHome(optStr(v, name));
+
+/** Dispatch's targets: at least one, each with a folder. */
+const targetsOk = (t) => Array.isArray(t) && t.length > 0 && t.every((x) => typeof x?.path === 'string' && x.path);
+/** A job's or playbook's folders with ~ expanded; a field that is not given stays not given. */
+const withPaths = (p) => ({ ...p, root: optPath(p.root, 'root'), ...(p.targets === undefined ? {} : { targets: p.targets.map((t) => ({ ...t, path: expandHome(t.path) })) }) });
 
 /**
  * The JSON-RPC methods by name. A function of the few things they need from the running server, so
@@ -187,10 +200,10 @@ function rpcMethods({ shell, quit, listChanged }) {
     'session.mcp.clearAuth': async ({ id, name }) => (await S(id)).mcpClearAuth(name),
     'session.reloadSkills': async ({ id }) => (await S(id)).reloadSkills(),
     // ---- skills & MCP configuration (Claude Code's own files)
-    'skills.list': ({ cwd }) => customize.listSkills({ cwd: cwd ? expandHome(cwd) : undefined }),
-    'skills.create': ({ scope, cwd, name, description }) => customize.createSkill({ scope, cwd: cwd ? expandHome(cwd) : undefined, name, description }),
-    'skills.remove': ({ dir, cwd }) => customize.removeSkill({ dir: pathParam(dir, 'dir'), cwd: cwd ? expandHome(cwd) : undefined }),
-    'skills.import': ({ scope, cwd, from, name }) => customize.importSkill({ scope, cwd: cwd ? expandHome(cwd) : undefined, from, name }),
+    'skills.list': ({ cwd }) => customize.listSkills({ cwd: optPath(cwd) }),
+    'skills.create': ({ scope, cwd, name, description }) => customize.createSkill({ scope, cwd: optPath(cwd), name, description }),
+    'skills.remove': ({ dir, cwd }) => customize.removeSkill({ dir: pathParam(dir, 'dir'), cwd: optPath(cwd) }),
+    'skills.import': ({ scope, cwd, from, name }) => customize.importSkill({ scope, cwd: optPath(cwd), from, name }),
     'skills.reloadAll': async () => {
       let n = 0;
       for (const s of sessions.live()) {
@@ -199,21 +212,22 @@ function rpcMethods({ shell, quit, listChanged }) {
       }
       return n;
     },
-    'mcp.list': ({ cwd }) => customize.listMcp({ cwd: cwd ? expandHome(cwd) : undefined }),
+    'mcp.list': ({ cwd }) => customize.listMcp({ cwd: optPath(cwd) }),
     'mcp.add': async ({ scope, cwd, name, form }) => {
       const claude = await resolveClaude(store.getConfig().claudeBinary);
-      return customize.addMcp({ bin: claude.path, scope, cwd: cwd ? expandHome(cwd) : undefined, name, config: customize.mcpConfigFromForm(form) });
+      return customize.addMcp({ bin: claude.path, scope, cwd: optPath(cwd), name, config: customize.mcpConfigFromForm(form) });
     },
     'mcp.remove': async ({ scope, cwd, name }) => {
+      str(name, 'name');
       const claude = await resolveClaude(store.getConfig().claudeBinary);
-      return customize.removeMcp({ bin: claude.path, scope, cwd: cwd ? expandHome(cwd) : undefined, name });
+      return customize.removeMcp({ bin: claude.path, scope, cwd: optPath(cwd), name });
     },
     'mcp.approve': ({ cwd, name, approved }) => customize.approveProjectMcp({ cwd: pathParam(cwd, 'cwd'), name, approved: Boolean(approved) }),
     // ---- project memory and who-touched-what
     'memory.list': ({ cwd }) => memory.list(pathParam(cwd, 'cwd')),
     'memory.add': ({ cwd, text }) => memory.add(pathParam(cwd, 'cwd'), { text }),
     'memory.update': ({ cwd, id, text, pinned }) => memory.update(pathParam(cwd, 'cwd'), id, { text, pinned }),
-    'memory.remove': ({ cwd, id }) => memory.remove(pathParam(cwd, 'cwd'), id),
+    'memory.remove': ({ cwd, id }) => memory.remove(pathParam(cwd, 'cwd'), str(id, 'id')),
     'memory.clear': ({ cwd }) => memory.clear(pathParam(cwd, 'cwd')),
     'memory.distill': async ({ id, force }) => {
       const s = await S(id);
@@ -234,8 +248,8 @@ function rpcMethods({ shell, quit, listChanged }) {
     },
     // ---- scheduled sessions and their inbox
     'schedules.list': () => schedules.list(),
-    'schedules.save': (p) => schedules.save({ ...p, cwd: p.cwd ? expandHome(p.cwd) : p.cwd }),
-    'schedules.remove': ({ id }) => schedules.remove(id),
+    'schedules.save': (p) => schedules.save({ ...p, cwd: optPath(p.cwd) }),
+    'schedules.remove': ({ id }) => schedules.remove(str(id, 'id')),
     'schedules.toggle': ({ id, enabled }) => schedules.toggle(id, enabled),
     'schedules.runNow': ({ id }) => schedules.runNow(id, { manual: true }),
     'schedules.preview': ({ cadence }) => {
@@ -247,28 +261,35 @@ function rpcMethods({ shell, quit, listChanged }) {
     },
     'inbox.list': () => inbox.list(),
     'inbox.markRead': ({ ids }) => inbox.markRead(ids || null),
-    'inbox.remove': ({ id }) => inbox.remove(id),
+    'inbox.remove': ({ id }) => inbox.remove(str(id, 'id')),
     // ---- dispatch: one job across many repositories
-    'helpers.list': ({ leadId }) => helpersMod.helpers.list(leadId),
-    'helpers.allow': ({ leadId, requestId }) => helpersMod.helpers.allow(leadId, requestId),
-    'helpers.stop': ({ leadId, name }) => helpersMod.helpers.stop(leadId, { name }),
-    'helpers.review': ({ leadId }) => helpersMod.helpers.review(leadId),
-    'helpers.finish': ({ leadId, name, action, message, pr }) => helpersMod.helpers.finish(leadId, { name, action, message, pr }),
-    'helpers.export': ({ leadId }) => helpersMod.helpers.exportMarkdown(leadId),
-    'helpers.detach': ({ id }) => helpersMod.helpers.detach(id),
+    'helpers.list': ({ leadId }) => helpersMod.helpers.list(str(leadId, 'leadId')),
+    'helpers.allow': ({ leadId, requestId }) => helpersMod.helpers.allow(str(leadId, 'leadId'), str(requestId, 'requestId')),
+    'helpers.stop': ({ leadId, name }) => helpersMod.helpers.stop(str(leadId, 'leadId'), { name: str(name, 'name') }),
+    'helpers.review': ({ leadId }) => helpersMod.helpers.review(str(leadId, 'leadId')),
+    'helpers.finish': ({ leadId, name, action, message, pr }) => helpersMod.helpers.finish(str(leadId, 'leadId'), { name: optStr(name, 'name'), action: str(action, 'action'), message: optStr(message, 'message'), pr }),
+    'helpers.export': ({ leadId }) => helpersMod.helpers.exportMarkdown(str(leadId, 'leadId')),
+    'helpers.detach': ({ id }) => helpersMod.helpers.detach(str(id, 'id')),
     'repos.list': () => repos.list(),
-    'repos.save': (p) => repos.save({ ...p, path: p.path ? expandHome(p.path) : p.path }),
-    'repos.remove': ({ id }) => repos.remove(id),
+    'repos.save': (p) => repos.save({ ...p, path: optPath(p.path, 'path') }),
+    'repos.remove': ({ id }) => repos.remove(str(id, 'id')),
     'repos.register': ({ path: dir, ...patch }) => repos.register(pathParam(dir), patch),
     'repos.scan': ({ root, depth }) => repos.scan(pathParam(root, 'root'), depth),
     'repos.refresh': ({ ids, force }) => repos.refresh(ids || null, { force: Boolean(force) }),
     'repos.resolve': ({ word }) => repos.resolve(word) || { nearest: repos.nearest(word) },
-    'workspace.scan': ({ root, depth, force }) => dispatch.dispatch.scan({ root: expandHome(root), depth, force: Boolean(force) }),
+    'workspace.scan': ({ root, depth, force }) => dispatch.dispatch.scan({ root: optPath(root, 'root'), depth, force: Boolean(force) }),
     'dispatch.list': () => dispatch.dispatch.list(),
     'dispatch.get': ({ id }) => dispatch.dispatch.get(id),
-    'dispatch.save': (p) => dispatch.dispatch.save({ ...p, root: p.root ? expandHome(p.root) : p.root, targets: (p.targets || []).map((t) => ({ ...t, path: expandHome(t.path) })) }),
-    'dispatch.remove': ({ id, removeWorktrees }) => dispatch.dispatch.remove(id, { removeWorktrees: Boolean(removeWorktrees) }),
-    'dispatch.plan': (p) => dispatch.dispatch.plan(p.id && !p.targets ? p.id : { ...p, root: p.root ? expandHome(p.root) : p.root, targets: (p.targets || []).map((t) => ({ ...t, path: expandHome(t.path) })) }),
+    'dispatch.save': (p) => {
+      // a new job needs somewhere to run; an update that names no targets keeps the job's
+      need(p.targets === undefined ? Boolean(p.id) : targetsOk(p.targets), 'targets');
+      return dispatch.dispatch.save(withPaths(p));
+    },
+    'dispatch.remove': ({ id, removeWorktrees }) => dispatch.dispatch.remove(str(id, 'id'), { removeWorktrees: Boolean(removeWorktrees) }),
+    'dispatch.plan': (p) => {
+      need(p.targets === undefined || Array.isArray(p.targets), 'targets');
+      return dispatch.dispatch.plan(p.id && !p.targets ? p.id : withPaths({ ...p, targets: p.targets || [] }));
+    },
     'dispatch.start': ({ id, wave }) => dispatch.dispatch.start(id, { wave }),
     'dispatch.continue': ({ id, brief, learn }) => dispatch.dispatch.continue(id, { brief, learn }),
     'dispatch.pause': ({ id }) => dispatch.dispatch.pause(id),
@@ -281,8 +302,11 @@ function rpcMethods({ shell, quit, listChanged }) {
     'dispatch.finish': ({ id, runId, action, message, pr }) => dispatch.dispatch.finish(id, { runId, action, message, pr }),
     'dispatch.export': ({ id }) => dispatch.dispatch.exportMarkdown(id),
     'dispatch.playbooks': () => dispatch.dispatch.playbooks(),
-    'dispatch.savePlaybook': (p) => dispatch.dispatch.savePlaybook({ ...p, root: p.root ? expandHome(p.root) : p.root, targets: p.targets ? p.targets.map((t) => ({ ...t, path: expandHome(t.path) })) : p.targets }),
-    'dispatch.removePlaybook': ({ id }) => dispatch.dispatch.removePlaybook(id),
+    'dispatch.savePlaybook': (p) => {
+      need(p.targets === undefined || Array.isArray(p.targets), 'targets');
+      return dispatch.dispatch.savePlaybook(withPaths(p));
+    },
+    'dispatch.removePlaybook': ({ id }) => dispatch.dispatch.removePlaybook(str(id, 'id')),
     'dispatch.startFromPlaybook': ({ id, name, wave, targets }) => dispatch.dispatch.startFromPlaybook(id, { name, wave, targets }),
     // ---- control room: every live session at a glance, plus spend
     'fleet.state': async () => {
@@ -308,24 +332,27 @@ function rpcMethods({ shell, quit, listChanged }) {
     'timeline.diff': async ({ id, from, to }) => snapshots.diff(await S(id), { from, to }),
     'timeline.stepDiff': async ({ id, n }) => snapshots.stepDiff(await S(id), n),
     'timeline.file': async ({ id, n, path: p }) => snapshots.fileAt(await S(id), { n, path: p }),
-    'timeline.restore': async ({ id, n, paths }) => {
-      const r = await snapshots.restore(await S(id), { n, paths });
-      return r;
-    },
+    'timeline.restore': async ({ id, n, paths }) => snapshots.restore(await S(id), { n, paths }),
     'session.stopTask': async ({ id, taskId }) => (await S(id)).stopTask(taskId),
     'session.subagent': async ({ id, agentId }) => history.loadSubagent(id, str(agentId, 'agentId'), (await S(id)).cwd),
     'session.gateway': async ({ cwd }) => gatewayInfo(cwd),
     'models.gateway': async ({ cwd, force }) => gatewayModels(cwd, { force: Boolean(force), version: VERSION }),
 
     // Without a folder, git would answer for whatever folder the server runs in (info and diff say isRepo: false).
-    'git.info': ({ cwd }) => git.info(cwd),
-    'git.diff': ({ cwd, base }) => git.diff(cwd, { base }),
-    'git.branches': ({ cwd }) => git.branches(str(cwd, 'cwd')),
-    'git.commit': ({ cwd, message, paths }) => git.commit(str(cwd, 'cwd'), { message: str(message, 'message'), paths }),
-    'git.discard': ({ cwd, path: p, untracked }) => git.discard(str(cwd, 'cwd'), { path: str(p, 'path'), untracked }),
-    'git.log': ({ cwd, n }) => git.log(str(cwd, 'cwd'), n),
-    'git.worktrees': ({ cwd }) => git.listWorktrees(str(cwd, 'cwd')),
-    'git.removeWorktree': (p) => git.removeWorktree(p),
+    'git.info': ({ cwd }) => git.info(optPath(cwd)),
+    'git.diff': ({ cwd, base }) => git.diff(optPath(cwd), { base: optStr(base, 'base') }),
+    'git.branches': ({ cwd }) => git.branches(pathParam(cwd, 'cwd')),
+    'git.commit': ({ cwd, message, paths }) => {
+      need(paths === undefined || paths === null || (Array.isArray(paths) && paths.every((x) => typeof x === 'string')), 'paths');
+      return git.commit(pathParam(cwd, 'cwd'), { message: str(message, 'message'), paths: paths || undefined });
+    },
+    'git.discard': ({ cwd, path: p, untracked }) => git.discard(pathParam(cwd, 'cwd'), { path: str(p, 'path'), untracked: Boolean(untracked) }),
+    'git.log': ({ cwd, n }) => {
+      need(n === undefined || (Number.isInteger(n) && n > 0), 'n');
+      return git.log(pathParam(cwd, 'cwd'), n);
+    },
+    'git.worktrees': ({ cwd }) => git.listWorktrees(pathParam(cwd, 'cwd')),
+    'git.removeWorktree': ({ repoRoot, dir, branch, deleteBranch }) => git.removeWorktree({ repoRoot: pathParam(repoRoot, 'repoRoot'), dir: pathParam(dir, 'dir'), branch: optStr(branch, 'branch'), deleteBranch: Boolean(deleteBranch) }),
 
     'fs.list': ({ dir }) => files.listDir(pathParam(dir, 'dir')),
     'fs.read': ({ path: p }) => files.readFile(pathParam(p)),
@@ -333,15 +360,17 @@ function rpcMethods({ shell, quit, listChanged }) {
       need(typeof text === 'string', 'text');
       return files.writeFile(pathParam(p), text, { expectedMtime, force });
     },
-    'fs.browse': ({ dir }) => files.browse(expandHome(dir)),
-    'fs.index': ({ cwd, force }) => files.fileIndex(str(cwd, 'cwd'), { force }),
+    'fs.browse': ({ dir }) => files.browse(optPath(dir, 'dir')),
+    'fs.index': ({ cwd, force }) => files.fileIndex(pathParam(cwd, 'cwd'), { force }),
     'fs.mkdir': async ({ path: p }) => {
       await fs.promises.mkdir(pathParam(p), { recursive: true });
       return true;
     },
-    'fs.exists': ({ path: p }) => fs.existsSync(pathParam(p)),
 
-    'term.open': (p) => term.open(p),
+    'term.open': ({ cwd, cols, rows, command }) => {
+      need((cols === undefined || (Number.isInteger(cols) && cols > 0)) && (rows === undefined || (Number.isInteger(rows) && rows > 0)), 'cols/rows');
+      return term.open({ cwd: optPath(cwd), cols, rows, command: optStr(command, 'command') });
+    },
     'term.input': ({ id, data }) => {
       need(typeof data === 'string', 'data');
       return term.write(str(id, 'id'), data);
@@ -350,17 +379,12 @@ function rpcMethods({ shell, quit, listChanged }) {
       need(Number.isInteger(cols) && Number.isInteger(rows) && cols > 0 && rows > 0, 'cols/rows');
       return term.resize(str(id, 'id'), cols, rows);
     },
-    'term.close': ({ id }) => term.close(id),
+    'term.close': ({ id }) => term.close(str(id, 'id')),
     'term.list': () => term.list(),
-    'term.snapshot': ({ id }) => term.snapshot(id),
+    'term.snapshot': ({ id }) => term.snapshot(str(id, 'id')),
 
-    'shell.openExternal': ({ url }) => /^(https?|file|mailto):/i.test(url) && openExternal(url),
+    'shell.openExternal': ({ url }) => /^(https?|file|mailto):/i.test(str(url, 'url')) && openExternal(url),
     'shell.openPath': ({ path: p }) => openExternal(pathParam(p)),
-    'shell.which': async ({ cmd }) => which(cmd),
-    'shell.run': async ({ cmd, args = [], cwd }) => {
-      need(Array.isArray(args) && args.every((a) => typeof a === 'string'), 'args');
-      return run(str(cmd, 'cmd'), args, { cwd });
-    },
   };
 }
 

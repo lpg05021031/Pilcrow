@@ -62,13 +62,50 @@ describe('RPC errors', () => {
       ['session.permission', { id: 'x', requestId: 'r' }, 'decision'],
       ['memory.list', { cwd: 42 }, 'cwd'],
       ['git.branches', {}, 'cwd'],
-      ['shell.run', { cmd: 'true', args: 'not-a-list' }, 'args'],
+      ['git.info', { cwd: 42 }, 'cwd'],
+      ['git.diff', { cwd: 42 }, 'cwd'],
+      ['git.diff', { cwd: '/tmp', base: 7 }, 'base'],
+      ['git.commit', { cwd: '/tmp', message: 'm', paths: 'a.txt' }, 'paths'],
+      ['git.log', { cwd: '/tmp', n: '5' }, 'n'],
+      ['git.removeWorktree', { dir: '/tmp/wt' }, 'repoRoot'],
+      ['git.removeWorktree', { repoRoot: '/tmp/repo' }, 'dir'],
+      ['git.removeWorktree', { repoRoot: '/tmp/repo', dir: '/tmp/wt', branch: ['b'] }, 'branch'],
+      ['dispatch.save', { name: 'nowhere' }, 'targets'],
+      ['dispatch.save', { targets: [] }, 'targets'],
+      ['dispatch.save', { targets: [{ name: 'no path' }] }, 'targets'],
+      ['dispatch.plan', { targets: 'a' }, 'targets'],
+      ['term.open', { cwd: 42 }, 'cwd'],
+      ['term.open', { cols: 0 }, 'cols'],
+      ['term.close', {}, 'id'],
+      ['schedules.remove', {}, 'id'],
+      ['repos.remove', { id: 3 }, 'id'],
+      ['inbox.remove', {}, 'id'],
+      ['dispatch.remove', {}, 'id'],
+      ['memory.remove', { cwd: '/tmp' }, 'id'],
+      ['helpers.list', {}, 'leadId'],
+      ['helpers.allow', { leadId: 'x' }, 'requestId'],
+      ['helpers.stop', { leadId: 'x' }, 'name'],
+      ['helpers.finish', { leadId: 'x' }, 'action'],
+      ['helpers.detach', {}, 'id'],
     ];
     for (const [m, p, name] of cases) {
       const res = await rpc(m, p);
       expect(res, m).toMatchObject({ ok: false, e: { code: 'invalid_params' } });
       expect(res.e.message, m).toContain(name);
     }
+  });
+
+  it('has no method to run a command or probe the file system that no window uses', async () => {
+    for (const m of ['shell.run', 'shell.which', 'fs.exists']) expect((await rpc(m, { cmd: 'true', path: '/' })).e.code).toBe('unknown_method');
+  });
+
+  it('keeps the targets of a job saved again without them', async () => {
+    const made = await rpc('dispatch.save', { name: 'Bump', brief: 'b', targets: [{ path: '/tmp/a', name: 'a' }] });
+    expect(made.ok).toBe(true);
+    await rpc('dispatch.save', { id: made.r.id, brief: 'better' });
+    const got = (await rpc('dispatch.get', { id: made.r.id })).r.job;
+    expect([got.brief, got.targets.map((t: any) => t.name)]).toEqual(['better', ['a']]);
+    await rpc('dispatch.remove', { id: made.r.id });
   });
 
   it('treats params that are not an object as none', async () => {

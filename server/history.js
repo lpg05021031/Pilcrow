@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
-import { listSessions, getSessionMessages, getSubagentMessages, renameSession, deleteSession, forkSession, listSubagents } from '@anthropic-ai/claude-agent-sdk';
+import { listSessions, getSessionMessages, getSubagentMessages, renameSession, deleteSession, forkSession } from '@anthropic-ai/claude-agent-sdk';
 import { claudeConfigDir, log } from './util.js';
 
 const LIST_TTL_MS = 4000; // the list is asked for on every change; the SDK reads every transcript's head
@@ -167,14 +167,6 @@ export async function loadSubagent(sessionId, agentId, dir) {
     return msgs;
   } catch (e) {
     log('getSubagentMessages failed', e);
-    return [];
-  }
-}
-
-export async function subagentIds(sessionId, dir) {
-  try {
-    return await listSubagents(sessionId, { dir });
-  } catch {
     return [];
   }
 }
