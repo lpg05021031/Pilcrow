@@ -50,9 +50,9 @@ class SendButton(QPushButton):
         prev = self.state
         self.state = "stop" if stop else "ready" if ready else "idle"
         tip = "Stop (Esc)" if stop else f"{self.verb} (Enter)" if send_with_enter else f"{self.verb} (Ctrl+Enter)"
+        spin = busy != self.spinner.isVisibleTo(self)
         self.spinner.setVisible(busy)
-        if self.state == prev and tip == self.toolTip():
-            self.update()
+        if self.state == prev and tip == self.toolTip() and not spin:
             return
         self.setEnabled(ready or stop)
         self.setToolTip(tip)
