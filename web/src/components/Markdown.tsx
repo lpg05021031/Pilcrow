@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef } from 'react';
 import { renderMarkdown, asPathRef, extendBlocks } from '../lib/markdown';
-import { highlightHtml } from '../lib/highlight';
+import { CHUNK_OPEN, escapeHtml, highlightHtml, PAINT_LINES } from '../lib/highlight';
 import { rpc } from '../lib/rpc';
 import { openFile, toast } from '../lib/store';
 import { copyText } from './ui/bits';
@@ -11,6 +11,31 @@ export function resolvePath(p: string, cwd?: string) {
   if (p.startsWith('~/')) return p;
   const base = (cwd || '').replace(/\/+$/, '');
   return base ? `${base}/${p.replace(/^\.\//, '')}` : p;
+}
+
+/**
+ * Swap a code block's plain text for its colour. A long one (lib/highlight linesToHtml) is first cut
+ * into the same blocks of plain lines, then coloured a block per frame, so no frame styles, lays out
+ * and paints all of it at once; it arrives gradually that way, so it goes without the fade-in.
+ */
+async function paintCode(pre: HTMLPreElement, code: string, html: string) {
+  const c = pre.querySelector('code');
+  if (!c) return;
+  const chunks = html.split(CHUNK_OPEN).slice(1);
+  if (!chunks.length) {
+    c.innerHTML = html;
+    pre.dataset.hl = '1';
+    return;
+  }
+  const lines = code.split('\n');
+  c.style.animation = 'none';
+  c.innerHTML = chunks.map((_, i) => `${CHUNK_OPEN}${escapeHtml(lines.slice(i * PAINT_LINES, (i + 1) * PAINT_LINES).join('\n'))}${i < chunks.length - 1 ? '\n' : ''}</span>`).join('');
+  for (let i = 0; i < chunks.length; i++) {
+    await new Promise(requestAnimationFrame);
+    if (!c.isConnected) return; // the block was drawn again meanwhile
+    c.children[i].outerHTML = CHUNK_OPEN + chunks[i];
+  }
+  pre.dataset.hl = '1';
 }
 
 /**
@@ -31,11 +56,7 @@ const Block = memo(function Block({ raw, open, baseDir }: { raw: string; open: b
       const code = pre.textContent || '';
       pre.dataset.hl = 'pending';
       highlightHtml(code, pre.dataset.lang || null).then((h) => {
-        if (h && pre.isConnected && pre.textContent === code) {
-          const c = pre.querySelector('code');
-          if (c) c.innerHTML = h;
-          pre.dataset.hl = '1';
-        }
+        if (h && pre.isConnected && pre.textContent === code) paintCode(pre, code, h);
       });
     });
     el.querySelectorAll<HTMLElement>('code:not([data-pr])').forEach((c) => {

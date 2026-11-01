@@ -4,7 +4,7 @@ import { create } from 'zustand';
 import { rpc } from './rpc';
 import { TranscriptModel } from './transcript';
 import { setHome } from './format';
-import { EASE_EXIT, reducedMotion } from './motion';
+import { EASE_EXIT, reducedMotion, yieldToEvents } from './motion';
 import type { AppInfo, Config, SessionState, SessionSummary, PermissionMode, Effort, RawMsg, GatewayModels, TimelineStep, PermissionDecision, DispatchJob, DispatchRun, DispatchDelta, Playbook } from './types';
 import type { RepoEntry } from './types';
 import type { PilcrowNative } from './globals';
@@ -582,15 +582,6 @@ export function openSession(id: string): Promise<void> {
     opening.set(id, p);
   }
   return p;
-}
-
-/** Let the browser draw a frame and handle input. A message, not a timer: nested timers are clamped to 4 ms. */
-function yieldToEvents() {
-  return new Promise<void>((done) => {
-    const ch = new MessageChannel();
-    ch.port1.onmessage = () => done();
-    ch.port2.postMessage(null);
-  });
 }
 
 /** Messages modelled per task while a conversation opens. */

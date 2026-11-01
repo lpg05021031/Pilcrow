@@ -1,8 +1,9 @@
 // Syntax highlighting with Shiki (JavaScript regex engine, no WASM), lazy-loaded: the highlighter
 // with the first code block, each language with its first block. Two hand-tuned themes are emitted
 // as CSS variables so dark/light switch without re-highlighting.
-import type { HighlighterCore, ThemeRegistration } from 'shiki/core';
+import type { GrammarState, HighlighterCore, ThemeRegistration } from 'shiki/core';
 import { LruBytes } from './lru';
+import { yieldToEvents } from './motion';
 
 const LANGS: Record<string, () => Promise<unknown>> = {
   javascript: () => import('shiki/langs/javascript.mjs'),
@@ -84,66 +85,56 @@ export function normalizeLang(lang?: string | null): string | null {
   return LANGS[n] ? n : null;
 }
 
-const dark: ThemeRegistration = {
-  name: 'pilcrow-dark',
-  type: 'dark',
-  colors: { 'editor.foreground': '#D9D9DE', 'editor.background': '#00000000' },
-  tokenColors: [
-    { scope: ['comment', 'punctuation.definition.comment', 'string.comment'], settings: { foreground: '#6C6C75', fontStyle: 'italic' } },
-    { scope: ['keyword', 'storage', 'storage.type', 'keyword.control', 'keyword.operator.new', 'keyword.operator.expression', 'variable.language', 'keyword.other'], settings: { foreground: '#C3A6EC' } },
-    { scope: ['string', 'string.quoted', 'string.template', 'markup.inline.raw'], settings: { foreground: '#A2CF98' } },
-    { scope: ['constant.numeric', 'constant.language', 'constant.character', 'support.constant', 'constant.other', 'keyword.other.unit'], settings: { foreground: '#E9B07C' } },
-    { scope: ['entity.name.function', 'support.function', 'meta.function-call', 'variable.function'], settings: { foreground: '#8FB8F2' } },
-    { scope: ['entity.name.type', 'entity.name.class', 'support.type', 'support.class', 'entity.other.inherited-class', 'storage.type.primitive', 'entity.name.namespace'], settings: { foreground: '#84CFC3' } },
-    { scope: ['variable.parameter'], settings: { foreground: '#E5C391' } },
-    { scope: ['variable.other.property', 'support.variable.property', 'meta.object-literal.key', 'entity.name.tag.yaml', 'support.type.property-name'], settings: { foreground: '#C8CAD2' } },
-    { scope: ['entity.name.tag', 'punctuation.definition.tag'], settings: { foreground: '#EF9B98' } },
-    { scope: ['entity.other.attribute-name'], settings: { foreground: '#E8C68A' } },
-    { scope: ['string.regexp', 'constant.character.escape'], settings: { foreground: '#ECACCB' } },
-    { scope: ['punctuation', 'meta.brace', 'keyword.operator'], settings: { foreground: '#8D8D96' } },
-    { scope: ['markup.heading', 'entity.name.section'], settings: { foreground: '#8FB8F2', fontStyle: 'bold' } },
-    { scope: ['markup.bold'], settings: { fontStyle: 'bold' } },
-    { scope: ['markup.italic'], settings: { fontStyle: 'italic' } },
-    { scope: ['markup.inserted', 'meta.diff.header.to-file'], settings: { foreground: '#82D3A5' } },
-    { scope: ['markup.deleted', 'meta.diff.header.from-file'], settings: { foreground: '#F08A80' } },
-    { scope: ['meta.diff.range', 'meta.diff.header'], settings: { foreground: '#8FB8F2' } },
-    { scope: ['entity.name.label', 'support.other.namespace'], settings: { foreground: '#E9B07C' } },
-  ],
+/**
+ * The two themes, as one table: the scopes, then the colour in the dark theme and in the light one,
+ * then a font style. Shiki is given a single theme whose colours stand for rows of this table, so it
+ * tokenizes once instead of once per theme (half the time), and each token gets both colours.
+ */
+const RULES: [scopes: string[], dark: string | null, light: string | null, fontStyle?: string][] = [
+  [['comment', 'punctuation.definition.comment', 'string.comment'], '#6C6C75', '#8A8A93', 'italic'],
+  [['keyword', 'storage', 'storage.type', 'keyword.control', 'keyword.operator.new', 'keyword.operator.expression', 'variable.language', 'keyword.other'], '#C3A6EC', '#7B3BC0'],
+  [['string', 'string.quoted', 'string.template', 'markup.inline.raw'], '#A2CF98', '#2D7A33'],
+  [['constant.numeric', 'constant.language', 'constant.character', 'support.constant', 'constant.other', 'keyword.other.unit'], '#E9B07C', '#B2560E'],
+  [['entity.name.function', 'support.function', 'meta.function-call', 'variable.function'], '#8FB8F2', '#1D5FC0'],
+  [['entity.name.type', 'entity.name.class', 'support.type', 'support.class', 'entity.other.inherited-class', 'storage.type.primitive', 'entity.name.namespace'], '#84CFC3', '#0B786D'],
+  [['variable.parameter'], '#E5C391', '#8A5A00'],
+  [['variable.other.property', 'support.variable.property', 'meta.object-literal.key', 'entity.name.tag.yaml', 'support.type.property-name'], '#C8CAD2', '#3A4556'],
+  [['entity.name.tag', 'punctuation.definition.tag'], '#EF9B98', '#B42430'],
+  [['entity.other.attribute-name'], '#E8C68A', '#946400'],
+  [['string.regexp', 'constant.character.escape'], '#ECACCB', '#B2357A'],
+  [['punctuation', 'meta.brace', 'keyword.operator'], '#8D8D96', '#5B6474'],
+  [['markup.heading', 'entity.name.section'], '#8FB8F2', '#1D5FC0', 'bold'],
+  [['markup.bold'], null, null, 'bold'],
+  [['markup.italic'], null, null, 'italic'],
+  [['markup.inserted', 'meta.diff.header.to-file'], '#82D3A5', '#237A3E'],
+  [['markup.deleted', 'meta.diff.header.from-file'], '#F08A80', '#B42430'],
+  [['meta.diff.range', 'meta.diff.header'], '#8FB8F2', '#1D5FC0'],
+  [['entity.name.label', 'support.other.namespace'], '#E9B07C', '#B2560E'],
+];
+const FOREGROUND = { dark: '#D9D9DE', light: '#1F1F25' };
+const rowColour = (i: number) => `#0000${(i + 1).toString(16).padStart(2, '0')}`;
+const theme: ThemeRegistration = {
+  name: 'pilcrow',
+  colors: { 'editor.foreground': '#000000', 'editor.background': '#00000000' },
+  tokenColors: RULES.map(([scope, dark, , fontStyle], i) => ({ scope, settings: { ...(dark ? { foreground: rowColour(i) } : {}), ...(fontStyle ? { fontStyle } : {}) } })),
 };
+const COLOURS = new Map(RULES.map(([, dark, light], i) => [rowColour(i).toUpperCase(), dark && light ? { dark, light } : FOREGROUND]));
 
-const light: ThemeRegistration = {
-  name: 'pilcrow-light',
-  type: 'light',
-  colors: { 'editor.foreground': '#1F1F25', 'editor.background': '#00000000' },
-  tokenColors: [
-    { scope: ['comment', 'punctuation.definition.comment', 'string.comment'], settings: { foreground: '#8A8A93', fontStyle: 'italic' } },
-    { scope: ['keyword', 'storage', 'storage.type', 'keyword.control', 'keyword.operator.new', 'keyword.operator.expression', 'variable.language', 'keyword.other'], settings: { foreground: '#7B3BC0' } },
-    { scope: ['string', 'string.quoted', 'string.template', 'markup.inline.raw'], settings: { foreground: '#2D7A33' } },
-    { scope: ['constant.numeric', 'constant.language', 'constant.character', 'support.constant', 'constant.other', 'keyword.other.unit'], settings: { foreground: '#B2560E' } },
-    { scope: ['entity.name.function', 'support.function', 'meta.function-call', 'variable.function'], settings: { foreground: '#1D5FC0' } },
-    { scope: ['entity.name.type', 'entity.name.class', 'support.type', 'support.class', 'entity.other.inherited-class', 'storage.type.primitive', 'entity.name.namespace'], settings: { foreground: '#0B786D' } },
-    { scope: ['variable.parameter'], settings: { foreground: '#8A5A00' } },
-    { scope: ['variable.other.property', 'support.variable.property', 'meta.object-literal.key', 'entity.name.tag.yaml', 'support.type.property-name'], settings: { foreground: '#3A4556' } },
-    { scope: ['entity.name.tag', 'punctuation.definition.tag'], settings: { foreground: '#B42430' } },
-    { scope: ['entity.other.attribute-name'], settings: { foreground: '#946400' } },
-    { scope: ['string.regexp', 'constant.character.escape'], settings: { foreground: '#B2357A' } },
-    { scope: ['punctuation', 'meta.brace', 'keyword.operator'], settings: { foreground: '#5B6474' } },
-    { scope: ['markup.heading', 'entity.name.section'], settings: { foreground: '#1D5FC0', fontStyle: 'bold' } },
-    { scope: ['markup.bold'], settings: { fontStyle: 'bold' } },
-    { scope: ['markup.italic'], settings: { fontStyle: 'italic' } },
-    { scope: ['markup.inserted', 'meta.diff.header.to-file'], settings: { foreground: '#237A3E' } },
-    { scope: ['markup.deleted', 'meta.diff.header.from-file'], settings: { foreground: '#B42430' } },
-    { scope: ['meta.diff.range', 'meta.diff.header'], settings: { foreground: '#1D5FC0' } },
-    { scope: ['entity.name.label', 'support.other.namespace'], settings: { foreground: '#B2560E' } },
-  ],
-};
+/** A token's style, as Shiki writes it for two themes: the colours and font as CSS variables (tokens.css). */
+function styleOf(colour: string | undefined, fontStyle = 0): Record<string, string> {
+  const c = COLOURS.get((colour || '').toUpperCase()) || FOREGROUND;
+  const s: Record<string, string> = { '--shiki-dark': c.dark, '--shiki-light': c.light };
+  if (fontStyle & 1) s['--shiki-dark-font-style'] = s['--shiki-light-font-style'] = 'italic';
+  if (fontStyle & 2) s['--shiki-dark-font-weight'] = s['--shiki-light-font-weight'] = 'bold';
+  return s;
+}
 
 let hlPromise: Promise<HighlighterCore> | null = null;
 const loaded = new Set<string>();
 const loading = new Map<string, Promise<void>>();
 
 function highlighter() {
-  hlPromise ||= Promise.all([import('shiki/core'), import('shiki/engine/javascript')]).then(([{ createHighlighterCore }, { createJavaScriptRegexEngine }]) => createHighlighterCore({ themes: [dark, light], langs: [], engine: createJavaScriptRegexEngine() }));
+  hlPromise ||= Promise.all([import('shiki/core'), import('shiki/engine/javascript')]).then(([{ createHighlighterCore }, { createJavaScriptRegexEngine }]) => createHighlighterCore({ themes: [theme], langs: [], engine: createJavaScriptRegexEngine() }));
   return hlPromise;
 }
 
@@ -169,25 +160,72 @@ export interface Tok {
 }
 
 /**
- * Code longer than this is shown plain. Shiki runs in one go on the main thread, and measured here
- * (median over this repository's own files) TypeScript, TSX and JavaScript take 45–75 ms for 2,000
- * characters and grow linearly from there, Python less than half that, shell and JSON far less: past
- * this length a block would be a long task the reader feels as a stall when it scrolls into view.
+ * Code longer than this is shown plain: past it, even coloured a slice at a time, a block would keep
+ * the highlighter busy for many seconds (measured here, a 60 kB TSX block takes about 1.2 s).
  */
-export const MAX_HIGHLIGHT = 2000;
+export const MAX_HIGHLIGHT = 200_000;
+
+/**
+ * How long one slice of highlighting may run before the browser gets a turn. Shiki works a line at a
+ * time and carries the grammar's state from one line to the next, so a block is coloured line by line
+ * in tasks of about this length: a slice is this plus at most one line (up to ~30 ms for the densest
+ * lines of TSX here).
+ */
+const SLICE_MS = 5;
 
 // Keyed by language and the whole code, so a code block shown again is coloured in its first frame.
 const htmlCache = new LruBytes<string>(4 << 20, (k, v) => k.length + v.length);
 // A token is an object with its text and a style record: about 100 bytes each besides the text.
 const tokCache = new LruBytes<Tok[][]>(8 << 20, (k, v) => k.length + v.reduce((n, line) => n + line.length * 100, 0));
 
-// Code blocks drawn together would otherwise all be coloured in the one task their highlights resolve
-// in; a task each keeps every one of them short.
-const nextTask = () => new Promise<void>((done) => setTimeout(done, 0));
+/** Tokens per line, coloured in slices of SLICE_MS (each after a yield, so none runs with the caller's task). */
+async function tokenize(code: string, lang: string): Promise<Tok[][]> {
+  await ensureLang(lang);
+  const hl = await highlighter();
+  const lines = code.split('\n');
+  const out: Tok[][] = [];
+  let state: GrammarState | undefined;
+  while (out.length < lines.length) {
+    await yieldToEvents();
+    const start = performance.now();
+    do {
+      const { tokens } = hl.codeToTokens(lines[out.length], { lang, theme: 'pilcrow', grammarState: state });
+      state = hl.getLastGrammarState(tokens);
+      out.push((tokens[0] || []).map((t) => ({ t: t.content, s: styleOf(t.color, t.fontStyle) })));
+    } while (out.length < lines.length && performance.now() - start < SLICE_MS);
+  }
+  return out;
+}
 
+export const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const css = (s: Record<string, string> | undefined) => (s ? Object.entries(s).map(([k, v]) => `${k}:${v}`).join(';') : '');
+
+/**
+ * Lines per block of a long code block's markup. Colour for a dense TSX line costs about 0.13 ms of
+ * style, layout and paint here, so a 60 kB block swapped in at once is a 170 ms frame; Markdown swaps
+ * a long one in a block of these per frame (paintCode).
+ */
+export const PAINT_LINES = 100;
+export const CHUNK_OPEN = '<span class="hl-chunk" style="display:block">';
+
+/**
+ * The markup Shiki's codeToHtml puts inside <code>: a span per line, a styled span per token. Past
+ * PAINT_LINES lines, the lines are grouped in blocks of that many (the newline between two blocks
+ * ends the first, so the text reads the same).
+ */
+export function linesToHtml(lines: Tok[][]): string {
+  const html = lines.map((line) => `<span class="line">${line.map((t) => `<span style="${escapeHtml(css(t.s))}">${escapeHtml(t.t)}</span>`).join('')}</span>`);
+  if (html.length <= PAINT_LINES) return html.join('\n');
+  let out = '';
+  for (let i = 0; i < html.length; i += PAINT_LINES) out += `${CHUNK_OPEN}${html.slice(i, i + PAINT_LINES).join('\n')}${i + PAINT_LINES < html.length ? '\n' : ''}</span>`;
+  return out;
+}
+
+/** Colour already worked out, to draw a block with in its first frame; a long one is painted a block at a time instead. */
 export function cachedHtml(code: string, lang: string | null): string | null {
   const l = normalizeLang(lang);
-  return l && code.length <= MAX_HIGHLIGHT ? (htmlCache.get(l + '\0' + code) ?? null) : null;
+  const html = l && code.length <= MAX_HIGHLIGHT ? htmlCache.get(l + '\0' + code) : undefined;
+  return html && !html.startsWith(CHUNK_OPEN) ? html : null;
 }
 
 /** Highlight a code block; resolves to `<span class="line">…` markup (no <pre>). */
@@ -198,13 +236,9 @@ export async function highlightHtml(code: string, lang: string | null): Promise<
   const hit = htmlCache.get(key);
   if (hit) return hit;
   try {
-    await ensureLang(l);
-    const hl = await highlighter();
-    await nextTask();
-    const html = hl.codeToHtml(code, { lang: l, themes: { dark: 'pilcrow-dark', light: 'pilcrow-light' }, defaultColor: false });
-    const inner = html.replace(/^<pre[^>]*><code[^>]*>/, '').replace(/<\/code><\/pre>$/, '');
-    htmlCache.set(key, inner);
-    return inner;
+    const html = linesToHtml(await tokenize(code, l));
+    htmlCache.set(key, html);
+    return html;
   } catch (e) {
     console.warn('highlight failed', l, e);
     return null;
@@ -224,11 +258,7 @@ export async function highlightTokens(code: string, lang: string | null): Promis
   const hit = tokCache.get(key);
   if (hit) return hit;
   try {
-    await ensureLang(l);
-    const hl = await highlighter();
-    await nextTask();
-    const res = hl.codeToTokens(code, { lang: l, themes: { dark: 'pilcrow-dark', light: 'pilcrow-light' }, defaultColor: false });
-    const lines: Tok[][] = res.tokens.map((line) => line.map((t) => ({ t: t.content, s: (t.htmlStyle as Record<string, string>) || undefined })));
+    const lines = await tokenize(code, l);
     tokCache.set(key, lines);
     return lines;
   } catch (e) {

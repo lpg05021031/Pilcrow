@@ -283,3 +283,15 @@ export function useThrottled<T>(value: T, ms: number): T {
   }, [value, ms]);
   return shown;
 }
+
+/**
+ * Let the browser draw a frame and handle input before going on: long work done in slices awaits this
+ * between them. A message, not a timer: nested timers are clamped to 4 ms.
+ */
+export function yieldToEvents() {
+  return new Promise<void>((done) => {
+    const ch = new MessageChannel();
+    ch.port1.onmessage = () => done();
+    ch.port2.postMessage(null);
+  });
+}
