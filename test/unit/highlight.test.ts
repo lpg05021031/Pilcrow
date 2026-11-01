@@ -34,6 +34,24 @@ describe('highlighting in slices', () => {
     expect(cachedHtml(short, 'ts')).toBe(shortHtml);
   }, 30_000);
 
+  it('blocks coloured together share the slices, and one no longer wanted stops at the next line', async () => {
+    const big = code + '\n// not coloured before';
+    const n = big.split('\n').length;
+    const order: string[] = [];
+    let lines = 0;
+    const [a, b, gone] = await Promise.all([
+      highlightTokens(big, 'tsx').then((t) => (order.push('big'), t)),
+      highlightTokens('const small = 1;', 'tsx').then((t) => (order.push('small'), t)),
+      highlightTokens(big + '\n// another', 'tsx', () => ++lines < 5),
+    ]);
+    expect(a).toHaveLength(n);
+    expect(b).toHaveLength(1);
+    expect(order).toEqual(['small', 'big']); // the small one is not kept waiting behind the big one
+    expect(gone).toBeNull();
+    expect(lines).toBeLessThan(10);
+    expect(await highlightTokens(big + '\n// another', 'tsx')).toHaveLength(n + 1); // a dropped block is not cached
+  }, 30_000);
+
   it('past the cap, a block stays plain', async () => {
     expect(await highlightHtml('x'.repeat(MAX_HIGHLIGHT + 1), 'ts')).toBeNull();
   });

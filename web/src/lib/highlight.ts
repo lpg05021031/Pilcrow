@@ -178,23 +178,49 @@ const htmlCache = new LruBytes<string>(4 << 20, (k, v) => k.length + v.length);
 // A token is an object with its text and a style record: about 100 bytes each besides the text.
 const tokCache = new LruBytes<Tok[][]>(8 << 20, (k, v) => k.length + v.reduce((n, line) => n + line.length * 100, 0));
 
-/** Tokens per line, coloured in slices of SLICE_MS (each after a yield, so none runs with the caller's task). */
-async function tokenize(code: string, lang: string): Promise<Tok[][]> {
+/**
+ * Blocks waiting to be coloured. One loop colours them all, a slice of SLICE_MS at a time (each after
+ * a yield, so none runs with the caller's task), each slice on the next block in turn: blocks drawn
+ * together share the slices instead of each running a loop of its own. A block no longer `wanted`
+ * (its code left the page) is dropped at the next line.
+ */
+type Job = { lines: string[]; lang: string; out: Tok[][]; state?: GrammarState; wanted: () => boolean; done: (lines: Tok[][] | null) => void };
+const queue: Job[] = [];
+let running = false;
+
+async function run(hl: HighlighterCore) {
+  running = true;
+  while (queue.length) {
+    await yieldToEvents();
+    const job = queue.shift() as Job;
+    const start = performance.now();
+    try {
+      do {
+        if (!job.wanted()) break;
+        const { tokens } = hl.codeToTokens(job.lines[job.out.length], { lang: job.lang, theme: 'pilcrow', grammarState: job.state });
+        job.state = hl.getLastGrammarState(tokens);
+        job.out.push((tokens[0] || []).map((t) => ({ t: t.content, s: styleOf(t.color, t.fontStyle) })));
+      } while (job.out.length < job.lines.length && performance.now() - start < SLICE_MS);
+    } catch (e) {
+      console.warn('highlight failed', job.lang, e);
+      job.done(null);
+      continue;
+    }
+    if (!job.wanted()) job.done(null);
+    else if (job.out.length === job.lines.length) job.done(job.out);
+    else queue.push(job);
+  }
+  running = false;
+}
+
+/** Tokens per line, or null when the block stopped being wanted before it was done. */
+async function tokenize(code: string, lang: string, wanted: () => boolean): Promise<Tok[][] | null> {
   await ensureLang(lang);
   const hl = await highlighter();
-  const lines = code.split('\n');
-  const out: Tok[][] = [];
-  let state: GrammarState | undefined;
-  while (out.length < lines.length) {
-    await yieldToEvents();
-    const start = performance.now();
-    do {
-      const { tokens } = hl.codeToTokens(lines[out.length], { lang, theme: 'pilcrow', grammarState: state });
-      state = hl.getLastGrammarState(tokens);
-      out.push((tokens[0] || []).map((t) => ({ t: t.content, s: styleOf(t.color, t.fontStyle) })));
-    } while (out.length < lines.length && performance.now() - start < SLICE_MS);
-  }
-  return out;
+  return new Promise((done) => {
+    queue.push({ lines: code.split('\n'), lang, out: [], wanted, done });
+    if (!running) void run(hl);
+  });
 }
 
 export const escapeHtml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -228,15 +254,17 @@ export function cachedHtml(code: string, lang: string | null): string | null {
   return html && !html.startsWith(CHUNK_OPEN) ? html : null;
 }
 
-/** Highlight a code block; resolves to `<span class="line">…` markup (no <pre>). */
-export async function highlightHtml(code: string, lang: string | null): Promise<string | null> {
+/** Highlight a code block; resolves to `<span class="line">…` markup (no <pre>), or null if it was not done. */
+export async function highlightHtml(code: string, lang: string | null, wanted: () => boolean = () => true): Promise<string | null> {
   const l = normalizeLang(lang);
   if (!l || code.length > MAX_HIGHLIGHT) return null;
   const key = l + '\0' + code;
   const hit = htmlCache.get(key);
   if (hit) return hit;
   try {
-    const html = linesToHtml(await tokenize(code, l));
+    const lines = await tokenize(code, l, wanted);
+    if (!lines) return null;
+    const html = linesToHtml(lines);
     htmlCache.set(key, html);
     return html;
   } catch (e) {
@@ -250,16 +278,16 @@ export function cachedTokens(code: string, lang: string | null): Tok[][] | null 
   return l && code.length <= MAX_HIGHLIGHT ? (tokCache.get(l + '\0' + code) ?? null) : null;
 }
 
-/** Tokens per line, for diff rendering where lines are laid out individually. */
-export async function highlightTokens(code: string, lang: string | null): Promise<Tok[][] | null> {
+/** Tokens per line, for diff rendering where lines are laid out individually; null if it was not done. */
+export async function highlightTokens(code: string, lang: string | null, wanted: () => boolean = () => true): Promise<Tok[][] | null> {
   const l = normalizeLang(lang);
   if (!l || code.length > MAX_HIGHLIGHT) return null;
   const key = l + '\0' + code;
   const hit = tokCache.get(key);
   if (hit) return hit;
   try {
-    const lines = await tokenize(code, l);
-    tokCache.set(key, lines);
+    const lines = await tokenize(code, l, wanted);
+    if (lines) tokCache.set(key, lines);
     return lines;
   } catch (e) {
     console.warn('tokenize failed', l, e);

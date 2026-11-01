@@ -53,7 +53,7 @@ export function useTokens(text: string, lang: string | null) {
     const hit = cachedTokens(text, lang);
     if (hit) setToks(hit);
     else
-      highlightTokens(text, lang).then((t) => {
+      highlightTokens(text, lang, () => alive).then((t) => {
         if (alive) setToks(t);
       });
     return () => {
@@ -191,7 +191,8 @@ function useHunkTokens(hunks: DiffHunk[], lang: string) {
       for (const h of hunks) {
         const oldL = h.lines.filter((l) => l.t !== '+');
         const newL = h.lines.filter((l) => l.t !== '-');
-        const [ot, nt] = await Promise.all([highlightTokens(oldL.map((l) => l.s).join('\n'), lang), highlightTokens(newL.map((l) => l.s).join('\n'), lang)]);
+        const wanted = () => alive;
+        const [ot, nt] = await Promise.all([highlightTokens(oldL.map((l) => l.s).join('\n'), lang, wanted), highlightTokens(newL.map((l) => l.s).join('\n'), lang, wanted)]);
         if (!ot && !nt) return;
         oldL.forEach((l, i) => ot?.[i] && map.set(l, ot[i]));
         newL.forEach((l, i) => nt?.[i] && map.set(l, nt[i]));
