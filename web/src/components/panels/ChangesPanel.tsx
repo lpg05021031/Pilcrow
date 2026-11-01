@@ -11,6 +11,7 @@ import { FileTouches, useFileHistory } from '../FileTouches';
 import { HelpersChanges } from './HelpersChanges';
 import { str } from '../../lib/tools';
 import { errText } from '../../lib/format';
+import type { ToolItem } from '../../lib/transcript';
 
 interface DiffResult {
   isRepo: boolean;
@@ -27,7 +28,10 @@ const notesStore = new Map<string, Record<string, Record<string, { text: string;
 const STATUS_LABEL: Record<string, string> = { M: 'Modified', A: 'Added', D: 'Deleted', R: 'Renamed' };
 
 export function ChangesPanel({ session, cwd }: { session: SessionSummary; cwd: string }) {
-  const rt = useStore((s) => s.rt[session.id]);
+  // Narrow reads: the runtime record changes with every streamed frame; the diff is fetched again
+  // when Claude stops, and at most every 25 changes while it works.
+  const status = useStore((s) => s.rt[session.id]?.status);
+  const revStep = useStore((s) => Math.floor((s.rt[session.id]?.rev || 0) / 25));
   const mode = useStore((s) => s.ui.diffMode);
   const [data, setData] = useState<DiffResult | null>(null);
   const history = useFileHistory(cwd);
@@ -72,8 +76,6 @@ export function ChangesPanel({ session, cwd }: { session: SessionSummary; cwd: s
   }, [load]);
 
   // Refresh when Claude finishes a step that may have touched files.
-  const status = rt?.status;
-  const rev = rt?.rev || 0;
   useEffect(() => {
     if (status === 'idle') load();
   }, [status, load]);
@@ -85,7 +87,7 @@ export function ChangesPanel({ session, cwd }: { session: SessionSummary; cwd: s
     if (Date.now() - lastLoad.current < 2500) return;
     const t = setTimeout(load, 1200);
     return () => clearTimeout(t);
-  }, [Math.floor(rev / 25)]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [revStep]); // eslint-disable-line react-hooks/exhaustive-deps -- a new cwd or base loads through the effect above
 
   const files = useMemo(() => data?.files || [], [data]);
   const totals = useMemo(() => files.reduce((a, f) => ({ add: a.add + f.additions, del: a.del + f.deletions }), { add: 0, del: 0 }), [files]);
@@ -118,7 +120,7 @@ export function ChangesPanel({ session, cwd }: { session: SessionSummary; cwd: s
     toast('Sent your notes to Claude', 'success');
   };
 
-  const review = () => sendMessage(session.id, { text: rt?.init?.slashCommands?.includes('code-review') ? '/code-review' : 'Review the uncommitted changes in this repository. Look for bugs, missed edge cases and anything that does not match the surrounding code. Report findings with file and line references; do not change files yet.' });
+  const review = () => sendMessage(session.id, { text: useStore.getState().rt[session.id]?.init?.slashCommands?.includes('code-review') ? '/code-review' : 'Review the uncommitted changes in this repository. Look for bugs, missed edge cases and anything that does not match the surrounding code. Report findings with file and line references; do not change files yet.' });
 
   const commit = async () => {
     if (!message.trim()) return;
@@ -312,18 +314,31 @@ export function ChangesPanel({ session, cwd }: { session: SessionSummary; cwd: s
   );
 }
 
+type Edit = { id: string; path: string; hunks: ReturnType<typeof hunksFromPatch> };
+
+function editOf(t: ToolItem): Edit | null {
+  const s = t.structured;
+  const path = str(t.input, 'file_path');
+  if (Array.isArray(s?.structuredPatch) && s.structuredPatch.length) return { id: t.id, path, hunks: hunksFromPatch(s.structuredPatch) };
+  if (t.name === 'Write' && typeof t.input?.content === 'string') return { id: t.id, path, hunks: [{ oldStart: 0, oldLines: 0, newStart: 1, newLines: 0, lines: t.input.content.split('\n').map((s2: string, k: number) => ({ t: '+', s: s2, n: k + 1 })) }] };
+  return null;
+}
+
+// Each edit's hunks, worked out once per change of that edit: the list is looked at again with every
+// streamed frame, and a long session has hundreds of edits.
+const editsSeen = new WeakMap<ToolItem, { rev: number; edit: Edit | null }>();
+
 /** Fallback for folders that are not git repositories: show what this session's tools changed. */
 function SessionEdits({ sessionId, cwd }: { sessionId: string; cwd: string }) {
   const rev = useStore((s) => s.rt[sessionId]?.rev);
   const model = models.get(sessionId);
   const edits = useMemo(() => {
-    const out: { id: string; path: string; hunks: ReturnType<typeof hunksFromPatch> }[] = [];
+    const out: Edit[] = [];
     for (const t of model?.tools.values() || []) {
       if (!['Edit', 'Write', 'MultiEdit'].includes(t.name) || t.status !== 'done') continue;
-      const s = t.structured;
-      const path = str(t.input, 'file_path');
-      if (Array.isArray(s?.structuredPatch) && s.structuredPatch.length) out.push({ id: t.id, path, hunks: hunksFromPatch(s.structuredPatch) });
-      else if (t.name === 'Write' && typeof t.input?.content === 'string') out.push({ id: t.id, path, hunks: [{ oldStart: 0, oldLines: 0, newStart: 1, newLines: 0, lines: t.input.content.split('\n').map((s2: string, k: number) => ({ t: '+', s: s2, n: k + 1 })) }] });
+      let e = editsSeen.get(t);
+      if (e === undefined || e.rev !== t.rev) editsSeen.set(t, (e = { rev: t.rev, edit: editOf(t) }));
+      if (e.edit) out.push(e.edit);
     }
     return out;
   }, [model, rev]); // eslint-disable-line react-hooks/exhaustive-deps -- the model mutates in place; rev marks a change

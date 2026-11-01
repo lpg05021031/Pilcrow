@@ -48,7 +48,7 @@ const dirCache = new Map<string, Entry[]>();
 
 const HistoryCtx = createContext<{ cwd: string; map: Record<string, FileTouch[]> | null }>({ cwd: '', map: null });
 
-export function FilesPanel({ session, cwd }: { session: SessionSummary; cwd: string }) {
+export function FilesPanel({ session, cwd, visible }: { session: SessionSummary; cwd: string; visible: boolean }) {
   const fileOpen = useStore((s) => s.fileOpen);
   const history = useFileHistory(cwd);
   const rev = useStore((s) => s.rt[session.id]?.rev || 0);
@@ -83,11 +83,13 @@ export function FilesPanel({ session, cwd }: { session: SessionSummary; cwd: str
     if (fileOpen) openTab(fileOpen.path, fileOpen.line);
   }, [fileOpen?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Pick up edits Claude makes to open files (only when there are no unsaved local edits).
-  const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Pick up edits Claude makes to open files (only when there are no unsaved local edits). The tab
+  // stays mounted when another one is chosen; hidden, it does nothing, and catches up once when shown.
+  const checkedRev = useRef(-1);
   useEffect(() => {
-    if (reloadTimer.current) clearTimeout(reloadTimer.current);
-    reloadTimer.current = setTimeout(async () => {
+    if (!visible || checkedRev.current === rev) return;
+    const timer = setTimeout(async () => {
+      checkedRev.current = rev;
       const cur = perCwd.get(cwd);
       if (!cur) return;
       for (const t of cur.tabs) {
@@ -102,7 +104,8 @@ export function FilesPanel({ session, cwd }: { session: SessionSummary; cwd: str
       }
       setTreeNonce((n) => n + 1);
     }, 900);
-  }, [rev, cwd]); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => clearTimeout(timer);
+  }, [rev, cwd, visible]); // eslint-disable-line react-hooks/exhaustive-deps -- update() is a fresh closure each render over the same perCwd entry
 
   const active = st.tabs.find((t) => t.path === st.active) || null;
 

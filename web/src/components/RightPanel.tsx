@@ -26,11 +26,11 @@ const TABS: { id: PanelTab; label: string; icon: LucideIcon; key: string }[] = [
 
 export function RightPanel({ session }: { session: SessionSummary }) {
   const ui = useStore((s) => s.ui);
-  const rt = useStore((s) => s.rt[session.id]);
-  const cwd = rt?.cwd || session.cwd;
+  // Narrow reads: the runtime record changes with every streamed frame, these two rarely.
+  const cwd = useStore((s) => s.rt[session.id]?.cwd) || session.cwd;
+  const running = useStore((s) => (s.rt[session.id]?.tasks || []).filter((t) => t.status === 'running').length);
   const [mounted, setMounted] = useState<Record<string, boolean>>({ [ui.panelTab]: true });
   useEffect(() => setMounted((m) => (m[ui.panelTab] ? m : { ...m, [ui.panelTab]: true })), [ui.panelTab]);
-  const running = (rt?.tasks || []).filter((t) => t.status === 'running').length;
   const tabsRef = useRef<HTMLDivElement>(null);
   const [ink, setInk] = useState<{ left: number; width: number } | null>(null);
   useLayoutEffect(() => {
@@ -80,7 +80,7 @@ export function RightPanel({ session }: { session: SessionSummary }) {
         {ui.panelTab === 'changes' && <ChangesPanel session={session} cwd={cwd} />}
         {mounted.files && (
           <div className="panel-keep" style={{ display: ui.panelTab === 'files' ? 'flex' : 'none' }}>
-            <FilesPanel session={session} cwd={cwd} />
+            <FilesPanel session={session} cwd={cwd} visible={ui.panelTab === 'files'} />
           </div>
         )}
         {mounted.terminal && (

@@ -2,20 +2,30 @@ import { useMemo, useRef, useState } from 'react';
 import { RotateCw, ExternalLink, AppWindow, ArrowRight } from 'lucide-react';
 import { useStore, models, call } from '../../lib/store';
 import type { SessionSummary } from '../../lib/types';
+import type { ToolItem } from '../../lib/transcript';
 
 const urls = new Map<string, string>();
 
+const LOCAL_URL = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d+)?(?:\/[^\s'"<>)]*)?/g;
+// What each command printed, read once per change of that command: the panel looks again with every
+// streamed frame, and a long conversation has thousands of commands with long outputs.
+const found = new WeakMap<ToolItem, { rev: number; urls: string[] }>();
+
 function findUrls(sessionId: string): string[] {
   const m = models.get(sessionId);
-  const found = new Set<string>();
+  const out = new Set<string>();
   if (!m) return [];
   for (const t of m.tools.values()) {
     if (t.name !== 'Bash' && t.name !== 'PowerShell') continue;
-    const s = t.structured;
-    const text = `${s?.stdout || ''}\n${s?.stderr || ''}\n${t.result?.text || ''}`;
-    for (const u of text.match(/https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d+)?(?:\/[^\s'"<>)]*)?/g) || []) found.add(u.replace('0.0.0.0', 'localhost').replace(/[.,;]+$/, ''));
+    let hit = found.get(t);
+    if (!hit || hit.rev !== t.rev) {
+      const s = t.structured;
+      const text = `${s?.stdout || ''}\n${s?.stderr || ''}\n${t.result?.text || ''}`;
+      found.set(t, (hit = { rev: t.rev, urls: (text.match(LOCAL_URL) || []).map((u) => u.replace('0.0.0.0', 'localhost').replace(/[.,;]+$/, '')) }));
+    }
+    for (const u of hit.urls) out.add(u);
   }
-  return [...found].slice(-6).reverse();
+  return [...out].slice(-6).reverse();
 }
 
 export function PreviewPanel({ session }: { session: SessionSummary }) {
