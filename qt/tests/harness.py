@@ -43,7 +43,7 @@ def start_mock(port: int, long: int = 60) -> subprocess.Popen:
         try:
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/hello", timeout=1):
                 return p
-        except Exception:  # noqa: BLE001
+        except Exception:
             time.sleep(0.1)
     p.kill()
     raise RuntimeError("mock server did not start")
@@ -150,7 +150,7 @@ class Client:
         st._ui_save_timer.stop()  # a layout change still waiting to be saved would land in the next test's mock
         try:
             self.call("mock.reset", timeout=3)  # the mock's saved config goes back to its defaults too
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         self.rpc.close()
         self.win.close()
@@ -184,7 +184,7 @@ class Client:
 
             composer._drafts.clear()
             composer._histories.clear()
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
         self.sleep(50)
 

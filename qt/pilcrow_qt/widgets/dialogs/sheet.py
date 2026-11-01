@@ -41,7 +41,7 @@ SHEET_MAX_H = 860
 class _BodyScroll(QScrollArea):
     """A scroll area whose size hint is its content's, so the sheet can be as tall as it needs."""
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         w = self.widget()
         if w is None:
             return super().sizeHint()
@@ -214,14 +214,14 @@ class Sheet(QDialog):
                 pass
         self.deleteLater()
 
-    def reject(self) -> None:  # noqa: N802
+    def reject(self) -> None:
         if self._closed:
             return
         self._closed = True
         store.set_dialog(self.key, self.off_value)
         self.dismiss()
 
-    def accept(self) -> None:  # noqa: N802
+    def accept(self) -> None:
         self.reject()
 
     def submit(self) -> None:
@@ -239,7 +239,7 @@ class Sheet(QDialog):
             return True
         return super().event(e)
 
-    def keyPressEvent(self, e) -> None:  # noqa: N802
+    def keyPressEvent(self, e) -> None:
         if e.key() == Qt.Key.Key_Escape:
             self.reject()
             return
@@ -248,19 +248,19 @@ class Sheet(QDialog):
             return
         super().keyPressEvent(e)
 
-    def mousePressEvent(self, e) -> None:  # noqa: N802
+    def mousePressEvent(self, e) -> None:
         if not self.frame.geometry().contains(e.position().toPoint()):
             self.reject()
             return
         super().mousePressEvent(e)
 
-    def eventFilter(self, obj: QObject, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj: QObject, e: QEvent) -> bool:
         if obj is self._host and e.type() == QEvent.Type.Resize and not self._closed:
             self.setGeometry(self._host.rect())
             self.place()
         return False
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         p = QPainter(self)
         bd = getattr(self, "backdrop", None)
         if bd is not None:

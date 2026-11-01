@@ -55,7 +55,7 @@ class JobCard(Card):
         self.extra.setSpacing(6)
         lay.addLayout(self.extra)
 
-    def paintEvent(self, e) -> None:  # noqa: N802
+    def paintEvent(self, e) -> None:
         super().paintEvent(e)
         if self._tone != "needs":
             return
@@ -113,7 +113,7 @@ class JobCard(Card):
                 w.set_keys(self._keys and first)
                 first = False
 
-    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, e) -> None:
         if e.button() == Qt.MouseButton.LeftButton and self.rect().contains(e.position().toPoint()):
             store.open_job(self.jid)
         super().mouseReleaseEvent(e)
@@ -285,18 +285,18 @@ class Board(QWidget):
         else:
             self._stale = True
 
-    def showEvent(self, e) -> None:  # noqa: N802
+    def showEvent(self, e) -> None:
         super().showEvent(e)
         self._tick_timer.start()
         if self._stale:
             self.refresh()
         store.load_jobs()
 
-    def hideEvent(self, e) -> None:  # noqa: N802
+    def hideEvent(self, e) -> None:
         self._tick_timer.stop()
         super().hideEvent(e)
 
-    def eventFilter(self, obj, e) -> bool:  # noqa: N802
+    def eventFilter(self, obj, e) -> bool:
         if obj is self.scroll.viewport() and e.type() == QEvent.Type.Resize:
             vw = self.scroll.viewport().width()
             self.body.setFixedWidth(max(320, min(page_column(vw), vw)))
@@ -433,7 +433,7 @@ class Board(QWidget):
         self.refresh()
         return True
 
-    def keyPressEvent(self, e) -> None:  # noqa: N802
+    def keyPressEvent(self, e) -> None:
         if not self.handle_key(e.key(), e.text()):
             super().keyPressEvent(e)
 

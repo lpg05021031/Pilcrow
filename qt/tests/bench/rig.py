@@ -139,7 +139,7 @@ class Counters(QObject):
     def snapshot(self) -> Dict[str, Dict[str, int]]:
         return {k: v.snapshot() for k, v in self.scopes.items()}
 
-    def eventFilter(self, obj, e) -> bool:  # noqa: N802
+    def eventFilter(self, obj, e) -> bool:
         t = e.type()
         if t == QEvent.Type.LayoutRequest:
             kind = "layout"

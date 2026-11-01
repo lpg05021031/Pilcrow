@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import time
 
-from harness import app_client, mock_server  # noqa: F401
+from harness import app_client, mock_server
 from PySide6.QtGui import QFontInfo
 
 MOCK_PORT = 5394
@@ -284,7 +284,7 @@ def test_progress_updates_the_workflow_card_in_place(app_client):
             super().__init__()
             self.n = 0
 
-        def eventFilter(self, obj, e) -> bool:  # noqa: N802
+        def eventFilter(self, obj, e) -> bool:
             if e.type() == QEvent.Type.ChildAdded and hasattr(obj, "isAncestorOf"):
                 try:
                     if obj is page or page.isAncestorOf(obj):

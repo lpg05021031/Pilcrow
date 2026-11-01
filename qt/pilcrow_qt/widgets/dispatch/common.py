@@ -187,7 +187,7 @@ class SegmentBar(QWidget):
         elif not live:
             self._timer.stop()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -237,7 +237,7 @@ class RunGlyph(QWidget):
             self._timer.stop()
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         paint_glyph(
             QPainter(self),
             QRectF(self.rect()),

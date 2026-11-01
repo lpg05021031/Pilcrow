@@ -129,7 +129,3 @@ def estimate_markdown(src: str, width: int, m: Metrics) -> int:
     if in_fence:
         h += fence_lines * m.mono_line + m.code_pad
     return max(m.line, h - m.para)  # the last block carries no margin
-
-
-def estimate_lines(n_lines: int, m: Metrics, pad: int = 0) -> int:
-    return max(0, n_lines) * m.mono_line + pad

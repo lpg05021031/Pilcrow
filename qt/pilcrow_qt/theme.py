@@ -16,7 +16,7 @@ change and a repaint, not a re-parse of every widget's style.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from typing import Callable, Dict, Optional, Tuple, Union
 
 from PySide6.QtCore import QEasingCurve, QObject, Signal
@@ -98,6 +98,9 @@ class Tokens:
     diff_del_hl: str
     scrim: str
     selection: str
+    find_mark: str  # a find match that is not the current one (app.css ``.find-hit``)
+    popover: str  # the client's floating material (app.css ``.popover``, ``.find-bar``)
+    switch_off: str  # the switch's off track, laid on the canvas
     glass: str
     glass_2: str
     edge_hi: str
@@ -183,6 +186,9 @@ DARK = Tokens(
     diff_del_hl="rgba(255, 44, 86, 0.3)",
     scrim="rgba(12, 11, 9, 0.55)",
     selection="rgba(122, 167, 240, 0.3)",
+    find_mark="rgba(217, 119, 87, 0.28)",
+    popover="#252528",
+    switch_off="#3a3a3e",
     glass="rgba(40, 40, 43, 0.96)",
     glass_2="rgba(33, 33, 36, 0.98)",
     edge_hi="rgba(255, 255, 255, 0.07)",
@@ -257,6 +263,9 @@ LIGHT = Tokens(
     diff_del_hl="rgba(205, 32, 84, 0.24)",
     scrim="rgba(40, 36, 28, 0.24)",
     selection="rgba(44, 98, 196, 0.16)",
+    find_mark="rgba(217, 119, 87, 0.28)",
+    popover="#ffffff",
+    switch_off="rgba(0, 0, 0, 0.145)",
     glass="rgba(255, 255, 255, 0.97)",
     glass_2="rgba(255, 255, 255, 0.98)",
     edge_hi="rgba(255, 255, 255, 0.9)",
@@ -312,6 +321,45 @@ def over(f: QColor, b: QColor) -> QColor:
         int(round(f.red() * a + b.red() * (1 - a))),
         int(round(f.green() * a + b.green() * (1 - a))),
         int(round(f.blue() * a + b.blue() * (1 - a))),
+    )
+
+
+Colorish = Union[str, QColor]
+
+
+def mix(a: Colorish, pa: float, b: Colorish) -> QColor:
+    """CSS ``color-mix(in srgb, a pa%, b)``: premultiplied interpolation, as the browser does it, so a
+    translucent token mixes by its coverage (two opaque ones mix channel by channel)."""
+    x = a if isinstance(a, QColor) else qcolor(a)
+    y = b if isinstance(b, QColor) else qcolor(b)
+    pb = 1 - pa
+    alpha = pa * x.alphaF() + pb * y.alphaF()
+    if alpha <= 0:
+        return QColor(0, 0, 0, 0)
+
+    def ch(u: int, v: int) -> int:
+        return int(round((pa * x.alphaF() * u + pb * y.alphaF() * v) / alpha))
+
+    c = QColor(ch(x.red(), y.red()), ch(x.green(), y.green()), ch(x.blue(), y.blue()))
+    c.setAlphaF(alpha)
+    return c
+
+
+def with_alpha(c: str, a: float) -> QColor:
+    """A token at an opacity (``rgb(from var(--accent) r g b / 8%)``)."""
+    q = qcolor(c)
+    q.setAlphaF(a)
+    return q
+
+
+def lerp(a: QColor, b: QColor, t: float) -> QColor:
+    """The colour ``t`` of the way from ``a`` to ``b``, alpha included (a transition's frame)."""
+    t = max(0.0, min(1.0, t))
+    return QColor(
+        int(round(a.red() + (b.red() - a.red()) * t)),
+        int(round(a.green() + (b.green() - a.green()) * t)),
+        int(round(a.blue() + (b.blue() - a.blue()) * t)),
+        int(round(a.alpha() + (b.alpha() - a.alpha()) * t)),
     )
 
 
@@ -429,11 +477,6 @@ def font_mono(size: float = MONO_SIZE, weight: int = QFont.Weight.Normal) -> QFo
     f.setWeight(_weight(weight))
     f.setStyleHint(QFont.StyleHint.Monospace)
     return f
-
-
-def px_to_pt(px: float) -> float:
-    """The web sizes are CSS pixels (96 dpi); Qt fonts are points. Device scaling is Qt's job."""
-    return px * 72.0 / 96.0
 
 
 # ---------------------------------------------------------------- the stylesheet
@@ -751,7 +794,3 @@ theme = Theme()
 
 def tokens() -> Tokens:
     return theme.tokens
-
-
-def token_names() -> list[str]:
-    return [f.name for f in fields(Tokens) if f.name not in ("name", "dark")]

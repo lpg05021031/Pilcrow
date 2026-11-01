@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from typing import Any, Dict
 
-from harness import app_client, mock_server  # noqa: F401
+from harness import app_client, mock_server
 from PySide6.QtWidgets import QLabel
 
 MOCK_PORT = 5391

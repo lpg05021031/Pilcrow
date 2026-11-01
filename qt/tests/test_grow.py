@@ -102,15 +102,15 @@ def test_a_fence_built_from_blocks_matches_the_well(app):
         src += tok
         b.set_src(src, True)
         b.measure(W, m)
-    assert isinstance(b._grower, grow.FenceGrower)  # noqa: SLF001
+    assert isinstance(b._grower, grow.FenceGrower)
     assert (
         b._grower.code()
         == "def f():\n    return 'x' * 40  # a comment that runs on past the column width for sure\n\nx = f()"
-    )  # noqa: SLF001
+    )
     rects = well_rects(b.doc)
     assert len(rects) == 1
     wells = b.wells()
-    assert len(wells) == 1 and wells[0][1] == b._grower.code()  # noqa: SLF001
+    assert len(wells) == 1 and wells[0][1] == b._grower.code()
     # the well's rectangle is the table well's of the same source
     from pilcrow_qt.canvas.paint import table_rect
 
@@ -135,7 +135,7 @@ def test_a_list_grows_an_item_at_a_time_in_chunks(app):
     lines = [f"- item {i} with `code{i}` and **bold** words\n" for i in range(90)]
     b, bad, _per = stream(chunks(lines, 9), lambda s: s.endswith("\n"))
     assert bad == []
-    assert isinstance(b._grower, grow.ListGrower) or b._grower is None  # noqa: SLF001
+    assert isinstance(b._grower, grow.ListGrower) or b._grower is None
     # while it streamed, the items sat in lists of LIST_CHUNK: three lists for ninety items
     m = measurer()
     doc = grow.ListGrower("".join(lines), m, W, False, False, "", None).doc
@@ -173,7 +173,7 @@ def test_a_list_that_changes_shape_falls_back_to_the_render(app):
         b.set_src(src, True)
         h = b.measure(W, m)
         assert h == doc_height(m.markdown_doc(src, W, streaming=True)), src
-    assert b._grower is None  # noqa: SLF001 - a nested list is rendered from its source
+    assert b._grower is None  # a nested list is rendered from its source
 
 
 def test_a_table_grows_a_row_at_a_time_and_widens_its_columns(app):
@@ -188,7 +188,7 @@ def test_a_table_grows_a_row_at_a_time_and_widens_its_columns(app):
     src = "".join(head + rows)
     b2.set_src(src, True)
     b2.measure(W, m)
-    g = b2._grower  # noqa: SLF001
+    g = b2._grower
     assert isinstance(g, grow.TableGrower)
     tables = [f for f in b2.doc.rootFrame().childFrames() if isinstance(f, QTextTable)]
     assert len(tables) == 2 and tables[0].rows() == 1 + markdown.TABLE_CHUNK

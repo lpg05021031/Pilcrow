@@ -177,7 +177,7 @@ class MemoryPage(QWidget):
         bind(store.config_changed, self, self._sync)
         self.load()
 
-    def eventFilter(self, obj, e) -> bool:  # noqa: N802
+    def eventFilter(self, obj, e) -> bool:
         from PySide6.QtCore import QEvent
 
         if obj is self.draft and e.type() == QEvent.Type.KeyPress:
@@ -439,7 +439,7 @@ class NoteRow(Panel):
         self.lay.addWidget(meta)
         self.edit.installEventFilter(self)
 
-    def eventFilter(self, obj, e) -> bool:  # noqa: N802
+    def eventFilter(self, obj, e) -> bool:
         from PySide6.QtCore import QEvent
 
         if obj is self.edit and e.type() == QEvent.Type.KeyPress:

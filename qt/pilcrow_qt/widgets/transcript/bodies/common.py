@@ -114,7 +114,7 @@ class Surface(QFrame):
             self.lay.addWidget(w, stretch)
         return w
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -142,7 +142,7 @@ class NeedsDot(QWidget):
         self.setFixedSize(14, 14)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -175,7 +175,7 @@ class Hairline(QFrame):
         self.setFrameShape(QFrame.Shape.NoFrame)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         p = QPainter(self)
         p.fillRect(self.rect(), theme.tokens().color(self._token))
 
@@ -301,14 +301,14 @@ class ElideLabel(QWidget):
     def text(self) -> str:
         return self._text
 
-    def sizeHint(self):  # noqa: N802
+    def sizeHint(self):
         fm = QFontMetrics(self._font)
         return QSize(fm.horizontalAdvance(self._text) + 2, fm.height() + 4)
 
-    def minimumSizeHint(self):  # noqa: N802
+    def minimumSizeHint(self):
         return QSize(24, QFontMetrics(self._font).height() + 4)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         p = QPainter(self)
         p.setFont(self._font)
         p.setPen(theme.tokens().color(self._color))
@@ -337,12 +337,12 @@ class LinkLabel(QLabel):
             ),
         )
 
-    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, e) -> None:
         if e.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit()
         super().mouseReleaseEvent(e)
 
-    def keyPressEvent(self, e) -> None:  # noqa: N802
+    def keyPressEvent(self, e) -> None:
         if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Space):
             self.clicked.emit()
             return
@@ -364,7 +364,7 @@ class IconLabel(QWidget):
             self._color = color
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         p = QPainter(self)
         pm = icons.pixmap(self._name, getattr(theme.tokens(), self._color), self._size)
         p.drawPixmap(0, 0, pm)

@@ -66,7 +66,7 @@ class Chip(QPushButton):
         self.on = on
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         hover = self.underMouse()
         p = QPainter(self)
@@ -175,7 +175,7 @@ class PreviewPanel(QWidget):
             return
         self.refresh()
 
-    def showEvent(self, e) -> None:  # noqa: N802
+    def showEvent(self, e) -> None:
         super().showEvent(e)
         if getattr(self, "_stale", False):
             self._stale = False

@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import math
 import time
-from typing import Any, Callable, Optional
+from functools import lru_cache
+from typing import Any, Callable, List, Optional, Tuple
 
-from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath, QPen
+from PySide6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFontMetrics, QGuiApplication, QImage, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QCheckBox, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QWidget
 
 from ... import icons, theme
@@ -36,7 +37,7 @@ class Hairline(QWidget):
             self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         c = theme.over(theme.qcolor(t.hair), theme.resolve(self._over, t))
@@ -122,17 +123,17 @@ class IconButton(QPushButton):
             self._active = on
             self.update()
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         self._hover = True
         self.update()
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self._hover = False
         self.update()
         super().leaveEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         lit = (self._hover and self.isEnabled()) or self._active
         p = QPainter(self)
@@ -159,14 +160,14 @@ class Check(QCheckBox):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         fm = self.fontMetrics()
         return QSize(self.BOX + self.GAP + fm.horizontalAdvance(self.text()) + 2, max(self.BOX + 4, fm.height() + 4))
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         return self.sizeHint()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -214,6 +215,110 @@ def paint_box(
         p.drawRoundedRect(r.adjusted(h, h, -h, -h), max(0.0, radius - h), max(0.0, radius - h))
 
 
+def rounded_path(r: QRectF, radius: float) -> QPainterPath:
+    """A rounded rectangle as a path, to clip to."""
+    path = QPainterPath()
+    path.addRoundedRect(r, radius, radius)
+    return path
+
+
+# ---------------------------------------------------------------- box shadows (CSS ``box-shadow``)
+
+
+def _phi(z: float) -> float:
+    return 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+
+
+@lru_cache(maxsize=48)
+def _shadow_pixmap(w: int, h: int, blur: int, alpha: float, rgb: Tuple[int, int, int] = (0, 0, 0)) -> QPixmap:
+    """A CSS box shadow of a ``w``×``h`` box blurred by ``blur`` (σ = blur/2), as a pixmap with ``blur``
+    pixels of margin on every side. The Gaussian of a box is separable, so it is one row profile and
+    one column profile multiplied: a few hundred ``erf`` calls and one blit per row, not a blur pass.
+    The corners come out square rather than rounded; under a 16px radius and an 18px sigma the
+    difference is a level or two in the darkest corner."""
+    ext = blur
+    tw, th = w + 2 * ext, h + 2 * ext
+    sigma = max(0.5, blur / 2.0)
+
+    def profile(n: int, x0: float, x1: float) -> List[float]:
+        return [_phi((i + 0.5 - x0) / sigma) - _phi((i + 0.5 - x1) / sigma) for i in range(n)]
+
+    fx = profile(tw, ext, ext + w)
+    fy = profile(th, ext, ext + h)
+    r, g, b = rgb
+    row = bytearray()
+    for v in fx:
+        a = max(0, min(255, int(round(255 * alpha * v))))
+        # premultiplied BGRA, little-endian ARGB32
+        row += bytes((b * a // 255, g * a // 255, r * a // 255, a))
+    row_img = QImage(bytes(row), tw, 1, tw * 4, QImage.Format.Format_ARGB32_Premultiplied).copy()
+    img = QImage(tw, th, QImage.Format.Format_ARGB32_Premultiplied)
+    img.fill(Qt.GlobalColor.transparent)
+    p = QPainter(img)
+    for y, v in enumerate(fy):
+        if v < 0.002:
+            continue
+        p.setOpacity(v)
+        p.drawImage(0, y, row_img)
+    p.end()
+    return QPixmap.fromImage(img)
+
+
+def draw_box_shadow(
+    p: QPainter,
+    rect: QRectF,
+    dy: float,
+    blur: int,
+    spread: float,
+    alpha: float,
+    opacity: float = 1.0,
+    rgb: Tuple[int, int, int] = (0, 0, 0),
+) -> None:
+    """``box-shadow: 0 dy blur spread rgba(rgb, alpha)`` under ``rect`` (the element's border box)."""
+    if opacity <= 0.003 or alpha <= 0:
+        return
+    sr = rect.adjusted(-spread, -spread, spread, spread).translated(0, dy)
+    w, h = int(round(sr.width())), int(round(sr.height()))
+    if w <= 0 or h <= 0:
+        return
+    pm = _shadow_pixmap(w, h, blur, alpha, rgb)
+    p.setOpacity(opacity)
+    p.drawPixmap(QPointF(sr.x() - blur, sr.y() - blur), pm)
+    p.setOpacity(1.0)
+
+
+# ---------------------------------------------------------------- <kbd>
+
+
+def paint_kbd(p: QPainter, x: float, y: float, text: str, small: bool = False) -> float:
+    """Draw a ``<kbd>`` chip with its left edge at ``x`` and its top at ``y``; returns its width.
+    ``small`` is the composer-foot flavour (16px, outlined); the base one is 18px on a fill."""
+    t = theme.tokens()
+    h = 16 if small else 18
+    font = theme.font_ui(10 if small else 11, 500)
+    fm = QFontMetrics(font)
+    w = max(h, fm.horizontalAdvance(text) + 10)
+    r = QRectF(x, y, w, h)
+    p.save()
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setPen(Qt.PenStyle.NoPen)
+    if small:
+        p.setPen(QPen(theme.qcolor(t.hair_2), 1))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), theme.R1, theme.R1)
+    else:
+        p.setBrush(theme.qcolor(t.fill_2))
+        p.drawRoundedRect(r, theme.R1, theme.R1)
+        p.setClipPath(rounded_path(r, theme.R1))
+        hline(p, x, y + h - 1, w, theme.qcolor(t.hair))
+        p.setClipping(False)
+    p.setFont(font)
+    p.setPen(QColor(t.text_3))
+    p.drawText(QRect(int(x), int(y), int(w), h), Qt.AlignmentFlag.AlignCenter, text)
+    p.restore()
+    return w
+
+
 class Box(QFrame):
     """A rounded box painted from the tokens (the card, chip, well and notice materials): a fill, a
     hairline, and another fill under the pointer when ``hover`` is given. Children lay out inside it."""
@@ -239,17 +344,17 @@ class Box(QFrame):
             setattr(self, k, v)
         self.update()
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         self._hover = True
         self.update()
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self._hover = False
         self.update()
         super().leaveEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         bg = theme.resolve(self.hover if (self._hover and self.hover is not None) else self.bg, t)
         p = QPainter(self)
@@ -278,7 +383,7 @@ class Pill(QLabel):
             setattr(self, k, v)
         self.update()
 
-    def paintEvent(self, e) -> None:  # noqa: N802
+    def paintEvent(self, e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         paint_box(
@@ -298,7 +403,7 @@ class Mark(QWidget):
         self.setFixedSize(size, size)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         _draw_mark(p, QRectF(0, 0, self._size, self._size), theme.tokens(), ink=self._color or None)
@@ -333,18 +438,18 @@ class WorkingMark(QWidget):
         self._timer.timeout.connect(self.update)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def showEvent(self, e) -> None:  # noqa: N802
+    def showEvent(self, e) -> None:
         from ...store import store
 
         if not store.reduced_motion:
             self._timer.start()
         super().showEvent(e)
 
-    def hideEvent(self, e) -> None:  # noqa: N802
+    def hideEvent(self, e) -> None:
         self._timer.stop()
         super().hideEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         phase = (time.monotonic() - self._t0) % 1.8 / 1.8
@@ -380,7 +485,7 @@ class StatusGlyph(QWidget):
         self.setVisible(bool(status in ("running", "starting", "requires_action", "error") or pending or unread))
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -417,7 +522,7 @@ class Spinner(QWidget):
         self._timer.timeout.connect(self.update)
         self._timer.start()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -442,7 +547,7 @@ class ContextRing(QWidget):
         self.used, self.total = used, total
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -489,7 +594,7 @@ class Clickable(QObject):
         w.installEventFilter(self)
         w.setCursor(Qt.CursorShape.PointingHandCursor)
 
-    def eventFilter(self, obj: QObject, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj: QObject, e: QEvent) -> bool:
         if obj is self._w and e.type() == QEvent.Type.MouseButtonRelease and e.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit()
             return True
@@ -506,12 +611,6 @@ def expanding(w: QWidget, h: bool = True, v: bool = False) -> QWidget:
         QSizePolicy.Policy.Expanding if v else QSizePolicy.Policy.Preferred,
     )
     return w
-
-
-def rounded_path(r: QRectF, radius: float) -> QPainterPath:
-    path = QPainterPath()
-    path.addRoundedRect(r, radius, radius)
-    return path
 
 
 class LayoutButton(QPushButton):
@@ -542,7 +641,7 @@ class LayoutButton(QPushButton):
         self.look_bg, self.look_hover, self.look_on, self.look_line, self.look_radius = bg, hover, on, line, radius
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         if self.look_active and self.look_on is not None:
             bg = self.look_on
@@ -555,10 +654,10 @@ class LayoutButton(QPushButton):
         p = QPainter(self)
         paint_box(p, QRectF(self.rect()), theme.resolve(bg, t), theme.resolve(self.look_line, t), self.look_radius)
 
-    def sizeHint(self):  # noqa: N802
+    def sizeHint(self):
         lay = self.layout()
         return lay.sizeHint() if lay is not None else super().sizeHint()
 
-    def minimumSizeHint(self):  # noqa: N802
+    def minimumSizeHint(self):
         lay = self.layout()
         return lay.minimumSize() if lay is not None else super().minimumSizeHint()

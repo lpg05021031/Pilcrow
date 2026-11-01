@@ -14,7 +14,7 @@ def _version() -> str:
     ):
         try:
             return str(json.loads(p.read_text(encoding="utf-8")).get("version") or "0.0.0")
-        except Exception:  # noqa: BLE001
+        except Exception:
             continue
     return "0.0.0"
 

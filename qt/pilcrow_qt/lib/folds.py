@@ -11,7 +11,6 @@ from typing import TYPE_CHECKING, List, Optional, Set, Union
 from .fmt import basename, truncate
 from .tools_meta import str_
 from .transcript_model import Item, TextItem, ThinkingItem, ToolItem
-from .units import Unit, WorkUnit
 
 if TYPE_CHECKING:  # pragma: no cover
     from ..widgets.transcript.ctx import ToolCtx
@@ -323,17 +322,6 @@ def group_items(items: List[Item]) -> List[Group]:
             out.append(ItemGroup(it.id, it))
     flush()
     return out
-
-
-def unit_sig(u: Unit, ctx: ToolCtx) -> str:
-    """What a unit looks like: its items and their revisions (and whether a permission sits on one)."""
-    items = u.work if isinstance(u, WorkUnit) else u.items
-    sig = ("W!" if u.live else "W") if isinstance(u, WorkUnit) else "P"
-    for it in items:
-        sig += f"|{it.id}:{it.rev}"
-        if it.kind == "tool" and it.id in ctx.pending:
-            sig += "+" + str(ctx.pending[it.id].get("requestId"))
-    return sig
 
 
 @dataclass

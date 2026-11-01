@@ -16,7 +16,7 @@ from PySide6.QtCore import QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPixmap, QTextDocument
 
 from .. import theme
-from .paint import FULL, Measurer, PaintState, doc_height, draw_doc, find_ranges, paint_decor, rounded, selection
+from .paint import Measurer, PaintState, doc_height, draw_doc, find_selections, paint_decor, rounded
 from .pixels import hline
 from .scene import Target
 
@@ -142,7 +142,6 @@ class Column(Container):
             h = c.layout(x + pl, cy, inner, m)
             if h <= 0 and not c.hidden:
                 cy -= 0 if first else self.spacing  # an empty child takes no gap
-                first = first  # noqa: PLW0127 - keep "first" as it was
                 continue
             cy += h
             first = False
@@ -334,7 +333,7 @@ class Text(Node):
             clip = QRect(ox + self.x, oy + self.y, self.w, self.h)
             if st.clip is not None:
                 clip = clip.intersected(st.clip)
-            sels = _find_selections(self._doc, st)
+            sels = find_selections(self._doc, st)
             draw_doc(p, self._doc, ox + self.x, oy + self.y, clip, color, sels or None)
             return
         shown = st.m.elide(self._text, f, self.w)
@@ -361,25 +360,6 @@ class Text(Node):
     def cool(self) -> None:
         self._doc = None
         self._font = None
-
-
-def _find_selections(doc: QTextDocument, st: PaintState) -> List[Any]:
-    sels: List[Any] = []
-    t = st.t
-    if st.needle:
-        for k, (a, b) in enumerate(find_ranges(doc, st.needle)):
-            if k == st.needle_current:
-                sels.append(selection(doc, a, b, QColor(t.accent), QColor("#ffffff")))
-            else:
-                sels.append(selection(doc, a, b, theme.blend("rgba(217, 119, 87, 0.28)", t.canvas)))
-    if st.selection is not None:
-        bg = theme.blend(t.selection, t.canvas)
-        if st.selection == FULL:
-            sels.append(selection(doc, 0, doc.characterCount(), bg))
-        else:
-            a, b = st.selection
-            sels.append(selection(doc, a, b, bg))
-    return sels
 
 
 class Markdown(Node):
@@ -435,7 +415,7 @@ class Markdown(Node):
             clip = clip.intersected(st.clip)
         paint_decor(p, self._doc, ox + self.x, oy + self.y, clip, st.t)
         color = st.m.color(self.color) if self.color is not None else QColor(st.t.text_2 if self.quiet else st.t.text)
-        sels = _find_selections(self._doc, st)
+        sels = find_selections(self._doc, st)
         draw_doc(p, self._doc, ox + self.x, oy + self.y, clip, color, sels or None)
 
     def text(self) -> str:

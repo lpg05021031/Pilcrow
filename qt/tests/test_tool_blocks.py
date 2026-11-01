@@ -152,7 +152,7 @@ def texts(n: nd.Node) -> List[str]:
 
 
 def html(n: nd.Node) -> str:
-    return "\n".join(x._text for x in nodes(n) if isinstance(x, nd.Text))  # noqa: SLF001
+    return "\n".join(x._text for x in nodes(n) if isinstance(x, nd.Text))
 
 
 def pump(ms: int = 30) -> None:

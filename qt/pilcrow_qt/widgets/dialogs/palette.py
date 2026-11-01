@@ -86,13 +86,13 @@ class PalItem(QWidget):
             self._active = on
             self.update()
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         if self.keys is not None:
             kw = self.keys.sizeHint().width()
             self.keys.setGeometry(self.width() - 10 - kw, 9, kw, 18)
         super().resizeEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -125,11 +125,11 @@ class PalItem(QWidget):
                     hm.elidedText(self.cmd.hint, Qt.TextElideMode.ElideRight, hw),
                 )
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         self.entered.emit()
         super().enterEvent(e)
 
-    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, e) -> None:
         if e.button() == Qt.MouseButton.LeftButton:
             self.chosen.emit()
 
@@ -441,7 +441,7 @@ class CommandPalette(Sheet):
     def submit(self) -> None:
         self.run(self.selected())
 
-    def eventFilter(self, obj: QObject, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj: QObject, e: QEvent) -> bool:
         if obj is self.input and e.type() == QEvent.Type.KeyPress:
             k = e.key()
             if k == Qt.Key.Key_Down:

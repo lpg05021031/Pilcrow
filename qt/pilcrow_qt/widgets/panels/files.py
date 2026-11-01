@@ -172,11 +172,11 @@ class FileTree(QAbstractScrollArea):
         return QRect(self.viewport().width() - 6 - w, top + 4, w, 18)
 
     # ---- painting
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         self.set_rows(self._rows)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         vp = self.viewport()
         p = QPainter(vp)
@@ -249,18 +249,18 @@ class FileTree(QAbstractScrollArea):
         p.end()
 
     # ---- interaction
-    def mouseMoveEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+    def mouseMoveEvent(self, e: QMouseEvent) -> None:
         i = self.row_at(int(e.position().y()))
         if i != self._hover:
             self._hover = i
             self.viewport().update()
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self._hover = -1
         self.viewport().update()
         super().leaveEvent(e)
 
-    def mousePressEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+    def mousePressEvent(self, e: QMouseEvent) -> None:
         if e.button() != Qt.MouseButton.LeftButton:
             return super().mousePressEvent(e)
         i = self.row_at(int(e.position().y()))
@@ -282,7 +282,7 @@ class FileTree(QAbstractScrollArea):
             self.opened.emit(r.path)
         self.viewport().update()
 
-    def keyPressEvent(self, e: QKeyEvent) -> None:  # noqa: N802
+    def keyPressEvent(self, e: QKeyEvent) -> None:
         k = e.key()
         n = len(self._rows)
         if not n:
@@ -339,14 +339,14 @@ class FTab(QWidget):
             self.on, self.dirty = on, dirty
             self.update()
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         fm = QFontMetrics(self._font)
         return QSize(12 + fm.horizontalAdvance(basename(self.path)) + (6 + 7 if self.dirty else 0) + 4 + 20 + 5, 30)
 
     def _x_rect(self) -> QRect:
         return QRect(self.width() - 25, 5, 20, 20)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -372,21 +372,21 @@ class FTab(QWidget):
                 p.drawRoundedRect(xr, 4, 4)
             p.drawPixmap(xr.left() + 4, xr.top() + 4, icons.pixmap("x", t.text if self._x_hover else t.text_3, 11))
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         self._hover = True
         self.update()
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self._hover = self._x_hover = False
         self.update()
 
-    def mouseMoveEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+    def mouseMoveEvent(self, e: QMouseEvent) -> None:
         xh = self._x_rect().contains(e.position().toPoint())
         if xh != self._x_hover:
             self._x_hover = xh
             self.update()
 
-    def mousePressEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+    def mousePressEvent(self, e: QMouseEvent) -> None:
         if e.button() == Qt.MouseButton.MiddleButton or (
             e.button() == Qt.MouseButton.LeftButton and self._x_rect().contains(e.position().toPoint())
         ):
@@ -639,7 +639,7 @@ class ImageView(QScrollArea):
         lay.addWidget(label(bytes_(tab.size), tone="faint"), 0, Qt.AlignmentFlag.AlignHCenter)
         self.setWidget(host)
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         if not self._pm.isNull():
             w = max(40, self.viewport().width() - 48)
@@ -1169,7 +1169,7 @@ class FilesPanel(QWidget):
             return
         self._reload_timer.start()
 
-    def showEvent(self, e) -> None:  # noqa: N802
+    def showEvent(self, e) -> None:
         super().showEvent(e)
         if getattr(self, "_stale", False):
             self._stale = False

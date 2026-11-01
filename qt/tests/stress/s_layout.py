@@ -10,7 +10,7 @@ import sys
 
 from PySide6.QtGui import QImage, QTextTable
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from core import app
 

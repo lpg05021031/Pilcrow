@@ -7,30 +7,33 @@ costs nothing on a CPU-only machine. It closes on a click outside, on Escape, an
 resizes.
 
 A :class:`Menu` is the list inside: rows of icon, label, hint and key cap, one of them active under
-the pointer or the arrow keys. An item is a dict: ``{"label", "icon"?, "hint"?, "mono"?, "checked"?,
+the pointer or the arrow keys. Its rows unfold a few milliseconds apart as it shows (``menu-in``). An item is a dict: ``{"label", "icon"?, "hint"?, "mono"?, "checked"?,
 "danger"?, "disabled"?, "kbd"?, "on_select"}``, ``{"separator": True}`` or ``{"heading": str}``.
-``show_menu(items, anchor)`` opens one under a widget; ``show_menu_at(items, global_pos)`` at a point
+``show_menu(items, anchor)`` opens one under a widget (``above=True``: over it); ``show_menu_at(items, global_pos)`` at a point
 (context menus). Both return at once; the menu lives until it is closed.
 """
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QEasingCurve, QEvent, QObject, QPoint, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import QApplication, QFrame, QLabel, QMainWindow, QSizePolicy, QVBoxLayout, QWidget
 
 from ... import icons, theme
+from ...canvas.clock import Tween
 from .bits import Hairline, paint_box
 from .signals import bind
 
 Item = Dict[str, Any]
 
+ROW_MS, STAGGER_MS = 240, 11  # menu-in: each row eases in over 240 ms, the next 11 ms behind (ten at most)
+
 
 def popover_bg(t: theme.Tokens) -> str:
-    """The popover material: ``#252528`` on dark (app.css ``[data-theme='dark'] .popover``), raised on light."""
-    return "#252528" if t.dark else t.raised
+    """The popover material (app.css ``.popover``)."""
+    return t.popover
 
 
 def host_for(w: Optional[QWidget]) -> Optional[QWidget]:
@@ -67,7 +70,7 @@ class Popover(QFrame):
         host.installEventFilter(self)
         QApplication.instance().installEventFilter(self)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         bg = QColor(popover_bg(t))
         p = QPainter(self)
@@ -126,7 +129,7 @@ class Popover(QFrame):
     def is_open(self) -> bool:
         return not self._closed
 
-    def eventFilter(self, obj: QObject, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj: QObject, e: QEvent) -> bool:
         if self._closed:
             return False
         t = e.type()
@@ -161,9 +164,10 @@ class MenuRow(QWidget):
     HINT_LH = 16.8  # 12px × 1.4
     PAD_X, PAD_Y, GAP = 9, 6, 9
 
-    def __init__(self, it: Item, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, it: Item, parent: Optional[QWidget] = None, order: int = 0) -> None:
         super().__init__(parent)
         self.it = it
+        self.order = order  # among the menu's rows, for the stagger
         self._active = False
         self.disabled = bool(it.get("disabled"))
         self._hint_lines: List[str] = []
@@ -231,19 +235,19 @@ class MenuRow(QWidget):
     def height_for(self, width: int) -> int:
         return int(round(self.height_for_f(width)))
 
-    def hasHeightForWidth(self) -> bool:  # noqa: N802
+    def hasHeightForWidth(self) -> bool:
         return True
 
-    def heightForWidth(self, w: int) -> int:  # noqa: N802
+    def heightForWidth(self, w: int) -> int:
         return self.height_for(w)
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         self._hint_lines = self._wrap(self.width())
         if self.kbd is not None:
             self.kbd.move(self.width() - self.PAD_X - self._kbd_w, self.PAD_Y)
         super().resizeEvent(e)
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         from PySide6.QtGui import QFontMetrics
 
         fm = QFontMetrics(self._label_font())
@@ -255,7 +259,7 @@ class MenuRow(QWidget):
         )
         return QSize(w, self.height_for(max(w, 200)))
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         return QSize(60, 30)
 
     def set_active(self, on: bool) -> None:
@@ -263,7 +267,7 @@ class MenuRow(QWidget):
             self._active = on
             self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         from PySide6.QtGui import QPainter
 
         t = theme.tokens()
@@ -271,6 +275,11 @@ class MenuRow(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setRenderHint(QPainter.RenderHint.TextAntialiasing)
+        menu = self.parentWidget()
+        if isinstance(menu, Menu):
+            k = menu.row_reveal(self.order)  # menu-in: opacity 0 → 1, translateY(-3px) → 0
+            p.setOpacity(k)
+            p.translate(0, -3 * (1 - k))
         if self._active and not self.disabled:
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(theme.blend(t.fill_2, popover_bg(t)))
@@ -303,12 +312,12 @@ class MenuRow(QWidget):
                 )
                 y += self.HINT_LH
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         if not self.disabled:
             self.entered.emit()
         super().enterEvent(e)
 
-    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, e) -> None:
         if e.button() == Qt.MouseButton.LeftButton and not self.disabled:
             self.chosen.emit()
 
@@ -326,6 +335,13 @@ class Menu(QWidget):
         self.rows: List[Optional[MenuRow]] = []
         self.parts: List[QWidget] = []
         self._active = -1
+        n = sum(1 for it in items if not it.get("separator") and not it.get("heading"))
+        self._span = ROW_MS + STAGGER_MS * min(n, 10)
+        self.reveal = Tween(
+            lambda _v: self._repaint_rows(),
+            ms=self._span,
+            curve=lambda: QEasingCurve(QEasingCurve.Type.Linear),
+        )
         sp = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         sp.setHeightForWidth(True)
         self.setSizePolicy(sp)
@@ -344,7 +360,7 @@ class Menu(QWidget):
                 self.parts.append(head)
                 self.rows.append(None)
                 continue
-            row = MenuRow(it, self)
+            row = MenuRow(it, self, order=sum(1 for r in self.rows if r is not None))
             row.entered.connect(lambda i=i: self.set_active(i))
             row.chosen.connect(lambda i=i: self.choose(i))
             self.parts.append(row)
@@ -361,21 +377,21 @@ class Menu(QWidget):
                 out.append(part.height_for_f(w))  # type: ignore[union-attr]
         return out
 
-    def hasHeightForWidth(self) -> bool:  # noqa: N802
+    def hasHeightForWidth(self) -> bool:
         return True
 
-    def heightForWidth(self, w: int) -> int:  # noqa: N802
+    def heightForWidth(self, w: int) -> int:
         hs = self._heights(w)
         return int(round(sum(hs) + self.GAP * max(0, len(hs) - 1)))
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         w = max((p.sizeHint().width() for p in self.parts), default=120)
         return QSize(w, self.heightForWidth(w))
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         return QSize(60, 0)
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         w = self.width()
         y = 0.0
         for part, it, h in zip(self.parts, self.items, self._heights(w)):
@@ -387,6 +403,21 @@ class Menu(QWidget):
                 part.setGeometry(0, top, w, bottom - top)
             y += h + self.GAP
         super().resizeEvent(e)
+
+    def showEvent(self, e) -> None:
+        super().showEvent(e)
+        if self.reveal.value == 0.0 and not self.reveal.running:
+            self.reveal.go(1.0)
+
+    def row_reveal(self, order: int) -> float:
+        """How far row ``order`` has eased in: each starts ``STAGGER_MS`` after the one above it."""
+        elapsed = self.reveal.value * self._span - STAGGER_MS * min(order, 10)
+        return theme.ease().valueForProgress(max(0.0, min(1.0, elapsed / ROW_MS)))
+
+    def _repaint_rows(self) -> None:
+        for r in self.rows:
+            if r is not None:
+                r.update()
 
     def selectable(self) -> List[int]:
         return [i for i, r in enumerate(self.rows) if r is not None and not r.disabled]
@@ -430,7 +461,7 @@ class MenuPopover(Popover):
         if callable(fn):
             fn()
 
-    def keyPressEvent(self, e) -> None:  # noqa: N802
+    def keyPressEvent(self, e) -> None:
         k = e.key()
         if k == Qt.Key.Key_Down:
             self.menu.step(1)
@@ -448,8 +479,11 @@ class MenuPopover(Popover):
 _current: List[MenuPopover] = []
 
 
-def show_menu(items: List[Item], anchor: QWidget, width: int = 0, align_right: bool = False) -> Optional[MenuPopover]:
-    """Open a menu under ``anchor`` (``MenuButton`` in the web); ``align_right`` is placement ``bottom-end``."""
+def show_menu(
+    items: List[Item], anchor: QWidget, width: int = 0, align_right: bool = False, above: bool = False
+) -> Optional[MenuPopover]:
+    """Open a menu under ``anchor`` (``MenuButton`` in the web); ``align_right`` is placement ``*-end``,
+    ``above`` placement ``top-*`` (the composer's menus open over the card)."""
     host = host_for(anchor)
     if host is None:
         return None
@@ -457,7 +491,7 @@ def show_menu(items: List[Item], anchor: QWidget, width: int = 0, align_right: b
     m = MenuPopover(host, items, width)
     _current.append(m)
     m.closed.connect(lambda: m in _current and _current.remove(m))
-    m.open_at(anchor, "bottom-end" if align_right else "bottom-start")
+    m.open_at(anchor, ("top-" if above else "bottom-") + ("end" if align_right else "start"))
     return m
 
 
@@ -484,12 +518,3 @@ def close_menus() -> None:
 def open_menu() -> Optional[MenuPopover]:
     """The menu on screen, if any (tests look here)."""
     return _current[-1] if _current else None
-
-
-def build_menu(items: List[Item], parent: Optional[QWidget] = None, width: int = 0) -> MenuPopover:
-    """Kept for callers that build first and place later: a menu popover not yet shown."""
-    host = host_for(parent)
-    return MenuPopover(host if host is not None else QWidget(), items, width)
-
-
-_ = Callable

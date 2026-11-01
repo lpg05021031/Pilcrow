@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 
 import pytest
-from harness import app_client, mock_server  # noqa: F401
+from harness import app_client, mock_server
 
 MOCK_PORT = 5341
 MOCK_LONG = 120
@@ -26,9 +26,9 @@ def _socket_settled():
     app = QApplication.instance()
     start = time.monotonic()
     aborted = False
-    while app is not None and rpc._ws is not None and time.monotonic() - start < 8:  # noqa: SLF001
+    while app is not None and rpc._ws is not None and time.monotonic() - start < 8:
         if not aborted and time.monotonic() - start > 1.5:
-            rpc._ws.abort()  # the close handshake is taking its time: drop the socket outright  # noqa: SLF001
+            rpc._ws.abort()  # the close handshake is taking its time: drop the socket outright
             aborted = True
         app.processEvents()
         time.sleep(0.01)

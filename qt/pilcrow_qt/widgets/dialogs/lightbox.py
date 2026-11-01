@@ -110,7 +110,7 @@ class Lightbox(QWidget):
         self.image.adjustSize()
         self.image.move((r.width() - self.image.width()) // 2, (r.height() - self.image.height()) // 2)
 
-    def eventFilter(self, obj: QObject, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj: QObject, e: QEvent) -> bool:
         if obj is self._host and e.type() == QEvent.Type.Resize and self.isVisible():
             self.setGeometry(self._host.rect())
             self._layout()
@@ -122,17 +122,17 @@ class Lightbox(QWidget):
             return True
         return super().event(e)
 
-    def keyPressEvent(self, e) -> None:  # noqa: N802
+    def keyPressEvent(self, e) -> None:
         if e.key() == Qt.Key.Key_Escape:
             store.close_lightbox()
             return
         super().keyPressEvent(e)
 
-    def mousePressEvent(self, e) -> None:  # noqa: N802
+    def mousePressEvent(self, e) -> None:
         if not self.image.geometry().contains(e.position().toPoint()):
             store.close_lightbox()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         # .lightbox: rgba(8, 8, 8, 0.72) over blur(18px); the image on 10px corners with a 0.5px light ring
         t = theme.tokens()
         p = QPainter(self)

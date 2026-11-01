@@ -134,7 +134,7 @@ class Bar(QWidget):
         self._parts = parts
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -166,16 +166,16 @@ class TodoBox(QWidget):
         self._timer.timeout.connect(self.update)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def showEvent(self, e) -> None:  # noqa: N802
+    def showEvent(self, e) -> None:
         if self.status == "in_progress" and not store.reduced_motion:
             self._timer.start()
         super().showEvent(e)
 
-    def hideEvent(self, e) -> None:  # noqa: N802
+    def hideEvent(self, e) -> None:
         self._timer.stop()
         super().hideEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -204,7 +204,7 @@ class TintSpinner(Spinner):
         super().__init__(size, parent)
         self._tone = tone
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -230,7 +230,7 @@ class StateMark(QWidget):
             lay.addWidget(TintSpinner(12, "accent_text"))
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -258,17 +258,17 @@ class HoverRow(QWidget):
         self.open = open_
         self.update()
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         self._hover = True
         self.update()
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self._hover = False
         self.update()
         super().leaveEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         if self._hover or self.open:
             t = theme.tokens()
             p = QPainter(self)
@@ -409,7 +409,7 @@ class TaskRow(Card):
         else:
             self.ico.setPixmap(icons.pixmap("square-terminal" if t.get("type") == "local_bash" else "bot", tk.text, 13))
 
-    def paintEvent(self, e) -> None:  # noqa: N802
+    def paintEvent(self, e) -> None:
         if not self._done:
             super().paintEvent(e)
 
@@ -592,7 +592,7 @@ class SubAgentRow(QWidget):
             lay.addWidget(end)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         if not self._elbow:
             return
         t = theme.tokens()
@@ -740,7 +740,7 @@ class PhaseRow(QWidget):
                 row.deleteLater()
                 self.rows[i] = fresh
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         if self.last:
             return
         t = theme.tokens()
@@ -765,7 +765,7 @@ class PhaseNode(QWidget):
         self.setFixedSize(18, 18)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -773,7 +773,7 @@ class PhaseNode(QWidget):
         if self.state in ("done", "error"):
             p.setBrush(QColor(t.ok if self.state == "done" else t.err))
             p.drawEllipse(QRectF(0, 0, 18, 18))
-            p.drawPixmap(3.5, 3.5, icons.pixmap("check" if self.state == "done" else "x", "#ffffff", 11))
+            p.drawPixmap(3.5, 3.5, icons.pixmap("check" if self.state == "done" else "x", t.accent_ink, 11))
             return
         p.setBrush(theme.qcolor(t.raised))
         p.drawEllipse(QRectF(0, 0, 18, 18))

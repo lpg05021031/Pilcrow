@@ -7,6 +7,7 @@ from __future__ import annotations
 import base64
 import html
 import json
+import logging
 import re
 from typing import Any, Dict, List, Optional
 
@@ -27,6 +28,8 @@ from ..paint import Measurer, PaintState
 from ..scene import Target
 from .base import NodeBlock
 from .codehtml import code_html, diff_html
+
+log = logging.getLogger(__name__)
 
 Json = Dict[str, Any]
 TAIL = 18
@@ -63,8 +66,8 @@ class ToolBodyBlock(NodeBlock):
         self.handlers = {}
         try:
             node = (build_reports if self.part == "reports" else build_body)(self.item, self.ctx, self, m)
-        except Exception as ex:  # noqa: BLE001 - a body that cannot be built must not take the card down
-            print(f"[canvas] body of {self.item.name} failed: {ex!r}")
+        except Exception as ex:  # a body that cannot be built must not take the card down
+            log.warning("the body of %s failed", self.item.name, exc_info=True)
             node = nd.note(f"Could not show this step: {ex!r}")
         return node or nd.Column()
 

@@ -84,6 +84,22 @@ class ToolBlock(Group):
 
     KIND = "tool"
     CHILD_INDENT = 28
+    __slots__ = (
+        "_loaded_items",
+        "_meta_rects",
+        "_tsig",
+        "body",
+        "child_builder",
+        "children_group",
+        "ctx",
+        "file",
+        "item",
+        "meta",
+        "perm",
+        "perm_island",
+        "reports",
+        "user_open",
+    )
 
     def __init__(
         self, item: ToolItem, ctx: ToolCtx, perm: Optional[Json], child_builder: Optional[ChildBuilder] = None
@@ -424,6 +440,7 @@ class AgentChildren(Group):
 
     KIND = "agent-children"
     CHILD_INDENT = 15
+    __slots__ = ("builder", "inner")
 
     def __init__(self, builder: ChildBuilder, items: List[Item], ctx: ToolCtx) -> None:
         super().__init__(f"agent-children:{id(self)}", head_h=0, pad_top=0, pad_bottom=0, open_=True)
@@ -442,6 +459,8 @@ class AgentChildren(Group):
 
 class PermissionIsland(IslandBlock):
     """The permission prompt as a real widget under the tool row."""
+
+    __slots__ = ("ctx", "item", "perm")
 
     def __init__(self, perm: Json, ctx: ToolCtx, item: ToolItem) -> None:
         self.perm, self.ctx, self.item = perm, ctx, item
@@ -463,6 +482,7 @@ class SpecialIsland(IslandBlock):
 
     MT = 12
     MB = 12
+    __slots__ = ("ctx", "item", "perm")
 
     def __init__(self, item: ToolItem, ctx: ToolCtx, perm: Optional[Json]) -> None:
         self.item, self.ctx, self.perm = item, ctx, perm

@@ -205,7 +205,7 @@ class NewSessionSheet(Sheet):
         self._summary()
         self._git_timer.start()
 
-    def eventFilter(self, obj, e) -> bool:  # noqa: N802
+    def eventFilter(self, obj, e) -> bool:
         if obj is getattr(self, "path", None) and e.type() in (QEvent.Type.FocusIn, QEvent.Type.FocusOut):
             set_prop(self.folder_box, "focus", "true" if e.type() == QEvent.Type.FocusIn else "false")
         return super().eventFilter(obj, e)

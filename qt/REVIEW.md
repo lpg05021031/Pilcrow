@@ -161,6 +161,10 @@ token; inside a fold the trees are small.
 suffix of `_vals` and of `_tree` is the whole operation. `insert`/`remove` at `i` need the tree
 rebuilt from `i` on only (nodes below `i` cover nothing at or after it).
 
+**Done (truncate).** `truncate(k)` drops the tails of `_vals` and `_tree`; an insert at the end is an
+append and a removal of the last value a truncate, so the live end never rebuilds. An insert or a
+removal in the middle still rebuilds (rare, small trees).
+
 ### R6 · Find re-searches every visible document on every paint — low
 
 **Evidence/cause.** While the find bar holds a needle, `ProseBlock.paint` calls
@@ -171,6 +175,10 @@ work done 60 times for an answer that changes once.
 
 **Fix.** Cache the ranges per `(doc revision, needle)` on the block; paint the highlight over the
 cached pixmap instead of bypassing the cache.
+
+**Done (the search).** `find_ranges` remembers its answer per document (weakly), revision and needle,
+so a scroll with the bar open searches nothing; one `find_selections` paints the matches for prose
+and card bodies alike. Blocks with a needle still paint from their documents rather than the cache.
 
 ### R7 · Select all over a long conversation builds documents for the cold blocks it crosses — low
 

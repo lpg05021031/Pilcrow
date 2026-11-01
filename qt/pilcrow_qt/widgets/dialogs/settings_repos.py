@@ -627,7 +627,7 @@ class RepoRow(Panel):
             )
         )
 
-    def eventFilter(self, obj, ev) -> bool:  # noqa: N802
+    def eventFilter(self, obj, ev) -> bool:
         if obj is self.name_edit and ev.type() == QEvent.Type.KeyPress and ev.key() == Qt.Key.Key_Escape:
             self.name_edit.setText(str(self.e.get("name") or ""))
             self.name_edit.hide()

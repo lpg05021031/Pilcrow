@@ -144,6 +144,17 @@ def test_find_lights_matches_and_the_current_one(app):
     b = prose("next and next again")
     ranges = find_ranges(b.doc, "next")
     assert len(ranges) == 2 and all(b.doc.toPlainText()[a:z] == "next" for a, z in ranges)
+    # remembered for the next paint, asked again when the needle or the document changes
+    assert find_ranges(b.doc, "next") is ranges
+    assert find_ranges(b.doc, "again") == [(14, 19)]
+    edited = prose("next")
+    first = find_ranges(edited.doc, "next")
+    from PySide6.QtGui import QTextCursor
+
+    cur = QTextCursor(edited.doc)
+    cur.movePosition(QTextCursor.MoveOperation.End)
+    cur.insertText(" next")
+    assert len(find_ranges(edited.doc, "next")) == 2 and len(first) == 1
     # painted: the current match in the accent, the other in the wash
     m = measurer()
     img = QImage(700, b.h, QImage.Format.Format_ARGB32_Premultiplied)
@@ -158,7 +169,7 @@ def test_find_lights_matches_and_the_current_one(app):
     p.end()
     seen = {img.pixelColor(x, 12).name() for x in range(0, 200)}
     assert theme.tokens().accent in seen
-    assert theme.blend("rgba(217, 119, 87, 0.28)", theme.tokens().canvas).name() in seen
+    assert theme.blend(theme.tokens().find_mark, theme.tokens().canvas).name() in seen
 
 
 def test_user_bubble_is_the_webs_size(app):
@@ -278,7 +289,7 @@ def test_code_well_carries_a_copy_at_its_corner(app):
     v = View()
     b.activate(t, v)
     assert v.copied == "const a = 1;"
-    assert b._copied[0] == 0  # noqa: SLF001 - the corner says "Copied" for a moment
+    assert b._copied[0] == 0  # the corner says "Copied" for a moment
 
 
 def test_a_written_thought_is_quiet_markdown(app):
@@ -290,12 +301,12 @@ def test_a_written_thought_is_quiet_markdown(app):
     blk = ThinkingBlock(done)
     body = blk.children[0]
     body.measure(700, m)
-    assert body._md and "`" not in body.doc.toPlainText()  # noqa: SLF001
+    assert body._md and "`" not in body.doc.toPlainText()
     assert body.selected_text(None, None).startswith("Plan:\nread a.ts")
     live = ThinkingItem(id="th2", text="still `thinking`", streaming=True, start_ts=0)
     blk2 = ThinkingBlock(live)
     blk2.children[0].measure(700, m)
-    assert not blk2.children[0]._md and "`" in blk2.children[0].doc.toPlainText()  # noqa: SLF001
+    assert not blk2.children[0]._md and "`" in blk2.children[0].doc.toPlainText()
 
 
 def test_a_node_body_lays_out_from_its_own_edge(app):

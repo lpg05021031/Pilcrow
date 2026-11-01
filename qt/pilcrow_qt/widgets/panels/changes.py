@@ -41,7 +41,7 @@ class Skeleton(QWidget):
         self.setFixedHeight(16 + 3 * (3 * 11 + 2 * 9) + 2 * 22 + 16)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -89,7 +89,7 @@ class CommitBox(QWidget):
         outer.addWidget(inner)
         outer.addWidget(Hairline())
 
-    def eventFilter(self, obj, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj, e: QEvent) -> bool:
         if obj is self.message and e.type() == QEvent.Type.KeyPress:
             ke: QKeyEvent = e  # type: ignore[assignment]
             if (
@@ -108,7 +108,7 @@ class NotesBar(QWidget):
         super().__init__(parent)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.fillRect(self.rect(), theme.qcolor(t.raised))
@@ -337,14 +337,14 @@ class ChangesPanel(QWidget):
             "split", self._narrow, "Side by side (widen the panel to use it)" if self._narrow else "Side by side"
         )
 
-    def showEvent(self, e) -> None:  # noqa: N802
+    def showEvent(self, e) -> None:
         # The web remounts this tab each time it is shown; here it stays built and refreshes instead.
         super().showEvent(e)
         self.helpers.sync()  # a lead's helpers, caught up now that the tab shows
         if self._stale or (self.data is not None and time.monotonic() - self._last_load > 2.5):
             self.load()
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         narrow = self.width() < NARROW_W
         if narrow != self._narrow:
             self._narrow = narrow

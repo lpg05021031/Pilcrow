@@ -105,12 +105,12 @@ class Btn(QPushButton):
         self._on = on
         self.update()
 
-    def setIconSize(self, size: QSize) -> None:  # noqa: N802
+    def setIconSize(self, size: QSize) -> None:
         super().setIconSize(size)
         self.icon_px = size.width()
         self.updateGeometry()
 
-    def setIcon(self, icon: QIcon) -> None:  # noqa: N802
+    def setIcon(self, icon: QIcon) -> None:
         super().setIcon(icon)
         self.updateGeometry()
         self.update()
@@ -118,7 +118,7 @@ class Btn(QPushButton):
     def _has_icon(self) -> bool:
         return bool(self.icon_name) or not self.icon().isNull()
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         m = self._metrics()
         fm = QFontMetrics(theme.font_ui(m["fs"], int(m["fw"])))
         w = m.get("pl", m["px"]) + m["px"]
@@ -129,20 +129,20 @@ class Btn(QPushButton):
         w += fm.horizontalAdvance(self.text()) if self.text() else 0
         return QSize(int(w), int(m["h"]))
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         return self.sizeHint()
 
-    def setText(self, text: str) -> None:  # noqa: N802
+    def setText(self, text: str) -> None:
         super().setText(text)
         self.updateGeometry()
         self.update()
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         self._hover = True
         self.update()
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self._hover = False
         self.update()
         super().leaveEvent(e)
@@ -163,7 +163,7 @@ class Btn(QPushButton):
             bg = theme.blend(t.fill_1, t.canvas) if hover else None
             return bg, QColor(t.text), 0.85, theme.blend(t.hair_2, t.raised)
         if k == "danger":
-            return QColor(t.err), QColor("#ffffff"), 1.0, None
+            return QColor(t.err), QColor(t.accent_ink), 1.0, None
         if k == "danger-text":
             return (theme.blend(t.err_wash, t.canvas) if hover else None), QColor(t.err), 0.85, None
         if k in ("link", "toggle"):
@@ -186,7 +186,7 @@ class Btn(QPushButton):
             return theme.blend(t.fill_1, t.canvas), QColor(t.text_4), 1.0, None
         return theme.blend(t.fill_3 if (hover or self._on) else t.fill_2, t.canvas), QColor(t.text), 0.85, None
 
-    def paintEvent(self, _e: QPaintEvent) -> None:  # noqa: N802
+    def paintEvent(self, _e: QPaintEvent) -> None:
         m = self._metrics()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)

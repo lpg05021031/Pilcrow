@@ -315,7 +315,7 @@ class NoteBadge(QLabel):
     def _paint(self) -> None:
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -372,7 +372,7 @@ class CommentEditor(QWidget):
         row.addWidget(self.save)
         lay.addLayout(row)
 
-    def eventFilter(self, obj, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj, e: QEvent) -> bool:
         if obj is self.edit and e.type() == QEvent.Type.KeyPress:
             ke: QKeyEvent = e  # type: ignore[assignment]
             if (
@@ -749,13 +749,13 @@ class DiffGrid(QWidget):
         self._editing = None
         self._relayout()
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         return QSize(max(self._content_w, 200), self._total_h)
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         return QSize(self._content_w, self._total_h)
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         # without wrapping the rows' heights do not depend on the width: only the columns move
         if self._wrap or self._mode == "split" or self._extras:
@@ -815,7 +815,7 @@ class DiffGrid(QWidget):
             return r.right
         return None
 
-    def mouseMoveEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+    def mouseMoveEvent(self, e: QMouseEvent) -> None:
         i = self._row_at(int(e.position().y()))
         if i != self._hover:
             self._hover = i
@@ -831,12 +831,12 @@ class DiffGrid(QWidget):
             self.unsetCursor()
         super().mouseMoveEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self._hover = -1
         self.update()
         super().leaveEvent(e)
 
-    def mousePressEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+    def mousePressEvent(self, e: QMouseEvent) -> None:
         if e.button() == Qt.MouseButton.LeftButton and self._can_comment:
             i = self._row_at(int(e.position().y()))
             if i >= 0 and self._rows[i].kind != "hunk":
@@ -847,7 +847,7 @@ class DiffGrid(QWidget):
         super().mousePressEvent(e)
 
     # ---- painting
-    def paintEvent(self, e) -> None:  # noqa: N802
+    def paintEvent(self, e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -1049,17 +1049,17 @@ class _Head(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         for w in self.hover_widgets:
             w.setVisible(True)
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         for w in self.hover_widgets:
             w.setVisible(False)
         super().leaveEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         p = QPainter(self)
         p.fillRect(self.rect(), theme.qcolor(theme.tokens().chrome))
 

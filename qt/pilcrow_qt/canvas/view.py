@@ -10,12 +10,13 @@ cools the ones far away between frames, under a time budget.
 
 from __future__ import annotations
 
+import logging
 import math
 import time
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QGuiApplication, QKeySequence, QPainter, QPixmap, QTextCursor
+from PySide6.QtGui import QAccessible, QColor, QGuiApplication, QKeySequence, QPainter, QPixmap, QTextCursor
 from PySide6.QtWidgets import QAbstractScrollArea, QToolTip, QWidget
 
 from .. import theme
@@ -28,6 +29,8 @@ from .blocks.island import IslandBlock
 from .clock import Tween, clock
 from .paint import FULL, Measurer, PaintState, rounded
 from .scene import GRADE_EXACT, GRADE_FAST, Block, Group, Scene, Target
+
+log = logging.getLogger(__name__)
 
 PAD_TOP = 22
 PAD_BOTTOM = 44
@@ -89,13 +92,13 @@ class FollowEase:
         if not self.running:
             self.running = True
             self._last = time.monotonic()
-            clock.hold_fast()
+            clock.hold_fast(self)
             clock.subscribe(self)
 
     def stop(self) -> None:
         if self.running:
             self.running = False
-            clock.release_fast()
+            clock.release_fast(self)
             clock.unsubscribe(self)
         self.target = None
 
@@ -247,7 +250,7 @@ class CanvasView(QAbstractScrollArea):
         finally:
             self._own = was
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         self.begin()
         try:
@@ -258,7 +261,7 @@ class CanvasView(QAbstractScrollArea):
         self._place_islands()
         self.viewport().update()
 
-    def viewportEvent(self, e) -> bool:  # noqa: N802
+    def viewportEvent(self, e) -> bool:
         if e.type() == QEvent.Type.Leave:
             self._set_hover(None)
         elif e.type() == QEvent.Type.ContextMenu:
@@ -266,15 +269,15 @@ class CanvasView(QAbstractScrollArea):
             return True
         return super().viewportEvent(e)
 
-    def focusInEvent(self, e) -> None:  # noqa: N802
+    def focusInEvent(self, e) -> None:
         super().focusInEvent(e)
         self._update_focus_rect()
 
-    def focusOutEvent(self, e) -> None:  # noqa: N802
+    def focusOutEvent(self, e) -> None:
         super().focusOutEvent(e)
         self._update_focus_rect()
 
-    def focusNextPrevChild(self, next_: bool) -> bool:  # noqa: N802
+    def focusNextPrevChild(self, next_: bool) -> bool:
         """Tab moves over the targets on screen before it leaves the view."""
         if self.hasFocus() and self._focus_step(1 if next_ else -1):
             return True
@@ -374,6 +377,7 @@ class CanvasView(QAbstractScrollArea):
                 vp.update(QRect(0, max(0, top), vp.width(), vp.height() - max(0, top)))
         for x, y, w, h in rects:
             vp.update(QRect(self.col_x + x, self.view_y(y), w, h))
+        a11y.blocks_changed(self)
         self._prefetch.start()
 
     def mutate(self, fn: Callable[[], Any]) -> Any:
@@ -435,7 +439,7 @@ class CanvasView(QAbstractScrollArea):
         if not self._silent:
             self._rehover()
 
-    def scrollContentsBy(self, dx: int, dy: int) -> None:  # noqa: N802
+    def scrollContentsBy(self, dx: int, dy: int) -> None:
         if not self._silent:
             self.viewport().scroll(0, dy)
 
@@ -451,10 +455,6 @@ class CanvasView(QAbstractScrollArea):
         if self.on_latest is not None:
             self.on_latest(False)
 
-    def at_bottom(self) -> bool:
-        vb = self.verticalScrollBar()
-        return vb.maximum() - vb.value() <= 60
-
     def scroll_to_block(self, b: Block, fraction: float = 0.38, only_if_hidden: bool = True) -> None:
         """Bring a block to ``fraction`` of the viewport height unless it is comfortably visible."""
         vb = self.verticalScrollBar()
@@ -467,11 +467,11 @@ class CanvasView(QAbstractScrollArea):
         self.follow_ease.stop()
         self._set_value(vb.value() + r.top() - int(vh * fraction))
 
-    def wheelEvent(self, e) -> None:  # noqa: N802
+    def wheelEvent(self, e) -> None:
         self._last_user_scroll = time.monotonic()
         super().wheelEvent(e)
 
-    def keyPressEvent(self, e) -> None:  # noqa: N802
+    def keyPressEvent(self, e) -> None:
         k = e.key()
         vb = self.verticalScrollBar()
         vh = self.viewport().height()
@@ -644,7 +644,7 @@ class CanvasView(QAbstractScrollArea):
             )
 
     # ---------------------------------------------------------------- painting
-    def paintEvent(self, e) -> None:  # noqa: N802
+    def paintEvent(self, e) -> None:
         self.frame += 1
         self.scene.frame = self.frame
         vp = self.viewport()
@@ -664,7 +664,8 @@ class CanvasView(QAbstractScrollArea):
         leaves = self.scene.leaves_between(y0, y1)
         if getattr(self.scene, "loading", False):
             # a conversation still arriving: its skeleton alone, where it sits at the top
-            leaves = [(b, by) for b, by in self.scene.leaves_between(0, 10**9) if b.KIND == "skeleton"]
+            sk = self.scene.skeleton
+            leaves = [(sk, sk.y())]
         region = e.region()
         for b, by in leaves:
             if b.h <= 0 or isinstance(b, IslandBlock):
@@ -741,9 +742,9 @@ class CanvasView(QAbstractScrollArea):
             b.paint(p, rect.x(), rect.y(), rect.width(), st)
             if st.focus is not None and self.hasFocus():
                 self._paint_focus_ring(p, rect, st)
-        except Exception as ex:  # noqa: BLE001 - one row's painter must not blank the frame
+        except Exception:  # one row's painter must not blank the frame
             if not getattr(b, "_paint_failed", False):
-                print(f"[canvas] {b.key} could not paint: {ex!r}")
+                log.warning("%s could not paint", b.key, exc_info=True)
                 try:
                     b._paint_failed = True  # type: ignore[attr-defined]
                 except AttributeError:
@@ -771,7 +772,8 @@ class CanvasView(QAbstractScrollArea):
         key = (b.key, b.rev, b.sig, b.gen, rect.width(), self.m.theme_name, dpr)
         pm = self.m.pixmaps.get(key)
         if pm is None:
-            pm = QPixmap(int(rect.width() * dpr), int(max(1, rect.height()) * dpr))
+            # rounded up: at a fractional ratio a truncated pixmap is a device pixel short of the row
+            pm = QPixmap(math.ceil(rect.width() * dpr), math.ceil(max(1, rect.height()) * dpr))
             pm.setDevicePixelRatio(dpr)
             pm.fill(QColor(st.t.canvas))
             pp = QPainter(pm)
@@ -779,8 +781,8 @@ class CanvasView(QAbstractScrollArea):
             bst.caching = True
             try:
                 b.paint(pp, 0, 0, rect.width(), bst)
-            except Exception as ex:  # noqa: BLE001
-                print(f"[canvas] {b.key} could not paint: {ex!r}")
+            except Exception:  # a painter that trips leaves the canvas colour, not a hole
+                log.warning("%s could not paint", b.key, exc_info=True)
             pp.end()
             self.m.pixmaps.put(key, pm)
         p.drawPixmap(rect.topLeft(), pm)
@@ -879,7 +881,7 @@ class CanvasView(QAbstractScrollArea):
         if tip:
             QToolTip.showText(self.viewport().mapToGlobal(self._tip_pos), tip, self.viewport())
 
-    def mouseMoveEvent(self, e) -> None:  # noqa: N802
+    def mouseMoveEvent(self, e) -> None:
         pos = e.position().toPoint()
         self._tip_pos = pos
         if self._selecting and self.selection is not None:
@@ -887,7 +889,7 @@ class CanvasView(QAbstractScrollArea):
             return
         self._set_hover(self.hit(pos))
 
-    def mousePressEvent(self, e) -> None:  # noqa: N802
+    def mousePressEvent(self, e) -> None:
         if e.button() != Qt.MouseButton.LeftButton:
             super().mousePressEvent(e)
             return
@@ -918,7 +920,7 @@ class CanvasView(QAbstractScrollArea):
                 self.selection = Selection(b.key, p0)
                 self._selecting = True
 
-    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, e) -> None:
         if e.button() != Qt.MouseButton.LeftButton:
             super().mouseReleaseEvent(e)
             return
@@ -936,7 +938,7 @@ class CanvasView(QAbstractScrollArea):
         if pressed is not None and hit is not None and pressed[0] is hit[0] and pressed[1] == hit[1]:
             self.activate(hit[0], hit[1])
 
-    def mouseDoubleClickEvent(self, e) -> None:  # noqa: N802
+    def mouseDoubleClickEvent(self, e) -> None:
         pos = e.position().toPoint()
         hit = self.hit(pos)
         if hit is not None and hit[1].kind not in ("text", "row"):
@@ -1052,11 +1054,16 @@ class CanvasView(QAbstractScrollArea):
         for b in self.visible_blocks():
             ts = [t for t in b.targets() if t.kind in FOCUS_KINDS]
             if not ts:
-                t = b.hit(2, 2)
-                if t is not None and t.kind in FOCUS_KINDS:
-                    ts = [t]
+                head = self.head_target(b)
+                ts = [head] if head is not None else []
             out.extend((b, t) for t in ts)
         return out
+
+    @staticmethod
+    def head_target(b: Block) -> Optional[Target]:
+        """What a press on the block's first line does (its head, a toggle), if anything."""
+        t = b.hit(2, 2)
+        return t if t is not None and t.kind in FOCUS_KINDS else None
 
     def _focus_step(self, d: int) -> bool:
         """Move the focus to the next (d=1) or previous (d=-1) target on screen; False at the ends."""
@@ -1089,6 +1096,8 @@ class CanvasView(QAbstractScrollArea):
             return
         self.focus = f
         self._update_focus_rect(old)
+        if f is not None:
+            a11y.announce(self, f[0], QAccessible.Event.Focus)
 
     def _update_focus_rect(self, *keys: Optional[Tuple[str, Target]]) -> None:
         vp = self.viewport()
@@ -1102,6 +1111,7 @@ class CanvasView(QAbstractScrollArea):
     # ---------------------------------------------------------------- groups
     def toggle_group(self, g: Group, open_: bool, animate: bool = True) -> None:
         g.open = open_
+        a11y.announce(self, g.key, QAccessible.Event.StateChanged)
         tw = self._tweens.get(g.key)
         if tw is not None:
             tw.stop()

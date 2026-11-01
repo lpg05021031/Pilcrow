@@ -61,7 +61,7 @@ class TitleBar(QWidget):
             self._win.showMaximized()
 
     # ---- dragging
-    def mousePressEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+    def mousePressEvent(self, e: QMouseEvent) -> None:
         if e.button() == Qt.MouseButton.LeftButton and self.childAt(e.position().toPoint()) in (None, self.title):
             wh = self._win.windowHandle()
             if wh is not None and not self._win.isMaximized():
@@ -69,7 +69,7 @@ class TitleBar(QWidget):
                 return
         super().mousePressEvent(e)
 
-    def mouseDoubleClickEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+    def mouseDoubleClickEvent(self, e: QMouseEvent) -> None:
         if e.button() == Qt.MouseButton.LeftButton:
             self.toggle_max()
 
@@ -80,7 +80,7 @@ class TitleBar(QWidget):
             self._lay.setContentsMargins(max(18, x), 0, 6, 0)
 
     # ---- the window's title and state
-    def eventFilter(self, obj: QObject, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj: QObject, e: QEvent) -> bool:
         if obj is self._win:
             if e.type() == QEvent.Type.WindowTitleChange:
                 self.title.setText(self._win.windowTitle())
@@ -112,7 +112,7 @@ class EdgeResizer(QObject):
             edges |= Qt.Edge.BottomEdge
         return edges
 
-    def eventFilter(self, obj: QObject, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj: QObject, e: QEvent) -> bool:
         if obj is not self._win or self._win.isMaximized():
             return False
         if e.type() == QEvent.Type.MouseMove:

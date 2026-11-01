@@ -126,24 +126,24 @@ class ToastCard(QWidget):
         self.ico.setContentsMargins(0, 2, 0, 0)
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         tk = theme.tokens()
         bg = toast_bg(tk)
         p = QPainter(self)
         paint_box(p, QRectF(self.rect()), bg, theme.over(theme.qcolor(tk.hair_2), bg), 12)
 
-    def sizeHint(self):  # noqa: N802
+    def sizeHint(self):
         s = super().sizeHint()
         # hug the text: the layout's hint, but never wider than the column
         from PySide6.QtCore import QSize
 
         return QSize(min(MAX_W, s.width()), max(40, s.height()))
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         store.hold_toast(self.toast.id)
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         store.release_toast(self.toast.id)
         super().leaveEvent(e)
 

@@ -51,6 +51,7 @@ def _boundary(items: List[Item]) -> int:
 class OrphanIsland(IslandBlock):
     MT = 10
     MB = 14
+    __slots__ = ("ctx", "perm")
 
     def __init__(self, perm: Json, ctx: ToolCtx) -> None:
         self.perm, self.ctx = perm, ctx
@@ -64,6 +65,8 @@ class OrphanIsland(IslandBlock):
 
 class EmptyIsland(IslandBlock):
     """The session view's empty card, shown through the scene; the view owns the widget."""
+
+    __slots__ = ("_w",)
 
     def __init__(self, widget: QWidget) -> None:
         self._w = widget
@@ -317,7 +320,7 @@ class Jump(QPushButton):
         self.setFixedWidth(10 + 14 + 4 + QFontMetrics(self._font).horizontalAdvance(self.text().strip()) + 12)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         bg = QColor(t.raised_2 if self.underMouse() else t.raised)
@@ -370,7 +373,7 @@ class Transcript(QWidget):
     def viewport(self) -> QWidget:
         return self.view.viewport()
 
-    def verticalScrollBar(self):  # noqa: N802
+    def verticalScrollBar(self):
         return self.view.verticalScrollBar()
 
     def set_empty(self, widget: QWidget) -> None:
@@ -576,16 +579,16 @@ class Transcript(QWidget):
         bar.setFixedWidth(min(380, max(120, vp.width() - 36)))
         bar.move(vp.width() - 18 - bar.width(), 10)
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         self._place_jump()
         self._place_find()
 
-    def hideEvent(self, e) -> None:  # noqa: N802
+    def hideEvent(self, e) -> None:
         self._remember()
         super().hideEvent(e)
 
-    def keyPressEvent(self, e) -> None:  # noqa: N802
+    def keyPressEvent(self, e) -> None:
         self.view.keyPressEvent(e)
 
 

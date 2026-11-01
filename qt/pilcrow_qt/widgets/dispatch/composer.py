@@ -402,7 +402,7 @@ class JobComposer(QWidget):
         self._summarize()
 
     # ---- lifecycle
-    def eventFilter(self, obj, e) -> bool:  # noqa: N802
+    def eventFilter(self, obj, e) -> bool:
         if obj is self.scroll.viewport() and e.type() == QEvent.Type.Resize:
             vw = self.scroll.viewport().width()
             self.body.setFixedWidth(max(320, min(page_column(vw), vw)))

@@ -8,6 +8,7 @@ frame per session, coalesced).
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
@@ -19,6 +20,8 @@ from . import theme as theme_mod
 from .lib.fmt import err_text, set_home
 from .lib.transcript_model import TranscriptModel
 from .rpc import Call, RpcError, rpc
+
+log = logging.getLogger(__name__)
 
 Json = Dict[str, Any]
 
@@ -107,7 +110,11 @@ class ConfirmSpec:
 
 
 class Store(QObject):
-    """The application state. One instance, :data:`store`."""
+    """The application state. One instance, :data:`store`.
+
+    A session's runtime changes in bursts (streamed messages, ``session.state`` events, :meth:`patch_rt`),
+    so all three are coalesced: ``rt_changed(sid)`` fires at most once per session per 16 ms frame
+    (:meth:`mark_dirty`). Every other signal fires as its state changes."""
 
     connected_changed = Signal(bool)
     info_changed = Signal(object)
@@ -137,6 +144,8 @@ class Store(QObject):
     notify = Signal(str, str, str)  # session id, title, body
     attention = Signal()
     sent = Signal(str)  # a message went out for this session: the transcript goes to its live end
+    term_data = Signal(object)  # {"id", "data"}: a terminal's output (the Terminal tab)
+    term_exit = Signal(object)  # {"id", "code"}: a terminal's process ended
 
     def __init__(self) -> None:
         super().__init__()
@@ -204,6 +213,8 @@ class Store(QObject):
         return m
 
     def mark_dirty(self, sid: str) -> None:
+        """Announce ``rt_changed(sid)`` on the next frame: every change to a session within 16 ms
+        (streamed messages, state events, patches) reaches the listeners as one emit."""
         self._dirty.add(sid)
         if not self._flush_timer.isActive():
             self._flush_timer.start()
@@ -213,18 +224,17 @@ class Store(QObject):
         self._dirty.clear()
         for sid in ids:
             m = self.models.get(sid)
-            if m is None:
-                continue
-            m.refresh_inputs()  # the tool inputs that streamed since the last flush, parsed once
-            r = self.rt.setdefault(sid, Runtime(loaded=True))
-            r.rev = m.rev
-            self.rt_changed.emit(sid)
+            if m is not None:
+                m.refresh_inputs()  # the tool inputs that streamed since the last flush, parsed once
+                self.rt.setdefault(sid, Runtime(loaded=True)).rev = m.rev
+            if sid in self.rt:
+                self.rt_changed.emit(sid)
 
     def patch_rt(self, sid: str, **patch: Any) -> Runtime:
         r = self.rt.setdefault(sid, Runtime())
         for k, v in patch.items():
             setattr(r, k, v)
-        self.rt_changed.emit(sid)
+        self.mark_dirty(sid)
         return r
 
     def rt_of(self, sid: Optional[str]) -> Optional[Runtime]:
@@ -315,6 +325,8 @@ class Store(QObject):
         rpc.on("dispatch.changed", self._on_dispatch)
         rpc.on("dispatch.playbooks", lambda _d: self.load_playbooks())
         rpc.on("timeline.step", self._on_timeline_step)
+        rpc.on("term.data", self.term_data.emit)
+        rpc.on("term.exit", self.term_exit.emit)
         hints = QGuiApplication.styleHints()
         if hasattr(hints, "colorSchemeChanged"):
             hints.colorSchemeChanged.connect(lambda _s: self.apply_theme())
@@ -360,10 +372,10 @@ class Store(QObject):
                     self.open_session(last)
 
         rpc.call("app.info").then(lambda r: (pending.__setitem__("info", r or {}), ready())).catch(
-            lambda e: print("[store] app.info failed", e)
+            lambda e: log.warning("app.info failed: %s", e)
         )
         rpc.call("config.get").then(lambda r: (pending.__setitem__("config", r or {}), ready())).catch(
-            lambda e: print("[store] config.get failed", e)
+            lambda e: log.warning("config.get failed: %s", e)
         )
 
     def _on_msgs(self, d: Json) -> None:
@@ -405,7 +417,7 @@ class Store(QObject):
         prev_status = prev.status if prev else ""
         r = self.rt.setdefault(sid, Runtime())
         r.st = {**r.st, **st}
-        self.rt_changed.emit(sid)
+        self.mark_dirty(sid)
         changed = False
         vals = (r.st.get("status"), r.st.get("live"), len(r.st.get("pending") or []))
         for s in self.sessions:

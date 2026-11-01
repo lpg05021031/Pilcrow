@@ -23,7 +23,7 @@ class _Regrow(QObject):
         self._pending = False
         widget.installEventFilter(self)
 
-    def eventFilter(self, obj: QObject, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj: QObject, e: QEvent) -> bool:
         if e.type() == QEvent.Type.LayoutRequest and not self._pending:
             self._pending = True
             from PySide6.QtCore import QTimer

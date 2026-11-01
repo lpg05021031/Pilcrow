@@ -54,7 +54,7 @@ class Mark(QWidget):
         self.on = on
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -110,33 +110,33 @@ class OptionRow(QWidget):
         self.mark.set_on(on)
         self.update()
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         self._hover = True
         self.hovered.emit()
         self.update()
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self._hover = False
         self.update()
         super().leaveEvent(e)
 
-    def focusInEvent(self, e) -> None:  # noqa: N802
+    def focusInEvent(self, e) -> None:
         self.hovered.emit()
         super().focusInEvent(e)
 
-    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, e) -> None:
         if e.button() == Qt.MouseButton.LeftButton:
             self.toggled.emit()
         super().mouseReleaseEvent(e)
 
-    def keyPressEvent(self, e) -> None:  # noqa: N802
+    def keyPressEvent(self, e) -> None:
         if e.key() in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter):
             self.toggled.emit()
             return
         super().keyPressEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         if self.on or self._hover:
             p = QPainter(self)
@@ -417,7 +417,7 @@ class AskBody(QWidget):
             },
         )
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)

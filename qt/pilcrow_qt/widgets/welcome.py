@@ -53,7 +53,7 @@ class AppIcon(QWidget):
         self.setFixedSize(size, size)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         s = self._size / 256.0
         p = QPainter(self)
@@ -98,7 +98,7 @@ class FolderButton(LayoutButton):
     def set_folder(self, name: str) -> None:
         self.label.setText(name or "Choose a folder")
 
-    def paintEvent(self, e) -> None:  # noqa: N802
+    def paintEvent(self, e) -> None:
         super().paintEvent(e)
         t = theme.tokens()
         hover = self.underMouse()
@@ -108,11 +108,11 @@ class FolderButton(LayoutButton):
         p.drawPixmap(self.chev.x(), self.chev.y(), icons.pixmap("chevron-down", t.text if hover else t.text_2, 12))
         self.label.set_color("text" if hover else "text_2")
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         self.update()
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self.update()
         super().leaveEvent(e)
 
@@ -140,7 +140,7 @@ class SendButton(QPushButton):
         self.spinner.setVisible(busy)
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -158,11 +158,11 @@ class SendButton(QPushButton):
         if not self._busy:
             p.drawPixmap(8, 8, icons.pixmap("arrow-up", ink, 16, stroke=2.25))
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         self.update()
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self.update()
         super().leaveEvent(e)
 
@@ -187,10 +187,10 @@ class WelcomeChip(QPushButton):
         self._on = on
         self.update()
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         return QSize(QFontMetrics(self._font).horizontalAdvance(self.text()) + 20, 24)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         lit = self._on or self.underMouse()
         bg = theme.blend(t.fill_2 if lit else t.fill_1, t.canvas)
@@ -240,7 +240,7 @@ class WelcomeBox(QFrame):
         lay.addWidget(bar)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         line = theme.blend(t.hair_3 if self._focus else t.hair_2, t.raised)
@@ -249,7 +249,7 @@ class WelcomeBox(QFrame):
     def text(self) -> str:
         return self.edit.toPlainText()
 
-    def eventFilter(self, obj: QObject, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj: QObject, e: QEvent) -> bool:
         if obj is self.edit:
             if e.type() == QEvent.Type.KeyPress and e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
                 if not (e.modifiers() & Qt.KeyboardModifier.ShiftModifier):
@@ -464,7 +464,7 @@ class Welcome(QWidget):
         ).then(lambda _r: (self.box.edit.setPlainText(""), done())).catch(done)
 
     # ---- geometry and the glow
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         col = column(self.width())
         self.inner.setFixedWidth(col)
         self.box.setFixedWidth(max(640, min(int(round(col * 0.618)), col - 48, 1080)) if col > 1035 else BOX_W)
@@ -473,7 +473,7 @@ class Welcome(QWidget):
             lay.setContentsMargins(24, 40, 24, int(round(self.height() * 0.10)))
         super().resizeEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         # [data-theme='dark'] .welcome-icon { filter: drop-shadow(0 18px 44px rgba(217,119,87,.22)) }
         t = theme.tokens()
         if not t.dark or not self.icon.isVisible():

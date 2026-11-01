@@ -36,7 +36,7 @@ def start_mock(port: int, long: int = 60) -> subprocess.Popen:
         try:
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/hello", timeout=1):
                 return p
-        except Exception:  # noqa: BLE001
+        except Exception:
             time.sleep(0.1)
     p.kill()
     raise RuntimeError("mock server did not start")
@@ -91,7 +91,7 @@ def run_scenario(args, out: Path) -> int:
         state["i"] += 1
         try:
             fn()
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             import traceback
 
             traceback.print_exc()

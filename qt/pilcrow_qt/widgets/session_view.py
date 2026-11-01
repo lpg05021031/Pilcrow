@@ -10,23 +10,22 @@ from __future__ import annotations
 
 import math
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter
 from PySide6.QtWidgets import (
-    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
-    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from .. import icons, theme
+from ..canvas.transcript import Transcript
 from ..lib.fmt import basename, cost, duration, err_text, plural, tildify
 from ..store import ConfirmSpec, store
 from .composer import Composer, LayoutButton
@@ -35,7 +34,7 @@ from .mcp_notice import McpNotice
 from .sidebar import IconBtn
 from .ui.bits import Box, Mark, button, copy_text, hairline, label, paint_box
 from .ui.button import Btn
-from .ui.menu import show_menu
+from .ui.menu import Popover, host_for, show_menu
 from .ui.signals import bind
 
 Json = Dict[str, Any]
@@ -63,47 +62,6 @@ def running_workflow(tasks: Optional[List[Json]]) -> Optional[str]:
         if t.get("type") == "local_workflow" and t.get("status") == "running":
             return str(t.get("workflowName") or t.get("description") or "workflow")
     return None
-
-
-def _make_transcript(session_id: str, cwd: str) -> QWidget:
-    """The conversation on the canvas engine, otherwise a stand-in with the same surface so this page runs alone."""
-    try:
-        from ..canvas.transcript import Transcript
-
-        return Transcript(session_id, cwd)
-    except Exception as e:  # noqa: BLE001 — the transcript is built separately; this page must not depend on it
-        print(f"[session_view] transcript unavailable, using a placeholder: {e!r}")
-        return _TranscriptPlaceholder()
-
-
-class _TranscriptPlaceholder(QScrollArea):
-    """What the page shows for the conversation until the Transcript lands: the empty state, or nothing."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.setWidgetResizable(True)
-        self.setFrameShape(QFrame.Shape.NoFrame)
-        self._host = QWidget()
-        self._lay = QVBoxLayout(self._host)
-        self._lay.setContentsMargins(0, 0, 0, 0)
-        self._lay.addStretch(1)
-        self.setWidget(self._host)
-        self._empty: Optional[QWidget] = None
-
-    def set_empty(self, w: QWidget) -> None:
-        if self._empty is not None:
-            self._empty.deleteLater()
-        self._empty = w
-        self._lay.insertWidget(0, w, 0, Qt.AlignmentFlag.AlignHCenter)
-
-    def open_find(self) -> None:
-        pass
-
-    def scroll_to_bottom(self) -> None:
-        self.verticalScrollBar().setValue(self.verticalScrollBar().maximum())
-
-    def set_scrolled_callback(self, fn: Callable[[bool], None]) -> None:
-        self.verticalScrollBar().valueChanged.connect(lambda v: fn(v > 0))
 
 
 HELPER_TONE = {
@@ -165,7 +123,7 @@ class HelperChip(QPushButton):
     def text(self) -> str:  # type: ignore[override]
         return self._text
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         st = str(self.h.get("state") or "")
         p = QPainter(self)
@@ -237,10 +195,10 @@ class HelpersBar(QWidget):
         self.hide()
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         return QSize(240, self.H)
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         return QSize(0, self.H)
 
     def sync(self, helpers: List[Json], lead: Json) -> None:
@@ -322,11 +280,11 @@ class HelpersBar(QWidget):
             self.more.hide()
         self._shown = shown
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         self._place()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.fillRect(self.rect(), QColor(t.canvas))
@@ -346,7 +304,7 @@ class SessionView(QWidget):
         self._git_timer.timeout.connect(self._fetch_git)
         self._git_cwd = ""
         self._git_tick = ""
-        self._picker: Optional[QFrame] = None
+        self._picker: Optional[Popover] = None
         self._title_edit: Optional[QLineEdit] = None
         self._status_seen = ""
         self.setObjectName("session")
@@ -441,7 +399,7 @@ class SessionView(QWidget):
 
         # ---- conversation and composer
         cwd = self.cwd
-        self.transcript = _make_transcript(self.sid, cwd)
+        self.transcript = Transcript(self.sid, cwd)
         self.empty = SessionEmpty(session, cwd, self)
         self.transcript.set_empty(self.empty)
         self.transcript.set_scrolled_callback(self._set_scrolled)
@@ -492,7 +450,7 @@ class SessionView(QWidget):
     def open_find(self) -> None:
         self.transcript.open_find()
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         # The web's container queries: under 560px the crumbs go, the title keeps the room.
         narrow = self.width() < 560
@@ -654,40 +612,28 @@ class SessionView(QWidget):
         edit.finished.connect(done)
 
     def pick_folder(self) -> None:
-        if self._picker is not None:
-            self._picker.close()
+        """The folder chooser in a popover under the folder chip (``FolderPicker`` in the web)."""
+        if self._picker is not None and self._picker.is_open:
+            self._picker.dismiss()
             return
-        pop = QFrame(self, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
-        pop.setObjectName("popover")
-        pop.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        pop.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
-        t = theme.tokens()
-        glass, line = theme.blend(t.glass, t.canvas).name(), theme.blend(t.hair_2, t.raised).name()
-        pop.setStyleSheet(f"#popover {{ background: {glass}; border: 1px solid {line}; border-radius: {theme.R3}px; }}")
-        lay = QVBoxLayout(pop)
-        lay.setContentsMargins(1, 1, 1, 1)
+        host = host_for(self)
+        if host is None:
+            return
+        pop = Popover(host, 380)
+        pop.lay.setContentsMargins(0, 0, 0, 0)
         cwd = self.cwd
 
         def picked(d: str) -> None:
-            pop.close()
+            pop.dismiss()
             if d != cwd:
                 store.set_cwd(self.sid, d).catch(lambda _e: None)
 
         picker = FolderPicker(cwd, picked)
-        lay.addWidget(picker)
+        pop.set_content(picker)
+        pop.closed.connect(lambda: self.folder_btn.set_on(False))
         self._picker = pop
+        pop.open_at(self.folder_btn, "bottom-start")
         self.folder_btn.set_on(True)
-
-        def closed(*_a: Any) -> None:
-            self._picker = None
-            try:
-                self.folder_btn.set_on(False)
-            except RuntimeError:
-                pass
-
-        pop.destroyed.connect(closed)
-        pop.move(self.folder_btn.mapToGlobal(QPoint(0, self.folder_btn.height() + 4)))
-        pop.show()
         picker.q.setFocus()
 
     def open_menu(self) -> None:
@@ -828,13 +774,13 @@ class _TitleLabel(QLabel):
 
     double_clicked = Signal()
 
-    def mouseDoubleClickEvent(self, _e) -> None:  # noqa: N802
+    def mouseDoubleClickEvent(self, _e) -> None:
         self.double_clicked.emit()
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         return QSize(40, super().minimumSizeHint().height())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         p = QPainter(self)
         p.setFont(self.font())
         p.setPen(self.palette().color(self.foregroundRole()))
@@ -858,13 +804,13 @@ class _TitleEdit(QLineEdit):
         self.setAccessibleName("Session title")
         self.returnPressed.connect(lambda: self._finish(True))
 
-    def keyPressEvent(self, e) -> None:  # noqa: N802
+    def keyPressEvent(self, e) -> None:
         if e.key() == Qt.Key.Key_Escape:
             self._finish(False)
             return
         super().keyPressEvent(e)
 
-    def focusOutEvent(self, e) -> None:  # noqa: N802
+    def focusOutEvent(self, e) -> None:
         super().focusOutEvent(e)
         self._finish(True)
 
@@ -1048,7 +994,7 @@ class _Dot(QWidget):
             self._timer.stop()
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         c = QColor(self.color or theme.tokens().text_3)
@@ -1083,7 +1029,7 @@ class Diffstat(LayoutButton):
         bind(theme.theme.changed, self, lambda _t: self._paint())
         self._paint()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         bg = self.look_on if self._on else self.look_hover if (self.underMouse() and self.isEnabled()) else self.look_bg
         p = QPainter(self)
@@ -1170,10 +1116,10 @@ class _Example(QPushButton):
         self.setAccessibleName(text)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         return QSize(QFontMetrics(theme.font_ui(theme.FS_UI)).horizontalAdvance(self.text()) + 28, 32)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         hover = self.underMouse() and self.isEnabled()
         p = QPainter(self)

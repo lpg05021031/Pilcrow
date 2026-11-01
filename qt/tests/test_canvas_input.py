@@ -240,6 +240,9 @@ def test_text_scale_grows_the_prose_and_the_bubble(app):
     try:
         theme.theme.set_scale(1.3)
         m.refresh()
+        metrics = m.metrics
+        m.refresh()  # every live view asks on a switch; the work is done once
+        assert m.metrics is metrics
         b = ProseBlock("p", "one line")
         assert b.measure(700, m) == 31  # 14.5 × 1.3 on 1.65
         assert bubble_line() == 29
@@ -253,7 +256,7 @@ def test_text_scale_grows_the_prose_and_the_bubble(app):
 
 
 def test_accessibility_lists_the_blocks_on_screen(view):
-    from PySide6.QtGui import QAccessible
+    from PySide6.QtGui import QAccessible, QAccessibleActionInterface
 
     v = view
     iface = QAccessible.queryAccessibleInterface(v.viewport())
@@ -267,6 +270,101 @@ def test_accessibility_lists_the_blocks_on_screen(view):
     assert card.role() == QAccessible.Role.Button and iface.indexOfChild(card) == n - 1
     assert card.parent() is iface and card.rect().width() > 100
     assert "rows on screen" in iface.text(QAccessible.Text.Description)
+    # the name is a summary, the value the whole text
+    para = iface.child(1)
+    assert para.text(QAccessible.Text.Name) == para.text(QAccessible.Text.Value).splitlines()[0][:120]
+    # the card can be pressed: its head opens it
+    from pilcrow_qt.canvas.blocks.tool import ToolBlock
+
+    tool_block = _blocks(v, ToolBlock)[0]
+    assert not tool_block.open and card.state().collapsed and card.state().expandable
+    actions = card.actionInterface()
+    assert actions is not None and actions.actionNames() == [QAccessibleActionInterface.pressAction()]
+    actions.doAction(QAccessibleActionInterface.pressAction())
+    assert tool_block.open and card.state().expanded
+    actions.doAction(QAccessibleActionInterface.pressAction())
+    assert not tool_block.open
+    assert iface.child(0).actionInterface().actionNames() == []  # a plain row has nothing to press
+
+
+def test_accessibility_announces_focus_folds_and_new_rows(view, monkeypatch):
+    from PySide6.QtGui import QAccessible
+
+    from pilcrow_qt.canvas.blocks.prose import TextGroup
+    from pilcrow_qt.canvas.blocks.tool import ToolBlock
+
+    v = view
+    QAccessible.queryAccessibleInterface(v.viewport())  # what a screen reader does first
+    heard: list = []
+
+    def update(ev) -> None:
+        it = ev.accessibleInterface()
+        heard.append((ev.type(), it.text(QAccessible.Text.Name) if it is not None else ""))
+
+    monkeypatch.setattr(QAccessible, "updateAccessibility", update)
+    QAccessible.setActive(True)
+    try:
+        card = _blocks(v, ToolBlock)[0]
+        head = v.head_target(card)
+        v._set_focus((card.key, head))
+        assert heard[-1] == (QAccessible.Event.Focus, card.text())
+        v.toggle_group(card, True, animate=False)
+        assert heard[-1][0] == QAccessible.Event.StateChanged
+        v.toggle_group(card, False, animate=False)
+        v.blocks_seen = len(heard)
+        v.begin()
+        try:
+            v.scene.root.append(TextGroup(TextItem(id="t2", text="A new paragraph arrives.", streaming=False, ts=0)))
+        finally:
+            v.end()
+        pump(60)  # the new group takes its shape and its height on the view's next pass
+        assert (QAccessible.Event.ObjectShow, "A new paragraph arrives.") in heard[v.blocks_seen :]
+    finally:
+        QAccessible.setActive(False)
+
+
+def test_accessibility_forgets_what_is_gone(app):
+    import shiboken6
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from PySide6.QtGui import QAccessible
+
+    from pilcrow_qt.canvas import a11y
+    from pilcrow_qt.canvas.blocks.prose import TextGroup
+    from pilcrow_qt.canvas.scene import Scene
+    from pilcrow_qt.canvas.view import CanvasView
+
+    scene = Scene()
+    v = CanvasView(scene)
+    v.resize(600, 400)
+    v.begin()
+    try:
+        for i in range(3):
+            scene.root.append(TextGroup(TextItem(id=f"g{i}", text=f"row {i}", streaming=False, ts=0)))
+    finally:
+        v.end()
+    v.show()
+    pump(30)
+    lst = QAccessible.queryAccessibleInterface(v.viewport())
+    items = {lst.child(i)._key: lst.child(i) for i in range(lst.childCount())}  # each group and its paragraph
+    assert len(items) == 6
+    # a dropped block's item goes at the next prune
+    v.begin()
+    try:
+        scene.root.truncate(1)
+    finally:
+        v.end()
+    lst._prune()
+    assert sorted(lst._items) == ["text:g0", "text:g0:0"]
+    assert not shiboken6.isValid(items["text:g2"]) and shiboken6.isValid(items["text:g0"])
+    # the view's list goes once Qt has let go of it with the viewport
+    v.close()
+    v.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    assert not shiboken6.isValid(lst)  # Qt's cache deleted it with the viewport
+    other = CanvasView(Scene())
+    QAccessible.queryAccessibleInterface(other.viewport())
+    assert all(shiboken6.isValid(x) for x in a11y._lists.values())
+    other.deleteLater()
 
 
 def test_dragging_over_words_selects_them(view):

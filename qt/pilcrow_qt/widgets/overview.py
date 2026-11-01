@@ -21,11 +21,8 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
-    QPlainTextEdit,
     QScrollArea,
     QSizePolicy,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -36,6 +33,7 @@ from ..lib.tools_meta import str_
 from ..lib.workflow import workflow_counts
 from ..store import Runtime, store
 from .dialogs.parts import Badge, Card, ElideLabel, Kbd, LayoutButton, Text, Well, half_hairline, page_column
+from .transcript.permission import suggestion_label, typing_elsewhere
 from .ui.bits import Box, ContextRing, IconButton, Mark, Spinner, WorkingMark, button, paint_box
 from .ui.signals import bind
 
@@ -46,66 +44,6 @@ STALE_MS = 45_000
 
 def now_ms() -> float:
     return time.time() * 1000
-
-
-# ---------------------------------------------------------------- permission helpers
-# These live in widgets/transcript/permission.py (another part of the port); the control room
-# imports them lazily so it runs on its own while that module is still landing.
-
-
-def typing_elsewhere() -> bool:
-    """Number keys answer a prompt unless the person is typing somewhere. An empty composer counts as
-    not typing: it has focus by default, and a lone "1" there is never a message."""
-    fw = QApplication.focusWidget()
-    try:
-        from .transcript.permission import typing_elsewhere as impl  # type: ignore[import-not-found]
-
-        try:
-            return bool(impl(fw))
-        except TypeError:
-            return bool(impl())
-    except Exception:  # noqa: BLE001 — not there yet, or a different shape: use the local rule
-        pass
-    if fw is None:
-        return False
-    is_composer = fw.metaObject().className() == "ComposerEdit" or fw.objectName() == "ComposerEdit"
-    if is_composer:
-        text = fw.toPlainText() if hasattr(fw, "toPlainText") else fw.text() if hasattr(fw, "text") else ""
-        return bool(text)
-    return isinstance(fw, (QLineEdit, QTextEdit, QPlainTextEdit))
-
-
-def suggestion_label(s: Json, cwd: str = "") -> str:
-    """A short label for a permission suggestion (what "Always allow" would add)."""
-    try:
-        from .transcript.permission import suggestion_label as impl  # type: ignore[import-not-found]
-
-        return str(impl(s, cwd))
-    except Exception:  # noqa: BLE001
-        pass
-    dest = {
-        "session": "for this session",
-        "localSettings": "in this project (just you)",
-        "projectSettings": "in this project",
-        "userSettings": "everywhere",
-    }.get(str(s.get("destination") or ""), "")
-    if s.get("type") == "addRules" and s.get("behavior") == "allow":
-        rules = s.get("rules") or []
-        tools = {str(r.get("toolName")) for r in rules}
-        if len(tools) == 1 and (tools & {"Bash", "PowerShell"}):
-            return f"{f'Always allow these {len(rules)} commands' if len(rules) > 1 else 'Always allow this command'} {dest}".strip()
-        if len(tools) == 1:
-            return f"Always allow {next(iter(tools))} {dest}".strip()
-        return f"Always allow {len(rules)} rules {dest}".strip()
-    if s.get("type") == "setMode":
-        return (
-            f"Allow all edits {dest}" if s.get("mode") == "acceptEdits" else f"Switch to {s.get('mode')} {dest}"
-        ).strip()
-    if s.get("type") == "addDirectories":
-        return (
-            f"Allow access to {', '.join(rel_path(str(d), cwd) for d in (s.get('directories') or []))} {dest}".strip()
-        )
-    return f"{s.get('type')} {dest}".strip()
 
 
 def perm_summary(p: Json, cwd: str) -> Tuple[str, bool, str]:
@@ -219,7 +157,7 @@ class Tile(LayoutButton):
         self._tone, self._sub, self._live = tone, sub, live
         self._paint()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         line = theme.blend(t.hair_3 if self.underMouse() else t.hair_2, t.canvas)
@@ -325,7 +263,7 @@ class WorkflowBar(QWidget):
         self.done, self.running, self.error = done, running, error
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -471,7 +409,7 @@ class WorkingCard(Card):
         self.quiet.setText(f"quiet for {duration(now - float(last))}" if stale else "")
         self.quiet.setVisible(stale)
 
-    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, e) -> None:
         if e.button() == Qt.MouseButton.LeftButton:
             store.open_session(self.sid)
 
@@ -606,7 +544,7 @@ class NeedsCard(Card):
         theme.tint(self.decided_lb, fg="ok")
         self.decided_ico.setPixmap(icons.pixmap("circle-check", t.ok, 14))
 
-    def paintEvent(self, e) -> None:  # noqa: N802
+    def paintEvent(self, e) -> None:
         super().paintEvent(e)
         # the rail: a 3px accent (ok once answered) down the left edge
         t = theme.tokens()
@@ -884,7 +822,7 @@ class SpendBars(QWidget):
         self.buckets = list(b)
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -1032,7 +970,7 @@ class _KeyWatch(QObject):
         else:
             app.removeEventFilter(self)
 
-    def eventFilter(self, _obj: QObject, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, _obj: QObject, e: QEvent) -> bool:
         try:
             return self._page.key_event(e)
         except RuntimeError:  # the page is gone; the filter is on its way out with it
@@ -1199,14 +1137,14 @@ class Overview(QWidget):
         self.load_fleet()
 
     # ---- lifecycle
-    def showEvent(self, e) -> None:  # noqa: N802
+    def showEvent(self, e) -> None:
         super().showEvent(e)
         self._tick_timer.start()
         self._fleet_timer.start()
         self._keys.watch(True)
         self.load_fleet()
 
-    def hideEvent(self, e) -> None:  # noqa: N802
+    def hideEvent(self, e) -> None:
         self._tick_timer.stop()
         self._fleet_timer.stop()
         self._keys.watch(False)
@@ -1437,7 +1375,7 @@ class Overview(QWidget):
     def focus_index(self) -> int:
         return self._focus
 
-    def eventFilter(self, obj: QObject, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj: QObject, e: QEvent) -> bool:
         if obj is self.scroll.viewport() and e.type() == QEvent.Type.Resize:
             self._fit_body()
         return False
@@ -1453,7 +1391,7 @@ class Overview(QWidget):
             Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier | Qt.KeyboardModifier.MetaModifier
         ):
             return False
-        if typing_elsewhere():
+        if typing_elsewhere(QApplication.focusWidget()):
             return False
         key, text = e.key(), e.text()
         if t == QEvent.Type.ShortcutOverride:
