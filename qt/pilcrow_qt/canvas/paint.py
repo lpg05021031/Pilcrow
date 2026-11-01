@@ -173,6 +173,37 @@ def doc_pos_at(doc: QTextDocument, x: float, y: float) -> Optional[int]:
     return pos
 
 
+def doc_links(doc: QTextDocument) -> List[Tuple[int, str, str, Rect]]:
+    """Each link of a laid-out document in reading order: where it starts, its href, its words
+    (the pill pads and word joiners left out) and the rectangle of its first line, in document
+    coordinates. A link whose words change format midway (``[a **b**](…)``) is one link."""
+    out: List[Tuple[int, str, str, Rect]] = []
+    blk = doc.begin()
+    while blk.isValid():
+        runs: List[List[Any]] = []  # [start, end, href] within the block
+        for fr in blk.textFormats():
+            href = fr.format.anchorHref() if fr.format.isAnchor() else ""
+            if not href:
+                continue
+            if runs and runs[-1][2] == href and runs[-1][1] == fr.start:
+                runs[-1][1] = fr.start + fr.length
+            else:
+                runs.append([fr.start, fr.start + fr.length, href])
+        lay = blk.layout()
+        for a, z, href in runs:
+            line = lay.lineForTextPosition(a)
+            if not line.isValid():
+                continue
+            x0 = line.cursorToX(a)[0]
+            x1 = line.cursorToX(min(z, line.textStart() + line.textLength()))[0]
+            o = lay.position()
+            words = blk.text()[a:z].replace(" ", "").replace("⁠", "").strip()
+            rect = (int(o.x() + x0), int(o.y() + line.y()), max(1, math.ceil(x1 - x0)), math.ceil(line.height()))
+            out.append((blk.position() + a, href, words or href, rect))
+        blk = blk.next()
+    return out
+
+
 def draw_doc(
     p: QPainter,
     doc: QTextDocument,

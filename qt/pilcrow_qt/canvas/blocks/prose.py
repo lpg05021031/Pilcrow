@@ -26,6 +26,7 @@ from ..paint import (
     Measurer,
     PaintState,
     doc_height,
+    doc_links,
     doc_pos_at,
     draw_doc,
     find_selections,
@@ -55,6 +56,7 @@ class ProseBlock(Block):
         "_doc_src",
         "line_h",
         "_wells",
+        "_links",
         "_copied",
         "_grower",
     )
@@ -76,6 +78,7 @@ class ProseBlock(Block):
         self.doc: Optional[QTextDocument] = None
         self._doc_src = ""
         self._wells: Optional[List[Tuple[QRectF, str]]] = None  # (rect, code) of each code well
+        self._links: Optional[List[Target]] = None  # its links, as Tab and a screen reader visit them
         self._copied: Tuple[int, float] = (-1, 0.0)  # which well said "Copied", until when
         self._grower: Optional[grow.Grower] = None  # grows the document while the block streams
 
@@ -129,7 +132,7 @@ class ProseBlock(Block):
                     self.src, width, self.compact, self.quiet, self.streaming, self.cwd, self.line_h
                 )
             self._doc_src = self.src
-        self._wells = None
+        self._wells = self._links = None
         self.warm = True
         h = doc_height(self.doc) if self.src.strip() else 0
         if self.grade < GRADE_EXACT and self.h:
@@ -163,7 +166,7 @@ class ProseBlock(Block):
     def cool(self) -> None:
         self.doc = None
         self._doc_src = ""
-        self._wells = None
+        self._wells = self._links = None
         self._grower = None
         self.warm = False
 
@@ -264,11 +267,17 @@ class ProseBlock(Block):
         return None
 
     def targets(self) -> List[Target]:
-        out: List[Target] = []
+        """Its links and its wells' Copy buttons, top to bottom."""
+        if self.doc is None:
+            return []
+        if self._links is None:  # a screen reader asks once per child: a long list's links are read once
+            self._links = [Target("link", str(at), rect, href, words) for at, href, words, rect in doc_links(self.doc)]
+        out = list(self._links)
         for i, (r, code) in enumerate(self.wells()):
             if code:
                 cr = self.copy_rect(r)
                 out.append(Target("button", f"copy:{i}", (cr.x(), cr.y(), cr.width(), cr.height())))
+        out.sort(key=lambda t: (t.rect[1], t.rect[0]))
         return out
 
     def cursor_for(self, target: Target) -> Optional[Any]:

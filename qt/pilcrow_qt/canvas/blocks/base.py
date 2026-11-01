@@ -86,6 +86,8 @@ class NodeBlock(Block):
         fn = self.handlers.get(f"{target.kind}:{target.id}") or self.handlers.get(target.id)
         if fn is not None:
             fn(target, view)
+        elif target.kind == "link" and isinstance(target.data, tuple):  # a link in a Markdown node
+            view.open_link(*target.data)
 
     def cursor_for(self, target: Target) -> Optional[Any]:
         return Qt.CursorShape.PointingHandCursor

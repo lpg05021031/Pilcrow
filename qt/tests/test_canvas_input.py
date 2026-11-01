@@ -230,6 +230,54 @@ def test_context_menu_offers_the_link_and_the_file(view):
     assert "Open file" in labels and "Copy path" in labels
 
 
+def test_tab_reaches_the_links_in_prose_and_in_a_markdown_body_and_enter_opens_them(view, monkeypatch):
+    """A link in a reply and one in a Markdown body (a command's output) are on the Tab ring with
+    the rectangle of their words, Enter opens each as a click does, and each is a Link to a screen
+    reader, named by its words."""
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QAccessible
+
+    from pilcrow_qt.canvas.blocks.misc import CommandOutputBlock
+    from pilcrow_qt.canvas.blocks.prose import ProseBlock
+    from pilcrow_qt.lib.transcript_model import CommandOutputItem
+
+    v = view
+    out = CommandOutputBlock(CommandOutputItem(id="c1", text="Wrote `src/a.py`."), "/proj")
+    v.begin()
+    try:
+        v.scene.root.append(out)
+    finally:
+        v.end()
+    pump(60)
+    opened: List[tuple] = []
+    monkeypatch.setattr(v, "open_link", lambda href, cwd: opened.append((href, cwd)))
+    para = _blocks(v, ProseBlock)[0]
+    links = [(b, t) for b, t in v.focusables() if t.kind == "link"]
+    assert [(b.key, t.data) for b, t in links] == [
+        (para.key, "https://example.com/lib"),
+        (out.key, ("pilcrow-path://open?p=src/a.py", "/proj")),
+    ]
+    x, y, w, h = links[0][1].rect
+    assert para.doc.documentLayout().anchorAt(QPointF(x + w / 2, y + h / 2)) == "https://example.com/lib"
+    r = v.block_rect(para)
+    QTest.mouseClick(v.viewport(), Qt.MouseButton.LeftButton, pos=QPoint(r.left() + x + w // 2, r.top() + y + h // 2))
+    assert opened == [("https://example.com/lib", "")]  # the click
+    for _b, t in links:
+        while v.focus is None or v.focus[1] != t:
+            assert v.focusNextPrevChild(True)
+        QTest.keyClick(v, Qt.Key_Return)
+    assert opened[1:] == [("https://example.com/lib", ""), ("pilcrow-path://open?p=src/a.py", "/proj")]
+    QAccessible.setActive(True)
+    try:
+        iface = QAccessible.queryAccessibleInterface(v.viewport())
+        rows = [iface.child(i) for i in range(iface.childCount())]
+        kids = [row.child(i) for row in rows for i in range(row.childCount())]
+        named = [(k.role(), k.text(QAccessible.Text.Name)) for k in kids if k.role() == QAccessible.Role.Link]
+        assert named == [(QAccessible.Role.Link, "lib"), (QAccessible.Role.Link, "src/a.py")]
+    finally:
+        QAccessible.setActive(False)
+
+
 def test_text_scale_grows_the_prose_and_the_bubble(app):
     from pilcrow_qt.canvas.blocks.prose import ProseBlock
     from pilcrow_qt.canvas.blocks.user import UserBlock, bubble_line
