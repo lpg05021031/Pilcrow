@@ -61,9 +61,10 @@ def test_a_lead_and_its_helpers(app_client):
     )
     c.wait_until(lambda: v.pill.text() == "Leading", 5, "the lead's pill")
     web_chip = next(ch for ch in v.helpers_bar.chips if ch.h.get("name") == "web")
-    assert web_chip.text().startswith("web · needs you")
     api_chip = next(ch for ch in v.helpers_bar.chips if ch.h.get("name") == "api")
-    assert api_chip.h.get("state") == "done" and api_chip.text().startswith("api · done")
+    # the chips follow the lead's state, which reaches the bar on the next frame
+    c.wait_until(lambda: web_chip.text().startswith("web · needs you"), 5, "web's chip")
+    c.wait_until(lambda: api_chip.h.get("state") == "done" and api_chip.text().startswith("api · done"), 5, "api")
     assert c.shot("helpers-lead-bar").exists()
     # the control room: the card says whose helper asked, and Allow for all helpers answers it
     c.store.show_page("overview")
