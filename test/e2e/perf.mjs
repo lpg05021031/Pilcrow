@@ -11,9 +11,11 @@
 //   frame p95                      requestAnimationFrame intervals while the view follows the stream
 //   script / style / layout        Chrome's own counters (CDP Performance.getMetrics), per second streamed
 //   DOM nodes, heap                after the view has settled; the heap after a forced collection
+//   eager JS                       the scripts fetched before the first rows (Resource Timing)
+//   a 60 kB TSX block              every line coloured, and no task over 50 ms meanwhile
 // Budgets sit well above what this machine measures, so they catch a regression, not noise.
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
@@ -31,6 +33,12 @@ const BUDGET = {
   // Under the fourfold CPU slowdown (measureStream). Before the streaming work: frame p95 83 ms,
   // 58 long tasks adding up to 4.1 s, 414 ms of script per second.
   stream: { p95: 100, longMax: 300, longTotal: 3000, scriptPerSec: 350 },
+  // JavaScript parsed before a conversation's first rows: 1,664 kB before the editor, the terminal and
+  // the highlighter loaded on first use. vite.config.mjs warns past the same figure.
+  eagerKB: 900,
+  // Coloured a slice at a time and painted a block per frame (lib/highlight, Markdown): with the TSX
+  // grammar compiled (by an earlier block), no task over 50 ms, so no long task at all.
+  code: { longMax: 50, ms: 15000 },
 };
 
 if (!existsSync(join(ROOT, 'web', 'dist', 'index.html'))) {
@@ -40,6 +48,7 @@ if (!existsSync(join(ROOT, 'web', 'dist', 'index.html'))) {
 
 const mock = spawn(process.execPath, [join(ROOT, 'test', 'mock', 'mock-server.mjs'), String(PORT)], { cwd: ROOT, env: { ...process.env, MOCK_LONG: '0' }, stdio: ['ignore', 'pipe', 'inherit'] });
 mock.stdout.on('data', () => {});
+process.on('exit', () => mock.kill()); // also when a step throws
 await new Promise((ok, bad) => {
   const t = setInterval(async () => {
     try {
@@ -114,7 +123,13 @@ async function measureOpen(turns) {
   await sleep(2000); // the landing passes and the pages near the end being drawn
   const measures = await page.evaluate((id) => Object.fromEntries(performance.getEntriesByType('measure').filter((m) => m.detail?.id === id).map((m) => [m.name, Math.round(m.duration)])), id);
   const fromBottom = await page.evaluate(() => { const el = document.querySelector('.transcript'); return Math.round(el.scrollHeight - el.scrollTop - el.clientHeight); });
-  const out = { turns, messages: gen.messages, mb: +(gen.bytes / 1048576).toFixed(1), wall, modelled: measures['pilcrow:modelled'], rows: measures['pilcrow:first-rows'], long: await longSince(page, t0), nodes: await nodes(page), heapMB: await heapMB(cdp), fromBottom };
+  // Up to the first rows of the first conversation shown (the window may reopen the last one by itself).
+  const eagerKB = await page.evaluate(() => {
+    const end = Math.min(...performance.getEntriesByType('measure').filter((m) => m.name === 'pilcrow:first-rows').map((m) => m.startTime + m.duration));
+    const js = performance.getEntriesByType('resource').filter((r) => /\.m?js(\?|$)/.test(r.name) && r.responseEnd <= end);
+    return Math.round(js.reduce((n, r) => n + r.decodedBodySize, 0) / 1024);
+  });
+  const out = { turns, eagerKB, messages: gen.messages, mb: +(gen.bytes / 1048576).toFixed(1), wall, modelled: measures['pilcrow:modelled'], rows: measures['pilcrow:first-rows'], long: await longSince(page, t0), nodes: await nodes(page), heapMB: await heapMB(cdp), fromBottom };
   return { out, context, page, cdp };
 }
 
@@ -170,6 +185,50 @@ async function measureStream(page, cdp) {
   return { ...f, behind, taskPerSec: perSec('TaskDuration'), scriptPerSec: perSec('ScriptDuration'), stylePerSec: perSec('RecalcStyleDuration'), layoutPerSec: perSec('LayoutDuration'), long: await longSince(page, t0), nodes: await nodes(page) };
 }
 
+const tsx = (...names) => names.map((f) => readFileSync(join(ROOT, 'web', 'src', 'components', `${f}.tsx`), 'utf8')).join('');
+const codeTurn = (code) => [{ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'show me the code' }] } }, { type: 'assistant', message: { id: `msg_${code.length}`, role: 'assistant', content: [{ type: 'text', text: 'Here it is:\n\n```tsx\n' + code + '\n```' }] } }];
+
+/** Open a conversation and wait until its last code block is coloured; the long tasks from its first rows on. */
+async function colour(page, id, minLength) {
+  const rows = () => page.evaluate((id) => performance.getEntriesByType('measure').find((m) => m.name === 'pilcrow:first-rows' && m.detail?.id === id), id);
+  await page.click(`[data-sid="${id}"] .side-row-main`);
+  await page.waitForFunction((id) => performance.getEntriesByType('measure').some((m) => m.name === 'pilcrow:first-rows' && m.detail?.id === id), id, { timeout: 30_000 });
+  // From the commit of the first rows on: the render that put the block on the page is not the highlighter's.
+  const m = await rows();
+  const t0 = m.startTime + m.duration;
+  await page.waitForFunction((n) => [...document.querySelectorAll('pre[data-hl="1"]')].some((p) => p.textContent.length >= n), minLength, { timeout: BUDGET.code.ms });
+  return { ms: Math.round((await page.evaluate(() => performance.now())) - t0), long: await longSince(page, t0) };
+}
+
+/**
+ * A 60 kB TSX block (this app's own components) in a reply: how it is coloured once it is on screen.
+ * The window first shows other TSX (48 kB of other components): Shiki compiles a grammar's patterns
+ * the first time each is needed, 50–350 ms at a time here, a one-off per pattern and window that
+ * slicing cannot split. That first block is reported apart, without a budget.
+ */
+async function measureCode() {
+  const warm = tsx('Markdown', 'RightPanel', 'SessionView', 'Inbox');
+  let code = tsx('Transcript', 'Composer', 'Sidebar', 'Overview');
+  code = code.slice(0, code.lastIndexOf('\n', 60_000));
+  await ctl.call('mock.generate', { id: 'perf-warm', turns: 1, shape: 'mixed' });
+  await ctl.call('mock.messages', { id: 'perf-warm', msgs: codeTurn(warm) });
+  await ctl.call('mock.generate', { id: 'perf-code', turns: 1, shape: 'mixed' });
+  await ctl.call('mock.messages', { id: 'perf-code', msgs: codeTurn(code) });
+  // To the top of the sidebar, which shows only the most recent rows of a folder.
+  for (const id of ['perf-warm', 'perf-code']) await ctl.call('mock.touch', { id });
+  const { context, page } = await freshPage();
+  const cold = await colour(page, 'perf-warm', warm.length - 1);
+  const out = await colour(page, 'perf-code', code.length - 1);
+  Object.assign(out, await page.evaluate((lines) => {
+    const pre = [...document.querySelectorAll('pre[data-hl="1"]')].at(-1);
+    return { lines, coloured: pre.querySelectorAll('.line').length, styled: pre.querySelectorAll('.line span[style*="--shiki"]').length };
+  }, code.split('\n').length));
+  out.kB = Math.round(code.length / 1024);
+  out.cold = { kB: Math.round(warm.length / 1024), ...cold };
+  await context.close();
+  return out;
+}
+
 const failures = [];
 const check = (what, value, max) => {
   if (value == null || value > max) failures.push(`${what}: ${value} (budget ${max})`);
@@ -180,8 +239,9 @@ const results = {};
 for (const turns of [400, 2000]) {
   const { out, context, page, cdp } = await measureOpen(turns);
   results[turns] = out;
-  console.log(`  open ${turns} turns (${out.messages} messages, ${out.mb} MB): modelled ${out.modelled} ms · first rows ${out.rows} ms (wall ${out.wall} ms) · long tasks ${out.long.n}, max ${out.long.max} ms, total ${out.long.total} ms · ${out.nodes} nodes · heap ${out.heapMB} MB`);
+  console.log(`  open ${turns} turns (${out.messages} messages, ${out.mb} MB): ${out.eagerKB} kB of JS before the first rows · modelled ${out.modelled} ms · first rows ${out.rows} ms (wall ${out.wall} ms) · long tasks ${out.long.n}, max ${out.long.max} ms, total ${out.long.total} ms · ${out.nodes} nodes · heap ${out.heapMB} MB`);
   const b = BUDGET[turns];
+  check(`${turns} turns: JavaScript loaded before the first rows (kB)`, out.eagerKB, BUDGET.eagerKB);
   check(`${turns} turns: open → modelled (ms)`, out.modelled, b.modelled);
   check(`${turns} turns: open → first rows (ms)`, out.rows, b.rows);
   check(`${turns} turns: longest task while opening (ms)`, out.long.max, b.longMax);
@@ -200,6 +260,13 @@ for (const turns of [400, 2000]) {
   }
   await context.close();
 }
+
+const c = await measureCode();
+results.code = c;
+console.log(`  first TSX block in the window (${c.cold.kB} kB, the grammar compiling): coloured in ${c.cold.ms} ms · long tasks ${c.cold.long.n}, max ${c.cold.long.max} ms`);
+console.log(`  a ${c.kB} kB TSX block: every line coloured in ${c.ms} ms (${c.coloured} of ${c.lines} lines, ${c.styled} coloured tokens) · long tasks ${c.long.n}, max ${c.long.max} ms`);
+check('code: lines coloured short of the whole block', c.lines - c.coloured, 0);
+check('code: longest task while it is coloured (ms)', c.long.max, BUDGET.code.longMax);
 
 await browser.close();
 ctl.close();
