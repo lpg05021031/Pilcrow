@@ -190,6 +190,35 @@ def test_user_bubble_is_the_webs_size(app):
     assert abs(long.estimate(742, m) - long.h) <= 22 * 2
 
 
+def test_an_attached_image_is_decoded_once_across_resizes_and_rewarms(app, monkeypatch):
+    """The thumbnail does not depend on the width: a resize step or a re-warm re-measures the
+    bubble without decoding and scaling the image again."""
+    from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+
+    from pilcrow_qt.canvas.blocks import user
+
+    img = QImage(1280, 800, QImage.Format.Format_RGB32)
+    img.fill(QColor("#1e1e1e"))
+    ba = QByteArray()
+    buf = QBuffer(ba)
+    buf.open(QIODevice.OpenModeFlag.WriteOnly)
+    img.save(buf, "PNG")
+    src = "data:image/png;base64," + bytes(ba.toBase64()).decode()
+    decoded = []
+    pixmap_of = user._pixmap_of
+    monkeypatch.setattr(user, "_pixmap_of", lambda s: decoded.append(len(s)) or pixmap_of(s))
+    user._thumb.cache_clear()
+    m = measurer()
+    b = user.UserBlock(UserItem(id="u3", uuid="uu3", text="This one", images=[src]), "sess", "/proj")
+    for w in (742, 700, 742):
+        b.measure(w, m)
+    b.cool()
+    b.measure(742, m)
+    assert len(decoded) == 1
+    ((r, pm, _s),) = b.thumbs
+    assert (pm.width(), pm.height()) == (user.THUMB_W, 137) == (r.width(), r.height())  # 1280×800 in 220×160
+
+
 def test_column_width_is_the_golden_section_of_the_pane():
     from pilcrow_qt.theme import column_width
 

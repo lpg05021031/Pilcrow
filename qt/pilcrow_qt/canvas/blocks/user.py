@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import html
 import re
+from functools import lru_cache
 from typing import Any, List, Optional, Tuple
 
 from PySide6.QtCore import QByteArray, QRect, Qt
@@ -57,6 +58,16 @@ def _pixmap_of(src: str) -> QPixmap:
     else:
         pm.load(src)
     return pm
+
+
+@lru_cache(maxsize=32)  # 32 thumbnails of 220×160 are under 5 MB
+def _thumb(src: str) -> QPixmap:
+    """An attachment's thumbnail (null when it cannot be read). It does not depend on the width, so
+    a resize, a re-warm or a theme switch re-measures the bubble without decoding the image again."""
+    pm = _pixmap_of(src)
+    if pm.isNull():
+        return pm
+    return pm.scaled(THUMB_W, THUMB_H, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
 
 
 class UserBlock(Block):
@@ -138,12 +149,9 @@ class UserBlock(Block):
             x = 0
             row_h = 0
             for src in it.images:
-                pm = _pixmap_of(src)
+                pm = _thumb(src)
                 if pm.isNull():
                     continue
-                pm = pm.scaled(
-                    THUMB_W, THUMB_H, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
-                )
                 self.thumbs.append((QRect(x, 0, pm.width(), pm.height()), pm, src))
                 x += pm.width() + 6
                 row_h = max(row_h, pm.height())
