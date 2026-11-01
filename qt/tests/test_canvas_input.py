@@ -622,3 +622,41 @@ def test_accessibility_announces_the_words_a_streamed_row_gains_once_a_second(ap
     finally:
         QAccessible.setActive(False)
         v.close()
+
+
+def test_a_hidden_view_leaves_the_theme_work_until_it_is_shown(app):
+    """DESIGN §8.8: a retained view behind another neither re-measures on a theme switch nor drains;
+    it is marked stale, and measures its screen when it is shown."""
+    from pilcrow_qt.canvas.blocks.prose import TextGroup
+    from pilcrow_qt.canvas.scene import Scene
+    from pilcrow_qt.canvas.view import CanvasView
+
+    scene = Scene()
+    v = CanvasView(scene)
+    v.resize(600, 400)
+    v.begin()
+    try:
+        for i in range(6):
+            scene.root.append(
+                TextGroup(TextItem(id=f"h{i}", text=f"Paragraph {i} of a retained view.", streaming=False, ts=0))
+            )
+    finally:
+        v.end()
+    v.show()
+    pump(60)
+    v.hide()
+    measured: List[str] = []
+    real = v._exact
+    v._exact = lambda b: (measured.append(b.key), real(b))[1]
+    try:
+        theme.theme.apply(False)
+        pump(60)
+        v._drain()
+        assert v.stale and measured == [], measured
+        v.show()
+        pump(60)
+        assert not v.stale and measured, "shown: the screen is measured again in the new theme"
+        assert all(b.warm for b in v.visible_blocks())
+    finally:
+        theme.theme.apply(True)
+        v.close()

@@ -149,6 +149,7 @@ class CanvasView(ViewInput, QAbstractScrollArea):
         self._last_user_scroll = 0.0
         self._grew = False
         self.cold_paints = 0  # placeholders painted where a block was not warm yet (a bench counter)
+        self.stale = False  # the theme or the text scale changed while hidden: re-measured when shown
         self.hover: Optional[Tuple[Block, Target]] = None
         self.pressed: Optional[Tuple[Block, Target]] = None
         self.focus: Optional[Tuple[str, Target]] = None
@@ -246,6 +247,12 @@ class CanvasView(ViewInput, QAbstractScrollArea):
             self._context_menu(e)
             return True
         return super().viewportEvent(e)
+
+    def showEvent(self, e) -> None:
+        super().showEvent(e)
+        if self.stale:
+            self.on_theme()
+        self._prefetch.start()  # what the drain left while the view was hidden
 
     def focusInEvent(self, e) -> None:
         super().focusInEvent(e)
@@ -544,8 +551,8 @@ class CanvasView(ViewInput, QAbstractScrollArea):
     def _drain(self) -> None:
         """Between frames, in one commit: warm the blocks near the viewport, upgrade far estimates,
         cool the far warm. The anchor holds through it all, so nothing on screen moves."""
-        if not self.isVisible() and not self.scene.root.children:
-            return
+        if not self.isVisible():
+            return  # a hidden view warms nothing; it drains when shown
         vh = max(1, self.viewport().height())
         y0 = self.scene_y(0)
         state = (y0, vh, self.col_w, self.scene.structure_rev, self.scene.height_changes, self.m.theme_name)
@@ -871,6 +878,12 @@ class CanvasView(ViewInput, QAbstractScrollArea):
 
     # ---------------------------------------------------------------- theme
     def on_theme(self) -> None:
+        """New tokens or metrics: cool every warm block and measure the screen again (DESIGN §8.7). A
+        hidden view only notes it, and does this when it is shown (§8.8)."""
+        if not self.isVisible():
+            self.stale = True
+            return
+        self.stale = False
         self.m.refresh()
         for b in list(self._warm):
             b.cool()
