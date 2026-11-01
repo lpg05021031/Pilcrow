@@ -7,7 +7,7 @@ import { searchKeymap, highlightSelectionMatches, search } from '@codemirror/sea
 import { syntaxHighlighting, HighlightStyle, indentOnInput, bracketMatching, foldGutter, foldKeymap, StreamLanguage, indentUnit, type StreamParser } from '@codemirror/language';
 import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 import { tags as t } from '@lezer/highlight';
-import { langFromPath } from '../../lib/format';
+import { basename, langFromPath } from '../../lib/format';
 import { useEvent } from '../ui/hooks';
 
 const style = HighlightStyle.define([
@@ -175,6 +175,7 @@ export function Editor({ path, doc, onChange, onSave, jump }: { path: string; do
         indentUnit.of('  '),
         syntaxHighlighting(style),
         theme,
+        EditorView.contentAttributes.of({ 'aria-label': basename(path) }), // the text box a screen reader names by its file
         langComp.current.of([]),
         keymap.of([{ key: 'Mod-s', preventDefault: true, run: () => (save(), true) }, ...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...foldKeymap, indentWithTab]),
         EditorView.updateListener.of((u) => {
