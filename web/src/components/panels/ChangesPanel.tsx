@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RefreshCw, Rows2, Columns2, ChevronRight, Undo2, FileText, Send, GitCommitHorizontal, MessageSquareText, Eye, CircleCheck, GitPullRequestArrow } from 'lucide-react';
-import { useStore, call, setUi, openFile, confirmAction, sendMessage, toast, insertIntoComposer, models, bumpFs } from '../../lib/store';
+import { useStore, call, setUi, openFile, confirmAction, sendMessage, toast, insertIntoComposer, models, bumpFs, memo } from '../../lib/store';
 import { Select } from '../ui/Select';
 import type { DiffFile, DiffLine, SessionSummary } from '../../lib/types';
 import { basename, dirname, plural } from '../../lib/format';
@@ -22,8 +22,6 @@ interface DiffResult {
   error?: string | null;
 }
 
-// Review notes survive tab switches: sessionId -> path -> key -> note
-const notesStore = new Map<string, Record<string, Record<string, { text: string; line: string; lineNo: number }>>>();
 
 const STATUS_LABEL: Record<string, string> = { M: 'Modified', A: 'Added', D: 'Deleted', R: 'Renamed' };
 
@@ -38,7 +36,8 @@ export function ChangesPanel({ session, cwd }: { session: SessionSummary; cwd: s
   const [loading, setLoading] = useState(false);
   const [base, setBase] = useState<string>(session.worktree?.base || 'HEAD');
   const [open, setOpen] = useState<Record<string, boolean>>({});
-  const [notes, setNotes] = useState(() => notesStore.get(session.id) || {});
+  // Review notes survive tab switches and closing the panel: they are kept in the session's memo.
+  const [notes, setNotes] = useState(() => memo(session.id).notes);
   const [commitOpen, setCommitOpen] = useState(false);
   const [message, setMessage] = useState('');
   const lastLoad = useRef(0);
@@ -55,7 +54,7 @@ export function ChangesPanel({ session, cwd }: { session: SessionSummary; cwd: s
   const viewMode = mode === 'split' && narrow ? 'unified' : mode;
 
   useEffect(() => {
-    notesStore.set(session.id, notes);
+    memo(session.id).notes = notes;
   }, [notes, session.id]);
 
   const load = useCallback(async () => {

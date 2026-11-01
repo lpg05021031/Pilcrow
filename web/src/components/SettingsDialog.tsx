@@ -6,7 +6,7 @@ import { tildify } from '../lib/format';
 import { Dialog } from './ui/Dialog';
 import { Switch, copyText, Mark, Seg } from './ui/bits';
 import { Select } from './ui/Select';
-import { MODES } from './Composer';
+import { MODES } from './composer/Menus';
 import { ModelSelect } from './ModelSelect';
 import { SkillsPage } from './settings/SkillsPage';
 import { McpPage } from './settings/McpPage';

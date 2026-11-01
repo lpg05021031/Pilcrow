@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowUpRight, Bot, Brain, Wrench, MessageSquareQuote, Workflow, PanelLeftOpen, Hourglass, CircleCheck, CircleAlert, Activity, CircleDollarSign } from 'lucide-react';
-import { useStore, call, openSession, respond, setUi } from '../lib/store';
+import { useStore, call, openSession, respond, setUi, mergeLive } from '../lib/store';
 import type { PermissionRequest, SessionState, SessionSummary, TaskInfo } from '../lib/types';
 import { basename, cost, duration, timeAgo, relPath, plural } from '../lib/format';
-import { ContextRing, Spinner, useNow, Num, WorkingMark, Mark } from './ui/bits';
+import { ContextRing, Spinner, useNow, Num, WorkingMark, Mark, useWindowKey } from './ui/bits';
 import { suggestionLabel, typingElsewhere } from './tools/Permission';
 import { workflowCounts } from '../lib/workflow';
 import { str } from '../lib/tools';
@@ -40,16 +40,14 @@ export function Overview() {
   useEffect(() => {
     let alive = true;
     const load = () =>
-      call<Fleet>('fleet.state', {}, { quiet: true })
-        .then((f) => {
+      call<Fleet>('fleet.state', {}, { quiet: true }).then(
+        (f) => {
           if (!alive) return;
           setFleet(f);
-          const cur = useStore.getState().rt;
-          const next = { ...cur };
-          for (const [id, st] of Object.entries(f.live)) next[id] = { ...(cur[id] || { rev: 0, loaded: false, loading: false }), ...st };
-          useStore.setState({ rt: next });
-        })
-        .catch(() => {});
+          mergeLive(f.live);
+        },
+        () => {}, // the cards keep what they show; the next tick asks again
+      );
     load();
     const t = setInterval(load, 20_000);
     return () => {
@@ -321,19 +319,14 @@ function NeedsCard({ s, st, first, focused, now }: { s: SessionSummary; st?: Par
       setBusy(false);
     }
   };
-  useEffect(() => {
-    if (!first || !perm || perm.interactive) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (typingElsewhere(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === '1' && !perm.defaultToNo) allow();
-      else if (e.key === '2' && allowAlways) always();
-      else if (e.key === (allowAlways ? '3' : '2')) deny();
-      else return;
-      e.preventDefault();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  });
+  useWindowKey((e) => {
+    if (!perm || typingElsewhere(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === '1' && !perm.defaultToNo) allow();
+    else if (e.key === '2' && allowAlways) always();
+    else if (e.key === (allowAlways ? '3' : '2')) deny();
+    else return;
+    e.preventDefault();
+  }, Boolean(first && perm && !perm.interactive));
   const what = perm ? permSummary(perm, s.cwd) : null;
   const key = (n: number) => (first && perm && !perm.interactive ? <span className="key">{n}</span> : null);
   return (

@@ -7,7 +7,7 @@ import { Dialog } from './ui/Dialog';
 import { Switch, Spinner } from './ui/bits';
 import { Collapse } from './ui/Collapse';
 import { Select } from './ui/Select';
-import { MODES } from './Composer';
+import { MODES } from './composer/Menus';
 import { ModelSelect } from './ModelSelect';
 import { errText } from '../lib/format';
 

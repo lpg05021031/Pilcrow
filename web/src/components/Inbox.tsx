@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Play, Ellipsis, Pencil, Trash, CircleCheck, CircleAlert, CircleStop, ArrowUpRight, RotateCw, X, PanelLeftOpen, Check, MailOpen, Pause, Send, ClipboardPaste } from 'lucide-react';
-import { useStore, call, openSession, setUi, toast, confirmAction, openJob } from '../lib/store';
+import { useStore, call, openSession, setUi, toast, confirmAction, openJob, setDialog } from '../lib/store';
 import { copyText } from './ui/bits';
 import type { InboxItem, Schedule } from '../lib/types';
 import { basename, cost, duration, timeAgo, plural, tildify } from '../lib/format';
@@ -38,7 +38,7 @@ function until(ms: number, now: number) {
 export function InboxPage() {
   const rev = useStore((s) => s.schedRev);
   const sidebar = useStore((s) => s.ui.sidebar);
-  const dialog = useStore((s) => s.scheduleDialog);
+  const dialog = useStore((s) => s.dialogs.schedule);
   const [items, setItems] = useState<InboxItem[] | null>(null);
   const [schedules, setSchedules] = useState<Schedule[] | null>(null);
   const [filter, setFilter] = useState<string | null>(null);
@@ -128,7 +128,7 @@ export function InboxPage() {
                 {schedules?.length ? 'The first result lands here when a schedule fires. You can also run one now from the list on the right.' : 'A schedule runs a prompt in a folder at a set time — a nightly dependency audit, a Monday test sweep — and leaves the result here with a link back to the full session.'}
               </div>
               {!schedules?.length && (
-                <button className="btn primary sm" onClick={() => useStore.setState({ scheduleDialog: {} })}>
+                <button className="btn primary sm" onClick={() => setDialog('schedule', {})}>
                   <Plus size={13} /> New schedule
                 </button>
               )}
@@ -151,7 +151,7 @@ export function InboxPage() {
             Schedules
             {schedules && schedules.length > 0 && <span className="ov-count">{schedules.length}</span>}
             <div className="grow" />
-            <button className="btn xs" onClick={() => useStore.setState({ scheduleDialog: {} })}>
+            <button className="btn xs" onClick={() => setDialog('schedule', {})}>
               <Plus size={12} /> New
             </button>
           </div>
@@ -418,7 +418,7 @@ function ScheduleCard({ s, now, index, active, onFilter }: { s: Schedule; now: n
       onConfirm: () => call('schedules.remove', { id: s.id }).catch(() => {}),
     });
   const menu = [
-    { label: 'Edit…', icon: Pencil, onSelect: () => useStore.setState({ scheduleDialog: { id: s.id } }) },
+    { label: 'Edit…', icon: Pencil, onSelect: () => setDialog('schedule', { id: s.id }) },
     { label: 'Run now', icon: Play, onSelect: run },
     { label: s.enabled ? 'Pause' : 'Resume', icon: s.enabled ? Pause : Play, onSelect: () => toggle(!s.enabled) },
     { separator: true },

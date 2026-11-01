@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { GitBranch, PanelRight, PanelLeftOpen, Ellipsis, Pencil, GitFork, FolderOpen, Archive, Trash, Copy, SquareTerminal, RotateCcw, Power, FolderGit2, Folder, Settings2, CircleDollarSign, ChevronDown, BookMarked, ArrowUpRight } from 'lucide-react';
-import { useStore, setUi, VIEW_MODES, renameSession, forkSession, archiveSession, deleteSession, confirmAction, call, insertIntoComposer, toast, openSession, openJob, setDialog, setCwd, getModel, repoFor } from '../lib/store';
+import { useStore, setUi, VIEW_MODES, renameSession, forkSession, archiveSession, deleteSession, confirmAction, call, insertIntoComposer, toast, openSession, openJob, setDialog, setCwd, getModel, repoFor, closeFind } from '../lib/store';
 import { basename, cost, errText, plural, tildify } from '../lib/format';
 import { McpNotice } from './McpNotice';
 import { HelpersBar } from './HelpersBar';
@@ -65,26 +65,14 @@ export function SessionView({ session }: { session: SessionSummary }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(session.title);
   const [scrolled, setScrolled] = useState(false);
-  const [finding, setFinding] = useState(false);
-  useEffect(() => {
-    useStore.setState({ findOpen: finding });
-    return () => useStore.setState({ findOpen: false });
-  }, [finding]);
+  const finding = useStore((s) => s.findOpen);
+  // The find bar belongs to the conversation on screen: leaving it closes the bar.
+  useEffect(() => closeFind, []);
   const [pickingFolder, setPickingFolder] = useState(false);
-  const folderBtn = useRef<HTMLButtonElement>(null);
+  const [folderBtn, setFolderBtn] = useState<HTMLButtonElement | null>(null);
   const root = useRef<HTMLDivElement>(null);
   // Until the first message goes out, the folder is still a choice, not a fact.
   const fresh = Boolean(rt?.loaded) && !rt?.live && getModel(id).items.length === 0 && !session.worktree && (rt?.status === 'idle' || rt?.status === 'stopped' || !rt?.status);
-  useEffect(() => {
-    const open = () => setFinding(true);
-    const pick = () => setPickingFolder(true);
-    window.addEventListener('pilcrow:find', open);
-    window.addEventListener('pilcrow:pick-folder', pick);
-    return () => {
-      window.removeEventListener('pilcrow:find', open);
-      window.removeEventListener('pilcrow:pick-folder', pick);
-    };
-  }, []);
 
   useEffect(() => setTitle(session.title), [session.title]);
 
@@ -173,7 +161,7 @@ export function SessionView({ session }: { session: SessionSummary }) {
           )}
           <span className="session-crumbs" title={tildify(cwd, info?.home)}>
             {fresh ? (
-              <button ref={folderBtn} className={`crumb crumb-btn${pickingFolder ? ' on' : ''}`} onClick={() => setPickingFolder(!pickingFolder)} title="Change the folder for this session" aria-expanded={pickingFolder}>
+              <button ref={setFolderBtn} className={`crumb crumb-btn${pickingFolder ? ' on' : ''}`} onClick={() => setPickingFolder(!pickingFolder)} title="Change the folder for this session" aria-expanded={pickingFolder}>
                 <Folder size={12} />
                 <span className="ellipsis">{basename(cwd)}</span>
                 <ChevronDown size={11} className="crumb-chev" />
@@ -184,7 +172,7 @@ export function SessionView({ session }: { session: SessionSummary }) {
                 <span className="ellipsis">{basename(session.worktree?.repoRoot || session.project || cwd)}</span>
               </span>
             )}
-            <Popover anchor={folderBtn.current} open={pickingFolder} onClose={() => setPickingFolder(false)} placement="bottom-start" width={380}>
+            <Popover anchor={folderBtn} open={pickingFolder} onClose={() => setPickingFolder(false)} placement="bottom-start" width={380}>
               <FolderPicker
                 value={cwd}
                 onPick={(dir) => {
@@ -260,8 +248,8 @@ export function SessionView({ session }: { session: SessionSummary }) {
           )}
         </Leave>
       )}
-      {finding && <FindBar root={() => document.querySelector('.session .transcript-inner')} onClose={() => setFinding(false)} />}
-      <Transcript sessionId={id} cwd={cwd} onScrolled={setScrolled} empty={<SessionEmpty session={session} git={git} cwd={cwd} fresh={fresh} />} />
+      {finding && <FindBar root={() => document.querySelector('.session .transcript-inner')} onClose={closeFind} />}
+      <Transcript sessionId={id} cwd={cwd} onScrolled={setScrolled} empty={<SessionEmpty session={session} git={git} cwd={cwd} fresh={fresh} onPickFolder={() => setPickingFolder(true)} />} />
       <Composer sessionId={id} cwd={cwd} />
     </div>
   );
@@ -269,7 +257,7 @@ export function SessionView({ session }: { session: SessionSummary }) {
 
 const EXAMPLES = ['Give me a tour of this codebase', 'Find the riskiest code path and explain why', 'Write tests for the module I changed last', 'Review my uncommitted changes'];
 
-function SessionEmpty({ session, git, cwd, fresh }: { session: SessionSummary; git: GitInfo | null; cwd: string; fresh?: boolean }) {
+function SessionEmpty({ session, git, cwd, fresh, onPickFolder }: { session: SessionSummary; git: GitInfo | null; cwd: string; fresh?: boolean; onPickFolder: () => void }) {
   const info = useStore((s) => s.info);
   const [memory, setMemory] = useState<number>(0);
   useEffect(() => {
@@ -288,7 +276,7 @@ function SessionEmpty({ session, git, cwd, fresh }: { session: SessionSummary; g
       <div className="session-empty-path">
         <span className="faint mono">{tildify(cwd, info?.home)}</span>
         {fresh && (
-          <button className="link session-empty-change" onClick={() => window.dispatchEvent(new Event('pilcrow:pick-folder'))}>
+          <button className="link session-empty-change" onClick={onPickFolder}>
             <Folder size={12} /> Change folder
           </button>
         )}

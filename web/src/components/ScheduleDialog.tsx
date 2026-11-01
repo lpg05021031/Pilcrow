@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { CalendarClock, Folder, ChevronDown, FilePen, ShieldOff, Map as MapIcon, ShieldCheck, Check } from 'lucide-react';
-import { useStore, call, toast } from '../lib/store';
+import { useStore, call, toast, setDialog } from '../lib/store';
 import type { Cadence, Schedule, PermissionMode } from '../lib/types';
 import { basename, tildify } from '../lib/format';
 import { Dialog } from './ui/Dialog';
@@ -33,7 +33,7 @@ export function ScheduleDialog({ spec, schedule }: { spec: { id?: string; cwd?: 
   const config = useStore((s) => s.config);
   const info = useStore((s) => s.info);
   const sessions = useStore((s) => s.sessions);
-  const close = () => useStore.setState({ scheduleDialog: null });
+  const close = () => setDialog('schedule', null);
   const playbooks = useStore((s) => s.playbooks);
   const [kind, setKind] = useState<'prompt' | 'dispatch'>(schedule?.kind || spec.kind || 'prompt');
   const [playbookId, setPlaybookId] = useState(schedule?.playbookId || spec.playbookId || '');

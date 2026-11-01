@@ -73,6 +73,8 @@ interface Dialogs {
   palette: boolean;
   shortcuts: boolean;
   confirm: ConfirmSpec | null;
+  /** Edit or create a schedule (on the inbox page): `{}` new, `{ id }` edit. */
+  schedule: null | { id?: string; cwd?: string; kind?: 'prompt' | 'dispatch'; playbookId?: string };
 }
 
 interface State {
@@ -110,12 +112,14 @@ interface State {
   inboxUnread: number;
   /** Bumped when schedules or the inbox change on the server. */
   schedRev: number;
-  /** Edit or create a schedule; `null` closed, `{}` new. */
-  scheduleDialog: null | { id?: string; cwd?: string; kind?: 'prompt' | 'dispatch'; playbookId?: string };
   /** An image opened full-size over the app. */
   lightbox: string | null;
   /** The find bar is open: every row of the conversation must be on the page to be searched. */
   findOpen: boolean;
+  /** What was last looked for; the find bar opens on it again. */
+  findQuery: string;
+  /** The last message sent from this window: the conversation it went to follows it to the end. */
+  sent: { id: string; at: number } | null;
 }
 
 export const useStore = create<State>(() => ({
@@ -128,7 +132,7 @@ export const useStore = create<State>(() => ({
   activeId: null,
   rt: {},
   ui: { sidebar: true, panel: false, panelTab: 'changes', sidebarW: 268, panelW: 560, showArchived: false, diffMode: 'unified', view: 'normal' },
-  dialogs: { newSession: null, settings: false, palette: false, shortcuts: false, confirm: null, mcpAuth: null },
+  dialogs: { newSession: null, settings: false, palette: false, shortcuts: false, confirm: null, mcpAuth: null, schedule: null },
   toasts: [],
   fsRev: 0,
   unread: {},
@@ -145,13 +149,17 @@ export const useStore = create<State>(() => ({
   playbooks: [],
   inboxUnread: 0,
   schedRev: 0,
-  scheduleDialog: null,
   lightbox: null,
   findOpen: false,
+  findQuery: '',
+  sent: null,
 }));
 
 export const openLightbox = (src: string) => set({ lightbox: src });
 export const closeLightbox = () => set({ lightbox: null });
+export const openFind = () => set({ findOpen: true });
+export const closeFind = () => set({ findOpen: false });
+export const setFindQuery = (findQuery: string) => set({ findQuery });
 
 const get = useStore.getState;
 const set = useStore.setState;
@@ -162,6 +170,31 @@ export function getModel(id: string) {
   let m = models.get(id);
   if (!m) models.set(id, (m = new TranscriptModel()));
   return m;
+}
+
+/** Review notes on a session's diff: path -> line key -> note. */
+export type DiffNotes = Record<string, Record<string, { text: string; line: string; lineNo: number }>>;
+/**
+ * What a session remembers outside React state while the window is open: the composer's draft, the
+ * messages sent from it (↑ brings them back) and review notes on its diff. Nothing re-renders when it
+ * changes. It goes with the session's transcript model (evictModels), all but unsent work, a draft
+ * or a note, which stays until the session is deleted.
+ */
+export interface SessionMemo {
+  draft: string;
+  sent: string[];
+  notes: DiffNotes;
+}
+const memos = new Map<string, SessionMemo>();
+export function memo(id: string): SessionMemo {
+  let m = memos.get(id);
+  if (!m) memos.set(id, (m = { draft: '', sent: [], notes: {} }));
+  return m;
+}
+function forgetMemo(id: string) {
+  const m = memos.get(id);
+  if (m && (m.draft || Object.keys(m.notes).length)) m.sent = [];
+  else memos.delete(id);
 }
 
 /**
@@ -178,6 +211,7 @@ function evictModels() {
     // The one on screen, one loading, one Claude is working in or waiting on you in: all stay.
     if (id === activeId || r?.loading || r?.pending?.length || r?.status === 'running' || r?.status === 'starting' || r?.status === 'requires_action') continue;
     models.delete(id);
+    forgetMemo(id);
     if (r) patchRt(id, { loaded: false });
     over--;
   }
@@ -255,6 +289,11 @@ export function dismissToast(id: number) {
   set({ toasts: get().toasts.filter((t) => t.id !== id) });
 }
 
+/**
+ * One request to the background process. A failure is shown as an error toast, unless `quiet`, and
+ * the promise still rejects so the caller can undo what it did. A caller with nothing to undo ends
+ * the chain with `.catch(toasted)`; a quiet caller handles the failure itself or says why it need not.
+ */
 export async function call<T = unknown>(method: string, params: Record<string, unknown> = {}, { quiet = false } = {}): Promise<T> {
   try {
     return await rpc.call<T>(method, params);
@@ -262,6 +301,28 @@ export async function call<T = unknown>(method: string, params: Record<string, u
     if (!quiet) toast(errText(e), 'error');
     throw e;
   }
+}
+
+/** The end of a call() whose failure needs nothing more: call() has already shown it. */
+export const toasted = () => {};
+
+function quitNow() {
+  // Quitting while the process is already going away fails; the window ends either way.
+  call('app.quit', {}, { quiet: true }).catch(() => {});
+  if (native()) return; // the desktop shell closes its own window
+  // A browser tab cannot always close itself; leave a clear end state instead.
+  setTimeout(() => {
+    window.close();
+    document.body.innerHTML = '<div class="quit-note">Pilcrow has quit. You can close this window.</div>';
+  }, 300);
+}
+
+/** Quit, asking first when Claude is still working (the desktop shell asks natively instead). */
+export function quitApp() {
+  if (native()) return quitNow();
+  const busy = useStore.getState().sessions.filter((s) => s.status === 'running' || s.status === 'requires_action').length;
+  if (!busy) return quitNow();
+  setDialog('confirm', { title: 'Quit Pilcrow?', body: `Claude is still working in ${busy} session${busy > 1 ? 's' : ''}. Quitting stops ${busy > 1 ? 'them' : 'it'}.`, confirm: 'Quit', danger: true, onConfirm: quitNow });
 }
 
 // ---- desktop notifications
@@ -635,8 +696,8 @@ export async function createSession(opts: { cwd: string; worktree?: { base?: str
 
 /** `now` steers: the current step is interrupted and this message goes first. */
 export async function sendMessage(id: string, payload: { text: string; images?: { mediaType: string; data: string }[]; files?: { name: string; text: string }[] }, opts: { now?: boolean } = {}) {
-  // Sending is a reason to be at the live end again, wherever the reader had scrolled to (Transcript listens).
-  window.dispatchEvent(new CustomEvent('pilcrow:sent', { detail: id }));
+  // Sending is a reason to be at the live end again, wherever the reader had scrolled to (useFollow).
+  set({ sent: { id, at: Date.now() } });
   await call('session.send', { id, ...payload, now: Boolean(opts.now) });
 }
 
@@ -728,6 +789,7 @@ export async function deleteSession(id: string, removeWorktree = false, removeHe
   }
   requestAnimationFrame(() => foldingRows.delete(id));
   models.delete(id);
+  memos.delete(id);
   const rt = { ...get().rt };
   delete rt[id];
   set({ rt, activeId: get().activeId === id ? null : get().activeId, sessions: get().sessions.filter((s) => s.id !== id) });
@@ -837,8 +899,31 @@ export function showDispatch(view: null | 'new' | string) {
 }
 export const openJob = (id: string) => showDispatch(id);
 
+/** Live state of sessions the control room shows without having opened them. */
+export function mergeLive(live: Record<string, Partial<SessionState>>) {
+  const cur = get().rt;
+  const next = { ...cur };
+  for (const [id, st] of Object.entries(live)) next[id] = { ...(cur[id] || { rev: 0, loaded: false, loading: false }), ...st };
+  set({ rt: next });
+}
+
 export function setTimeline(id: string, steps: TimelineStep[]) {
   set({ timeline: { ...get().timeline, [id]: steps } });
+}
+
+// A folder's file list for @ mentions (composer, palette), shared and kept for 20 seconds.
+const fileIndexes = new Map<string, { at: number; files: Promise<string[]> }>();
+export function fileIndex(cwd: string): Promise<string[]> {
+  const now = Date.now();
+  for (const [k, v] of fileIndexes) if (now - v.at > 20_000) fileIndexes.delete(k);
+  let hit = fileIndexes.get(cwd);
+  if (!hit) {
+    hit = { at: now, files: call<string[]>('fs.index', { cwd }, { quiet: true }) };
+    fileIndexes.set(cwd, hit);
+    // A failed listing is not kept; the next @ asks again.
+    hit.files.catch(() => fileIndexes.delete(cwd));
+  }
+  return hit.files;
 }
 
 export function bumpFs() {

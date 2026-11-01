@@ -39,6 +39,8 @@ const Flat = memo(function Flat({ items, ctx }: { items: Item[]; ctx: ToolCtx })
 // Which folds you opened in the conversation on screen. Opening a conversation starts clean.
 const turnOpen = new Map<string, boolean>();
 const chapterOpen = new Map<string, boolean>();
+/** How a jump to a step inside a closed fold opens it: each fold on the page registers here. */
+const foldOpeners = new Map<string, () => void>();
 export function forgetFolds() {
   turnOpen.clear();
   chapterOpen.clear();
@@ -51,9 +53,8 @@ const WorkFold = memo(function WorkFold({ unit, ctx }: { unit: Extract<Unit, { k
   const defaultOpen = ctx.view === 'thinking' || ctx.view === 'verbose';
   const [open, setOpen] = useState<boolean>(() => turnOpen.get(key) ?? defaultOpen);
   useEffect(() => {
-    const on = (e: Event) => (e as CustomEvent).detail === key && setOpen(true);
-    window.addEventListener('pilcrow:open-fold', on);
-    return () => window.removeEventListener('pilcrow:open-fold', on);
+    foldOpeners.set(key, () => setOpen(true));
+    return () => void foldOpeners.delete(key);
   }, [key]);
   const summary = useMemo(() => workSummary(work), [work]);
   const doing = live ? liveLabel(work) : null;
@@ -359,7 +360,7 @@ export const ItemList = memo(function ItemList({ items, ctx, rev, running, flat 
       nearRef.current.add('pg' + Math.floor(i / PAGE));
       if (u.kind === 'work') {
         turnOpen.set(u.key, true);
-        window.dispatchEvent(new CustomEvent('pilcrow:open-fold', { detail: u.key }));
+        foldOpeners.get(u.key)?.();
       }
       return true;
     });

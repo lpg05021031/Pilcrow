@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Pause, Play, Square, Ellipsis, GitCommitHorizontal, GitPullRequestArrow, ExternalLink, RotateCw, BookMarked, CalendarClock, ClipboardPaste, Trash, CircleDollarSign } from 'lucide-react';
-import { useStore, call, openSession, respond, confirmAction, toast, showDispatch, openJob, runsIn, loadPlaybooks } from '../../lib/store';
+import { useStore, call, openSession, respond, confirmAction, toast, showDispatch, openJob, runsIn, loadPlaybooks, setDialog, showPage } from '../../lib/store';
 import type { DispatchJob, DispatchReview, DispatchRun, Playbook } from '../../lib/types';
 import { cost, duration, plural } from '../../lib/format';
 import { Switch, useNow, copyText } from '../ui/bits';
@@ -105,7 +105,10 @@ export function JobView({ id }: { id: string }) {
       icon: CalendarClock,
       onSelect: async () => {
         const pid = await ensurePlaybook();
-        if (pid) useStore.setState({ scheduleDialog: { kind: 'dispatch', playbookId: pid }, page: 'inbox' });
+        if (pid) {
+          showPage('inbox');
+          setDialog('schedule', { kind: 'dispatch', playbookId: pid });
+        }
       },
     },
     { separator: true },

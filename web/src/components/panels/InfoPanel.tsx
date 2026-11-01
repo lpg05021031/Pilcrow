@@ -5,7 +5,7 @@ import type { SessionSummary, MemoryNote } from '../../lib/types';
 import { tokens, cost, tildify } from '../../lib/format';
 import { modelLabel, useGatewayModels } from '../../lib/models';
 import { contextLabel, copyText, Spinner, Num, RingGauge } from '../ui/bits';
-import { MODES } from '../Composer';
+import { MODES } from '../composer/Menus';
 import type { McpStatus } from '../../lib/types';
 
 interface Usage {

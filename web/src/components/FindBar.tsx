@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Search, ChevronUp, ChevronDown, X } from 'lucide-react';
 import { useExitGhost } from '../lib/motion';
+import { useStore, setFindQuery } from '../lib/store';
 
 const supported = typeof CSS !== 'undefined' && 'highlights' in CSS;
-let lastQuery = '';
 
 /**
  * Find in the conversation. Matches are painted with the CSS Custom Highlight API, so the transcript's
@@ -11,7 +11,7 @@ let lastQuery = '';
  * arrives; Enter / Shift+Enter step through matches and the current one is brought into view.
  */
 export function FindBar({ root, onClose }: { root: () => HTMLElement | null; onClose: () => void }) {
-  const [q, setQ] = useState(lastQuery);
+  const [q, setQ] = useState(() => useStore.getState().findQuery);
   const [count, setCount] = useState(0);
   const [index, setIndex] = useState(0);
   const ranges = useRef<Range[]>([]);
@@ -78,7 +78,7 @@ export function FindBar({ root, onClose }: { root: () => HTMLElement | null; onC
 
   // Search as you type, and again whenever the conversation changes underneath.
   useEffect(() => {
-    lastQuery = q;
+    setFindQuery(q);
     search(false);
     const el = root();
     if (!el) return;
@@ -92,7 +92,7 @@ export function FindBar({ root, onClose }: { root: () => HTMLElement | null; onC
       mo.disconnect();
       window.clearTimeout(t);
     };
-  }, [q]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [q]); // eslint-disable-line react-hooks/exhaustive-deps -- a new query searches afresh; search and root are stable for the bar's life
 
   useEffect(() => {
     input.current?.select();
@@ -112,10 +112,11 @@ export function FindBar({ root, onClose }: { root: () => HTMLElement | null; onC
   if (!supported) return null;
   return (
     <div className="findbar" role="search" ref={box}>
-      <Search size={14} className="findbar-ico" />
+      <Search size={14} className="findbar-ico" aria-hidden="true" />
       <input
         ref={input}
         autoFocus
+        aria-label="Find in the conversation"
         value={q}
         placeholder="Find in conversation"
         spellCheck={false}
@@ -132,13 +133,13 @@ export function FindBar({ root, onClose }: { root: () => HTMLElement | null; onC
         }}
       />
       <span className={`findbar-count tnum${q.trim() && !count ? ' none' : ''}`}>{q.trim() ? (count ? `${index + 1} of ${count}` : 'No matches') : ''}</span>
-      <button className="icon-btn sm" title="Previous match (Shift+Enter)" disabled={!count} onClick={() => step(-1)}>
+      <button className="icon-btn sm" title="Previous match (Shift+Enter)" aria-label="Previous match" disabled={!count} onClick={() => step(-1)}>
         <ChevronUp size={14} />
       </button>
-      <button className="icon-btn sm" title="Next match (Enter)" disabled={!count} onClick={() => step(1)}>
+      <button className="icon-btn sm" title="Next match (Enter)" aria-label="Next match" disabled={!count} onClick={() => step(1)}>
         <ChevronDown size={14} />
       </button>
-      <button className="icon-btn sm" title="Close (Esc)" onClick={onClose}>
+      <button className="icon-btn sm" title="Close (Esc)" aria-label="Close find" onClick={onClose}>
         <X size={14} />
       </button>
     </div>

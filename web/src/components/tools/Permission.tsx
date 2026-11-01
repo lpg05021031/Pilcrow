@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useWindowKey } from '../ui/bits';
 import { CornerDownLeft } from 'lucide-react';
 import type { ToolItem } from '../../lib/transcript';
 import type { PermissionRequest, PermissionSuggestion } from '../../lib/types';
@@ -114,20 +115,15 @@ export function PermissionCard({ perm, item, ctx, stale = false }: { perm: Permi
     if (feedback.trim()) toast('Sent your note to Claude', 'info');
   };
 
-  useEffect(() => {
-    if (!first) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (typingElsewhere(e.target)) return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === '1' && !perm.defaultToNo) allow();
-      else if (e.key === '2' && allowAlways) always();
-      else if (e.key === (allowAlways ? '3' : '2')) deny();
-      else return;
-      e.preventDefault();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  });
+  useWindowKey((e) => {
+    if (typingElsewhere(e.target)) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === '1' && !perm.defaultToNo) allow();
+    else if (e.key === '2' && allowAlways) always();
+    else if (e.key === (allowAlways ? '3' : '2')) deny();
+    else return;
+    e.preventDefault();
+  }, first);
 
   const rule = allowAlways ? suggestionRules(perm.suggestions[0]) : '';
   const extra = allowAlways && perm.suggestions.length > 1 ? ` and ${perm.suggestions.length - 1} more` : '';

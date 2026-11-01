@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { spring, EASE, takeLaunch } from '../lib/motion';
 import type { TranscriptModel } from '../lib/transcript';
+import { useStore } from '../lib/store';
 
 // Where each conversation was scrolled to, so switching away and back keeps your place: the box at
 // the top of the view and how far it was from the edge (a scroll offset would drift, since boxes far
@@ -297,10 +298,12 @@ export function useFollow({ sessionId, model, loaded, rev, extra, onScrolled }: 
     follow();
   };
   // Your own message goes to the end of the conversation, and so do you.
-  useEffect(() => {
-    const on = (e: Event) => (e as CustomEvent).detail === sessionId && jump();
-    window.addEventListener('pilcrow:sent', on);
-    return () => window.removeEventListener('pilcrow:sent', on);
-  }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(
+    () =>
+      useStore.subscribe((s, prev) => {
+        if (s.sent !== prev.sent && s.sent?.id === sessionId) jump();
+      }),
+    [sessionId], // eslint-disable-line react-hooks/exhaustive-deps -- jump reads refs only; one subscription per conversation
+  );
   return { scroller, inner, onScroll, jump, showJump, settling, reading };
 }
