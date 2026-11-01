@@ -337,6 +337,44 @@ def test_accessibility_lists_the_blocks_on_screen(view):
     assert iface.child(0).actionInterface().actionNames() == []  # a plain row has nothing to press
 
 
+def test_accessibility_lists_an_island_among_the_rows(app):
+    """A real widget in the scene (a permission card, a question, a plan review) is a child of the
+    list where it reads, as Qt's own interface for it, which already names the list its parent."""
+    from PySide6.QtGui import QAccessible
+    from PySide6.QtWidgets import QPushButton
+
+    from pilcrow_qt.canvas.blocks.island import IslandBlock
+    from pilcrow_qt.canvas.blocks.prose import TextGroup
+    from pilcrow_qt.canvas.scene import Scene
+    from pilcrow_qt.canvas.view import CanvasView
+
+    scene = Scene()
+    v = CanvasView(scene)
+    v.resize(760, 600)
+    card = IslandBlock("perm:x", lambda: QPushButton("Allow once"))
+    v.register_island(card)
+    v.begin()
+    try:
+        scene.root.append(TextGroup(TextItem(id="t1", text="Before the card.", streaming=False, ts=0)))
+        scene.root.append(card)
+        scene.root.append(TextGroup(TextItem(id="t2", text="After the card.", streaming=False, ts=0)))
+    finally:
+        v.end()
+    v.show()
+    pump(60)
+    lst = QAccessible.queryAccessibleInterface(v.viewport())
+    kids = [lst.child(i) for i in range(lst.childCount())]
+    assert [k.text(QAccessible.Text.Name) for k in kids] == ["Before the card.", "Allow once", "After the card."]
+    button = kids[1]
+    assert button.object() is card.widget and button.role() == QAccessible.Role.Button
+    assert button.parent() is lst
+    assert [lst.indexOfChild(k) for k in kids] == [0, 1, 2]
+    centre = card.widget.mapToGlobal(card.widget.rect().center())
+    assert lst.childAt(centre.x(), centre.y()).object() is card.widget
+    assert card.key not in lst._items  # no row item of its own: the widget is the child
+    v.close()
+
+
 def test_accessibility_announces_focus_folds_and_new_rows(view, monkeypatch):
     from PySide6.QtGui import QAccessible
 

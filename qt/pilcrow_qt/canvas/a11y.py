@@ -7,9 +7,10 @@ Button named by its head line, with a Press action that opens and closes it; a r
 paragraph, a message, a notice) is a ListItem named by the first line of its words as they read
 (the laid-out document, never the Markdown source), its value all of them; a group with no head of
 its own is only its rows, and a block with no words is left out, so nothing is read twice and no
-internal key is ever a name. What Tab visits inside a row (a code well's Copy, a card's Open in
-Files, the buttons, links and toggles of a body) are the row's children: Buttons and Links with a
-Press action and a name of their own.
+internal key is ever a name. A real widget in the scene (a permission card, a question form, a plan
+review) is read as itself, through Qt's own interface for it, in its place among the rows. What
+Tab visits inside a row (a code well's Copy, a card's Open in Files, the buttons, links and toggles
+of a body) are the row's children: Buttons and Links with a Press action and a name of their own.
 The view tells assistive technology what changed through :func:`announce` (the focus ring moved
 to a row or a target, a fold opened) and :func:`blocks_changed` (rows arrived; the words a
 streamed row gained, at most once a second); both cost one ``isActive()`` call when nothing is
@@ -33,6 +34,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QAccessibleWidget, QWidget
 
+from .blocks.island import IslandBlock
 from .scene import Group, Target
 
 NAME_MAX = 120  # a name is what a screen reader says on arrival; the rest is the value
@@ -62,6 +64,11 @@ def describe(b: Any) -> Optional[Tuple[QAccessible.Role, str]]:
         return (QAccessible.Role.Button, name) if name else None
     name = _summary(words(b))
     return (QAccessible.Role.ListItem, name) if name else None
+
+
+def _widget(b: Any) -> Optional[QWidget]:
+    """An island's widget, which is read through Qt's own interface for it, or None."""
+    return b.widget if isinstance(b, IslandBlock) and b.alive else None
 
 
 def target_name(b: Any, t: Target) -> str:
@@ -285,7 +292,8 @@ class TargetAccessible(_Item):
 
 
 class CanvasListAccessible(QAccessibleWidget):
-    """The viewport: a list whose children are the blocks on screen, in reading order."""
+    """The viewport: a list whose children are the blocks on screen, in reading order, the islands'
+    widgets among them."""
 
     def __init__(self, viewport: QWidget) -> None:
         super().__init__(viewport, QAccessible.Role.List, "Conversation")
@@ -309,7 +317,7 @@ class CanvasListAccessible(QAccessibleWidget):
         view = self.view
         if view is None:
             return []
-        return [b.key for b in view.visible_blocks() if b.h > 0 and describe(b) is not None]
+        return [b.key for b in view.visible_blocks() if b.h > 0 and (_widget(b) is not None or describe(b) is not None)]
 
     def _item(self, key: str) -> BlockAccessible:
         it = self._items.get(key)
@@ -318,6 +326,12 @@ class CanvasListAccessible(QAccessibleWidget):
                 self._prune()
             it = self._items[key] = BlockAccessible(self, key)
         return it
+
+    def _child(self, key: str) -> QAccessibleInterface:
+        """The child for a key ``_keys`` gave: an island's widget as Qt reads it, else a row's item."""
+        view = self.view
+        w = _widget(view.scene.block(key)) if view is not None else None
+        return QAccessible.queryAccessibleInterface(w) if w is not None else self._item(key)
 
     def _prune(self) -> None:
         """Forget the items of blocks the scene dropped; the threshold doubles so this stays amortised."""
@@ -332,12 +346,17 @@ class CanvasListAccessible(QAccessibleWidget):
     def child(self, index: int) -> Optional[QAccessibleInterface]:
         keys = self._keys()
         if 0 <= index < len(keys):
-            return self._item(keys[index])
+            return self._child(keys[index])
         return None
 
     def indexOfChild(self, child: QAccessibleInterface) -> int:
-        key = getattr(child, "_key", None)
         keys = self._keys()
+        obj = child.object()
+        if obj is None:  # a row's item
+            key = getattr(child, "_key", None)
+        else:  # an island's widget
+            view = self.view
+            key = next((k for k in keys if _widget(view.scene.block(k)) is obj), None)
         return keys.index(key) if key in keys else -1
 
     def childAt(self, x: int, y: int) -> Optional[QAccessibleInterface]:
@@ -346,7 +365,9 @@ class CanvasListAccessible(QAccessibleWidget):
             return None
         local = self._viewport.mapFromGlobal(QPoint(x, y))
         found = view.scene.leaf_at(view.scene_y(local.y()))
-        return self._item(found[0].key) if found is not None and describe(found[0]) is not None else None
+        if found is None or (_widget(found[0]) is None and describe(found[0]) is None):
+            return None
+        return self._child(found[0].key)
 
     def text(self, t: QAccessible.Text) -> str:
         if t == QAccessible.Text.Name:
@@ -393,8 +414,11 @@ def blocks_changed(view: Any) -> None:
     keys = lst._keys()
     if lst._shown is not None:
         for k in keys:
-            if k not in lst._shown:
-                QAccessible.updateAccessibility(QAccessibleEvent(lst._item(k), QAccessible.Event.ObjectShow))
+            if k in lst._shown:
+                continue
+            it = lst._child(k)
+            if isinstance(it, BlockAccessible):  # an island's widget: Qt announces it as it shows
+                QAccessible.updateAccessibility(QAccessibleEvent(it, QAccessible.Event.ObjectShow))
     lst._shown = set(keys)
 
 

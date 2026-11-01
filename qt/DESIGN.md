@@ -526,7 +526,9 @@ match is lit in full, others washed, as today.
 review, the empty-conversation card). `measure(width)`: `widget.setFixedWidth(width);
 widget.layout().activate(); widget.sizeHint().height()`. After every commit and scroll the view
 calls `setGeometry(x, y − scroll, width, h)` on islands within a screen of the viewport and hides
-the others. They keep native focus, input methods and shortcuts; `bind` guards them as today.
+the others. They keep native focus, input methods and shortcuts; `bind` guards them as today. To
+assistive technology each is a child of the conversation's list in its place among the rows, read
+through Qt's own interface for the widget.
 
 **One grammar for the cards that wait on the person.** A permission (under its tool row or on a card of
 its own), a question and a plan review share a frame (`paint_needs_frame`: raised, the accent ring
@@ -706,10 +708,10 @@ and a third click the block; Ctrl+A selects all; the right-click menu offers cop
 the link under the pointer and the card's file; Ctrl+= / Ctrl+- / Ctrl+0 scale the conversation's
 text (prose, code in prose, bubbles, thoughts; the chrome keeps its size), remembered in the ui
 state; `canvas/a11y.py` exposes the viewport to assistive technology as a list of the blocks on
-screen (a fold or a card reads as a button), each row named by its words as they read (the laid-out
-document, not the Markdown), the targets Tab visits inside a row as its children (Buttons and
-Links with their own names and a Press action; focus moving to one announces it), and the words a
-streamed row gains announced once a second.
+screen (a fold or a card reads as a button, an island as its own widget), each row named by its
+words as they read (the laid-out document, not the Markdown), the targets Tab visits inside a row as
+its children (Buttons and Links with their own names and a Press action; focus moving to one
+announces it), and the words a streamed row gains announced once a second.
 
 Phase 4 — the rest of the window (2.10.0): the Timeline is a list on the engine
 (`panels/timeline_list.py`: a block per step, the picked step's detail as an island); hidden panel
