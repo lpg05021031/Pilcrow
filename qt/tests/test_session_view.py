@@ -139,7 +139,11 @@ def test_at_opens_the_file_popup(app_client):
     edit = v.composer.edit
     edit.setFocus()
     QTest.keyClicks(edit, "@")
-    c.wait_until(lambda: v.composer.popup.isVisible() and v.composer.suggestions, 5, "file popup")
+    c.wait_until(
+        lambda: v.composer.popup.isVisible() and any(s.get("kind") != "repo" for s in v.composer.suggestions),
+        5,
+        "file popup",
+    )
     labels = [s["label"] for s in v.composer.suggestions]
     assert "README.md" in labels and "server/main.js" in labels, labels
     QTest.keyClicks(edit, "readme")

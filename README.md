@@ -17,7 +17,7 @@ Changes / Files / Terminal / Preview / Tasks / Session 面板。
 
 | 路徑 | 內容 |
 |---|---|
-| `server/` | Node 伺服器：Claude Agent SDK 驅動、session / 歷史 / git / 檔案 / 終端機 / 排程 / 記憶 |
+| `server/` | Node 伺服器：Claude Agent SDK 驅動、session / 歷史 / git / 檔案 / 終端機 / 排程 / 記憶 / 跨 repo 派工（`dispatch_core.js`）/ 跨 session 協調（`helpers.js`）/ repo 註冊表（`repos.js`） |
 | `web/src/` | React 介面（Vite + TypeScript）；`web/dist/` 是建置結果，不進 git |
 | `electron/`、`bin/pilcrow` | Linux 的 Electron 視窗與啟動器 |
 | `qt/pilcrow_qt/` | **原生桌面視窗（PySide6 / Qt Widgets）**：純 CPU 繪圖，沒有 GPU 的機器也快；接同一個伺服器。見 [qt/ARCHITECTURE.md](qt/ARCHITECTURE.md) |
@@ -25,6 +25,9 @@ Changes / Files / Terminal / Preview / Tasks / Session 面板。
 | `scripts/make-installers.py`、`scripts/installer/*.tmpl` | 把工作樹打包成三個安裝檔；模板是安裝檔的固定部分 |
 | `scripts/release.mjs` | 改版流程：版本號、檢查、build、打包、驗證、commit、tag |
 | `pilcrow-install.sh`、`pilcrow-windows.ps1`、`pilcrow-app.sh` | 發佈產物（見下方「修改介面」與「發佈」） |
+| `DISPATCH.md` | 跨 repo 派工（Dispatch）的設計與現況：一份 brief、一組 repo、每個 repo 一個 worktree 裡的 session；先 plan、先跑 canary、一個權限答所有 repo、一次 review、一次收尾 |
+| `HELPERS.md` | 跨 session 協調（Helpers）的設計與現況：一個 session 帶領其他 session，每個 helper 有自己的資料夾、worktree 與 brief，怎麼拆由模型逐回合決定；lead 等、讀、指示、收攏，變更在一個地方一起 review |
+| `REPOSITORIES.md` | Repositories 註冊表的設計與現況：你維護的一份清單——每個 repo 的名字與別名、policy、預設值、給 agent 的常備 notes；Helpers 與 Dispatch 都讀它，模型用你的話就找得到 repo |
 | `CHANGELOG.md` | 版本紀錄 |
 
 ---
@@ -315,6 +318,21 @@ Pilcrow 是設計給「一人一台」的開發機：
 > 同一台主機有多個使用者同時登入時（共用伺服器），其他使用者也連得到 `127.0.0.1` 上的服務。
 > Pilcrow 沒有為這種情況加上登入驗證，請在自己的機器上使用。
 
+**安裝檔**（`pilcrow-install.sh`、`pilcrow-windows.ps1`）是可以整份讀的純文字，沒有混淆、沒有下載再執行：
+
+- 程式碼以文字直接寫在檔案裡；只有建置好的介面、字型與（Windows）外殼腳本以 base64 內附，寫出前先比對 SHA-256，
+  不符就停下來什麼都不裝。Windows 安裝檔整份是純 ASCII（`make-installers.py` 會檢查），沒有任何非 ASCII 字元或
+  `[char]` 拼字之類的寫法；Linux 安裝檔的中文只在訊息裡
+- 全程以目前使用者身分執行，不需要也不會要求管理員權限：Linux 寫 `~/pilcrow`（或 `--dir`）、`~/.local/share/applications`、
+  `~/.local/bin`；Windows 寫 `%LOCALAPPDATA%\Programs\Pilcrow`、`%LOCALAPPDATA%\Pilcrow`、兩個捷徑，並把 `bin` 加進
+  使用者 PATH（照登錄檔原樣編輯，`%VAR%` 不展開）。不碰系統資料夾、不建服務或排程、不改其他登錄檔
+- 網路只有 npm / pip 向你設定的 registry 抓套件（Windows 的 WebView2 DLL 從 `pywebview` wheel 取出後驗 Microsoft
+  簽章）；Electron 只在 `-Electron` / 預設 Linux 流程時才下載。要離線審閱 Windows 的 payload，把 `$payload`
+  區塊 base64 解碼就是一個 zip
+- Windows 上會看到的防毒互動：安裝檔是自解壓的 PowerShell 腳本，Defender 掃完整份內容才執行（幾秒）；桌面外殼
+  `PilcrowHost.exe` 是在你的機器上由 Windows 內建的 C# 編譯器產生的未簽署程式，第一次啟動時 Defender 的雲端
+  查詢可能多等一兩秒；開了「受控資料夾存取」時桌面捷徑可能被擋（開始功能表的捷徑照常建立，或用 `-NoDesktop`）
+
 ## 修改介面（開發者）
 
 這個 repo 就是開發樹。安裝後的資料夾裡也有同一份原始碼（`web/src`、`server/`）但沒有建置工具；
@@ -432,14 +450,17 @@ Windows 版跟 Linux 版是同一套程式與介面。安裝檔只有一個：`p
 powershell -NoProfile -ExecutionPolicy Bypass -File .\pilcrow-windows.ps1
 ```
 
-如果執行原則封鎖 PowerShell 腳本檔，改用這行（直接執行內容，效果一樣）：
+從瀏覽器存下來的檔案帶有「來自網際網路」標記；若 PowerShell 在 RemoteSigned 原則下拒絕執行，先清掉標記：
 
 ```powershell
-& ([scriptblock]::Create((Get-Content -Raw .\pilcrow-windows.ps1)))
+Unblock-File .\pilcrow-windows.ps1
 ```
 
 選項：`-Dir <路徑>`（預設 `%LOCALAPPDATA%\Programs\Pilcrow`）、`-NoDesktop`、`-NoLaunch`（裝完不開視窗）、
-`-FilesOnly`、`-Uninstall`（移除程式與外殼，設定與對話紀錄保留）、`-Electron`（額外嘗試下載 Electron，通常不需要）；
+`-FilesOnly`、`-Uninstall`（移除程式與外殼，設定與對話紀錄保留）、`-Electron`（額外嘗試下載 Electron，通常不需要）、
+`-Qt`（改用原生 Qt 視窗：PySide6 會裝進 `<安裝目錄>\qt\.venv`，約 150 MB，從你的 pip 來源抓；捷徑與
+`pilcrow-qt` 指令都開 Qt 視窗，不建 WebView2 外殼；適合 VM、遠端桌面這類 Chromium 拿不到真 GPU 的環境——
+Qt 視窗純 CPU 繪圖。再跑一次不帶 `-Qt` 就換回 WebView2）；
 外殼相關：`-Node`、`-Python`、`-WebView2Package`、`-NuGetSource`、`-WebView2Runtime`、`-KeepServer`、
 `-NativeTitleBar`、`-DevTools`、`-SkipSignatureCheck`，意思同 `pilcrow-app.ps1` 的說明。
 

@@ -15,7 +15,7 @@ import time
 import weakref
 from typing import Any, Callable, List, Optional
 
-from PySide6.QtCore import QEasingCurve, QObject, QTimer
+from PySide6.QtCore import QEasingCurve, QObject, Qt, QTimer
 
 SLOW_MS = 33
 FAST_MS = 16
@@ -25,6 +25,8 @@ class Clock(QObject):
     def __init__(self) -> None:
         super().__init__()
         self._timer = QTimer(self)
+        # precise: Windows' default timer resolution is 15.6 ms, which would turn 16 ms into 31
+        self._timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._timer.timeout.connect(self._tick)
         self._subs: List[weakref.ReferenceType] = []
         self._fast = 0  # tweens holding the fast rate

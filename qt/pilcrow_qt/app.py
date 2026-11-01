@@ -61,6 +61,8 @@ class ServerProcess:
         self.node = node or self._node_from_env() or "node"
         self.proc: Optional[subprocess.Popen] = None
         self.url = ""
+        self.log_path: Optional[Path] = None
+        self.log = None
 
     def _node_from_env(self) -> str:
         env = self.dir / ".launch-env"
@@ -77,13 +79,23 @@ class ServerProcess:
                 f"Pilcrow is not installed at {self.dir} (no server/main.js). Run pilcrow-install.sh, or pass --dir."
             )
         env = {**os.environ, "PILCROW_SHELL_ENV": "0"}
+        # Its output goes to a file: a pipe nobody reads fills up and blocks the server's writes
+        # (Node's stdout is synchronous on a pipe on Linux). On Windows, no console window either.
+        log_dir = _state_dir()
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True)
+            self.log_path = log_dir / "qt-server.log"
+            self.log = open(self.log_path, "a", encoding="utf-8", errors="replace")  # noqa: SIM115
+        except OSError:
+            self.log_path, self.log = None, open(os.devnull, "w")  # noqa: SIM115
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
         self.proc = subprocess.Popen(
             [self.node, str(main_js), "--shell=none"],
             cwd=str(self.dir),
             env=env,
-            stdout=subprocess.PIPE,
+            stdout=self.log,
             stderr=subprocess.STDOUT,
-            text=True,
+            creationflags=flags,
         )
         deadline = time.time() + timeout
         while time.time() < deadline:
@@ -92,19 +104,31 @@ class ServerProcess:
                 self.url = url
                 return url
             if self.proc.poll() is not None:
-                out = self.proc.stdout.read() if self.proc.stdout else ""
-                raise RuntimeError(f"The Pilcrow server exited right away:\n{out[-2000:]}")
+                raise RuntimeError(f"The Pilcrow server exited right away:\n{self._log_tail()}")
             time.sleep(0.15)
-        raise RuntimeError("The Pilcrow server did not come up within 25 seconds.")
+        raise RuntimeError(f"The Pilcrow server did not come up within 25 seconds.\n{self._log_tail()}")
+
+    def _log_tail(self) -> str:
+        try:
+            if self.log_path is not None:
+                return self.log_path.read_text(encoding="utf-8", errors="replace")[-2000:]
+        except OSError:
+            pass
+        return ""
 
     def stop(self) -> None:
-        if self.proc is None or self.proc.poll() is not None:
-            return
-        try:
-            self.proc.terminate()
-            self.proc.wait(timeout=5)
-        except Exception:  # noqa: BLE001
-            self.proc.kill()
+        if self.proc is not None and self.proc.poll() is None:
+            try:
+                self.proc.terminate()
+                self.proc.wait(timeout=5)
+            except Exception:  # noqa: BLE001
+                self.proc.kill()
+        if self.log is not None:
+            try:
+                self.log.close()
+            except OSError:
+                pass
+            self.log = None
 
 
 # ---------------------------------------------------------------- the app

@@ -49,6 +49,7 @@ export function PlanBody({ item, perm, ctx }: { item: ToolItem; perm?: Permissio
   return (
     <div className={`plancard${perm ? ' live' : ''}`}>
       <div className="plan-head">
+        {perm && <span className="wait-dot" aria-hidden="true" />}
         <span className="plan-kicker">{perm ? 'Plan ready for review' : 'Plan'}</span>
         <span className="grow" />
         {outcome === 'approved' && (
@@ -87,16 +88,25 @@ export function PlanBody({ item, perm, ctx }: { item: ToolItem; perm?: Permissio
               </div>
             </div>
           ) : (
-            <div className="row">
-              <button className="btn primary" onClick={() => approve('acceptEdits')} disabled={busy}>
-                Approve and start <span className="key">1</span>
-              </button>
-              <button className="btn" onClick={() => approve('default')} disabled={busy} title="Approve, but ask before each edit">
-                Approve, ask before edits <span className="key">2</span>
-              </button>
-              <button className="btn ghost" onClick={() => setRevising(true)} disabled={busy}>
-                Keep planning <span className="key">3</span>
-              </button>
+            <div className="row perm-actions">
+              <span className="perm-choice">
+                <button className="btn primary" onClick={() => approve('acceptEdits')} disabled={busy}>
+                  Approve and start
+                </button>
+                <kbd className="perm-key">1</kbd>
+              </span>
+              <span className="perm-choice">
+                <button className="btn" onClick={() => approve('default')} disabled={busy} title="Approve, but ask before each edit">
+                  Approve, ask before edits
+                </button>
+                <kbd className="perm-key">2</kbd>
+              </span>
+              <span className="perm-choice">
+                <button className="btn ghost" onClick={() => setRevising(true)} disabled={busy}>
+                  Keep planning
+                </button>
+                <kbd className="perm-key">3</kbd>
+              </span>
             </div>
           )}
         </div>

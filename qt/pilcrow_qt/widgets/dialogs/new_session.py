@@ -259,11 +259,20 @@ class NewSessionSheet(Sheet):
 
     def _chips(self) -> None:
         self.chips.clear()
-        rec = [r for r in recents() if r != self.cwd]
+        # registered repositories first (REPOSITORIES.md), then the recent folders; the default folder
+        # stays the most recent one
+        registered = [str(e.get("path") or "") for e in store.repos if e.get("path") and not e.get("missing")]
+        rec = [r for r in registered + [x for x in recents() if x not in registered] if r != self.cwd]
         show = bool(rec) and not self.show_browser
         self.chips_w.setVisible(show)
         for r in rec:
-            ch = FolderChip(basename(r), tildify(r, home()))
+            # a registered repository goes by the person's name for it, with its about line
+            reg = store.repo_for(r)
+            if reg and str(reg.get("path") or "").rstrip("/") == r.rstrip("/"):
+                tip = " · ".join(x for x in (str(reg.get("about") or ""), tildify(r, home())) if x)
+                ch = FolderChip(str(reg.get("name") or basename(r)), tip)
+            else:
+                ch = FolderChip(basename(r), tildify(r, home()))
             ch.clicked.connect(lambda _c=False, p=r: self.set_cwd(p))
             self.chips.add(ch)
         self.schedule_relayout()

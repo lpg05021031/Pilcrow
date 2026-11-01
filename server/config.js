@@ -24,6 +24,8 @@ export const DEFAULT_CONFIG = {
   memoryInject: true, // hand those notes to new sessions
   memoryModel: '', // '' = the session default // record a snapshot of the folder after every step so you can scrub back
   recentProjects: [],
+  repos: [], // the repositories registry (REPOSITORIES.md): names, aliases, policy, defaults, notes
+  helpers: { enabled: true, total: 8, parallel: 0, maxMinutes: 30, costUsd: 0, wakeLead: true }, // HELPERS.md §5.7; parallel 0 = min(3, cores ÷ 2)
   ui: {}, // free-form UI prefs (panel sizes, last tabs) owned by the client
   window: null,
   configVersion: 2,

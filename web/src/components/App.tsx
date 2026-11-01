@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { WifiOff, RefreshCw } from 'lucide-react';
-import { useStore, setUi, setDialog, openSession, interrupt, native, quickNewSession, type PanelTab, cycleView, showPage } from '../lib/store';
+import { useStore, setUi, setDialog, openSession, interrupt, native, quickNewSession, type PanelTab, cycleView, showPage, showDispatch } from '../lib/store';
 import { Sidebar } from './Sidebar';
 import { SessionView } from './SessionView';
 import { RightPanel } from './RightPanel';
 import { Welcome } from './Welcome';
 import { Overview } from './Overview';
 import { InboxPage } from './Inbox';
+import { DispatchPage } from './dispatch/Page';
 import { NewSessionDialog } from './NewSessionDialog';
 import { SettingsDialog } from './SettingsDialog';
 import { McpAuthDialog } from './McpAuthDialog';
@@ -29,7 +30,7 @@ export function App() {
   const waiting = sessions.filter((s) => s.status === 'requires_action').length;
 
   useEffect(() => {
-    document.title = `${waiting ? `(${waiting}) ` : ''}${page === 'overview' ? 'Control room — ' : page === 'inbox' ? 'Inbox — ' : session ? `${session.title} — ` : ''}Pilcrow`;
+    document.title = `${waiting ? `(${waiting}) ` : ''}${page === 'overview' ? 'Control room — ' : page === 'inbox' ? 'Inbox — ' : page === 'dispatch' ? 'Dispatch — ' : session ? `${session.title} — ` : ''}Pilcrow`;
   }, [waiting, session?.title, page]); // eslint-disable-line react-hooks/exhaustive-deps -- only the title is read
 
   useEffect(() => {
@@ -52,6 +53,10 @@ export function App() {
       } else if (mod && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'o') {
         e.preventDefault();
         showPage(st.page === 'overview' ? 'session' : 'overview');
+      } else if (mod && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        if (st.page === 'dispatch') showPage('session');
+        else showDispatch(null);
       } else if (mod && e.key === '\\') {
         e.preventDefault();
         setUi({ panel: !st.ui.panel });
@@ -140,7 +145,7 @@ export function App() {
           </div>
         )}
         <UpdateNotice />
-        {page === 'overview' ? <Overview /> : page === 'inbox' ? <InboxPage /> : session ? <SessionView key={session.id} session={session} /> : <Welcome />}
+        {page === 'overview' ? <Overview /> : page === 'inbox' ? <InboxPage /> : page === 'dispatch' ? <DispatchPage /> : session ? <SessionView key={session.id} session={session} /> : <Welcome />}
         <Toasts />
       </main>
       {panelOpen && <Resizer side="right" onResize={resizePanel} />}

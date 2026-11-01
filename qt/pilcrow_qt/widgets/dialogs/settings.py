@@ -21,13 +21,14 @@ from .settings_ui import Sheet, open_sheet, styled, vbox
 
 SECTIONS: List[Tuple[str, str]] = [
     ("general", "General"),
+    ("repos", "Repositories"),
     ("claude", "Claude Code"),
     ("skills", "Skills"),
     ("mcp", "MCP servers"),
     ("memory", "Memory"),
     ("diagnostics", "Diagnostics"),
 ]
-WIDE = ("skills", "mcp", "memory")
+WIDE = ("repos", "skills", "mcp", "memory")
 
 
 class SettingsSheet(Sheet):
@@ -139,6 +140,10 @@ class SettingsSheet(Sheet):
             from .settings_general import GeneralPage
 
             return GeneralPage(self)
+        if sid == "repos":
+            from .settings_repos import ReposPage
+
+            return ReposPage(self)
         if sid == "claude":
             from .settings_claude import ClaudePage
 

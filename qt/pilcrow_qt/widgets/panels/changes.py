@@ -282,6 +282,11 @@ class ChangesPanel(QWidget):
         self.empty_edits = EmptyState("", "No file edits in this session yet.")
         self.empty_edits.hide()
         self._host_lay.addWidget(self.empty_edits)
+        # a lead's helpers, each worktree a section, with the finish actions (HELPERS.md §6.5)
+        from .helpers_changes import HelpersChanges
+
+        self.helpers = HelpersChanges(session_id)
+        self._host_lay.addWidget(self.helpers)
         self._host_lay.addStretch(1)
         self.scroll.setWidget(host)
         lay.addWidget(self.scroll, 1)
@@ -335,6 +340,7 @@ class ChangesPanel(QWidget):
     def showEvent(self, e) -> None:  # noqa: N802
         # The web remounts this tab each time it is shown; here it stays built and refreshes instead.
         super().showEvent(e)
+        self.helpers.sync()  # a lead's helpers, caught up now that the tab shows
         if self._stale or (self.data is not None and time.monotonic() - self._last_load > 2.5):
             self.load()
 
@@ -354,6 +360,7 @@ class ChangesPanel(QWidget):
             # a hidden tab does no work: it catches up when it is shown
             self._stale = True
             return
+        self.helpers.sync()
         if status == "idle" and was != "idle":
             self.load()
         elif status in ("running", "requires_action") and time.monotonic() - self._last_load > 2.5:

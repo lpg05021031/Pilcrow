@@ -29,12 +29,16 @@ const RUN_MODES: { id: PermissionMode; label: string; hint: string; icon: Lucide
   { id: 'bypassPermissions', label: 'Everything', hint: 'Runs any command without asking — only for folders you trust', icon: ShieldOff },
 ];
 
-export function ScheduleDialog({ spec, schedule }: { spec: { id?: string; cwd?: string }; schedule?: Schedule }) {
+export function ScheduleDialog({ spec, schedule }: { spec: { id?: string; cwd?: string; kind?: 'prompt' | 'dispatch'; playbookId?: string }; schedule?: Schedule }) {
   const config = useStore((s) => s.config);
   const info = useStore((s) => s.info);
   const sessions = useStore((s) => s.sessions);
   const close = () => useStore.setState({ scheduleDialog: null });
-  const [name, setName] = useState(schedule?.name || '');
+  const playbooks = useStore((s) => s.playbooks);
+  const [kind, setKind] = useState<'prompt' | 'dispatch'>(schedule?.kind || spec.kind || 'prompt');
+  const [playbookId, setPlaybookId] = useState(schedule?.playbookId || spec.playbookId || '');
+  const playbook = playbooks.find((p) => p.id === (playbookId || playbooks[0]?.id));
+  const [name, setName] = useState(schedule?.name || (spec.kind === 'dispatch' ? playbooks.find((p) => p.id === spec.playbookId)?.name || '' : ''));
   const [cwd, setCwd] = useState(schedule?.cwd || spec.cwd || sessions.find((s) => !s.archived)?.project || config?.recentProjects?.[0] || info?.home || '');
   const [prompt, setPrompt] = useState(schedule?.prompt || '');
   const [cadence, setCadence] = useState<Cadence>(schedule?.cadence || { kind: 'daily', time: '09:00' });
@@ -61,10 +65,11 @@ export function ScheduleDialog({ spec, schedule }: { spec: { id?: string; cwd?: 
   const save = async () => {
     if (busy) return;
     if (!name.trim()) return toast('Give the schedule a name.', 'warning');
-    if (!prompt.trim()) return toast('Write what Claude should do each time.', 'warning');
+    if (kind === 'dispatch' && !playbook) return toast('Pick a playbook for the schedule.', 'warning');
+    if (kind !== 'dispatch' && !prompt.trim()) return toast('Write what Claude should do each time.', 'warning');
     setBusy(true);
     try {
-      await call('schedules.save', { id: schedule?.id, name: name.trim(), cwd, prompt, cadence, mode, model, worktree, maxMinutes, enabled });
+      await call('schedules.save', { id: schedule?.id, kind, playbookId: kind === 'dispatch' ? playbook?.id : undefined, playbookName: kind === 'dispatch' ? playbook?.name : undefined, name: name.trim(), cwd, prompt, cadence, mode, model, worktree, maxMinutes, enabled });
       toast(schedule ? 'Schedule updated' : `Scheduled: ${name.trim()}`, 'success');
       close();
     } catch {
@@ -97,12 +102,20 @@ export function ScheduleDialog({ spec, schedule }: { spec: { id?: string; cwd?: 
       }
     >
       <div className="sd">
+        <div className="field">
+          <label>What runs</label>
+          <div className="sd-when">
+            <Select<'prompt' | 'dispatch'> value={kind} onChange={setKind} options={[{ value: 'prompt', label: 'A prompt in a folder', hint: 'One session, in one folder' }, { value: 'dispatch', label: 'A dispatch playbook', hint: "One job across the playbook's repositories" }]} width={260} />
+            {kind === 'dispatch' && <Select value={playbook?.id || ''} onChange={setPlaybookId} options={playbooks.length ? playbooks.map((p) => ({ value: p.id, label: p.name, hint: `${p.targets.length} repositories` })) : [{ value: '', label: 'No playbooks yet — save one from a job' }]} width={300} />}
+          </div>
+          {kind === 'dispatch' && <div className="hint">The playbook's brief, repositories and settings are used as saved. Nobody is there to answer, so permissions are declined and there is no canary; the report lands in the inbox.</div>}
+        </div>
         <div className="ns-two">
           <div className="field">
             <label>Name</label>
             <input className="input" autoFocus value={name} placeholder="Nightly dependency audit" onChange={(e) => setName(e.target.value)} />
           </div>
-          <div className="field">
+          <div className="field" style={kind === 'dispatch' ? { display: 'none' } : undefined}>
             <label>Folder</label>
             <button ref={folderBtn} className={`ns-folder sd-folder${picking ? ' on' : ''}`} onClick={() => setPicking(!picking)} title={tildify(cwd, info?.home)}>
               <Folder size={14} className="ns-folder-ico" />
@@ -123,11 +136,13 @@ export function ScheduleDialog({ spec, schedule }: { spec: { id?: string; cwd?: 
           </div>
         </div>
 
-        <div className="field">
-          <label>What Claude does each time</label>
-          <textarea className="textarea ns-prompt" rows={4} value={prompt} placeholder="Run the test suite, fix any failing tests you can, and summarise what changed. Do not push." onChange={(e) => setPrompt(e.target.value)} />
-          <div className="hint">Nobody is there to answer questions during a run, so say what to assume and what to leave alone.</div>
-        </div>
+        {kind !== 'dispatch' && (
+          <div className="field">
+            <label>What Claude does each time</label>
+            <textarea className="textarea ns-prompt" rows={4} value={prompt} placeholder="Run the test suite, fix any failing tests you can, and summarise what changed. Do not push." onChange={(e) => setPrompt(e.target.value)} />
+            <div className="hint">Nobody is there to answer questions during a run, so say what to assume and what to leave alone.</div>
+          </div>
+        )}
 
         <div className="field">
           <label>When</label>
@@ -153,6 +168,7 @@ export function ScheduleDialog({ spec, schedule }: { spec: { id?: string; cwd?: 
           </div>
         </div>
 
+        {kind !== 'dispatch' && (
         <div className="field">
           <label>While it runs, Claude may</label>
           <div className="radio-list">
@@ -166,7 +182,9 @@ export function ScheduleDialog({ spec, schedule }: { spec: { id?: string; cwd?: 
             ))}
           </div>
         </div>
+        )}
 
+        {kind !== 'dispatch' && (
         <button className={`ns-disclose${more ? ' open' : ''}`} onClick={() => setMore(!more)} aria-expanded={more}>
           <ChevronDown size={14} className="ns-disclose-chev" />
           <span className="ns-disclose-title">More</span>
@@ -177,7 +195,8 @@ export function ScheduleDialog({ spec, schedule }: { spec: { id?: string; cwd?: 
             </span>
           )}
         </button>
-        {more && (
+        )}
+        {kind !== 'dispatch' && more && (
           <div className="sd-more">
             <div className="ns-two">
               <div className="field">

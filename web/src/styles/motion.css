@@ -700,13 +700,13 @@ button.chip:active,
   -webkit-backdrop-filter: blur(22px) saturate(160%);
   backdrop-filter: blur(22px) saturate(160%);
 }
-.session:not(:has(> .mcp-notice-stack, > .session-error)) > .transcript {
+.session:not(:has(> .mcp-notice-stack, > .helpers-bar, > .session-error)) > .transcript {
   margin-top: calc(-1 * var(--header-h));
 }
-.session:not(:has(> .mcp-notice-stack, > .session-error)) > .transcript > .transcript-inner {
+.session:not(:has(> .mcp-notice-stack, > .helpers-bar, > .session-error)) > .transcript > .transcript-inner {
   padding-top: calc(var(--header-h) + 22px);
 }
-.session:not(:has(> .mcp-notice-stack, > .session-error)) > .transcript .session-empty {
+.session:not(:has(> .mcp-notice-stack, > .helpers-bar, > .session-error)) > .transcript .session-empty {
   padding-top: calc(12vh - var(--header-h) + 20px);
 }
 .composer-wrap::before {

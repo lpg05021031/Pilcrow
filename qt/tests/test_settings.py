@@ -45,7 +45,7 @@ def test_general_page_and_theme(app_client):
     c.sleep(100)
     assert s.isVisible() and not s.isWindow()
     nav = [b.text() for b in c.find(QPushButton, s.nav)]
-    assert nav == ["General", "Claude Code", "Skills", "MCP servers", "Memory", "Diagnostics"], nav
+    assert nav == ["General", "Repositories", "Claude Code", "Skills", "MCP servers", "Memory", "Diagnostics"], nav
     assert s.nav_buttons["general"].isChecked()
     assert "Theme" in _labels(c, s.frame)
     seg = s.page.theme
@@ -150,7 +150,7 @@ def test_new_session_dialog(app_client):
     c.sleep(300)
     assert s.path.text() == "/home/tester/code/pilcrow"
     chips = [ch.text() for ch in c.find(FolderChip, s.frame) if ch.isVisible()]
-    assert chips == ["website"], chips
+    assert chips == ["web", "api", "legacy-api", "website"], chips  # registered repositories first, by name
     assert "Options" in _labels(c, s.frame)
     assert _button(c, "Create session", s.frame)
     # The options fold open with the permission modes, model and effort.

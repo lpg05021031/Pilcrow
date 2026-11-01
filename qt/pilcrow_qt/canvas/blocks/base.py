@@ -99,6 +99,15 @@ class NodeBlock(Block):
 # ---------------------------------------------------------------- heads
 
 
+NEEDS_R = 12
+
+
+def paint_needs_frame(p: QPainter, rect: QRect, st: PaintState) -> None:
+    """The card of a step that waits on the person (a permission, a question, a plan): raised, with
+    the accent ring 1.5 px wide — the one signal, shared with the composer's border and the pill."""
+    rounded(p, rect, QColor(st.t.raised), QColor(st.t.accent_ring), NEEDS_R, width=1.5)
+
+
 def paint_head_tint(p: QPainter, rect: QRect, st: PaintState, strength: str = "fill_1") -> None:
     """The soft tint under a hovered head (``.tool-head:hover``)."""
     rounded(p, rect, theme.blend(getattr(st.t, strength), st.t.canvas), None, theme.R2)

@@ -108,11 +108,12 @@ def test_measures_match_app_css(app_client):
     assert _at(sb.search_row, c) == QPoint(10, 76) and sb.search_row.height() == 30
     assert _at(sb.page_overview, c) == QPoint(10, 118) and sb.page_overview.height() == 30
     assert _at(sb.page_inbox, c) == QPoint(10, 149)
+    assert _at(sb.page_dispatch, c) == QPoint(10, 180) and sb.page_dispatch.height() == 30
     heads = _heads(c)
-    assert _at(heads[0].btn, c) == QPoint(10, 201) and heads[0].btn.height() == 24
+    assert _at(heads[0].btn, c) == QPoint(10, 232) and heads[0].btn.height() == 24
     rows = _rows(c)
-    assert _at(rows[0], c) == QPoint(10, 225) and rows[0].height() == 30 and rows[0].width() == 248
-    assert _at(rows[1], c) == QPoint(10, 255)
+    assert _at(rows[0], c) == QPoint(10, 256) and rows[0].height() == 30 and rows[0].width() == 248
+    assert _at(rows[1], c) == QPoint(10, 286)
     assert _at(rows[0].title, c).x() == 18, ".side-row-main padding-left 8"
     assert _at(heads[1].btn, c).y() == _at(rows[3], c).y() + 30 + 14
     h = c.win.height()

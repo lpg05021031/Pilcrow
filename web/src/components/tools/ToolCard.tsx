@@ -12,6 +12,7 @@ import { CodeView, DiffView, AnsiText, hunksFromPatch } from '../Code';
 import { Markdown } from '../Markdown';
 import { PermissionCard } from './Permission';
 import { AgentBody } from './AgentBody';
+import { HelpersBody } from './HelpersBody';
 import { AskBody } from './AskBody';
 import { PlanBody } from './PlanBody';
 import { WorkflowInline, WorkflowMeta } from './WorkflowBody';
@@ -154,6 +155,7 @@ function renderBody(item: ToolItem, ctx: ToolCtx): ReactNode {
   const i = item.input || {};
   const s = item.structured;
   const r = item.result;
+  if (item.name.startsWith('mcp__helpers__')) return <HelpersBody item={item} ctx={ctx} />;
   switch (item.name) {
     case 'Bash':
     case 'PowerShell':

@@ -12,8 +12,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
-from PySide6.QtCore import QObject, QTimer, Signal
-from PySide6.QtGui import QGuiApplication, Qt
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtGui import QGuiApplication
 
 from . import theme as theme_mod
 from .lib.fmt import err_text, set_home
@@ -112,6 +112,7 @@ class Store(QObject):
     connected_changed = Signal(bool)
     info_changed = Signal(object)
     config_changed = Signal(object)
+    repos_changed = Signal(object)  # the repositories registry (REPOSITORIES.md), a list of entries
     sessions_changed = Signal(object)  # list of SessionSummary dicts
     active_changed = Signal(object)  # session id or None
     rt_changed = Signal(str)  # session id (coalesced to one per frame)
@@ -126,6 +127,9 @@ class Store(QObject):
     timeline_changed = Signal(str)
     sched_changed = Signal(int)
     inbox_unread_changed = Signal(int)
+    dispatch_changed = Signal(object)  # {"id": job id, "removed"?: bool} per change; None after a full reload
+    dispatch_view_changed = Signal(object)  # None = the board, "new" = the composer, else a job id
+    playbooks_changed = Signal(object)  # the list of playbooks
     gateway_models_changed = Signal(object)
     lightbox_changed = Signal(object)
     find_open_changed = Signal(bool)
@@ -160,6 +164,12 @@ class Store(QObject):
         self.page = "session"
         self.inbox_unread = 0
         self.sched_rev = 0
+        # dispatch: job summaries and their runs, kept in line by dispatch.changed deltas
+        self.jobs: Dict[str, Json] = {}
+        self.job_runs: Dict[str, Dict[str, Json]] = {}
+        self.jobs_loaded = False
+        self.dispatch_view: Optional[str] = None
+        self.playbooks: List[Json] = []
         self.gateway_models: Any = None  # None | "loading" | GatewayModels dict
         self.timeline: Dict[str, List[Json]] = {}
         self.lightbox: Optional[str] = None
@@ -170,6 +180,7 @@ class Store(QObject):
         self._flush_timer = QTimer(self)
         self._flush_timer.setSingleShot(True)
         self._flush_timer.setInterval(16)
+        self._flush_timer.setTimerType(Qt.TimerType.PreciseTimer)  # Windows: 16 ms, not the 15.6 ms grid's 31
         self._flush_timer.timeout.connect(self._flush_dirty)
         self._list_timer = QTimer(self)
         self._list_timer.setSingleShot(True)
@@ -204,6 +215,7 @@ class Store(QObject):
             m = self.models.get(sid)
             if m is None:
                 continue
+            m.refresh_inputs()  # the tool inputs that streamed since the last flush, parsed once
             r = self.rt.setdefault(sid, Runtime(loaded=True))
             r.rev = m.rev
             self.rt_changed.emit(sid)
@@ -298,7 +310,10 @@ class Store(QObject):
         rpc.on("sessions.changed", lambda _d: self.refresh_sessions())
         rpc.on("schedules.changed", lambda _d: self._bump_sched())
         rpc.on("memory.changed", lambda _d: self._bump_sched())
+        rpc.on("repos.changed", self._on_repos)
         rpc.on("inbox.changed", self._on_inbox)
+        rpc.on("dispatch.changed", self._on_dispatch)
+        rpc.on("dispatch.playbooks", lambda _d: self.load_playbooks())
         rpc.on("timeline.step", self._on_timeline_step)
         hints = QGuiApplication.styleHints()
         if hasattr(hints, "colorSchemeChanged"):
@@ -327,6 +342,8 @@ class Store(QObject):
             self.config_changed.emit(config)
             self.load_gateway_models()
             rpc.call("inbox.list").then(lambda r: self._set_inbox_unread(int((r or {}).get("unread") or 0)))
+            self.load_jobs()
+            self.load_playbooks()
             self._apply_config_ui(config)
             self.apply_theme()
             self.refresh_sessions()
@@ -390,11 +407,12 @@ class Store(QObject):
         r.st = {**r.st, **st}
         self.rt_changed.emit(sid)
         changed = False
+        vals = (r.st.get("status"), r.st.get("live"), len(r.st.get("pending") or []))
         for s in self.sessions:
-            if s.get("id") == sid:
-                s["status"] = st.get("status")
-                s["live"] = st.get("live")
-                s["pending"] = len(st.get("pending") or [])
+            if s.get("id") == sid and (s.get("status"), s.get("live"), s.get("pending")) != vals:
+                # only a change the list shows re-emits it: a lead's helpers ticking (HELPERS.md) or a
+                # cost update does not rebuild the sidebar
+                s["status"], s["live"], s["pending"] = vals
                 changed = True
         if changed:
             self.sessions_changed.emit(self.sessions)
@@ -435,6 +453,88 @@ class Store(QObject):
     def _set_inbox_unread(self, n: int) -> None:
         self.inbox_unread = n
         self.inbox_unread_changed.emit(n)
+
+    # ---------------------------------------------------------------- dispatch
+    def load_jobs(self) -> None:
+        def ok(lst: Any) -> None:
+            self.jobs = {str(j.get("id")): j for j in lst if isinstance(j, dict)} if isinstance(lst, list) else {}
+            self.jobs_loaded = True
+            self.dispatch_changed.emit(None)
+
+        rpc.call("dispatch.list").then(ok).catch(lambda _e: None)
+
+    def load_playbooks(self) -> None:
+        def ok(lst: Any) -> None:
+            self.playbooks = [p for p in lst if isinstance(p, dict)] if isinstance(lst, list) else []
+            self.playbooks_changed.emit(self.playbooks)
+
+        rpc.call("dispatch.playbooks").then(ok).catch(lambda _e: None)
+
+    def _on_dispatch(self, d: Json) -> None:
+        if not isinstance(d, dict):
+            return
+        jid = str(d.get("id") or "")
+        if not jid:
+            return
+        if d.get("removed"):
+            self.jobs.pop(jid, None)
+            self.job_runs.pop(jid, None)
+            if self.dispatch_view == jid:
+                self.dispatch_view = None
+                self.dispatch_view_changed.emit(None)
+            self.dispatch_changed.emit({"id": jid, "removed": True})
+            return
+        job = d.get("job")
+        if isinstance(job, dict):
+            self.jobs[jid] = job
+        runs = d.get("runs")
+        if isinstance(runs, list):
+            cur = self.job_runs.setdefault(jid, {})
+            if d.get("all"):
+                cur.clear()
+            for r in runs:
+                if isinstance(r, dict) and r.get("id"):
+                    cur[str(r["id"])] = r
+        self.dispatch_changed.emit({"id": jid})
+
+    def fetch_job(self, jid: str, done: Optional[Callable[[], None]] = None) -> None:
+        def ok(r: Any) -> None:
+            if not isinstance(r, dict):
+                return
+            job = r.get("job")
+            if isinstance(job, dict):
+                self.jobs[jid] = job
+            self.job_runs[jid] = {str(x["id"]): x for x in (r.get("runs") or []) if isinstance(x, dict) and x.get("id")}
+            self.dispatch_changed.emit({"id": jid})
+            if done is not None:
+                done()
+
+        self.call("dispatch.get", {"id": jid}, quiet=True).then(ok).catch(lambda _e: None)
+
+    def runs_of(self, jid: str) -> List[Json]:
+        """A job's runs in the server's order, the superseded (retried) ones left out."""
+        return [r for r in self.job_runs.get(jid, {}).values() if not r.get("superseded")]
+
+    @property
+    def dispatch_needs(self) -> int:
+        """Requests waiting across jobs, plus the canaries waiting to be read: the sidebar's badge."""
+        n = 0
+        for j in self.jobs.values():
+            if j.get("state") in ("running", "reviewing"):
+                n += int(j.get("needsAction") or 0) + (1 if j.get("canaryWaiting") else 0)
+        return n
+
+    def show_dispatch(self, view: Optional[str] = None) -> None:
+        """The board (None), the composer ("new") or a job's view (its id)."""
+        self.dispatch_view = view
+        if view not in (None, "new"):
+            self.fetch_job(str(view))
+        self.dispatch_view_changed.emit(view)
+        if self.page != "dispatch":
+            self.show_page("dispatch")
+
+    def open_job(self, jid: str) -> None:
+        self.show_dispatch(jid)
 
     def _on_timeline_step(self, d: Json) -> None:
         sid, step = d.get("id"), d.get("step")
@@ -503,6 +603,28 @@ class Store(QObject):
             self.apply_theme()
 
         return self.call("config.set", patch).then(done)
+
+    # ---- the repositories registry (REPOSITORIES.md)
+    @property
+    def repos(self) -> List[Json]:
+        return [e for e in (self.config or {}).get("repos") or [] if isinstance(e, dict)]
+
+    def _on_repos(self, d: Json) -> None:
+        if self.config is None:
+            return
+        self.config = {**self.config, "repos": list((d or {}).get("repos") or [])}
+        self.config_changed.emit(self.config)
+        self.repos_changed.emit(self.config["repos"])
+
+    def repo_for(self, path: str) -> Optional[Json]:
+        """The registered repository whose folder holds ``path`` (the deepest one), or None."""
+        p = str(path or "").rstrip("/")
+        best: Optional[Json] = None
+        for e in self.repos:
+            ep = str(e.get("path") or "").rstrip("/")
+            if ep and (p == ep or p.startswith(ep + "/")) and (best is None or len(ep) > len(str(best.get("path")))):
+                best = e
+        return best
 
     def set_ui(self, **patch: Any) -> None:
         for k, v in patch.items():
@@ -623,11 +745,13 @@ class Store(QObject):
                 m.push_all(msgs[i : i + LOAD_SLICE])
                 nxt = i + LOAD_SLICE
                 if nxt < len(msgs):
+                    m.refresh_inputs()
                     r.rev = m.rev
                     self.rt_changed.emit(sid)
                     QTimer.singleShot(0, lambda: slice_(nxt))
                     return
                 m.push_all(inflight)
+                m.refresh_inputs()
                 self._opening.discard(sid)
                 r.loaded, r.loading, r.rev = True, False, m.rev
                 self.rt_changed.emit(sid)
@@ -749,7 +873,7 @@ class Store(QObject):
     def rename_session(self, sid: str, title: str) -> Call:
         return self.call("session.rename", {"id": sid, "title": title}).then(lambda _r: self.refresh_sessions(True))
 
-    def delete_session(self, sid: str, remove_worktree: bool = False) -> Call:
+    def delete_session(self, sid: str, remove_worktree: bool = False, remove_helpers: bool = False) -> Call:
         def done(_r: Any) -> None:
             self.models.pop(sid, None)
             self.rt.pop(sid, None)
@@ -760,7 +884,9 @@ class Store(QObject):
             self.sessions_changed.emit(self.sessions)
             self.refresh_sessions(True)
 
-        return self.call("session.delete", {"id": sid, "removeWorktree": remove_worktree}).then(done)
+        return self.call(
+            "session.delete", {"id": sid, "removeWorktree": remove_worktree, "removeHelpers": remove_helpers}
+        ).then(done)
 
     def archive_session(self, sid: str, archived: bool) -> Call:
         return self.call("session.archive", {"id": sid, "archived": archived}).then(

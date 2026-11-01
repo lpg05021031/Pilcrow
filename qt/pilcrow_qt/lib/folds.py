@@ -45,9 +45,25 @@ def tool_word(t: ToolItem) -> str:
         return "command"
     if n in ("Task", "Agent", "Workflow", "RunWorkflow"):
         return "agent"
+    if n.startswith("mcp__helpers__"):
+        return "helper"
+    if n == "AskUserQuestion":
+        return "ask"
+    if n == "ExitPlanMode":
+        return "plan"
     if n.startswith("mcp__"):
         return "mcp"
     return "other"
+
+
+HELPER_LIVE = {
+    "start": "Starting a helper",
+    "wait": "Waiting for helpers",
+    "read": "Reading a helper's result",
+    "send": "Telling a helper",
+    "stop": "Stopping a helper",
+    "list": "Listing helpers",
+}
 
 
 def live_label(work: List[Item]) -> Optional[str]:
@@ -69,6 +85,12 @@ def live_label(work: List[Item]) -> Optional[str]:
                 return "Running an agent"
             if w == "mcp":
                 return "Using a connector"
+            if w == "helper":
+                return HELPER_LIVE.get(it.name[len("mcp__helpers__") :], "Working with helpers")
+            if w == "ask":
+                return "Asking you a question"
+            if w == "plan":
+                return "Waiting for your review of the plan"
             return f"Using {it.name}"
         if it.kind == "thinking" and it.streaming:
             return "Thinking"
@@ -86,11 +108,21 @@ def work_summary(work: List[Item]) -> Summary:
     tools = [it for it in work if it.kind == "tool"]
     files: Set[str] = set()
     reads = searches = commands = agents = mcp = other = failed = 0
+    starts = helper_steps = asks = plans = 0
     for t in tools:
         if t.status in ("error", "denied"):
             failed += 1
         w = tool_word(t)
-        if w == "edit":
+        if w == "helper":
+            if t.name.endswith("__start"):
+                starts += 1
+            else:
+                helper_steps += 1
+        elif w == "ask":
+            asks += 1
+        elif w == "plan":
+            plans += 1
+        elif w == "edit":
             files.add(str_(t.input, "file_path") or str_(t.input, "notebook_path") or t.id)
         elif w == "read":
             reads += 1
@@ -118,6 +150,14 @@ def work_summary(work: List[Item]) -> Summary:
         parts.append(f"searched {'once' if searches == 1 else f'{searches} times'}")
     if agents:
         parts.append("ran an agent" if agents == 1 else f"ran {agents} agents")
+    if starts:
+        parts.append(f"started {'a helper' if starts == 1 else f'{starts} helpers'}")
+    if helper_steps and not starts:
+        parts.append("worked with helpers")
+    if asks:
+        parts.append(f"asked you {'a question' if asks == 1 else f'{asks} questions'}")
+    if plans:
+        parts.append("proposed a plan")
     if mcp:
         parts.append(f"used {'a connector' if mcp == 1 else f'{mcp} connector tools'}")
     if other:
@@ -178,7 +218,18 @@ class Tally:
 
 def tally(steps: List[Item]) -> Tally:
     tools = [it for it in steps if it.kind == "tool"]
-    counts = {"edit": 0, "command": 0, "read": 0, "search": 0, "agent": 0, "mcp": 0, "other": 0}
+    counts = {
+        "edit": 0,
+        "command": 0,
+        "read": 0,
+        "search": 0,
+        "agent": 0,
+        "helper": 0,
+        "ask": 0,
+        "plan": 0,
+        "mcp": 0,
+        "other": 0,
+    }
     failed = 0
     for t in tools:
         if t.status in ("error", "denied"):
@@ -191,6 +242,9 @@ def tally(steps: List[Item]) -> Tally:
         ("read", "read", "reads"),
         ("search", "search", "searches"),
         ("agent", "agent", "agents"),
+        ("helper", "helper step", "helper steps"),
+        ("ask", "question", "questions"),
+        ("plan", "plan", "plans"),
         ("mcp", "connector call", "connector calls"),
     ):
         n = counts[key]

@@ -10,7 +10,7 @@ hairline round them; a 9px drag handle straddles each seam and takes 1px of the 
 from __future__ import annotations
 
 from collections import OrderedDict
-from typing import Optional
+from typing import Optional, Tuple
 
 import shiboken6
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
@@ -36,7 +36,9 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._title = title
         self.setWindowTitle(title)
-        self.resize(1480, 940)
+        # 1480×940 where it fits; smaller on a small screen (a 1366×768 laptop, a 125 % 1080p display), so the
+        # panel and the composer are on screen from the first frame rather than after a resize
+        self.resize(*fit_size())
         self.setMinimumSize(900, 560)
 
         central = QWidget()
@@ -95,6 +97,7 @@ class MainWindow(QMainWindow):
         self.panel_resizer.dragged.connect(self._drag_panel)
         self.panel_resizer.released.connect(lambda: store.set_ui(panel_w=self.panel_host.width()))
         self.body.set_parts(self.sidebar, self.main, self.panel_host, self.side_resizer, self.panel_resizer)
+        restore_geometry(self)
 
         # pages: welcome / session / overview / inbox (built lazily where heavy)
         from .welcome import Welcome
@@ -105,6 +108,7 @@ class MainWindow(QMainWindow):
         self._session_views: OrderedDict[str, QWidget] = OrderedDict()
         self.overview: Optional[QWidget] = None
         self.inbox: Optional[QWidget] = None
+        self.dispatch: Optional[QWidget] = None
         self.panel: Optional[QWidget] = None
 
         self.boot = Boot(self)
@@ -180,6 +184,13 @@ class MainWindow(QMainWindow):
                 self.inbox = InboxPage()
                 self.pages.addWidget(self.inbox)
             self.pages.setCurrentWidget(self.inbox)
+        elif page == "dispatch":
+            if self.dispatch is None:
+                from .dispatch.page import DispatchPage
+
+                self.dispatch = DispatchPage()
+                self.pages.addWidget(self.dispatch)
+            self.pages.setCurrentWidget(self.dispatch)
         elif session is not None:
             from .session_view import SessionView
 
@@ -215,11 +226,24 @@ class MainWindow(QMainWindow):
             if store.page == "overview"
             else "Inbox — "
             if store.page == "inbox"
+            else "Dispatch — "
+            if store.page == "dispatch"
             else f"{session.get('title')} — "
             if session
             else ""
         )
         self.setWindowTitle(f"{f'({waiting}) ' if waiting else ''}{head}{self._title}")
+
+    def showEvent(self, e) -> None:  # noqa: N802
+        super().showEvent(e)
+        if not getattr(self, "_framed", False):
+            self._framed = True
+            apply_windows_frame(self)
+            bind(theme.theme.changed, self, lambda _t: apply_windows_frame(self))
+
+    def closeEvent(self, e) -> None:  # noqa: N802
+        save_geometry(self)
+        super().closeEvent(e)
 
     def _on_ui(self) -> None:
         ui = store.ui
@@ -322,6 +346,10 @@ class MainWindow(QMainWindow):
         sc("Ctrl+-", lambda: store.zoom(-1))
         sc("Ctrl+0", lambda: store.zoom(0))
         sc("Ctrl+Shift+O", lambda: store.show_page("session" if store.page == "overview" else "overview"))
+        sc(
+            "Ctrl+Shift+D",
+            lambda: store.show_page("session") if store.page == "dispatch" else store.show_dispatch(None),
+        )
         sc("Ctrl+\\", lambda: store.set_ui(panel=not store.ui.panel))
         sc("Ctrl+,", lambda: store.set_dialog("settings", True))
         sc("Ctrl+Q", self._quit)
@@ -376,6 +404,79 @@ class MainWindow(QMainWindow):
 
     def _quit(self) -> None:
         store.call("app.quit").then(lambda _r: self.close()).catch(lambda _e: self.close())
+
+
+def fit_size(want_w: int = 1480, want_h: int = 940) -> Tuple[int, int]:
+    """The default window size, clamped to the primary screen's available area with a margin."""
+    from PySide6.QtGui import QGuiApplication
+
+    screen = QGuiApplication.primaryScreen()
+    if screen is None:
+        return want_w, want_h
+    a = screen.availableGeometry()
+    return min(want_w, max(900, a.width() - 48)), min(want_h, max(560, a.height() - 48))
+
+
+def _settings():
+    """QSettings when the application has a name (the real app); tests run without persistence."""
+    from PySide6.QtCore import QCoreApplication, QSettings
+
+    if not QCoreApplication.organizationName():
+        return None
+    return QSettings()
+
+
+def restore_geometry(win: QMainWindow) -> None:
+    """Where the window was last time, when that still lands on a screen (Qt checks); else the fit."""
+    st = _settings()
+    if st is None:
+        return
+    g = st.value("window/geometry")
+    if g is not None:
+        try:
+            win.restoreGeometry(g)
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def save_geometry(win: QMainWindow) -> None:
+    st = _settings()
+    if st is not None:
+        st.setValue("window/geometry", win.saveGeometry())
+
+
+def apply_windows_frame(win: QMainWindow) -> None:
+    """Windows: the native title bar in the theme's colours (dark mode, caption, border, text) and
+    rounded corners on Windows 11 — through DWM, like the WebView2 shell does. A no-op elsewhere."""
+    import sys
+
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+
+        from PySide6.QtGui import QColor
+
+        hwnd = int(win.winId())
+        dwm = ctypes.windll.dwmapi
+        t = theme.tokens()
+
+        def put(attr: int, value: int) -> int:
+            v = ctypes.c_int(value)
+            return dwm.DwmSetWindowAttribute(ctypes.c_void_p(hwnd), attr, ctypes.byref(v), 4)
+
+        def colorref(hex_color: str) -> int:
+            c = QColor(hex_color)
+            return c.red() | (c.green() << 8) | (c.blue() << 16)
+
+        if put(20, 1 if t.dark else 0) != 0:  # DWMWA_USE_IMMERSIVE_DARK_MODE (19 on older Windows 10)
+            put(19, 1 if t.dark else 0)
+        put(35, colorref(t.chrome))  # DWMWA_CAPTION_COLOR (Windows 11)
+        put(34, colorref(t.chrome))  # DWMWA_BORDER_COLOR
+        put(36, colorref(t.text))  # DWMWA_TEXT_COLOR
+        put(33, 2)  # DWMWA_WINDOW_CORNER_PREFERENCE = DWMWCP_ROUND (Windows 11; ignored before)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def custom_titlebar() -> bool:

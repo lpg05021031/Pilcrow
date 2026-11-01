@@ -216,3 +216,138 @@ def test_running_cards_and_workflow_phases(app_client):
     c.store.rt[SID].st["tasks"] = []
     c.store.rt_changed.emit(SID)
     c.wait_until(lambda: not page.workflow_cards(), 3, "cleared")
+
+
+def test_progress_updates_the_workflow_card_in_place(app_client):
+    """A run's progress (ten times a second from the server, coalesced) updates the card's figures and rows
+    in place: the card and its phase rows stay, and only an agent whose state changed gets a new row."""
+    from PySide6.QtCore import QEvent, QObject
+    from PySide6.QtWidgets import QApplication
+
+    from pilcrow_qt.widgets.panels.tasks import AgentRow, PhaseRow
+
+    c = app_client
+    now = time.time() * 1000
+
+    def agents(tick: int):
+        out = []
+        for i in range(20):
+            a = {
+                "type": "workflow_agent",
+                "index": i,
+                "label": f"a{i}",
+                "phaseIndex": i // 10,
+                "state": "start",
+                "queuedAt": now,
+            }
+            if tick >= i // 2:
+                a.update(
+                    state="progress",
+                    startedAt=now,
+                    lastProgressAt=now + tick * 100,
+                    lastToolName="Read",
+                    lastToolSummary=f"Read mod{tick}.ts",
+                    totalTokens=tick * 500,
+                )
+            if tick >= i // 2 + 8:
+                a.update(state="done", resultPreview=f"a{i} done")
+            out.append(a)
+        return out
+
+    def wf(tick: int):
+        return {
+            "id": "task-wf2",
+            "type": "local_workflow",
+            "status": "running",
+            "workflowName": "Twenty",
+            "startedAt": now,
+            "usage": {"total_tokens": tick * 1000, "tool_uses": tick, "duration_ms": tick * 100},
+            "workflow": {
+                "phases": [{"index": 0, "title": "A"}, {"index": 1, "title": "B"}],
+                "agents": agents(tick),
+                "logs": [{"at": now, "message": "started"}],
+                "updatedAt": now + tick,
+            },
+        }
+
+    c.open(SID)
+    c.store.rt[SID].st["tasks"] = [wf(0)]
+    c.store.rt_changed.emit(SID)
+    page = _open_tasks(c)
+    c.wait_until(lambda: page.workflow_cards(), 5, "card")
+    card = page.workflow_cards()[0]
+    phases = c.find(PhaseRow, card)
+    assert len(phases) == 2 and len(c.find(AgentRow, card)) == 20
+
+    class Made(QObject):
+        def __init__(self) -> None:
+            super().__init__()
+            self.n = 0
+
+        def eventFilter(self, obj, e) -> bool:  # noqa: N802
+            if e.type() == QEvent.Type.ChildAdded and hasattr(obj, "isAncestorOf"):
+                try:
+                    if obj is page or page.isAncestorOf(obj):
+                        self.n += 1
+                except RuntimeError:
+                    pass
+            return False
+
+    made = Made()
+    QApplication.instance().installEventFilter(made)
+    try:
+        for tick in range(1, 4):  # progress only: no agent changes state (a0, a1 start at tick 0; a2, a3 at tick 1…)
+            c.store.rt[SID].st["tasks"] = [wf(tick)]
+            c.store.rt_changed.emit(SID)
+            c.sleep(600)  # the panel refreshes at most twice a second
+    finally:
+        QApplication.instance().removeEventFilter(made)
+    assert page.workflow_cards()[0] is card, "the card stayed"
+    assert c.find(PhaseRow, card) == phases, "the phase rows stayed"
+    assert card.sub.text().startswith("0 of 20 agents done · 8 running"), card.sub.text()
+    rows = c.find(AgentRow, card)
+    assert rows[0].what_lbl.text() == "Read mod3.ts", "the row's text followed the tick"
+    # ticks 1..3 start agents a2..a7 (queued → running): six rows rebuilt, nothing else
+    assert made.n <= 6 * 12, made.n
+    # a tick that finishes agents replaces their rows, and the figures follow
+    c.store.rt[SID].st["tasks"] = [wf(9)]
+    c.store.rt_changed.emit(SID)
+    c.wait_until(lambda: card.sub.text().startswith("4 of 20 agents done"), 3, card.sub.text)
+    assert page.workflow_cards()[0] is card
+    c.store.rt[SID].st["tasks"] = []
+    c.store.rt_changed.emit(SID)
+    c.wait_until(lambda: not page.workflow_cards(), 3, "cleared")
+
+
+def test_the_mock_workflow_runs_through_the_panel_and_the_card(app_client):
+    """The mock's run of eight agents: the Tasks panel shows the card live and settled; the conversation's
+    Workflow card follows the run while it goes (its body reads the task, not only the tool result)."""
+    from pilcrow_qt.widgets.panels.tasks import AgentRow
+
+    c = app_client
+    c.call("mock.pace", {"ms": 0})
+    c.open(SID)
+    c.store.set_ui(panel=True, panel_tab="tasks", panel_w=560)
+    c.wait_until(lambda: c.win.panel is not None and c.win.panel.page("tasks") is not None, 5, "tasks tab")
+    page = c.win.panel.page("tasks")
+    c.call("session.send", {"id": SID, "text": "run the review workflow"})
+    c.wait_until(
+        lambda: page.workflow_cards() and page.workflow_cards()[0].task.get("workflowName") == "review-changes",
+        15,
+        "the card",
+    )
+    c.wait_until(lambda: c.store.rt[SID].status == "idle", 20, "the run")
+    c.sleep(700)
+    card = page.workflow_cards()[0]
+    assert card.task.get("status") == "completed"
+    assert card.counts.done == 7 and card.counts.error == 1
+    assert card.sub.text().startswith("7 of 8 agents done · 1 failed")
+    card._toggle()  # a settled run is folded; open it to the rows
+    c.sleep(300)
+    labels = [a.label.text() for a in c.find(AgentRow, card)]
+    assert labels[:3] == ["review:bugs", "review:perf", "review:tests"]
+    # the conversation's card settled with the run's figures
+    items = list(c.store.models[SID].items)
+    wf_item = next(it for it in items if it.kind == "tool" and it.name == "Workflow")
+    assert wf_item.status == "done"
+    assert c.shot("tasks-workflow-mock").exists()

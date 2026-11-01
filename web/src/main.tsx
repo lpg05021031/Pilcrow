@@ -5,6 +5,7 @@ import './styles/base.css';
 import './styles/app.css';
 import './styles/transcript.css';
 import './styles/panels.css';
+import './styles/dispatch.css';
 import './styles/motion.css';
 import { App } from './components/App';
 import { initApp, applyTheme } from './lib/store';

@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Check } from 'lucide-react';
 import type { ToolItem } from '../../lib/transcript';
 import type { PermissionRequest } from '../../lib/types';
 import { respond } from '../../lib/store';
 import { Markdown } from '../Markdown';
 import type { ToolCtx } from './ToolCard';
+import { typingElsewhere } from './Permission';
 
 interface Q {
   question: string;
@@ -25,6 +26,31 @@ export function AskBody({ item, perm, ctx }: { item: ToolItem; perm?: Permission
   const [busy, setBusy] = useState(false);
 
   const complete = useMemo(() => questions.every((_, qi) => (sel[qi]?.length || 0) > 0 || (other[qi] || '').trim()), [questions, sel, other]);
+  const toggle = (qi: number, label: string, multi: boolean) => {
+    setSel((s) => {
+      const cur = s[qi] || [];
+      const next = multi ? (cur.includes(label) ? cur.filter((x) => x !== label) : [...cur, label]) : [label];
+      return { ...s, [qi]: next };
+    });
+    if (!multi) setOther((o) => ({ ...o, [qi]: '' }));
+  };
+
+  const first = Boolean(perm) && [...ctx.pending.values()][0]?.requestId === perm?.requestId;
+  // number keys pick an option when one question is asked (the keys are shown on the rows)
+  const keyed = Boolean(perm) && first && questions.length === 1;
+  useEffect(() => {
+    if (!keyed || busy) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (typingElsewhere(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
+      const n = Number(e.key);
+      const q = questions[0];
+      if (!(n >= 1 && n <= Math.min(9, q.options.length))) return;
+      toggle(0, q.options[n - 1].label, Boolean(q.multiSelect));
+      e.preventDefault();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
 
   if (!perm) {
     const resultText = item.result?.text || '';
@@ -52,15 +78,6 @@ export function AskBody({ item, perm, ctx }: { item: ToolItem; perm?: Permission
     );
   }
 
-  const toggle = (qi: number, label: string, multi: boolean) => {
-    setSel((s) => {
-      const cur = s[qi] || [];
-      const next = multi ? (cur.includes(label) ? cur.filter((x) => x !== label) : [...cur, label]) : [label];
-      return { ...s, [qi]: next };
-    });
-    if (!multi) setOther((o) => ({ ...o, [qi]: '' }));
-  };
-
   const submit = async () => {
     if (!complete || busy) return;
     setBusy(true);
@@ -86,6 +103,7 @@ export function AskBody({ item, perm, ctx }: { item: ToolItem; perm?: Permission
   return (
     <div className="askcard live">
       <div className="ask-head">
+        <span className="wait-dot" aria-hidden="true" />
         <span>{questions.length > 1 ? `Claude has ${questions.length} questions` : 'Claude has a question'}</span>
       </div>
       <div className={`ask-body${preview ? ' with-preview' : ''}`}>
@@ -107,6 +125,7 @@ export function AskBody({ item, perm, ctx }: { item: ToolItem; perm?: Permission
                         <span className="ask-opt-label">{o.label}</span>
                         {o.description && <span className="ask-opt-desc">{o.description}</span>}
                       </span>
+                      {keyed && oi < 9 && <kbd className="perm-key ask-key">{oi + 1}</kbd>}
                     </button>
                   );
                 })}

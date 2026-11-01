@@ -133,8 +133,14 @@ class Sidebar(QWidget):
         self.page_inbox = NavButton("inbox", "Inbox")
         self.page_inbox.setToolTip("Results of scheduled sessions")
         self.page_inbox.clicked.connect(lambda: store.show_page("session" if store.page == "inbox" else "inbox"))
+        self.page_dispatch = NavButton("send", "Dispatch")
+        self.page_dispatch.setToolTip("One job across many repositories (Ctrl+Shift+D)")
+        self.page_dispatch.clicked.connect(
+            lambda: store.show_page("session") if store.page == "dispatch" else store.show_dispatch(None)
+        )
         pl.addWidget(self.page_overview)
         pl.addWidget(self.page_inbox)
+        pl.addWidget(self.page_dispatch)
         tl.addWidget(pages)
         root.addWidget(top)
 
@@ -178,6 +184,8 @@ class Sidebar(QWidget):
         bind(store.ui_changed, self, lambda _u: self._on_ui())
         bind(store.page_changed, self, lambda _p: self._on_page())
         bind(store.inbox_unread_changed, self, lambda _n: self._on_page())
+        bind(store.dispatch_changed, self, lambda _d: self.rebuild())
+        bind(store.repos_changed, self, lambda _r: self.rebuild())
         bind(store.config_changed, self, lambda _c: self._on_config())
         bind(theme.theme.changed, self, lambda _t: self._on_config())
         self._on_config()
@@ -222,6 +230,8 @@ class Sidebar(QWidget):
     def _on_page(self) -> None:
         self.page_overview.set_on(store.page == "overview")
         self.page_inbox.set_on(store.page == "inbox")
+        self.page_dispatch.set_on(store.page == "dispatch")
+        self.page_dispatch.set_count(store.dispatch_needs, "needs")
         working = sum(1 for s in store.sessions if not s.get("archived") and s.get("status") in ("running", "starting"))
         needs = sum(
             1
@@ -252,6 +262,39 @@ class Sidebar(QWidget):
                 for s in lst
                 if fuzzy_score(q, f"{s.get('title', '')} {basename(s.get('project') or s.get('cwd') or '')}")
             ]
+        # A dispatch job's runs sit under their job, collapsed, not among the projects.
+        job_sessions: Dict[str, List[Json]] = {}
+        for s in lst:
+            d = s.get("dispatch")
+            if isinstance(d, dict) and d.get("jobId") and s.get("id") != active:
+                job_sessions.setdefault(str(d["jobId"]), []).append(s)
+        lst = [s for s in lst if not (isinstance(s.get("dispatch"), dict) and s.get("id") != active)]
+        # A lead's helpers sit under it, indented, not among the projects (HELPERS.md §6.3); a helper
+        # whose lead is not listed stays where its folder puts it.
+        listed = {str(s.get("id")) for s in lst}
+        helper_sessions: Dict[str, List[Json]] = {}
+        for s in lst:
+            h = s.get("helper")
+            if isinstance(h, dict) and str(h.get("leadId")) in listed and s.get("id") != active:
+                helper_sessions.setdefault(str(h["leadId"]), []).append(s)
+        nested = {str(s.get("id")) for hs in helper_sessions.values() for s in hs}
+        lst = [s for s in lst if str(s.get("id")) not in nested]
+        warmth = {"requires_action": 3, "running": 2, "starting": 2}
+
+        def with_warmth(s: Json) -> Json:
+            """A lead's dot takes the warmest state of itself and its helpers."""
+            hs = helper_sessions.get(str(s.get("id")))
+            if not hs:
+                return s
+            best = max(hs, key=lambda x: warmth.get(str(x.get("status")), 0))
+            if warmth.get(str(best.get("status")), 0) > warmth.get(str(s.get("status")), 0):
+                return {
+                    **s,
+                    "status": best.get("status"),
+                    "pending": max(int(s.get("pending") or 0), int(best.get("pending") or 0)),
+                }
+            return s
+
         # The conversation on screen never jumps into "Needs you": you are already looking at it.
         attention = [
             s
@@ -275,7 +318,7 @@ class Sidebar(QWidget):
                 row.hide()
                 row.setParent(None)
                 row.deleteLater()
-        keys = {k for k, _ in ordered}
+        keys = {k for k, _ in ordered} | {f"job:{jid}" for jid in job_sessions}
         for key in list(self._heads):
             if key not in keys:
                 head = self._heads.pop(key)
@@ -297,35 +340,58 @@ class Sidebar(QWidget):
                 lb = self._labels[key] = SectionLabel(text, tone)
             return lb
 
-        def row_for(s: Json, show_project: bool = False) -> SessionRow:
+        def row_for(s: Json, show_project: bool = False, indent: bool = False) -> SessionRow:
             sid = str(s.get("id"))
             r = self._rows.get(sid)
             if r is None:
                 r = self._rows[sid] = SessionRow(sid)
-            r.update(s, active=sid == active, unread=bool(store.unread.get(sid)), show_project=show_project, q=q)
+            r.update(
+                s,
+                active=sid == active,
+                unread=bool(store.unread.get(sid)),
+                show_project=show_project,
+                q=q,
+                indent=indent,
+            )
             return r
+
+        def rows_for(s: Json, show_project: bool = False) -> List[SessionRow]:
+            """A session's row, then its helpers' rows indented under it."""
+            out = [row_for(with_warmth(s), show_project)]
+            for h in helper_sessions.get(str(s.get("id")), []):
+                out.append(row_for(h, False, True))
+            return out
 
         if attention:
             wanted.append(label_for("attention", "Needs you", "accent"))
             for s in attention:
-                wanted.append(row_for(s, True))
+                wanted.extend(rows_for(s, True))
         if pinned:
             wanted.append(label_for("pinned", "Pinned"))
             for s in pinned:
-                wanted.append(row_for(s, True))
+                wanted.extend(rows_for(s, True))
         for key, items in ordered:
             head = self._heads.get(key)
+            # a registered repository (REPOSITORIES.md) is called by the person's name for it
+            reg = store.repo_for(key)
+            label_text = (
+                str(reg.get("name"))
+                if reg and str(reg.get("path") or "").rstrip("/") == key.rstrip("/")
+                else basename(key)
+            )
             if head is None:
-                head = self._heads[key] = GroupHead(basename(key), key)
+                head = self._heads[key] = GroupHead(label_text, key)
                 head.toggled.connect(lambda k=key: self._toggle_group(k))
                 head.add_clicked.connect(lambda k=key: self._new_in(k))
+            elif head.btn.text() != label_text:
+                head.btn.setText(label_text)
             head.set_collapsed(self._collapsed.get(key, False))
             wanted.append(head)
             if self._collapsed.get(key):
                 continue
             limit = len(items) if (self._show_all.get(key) or q) else 6
             for s in items[:limit]:
-                wanted.append(row_for(s))
+                wanted.extend(rows_for(s))
             if len(items) > limit:
                 more = self._mores.get(key)
                 if more is None:
@@ -335,6 +401,23 @@ class Sidebar(QWidget):
                 if more.text() != text:
                     more.setText(text)
                 wanted.append(more)
+        for jid, items in sorted(job_sessions.items(), key=lambda kv: -(kv[1][0].get("lastModified") or 0)):
+            key = f"job:{jid}"
+            head = self._heads.get(key)
+            if head is None:
+                name = str(
+                    (store.jobs.get(jid) or {}).get("name") or (items[0].get("dispatch") or {}).get("name") or "Job"
+                )
+                head = self._heads[key] = GroupHead(name, name, icon="arrow-up-right", add_tip=f"Open the job {name}")
+                head.toggled.connect(lambda k=key: self._toggle_group(k))
+                head.add_clicked.connect(lambda j=jid: store.open_job(j))
+                self._collapsed.setdefault(key, True)
+            head.set_collapsed(self._collapsed.get(key, True))
+            wanted.append(head)
+            if self._collapsed.get(key, True):
+                continue
+            for s in items:
+                wanted.append(row_for(s))
         note = ""
         if store.sessions_loaded and not sessions:
             note = "No sessions yet. Start one to see it here."
@@ -731,7 +814,15 @@ class GroupHead(QWidget):
     toggled = Signal()
     add_clicked = Signal()
 
-    def __init__(self, label_text: str, path: str, collapsed: bool = False, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self,
+        label_text: str,
+        path: str,
+        collapsed: bool = False,
+        parent: Optional[QWidget] = None,
+        icon: str = "plus",
+        add_tip: str = "",
+    ) -> None:
         super().__init__(parent)
         self.last_modifiers = Qt.KeyboardModifier.NoModifier
         self.setFixedHeight(GROUP_GAP + HEAD_H)
@@ -742,7 +833,9 @@ class GroupHead(QWidget):
         self.btn.setToolTip(tildify(path, (store.info or {}).get("home")))
         self.btn.clicked.connect(self.toggled.emit)
         lay.addWidget(self.btn, 1)
-        self.add = IconBtn("plus", f"New session in {label_text} · Shift+click for options", 13, 22, "text_3", True)
+        self.add = IconBtn(
+            icon, add_tip or f"New session in {label_text} · Shift+click for options", 13, 22, "text_3", True
+        )
         self.add.clicked.connect(self._add)
         lay.addWidget(self.add)
 
@@ -921,12 +1014,17 @@ class SessionRow(QWidget):
         bind(theme.theme.changed, self, lambda _t: self._paint())
 
     # ---- data
-    def update(self, s: Json, active: bool, unread: bool, show_project: bool, q: str) -> None:  # type: ignore[override]
-        sig = (s, active, unread, show_project, q)
+    def update(  # type: ignore[override]
+        self, s: Json, active: bool, unread: bool, show_project: bool, q: str, indent: bool = False
+    ) -> None:
+        sig = (s, active, unread, show_project, q, indent)
         if sig == self._sig:
             self.refresh_time()  # the same row: only the clock moved
             return
-        self._sig = (dict(s), active, unread, show_project, q)
+        self._sig = (dict(s), active, unread, show_project, q, indent)
+        lay = self.layout()
+        if lay is not None:
+            lay.setContentsMargins(PAD + (18 if indent else 0), 0, 4, 0)  # a helper sits under its lead
         self.s = s
         self._active, self._unread, self._show_project = active, unread, show_project
         self._q = q

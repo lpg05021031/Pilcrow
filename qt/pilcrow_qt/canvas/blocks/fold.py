@@ -51,6 +51,7 @@ from .misc import (
     notice_mode,
     result_notice,
 )
+from .note import FromLeadBlock, NoteBlock
 from .prose import TextGroup
 from .thinking import ThinkingBlock
 from .tool import SpecialIsland, ToolBlock, is_special
@@ -70,6 +71,11 @@ def _perm(ctx: ToolCtx, item: Item) -> Optional[Json]:
 def make_row(item: Item, ctx: ToolCtx, in_work: bool, sid: str) -> Block:
     k = item.kind
     if k == "user":
+        # a note Pilcrow wrote (a helper's news to its lead) is drawn apart from the person's messages
+        if getattr(item, "note", ""):
+            return NoteBlock(item, sid)
+        if getattr(item, "from_", ""):
+            return FromLeadBlock(item, sid)
         return UserBlock(item, sid, ctx.cwd)
     if k == "text":
         return TextGroup(item, ctx.cwd, quiet=in_work)
@@ -118,6 +124,8 @@ def sync_row(b: Block, item: Item, ctx: ToolCtx) -> List[Block]:
             return []
         if isinstance(b, ThinkingBlock) and b.view_mode == ctx.view:
             return []
+    if isinstance(b, (NoteBlock, FromLeadBlock)):
+        return [b] if b.sync(item) else []
     if isinstance(b, UserBlock):
         return [b] if b.sync(item) else []
     if isinstance(b, TextGroup):
@@ -152,25 +160,25 @@ def reconcile(
 ) -> List[Block]:
     """Make a group's children match ``keys`` in order: the common prefix is kept and updated (the
     first ``settled`` of them without even asking), the rest is rebuilt from the first difference.
-    Returns the blocks whose content changed."""
+    Returns the blocks whose content changed. The cost is the part after ``settled``: a flush with a
+    long settled history behind it touches the tail only."""
     changed: List[Block] = []
-    have = [c.key for c in group.children]
-    keep = 0
-    for keep in range(min(len(keys), len(have))):  # noqa: B007
-        if keys[keep] != have[keep]:
-            break
-    else:
-        keep = min(len(keys), len(have))
-    if keep < len(have):
+    kids = group.children
+    n_have, n_keys = len(kids), len(keys)
+    n = min(n_have, n_keys)
+    keep = min(settled, n)
+    if keep and kids[keep - 1].key != keys[keep - 1]:
+        keep = 0  # the contract did not hold (the history itself changed): compare everything
+    while keep < n and kids[keep].key == keys[keep]:
+        keep += 1
+    if keep < n_have:
         group.truncate(keep)
-    for i in range(len(keys)):
-        if i < keep:
-            if i >= settled:
-                changed.extend(update(group.children[i], i))
-        else:
-            b = make(i)
-            group.append(b)
-            changed.append(b)
+    for i in range(min(settled, keep), keep):
+        changed.extend(update(kids[i], i))
+    for i in range(keep, n_keys):
+        b = make(i)
+        group.append(b)
+        changed.append(b)
     return changed
 
 

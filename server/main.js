@@ -19,7 +19,10 @@ import * as term from './terminal.js';
 import * as customize from './customize.js';
 import * as snapshots from './snapshots.js';
 import * as schedules from './schedules.js';
+import * as dispatch from './dispatch.js';
 import * as memory from './memory.js';
+import { repos } from './repos.js';
+import * as helpersMod from './helpers.js';
 import { which, log, xdg, HOME, IS_ROOT, IS_WIN, slash, readJson, writeJson, debounce, expandHome, run, privateDir } from './util.js';
 
 // Old environment variable names keep working after the rename.
@@ -109,7 +112,15 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
   schedules.events.on('schedules', () => broadcast('schedules.changed', {}));
   schedules.events.on('inbox', () => broadcast('inbox.changed', schedules.inboxList().unread));
   schedules.start();
+  dispatch.events.on('changed', (d) => broadcast('dispatch.changed', d));
+  dispatch.events.on('playbooks', () => broadcast('dispatch.playbooks', {}));
+  dispatch.events.on('finished', (d) => d.scheduleId && schedules.noteDispatchFinished(d.scheduleId, d.status));
+  schedules.setDispatchRunner((playbookId, opts) => dispatch.dispatch.startFromPlaybook(playbookId, opts));
+  dispatch.start();
   memory.events.on('changed', (d) => broadcast('memory.changed', d));
+  repos.events.on('changed', (d) => broadcast('repos.changed', d));
+  helpersMod.start();
+  helpersMod.events.on('changed', (d) => broadcast('helpers.changed', d));
   term.terminals.on('data', (d) => broadcast('term.data', d));
   term.terminals.on('exit', (d) => broadcast('term.exit', d));
 
@@ -159,7 +170,11 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
     'session.setEffort': async ({ id, effort }) => (await S(id)).setEffort(effort),
     'session.permission': async ({ id, requestId, decision }) => (await S(id)).respond(requestId, decision),
     'session.rename': ({ id, title }) => sessions.rename(id, title),
-    'session.delete': ({ id, removeWorktree }) => sessions.remove(id, { removeWorktree }),
+    'session.delete': async ({ id, removeWorktree, removeHelpers }) => {
+      // a lead's helpers go with it when asked (HELPERS.md §5.10); otherwise they stay as sessions
+      if (removeHelpers) for (const hid of helpersMod.helpers.helperIds(id)) await sessions.remove(hid, { removeWorktree: Boolean(removeWorktree) });
+      return sessions.remove(id, { removeWorktree });
+    },
     'session.archive': ({ id, archived }) => {
       store.setMeta(id, { archived: archived || null });
       listChanged();
@@ -241,6 +256,42 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
     'inbox.list': () => schedules.inboxList(),
     'inbox.markRead': ({ ids }) => schedules.markRead(ids || null),
     'inbox.remove': ({ id }) => schedules.removeItem(id),
+    // ---- dispatch: one job across many repositories
+    'helpers.list': ({ leadId }) => helpersMod.helpers.list(leadId),
+    'helpers.allow': ({ leadId, requestId }) => helpersMod.helpers.allow(leadId, requestId),
+    'helpers.stop': ({ leadId, name }) => helpersMod.helpers.stop(leadId, { name }),
+    'helpers.review': ({ leadId }) => helpersMod.helpers.review(leadId),
+    'helpers.finish': ({ leadId, name, action, message, pr }) => helpersMod.helpers.finish(leadId, { name, action, message, pr }),
+    'helpers.export': ({ leadId }) => helpersMod.helpers.exportMarkdown(leadId),
+    'helpers.detach': ({ id }) => helpersMod.helpers.detach(id),
+    'repos.list': () => repos.list(),
+    'repos.save': (p) => repos.save({ ...p, path: p.path ? expandHome(p.path) : p.path }),
+    'repos.remove': ({ id }) => repos.remove(id),
+    'repos.register': ({ path: dir, ...patch }) => repos.register(expandHome(dir), patch),
+    'repos.scan': ({ root, depth }) => repos.scan(expandHome(root), depth),
+    'repos.refresh': ({ ids, force }) => repos.refresh(ids || null, { force: Boolean(force) }),
+    'repos.resolve': ({ word }) => repos.resolve(word) || { nearest: repos.nearest(word) },
+    'workspace.scan': ({ root, depth, force }) => dispatch.dispatch.scan({ root: expandHome(root), depth, force: Boolean(force) }),
+    'dispatch.list': () => dispatch.dispatch.list(),
+    'dispatch.get': ({ id }) => dispatch.dispatch.get(id),
+    'dispatch.save': (p) => dispatch.dispatch.save({ ...p, root: p.root ? expandHome(p.root) : p.root, targets: (p.targets || []).map((t) => ({ ...t, path: expandHome(t.path) })) }),
+    'dispatch.remove': ({ id, removeWorktrees }) => dispatch.dispatch.remove(id, { removeWorktrees: Boolean(removeWorktrees) }),
+    'dispatch.plan': (p) => dispatch.dispatch.plan(p.id && !p.targets ? p.id : { ...p, root: p.root ? expandHome(p.root) : p.root, targets: (p.targets || []).map((t) => ({ ...t, path: expandHome(t.path) })) }),
+    'dispatch.start': ({ id, wave }) => dispatch.dispatch.start(id, { wave }),
+    'dispatch.continue': ({ id, brief, learn }) => dispatch.dispatch.continue(id, { brief, learn }),
+    'dispatch.pause': ({ id }) => dispatch.dispatch.pause(id),
+    'dispatch.resume': ({ id }) => dispatch.dispatch.resume(id),
+    'dispatch.stop': ({ id, runId }) => dispatch.dispatch.stop(id, { runId }),
+    'dispatch.retry': ({ id, runId, brief }) => dispatch.dispatch.retry(id, runId, { brief }),
+    'dispatch.skip': ({ id, runId }) => dispatch.dispatch.skip(id, runId),
+    'dispatch.allow': ({ id, key, requestId }) => dispatch.dispatch.allow(id, key, requestId),
+    'dispatch.review': ({ id }) => dispatch.dispatch.review(id),
+    'dispatch.finish': ({ id, runId, action, message, pr }) => dispatch.dispatch.finish(id, { runId, action, message, pr }),
+    'dispatch.export': ({ id }) => dispatch.dispatch.exportMarkdown(id),
+    'dispatch.playbooks': () => dispatch.dispatch.playbooks(),
+    'dispatch.savePlaybook': (p) => dispatch.dispatch.savePlaybook({ ...p, root: p.root ? expandHome(p.root) : p.root, targets: p.targets ? p.targets.map((t) => ({ ...t, path: expandHome(t.path) })) : p.targets }),
+    'dispatch.removePlaybook': ({ id }) => dispatch.dispatch.removePlaybook(id),
+    'dispatch.startFromPlaybook': ({ id, name, wave, targets }) => dispatch.dispatch.startFromPlaybook(id, { name, wave, targets }),
     // ---- control room: every live session at a glance, plus spend
     'fleet.state': async () => {
       const list = await sessions.list();

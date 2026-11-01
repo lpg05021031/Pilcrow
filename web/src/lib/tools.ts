@@ -2,6 +2,7 @@
 import {
   SquareTerminal, FileText, FilePen, FilePlus, Search, FolderSearch, Globe, ListChecks, Bot, ClipboardCheck, MessageCircleQuestionMark,
   BookOpen, Plug, Sparkles, Wrench, Clock, GitBranch, CircleStop, ListTodo, Map as MapIcon, Bell, Layers, type LucideIcon, Workflow } from 'lucide-react';
+import { ArrowUpRight as HelperStart, Clock as HelperWait, Eye as HelperRead, Send as HelperSend, Square as HelperStop, List as HelperList } from 'lucide-react';
 import { basename, relPath, truncate, firstLine } from './format';
 import type { ToolInput } from './types';
 
@@ -96,6 +97,23 @@ export function toolMeta(name: string, input: ToolInput | undefined | null, cwd?
     case 'ReadMcpResourceTool':
       return { icon: Plug, verb: name === 'ReadMcpResourceTool' ? 'Read resource' : 'List resources', target: S('uri') || S('server') || '' };
     default:
+      if (name.startsWith('mcp__helpers__')) {
+        // the lead's tools (HELPERS.md): named by what happened, not by the server
+        const tool = name.slice('mcp__helpers__'.length);
+        const meta: Record<string, [LucideIcon, string]> = {
+          start: [HelperStart, 'Started helper'],
+          wait: [HelperWait, 'Waited for'],
+          read: [HelperRead, 'Read helper'],
+          send: [HelperSend, 'Told helper'],
+          stop: [HelperStop, 'Stopped helper'],
+          list: [HelperList, 'Listed helpers'],
+        };
+        const [icon, verb] = meta[tool] || [HelperStart, `Helpers · ${tool}`];
+        const names = Array.isArray(i?.names) ? (i!.names as unknown[]).map(String) : null;
+        const where = S('repo') || (S('cwd') ? basename(S('cwd')) : '');
+        const target = tool === 'wait' ? (names?.length ? names.join(', ') : 'all helpers') : tool === 'list' ? '' : tool === 'start' && where ? `${S('name')} in ${where}` : S('name');
+        return { icon, verb, target };
+      }
       if (name.startsWith('mcp__')) {
         const [, server, ...rest] = name.split('__');
         const tool = rest.join('__').replace(/_/g, ' ');

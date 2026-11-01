@@ -400,6 +400,109 @@ test('control room: a working session shows as a card with its activity; a waiti
   expect(working >= 0, 'no crash after answering');
 });
 
+test('dispatch: the board lists the finished job, its view has a row per repository, a job runs from the composer', async ({ page }) => {
+  await page.click('.side-page:has-text("Dispatch")');
+  await page.waitForSelector('.dispatch .dp-fin', { timeout: 10_000 });
+  expect((await page.locator('.dp-fin').count()) === 1, 'the seeded finished job is on the board');
+  await page.click('.dp-fin');
+  await page.waitForSelector('.dp-table tbody tr', { timeout: 10_000 });
+  expect((await page.locator('.dp-table tbody tr').count()) === 3, 'three repositories, one row each');
+  expect((await page.locator('.dp-foot').count()) === 1, 'a finished job shows its review foot');
+  await page.click('.dispatch .icon-btn[aria-label="Back"]');
+  await page.click('.dispatch .btn.primary:has-text("New job")');
+  await page.waitForSelector('.dp-targets .dp-target', { timeout: 10_000 });
+  expect((await page.locator('.dp-target').count()) === 8, 'the workspace scan lists eight repositories');
+  await page.click('.dispatch .ghost-select');
+  await page.click('text=Dependency bump');
+  await page.waitForFunction(() => document.querySelectorAll('.dp-target.on').length === 3, null, { timeout: 5000 });
+  expect((await page.inputValue('.dp-form .input')).includes('Dependency bump'), 'the name follows the playbook');
+  await page.waitForSelector('.dispatch .btn.primary:has-text("Start"):not([disabled])', { timeout: 15_000 });
+  expect((await page.locator('.dp-chip.ok').count()) >= 3, 'the plan painted its verdicts on the rows');
+  await ctl.call('mock.pace', { ms: 0 });
+  await page.click('.dispatch .btn.primary:has-text("Start")');
+  await page.waitForSelector('.dp-table tbody tr', { timeout: 15_000 });
+  await page.waitForSelector('.dp-canary', { timeout: 30_000 });
+  await page.click('.dp-canary .btn.primary');
+  await page.waitForSelector('.dp-foot', { timeout: 40_000 });
+  expect((await page.locator('.dp-row.done').count()) === 3, 'all three repositories done after the main wave');
+  await page.click('.dp-foot .btn.ghost:has-text("Keep")');
+  await page.waitForFunction(() => document.querySelector('.dp-foot')?.textContent?.includes('Finished:'), null, { timeout: 10_000 });
+  await page.click('.side-page:has-text("Inbox")');
+  await page.waitForSelector('.dp-report', { timeout: 10_000 });
+  expect((await page.locator('.dp-report .dp-report-row').count()) === 3, 'the report card lists the three repositories');
+});
+
+test('helpers: a lead starts two helpers; the bar follows them, the person answers for all, the notes come back, the Changes panel finishes them', async ({ page }) => {
+  await ctl.call('mock.pace', { ms: 0 });
+  await open(page, 'sess-empty');
+  await send(page, 'Start helpers for the api and the web.');
+  await page.waitForFunction(() => document.querySelectorAll('.helpers-bar .helper-chip').length === 2, null, { timeout: 15_000 }); // one chip per helper
+  expect((await page.locator('.helpers-bar .helper-chip').first().innerText()).startsWith('api ·'), 'the first chip is api');
+  await page.waitForSelector('.helper-chip.warm', { timeout: 20_000 }); // web asks a permission
+  await page.waitForSelector('.status-pill.leading', { timeout: 10_000 });
+  expect((await page.locator('.side-row.sub').count()) === 2, 'the helpers sit under the lead in the sidebar');
+  await page.click('.side-page[title^="Every session"]');
+  await page.waitForSelector('.ovc.needs .btn:has-text("Allow for all helpers")', { timeout: 10_000 });
+  expect((await page.locator('.ovc.needs .ovc-proj').first().innerText()).includes('helper of'), 'the card says whose helper asked');
+  await page.click('.ovc.needs .btn:has-text("Allow for all helpers")');
+  await open(page, 'sess-empty');
+  await page.waitForSelector('.msg-notes .session-card', { timeout: 30_000 });
+  await page.waitForFunction(() => document.querySelectorAll('.helper-chip .dp-glyph.done').length === 2, null, { timeout: 30_000 });
+  await page.waitForSelector('.helpers-bar .btn:has-text("Review")', { timeout: 10_000 });
+  await page.click('.helpers-bar .btn:has-text("Review")');
+  await page.waitForSelector('.hc .hc-sec', { timeout: 10_000 });
+  expect((await page.locator('.hc-sec').count()) === 2, 'a Changes section per helper');
+  await page.click('.hc-row .btn:has-text("Keep")');
+  await page.waitForFunction(() => document.querySelectorAll('.hc-sec .chip.tiny').length === 2, null, { timeout: 10_000 });
+  await page.click('.side-page[title="Results of scheduled sessions"]');
+  await page.waitForSelector('.dp-report .chip:has-text("helpers")', { timeout: 10_000 });
+  expect((await page.locator('.dp-report .dp-report-row').count()) === 2, 'the record lists both helpers');
+});
+
+test('answer cards: the question and the plan open with the dot, carry key boxes, and the digits answer', async ({ page }) => {
+  await open(page, 'sess-tests');
+  await send(page, 'ask me a question');
+  await page.waitForSelector('.askcard.live', { timeout: 20_000 });
+  expect((await page.locator('.askcard.live .ask-head .wait-dot').count()) === 1, 'the caption dot');
+  expect((await page.locator('.askcard.live .ask-key').count()) === 2, 'a key box per option');
+  expect(await page.locator('.ask-actions .btn.primary').isDisabled(), 'nothing chosen yet');
+  await page.keyboard.press('1');
+  await page.waitForSelector('.ask-opt.on', { timeout: 5_000 });
+  expect((await page.locator('.ask-opt.on .ask-opt-label').innerText()) === 'Compact', '1 picked the first option');
+  await page.click('.ask-actions .btn.primary');
+  await page.waitForFunction(() => document.body.innerText.includes('Compact it is.'), null, { timeout: 20_000 });
+  await page.click('text=Asked you a question');
+  await page.waitForSelector('.askcard.done', { timeout: 10_000 });
+  expect((await page.locator('.askcard.done .ask-answer').innerText()).includes('Compact'), 'the record carries the answer');
+  await send(page, 'propose a plan');
+  await page.waitForSelector('.plancard.live', { timeout: 20_000 });
+  expect((await page.locator('.plancard.live .plan-head .wait-dot').count()) === 1, 'the same dot');
+  expect((await page.locator('.plancard.live .perm-key').count()) === 3, 'the same key boxes');
+  await page.keyboard.press('1');
+  await page.waitForFunction(() => document.body.innerText.includes('Starting on the lexer.'), null, { timeout: 20_000 });
+  await page.click('text=Proposed a plan');
+  await page.waitForSelector('.plancard .badge.ok', { timeout: 10_000 });
+});
+
+test('workflow: the Tasks tab draws the run live and settled, and the card in the conversation follows', async ({ page }) => {
+  await open(page, 'sess-tests');
+  await page.click('.icon-btn[title^="Side panel"]');
+  await page.click('.panel-tab[title^="Tasks"]');
+  await send(page, 'run the review workflow');
+  await page.waitForSelector('.wfd', { timeout: 20_000 });
+  expect((await page.locator('.wfd-name').first().innerText()) === 'review-changes', 'the run is named from its meta');
+  await page.waitForFunction(() => document.querySelectorAll('.wfa').length >= 3, null, { timeout: 20_000 });
+  await page.waitForFunction(() => document.body.innerText.includes('Five findings confirmed'), null, { timeout: 40_000 });
+  await sleep(600);
+  expect((await page.locator('.wfd-sub').first().innerText()).startsWith('7 of 8 agents done'), 'the figures settled');
+  expect((await page.locator('.wfd.completed').count()) === 1, 'the card says completed');
+  await page.click('.icon-btn[title="Close panel"]');
+  await page.click('text=Ran an agent');
+  await page.click('.tool[data-tool="Workflow"] .tool-head'); // the card is folded once done; its body carries the figures
+  await page.waitForSelector('.wfi-row', { timeout: 10_000 });
+  expect((await page.locator('.wfi-row').innerText()).includes('7 of 8 agents done'), 'the conversation card carries the run');
+});
+
 // ---------------------------------------------------------------- run
 
 const chosen = tests.filter((t) => !grep || t.name.includes(grep));

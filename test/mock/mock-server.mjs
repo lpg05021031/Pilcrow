@@ -11,6 +11,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { EventEmitter } from 'node:events';
 import { WebSocketServer } from 'ws';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -41,6 +42,7 @@ const msg = {
   toolResult: (sid, toolUseId, content, at, structured, isError = false) => ({ type: 'user', uuid: uuid(), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content, is_error: isError }] }, parent_tool_use_id: null, session_id: sid, timestamp: new Date(at).toISOString(), tool_use_result: structured }),
   result: (sid, text, at, ms = 4200, cost = 0.012) => ({ type: 'result', subtype: 'success', uuid: uuid(), session_id: sid, duration_ms: ms, duration_api_ms: ms - 200, is_error: false, num_turns: 1, result: text, total_cost_usd: cost, usage: { input_tokens: 1200, output_tokens: 80, cache_read_input_tokens: 20000 }, modelUsage: { 'claude-mock-1': { inputTokens: 1200, outputTokens: 80, contextWindow: 200000 } } }),
   stream: (sid, event) => ({ type: 'stream_event', uuid: uuid(), session_id: sid, parent_tool_use_id: null, event }),
+  system: (sid, subtype, extra) => ({ type: 'system', subtype, uuid: uuid(), session_id: sid, ...extra }),
 };
 
 /** A finished turn for the history: the question, Claude's words and the work in between. */
@@ -145,6 +147,8 @@ const now = Date.now();
 
 /** @type {Map<string, Sess>} */
 const sessions = new Map();
+/** What the sessions do, for the dispatch engine below: 'idle' (s), 'permission' ({ s, req }), 'resolved' ({ s, requestId }). */
+const hooks = new EventEmitter();
 class Sess {
   constructor({ id, title, cwd, touched, archived = false, pinned = false, messages = [] }) {
     this.id = id;
@@ -159,6 +163,7 @@ class Sess {
     this.status = 'idle';
     this.live = false;
     this.pending = new Map(); // requestId -> { req, resolve }
+    this.tasks = new Map(); // a workflow's run, as the server keeps it from task_* events
     this.held = [];
     this.mode = 'default';
     this.model = '';
@@ -177,14 +182,16 @@ class Sess {
     this.extra = {}; // fields the tests lay over state() (mock.patch): tasks, mcp, …
   }
   summary() {
-    return { id: this.id, title: this.title, firstPrompt: this.messages[0]?.message?.content?.[0]?.text, cwd: this.cwd, project: this.cwd, gitBranch: 'main', lastModified: this.touched, createdAt: this.createdAt, archived: this.archived, pinned: this.pinned, worktree: null, scheduled: null, status: this.status, live: this.live, pending: this.pending.size };
+    const mine = hOf(this.id);
+    return { id: this.id, title: this.title, firstPrompt: this.messages[0]?.message?.content?.[0]?.text, cwd: this.cwd, project: this.worktree?.repoRoot || this.cwd, gitBranch: 'main', lastModified: this.touched, createdAt: this.createdAt, archived: this.archived, pinned: this.pinned, worktree: this.worktree || null, scheduled: this.scheduled || null, dispatch: this.dispatch || null, helper: this.helper ? { leadId: this.helper.leadId, name: this.helper.name, state: hAll.get(this.id)?.state || null } : null, lead: mine.length ? { since: mine[0].startedAt, count: mine.length } : null, status: this.status, live: this.live, pending: this.pending.size };
   }
   state() {
     return {
       id: this.id, status: this.status, live: this.live, cwd: this.cwd, mode: this.mode, model: this.model, effort: this.effort, activeModel: 'claude-mock-1',
       usage: this.usage, error: null, suggestion: null, compacting: false, mcp: [], activity: this.activity, lastActivity: this.lastActivity, turnStartedAt: this.turnStartedAt, processStartedAt: this.live ? this.createdAt : null, lastReply: this.lastReply,
-      unattended: false, unattendedDenials: 0, pending: [...this.pending.values()].map((p) => p.req), tasks: [], bgTasks: [], queued: [], held: this.held.map((h) => ({ uuid: h.uuid, text: h.text, images: 0, files: [], at: h.at })),
+      unattended: false, unattendedDenials: 0, pending: [...this.pending.values()].map((p) => p.req), tasks: [...this.tasks.values()], bgTasks: [], queued: [], held: this.held.map((h) => ({ uuid: h.uuid, text: h.text, images: 0, files: [], at: h.at, note: h.note || null, from: h.from || null })),
       init: this.init, commands: null, models: null,
+      ...hExtra(this),
       ...this.extra,
     };
   }
@@ -248,8 +255,13 @@ seed();
 /** What Claude does with a message: keywords in the prompt pick the script. */
 function scriptFor(text) {
   const t = text.toLowerCase();
+  if (t.startsWith('<helper-note')) return 'note';
+  if (/\bstart (two |some |the )?helpers?\b/.test(t)) return 'helpers';
   if (/\bmarathon\b/.test(t)) return 'marathon';
   if (/\bperm|permission|run (a |the )?command|dangerous/.test(t)) return 'permission';
+  if (/\bplan\b/.test(t)) return 'plan';
+  if (/\bworkflow\b/.test(t)) return 'workflow';
+  if (/\bcompact\b/.test(t)) return 'compact';
   if (/\btool|read|look|check|edit|fix/.test(t)) return 'tools';
   if (/\bask|question/.test(t)) return 'question';
   if (/\bslow\b/.test(t)) return 'slow';
@@ -324,6 +336,10 @@ async function say(s, parts) {
 async function useTool(s, tool, { ask = false } = {}) {
   const [{ id }] = await say(s, [{ tool }]);
   if (s.aborted) return;
+  if (ask && s.unattended) {
+    s.record(msg.toolResult(s.id, id, 'This session runs with nobody watching, so this action cannot be approved.', Date.now(), undefined, true));
+    return 'denied';
+  }
   if (ask) {
     const requestId = `req_${uuid()}`;
     const decision = await new Promise((resolve) => {
@@ -333,15 +349,22 @@ async function useTool(s, tool, { ask = false } = {}) {
       broadcast('session.permission', { id: s.id, request: req });
       s.emitState();
       listChanged();
+      hooks.emit('permission', { s, req });
     });
     s.pending.delete(requestId);
     if (s.status === 'requires_action') s.status = 'running';
     broadcast('session.permissionResolved', { id: s.id, requestId, decision: decision.behavior });
+    hooks.emit('resolved', { s, requestId });
     s.emitState();
     listChanged();
     if (decision.behavior === 'deny') {
       s.record(msg.toolResult(s.id, id, decision.message || 'The user declined this action.', Date.now(), undefined, true));
       return 'denied';
+    }
+    const answers = decision.updatedInput?.answers;
+    if (tool.name === 'AskUserQuestion' && answers && typeof answers === 'object') {
+      tool.result = `User has answered your questions: ${Object.entries(answers).map(([q, a]) => `"${q}"="${a}"`).join(', ')}. You can now continue with the user's answers in mind.`;
+      tool.structured = { ...(tool.structured || {}), answers };
     }
   }
   for (const c of tool.children || []) {
@@ -364,7 +387,8 @@ async function runTurn(s, text) {
   s.turnSeq++;
   const mine = s.turnSeq;
   s.aborted = false;
-  const script = scriptFor(text);
+  // a helper's brief carries Pilcrow's header; the script comes from the brief itself
+  const script = scriptFor(text.startsWith(H_HEADER) ? text.slice(H_HEADER.length) : text);
   try {
     if (script === 'plain') {
       await say(s, [{ text: `You said “${text.trim().slice(0, 60)}”. Here is a short reply with a list:\n\n- one thing\n- another thing\n\nAnd a line of \`code\` to round it off.` }]);
@@ -401,6 +425,85 @@ async function runTurn(s, text) {
       const r = await useTool(s, BASH('rm -rf build && npm run build', 'Rebuild from scratch', 'built in 4.2s'), { ask: true });
       if (s.aborted) throw new Error('aborted');
       await say(s, [{ text: r === 'denied' ? 'Understood, I did not run it. Tell me how you would like to proceed.' : 'The build finished cleanly in about four seconds.' }]);
+    } else if (script === 'helpers') {
+      // the lead: two helpers, the second after the first, then the turn ends and the notes come back
+      await say(s, [{ text: 'Two parts, two helpers: api first, then web with its handoff.' }]);
+      const a = { name: 'api', repo: 'api', brief: 'Edit the parser and check its tests. End with a Handoff.' };
+      const r1 = await hStart(s, a);
+      await useTool(s, { name: 'mcp__helpers__start', input: a, result: JSON.stringify(r1, null, 2), structured: r1 });
+      if (s.aborted) throw new Error('aborted');
+      const w = { name: 'web', repo: 'order FE', brief: 'Run a command needing permission, then add the button. End with a Handoff.', after: ['api'] };
+      const r2 = await hStart(s, w);
+      await useTool(s, { name: 'mcp__helpers__start', input: w, result: JSON.stringify(r2, null, 2), structured: r2 });
+      if (s.aborted) throw new Error('aborted');
+      await say(s, [{ text: 'Two helpers are working; I will continue when api finishes.' }]);
+    } else if (script === 'note') {
+      const names = [...text.matchAll(/<helper-note name="([^"]+)" state="([^"]+)"/g)].map((m) => `${m[1]} (${m[2]})`);
+      await say(s, [{ text: `Noted: ${names.join(', ')}. I read the handoff; the pieces agree.` }]);
+    } else if (script === 'plan') {
+      await say(s, [{ text: 'Here is the plan.' }]);
+      const plan = '# Fix the comment bug\n\n1. Teach the lexer to skip `//` comments to the end of the line.\n2. Add a test for a comment on the last line of a file.\n3. Run the parser tests.';
+      const r = await useTool(s, { name: 'ExitPlanMode', input: { plan }, result: 'Plan approved; starting.', structured: { plan, filePath: `${PROJ}/.claude/plans/comment-fix.md` } }, { ask: true });
+      await say(s, [{ text: r === 'denied' ? 'Staying in plan mode; tell me what should change.' : 'Starting on the lexer.' }]);
+    } else if (script === 'workflow') {
+      // the Workflow tool: a run of eight agents in two phases, reported the way Claude Code does through task_progress
+      await say(s, [{ text: 'Running the review workflow: two review agents, then a verify pass on each finding.' }]);
+      const wfScript = "export const meta = {\n  name: 'review-changes',\n  description: 'Review the changed files for bugs and for performance, then verify each finding',\n  phases: [{ title: 'Review' }, { title: 'Verify' }],\n}\nconst results = await pipeline(DIMENSIONS, (d) => agent(d.prompt), (r) => parallel(r.findings.map((f) => () => agent(`Verify: ${f.title}`))))\nreturn { confirmed: results.flat().filter((f) => f.verdict?.isReal) }\n";
+      const [{ id }] = await say(s, [{ tool: { name: 'Workflow', input: { script: wfScript } } }]);
+      const taskId = `task_${uuid()}`;
+      const t0 = Date.now();
+      const task = { id: taskId, runId: `wf_${uuid().slice(0, 6)}`, toolUseId: id, description: 'review-changes', type: 'local_workflow', workflowName: 'review-changes', status: 'running', startedAt: t0, workflow: { phases: [{ index: 0, title: 'Review' }, { index: 1, title: 'Verify' }], agents: [], logs: [], updatedAt: t0 } };
+      s.tasks.set(taskId, task);
+      s.out(msg.system(s.id, 'task_started', { task_id: taskId, run_id: task.runId, tool_use_id: id, description: task.description, task_type: 'local_workflow', workflow_name: task.workflowName }));
+      s.emitState();
+      const labels = ['review:bugs', 'review:perf', 'review:tests', 'verify:parse.ts', 'verify:lexer.ts', 'verify:index.ts', 'verify:cli.ts', 'verify:build.ts'];
+      const files = ['src/parse.ts', 'src/lexer.ts', 'test/parse.test.ts'];
+      const agents = labels.map((label, i) => ({ type: 'workflow_agent', index: i, label, phaseIndex: i < 3 ? 0 : 1, phaseTitle: i < 3 ? 'Review' : 'Verify', model: 'claude-mock-1', agentType: i < 3 ? 'general-purpose' : 'Explore', state: 'start', queuedAt: t0, promptPreview: i < 3 ? `Review the changed files for ${label.split(':')[1]} problems. Report findings as JSON.` : `Adversarially verify the finding in ${label.split(':')[1]}: is it real?` }));
+      const steps = 30;
+      const stepMs = pace ? 150 : 8;
+      for (let step = 0; step <= steps && !s.aborted; step++) {
+        const now = Date.now();
+        agents.forEach((a, i) => {
+          const start = i < 3 ? 1 : 12 + (i - 3) * 2;
+          const end = start + (i < 3 ? 10 : 8);
+          if (step >= start && a.state === 'start') { a.startedAt = now; a.state = 'progress'; }
+          if (a.state === 'progress' && step < end) {
+            a.lastProgressAt = now;
+            a.lastToolName = ['Read', 'Grep', 'Bash'][step % 3];
+            a.lastToolSummary = `${a.lastToolName} ${files[(step + i) % 3]}`;
+            a.toolUseCount = (a.toolUseCount || 0) + 1;
+            a.totalTokens = (a.totalTokens || 0) + 1200;
+          } else if (a.state === 'progress' && step >= end) {
+            a.endedAt = now;
+            if (i === 6) { a.state = 'error'; a.error = 'The agent hit its turn limit before deciding.'; } else { a.state = 'done'; a.resultPreview = `${a.label}: ${i < 3 ? '2 findings, both in the lexer.' : 'confirmed; reproduces with a comment on the last line.'}`; }
+          }
+        });
+        const usage = { total_tokens: agents.reduce((n, a) => n + (a.totalTokens || 0), 0), tool_uses: agents.reduce((n, a) => n + (a.toolUseCount || 0), 0), duration_ms: now - t0 };
+        task.usage = usage;
+        task.workflow.agents = agents.map((a) => ({ ...a, updatedAt: now }));
+        if (step === 12) task.workflow.logs.push({ at: now, message: 'Review done: 6 findings; verifying each.' });
+        task.workflow.updatedAt = now;
+        s.out(msg.system(s.id, 'task_progress', { task_id: taskId, description: task.description, usage, last_tool_name: 'Agent', workflow_progress: task.workflow.agents }));
+        s.emitState();
+        await sleep(stepMs);
+      }
+      task.status = 'completed';
+      task.endedAt = Date.now();
+      task.summary = '5 findings confirmed, 1 agent failed';
+      s.out(msg.system(s.id, 'task_notification', { task_id: taskId, status: 'completed', summary: task.summary, tool_use_id: id, usage: task.usage }));
+      s.emitState();
+      s.record(msg.toolResult(s.id, id, JSON.stringify({ confirmed: 5 }, null, 2), Date.now(), { confirmed: 5 }));
+      await say(s, [{ text: 'Five findings confirmed; the verify agent for cli.ts ran out of turns, so that one is unchecked.' }]);
+    } else if (script === 'compact') {
+      // a compaction, the way Claude Code reports it: a compact_boundary, the figure unknown until the next reply
+      const pre = s.usage.contextTokens;
+      s.usage = { ...s.usage, contextTokens: 0, afterCompact: true, compactedFrom: pre };
+      s.record(msg.system(s.id, 'compact_boundary', { compact_metadata: { trigger: 'manual', pre_tokens: pre } }));
+      s.emitState();
+      await sleep(pace ? 600 : 30);
+      await say(s, [{ text: 'Compacted. The summary keeps the decisions and the open questions; the rest is gone.' }]);
+      s.usage = { ...s.usage, contextTokens: 14000, afterCompact: false };
+      s.emitState();
     } else if (script === 'question') {
       await say(s, [{ text: 'Before I go on, one question.' }]);
       await useTool(s, { name: 'AskUserQuestion', input: { questions: [{ question: 'Which style?', header: 'Style', options: [{ label: 'Compact', description: 'Short lines' }, { label: 'Verbose', description: 'Everything' }], multiSelect: false }] }, result: 'Compact' }, { ask: true });
@@ -426,15 +529,21 @@ async function runTurn(s, text) {
   s.lastActivity = Date.now();
   s.emitState();
   listChanged();
+  hooks.emit('idle', s);
   if (s.held.length) setTimeout(() => deliver(s, s.held.shift()), 60);
 }
 
-function deliver(s, { uuid: u, text }) {
+function deliver(s, { uuid: u, text, note = null, from = null }) {
   if (!s.live) {
     s.live = true;
     s.init = { version: '2.0.0-mock', tools: ['Bash', 'Read', 'Edit', 'Write', 'Grep', 'Glob', 'Agent', 'AskUserQuestion'], mcpServers: [], slashCommands: ['compact', 'clear', 'context', 'usage'], model: 'claude-mock-1', capabilities: [] };
   }
-  s.record({ ...msg.user(s.id, text, Date.now()), uuid: u || uuid() });
+  s.record({ ...msg.user(s.id, text, Date.now()), uuid: u || uuid(), ...(note ? { _note: note } : {}), ...(from ? { _from: from } : {}) });
+  const hh = hAll.get(s.id);
+  if (hh && hh.state === 'done') {
+    hh.state = 'running'; // sent more text: it runs again
+    hEmit(hh.leadId);
+  }
   s.status = 'running';
   s.turnStartedAt = Date.now();
   s.touched = Date.now();
@@ -443,6 +552,859 @@ function deliver(s, { uuid: u, text }) {
   listChanged();
   runTurn(s, text).catch((e) => console.error('turn failed', e));
 }
+
+// ---------------------------------------------------------------- dispatch: one job across many repositories
+// A small model of server/dispatch_core.js: the same states and events, runs that are mock sessions fed
+// the brief (so they stream, ask and finish like any mock turn), a canary wave, rules that answer a
+// permission for every repository, review, finish and a report in the inbox.
+
+const REPOS = [
+  { name: 'design-system', branch: 'main', size: 'small', kind: 'node', deps: [], hasClaudeMd: true },
+  { name: 'web-ui', branch: 'main', size: 'medium', kind: 'node', deps: ['design-system'] },
+  { name: 'docs', branch: 'main', size: 'small', kind: 'node', deps: [] },
+  { name: 'api-gateway', branch: 'main', size: 'medium', kind: 'node', deps: [], changed: 2 },
+  { name: 'cli', branch: 'main', size: 'small', kind: 'node', deps: [] },
+  { name: 'legacy-api', branch: 'release/4', size: 'large', kind: 'go', deps: [] },
+  { name: 'infra', branch: 'main', size: 'small', kind: null, deps: [] },
+  { name: 'mobile', branch: 'main', size: 'large', kind: 'node', deps: ['design-system'] },
+].map((r) => ({
+  ...r,
+  path: `${HOME}/code/${r.name}`,
+  deps: r.deps.map((n) => `${HOME}/code/${n}`),
+  dirty: Boolean(r.changed),
+  changed: r.changed || 0,
+  untracked: 0,
+  ahead: 0,
+  behind: 0,
+  remote: { host: 'github', owner: 'acme', repo: r.name, url: `git@github.com:acme/${r.name}.git` },
+  files: { small: 120, medium: 900, large: 4000 }[r.size],
+  packageName: r.kind === 'node' ? `@acme/${r.name}` : null,
+  lastSession: null,
+  hasClaudeMd: Boolean(r.hasClaudeMd),
+}));
+const REPO_BY_PATH = new Map(REPOS.map((r) => [r.path, r]));
+/** The repositories registry (REPOSITORIES.md) as the person left it: three entries, one of each policy. */
+const REGISTRY = [
+  { id: 'repo-web', path: `${HOME}/code/web-ui`, name: 'web', aliases: ['order FE', 'storefront'], about: 'Next.js storefront; calls api', policy: 'allowed', defaults: { worktree: true, verify: 'pnpm test' }, notes: 'pnpm, not npm. The ESLint config lives in config/eslint.cjs.', deps: [], facts: { manifest: 'node', packageName: '@acme/web-ui', isRepo: true, branch: 'main', dirty: false, hasClaudeMd: false, seenAt: 1700000000000 }, addedAt: 1700000000000, machine: 'local' },
+  { id: 'repo-api', path: `${HOME}/code/api-gateway`, name: 'api', aliases: ['orders service', '後端'], about: 'Fastify gateway in front of the services', policy: 'ask', defaults: {}, notes: '', deps: [], facts: { manifest: 'node', packageName: '@acme/api-gateway', isRepo: true, branch: 'main', dirty: true, hasClaudeMd: false, seenAt: 1700000000000 }, addedAt: 1700000000000, machine: 'local' },
+  { id: 'repo-legacy', path: `${HOME}/code/legacy-api`, name: 'legacy-api', aliases: [], about: 'Frozen; release branches only', policy: 'never', defaults: {}, notes: '', deps: [], facts: { manifest: 'go', packageName: null, isRepo: true, branch: 'release/4', dirty: false, hasClaudeMd: false, seenAt: 1700000000000 }, addedAt: 1700000000000, machine: 'local' },
+];
+const normWord = (w) => String(w || '').normalize('NFKC').toLowerCase().replace(/^@/, '').replace(/[\s_-]+/g, '');
+const rWords = (e) => [e.name, ...(e.aliases || [])];
+const rMissing = (e) => ({ ...e, missing: !fs.existsSync(e.path) && !e.path.startsWith(`${HOME}/code/`) });
+function rResolve(word) {
+  const w = String(word || '').trim();
+  if (!w) return null;
+  const list = config.repos || [];
+  const byPath = list.find((e) => e.path === w);
+  if (byPath) return rMissing(byPath);
+  const n = normWord(w);
+  const hit = list.find((e) => normWord(e.name) === n) || list.find((e) => (e.aliases || []).some((a) => normWord(a) === n)) || list.find((e) => normWord(e.path.split('/').pop()) === n);
+  return hit ? rMissing(hit) : null;
+}
+function rSave(input) {
+  const list = config.repos || (config.repos = []);
+  const cur = input.id ? list.find((x) => x.id === input.id) : null;
+  if (input.id && !cur) throw new Error('No such repository.');
+  const e = cur ? { ...cur } : { id: `repo-${uuid().slice(0, 6)}`, addedAt: Date.now(), machine: 'local', facts: {}, aliases: [], about: '', notes: '', policy: 'ask', defaults: {}, deps: [] };
+  if (input.path !== undefined || !cur) {
+    if (!input.path) throw new Error('A repository needs a folder.');
+    e.path = String(input.path).replace(/\/+$/, '');
+    // the mock's world: everything under ~/code exists
+    if (!cur && !REPO_BY_PATH.has(e.path) && !e.path.startsWith(`${HOME}/code/`) && !fs.existsSync(e.path)) throw new Error(`The folder does not exist: ${e.path}`);
+  }
+  if (input.name !== undefined) e.name = String(input.name).trim().slice(0, 40);
+  if (!e.name) e.name = e.path.split('/').pop();
+  if (input.aliases !== undefined) {
+    const seen = new Set([normWord(e.name)]);
+    e.aliases = [];
+    for (const a of input.aliases) {
+      const t = String(a).trim();
+      if (!t || seen.has(normWord(t))) continue;
+      seen.add(normWord(t));
+      e.aliases.push(t);
+    }
+  }
+  if (input.about !== undefined) e.about = String(input.about).trim().slice(0, 200);
+  if (input.notes !== undefined) e.notes = String(input.notes).trim().slice(0, 2000);
+  if (input.policy !== undefined) e.policy = ['allowed', 'ask', 'never'].includes(input.policy) ? input.policy : 'ask';
+  if (input.defaults !== undefined) e.defaults = Object.fromEntries(Object.entries(input.defaults || {}).filter(([, v]) => v !== '' && v !== null && v !== undefined));
+  if (input.deps !== undefined) e.deps = (input.deps || []).filter((d) => d !== e.id && list.some((x) => x.id === d));
+  const others = list.filter((x) => x.id !== e.id);
+  const taken = others.find((x) => x.path === e.path);
+  if (taken) throw new Error(`That folder is already registered as ${taken.name}.`);
+  for (const w of rWords(e)) {
+    const hit = others.find((x) => rWords(x).some((y) => normWord(y) === normWord(w)));
+    if (hit) throw new Error(`“${w}” is already a name of ${hit.name}.`);
+  }
+  const known = REPO_BY_PATH.get(e.path);
+  if (known) e.facts = { manifest: known.kind, packageName: known.packageName, isRepo: true, branch: known.branch, dirty: known.dirty, hasClaudeMd: known.hasClaudeMd, seenAt: Date.now() };
+  config.repos = cur ? list.map((x) => (x.id === e.id ? e : x)) : [...list, e];
+  broadcast('repos.changed', { repos: config.repos.map(rMissing) });
+  return rMissing(e);
+}
+const rAnnotate = (list) =>
+  list.map((r) => {
+    const e = (config.repos || []).find((x) => x.path === r.path);
+    if (!e) return { ...r, registered: false };
+    const extra = (e.deps || []).map((d) => (config.repos || []).find((x) => x.id === d)?.path).filter((p) => p && p !== r.path);
+    return { ...r, registered: true, registryId: e.id, registryName: e.name, about: e.about, policy: e.policy, notes: e.notes || r.notes, deps: [...new Set([...(r.deps || []), ...extra])].sort() };
+  });
+const D_TERMINAL = new Set(['done', 'failed', 'stopped', 'skipped']);
+const D_ACTIVE = new Set(['preparing', 'running', 'needs_action']);
+const D_DEFAULTS = { mode: 'acceptEdits', allowedTools: [], model: '', effort: '', parallel: 3, maxMinutes: 20, costCap: 0, canary: 1, learn: true, prepare: '', copy: [], verify: '', verifyRetry: true, commitMessage: '', pr: false, report: 'table' };
+/** @type {any[]} */
+let jobs = [];
+/** @type {any[]} */
+let inboxItems = [];
+/** @type {any[]} */
+let playbooks = [];
+/** @type {any[]} */
+let schedules = [];
+
+function dRender(brief, job, t, extras = {}) {
+  let out = String(brief || '').replace(/\{\{\s*([a-zA-Z_.]+)\s*\}\}/g, (m, k) => ({ 'repo.name': t.name, 'repo.path': t.path, 'repo.branch': t.base || '', 'job.name': job.name, notes: t.notes || '' })[k] ?? m);
+  if (extras.learned?.length) out += '\n\nThe same work was already done in ' + extras.learned.length + ' repositories. Follow the same approach where it fits:\n' + extras.learned.map((l) => `- ${l.name}: ${l.summary}`).join('\n');
+  return out.trim();
+}
+function dKey(req) {
+  const tool = req.toolName || '';
+  const input = req.input || {};
+  if (tool === 'Bash') return `Bash:${String(input.command || '').replace(/\s+/g, ' ').trim()}`;
+  if (input.file_path) return `${tool}:${String(input.file_path).split('/').slice(-2).join('/')}`;
+  return `${tool}:${JSON.stringify(input)}`;
+}
+function dLabel(req) {
+  const [tool, ...rest] = dKey(req).split(':');
+  return `${tool}: ${rest.join(':')}`;
+}
+function dSummary(job) {
+  const counts = { queued: 0, preparing: 0, running: 0, needs_action: 0, done: 0, failed: 0, stopped: 0, skipped: 0 };
+  let cost = 0;
+  let needs = 0;
+  let files = 0;
+  for (const r of job.runs) {
+    counts[r.state] = (counts[r.state] || 0) + 1;
+    cost += r.cost || 0;
+    needs += (r.pending || []).length;
+    files += (r.files || []).length;
+  }
+  const { runs, ...rest } = job;
+  return { ...rest, counts, total: runs.length, cost: Math.round(cost * 10000) / 10000, needsAction: needs, files, canaryWaiting: job.state === 'reviewing' && job.wave === 'canary' };
+}
+function dEmit(job, runs = null) {
+  job.updatedAt = Date.now();
+  broadcast('dispatch.changed', { id: job.id, job: dSummary(job), runs: runs || job.runs, all: !runs });
+}
+const dJob = (id) => {
+  const j = jobs.find((x) => x.id === id);
+  if (!j) throw new Error('No such job.');
+  return j;
+};
+function dNormalize(input, cur) {
+  const settings = { ...D_DEFAULTS, unattended: false, ...(cur?.settings || {}), ...(input.settings || {}) };
+  settings.parallel = Math.max(1, Math.min(16, Number(settings.parallel) || 3));
+  settings.canary = Math.max(0, Math.min(8, Number.isFinite(Number(settings.canary)) ? Number(settings.canary) : 1));
+  const name = String(input.name ?? cur?.name ?? '').trim() || 'Untitled job';
+  const targets = (input.targets ?? cur?.targets ?? []).map((t) => ({ path: String(t.path || ''), name: String(t.name || String(t.path || '').split('/').pop()), base: String(t.base || ''), notes: String(t.notes || ''), size: t.size || REPO_BY_PATH.get(t.path)?.size || null, deps: Array.isArray(t.deps) ? t.deps : REPO_BY_PATH.get(t.path)?.deps || [] }));
+  return { id: cur?.id || `job-${uuid()}`, name, slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'job', brief: String(input.brief ?? cur?.brief ?? ''), root: String(input.root ?? cur?.root ?? `${HOME}/code`), targets, settings, state: cur?.state || 'draft', wave: cur?.wave || null, paused: cur?.paused || false, createdAt: cur?.createdAt || Date.now(), updatedAt: Date.now(), startedAt: cur?.startedAt || null, finishedAt: cur?.finishedAt || null, plan: cur?.plan || null, rules: cur?.rules || [], runs: cur?.runs || [], learned: cur?.learned || [], forecast: cur?.forecast || null, capReached: false, report: cur?.report || null, stoppedReason: null, playbookId: input.playbookId ?? cur?.playbookId ?? null, scheduleId: input.scheduleId ?? cur?.scheduleId ?? null, inboxId: cur?.inboxId || null, reportSessionId: cur?.reportSessionId || null };
+}
+function dLevels(targets) {
+  const paths = new Set(targets.map((t) => t.path));
+  const level = new Map();
+  let changed = true;
+  for (const t of targets) level.set(t.path, 0);
+  while (changed) {
+    changed = false;
+    for (const t of targets) {
+      const l = Math.max(0, ...(t.deps || []).filter((d) => paths.has(d)).map((d) => level.get(d) + 1));
+      if (l !== level.get(t.path) && l < 10) {
+        level.set(t.path, l);
+        changed = true;
+      }
+    }
+  }
+  return level;
+}
+function dPlan(job) {
+  const level = dLevels(job.targets);
+  const targets = job.targets.map((t) => {
+    const repo = REPO_BY_PATH.get(t.path);
+    const notes = [];
+    let verdict = 'ok';
+    const base = t.base || repo?.branch || 'main';
+    if (!repo) {
+      verdict = 'blocked';
+      notes.push({ kind: 'blocked', text: 'Not a git repository.' });
+    } else {
+      if (base !== repo.branch) {
+        verdict = 'blocked';
+        notes.push({ kind: 'blocked', text: `Branch ${base} not found. Pick another branch or deselect this repository.` });
+      }
+      if (repo.dirty) {
+        if (verdict === 'ok') verdict = 'warning';
+        notes.push({ kind: 'warning', text: `${repo.changed} uncommitted changes in the main checkout. The run starts from the branch's last commit; they are not in it.` });
+      }
+      if (!repo.hasClaudeMd) notes.push({ kind: 'note', text: 'No CLAUDE.md: the brief may want to say more about this repository.' });
+    }
+    if (!job.brief.trim()) {
+      verdict = 'blocked';
+      notes.push({ kind: 'blocked', text: 'The brief is empty.' });
+    }
+    const deps = (t.deps || []).filter((d) => job.targets.some((x) => x.path === d));
+    if (deps.length) notes.push({ kind: 'note', text: `Runs after ${deps.map((d) => job.targets.find((x) => x.path === d)?.name || d).join(', ')} and receives ${deps.length === 1 ? 'its' : 'their'} summary.` });
+    return { path: t.path, name: t.name, base, verdict, notes, brief: dRender(job.brief, job, { ...t, base }), level: level.get(t.path) || 0, deps, size: t.size };
+  });
+  const n = targets.filter((t) => t.verdict !== 'blocked').length;
+  const levels = targets.length ? Math.max(...targets.map((t) => t.level)) + 1 : 0;
+  return { at: Date.now(), targets, levels, worst: { minutes: Math.ceil((n * job.settings.maxMinutes) / job.settings.parallel), cost: job.settings.costCap || null, runs: n, levels }, ok: targets.filter((t) => t.verdict === 'ok').length, warnings: targets.filter((t) => t.verdict === 'warning').length, blocked: targets.filter((t) => t.verdict === 'blocked').length };
+}
+function dRunBySession(sid) {
+  for (const j of jobs) {
+    const r = j.runs.find((x) => x.sessionId === sid && D_ACTIVE.has(x.state));
+    if (r) return { job: j, run: r };
+  }
+  return null;
+}
+function dStartRun(job, run) {
+  run.state = 'running';
+  run.startedAt = Date.now();
+  run.now = 'starting';
+  const extras = { learned: job.wave === 'main' && job.settings.learn ? job.learned : [] };
+  run.brief = dRender(job.brief, job, run, extras);
+  const s = new Sess({ id: `dj-${uuid()}`, title: `${job.name} · ${run.name}`, cwd: run.path, touched: Date.now() });
+  s.dispatch = { jobId: job.id, runId: run.id, name: job.name, target: run.name };
+  s.unattended = Boolean(job.settings.unattended);
+  s.usage.costUsd = 0;
+  sessions.set(s.id, s);
+  run.sessionId = s.id;
+  run.worktree = { path: `${HOME}/.local/share/pilcrow/worktrees/${run.name}/${job.slug}-${s.id.slice(-4)}`, branch: `pilcrow/${job.slug}`, base: run.base, repoRoot: run.path };
+  dEmit(job, [run]);
+  listChanged();
+  setTimeout(() => deliver(s, { text: run.brief }), 30);
+}
+function dPump(job) {
+  if (job.state !== 'running' || job.paused) return;
+  const active = job.runs.filter((r) => D_ACTIVE.has(r.state)).length;
+  const eligible = (r) => r.state === 'queued' && (job.wave === 'main' || r.wave === 'canary');
+  for (const r of job.runs.filter(eligible)) {
+    const bad = r.dependsOn.find((d) => job.runs.some((x) => x.path === d && D_TERMINAL.has(x.state) && x.state !== 'done'));
+    if (bad) {
+      r.state = 'skipped';
+      r.reason = `Depends on ${job.runs.find((x) => x.path === bad)?.name}, which did not finish.`;
+      r.endedAt = Date.now();
+    }
+  }
+  const ready = job.runs.filter(eligible).filter((r) => r.dependsOn.every((d) => !job.runs.some((x) => x.path === d) || job.runs.some((x) => x.path === d && x.state === 'done')));
+  ready.sort((a, b) => a.level - b.level || a.name.localeCompare(b.name));
+  for (const r of ready.slice(0, Math.max(0, job.settings.parallel - active))) dStartRun(job, r);
+  dSettle(job);
+}
+function dSettle(job) {
+  if (job.state !== 'running' || job.runs.some((r) => D_ACTIVE.has(r.state))) return;
+  const queued = job.runs.filter((r) => r.state === 'queued');
+  if (job.wave === 'canary' && queued.length) {
+    job.state = 'reviewing';
+    job.learned = job.runs.filter((r) => r.wave === 'canary' && r.state === 'done').map((r) => ({ name: r.name, summary: r.summary }));
+    const canary = job.runs.filter((r) => r.wave === 'canary' && r.state === 'done');
+    job.forecast = canary.length ? { cost: Math.round(queued.length * (canary[0].cost || 0.01) * 100) / 100, minutes: Math.max(1, Math.round((queued.length * Math.max(1, canary[0].durationMs || 60e3)) / job.settings.parallel / 60e3)), from: canary.map((r) => r.name), runs: queued.length } : null;
+    dEmit(job);
+    return;
+  }
+  if (queued.length) return;
+  job.state = 'reviewing';
+  job.wave = 'done';
+  dEmit(job);
+  dMaybeFinish(job);
+}
+function dEndRun(job, run, state, reason, s) {
+  if (D_TERMINAL.has(run.state)) return;
+  run.state = state;
+  run.reason = reason || null;
+  run.now = null;
+  run.pending = [];
+  run.endedAt = Date.now();
+  run.durationMs = run.endedAt - (run.startedAt || run.endedAt);
+  if (s) {
+    run.cost = Math.round((s.usage.costUsd || 0) * 10000) / 10000;
+    run.summary = s.lastReply?.text || '';
+    const edits = s.messages.flatMap((m) => (m.type === 'assistant' ? m.message.content : [])).filter((c) => c.type === 'tool_use' && (c.name === 'Edit' || c.name === 'Write'));
+    run.files = edits.map((c) => ({ path: String(c.input.file_path || '').replace(`${PROJ}/`, ''), add: 3, del: 1 }));
+    run.add = run.files.length * 3;
+    run.del = run.files.length;
+  }
+  dEmit(job, [run]);
+  dPump(job);
+}
+hooks.on('idle', (s) => {
+  const hit = dRunBySession(s.id);
+  if (hit) dEndRun(hit.job, hit.run, 'done', null, s);
+  const h = hAll.get(s.id);
+  if (h && h.launched && (h.state === 'done' || !H_TERMINAL.has(h.state))) hEnd(h, h.stopping ? 'stopped' : 'done', h.stopping || null);
+});
+hooks.on('permission', ({ s, req }) => {
+  const h = hAll.get(s.id);
+  if (h) {
+    const key = dKey(req);
+    const rules = hLeadRules.get(h.leadId) || [];
+    if (rules.some((r) => r.key === key)) {
+      s.pending.get(req.requestId)?.resolve({ behavior: 'allow', updatedInput: req.input });
+      return;
+    }
+    h.state = 'needs_action';
+    h.pending = s.pending.size;
+    h.lastLine = dLabel(req);
+    hEmit(h.leadId);
+    return;
+  }
+  const hit = dRunBySession(s.id);
+  if (!hit) return;
+  const { job, run } = hit;
+  const key = dKey(req);
+  if (job.rules.some((r) => r.key === key)) {
+    const p = s.pending.get(req.requestId);
+    p?.resolve({ behavior: 'allow', updatedInput: req.input });
+    return;
+  }
+  run.pending = [...run.pending.filter((p) => p.requestId !== req.requestId), { requestId: req.requestId, toolName: req.toolName, displayName: req.toolName, key, label: dLabel(req), interactive: Boolean(req.interactive), at: req.at }];
+  run.state = 'needs_action';
+  run.now = dLabel(req);
+  dEmit(job, [run]);
+});
+hooks.on('resolved', ({ s, requestId }) => {
+  const h = hAll.get(s.id);
+  if (h) {
+    h.pending = Math.max(0, s.pending.size - 1);
+    if (!h.pending && h.state === 'needs_action') h.state = 'running';
+    hEmit(h.leadId);
+    return;
+  }
+  const hit = dRunBySession(s.id);
+  if (!hit) return;
+  const { job, run } = hit;
+  run.pending = run.pending.filter((p) => p.requestId !== requestId);
+  if (!run.pending.length && run.state === 'needs_action') {
+    run.state = 'running';
+    run.now = 'continuing';
+  }
+  dEmit(job, [run]);
+});
+function dReport(job) {
+  return { at: Date.now(), targets: job.runs.map((r) => ({ name: r.name, path: r.path, state: r.state, reason: r.reason, summary: r.summary, files: (r.files || []).length, add: r.add, del: r.del, cost: r.cost, durationMs: r.durationMs, branch: r.worktree?.branch || null, commit: r.commit, pr: r.pr, finished: r.finished, verify: null })), rules: job.rules, plan: job.plan ? { ok: job.plan.ok, warnings: job.plan.warnings, blocked: job.plan.blocked, levels: job.plan.levels } : null, cost: job.runs.reduce((n, r) => n + (r.cost || 0), 0), durationMs: (job.finishedAt || Date.now()) - (job.startedAt || Date.now()) };
+}
+function dMaybeFinish(job) {
+  if (job.state !== 'reviewing' || job.wave === 'canary') return;
+  if (!job.runs.every((r) => D_TERMINAL.has(r.state) && (r.finished || r.state !== 'done'))) return;
+  job.state = 'finished';
+  job.finishedAt = Date.now();
+  job.report = dReport(job);
+  const done = job.runs.filter((r) => r.state === 'done').length;
+  const failed = job.runs.filter((r) => r.state === 'failed' || r.state === 'stopped').length;
+  job.inboxId = `ib-${uuid()}`;
+  inboxItems.unshift({ id: job.inboxId, kind: 'dispatch', jobId: job.id, scheduleId: job.scheduleId || null, scheduleName: job.name, sessionId: null, cwd: job.root, startedAt: job.startedAt, endedAt: job.finishedAt, durationMs: job.report.durationMs, status: failed && !done ? 'failed' : 'completed', reason: failed ? `${failed} of ${job.runs.length} did not finish` : null, summary: `${done} of ${job.runs.length} repositories done.\n` + job.runs.map((r) => `- ${r.name}: ${r.state}${r.summary ? ' — ' + r.summary.slice(0, 120) : ''}`).join('\n'), cost: job.report.cost, files: job.runs.flatMap((r) => (r.files || []).map((f) => ({ ...f, repo: r.name }))).slice(0, 60), read: false, manual: true, dispatch: job.report });
+  broadcast('inbox.changed', inboxItems.filter((i) => !i.read).length);
+  if (job.scheduleId) {
+    const sc = schedules.find((x) => x.id === job.scheduleId);
+    if (sc) {
+      sc.lastStatus = failed && !done ? 'failed' : 'completed';
+      sc.running = null;
+      broadcast('schedules.changed', {});
+    }
+  }
+  if (job.settings.report === 'agent') {
+    // one more session writes the prose; the mock has it ready a moment later
+    job.report.proseState = 'writing';
+    const rs = new Sess({ id: `dj-${uuid()}`, title: `${job.name} · report`, cwd: job.root, touched: Date.now() });
+    rs.dispatch = { jobId: job.id, runId: null, name: job.name, target: 'report' };
+    sessions.set(rs.id, rs);
+    job.reportSessionId = rs.id;
+    setTimeout(() => {
+      const names = job.runs.filter((r) => r.state === 'done').map((r) => r.name);
+      job.report.prose = `The brief was carried out the same way in ${names.join(', ')}: each run changed the same files and finished without asking. Nothing differed between the repositories. Nothing needs a hand.`;
+      job.report.proseState = 'done';
+      job.report.proseCost = 0.004;
+      const it = inboxItems.find((i) => i.id === job.inboxId);
+      if (it) {
+        it.dispatch = job.report;
+        it.summary = job.report.prose;
+      }
+      broadcast('inbox.changed', inboxItems.filter((i) => !i.read).length);
+      dEmit(job);
+    }, 300);
+  }
+  dEmit(job);
+}
+function dSavePlaybook(input) {
+  let src = input;
+  if (input.fromJob) {
+    const job = dJob(input.fromJob);
+    src = { id: input.id, name: input.name || job.name, brief: job.brief, root: job.root, settings: job.settings, targets: job.targets };
+  }
+  const cur = src.id ? playbooks.find((p) => p.id === src.id) : null;
+  const settings = { ...D_DEFAULTS, ...(cur?.settings || {}), ...(src.settings || {}) };
+  delete settings.unattended;
+  const pb = { id: cur?.id || `pb-${uuid()}`, name: String(src.name ?? cur?.name ?? '').trim() || 'Untitled playbook', brief: String(src.brief ?? cur?.brief ?? ''), root: String(src.root ?? cur?.root ?? `${HOME}/code`), settings, targets: (src.targets ?? cur?.targets ?? []).map((t) => ({ path: t.path, name: t.name || String(t.path).split('/').pop(), base: t.base || '', notes: t.notes || '' })), createdAt: cur?.createdAt || Date.now(), updatedAt: Date.now(), uses: cur?.uses || 0, lastUsedAt: cur?.lastUsedAt || null };
+  if (!pb.brief.trim()) throw new Error('A playbook needs a brief.');
+  if (cur) Object.assign(cur, pb);
+  else playbooks.push(pb);
+  if (input.fromJob) dJob(input.fromJob).playbookId = pb.id;
+  broadcast('dispatch.playbooks', {});
+  return cur || pb;
+}
+function dStartFromPlaybook(id, { name, wave, unattended = false, scheduleId = null, targets } = {}) {
+  const pb = playbooks.find((p) => p.id === id);
+  if (!pb) throw new Error('No such playbook.');
+  const job = dNormalize({ name: name || pb.name, brief: pb.brief, root: pb.root, targets: targets || pb.targets, settings: { ...pb.settings, unattended: Boolean(unattended) }, playbookId: pb.id, scheduleId }, null);
+  jobs.push(job);
+  pb.uses += 1;
+  pb.lastUsedAt = Date.now();
+  broadcast('dispatch.playbooks', {});
+  return dispatchMethods['dispatch.start']({ id: job.id, wave: unattended ? 'all' : wave });
+}
+const CADENCE_LABEL = { daily: 'Every day', weekdays: 'Weekdays', weekly: 'Every week', hourly: 'Every hour', interval: 'Every few hours', cron: 'On a cron expression' };
+function sWithNext(sc) {
+  return { ...sc, kind: sc.kind || 'prompt', nextRunAt: sc.enabled ? Date.now() + 3600e3 : null, cadenceLabel: `${CADENCE_LABEL[sc.cadence?.kind] || 'Every day'}${sc.cadence?.time ? ` at ${sc.cadence.time}` : ''}`, error: null, running: sc.running || null };
+}
+function seedDispatch() {
+  jobs = [];
+  inboxItems = [];
+  schedules = [];
+  playbooks = [
+    { id: 'pb-deps', name: 'Dependency bump', brief: 'Bump the dependencies in {{repo.name}} to their latest minor versions, run the tests, fix what breaks. {{notes}}', root: `${HOME}/code`, settings: { ...D_DEFAULTS, canary: 1, verify: 'npm test' }, targets: ['design-system', 'web-ui', 'docs'].map((n) => ({ path: `${HOME}/code/${n}`, name: n, base: 'main', notes: '' })), createdAt: now - 10 * DAY, updatedAt: now - 10 * DAY, uses: 3, lastUsedAt: now - 2 * DAY },
+    { id: 'pb-license', name: 'License headers', brief: 'Add the SPDX header to every source file of {{repo.name}} that lacks one.', root: `${HOME}/code`, settings: { ...D_DEFAULTS, canary: 1 }, targets: [], createdAt: now - 20 * DAY, updatedAt: now - 20 * DAY, uses: 0, lastUsedAt: null },
+  ];
+  const t0 = now - 26 * 3600e3;
+  const old = dNormalize({ name: 'Pin node 22 in CI', brief: 'Pin the Node version in CI to 22 in {{repo.name}}.', targets: ['cli', 'docs', 'infra'].map((n) => ({ path: `${HOME}/code/${n}`, name: n, base: 'main' })), settings: { canary: 0 } }, null);
+  old.plan = dPlan(old);
+  old.state = 'finished';
+  old.wave = 'done';
+  old.startedAt = t0;
+  old.finishedAt = t0 + 9 * 60e3;
+  old.createdAt = t0 - 60e3;
+  old.updatedAt = old.finishedAt;
+  old.runs = old.targets.map((t, i) => ({ id: `run-old-${i}`, jobId: old.id, path: t.path, name: t.name, base: 'main', size: t.size, level: 0, dependsOn: [], wave: 'main', state: i === 2 ? 'failed' : 'done', attempt: 1, sessionId: null, worktree: null, startedAt: t0 + i * 60e3, endedAt: t0 + (i + 3) * 60e3, durationMs: 3 * 60e3, cost: 0.37 - i * 0.1, summary: i === 2 ? '' : `Pinned node 22 in .github/workflows/ci.yml of ${t.name}.`, files: i === 2 ? [] : [{ path: '.github/workflows/ci.yml', add: 1, del: 1 }], add: i === 2 ? 0 : 1, del: i === 2 ? 0 : 1, reason: i === 2 ? 'Stopped after 20 minutes' : null, verify: null, now: null, pending: [], retried: false, commit: i === 2 ? null : `a1b2c3${i}`, pr: null, finished: i === 2 ? null : 'commit', brief: '' }));
+  old.report = dReport(old);
+  jobs.push(old);
+}
+seedDispatch();
+
+// ---------------------------------------------------------------- helpers: a session that leads other sessions
+// A small model of server/helpers.js: a helper is a mock session fed its brief (so it streams, asks and
+// finishes like any mock turn); the lead's state carries its helpers; a finished helper's handoff comes
+// back to the lead as a note; Allow for all helpers answers by rule; review, finish and the inbox record
+// have the shapes the clients draw.
+const H_TERMINAL = new Set(['done', 'failed', 'stopped', 'skipped']);
+const H_HEADER = 'You are a helper started by another Pilcrow session (the lead) for one part of a larger task. Work only in this folder. The person can see this conversation and will answer your permission requests; the lead cannot. When you finish, end your reply with a section titled **Handoff**.';
+/** @type {Map<string, any>} helperId -> the helper */
+const hAll = new Map();
+/** @type {Map<string, {key: string, label: string}[]>} leadId -> Allow for all helpers rules */
+const hLeadRules = new Map();
+/** @type {Map<string, {texts: string[], timer: any}>} */
+const hNoteBuf = new Map();
+const hOf = (leadId) => [...hAll.values()].filter((h) => h.leadId === leadId).sort((a, b) => a.startedAt - b.startedAt);
+const hByName = (leadId, name) => hOf(leadId).find((h) => h.name === name) || null;
+const hPublic = (h) => ({ name: h.name, id: h.id, cwd: h.cwd, branch: h.worktree?.branch || null, worktree: h.worktree?.path || null, state: h.state, since: h.startedAt, elapsedMs: (h.endedAt || Date.now()) - h.startedAt, cost: Math.round(h.cost * 10000) / 10000, files: h.files.length, add: h.add, del: h.del, pending: h.pending, lastLine: h.lastLine, after: h.after, reason: h.reason || undefined, finished: h.finished || undefined, commit: h.commit || undefined, pr: h.pr || undefined });
+const H_CAPS = { total: 8, parallel: 3, maxMinutes: 30, costUsd: 0 };
+function hExtra(s) {
+  const out = {};
+  const mine = hOf(s.id);
+  if (mine.length) {
+    out.helpers = mine.map(hPublic);
+    out.lead = { since: mine[0].startedAt, cost: Math.round(mine.reduce((n, h) => n + h.cost, 0) * 10000) / 10000, caps: H_CAPS, rules: (hLeadRules.get(s.id) || []).map((r) => r.label) };
+  }
+  if (s.helper) out.helper = { leadId: s.helper.leadId, leadTitle: sessions.get(s.helper.leadId)?.title || s.helper.leadTitle || '', name: s.helper.name, state: hAll.get(s.id)?.state || null };
+  return out;
+}
+function hEmit(leadId) {
+  sessions.get(leadId)?.emitState();
+  broadcast('helpers.changed', { leadId, helpers: hOf(leadId).map(hPublic) });
+  listChanged();
+}
+async function hStart(lead, args) {
+  const name = String(args.name || '');
+  if (!/^[a-z0-9][a-z0-9_-]{0,31}$/.test(name)) throw new Error('A helper needs a name: 1–32 characters of a-z, 0-9, - or _.');
+  if (hByName(lead.id, name)) throw new Error(`A helper named ${name} exists; use another name, or send to it.`);
+  let folder = args.cwd;
+  if (args.repo) {
+    const e = rResolve(args.repo);
+    if (e) folder = e.path;
+    else if (/[\\/~]/.test(args.repo)) folder = args.repo;
+    else throw new Error(`No repository called “${args.repo}”. Use list to see the folders known here, or give a path.`);
+  }
+  if (!folder) throw new Error('A helper needs a folder: give repo (a registered name) or cwd (a path).');
+  const reg = (config.repos || []).find((e) => folder === e.path || folder.startsWith(e.path + '/'));
+  if (reg?.policy === 'never') throw new Error(`${folder} is registered with policy Never (Settings → Repositories); nothing starts there from a lead.`);
+  const after = Array.isArray(args.after) ? args.after.map(String) : [];
+  for (const a of after) if (!hByName(lead.id, a)) throw new Error(`after names ${a}, which is not a helper of yours.`);
+  if (hOf(lead.id).length >= H_CAPS.total) throw new Error(`The cap is ${H_CAPS.total} helpers for this session; stop or finish one first.`);
+  const id = `helper-${uuid().slice(0, 6)}`;
+  const s = new Sess({ id, title: name, cwd: folder, touched: Date.now() });
+  s.createdAt = Date.now();
+  s.worktree = args.worktree === false ? null : { path: `${folder}/.wt/${name}`, branch: `pilcrow/${name}`, base: 'main', repoRoot: folder };
+  s.helper = { leadId: lead.id, name, leadTitle: lead.title };
+  s.mode = lead.mode;
+  sessions.set(id, s);
+  const h = { id, leadId: lead.id, name, cwd: s.worktree?.path || folder, folder, worktree: s.worktree, brief: String(args.brief || ''), after, startedAt: Date.now(), endedAt: null, state: 'queued', reason: null, handoff: '', cost: 0, files: [], add: 0, del: 0, pending: 0, lastLine: '', launched: false, noted: false, stopping: null, finished: null, commit: null, pr: null };
+  hAll.set(id, h);
+  const waiting = after.filter((a) => hByName(lead.id, a)?.state !== 'done');
+  if (!waiting.length) hLaunch(h);
+  else h.reason = `waits for ${waiting.join(', ')}`;
+  hPump(lead.id);
+  hEmit(lead.id);
+  return { name, id, state: h.state, cwd: h.cwd, worktree: s.worktree ? { path: s.worktree.path, branch: s.worktree.branch } : null, ...(h.state === 'queued' ? { queuedBehind: waiting } : {}) };
+}
+function hLaunch(h) {
+  h.launched = true;
+  h.state = 'running';
+  h.reason = null;
+  const s = sessions.get(h.id);
+  const deps = h.after.map((a) => hByName(h.leadId, a)).filter((d) => d && d.state === 'done');
+  let text = `${H_HEADER}\n\n${h.brief}`;
+  const notes = (config.repos || []).find((e) => h.folder === e.path)?.notes;
+  if (notes) text += `\n\n## About this repository\n${notes}`;
+  if (deps.length) text += '\n\n## From helpers you waited for\n' + deps.map((d) => `- ${d.name} (done): worktree ${d.worktree?.path} on branch ${d.worktree?.branch}. Read the change there before you start.\n${(d.handoff || 'no handoff').replace(/^/gm, '  ')}`).join('\n');
+  deliver(s, { uuid: uuid(), text, from: 'lead' });
+}
+function hPump(leadId) {
+  for (const h of hOf(leadId)) {
+    if (h.state !== 'queued') continue;
+    const deps = h.after.map((a) => hByName(leadId, a));
+    const bad = deps.find((d) => !d || (H_TERMINAL.has(d.state) && d.state !== 'done'));
+    if (bad) {
+      h.state = 'skipped';
+      h.reason = `${bad?.name || 'a helper it waited for'} ${bad ? bad.state : 'is gone'}`;
+      h.endedAt = Date.now();
+      hNote(leadId, h);
+      continue;
+    }
+    if (deps.every((d) => d.state === 'done')) hLaunch(h);
+  }
+}
+function hEnd(h, state, reason) {
+  if (H_TERMINAL.has(h.state) && h.state !== 'done') return;
+  const again = h.state === 'done';
+  h.state = state;
+  h.reason = reason;
+  h.endedAt = Date.now();
+  h.stopping = null;
+  const s = sessions.get(h.id);
+  if (s) {
+    h.cost = s.usage.costUsd;
+    const edits = s.messages.filter((m) => m.type === 'assistant').flatMap((m) => m.message.content).filter((c) => c.type === 'tool_use' && (c.name === 'Edit' || c.name === 'Write'));
+    h.files = [...new Set(edits.map((c) => c.input.file_path))].map((p) => ({ path: p, add: 1, del: 1 }));
+    h.add = h.files.length;
+    h.del = h.files.length;
+    if (state === 'done') {
+      const last = s.messages.filter((m) => m.type === 'assistant').at(-1);
+      const text = last?.message.content.filter((c) => c.type === 'text').map((c) => c.text).join('\n') || '';
+      const m = /^(?:#{1,6}\s*\**|\*\*)\s*handoff\b.*$/im.exec(text);
+      h.handoff = m ? text.slice(m.index).trim() : text;
+    }
+  }
+  hEmit(h.leadId);
+  if (!again) hNote(h.leadId, h);
+  hPump(h.leadId);
+  hReport(h.leadId);
+}
+function hNote(leadId, h) {
+  if (h.noted) return;
+  h.noted = true;
+  const body = h.state === 'done' ? h.handoff || 'No handoff; the helper ended without a reply.' : h.reason || h.state;
+  const text = `<helper-note name="${h.name}" state="${h.state}" elapsed="${Math.round(((h.endedAt || Date.now()) - h.startedAt) / 1000)}s" cost="$${h.cost.toFixed(2)}" files="${h.files.length}" add="${h.add}" del="${h.del}">\n${body}\n</helper-note>`;
+  const b = hNoteBuf.get(leadId) || { texts: [], timer: null };
+  b.texts.push(text);
+  clearTimeout(b.timer);
+  b.timer = setTimeout(() => {
+    hNoteBuf.delete(leadId);
+    const lead = sessions.get(leadId);
+    if (!lead) return;
+    const still = hOf(leadId).filter((x) => !H_TERMINAL.has(x.state));
+    const tail = still.length ? `Helpers still going: ${still.map((x) => `${x.name} (${x.state})`).join(', ')}.` : 'No helpers are running now.';
+    const full = b.texts.join('\n\n') + `\n\n${tail} Read more with the helpers read tool.`;
+    if (lead.isBusy()) lead.held.push({ uuid: uuid(), text: full, at: Date.now(), note: 'helper' });
+    else deliver(lead, { uuid: uuid(), text: full, note: 'helper' });
+    lead.emitState();
+  }, Math.max(80, Math.min(pace * 4, 400)));
+  hNoteBuf.set(leadId, b);
+}
+function hReport(leadId) {
+  const mine = hOf(leadId);
+  if (!mine.length || !mine.every((h) => H_TERMINAL.has(h.state)) || !mine.some((h) => h.files.length)) return;
+  const lead = sessions.get(leadId);
+  const done = mine.filter((h) => h.state === 'done').length;
+  const existing = inboxItems.find((i) => i.kind === 'helpers' && i.leadId === leadId);
+  const item = { id: existing?.id || `inbox-${uuid().slice(0, 6)}`, kind: 'helpers', leadId, sessionId: leadId, scheduleName: lead?.title || 'A lead session', title: lead?.title || 'A lead session', cwd: lead?.cwd, startedAt: mine[0].startedAt, endedAt: Date.now(), durationMs: Date.now() - mine[0].startedAt, status: done ? 'completed' : 'failed', reason: done === mine.length ? null : `${mine.length - done} of ${mine.length} did not finish`, summary: `${done} of ${mine.length} helpers done.\n` + mine.map((h) => `- ${h.name}: ${h.state}`).join('\n'), cost: mine.reduce((n, h) => n + h.cost, 0), helpers: mine.map((h) => ({ ...hPublic(h), handoff: h.handoff })), read: existing?.read || false, manual: true };
+  if (existing) Object.assign(existing, item);
+  else inboxItems.unshift(item);
+  broadcast('inbox.changed', inboxItems.filter((i) => !i.read).length);
+}
+const helperMethods = {
+  'helpers.list': ({ leadId }) => ({ helpers: hOf(leadId).map(hPublic), caps: H_CAPS, cost: hOf(leadId).reduce((n, h) => n + h.cost, 0), known: (config.repos || []).map((e) => ({ path: e.path, name: e.name, registered: true, policy: e.policy, about: e.about, allowed: e.policy === 'allowed' })) }),
+  'helpers.allow': ({ leadId, requestId }) => {
+    for (const h of hOf(leadId)) {
+      const p = sessions.get(h.id)?.pending.get(requestId);
+      if (!p) continue;
+      const key = dKey(p.req);
+      const label = dLabel(p.req);
+      const rules = hLeadRules.get(leadId) || [];
+      if (!rules.some((r) => r.key === key)) rules.push({ key, label });
+      hLeadRules.set(leadId, rules);
+      let answered = 0;
+      for (const x of hOf(leadId)) {
+        const xs = sessions.get(x.id);
+        for (const [, pp] of xs?.pending || []) {
+          if (dKey(pp.req) !== key) continue;
+          pp.resolve({ behavior: 'allow', updatedInput: pp.req.input });
+          answered++;
+        }
+      }
+      hEmit(leadId);
+      return { key, label, answered };
+    }
+    throw new Error('That request is gone.');
+  },
+  'helpers.stop': ({ leadId, name }) => {
+    const h = hByName(leadId, name);
+    if (!h) throw new Error(`No helper called ${name}.`);
+    const s = sessions.get(h.id);
+    if (s?.isBusy()) {
+      h.stopping = 'stopped by you';
+      s.aborted = true;
+    } else hEnd(h, 'stopped', 'stopped by you');
+    return hPublic(h);
+  },
+  'helpers.review': ({ leadId }) => {
+    const runs = hOf(leadId)
+      .filter((h) => h.worktree && !['commit', 'discard'].includes(h.finished))
+      .map((h) => ({ runId: h.id, name: h.name, files: h.files, add: h.add, del: h.del }));
+    return { id: leadId, runs, files: runs.reduce((n, r) => n + r.files.length, 0), same: [], differ: runs.map((r) => ({ name: r.name, files: r.files })) };
+  },
+  'helpers.finish': ({ leadId, name, action }) => {
+    const mine = hOf(leadId).filter((h) => (!name || h.name === name) && H_TERMINAL.has(h.state) && !h.finished);
+    for (const h of mine) {
+      h.finished = action === 'pr' ? 'commit' : action;
+      if (action === 'commit' || action === 'pr') h.commit = 'a1b2c3d';
+      if (action === 'pr') h.pr = `https://github.com/acme/${h.name}/pull/7`;
+    }
+    hEmit(leadId);
+    hReport(leadId);
+    return { results: mine.map((h) => ({ name: h.name, ok: true, output: '' })) };
+  },
+  'helpers.export': ({ leadId }) => `# ${sessions.get(leadId)?.title || 'Lead'}: helpers\n\n` + hOf(leadId).map((h) => `## ${h.name} — ${h.state}\n\n${h.handoff}`).join('\n\n') + '\n',
+  'helpers.detach': ({ id }) => {
+    const h = hAll.get(id);
+    if (!h) return false;
+    hAll.delete(id);
+    const s = sessions.get(id);
+    if (s) s.helper = null;
+    hEmit(h.leadId);
+    return true;
+  },
+};
+
+const dispatchMethods = {
+  'workspace.scan': ({ root }) => ({ root: root || `${HOME}/code`, depth: 3, at: Date.now(), repos: rAnnotate(REPOS) }),
+  'repos.list': () => (config.repos || []).map(rMissing),
+  'repos.save': (p) => rSave(p),
+  'repos.remove': ({ id }) => {
+    const list = config.repos || [];
+    if (!list.some((x) => x.id === id)) return false;
+    config.repos = list.filter((x) => x.id !== id).map((x) => ({ ...x, deps: (x.deps || []).filter((d) => d !== id) }));
+    broadcast('repos.changed', { repos: config.repos.map(rMissing) });
+    return true;
+  },
+  'repos.register': ({ path: dir, ...patch }) => {
+    const cur = (config.repos || []).find((e) => dir === e.path || dir.startsWith(e.path + '/'));
+    return rSave(cur ? { id: cur.id, ...patch } : { path: dir, ...patch });
+  },
+  'repos.scan': ({ root }) => ({ root: root || `${HOME}/code`, found: REPOS.map((r) => ({ path: r.path, name: r.name, packageName: r.packageName, kind: r.kind, branch: r.branch, registered: (config.repos || []).some((e) => e.path === r.path) })) }),
+  'repos.refresh': () => (config.repos || []).map(rMissing),
+  'repos.resolve': ({ word }) => rResolve(word) || { nearest: (config.repos || []).map((e) => e.name).slice(0, 3) },
+  'dispatch.list': () => jobs.map(dSummary).sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0)),
+  'dispatch.get': ({ id }) => ({ job: dSummary(dJob(id)), runs: dJob(id).runs }),
+  'dispatch.save': (p) => {
+    const cur = p.id ? jobs.find((j) => j.id === p.id) : null;
+    const job = dNormalize(p, cur);
+    if (cur) Object.assign(cur, job, { plan: null, state: cur.state === 'draft' || cur.state === 'planned' ? 'draft' : cur.state, runs: cur.runs });
+    else jobs.push(job);
+    const j = cur || job;
+    dEmit(j);
+    return dSummary(j);
+  },
+  'dispatch.remove': ({ id }) => {
+    jobs = jobs.filter((j) => j.id !== id);
+    broadcast('dispatch.changed', { id, removed: true });
+    return true;
+  },
+  'dispatch.plan': (p) => {
+    const saved = p.id ? jobs.find((j) => j.id === p.id) : null;
+    const job = saved && !p.targets ? saved : dNormalize(p, saved);
+    const plan = dPlan(job);
+    if (saved) {
+      saved.plan = plan;
+      if (saved.state === 'draft') saved.state = 'planned';
+      dEmit(saved);
+    }
+    return plan;
+  },
+  'dispatch.start': ({ id, wave }) => {
+    const job = dJob(id);
+    if (job.state === 'running') throw new Error('This job is already running.');
+    const plan = (job.plan = dPlan(job));
+    if (plan.blocked) throw new Error(`${plan.blocked} target${plan.blocked === 1 ? ' is' : 's are'} blocked. Fix or deselect ${plan.blocked === 1 ? 'it' : 'them'} first.`);
+    const ok = plan.targets.filter((t) => t.verdict !== 'blocked');
+    const canaryN = wave === 'all' ? 0 : job.settings.canary;
+    const order = [...ok].sort((a, b) => a.level - b.level || a.name.localeCompare(b.name));
+    const canary = new Set(order.filter((t) => t.level === 0).slice(0, canaryN).map((t) => t.path));
+    job.runs = ok.map((t) => ({ id: `run-${uuid()}`, jobId: job.id, path: t.path, name: t.name, base: t.base, size: t.size, level: t.level, dependsOn: t.deps, wave: canary.has(t.path) ? 'canary' : 'main', state: 'queued', attempt: 1, sessionId: null, worktree: null, startedAt: null, endedAt: null, durationMs: 0, cost: 0, summary: '', files: [], add: 0, del: 0, reason: null, verify: null, now: null, pending: [], retried: false, commit: null, pr: null, finished: null, brief: t.brief }));
+    job.state = 'running';
+    job.wave = canary.size ? 'canary' : 'main';
+    job.paused = false;
+    job.startedAt = Date.now();
+    job.finishedAt = null;
+    job.learned = [];
+    job.forecast = null;
+    job.report = null;
+    dEmit(job);
+    dPump(job);
+    return dSummary(job);
+  },
+  'dispatch.continue': ({ id, brief, learn }) => {
+    const job = dJob(id);
+    if (!(job.state === 'reviewing' && job.wave === 'canary')) throw new Error('The job is not waiting after a canary.');
+    if (typeof brief === 'string' && brief.trim()) job.brief = brief;
+    if (typeof learn === 'boolean') job.settings.learn = learn;
+    job.wave = 'main';
+    job.state = 'running';
+    dEmit(job);
+    dPump(job);
+    return dSummary(job);
+  },
+  'dispatch.pause': ({ id }) => {
+    const job = dJob(id);
+    job.paused = true;
+    dEmit(job);
+    return dSummary(job);
+  },
+  'dispatch.resume': ({ id }) => {
+    const job = dJob(id);
+    job.paused = false;
+    dEmit(job);
+    dPump(job);
+    return dSummary(job);
+  },
+  'dispatch.stop': ({ id, runId }) => {
+    const job = dJob(id);
+    const stopRun = (r) => {
+      const s = r.sessionId ? sessions.get(r.sessionId) : null;
+      if (s) {
+        s.aborted = true;
+        for (const p of s.pending.values()) p.resolve({ behavior: 'deny', message: 'Stopped' });
+      }
+      dEndRun(job, r, 'stopped', 'Stopped by you', s);
+    };
+    if (runId) {
+      const r = job.runs.find((x) => x.id === runId);
+      if (r && D_ACTIVE.has(r.state)) stopRun(r);
+      else if (r && r.state === 'queued') {
+        r.state = 'skipped';
+        r.reason = 'Skipped by you';
+        r.endedAt = Date.now();
+        dEmit(job, [r]);
+        dPump(job);
+      }
+      return dSummary(job);
+    }
+    for (const r of job.runs) {
+      if (D_ACTIVE.has(r.state)) stopRun(r);
+      else if (r.state === 'queued') {
+        r.state = 'skipped';
+        r.reason = 'Stopped by you';
+        r.endedAt = Date.now();
+      }
+    }
+    job.state = 'stopped';
+    job.stoppedReason = 'Stopped by you';
+    dEmit(job);
+    return dSummary(job);
+  },
+  'dispatch.retry': ({ id, runId, brief }) => {
+    const job = dJob(id);
+    const old = job.runs.find((x) => x.id === runId);
+    if (!old || !D_TERMINAL.has(old.state)) throw new Error('That run is still going.');
+    if (typeof brief === 'string' && brief.trim()) job.brief = brief;
+    const run = { ...old, id: `run-${uuid()}`, state: 'queued', attempt: (old.attempt || 1) + 1, sessionId: null, worktree: null, startedAt: null, endedAt: null, durationMs: 0, cost: 0, summary: '', files: [], add: 0, del: 0, reason: null, now: null, pending: [], commit: null, pr: null, finished: null, wave: 'main' };
+    old.superseded = run.id;
+    job.runs.push(run);
+    if (job.state !== 'running') {
+      job.state = 'running';
+      job.wave = 'main';
+      job.finishedAt = null;
+    }
+    dEmit(job);
+    dPump(job);
+    return run;
+  },
+  'dispatch.skip': ({ id, runId }) => dispatchMethods['dispatch.stop']({ id, runId }),
+  'dispatch.allow': ({ id, key, requestId }) => {
+    const job = dJob(id);
+    if (!key && requestId) key = job.runs.flatMap((r) => r.pending || []).find((p) => p.requestId === requestId)?.key || null;
+    if (!key) throw new Error('No request to allow.');
+    if (!job.rules.some((r) => r.key === key)) job.rules.push({ key, label: null, at: Date.now(), count: 0 });
+    const rule = job.rules.find((r) => r.key === key);
+    for (const run of job.runs) {
+      const hits = (run.pending || []).filter((p) => p.key === key);
+      if (!hits.length) continue;
+      rule.label = rule.label || hits[0].label;
+      const s = sessions.get(run.sessionId);
+      for (const p of hits) {
+        rule.count += 1;
+        s?.pending.get(p.requestId)?.resolve({ behavior: 'allow', updatedInput: s.pending.get(p.requestId).req.input });
+      }
+    }
+    dEmit(job);
+    return dSummary(job);
+  },
+  'dispatch.review': ({ id }) => {
+    const job = dJob(id);
+    const runs = job.runs.filter((r) => r.state === 'done' && !r.superseded).map((r) => ({ runId: r.id, name: r.name, files: r.files || [], add: r.add || 0, del: r.del || 0 }));
+    const byPath = new Map();
+    for (const r of runs) for (const f of r.files) byPath.set(f.path, [...(byPath.get(f.path) || []), r.name]);
+    const same = [...byPath.entries()].filter(([, names]) => names.length > 1).map(([p, names]) => ({ sig: p, path: p, runs: names, add: 3, del: 1, preview: ['-  node: 20', '+  node: 22'] }));
+    const differ = runs.map((r) => ({ name: r.name, files: r.files.filter((f) => (byPath.get(f.path) || []).length === 1) })).filter((d) => d.files.length);
+    return { id, runs, same, differ, files: runs.reduce((n, r) => n + r.files.length, 0) };
+  },
+  'dispatch.finish': ({ id, runId, action, pr }) => {
+    const job = dJob(id);
+    const runs = runId ? job.runs.filter((r) => r.id === runId) : job.runs.filter((r) => !r.superseded && D_TERMINAL.has(r.state) && !r.finished && (action === 'commit' ? r.state === 'done' : true));
+    const results = runs.map((r) => {
+      r.finished = action;
+      if (action === 'commit') {
+        r.commit = `c0ffee${r.id.slice(-2)}`;
+        if (pr ?? job.settings.pr) r.pr = `https://github.com/acme/${r.name}/pull/${40 + job.runs.indexOf(r)}`;
+      }
+      return { runId: r.id, name: r.name, ok: true, output: '' };
+    });
+    dEmit(job);
+    dMaybeFinish(job);
+    return { job: dSummary(job), results };
+  },
+  'dispatch.playbooks': () => [...playbooks].sort((a, b) => (b.lastUsedAt || b.updatedAt) - (a.lastUsedAt || a.updatedAt)),
+  'dispatch.savePlaybook': (p) => dSavePlaybook(p),
+  'dispatch.removePlaybook': ({ id }) => {
+    const n = playbooks.length;
+    playbooks = playbooks.filter((p) => p.id !== id);
+    if (playbooks.length === n) throw new Error('No such playbook.');
+    broadcast('dispatch.playbooks', {});
+    return true;
+  },
+  'dispatch.startFromPlaybook': ({ id, name, wave, targets }) => dStartFromPlaybook(id, { name, wave, targets }),
+  'dispatch.export': ({ id }) => {
+    const job = dJob(id);
+    const rep = job.report || dReport(job);
+    return [`# ${job.name}`, '', `${rep.targets.length} repositories · $${rep.cost.toFixed(2)}`, '', '## Brief', '', job.brief, '', '## Repositories', '', '| Repository | State | Files | Cost | Time | Landed |', '|---|---|---|---|---|---|', ...rep.targets.map((t) => `| ${t.name} | ${t.state} | ${t.files} | $${(t.cost || 0).toFixed(2)} | ${Math.round((t.durationMs || 0) / 60e3)} min | ${t.commit || t.finished || ''} |`)].join('\n');
+  },
+};
 
 // ---------------------------------------------------------------- RPC
 
@@ -456,7 +1418,8 @@ const listChanged = () => {
   clearTimeout(listTimer);
   listTimer = setTimeout(() => broadcast('sessions.changed', {}), 50);
 };
-const config = { theme: 'dark', fontSize: 14.5, sendKey: 'enter', claudeBinary: 'auto', defaultModel: '', defaultMode: 'default', defaultEffort: '', worktreeRoot: '', idleTimeoutMin: 30, notifications: false, promptSuggestions: false, showThinking: false, recentProjects: [PROJ, OTHER], ui: { sidebar: true, panel: false, view: 'normal' } };
+const config = { theme: 'dark', fontSize: 14.5, sendKey: 'enter', claudeBinary: 'auto', defaultModel: '', defaultMode: 'default', defaultEffort: '', worktreeRoot: '', idleTimeoutMin: 30, notifications: false, promptSuggestions: false, showThinking: false, recentProjects: [PROJ, OTHER], repos: JSON.parse(JSON.stringify(REGISTRY)), helpers: { enabled: true, total: 8, parallel: 0, maxMinutes: 30, costUsd: 0, wakeLead: true }, ui: { sidebar: true, panel: false, view: 'normal' } };
+const configDefaults = JSON.parse(JSON.stringify(config)); // what mock.reset puts back
 const S = (id) => {
   const s = sessions.get(id);
   if (!s) throw new Error('Unknown session: ' + id);
@@ -554,7 +1517,17 @@ const methods = {
     S(id).title = title;
     listChanged();
   },
-  'session.delete': ({ id }) => {
+  'session.delete': ({ id, removeHelpers }) => {
+    if (removeHelpers)
+      for (const h of hOf(id)) {
+        sessions.delete(h.id);
+        hAll.delete(h.id);
+      }
+    const h = hAll.get(id);
+    if (h) {
+      hAll.delete(id);
+      hEmit(h.leadId);
+    }
     sessions.delete(id);
     listChanged();
   },
@@ -593,8 +1566,60 @@ const methods = {
   'mcp.list': () => ({ file: `${HOME}/.claude.json`, servers: [] }),
   'memory.list': () => ({ notes: [] }),
   'project.fileHistory': () => ({}),
-  'schedules.list': () => [],
-  'inbox.list': () => ({ unread: 0, items: [] }),
+  'schedules.list': () => schedules.map(sWithNext),
+  'schedules.save': (p) => {
+    const cur = p.id ? schedules.find((x) => x.id === p.id) : null;
+    const kind = p.kind || cur?.kind || 'prompt';
+    const sc = { id: cur?.id || `sch-${uuid()}`, kind, playbookId: kind === 'dispatch' ? String(p.playbookId || cur?.playbookId || '') : null, playbookName: kind === 'dispatch' ? String(p.playbookName || cur?.playbookName || '') : null, name: String(p.name || '').trim() || 'Untitled schedule', cwd: String(p.cwd || cur?.cwd || ''), prompt: String(p.prompt ?? cur?.prompt ?? ''), cadence: p.cadence || cur?.cadence || { kind: 'daily', time: '09:00' }, model: p.model ?? cur?.model ?? '', effort: p.effort ?? cur?.effort ?? '', mode: p.mode || cur?.mode || 'acceptEdits', worktree: Boolean(p.worktree ?? cur?.worktree), maxMinutes: Number(p.maxMinutes ?? cur?.maxMinutes ?? 45), enabled: p.enabled ?? cur?.enabled ?? true, createdAt: cur?.createdAt || Date.now(), lastRunAt: cur?.lastRunAt || null, lastStatus: cur?.lastStatus || null, runs: cur?.runs || 0, running: cur?.running || null };
+    if (kind === 'dispatch' && !sc.playbookId) throw new Error('Pick a playbook for the schedule.');
+    if (kind !== 'dispatch' && !sc.prompt.trim()) throw new Error('Write what Claude should do each time.');
+    if (cur) Object.assign(cur, sc);
+    else schedules.push(sc);
+    broadcast('schedules.changed', {});
+    return sWithNext(cur || sc);
+  },
+  'schedules.remove': ({ id }) => {
+    schedules = schedules.filter((x) => x.id !== id);
+    broadcast('schedules.changed', {});
+    return true;
+  },
+  'schedules.toggle': ({ id, enabled }) => {
+    const sc = schedules.find((x) => x.id === id);
+    if (!sc) throw new Error('No such schedule.');
+    sc.enabled = Boolean(enabled);
+    broadcast('schedules.changed', {});
+    return sWithNext(sc);
+  },
+  'schedules.preview': ({ cadence }) => ({ nextRunAt: Date.now() + 3600e3, label: `${CADENCE_LABEL[cadence?.kind] || 'Every day'}${cadence?.time ? ` at ${cadence.time}` : ''}` }),
+  'schedules.runNow': ({ id }) => {
+    const sc = schedules.find((x) => x.id === id);
+    if (!sc) throw new Error('No such schedule.');
+    sc.lastRunAt = Date.now();
+    sc.runs += 1;
+    if (sc.kind === 'dispatch') {
+      const job = dStartFromPlaybook(sc.playbookId, { name: `${sc.name} · now`, unattended: true, scheduleId: sc.id });
+      sc.running = { sessionId: null, jobId: job.id, startedAt: Date.now() };
+      broadcast('schedules.changed', {});
+      return { jobId: job.id };
+    }
+    const s = new Sess({ id: `sr-${uuid()}`, title: `${sc.name} · now`, cwd: sc.cwd || PROJ, touched: Date.now() });
+    s.scheduled = { id: sc.id, name: sc.name, at: Date.now(), manual: true };
+    sessions.set(s.id, s);
+    broadcast('schedules.changed', {});
+    setTimeout(() => deliver(s, { text: sc.prompt }), 30);
+    return { sessionId: s.id };
+  },
+  'inbox.list': () => ({ unread: inboxItems.filter((i) => !i.read).length, items: inboxItems }),
+  'inbox.markRead': ({ ids }) => {
+    for (const i of inboxItems) if (!ids || ids.includes(i.id)) i.read = true;
+    return inboxItems.filter((i) => !i.read).length;
+  },
+  'inbox.remove': ({ id }) => {
+    inboxItems = inboxItems.filter((i) => i.id !== id);
+    return true;
+  },
+  ...dispatchMethods,
+  ...helperMethods,
   'fleet.state': () => {
     const live = Object.fromEntries([...sessions.values()].filter((s) => s.live).map((s) => [s.id, s.state()]));
     const dayStart = new Date();
@@ -618,7 +1643,15 @@ const methods = {
   // ---- test controls
   'mock.reset': () => {
     seed();
+    seedDispatch();
+    hAll.clear();
+    hLeadRules.clear();
+    for (const b of hNoteBuf.values()) clearTimeout(b.timer);
+    hNoteBuf.clear();
     overrides.clear();
+    // the config too: a saved ui (a dragged sidebar width) must not leak into the next test's window
+    for (const k of Object.keys(config)) delete config[k];
+    Object.assign(config, JSON.parse(JSON.stringify(configDefaults)));
     listChanged();
     return true;
   },

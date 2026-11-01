@@ -179,8 +179,12 @@ class ProseBlock(Block):
                 if g is not None and g.code() is not None:
                     # a well being written: built from blocks, its code held by the grower
                     out.extend((r, g.code() or "") for r in well_rects(self.doc))
-                elif "```" in self.src or "~~~" in self.src:  # a parse of the source: only when it may hold a fence
-                    codes = markdown.fence_sources(self.src)
+                elif "```" in self.src or "~~~" in self.src or "    " in self.src:
+                    # the builder leaves the code of each well on the document; a document from the
+                    # HTML renderer (the fallback) is parsed for it
+                    codes = self.doc.property("pilcrow_wells")
+                    if not isinstance(codes, list):
+                        codes = markdown.fence_sources(self.src)
                     lay = self.doc.documentLayout()
                     for frame in self.doc.rootFrame().childFrames():
                         if isinstance(frame, QTextTable) and frame.format().borderCollapse():

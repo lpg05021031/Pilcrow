@@ -217,6 +217,7 @@ function CardHead({ s, st }: { s: SessionSummary; st?: Partial<SessionState> }) 
     <div className="ovc-head">
       <span className="ovc-title ellipsis">{s.title}</span>
       <span className="ovc-proj ellipsis">
+        {st?.helper || s.helper ? `helper of ${st?.helper?.leadTitle || 'a lead session'} · ` : ''}
         {basename(s.project || s.cwd)}
         {s.worktree ? ` · ${s.worktree.branch}` : s.gitBranch ? ` · ${s.gitBranch}` : ''}
         {st?.activeModel ? ` · ${st.activeModel.replace(/^claude-/, '').replace(/-\d{8}$/, '')}` : ''}
@@ -304,6 +305,19 @@ function NeedsCard({ s, st, first, focused, now }: { s: SessionSummary; st?: Par
   const allow = () => decide({ behavior: 'allow', decisionClassification: 'user_temporary' });
   const always = () => decide({ behavior: 'allow', updatedPermissions: perm!.suggestions, decisionClassification: 'user_permanent' });
   const deny = () => decide({ behavior: 'deny', message: 'The user declined this action.', decisionClassification: 'user_reject' });
+  // a helper's request can be answered for every helper of its lead at once (HELPERS.md §5.6)
+  const helperOf = s.helper || null;
+  const allowAllHelpers = async () => {
+    if (!perm || busy || !helperOf) return;
+    setBusy(true);
+    try {
+      await call('helpers.allow', { leadId: helperOf.leadId, requestId: perm.requestId });
+      setDecided('allow');
+      setTimeout(() => (setDecided(null), setBusy(false)), 900);
+    } catch {
+      setBusy(false);
+    }
+  };
   useEffect(() => {
     if (!first || !perm || perm.interactive) return;
     const onKey = (e: KeyboardEvent) => {
@@ -354,6 +368,11 @@ function NeedsCard({ s, st, first, focused, now }: { s: SessionSummary; st?: Par
               {allowAlways && (
                 <button className="btn sm" onClick={always} disabled={busy} title={suggestionLabel(perm.suggestions[0], s.cwd)}>
                   Always allow{key(2)}
+                </button>
+              )}
+              {helperOf && (
+                <button className="btn sm" onClick={allowAllHelpers} disabled={busy} title="Answer every helper of this lead that asks the same thing, now and later">
+                  Allow for all helpers
                 </button>
               )}
               <button className={`btn sm ${perm.defaultToNo ? 'primary' : 'ghost'}`} onClick={deny} disabled={busy}>
