@@ -505,3 +505,28 @@ kbd {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* A part of the page that failed to render (ui/ErrorBoundary.tsx): says so in place, offers a retry. */
+.render-fault {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: var(--r-2);
+  color: var(--err);
+  background: var(--err-wash);
+  font-size: var(--fs-small);
+}
+.render-fault-text {
+  flex: 1;
+  min-width: 0;
+}
+.render-fault-why {
+  color: var(--text-3);
+}
+.render-fault-retry {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-2);
+}
