@@ -241,12 +241,17 @@ export function writeJson(file, data) {
  */
 export function coalesce(fn, ms) {
   let t = null;
-  return () => {
-    t ??= setTimeout(() => {
-      t = null;
-      fn();
-    }, ms);
+  const run = () => {
+    clearTimeout(t);
+    t = null;
+    fn();
   };
+  const call = () => {
+    t ??= setTimeout(run, ms);
+  };
+  /** Run now if a call is waiting (the server is quitting); nothing waiting, nothing to write. */
+  call.flush = () => t !== null && run();
+  return call;
 }
 
 let tmpSeq = 0;

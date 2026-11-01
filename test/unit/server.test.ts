@@ -2,6 +2,7 @@
 // Sec-Fetch-Site checks on HTTP and WebSocket, and a window that sends a broken frame or goes silent.
 import { afterAll, describe, expect, it } from 'vitest';
 import http from 'node:http';
+import os from 'node:os';
 import WebSocket from 'ws';
 import { METHODS } from '../../server/main.js';
 import { logSays, serve } from './serve.js';
@@ -137,5 +138,16 @@ describe('windows that break or go silent', () => {
     await new Promise((r) => raw.on('close', r));
     expect(Date.now() - t0).toBeLessThan(3 * HEARTBEAT_MS);
     expect((await rpc('config.get')).ok).toBe(true);
+  });
+});
+
+describe('terminals', () => {
+  it('closing one waits until its process is gone', async () => {
+    const t = await rpc('term.open', { cwd: os.tmpdir(), command: "trap '' HUP; sleep 30" });
+    expect(t.ok).toBe(true);
+    const t0 = Date.now();
+    expect((await rpc('term.close', { id: t.r.id })).ok).toBe(true);
+    expect(Date.now() - t0).toBeLessThan(2500); // SIGHUP, and SIGKILL after 1.5 s at the latest
+    expect((await rpc('term.list')).r).toEqual([]);
   });
 });

@@ -1474,9 +1474,11 @@ export function createDispatcher(deps) {
     backoffTimers.clear();
     clearTimeout(flushTimer);
     flushTimer = null;
-    clearTimeout(saveTimer);
-    saveTimer = null;
-    flushNow();
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+      saveTimer = null;
+      flushNow(); // what changed since the last save
+    }
   }
 
   return {

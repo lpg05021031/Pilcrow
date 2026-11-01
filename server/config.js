@@ -104,10 +104,10 @@ class Store {
     this.saveMeta();
   }
 
-  /** Write now what is loaded (nothing loaded, nothing to lose). */
+  /** Write now what is waiting to be saved. */
   flush() {
-    if (this.#config) writeJson(CONFIG_FILE, this.#config);
-    if (this.#meta) writeJson(META_FILE, this.#meta);
+    this.saveConfig.flush();
+    this.saveMeta.flush();
   }
 }
 
