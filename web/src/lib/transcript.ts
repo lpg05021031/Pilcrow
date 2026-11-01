@@ -152,6 +152,11 @@ export class TranscriptModel {
   lastChain: string | undefined;
   private infoSeen = new Set<string>();
 
+  /**
+   * Mark a change. Each bump raises `rev` by one and exactly one top-level item's rev by one (the item,
+   * or the outermost tool it sits under), so `rev` is always the sum of the top-level items' revs:
+   * ItemList (lib/units extendTurns) relies on that to see a change to an earlier turn without reading it.
+   */
   private bump(item: Item) {
     item.rev++;
     this.rev++;

@@ -3,37 +3,20 @@ import { ArrowDown, ArrowUpRight, CornerDownRight, PencilLine, GitFork, ChevronR
 import { useStore, models, forkSession, insertIntoComposer, toast, call, confirmAction, bumpFs, openLightbox, openSession } from '../lib/store';
 import type { Item, ToolItem, UserItem, ThinkingItem, TextItem, NoticeItem, ResultItem, CompactItem, CommandOutputItem } from '../lib/transcript';
 import type { PermissionRequest } from '../lib/types';
-import { duration, tokens, cost, truncate, relPath, basename } from '../lib/format';
+import { duration, tokens, cost, truncate, relPath } from '../lib/format';
 import { Markdown } from './Markdown';
 import { ToolCard, type ToolCtx } from './tools/ToolCard';
 import { PermissionCard } from './tools/Permission';
 import { useNow, CopyButton, WorkingMark } from './ui/bits';
-import { useSmoothText, useThrottled, useExitGhost, spring, EASE, takeLaunch } from '../lib/motion';
+import { useSmoothText, useThrottled, useExitGhost } from '../lib/motion';
 import { Collapse } from './ui/Collapse';
-import { str } from '../lib/tools';
-import { groupTurns, liveTurnFolds, type Unit } from '../lib/units';
+import { ErrorBoundary } from './ui/ErrorBoundary';
+import { chaptersOf, extendTurns, groupItems, liveTurnFolds, type Chapter, type Turns, type Unit } from '../lib/units';
+import { exploreLabel, isQuiet, liveLabel, parseNotes, tally, workSummary } from '../lib/labels';
+import { useFollow } from './useFollow';
 
 // ---------------------------------------------------------------- list with step grouping
-
-type Group = { kind: 'steps'; items: ToolItem[]; key: string } | { kind: 'item'; item: Item; key: string };
-
-function groupItems(items: Item[]): Group[] {
-  const out: Group[] = [];
-  let run: ToolItem[] = [];
-  const flush = () => {
-    if (run.length) out.push({ kind: 'steps', items: run, key: 's-' + run[0].id });
-    run = [];
-  };
-  for (const it of items) {
-    if (it.kind === 'tool' && it.name !== 'AskUserQuestion' && it.name !== 'ExitPlanMode') run.push(it);
-    else {
-      flush();
-      out.push({ kind: 'item', item: it, key: it.id });
-    }
-  }
-  flush();
-  return out;
-}
+// The grouping and the words on folds are pure and live in lib/units.ts and lib/labels.ts.
 
 /** The items of one slice of the conversation, with runs of tool calls drawn as steps. */
 const Flat = memo(function Flat({ items, ctx }: { items: Item[]; ctx: ToolCtx }) {
@@ -52,7 +35,6 @@ const Flat = memo(function Flat({ items, ctx }: { items: Item[]; ctx: ToolCtx })
 });
 
 // ---------------------------------------------------------------- turns: the work folds, what Claude says stays
-// The grouping itself is pure and lives in lib/units.ts so it can be tested on its own.
 
 // Which folds you opened in the conversation on screen. Opening a conversation starts clean.
 const turnOpen = new Map<string, boolean>();
@@ -60,123 +42,6 @@ const chapterOpen = new Map<string, boolean>();
 export function forgetFolds() {
   turnOpen.clear();
   chapterOpen.clear();
-}
-
-/** What Claude is doing right now, for the fold line of a turn that is still running. */
-function liveLabel(work: Item[]): string | null {
-  for (let i = work.length - 1; i >= 0; i--) {
-    const it = work[i];
-    if (it.kind === 'tool' && (it.status === 'running' || it.status === 'streaming')) {
-      const file = str(it.input, 'file_path') || str(it.input, 'notebook_path');
-      switch (toolWord(it)) {
-        case 'edit':
-          return file ? `Editing ${basename(file)}` : 'Editing a file';
-        case 'read':
-          return file ? `Reading ${basename(file)}` : 'Reading a file';
-        case 'search':
-          return 'Searching';
-        case 'command':
-          return it.input?.description ? truncate(String(it.input.description), 64) : 'Running a command';
-        case 'agent':
-          return 'Running an agent';
-        case 'mcp':
-          return 'Using a connector';
-        case 'helper':
-          return HELPER_LIVE[it.name.slice('mcp__helpers__'.length)] || 'Working with helpers';
-        case 'ask':
-          return 'Asking you a question';
-        case 'plan':
-          return 'Waiting for your review of the plan';
-        default:
-          return `Using ${it.name}`;
-      }
-    }
-    if (it.kind === 'thinking' && it.streaming) return 'Thinking';
-  }
-  return null;
-}
-
-const HELPER_LIVE: Record<string, string> = { start: 'Starting a helper', wait: 'Waiting for helpers', read: "Reading a helper's result", send: 'Telling a helper', stop: 'Stopping a helper', list: 'Listing helpers' };
-
-function toolWord(t: ToolItem) {
-  const n = t.name;
-  if (['Edit', 'MultiEdit', 'Write', 'NotebookEdit'].includes(n)) return 'edit';
-  if (n === 'Read' || n === 'NotebookRead') return 'read';
-  if (['Grep', 'Glob', 'LS', 'WebSearch', 'WebFetch', 'ToolSearch'].includes(n)) return 'search';
-  if (n === 'Bash' || n === 'PowerShell' || n === 'BashOutput') return 'command';
-  if (n === 'Task' || n === 'Agent' || n === 'Workflow' || n === 'RunWorkflow') return 'agent';
-  if (n.startsWith('mcp__helpers__')) return 'helper';
-  if (n === 'AskUserQuestion') return 'ask';
-  if (n === 'ExitPlanMode') return 'plan';
-  if (n.startsWith('mcp__')) return 'mcp';
-  return 'other';
-}
-
-function workSummary(work: Item[]) {
-  const tools = work.filter((it): it is ToolItem => it.kind === 'tool');
-  const files = new Set<string>();
-  let reads = 0;
-  let searches = 0;
-  let commands = 0;
-  let agents = 0;
-  let mcp = 0;
-  let other = 0;
-  let failed = 0;
-  let starts = 0;
-  let helperSteps = 0;
-  let asks = 0;
-  let plans = 0;
-  for (const t of tools) {
-    if (t.status === 'error' || t.status === 'denied') failed++;
-    switch (toolWord(t)) {
-      case 'edit':
-        files.add(str(t.input, 'file_path') || str(t.input, 'notebook_path') || t.id);
-        break;
-      case 'read':
-        reads++;
-        break;
-      case 'search':
-        searches++;
-        break;
-      case 'command':
-        commands++;
-        break;
-      case 'agent':
-        agents++;
-        break;
-      case 'helper':
-        if (t.name.endsWith('__start')) starts++;
-        else helperSteps++;
-        break;
-      case 'ask':
-        asks++;
-        break;
-      case 'plan':
-        plans++;
-        break;
-      case 'mcp':
-        mcp++;
-        break;
-      default:
-        other++;
-    }
-  }
-  for (const it of work) if (it.kind === 'notice' && it.level === 'error') failed++;
-  const parts: string[] = [];
-  if (files.size) parts.push(`edited ${files.size === 1 ? 'a file' : `${files.size} files`}`);
-  if (commands) parts.push(`ran ${commands === 1 ? 'a command' : `${commands} commands`}`);
-  if (reads) parts.push(`read ${reads === 1 ? 'a file' : `${reads} files`}`);
-  if (searches) parts.push(`searched ${searches === 1 ? 'once' : `${searches} times`}`);
-  if (agents) parts.push(`${agents === 1 ? 'ran an agent' : `ran ${agents} agents`}`);
-  if (starts) parts.push(`started ${starts === 1 ? 'a helper' : `${starts} helpers`}`);
-  if (helperSteps && !starts) parts.push('worked with helpers');
-  if (asks) parts.push(`asked you ${asks === 1 ? 'a question' : `${asks} questions`}`);
-  if (plans) parts.push('proposed a plan');
-  if (mcp) parts.push(`used ${mcp === 1 ? 'a connector' : `${mcp} connector tools`}`);
-  if (other) parts.push(`${other} other ${other === 1 ? 'step' : 'steps'}`);
-  if (!parts.length) parts.push(work.some((it) => it.kind === 'thinking') ? 'thought it through' : 'worked');
-  const text = parts.join(', ');
-  return { text: text.charAt(0).toUpperCase() + text.slice(1), failed, steps: tools.length };
 }
 
 const WorkFold = memo(function WorkFold({ unit, ctx }: { unit: Extract<Unit, { kind: 'work' }>; ctx: ToolCtx }) {
@@ -232,88 +97,6 @@ const WorkFold = memo(function WorkFold({ unit, ctx }: { unit: Extract<Unit, { k
 });
 
 // ---------------------------------------------------------------- chapters: the work, told in Claude's own words
-
-type Chapter = { key: string; title: TextItem | null; thought: ThinkingItem | null; steps: Item[] };
-
-/**
- * Inside a turn, what Claude says along the way ("I'm reading the source; next I'll…") describes the
- * steps that follow it. So each stretch of narration becomes a chapter heading with its steps under
- * it, and a thought that led straight into the narration is tucked onto the same heading.
- */
-function chaptersOf(items: Item[]): Chapter[] {
-  const out: Chapter[] = [];
-  let cur: Chapter = { key: 'c0', title: null, thought: null, steps: [] };
-  let pendingThought: ThinkingItem | null = null;
-  const push = () => {
-    if (cur.title || cur.thought || cur.steps.length) out.push(cur);
-  };
-  for (const it of items) {
-    if (it.kind === 'thinking') {
-      // Hold it: if narration follows, it belongs to that heading.
-      if (pendingThought) cur.steps.push(pendingThought);
-      pendingThought = it;
-      continue;
-    }
-    if (it.kind === 'text') {
-      push();
-      cur = { key: 'c-' + it.id, title: it, thought: pendingThought, steps: [] };
-      pendingThought = null;
-      continue;
-    }
-    if (pendingThought) {
-      cur.steps.push(pendingThought);
-      pendingThought = null;
-    }
-    cur.steps.push(it);
-  }
-  if (pendingThought) cur.steps.push(pendingThought);
-  push();
-  return out;
-}
-
-function tally(steps: Item[]) {
-  const tools = steps.filter((it): it is ToolItem => it.kind === 'tool');
-  let edits = 0;
-  let commands = 0;
-  let reads = 0;
-  let searches = 0;
-  let agents = 0;
-  let mcp = 0;
-  let helpers = 0;
-  let asks = 0;
-  let plans = 0;
-  let other = 0;
-  let failed = 0;
-  for (const t of tools) {
-    if (t.status === 'error' || t.status === 'denied') failed++;
-    const w = toolWord(t);
-    if (w === 'edit') edits++;
-    else if (w === 'command') commands++;
-    else if (w === 'read') reads++;
-    else if (w === 'search') searches++;
-    else if (w === 'agent') agents++;
-    else if (w === 'helper') helpers++;
-    else if (w === 'ask') asks++;
-    else if (w === 'plan') plans++;
-    else if (w === 'mcp') mcp++;
-    else other++;
-  }
-  const parts: string[] = [];
-  if (edits) parts.push(`${edits} edit${edits > 1 ? 's' : ''}`);
-  if (commands) parts.push(`${commands} command${commands > 1 ? 's' : ''}`);
-  if (reads) parts.push(`${reads} read${reads > 1 ? 's' : ''}`);
-  if (searches) parts.push(`${searches} search${searches > 1 ? 'es' : ''}`);
-  if (agents) parts.push(`${agents} agent${agents > 1 ? 's' : ''}`);
-  if (helpers) parts.push(`${helpers} helper step${helpers > 1 ? 's' : ''}`);
-  if (asks) parts.push(`${asks} question${asks > 1 ? 's' : ''}`);
-  if (plans) parts.push(`${plans} plan${plans > 1 ? 's' : ''}`);
-  if (mcp) parts.push(`${mcp} connector call${mcp > 1 ? 's' : ''}`);
-  if (other) parts.push(`${other} other`);
-  const first = tools[0]?.startTs;
-  const last = tools[tools.length - 1];
-  const ms = first && last ? (last.endTs || last.startTs) - first : 0;
-  return { text: parts.join(' · '), failed, ms, n: tools.length };
-}
 
 function ChapterView({ ch, ctx, last }: { ch: Chapter; ctx: ToolCtx; last: boolean }) {
   const t = useMemo(() => tally(ch.steps), [ch.steps]);
@@ -391,7 +174,9 @@ const EST = { items: 260, work: 44 }; // stand-in heights, matching transcript.c
 
 /** Where a conversation on screen can be asked to show one of its items (a tool, a message). */
 const revealers = new Map<string, (id: string) => boolean>();
-const drawnPages = new Map<string, NearSet>();
+// Kept with the conversation's items array, which lives as long as its model: a conversation evicted
+// from memory (store.ts) or deleted takes its drawn pages with it, and reopened, starts afresh.
+const drawnPages = new WeakMap<Item[], NearSet>();
 
 /** Which pages have been drawn, per conversation; each page listens for its own key only. */
 class NearSet {
@@ -447,49 +232,43 @@ const PageBox = memo(function PageBox({ page, ctx, live, near, observe }: { page
   const far = !live && !drawn;
   return (
     <div className={`page${far ? ' far' : ''}${live ? ' live' : ''}`} style={far ? { minHeight: page.est, containIntrinsicSize: `auto ${page.est}px` } : undefined} ref={(el) => observe(el, page.key)}>
-      {far
-        ? null
-        : page.units.map((u) => (
+      {far ? null : (
+        <ErrorBoundary label="This part of the conversation">
+          {page.units.map((u) => (
             <UnitBox key={u.key} unit={u} ctx={ctx} />
           ))}
+        </ErrorBoundary>
+      )}
     </div>
   );
 });
 
+/**
+ * The conversation, or (`flat`) an agent's own steps. `items` is a model's array, mutated in place as
+ * the conversation grows, so `rev` (the model's rev) is what marks a change.
+ */
 export const ItemList = memo(function ItemList({ items, ctx, rev, running, flat = false }: { items: Item[]; ctx: ToolCtx; rev: number; running: boolean; flat?: boolean }) {
-  // Inside an agent's own transcript there is no "answer" to set apart: every step shows.
-  // The items array is mutated in place as the conversation grows, so `rev` is what marks a change.
-  const prev = useRef(new Map<string, { sig: string; unit: Unit }>());
-  const units = useMemo(() => {
-    if (flat) return [];
-    // A unit whose items (and their revisions) have not changed keeps its identity, so the component
-    // under it skips the render: while a reply streams only the live end re-renders, not the history.
-    const next = new Map<string, { sig: string; unit: Unit }>();
-    const out = groupTurns(items, running).map((u) => {
-      let sig = u.kind === 'work' ? (u.live ? 'W!' : 'W') : 'P';
-      for (const it of u.kind === 'work' ? u.work : u.items) sig += `|${it.id}:${it.rev}`;
-      const old = prev.current.get(u.key);
-      const unit = old && old.sig === sig ? old.unit : u;
-      next.set(u.key, { sig, unit });
-      return unit;
-    });
-    prev.current = next;
-    return out;
-  }, [items, rev, running, flat]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Grouped again per frame only from the turn under way; earlier units keep their identity, so the
+  // components under them skip the render (lib/units extendTurns).
+  const turns = useRef<Turns | null>(null);
+  const grouped = useMemo(() => (flat ? null : (turns.current = extendTurns(turns.current, items, running, rev))), [items, rev, running, flat]);
+  const units = useMemo(() => grouped?.units || [], [grouped]);
 
-  // Pages keep their identity until a unit in them changes, so a streaming reply reconciles one page.
+  // A page keeps its identity until a unit in it changes, so a streaming reply reconciles one page;
+  // the pages before the first changed unit are not even looked at.
   const pagesRef = useRef<Page[]>([]);
   const pages = useMemo(() => {
-    const out: Page[] = [];
-    for (let p = 0; p * PAGE < units.length; p++) {
+    const old = pagesRef.current;
+    const out = old.slice(0, Math.min(old.length, Math.floor((grouped?.changed || 0) / PAGE)));
+    for (let p = out.length; p * PAGE < units.length; p++) {
       const slice = units.slice(p * PAGE, (p + 1) * PAGE);
-      const old = pagesRef.current[p];
-      const same = old && old.units.length === slice.length && old.units.every((u, i) => u === slice[i]);
-      out.push(same ? old : { key: 'pg' + p, units: slice, est: slice.reduce((n, u) => n + EST[u.kind], 0) + 24 * slice.length });
+      const was = old[p];
+      const same = was && was.units.length === slice.length && was.units.every((u, i) => u === slice[i]);
+      out.push(same ? was : { key: 'pg' + p, units: slice, est: slice.reduce((n, u) => n + EST[u.kind], 0) + 24 * slice.length });
     }
     pagesRef.current = out;
     return out;
-  }, [units]);
+  }, [units, grouped]);
   // The turn under way (and the page the reader lands on) is always drawn.
   let tailStart = units.length;
   for (let i = units.length - 1; i >= 0; i--) {
@@ -504,10 +283,10 @@ export const ItemList = memo(function ItemList({ items, ctx, rev, running, flat 
   // Which far-off pages have been drawn (sticky, and remembered per conversation so coming back to one
   // finds the same pages drawn, the same heights, and the same scroll position).
   const nearRef = useRef<NearSet>(null as unknown as NearSet);
-  if (!nearRef.current) nearRef.current = drawnPages.get(ctx.sessionId) || new NearSet();
+  if (!nearRef.current) nearRef.current = drawnPages.get(items) || new NearSet();
   useEffect(() => {
-    drawnPages.set(ctx.sessionId, nearRef.current);
-  }, [ctx.sessionId]);
+    if (!flat) drawnPages.set(items, nearRef.current);
+  }, [items, flat]);
   const io = useRef<IntersectionObserver | null>(null);
   const keys = useRef(new WeakMap<Element, string>());
   const unitsRef = useRef(units);
@@ -597,31 +376,8 @@ export const ItemList = memo(function ItemList({ items, ctx, rev, running, flat 
   );
 });
 
-// Read-only steps that finished cleanly fold into one "Explored" line; edits, agents, failures and
-// anything waiting on the user always stay visible as their own rows.
-const QUIET = new Set(['Read', 'Grep', 'Glob', 'LS', 'WebSearch', 'WebFetch', 'ToolSearch', 'BashOutput', 'TaskList', 'TaskGet', 'NotebookRead']);
-function isQuiet(t: ToolItem, ctx: ToolCtx) {
-  if (ctx.pending.has(t.id) || t.status !== 'done') return false;
-  return QUIET.has(t.name) || ((t.name === 'Bash' || t.name === 'PowerShell') && !t.result?.isError && !t.input?.run_in_background);
-}
-
-function exploreLabel(items: ToolItem[]) {
-  const n = (names: string[]) => items.filter((t) => names.includes(t.name)).length;
-  const parts: string[] = [];
-  const cmds = n(['Bash', 'PowerShell', 'BashOutput']);
-  const reads = n(['Read', 'NotebookRead']);
-  const searches = n(['Grep', 'Glob', 'LS', 'ToolSearch']);
-  const web = n(['WebSearch', 'WebFetch']);
-  const tasks = n(['TaskList', 'TaskGet']);
-  if (cmds) parts.push(cmds === 1 ? 'ran a command' : `ran ${cmds} commands`);
-  if (reads) parts.push(reads === 1 ? 'read a file' : `read ${reads} files`);
-  if (searches) parts.push(searches === 1 ? 'searched once' : `searched ${searches} times`);
-  if (web) parts.push(web === 1 ? 'checked the web' : `checked ${web} web pages`);
-  if (tasks) parts.push('checked tasks');
-  const text = parts.join(', ');
-  return text.charAt(0).toUpperCase() + text.slice(1);
-}
-
+// Read-only steps that finished cleanly fold into one "Explored" line (lib/labels isQuiet); edits,
+// agents, failures and anything waiting on the user always stay visible as their own rows.
 type Seg = { kind: 'tool'; item: ToolItem } | { kind: 'explore'; items: ToolItem[]; key: string };
 
 function Steps({ items, ctx }: { items: ToolItem[]; ctx: ToolCtx }) {
@@ -630,6 +386,7 @@ function Steps({ items, ctx }: { items: ToolItem[]; ctx: ToolCtx }) {
   // the moment each one finishes would make the end of the list jump with every tool call. They
   // fold once something follows them, or when the turn is over.
   const live = useStore((s) => ['running', 'starting', 'requires_action'].includes(s.rt[ctx.sessionId]?.status || ''));
+  // A step that changes gives its unit, and so this list, a new array (lib/units): `items` is enough.
   const segs = useMemo(() => {
     const out: Seg[] = [];
     let run: ToolItem[] = [];
@@ -639,7 +396,7 @@ function Steps({ items, ctx }: { items: ToolItem[]; ctx: ToolCtx }) {
       run = [];
     };
     for (const t of items) {
-      if (ctx.view !== 'verbose' && isQuiet(t, ctx)) run.push(t);
+      if (ctx.view !== 'verbose' && isQuiet(t, ctx.pending.has(t.id))) run.push(t);
       else {
         flush();
         out.push({ kind: 'tool', item: t });
@@ -647,7 +404,7 @@ function Steps({ items, ctx }: { items: ToolItem[]; ctx: ToolCtx }) {
     }
     flush(true);
     return out;
-  }, [items, items.map((t) => t.status + t.rev).join(), ctx, live]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [items, ctx, live]);
   const COLLAPSE_AT = 10;
   const hidden = !expanded && segs.length > COLLAPSE_AT ? segs.length - 6 : 0;
   const visible = hidden ? segs.slice(hidden) : segs;
@@ -696,31 +453,29 @@ function Explore({ items, ctx }: { items: ToolItem[]; ctx: ToolCtx }) {
   );
 }
 
-const ItemView = memo(
-  function ItemView({ item, ctx }: { item: Item; rev: number; ctx: ToolCtx }) {
-    switch (item.kind) {
-      case 'user':
-        return <UserMessage item={item} ctx={ctx} />;
-      case 'text':
-        return <AssistantText item={item} ctx={ctx} />;
-      case 'thinking':
-        return <Thinking item={item} view={ctx.view} />;
-      case 'tool':
-        return <ToolCard item={item} rev={item.rev} ctx={ctx} perm={ctx.pending.get(item.id)} />;
-      case 'notice':
-        return <Notice item={item} />;
-      case 'compact':
-        return <Compact item={item} />;
-      case 'command-output':
-        return <CommandOutput item={item} ctx={ctx} />;
-      case 'result':
-        return <ResultFooter item={item} ctx={ctx} />;
-      default:
-        return null;
-    }
-  },
-  (a, b) => a.item === b.item && a.rev === b.rev && a.ctx === b.ctx,
-);
+// `rev` is passed (not read) so the memo sees an item that changed in place.
+const ItemView = memo(function ItemView({ item, ctx }: { item: Item; rev: number; ctx: ToolCtx }) {
+  switch (item.kind) {
+    case 'user':
+      return <UserMessage item={item} ctx={ctx} />;
+    case 'text':
+      return <AssistantText item={item} ctx={ctx} />;
+    case 'thinking':
+      return <Thinking item={item} view={ctx.view} />;
+    case 'tool':
+      return <ToolCard item={item} rev={item.rev} ctx={ctx} perm={ctx.pending.get(item.id)} />;
+    case 'notice':
+      return <Notice item={item} />;
+    case 'compact':
+      return <Compact item={item} />;
+    case 'command-output':
+      return <CommandOutput item={item} ctx={ctx} />;
+    case 'result':
+      return <ResultFooter item={item} ctx={ctx} />;
+    default:
+      return null;
+  }
+});
 
 // ---------------------------------------------------------------- items
 
@@ -972,31 +727,27 @@ function ResultFooter({ item, ctx }: { item: ResultItem; ctx: ToolCtx }) {
 const VERBS = ['Reading', 'Drafting', 'Composing', 'Outlining', 'Revising', 'Proofing', 'Collating', 'Annotating', 'Indexing', 'Marking up', 'Typesetting', 'Kerning'];
 
 function WorkingLine({ sessionId, startTs, quiet }: { sessionId: string; startTs: number; quiet: boolean }) {
-  const rt = useStore((s) => s.rt[sessionId]);
+  const status = useStore((s) => s.rt[sessionId]?.status);
+  const compacting = useStore((s) => s.rt[sessionId]?.compacting);
+  const thinkingTokens = useStore((s) => s.rt[sessionId]?.thinkingTokens);
   const now = useNow(1000);
   const [verb] = useState(() => VERBS[Math.floor(Math.random() * VERBS.length)]);
-  const status = rt?.status;
   if (!(status === 'running' || status === 'starting')) return null;
   const elapsed = startTs ? now - startTs : 0;
-  if (quiet && !rt?.compacting) return null; // the turn's own fold line is breathing already
+  if (quiet && !compacting) return null; // the turn's own fold line is breathing already
   return (
     <div className="working">
       <WorkingMark />
-      <span className="working-verb shimmer">{rt?.compacting ? 'Compacting the conversation' : status === 'starting' ? 'Starting Claude Code' : `${verb}…`}</span>
+      <span className="working-verb shimmer">{compacting ? 'Compacting the conversation' : status === 'starting' ? 'Starting Claude Code' : `${verb}…`}</span>
       <span className="working-meta tnum">
         {elapsed > 1000 ? duration(elapsed) : ''}
-        {rt?.thinkingTokens ? ` · ${tokens(rt.thinkingTokens)} thinking tokens` : ''}
+        {thinkingTokens ? ` · ${tokens(thinkingTokens)} thinking tokens` : ''}
       </span>
     </div>
   );
 }
 
 // ---------------------------------------------------------------- transcript
-
-// Where each conversation was scrolled to, so switching away and back keeps your place: the row at
-// the top of the view and how far it was from the edge (a scroll offset would drift, since rows far
-// off screen only have estimated heights until they have been seen).
-const scrollMemory = new Map<string, { index: number; offset: number; bottom: boolean }>();
 
 export function Transcript({ sessionId, cwd, empty, onScrolled }: { sessionId: string; cwd: string; empty?: React.ReactNode; onScrolled?: (scrolled: boolean) => void }) {
   const rt = useStore((s) => s.rt[sessionId]);
@@ -1017,293 +768,15 @@ export function Transcript({ sessionId, cwd, empty, onScrolled }: { sessionId: s
   const ctx = useMemo<ToolCtx>(() => ({ sessionId, cwd, pending, depth: 0, view }), [sessionId, cwd, pending, view]);
   const orphans = (pendingList || []).filter((p) => !p.toolUseId || !model?.tools.has(p.toolUseId));
 
-  const scroller = useRef<HTMLDivElement>(null);
-  const inner = useRef<HTMLDivElement>(null);
-  const atBottom = useRef(true);
-  const lastSet = useRef(0);
-  const raf = useRef<number | null>(null);
-  const anchorRaf = useRef<number | null>(null);
-  const landing = useRef(false);
-  // When the reader last moved the page themselves (wheel, keys, the scrollbar, a finger). Never,
-  // to begin with: at 0 it would read as "just now" for the first half second of the page's life,
-  // and a far page taking its real height then (the position drops) counted as the reader leaving
-  // the live end, so a long conversation opened at start-up landed short of its end.
-  const userScrollAt = useRef(-Infinity);
-  useEffect(() => {
-    const el = scroller.current;
-    if (!el) return;
-    const mark = () => (userScrollAt.current = performance.now());
-    const onWheel = (e: WheelEvent) => e.deltaY < 0 && mark();
-    const onKey = (e: KeyboardEvent) => ['ArrowUp', 'PageUp', 'Home'].includes(e.key) && mark();
-    const onDown = (e: PointerEvent) => e.target === el && mark(); // the scrollbar itself
-    el.addEventListener('wheel', onWheel, { passive: true });
-    el.addEventListener('keydown', onKey);
-    el.addEventListener('pointerdown', onDown);
-    el.addEventListener('touchmove', mark, { passive: true });
-    return () => {
-      el.removeEventListener('wheel', onWheel);
-      el.removeEventListener('keydown', onKey);
-      el.removeEventListener('pointerdown', onDown);
-      el.removeEventListener('touchmove', mark);
-    };
-  }, [sessionId]);
-  const [showJump, setShowJump] = useState(false);
-  // Items already on screen when a conversation opens must not all animate in at once.
-  const [settling, setSettling] = useState(true);
-  // Up in the history (not following the live end): the browser then keeps the rows in view still
-  // while rows above take their real size (transcript.css). State, not a class set by hand, so a
-  // re-render cannot wipe it.
-  const [reading, setReading] = useState(false);
-  const readingRef = useRef(false);
-  const markReading = (v: boolean) => {
-    if (readingRef.current === v) return;
-    readingRef.current = v;
-    setReading(v);
-  };
-
-  // Follow new output smoothly instead of snapping to the bottom on every streamed token.
-  const follow = () => {
-    if (raf.current != null) return;
-    const step = () => {
-      const el = scroller.current;
-      if (!el || !atBottom.current) return void (raf.current = null);
-      const target = el.scrollHeight - el.clientHeight;
-      const d = target - el.scrollTop;
-      if (d <= 0.5) return void (raf.current = null);
-      // While a conversation is still landing after opening, go straight there: easing from a
-      // stand-in height to the real one would read as the page scrolling itself.
-      el.scrollTop = d < 1.5 || landing.current ? target : el.scrollTop + Math.max(1, d * 0.24);
-      lastSet.current = el.scrollTop;
-      raf.current = requestAnimationFrame(step);
-    };
-    raf.current = requestAnimationFrame(step);
-  };
-
-  const settled = useRef(false);
+  const { scroller, inner, onScroll, jump, showJump, settling, reading } = useFollow({ sessionId, model, loaded: Boolean(rt?.loaded), rev: rt?.rev || 0, extra: orphans.length, onScrolled });
+  const hasRows = Boolean(rt?.loaded && model?.items.length);
   useLayoutEffect(() => {
-    atBottom.current = true;
-    settled.current = false;
-    setSettling(true);
-    const el = scroller.current;
-    const saved = scrollMemory.get(sessionId);
-    const anchor = saved && !saved.bottom && rt?.loaded ? (inner.current?.querySelector('.units')?.children[saved.index] as HTMLElement | undefined) : undefined;
-    if (el && saved && anchor) {
-      // Coming back to a conversation you had scrolled up in: return to that spot, not the bottom.
-      // Boxes that have not been laid out yet only have stand-in heights, so the first placing is
-      // approximate; once the frame has painted the boxes around the spot have their real heights,
-      // and the same measure lands exactly. Two more passes cover the boxes that fill in after that.
-      const place = () => {
-        if (!anchor.isConnected) return;
-        el.scrollTop = anchor.offsetTop - saved.offset;
-        lastSet.current = el.scrollTop;
-      };
-      place();
-      atBottom.current = false;
-      markReading(true);
-      setShowJump(true);
-      let passes = 0;
-      const again = () => {
-        if (atBottom.current || passes++ >= 3) return;
-        place();
-        requestAnimationFrame(again);
-      };
-      requestAnimationFrame(again);
-    } else if (el) {
-      // Pages far from the viewport take their stand-in heights only once the browser has decided
-      // which are off screen, which happens after this first layout; so land at the bottom now and
-      // again over the next frames, until the height stops changing.
-      const land = () => {
-        el.scrollTop = el.scrollHeight;
-        lastSet.current = el.scrollTop;
-      };
-      land();
-      markReading(false);
-      // The browser settles which pages are off screen in its own time (it can take a while on a
-      // long conversation), so keep landing until the height has held still for a few frames.
-      landing.current = true;
-      let passes = 0;
-      let still = 0;
-      let lastH = el.scrollHeight;
-      const again = () => {
-        if (!atBottom.current || !el.isConnected || passes++ >= 120 || still >= 12) {
-          landing.current = false;
-          return;
-        }
-        const h = el.scrollHeight;
-        if (h === lastH) still++;
-        else {
-          still = 0;
-          lastH = h;
-          land();
-        }
-        requestAnimationFrame(again);
-      };
-      requestAnimationFrame(again);
-    }
-    // History that is already there appears at once; a brand-new conversation animates from its first row.
-    const fresh = (models.get(sessionId)?.items.length || 0) === 0 && rt?.loaded;
-    const t = setTimeout(
-      () => {
-        settled.current = true;
-        setSettling(false);
-      },
-      fresh ? 0 : 450,
-    );
-    return () => clearTimeout(t);
-  }, [sessionId, rt?.loaded]);
-
-  // New rows ease in where they land. Only rows added after the conversation has settled animate,
-  // so opening a long session or switching between sessions never replays the whole history.
-  useEffect(() => {
-    const body = inner.current;
-    if (!body || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    const mo = new MutationObserver((records) => {
-      if (!settled.current) return;
-      for (const r of records) {
-        const parent = r.target as HTMLElement;
-        // A history box being drawn as the reader approaches is not news: only new rows in the live
-        // boxes at the end, and new boxes themselves, ease in.
-        if (parent !== body && !parent.matches?.('.units, .page.live, .page.live > .unit, .steps, .explore-body, .agent-children')) continue;
-        r.addedNodes.forEach((added) => {
-          let n = added;
-          // A new unit (or page) arrives with its first row already inside; the row is what moves.
-          if (n instanceof HTMLElement && n.classList.contains('page')) n = n.firstElementChild as Node;
-          if (n instanceof HTMLElement && n.classList.contains('unit')) n = n.firstElementChild as Node;
-          if (!(n instanceof HTMLElement) || n.classList.contains('working') || n.classList.contains('transcript-loading')) return;
-          // Your message flies up out of the composer to its place in the conversation, settling on a
-          // spring, the way a sent message does; Claude's rows simply rise.
-          const user = n.classList.contains('msg-user');
-          const { snappy, snappyT } = spring();
-          const from = user ? takeLaunch() : null;
-          const bubble = user ? n.querySelector<HTMLElement>('.msg-bubble') : null;
-          if (from && bubble) {
-            const to = bubble.getBoundingClientRect();
-            const dx = Math.min(0, from.right - 16 - to.right);
-            const dy = from.top - to.top;
-            bubble.animate(
-              [
-                { opacity: 0.5, transform: `translate(${dx}px, ${dy}px) scale(0.94)`, transformOrigin: 'right bottom' },
-                { opacity: 1, transform: 'none', transformOrigin: 'right bottom' },
-              ],
-              { duration: snappyT, easing: snappy },
-            );
-            return;
-          }
-          n.animate(
-            [
-              { opacity: 0, transform: `translateY(${user ? 12 : 5}px)${user ? ' scale(0.96)' : ''}`, transformOrigin: 'right bottom' },
-              { opacity: 1, transform: 'none', transformOrigin: 'right bottom' },
-            ],
-            user ? { duration: snappyT, easing: snappy } : { duration: 240, easing: EASE },
-          );
-        });
-      }
-    });
-    mo.observe(body, { childList: true, subtree: true });
-    return () => mo.disconnect();
-  }, [sessionId]);
-
-  useLayoutEffect(() => {
-    if (atBottom.current) return follow();
-    const el = scroller.current;
-    // The reader is up in the history: offer "Latest" — unless the page has in fact ended up at the
-    // bottom (a fold above closed, the window grew), in which case there is nowhere to go.
-    if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 60) {
-      atBottom.current = true;
-      lastSet.current = el.scrollTop;
-      markReading(false);
-      setShowJump(false);
-    } else setShowJump(true);
-  }, [rt?.rev, orphans.length]);  
-
-  useEffect(() => {
-    const body = inner.current;
-    if (!body) return;
-    // The content growing, or the view shrinking (the composer growing as you type, a panel opening,
-    // the window resized): either leaves room under the last row, and both are followed.
-    const ro = new ResizeObserver((entries) => {
-      if (!atBottom.current) return;
-      const el = scroller.current;
-      // The view itself changing size (the composer growing as you type, a panel opening) is kept
-      // in step at once, in the same frame: easing after it would make the conversation twitch with
-      // every line you type. New content below is what the smooth follow is for.
-      if (el && entries.some((e) => e.target === el)) {
-        el.scrollTop = el.scrollHeight - el.clientHeight;
-        lastSet.current = el.scrollTop;
-        return;
-      }
-      follow();
-    });
-    ro.observe(body);
-    if (scroller.current) ro.observe(scroller.current);
-    return () => {
-      ro.disconnect();
-      if (raf.current != null) cancelAnimationFrame(raf.current);
-      raf.current = null;
-    };
-  }, [sessionId]);  
-
-  const onScroll = () => {
-    const el = scroller.current!;
-    // Raised by the follow itself (the position is exactly the one it set): reading scrollHeight here
-    // would force a layout for every streamed frame, and all it would say is what we already know —
-    // we are at the bottom. A reader's scroll lands anywhere else.
-    if (atBottom.current && el.scrollTop === lastSet.current) return;
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 60;
-    if (nearBottom) {
-      atBottom.current = true;
-      setShowJump(false);
-    } else if (el.scrollTop < lastSet.current - 2 && performance.now() - userScrollAt.current < 500) {
-      // The reader scrolled up: stop following. Only their own input counts — the position can
-      // also fall when a page above takes its real, smaller height, and that is not a reader leaving.
-      atBottom.current = false;
-    }
-    lastSet.current = Math.max(lastSet.current, el.scrollTop);
-    if (el.scrollTop < lastSet.current - 2) lastSet.current = el.scrollTop;
-    onScrolled?.(el.scrollTop > 4);
-    markReading(!atBottom.current);
-    if (!rt?.loaded) return;
-    if (atBottom.current) {
-      // Following the live end: nothing to anchor to, and a layout read here (once per streamed
-      // frame, since the follow itself scrolls) would be the costliest thing on the page.
-      scrollMemory.set(sessionId, { index: 0, offset: 0, bottom: true });
-      return;
-    }
-    if (anchorRaf.current != null) return;
-    anchorRaf.current = requestAnimationFrame(() => {
-      anchorRaf.current = null;
-      const kids = inner.current?.querySelector('.units')?.children;
-      let index = 0;
-      if (kids && kids.length) {
-        // The boxes are stacked in order, so the first one reaching below the top edge is found by
-        // bisection: a scan of every box on every scroll event forced a layout read per box.
-        let lo = 0;
-        let hi = kids.length - 1;
-        while (lo < hi) {
-          const mid = (lo + hi) >> 1;
-          const k = kids[mid] as HTMLElement;
-          if (k.offsetTop + k.offsetHeight > el.scrollTop) hi = mid;
-          else lo = mid + 1;
-        }
-        index = lo;
-      }
-      const k = kids?.[index] as HTMLElement | undefined;
-      scrollMemory.set(sessionId, { index, offset: k ? k.offsetTop - el.scrollTop : 0, bottom: atBottom.current });
-    });
-  };
-
-  const jump = () => {
-    atBottom.current = true;
-    setShowJump(false);
-    markReading(false);
-    follow();
-  };
-  // Your own message goes to the end of the conversation, and so do you.
-  useEffect(() => {
-    const on = (e: Event) => (e as CustomEvent).detail === sessionId && jump();
-    window.addEventListener('pilcrow:sent', on);
-    return () => window.removeEventListener('pilcrow:sent', on);
-  }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Measured by test/e2e/perf.mjs: from the click that opened the conversation (store.ts loadSession) to its first rows.
+    const mark = `pilcrow:open:${sessionId}`;
+    if (!hasRows || !performance.getEntriesByName(mark).length) return;
+    performance.measure('pilcrow:first-rows', { start: mark, detail: { id: sessionId } });
+    performance.clearMarks(mark);
+  }, [sessionId, hasRows]);
 
   const items = model?.items || [];
   let turnStart = 0;
@@ -1349,27 +822,6 @@ function Jump({ onClick }: { onClick: () => void }) {
 }
 
 // ---------------------------------------------------------------- a helper's note to its lead (HELPERS.md §5.4)
-
-const NOTE_RE = /<helper-note\s+([^>]*)>\n?([\s\S]*?)\n?<\/helper-note>/g;
-const ATTR_RE = /(\w+)="([^"]*)"/g;
-
-function parseNotes(text: string) {
-  const parts: Record<string, string>[] = [];
-  const tail: string[] = [];
-  let last = 0;
-  for (const m of text.matchAll(NOTE_RE)) {
-    const before = text.slice(last, m.index).trim();
-    if (before) tail.push(before);
-    const attrs: Record<string, string> = {};
-    for (const a of m[1].matchAll(ATTR_RE)) attrs[a[1]] = a[2];
-    attrs.body = m[2].trim();
-    parts.push(attrs);
-    last = (m.index || 0) + m[0].length;
-  }
-  const rest = text.slice(last).trim();
-  if (rest) tail.push(rest);
-  return { parts, tail: tail.join(' ') };
-}
 
 const HELPER_VERB: Record<string, string> = { done: 'Helper finished', failed: 'Helper failed', stopped: 'Helper stopped', needs_action: 'Helper needs you', skipped: 'Helper skipped' };
 const HELPER_HEADER_PREFIX = 'You are a helper started by another Pilcrow session';
