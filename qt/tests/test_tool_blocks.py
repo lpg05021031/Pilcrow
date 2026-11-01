@@ -372,6 +372,26 @@ def test_a_running_card_ticks_its_marks_not_its_rows(app):
     assert block(make("Bash", {"command": "ls"}, "a.ts")).body.tick(now) is None
 
 
+def test_a_row_measures_its_words_natural_width_once(app, monkeypatch):
+    """A Markdown or an HTML text beside an icon is not stretched: its natural width is read from a
+    document laid out once, not once per layout (a resize lays the row out at every step)."""
+    m = measurer()
+    built: List[str] = []
+    for name in ("markdown_doc", "html_doc"):
+        real = getattr(m, name)
+        monkeypatch.setattr(m, name, lambda *a, _r=real, _n=name, **k: (built.append(_n), _r(*a, **k))[1])
+    md, html_text = nd.Markdown("A **short** note."), nd.Text("<p>An <b>html</b> line</p>", 13, html=True)
+    row = nd.hstack(nd.Icon("info"), md, html_text, nd.Spacer(), stretch=[3])
+    for w in range(400, 800, 40):
+        row.layout(0, 0, w, m)
+    natural = [n for n in built if n in ("markdown_doc", "html_doc")]
+    assert len(natural) <= 4, built  # a natural width and a document each, whatever the row's width
+    assert md.natural_w(m) == md._nat > 0 and html_text.natural_w(m) == html_text._nat > 0
+    html_text.set_text("<p>Longer words in the same line now</p>")
+    md.cool()
+    assert md._nat == html_text._nat == -1 and html_text.natural_w(m) > 0
+
+
 def test_generic_and_mcp_body(app):
     item = make("mcp__github__list_issues", {"repo": "a/b", "state": "open"}, "#1 bug\n#2 feature")
     b = block(item)

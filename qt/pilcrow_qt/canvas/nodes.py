@@ -274,6 +274,7 @@ class Text(Node):
         "strike",
         "max_h",
         "align",
+        "_nat",
     )
 
     def __init__(
@@ -299,6 +300,7 @@ class Text(Node):
         self.align = align
         self._doc: Optional[QTextDocument] = None
         self._font: Optional[QFont] = None
+        self._nat = -1  # the natural width, once asked (it depends on the words and the font alone)
 
     def font(self, m: Measurer) -> QFont:
         if self._font is None:
@@ -309,12 +311,14 @@ class Text(Node):
         return self._font
 
     def natural_w(self, m: Measurer) -> int:
-        if not self._text:
-            return 0
-        if self.html and self.wrap:
-            doc = m.html_doc(self._text, 100000, self.font(m))
-            return int(math.ceil(doc.idealWidth())) + 2
-        return int(math.ceil(m.text_w(self._text, self.font(m)))) + 2
+        if self._nat < 0:
+            if not self._text:
+                self._nat = 0
+            elif self.html and self.wrap:
+                self._nat = int(math.ceil(m.html_doc(self._text, 100000, self.font(m)).idealWidth())) + 2
+            else:
+                self._nat = int(math.ceil(m.text_w(self._text, self.font(m)))) + 2
+        return self._nat
 
     def layout(self, x: int, y: int, w: int, m: Measurer) -> int:
         self.x, self.y, self.w = x, y, w
@@ -368,16 +372,18 @@ class Text(Node):
     def set_text(self, text: str) -> None:
         self._text = text
         self._doc = None
+        self._nat = -1
 
     def cool(self) -> None:
         self._doc = None
         self._font = None
+        self._nat = -1
 
 
 class Markdown(Node):
     """A Markdown text as a document with its decorations (code wells, pills, quotes, tables)."""
 
-    __slots__ = ("src", "compact", "quiet", "cwd", "streaming", "line_h", "_doc", "color")
+    __slots__ = ("src", "compact", "quiet", "cwd", "streaming", "line_h", "_doc", "color", "_nat")
 
     def __init__(
         self,
@@ -400,14 +406,17 @@ class Markdown(Node):
         )
         self.color = color
         self._doc: Optional[QTextDocument] = None
+        self._nat = -1  # the natural width, once asked
 
     @property
     def doc(self) -> Optional[QTextDocument]:
         return self._doc
 
     def natural_w(self, m: Measurer) -> int:
-        doc = m.markdown_doc(self.src, 100000, self.compact, self.quiet, self.streaming, self.cwd, self.line_h)
-        return int(math.ceil(doc.idealWidth())) + 2
+        if self._nat < 0:
+            doc = m.markdown_doc(self.src, 100000, self.compact, self.quiet, self.streaming, self.cwd, self.line_h)
+            self._nat = int(math.ceil(doc.idealWidth())) + 2
+        return self._nat
 
     def layout(self, x: int, y: int, w: int, m: Measurer) -> int:
         self.x, self.y, self.w = x, y, w
@@ -435,6 +444,7 @@ class Markdown(Node):
 
     def cool(self) -> None:
         self._doc = None
+        self._nat = -1
 
 
 class Surface(Node):
