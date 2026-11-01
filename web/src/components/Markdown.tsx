@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
-import { renderMarkdown, asPathRef, extendBlocks, openFenceCode } from '../lib/markdown';
+import { renderMarkdown, asPathRef, extendBlocks, growBlock, openFenceCode, GROWS_IN, type Growth, type Split } from '../lib/markdown';
 import { CHUNK_OPEN, escapeHtml, highlightHtml, PAINT_LINES } from '../lib/highlight';
 import { rpc } from '../lib/rpc';
 import { openFile, toast } from '../lib/store';
@@ -70,68 +70,104 @@ function newChunk() {
   return el;
 }
 
+/** Colour the finished code blocks in a block or a piece of one, and make paths in its inline code open in Files. */
+function decorate(el: Element, open: boolean) {
+  const within = <T extends Element>(sel: string) => [...(el.matches(sel) ? [el as T] : []), ...el.querySelectorAll<T>(sel)];
+  const pres = within<HTMLPreElement>('pre.hl:not([data-hl])');
+  pres.forEach((pre, i) => {
+    if (open && i === pres.length - 1) return; // still being written
+    const code = pre.textContent || '';
+    pre.dataset.hl = 'pending';
+    highlightHtml(code, pre.dataset.lang || null, () => pre.isConnected).then((h) => {
+      if (h && pre.isConnected && pre.textContent === code) paintCode(pre, code, h);
+    });
+  });
+  within<HTMLElement>('code:not([data-pr])').forEach((c) => {
+    c.dataset.pr = '1';
+    if (c.closest('pre')) return;
+    const r = asPathRef(c.textContent || '');
+    if (!r) return;
+    c.classList.add('md-path');
+    c.dataset.path = r.path;
+    if (r.line) c.dataset.line = String(r.line);
+    c.title = 'Open in Files';
+  });
+}
+
+/**
+ * What the DOM of a block being written holds: the markup drawn whole and the source it shows now,
+ * and how it grows from there. An open code fence by its code, a list, a table or a paragraph by its
+ * pieces (lib/markdown growBlock): `grow` is null until the first piece is drawn that way, and false
+ * for a block that cannot be (it is drawn whole each time).
+ */
+type Drawn = { html: string; raw: string; code: string | null; grow: Growth | null | false; keep: number };
+
 /**
  * One top-level block. Finished blocks never re-render, so their DOM (and the reader's selection)
- * survives streaming; while a reply streams, only the open block at the end renders, and only its
- * own DOM is looked over afterwards.
+ * survives streaming; while a reply streams, only the open block at the end renders. It grows at its
+ * end, so what arrives is added to its DOM (below) instead of the block being parsed, sanitised and
+ * laid out whole again for every piece: the code of a fence is appended to its text, the item, row or
+ * run of text being written is drawn again and the ones before it are left alone. The block is drawn
+ * whole once it closes. `kind` is what the split says the open block is now (lib/markdown extendBlocks).
  */
-const Block = memo(function Block({ raw, open, baseDir }: { raw: string; open: boolean; baseDir?: string }) {
+const Block = memo(function Block({ raw, open, kind, baseDir }: { raw: string; open: boolean; kind?: Growth['kind']; baseDir?: string }) {
   const ref = useRef<HTMLDivElement>(null);
-  // A code fence being written grows at its end, so what arrives is appended to the code's text
-  // (below) instead of the block being parsed, sanitised and laid out whole again for every piece:
-  // the markup stays the one drawn when the fence opened, and the block is drawn whole once it closes.
-  const fence = useRef<{ html: string; code: string } | null>(null); // what the DOM holds of an open fence
+  const drawn = useRef<Drawn | null>(null);
+  const d = open ? drawn.current : null;
+  const after = d !== null && raw.startsWith(d.raw);
   const code = open ? openFenceCode(raw) : null;
-  const drawn = fence.current;
-  const growing = code !== null && drawn !== null && code.startsWith(drawn.code);
-  const html = useMemo(() => (growing && drawn ? drawn.html : renderMarkdown(raw, { streaming: open, baseDir })), [raw, open, baseDir, growing, drawn]);
+  const fence = after && code !== null && d.code !== null && code.startsWith(d.code);
+  const tries = after && code === null && kind !== undefined && d.grow !== false && (!d.grow || d.grow.kind === kind);
+  const grown = tries ? growBlock(raw, d.grow || null) : null;
+  const html = (fence || grown) && d ? d.html : renderMarkdown(raw, { streaming: open, baseDir });
+
   useLayoutEffect(() => {
-    const el = ref.current?.querySelector('pre:last-of-type code');
-    if (code === null || !el) fence.current = null;
-    else if (!growing || !drawn) fence.current = el.textContent === code ? { html, code } : null;
-    // Not what was drawn (something else changed it): the next piece draws the block whole.
-    else if (el.textContent !== drawn.code) fence.current = null;
-    else if (code.length > drawn.code.length) {
-      appendCode(el, code.slice(drawn.code.length));
-      drawn.code = code;
+    const el = ref.current;
+    if (!el || !open) {
+      drawn.current = null;
+      return;
     }
-  }, [code, html, growing, drawn]);
+    if (d && fence && code !== null) {
+      const c = el.querySelector('pre:last-of-type code');
+      // Not what was drawn (something else changed it): the next piece draws the block whole.
+      if (!c || c.textContent !== d.code) drawn.current = null;
+      else {
+        appendCode(c, code.slice((d.code || '').length));
+        drawn.current = { ...d, raw, code };
+      }
+      return;
+    }
+    if (d && grown) {
+      const box = el.querySelector(GROWS_IN[grown.g.kind]);
+      if (!box || box.childNodes.length < d.keep) {
+        drawn.current = null;
+        return;
+      }
+      while (box.childNodes.length > d.keep) box.lastChild?.remove();
+      box.insertAdjacentHTML('beforeend', grown.settled);
+      const keep = box.childNodes.length;
+      box.insertAdjacentHTML('beforeend', grown.rest);
+      drawn.current = { ...d, raw, grow: grown.g, keep };
+      for (let i = d.keep, n: ChildNode | null = box.childNodes[i]; n; n = n.nextSibling, i++) if (n instanceof Element) decorate(n, i >= keep);
+      return;
+    }
+    // Drawn whole. A block that could not grow from its start never will; one that stopped growing starts over.
+    const c = el.querySelector('pre:last-of-type code');
+    drawn.current = { html, raw, code: code !== null && c?.textContent === code ? code : null, grow: tries && d && !d.grow ? false : null, keep: 0 };
+  });
 
   useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const pres = el.querySelectorAll<HTMLPreElement>('pre.hl:not([data-hl])');
-    pres.forEach((pre, i) => {
-      if (open && i === pres.length - 1) return; // still being written
-      const code = pre.textContent || '';
-      pre.dataset.hl = 'pending';
-      highlightHtml(code, pre.dataset.lang || null).then((h) => {
-        if (h && pre.isConnected && pre.textContent === code) paintCode(pre, code, h);
-      });
-    });
-    el.querySelectorAll<HTMLElement>('code:not([data-pr])').forEach((c) => {
-      c.dataset.pr = '1';
-      if (c.closest('pre')) return;
-      const r = asPathRef(c.textContent || '');
-      if (!r) return;
-      c.classList.add('md-path');
-      c.dataset.path = r.path;
-      if (r.line) c.dataset.line = String(r.line);
-      c.title = 'Open in Files';
-    });
+    if (ref.current) decorate(ref.current, open);
   }, [html, open]);
 
   return <div ref={ref} className="md-b" dangerouslySetInnerHTML={{ __html: html }} />;
 });
 
 export const Markdown = memo(function Markdown({ text, streaming = false, cwd, className = '', baseDir }: { text: string; streaming?: boolean; cwd?: string; className?: string; baseDir?: string }) {
-  // The last split is kept so a growing text is lexed again only from its last block (lib/markdown).
-  const split = useRef<{ text: string; blocks: string[] }>({ text: '', blocks: [] });
-  const blocks = useMemo(() => {
-    const next = { text, blocks: extendBlocks(split.current, text) };
-    split.current = next;
-    return next.blocks;
-  }, [text]);
+  // The last split is kept so a growing text is lexed again only from the end of its last block (lib/markdown).
+  const last = useRef<Split>({ text: '', blocks: [] });
+  const split = useMemo(() => (last.current = extendBlocks(last.current, text)), [text]);
+  const blocks = split.blocks;
 
   const onClick = (e: React.MouseEvent) => {
     const t = e.target as HTMLElement;
@@ -164,7 +200,7 @@ export const Markdown = memo(function Markdown({ text, streaming = false, cwd, c
   return (
     <div className={`md ${className}${streaming ? ' streaming' : ''}`} onClick={onClick}>
       {blocks.map((b, i) => (
-        <Block key={i} raw={b} open={streaming && i === blocks.length - 1} baseDir={baseDir} />
+        <Block key={i} raw={b} open={streaming && i === blocks.length - 1} kind={streaming && i === blocks.length - 1 ? split.resume?.type : undefined} baseDir={baseDir} />
       ))}
     </div>
   );
