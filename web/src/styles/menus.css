@@ -9,7 +9,7 @@
   min-width: 180px;
   max-height: min(70vh, 520px);
   overflow-y: auto;
-  padding: 5px;
+  padding: var(--sp-1_25);
   border-radius: var(--r-4);
   background: var(--glass);
   -webkit-backdrop-filter: var(--glass-blur);
@@ -24,10 +24,10 @@
 .menu-item {
   display: flex;
   align-items: flex-start;
-  gap: 9px;
+  gap: var(--sp-2_25);
   width: 100%;
   min-height: 30px;
-  padding: var(--sp-1_5) 9px;
+  padding: var(--sp-1_5) var(--sp-2_25);
   border-radius: var(--r-2);
   text-align: left;
   color: var(--text);
@@ -97,7 +97,7 @@
   background: var(--hair);
 }
 .menu-heading {
-  padding: var(--sp-2) 9px var(--sp-1);
+  padding: var(--sp-2) var(--sp-2_25) var(--sp-1);
   font-size: var(--fs-micro);
   font-weight: 600;
   color: var(--text-3);
@@ -110,7 +110,7 @@
   gap: var(--sp-2);
   width: 100%;
   height: 34px;
-  padding: 0 var(--sp-2_5) 0 11px;
+  padding: 0 var(--sp-2_5) 0 var(--sp-2_75);
   border-radius: var(--r-2);
   background: var(--fill-1);
   box-shadow: inset 0 0 0 1px var(--hair);
@@ -149,7 +149,7 @@
   align-items: center;
   gap: var(--sp-2);
   max-width: 320px;
-  padding: 5px var(--sp-2);
+  padding: var(--sp-1_25) var(--sp-2);
   border-radius: 7px;
   font-size: var(--fs-small);
   line-height: 1.4;
@@ -172,17 +172,17 @@
 .tip-keys {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: var(--sp-0_75);
 }
 .tip-note {
-  margin-left: 3px;
+  margin-left: var(--sp-0_75);
   color: color-mix(in srgb, var(--tip-ink) 62%, var(--tip));
   font-weight: 400;
 }
 .tip kbd {
   min-width: 18px;
   height: 18px;
-  padding: 0 5px;
+  padding: 0 var(--sp-1_25);
   border-radius: var(--r-1);
   font-family: var(--font-ui);
   font-size: var(--fs-tiny-plus);

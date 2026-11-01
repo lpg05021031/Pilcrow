@@ -93,7 +93,7 @@
   align-items: center;
   gap: var(--sp-1_5);
   height: 30px;
-  padding: 0 9px;
+  padding: 0 var(--sp-2_25);
   border-radius: var(--r-2);
   font-size: var(--fs-small);
   font-weight: 500;
@@ -134,7 +134,7 @@
 .ctx-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--sp-1_25);
   height: 30px;
   padding: 0 var(--sp-2);
   border-radius: var(--r-2);
@@ -146,7 +146,7 @@
   color: var(--text);
 }
 .ctx-btn:not(.with-num) {
-  padding: 0 5px;
+  padding: 0 var(--sp-1_25);
 }
 .ctx-btn.hot {
   color: var(--err);
@@ -419,7 +419,7 @@
   grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: start;
   gap: var(--sp-2);
-  padding: 5px var(--sp-1_5) 5px var(--sp-2);
+  padding: var(--sp-1_25) var(--sp-1_5) var(--sp-1_25) var(--sp-2);
   border-radius: var(--r-2);
 }
 .queue-item:hover,
@@ -427,7 +427,7 @@
   background: var(--fill-1);
 }
 .queue-n {
-  margin-top: 3px;
+  margin-top: var(--sp-0_75);
   font-size: var(--fs-micro);
   font-weight: 600;
   color: var(--text-3);
@@ -454,7 +454,7 @@
 .queue-attach {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: var(--sp-0_75);
   margin-left: var(--sp-1_5);
   padding: 0 var(--sp-1_5);
   height: 18px;

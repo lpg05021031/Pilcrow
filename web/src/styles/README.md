@@ -53,9 +53,10 @@ is played by something.
   `--plan`, `--think` (reasoning only), each with a `-wash`. Orange or red that carries words or
   figures is `--accent-solid` (`-2` on hover) or `--err-solid`, which white (`--accent-ink`) meets
   4.5:1 on; `--accent` itself is for marks, focus and the icon-only send button.
-- **Spacing**: `--sp-N` is N × 4px, with `_5` half steps (`--sp-1_5` = 6px). A value off the scale
-  is an optical correction and stays a number, and so is a negative margin, which undoes a padding
-  rather than adds a step.
+- **Spacing**: `--sp-N` is N × 4px, with `_5` half steps (`--sp-1_5` = 6px) and, up to 13px, `_25`
+  and `_75` quarter steps for the odd pixels that centre 13px type in an even box (`--sp-2_25` = 9px).
+  What stays a number is an optical correction: 1px (a hairline's nudge), a negative margin (it
+  undoes a padding rather than adds a step), and an inset that lines text up with an icon's column.
 - **Type**: `--fs-tiny` 10 … `--fs-display` 22; a `-plus` step is half a pixel up for faces that run
   small (code, keycaps, counters). `--font-size` is the reading size the person sets.
 - **Radii**: `--r-1…7` are 4 to 16 in steps of 2, and `--r-pill`. A radius off the scale follows

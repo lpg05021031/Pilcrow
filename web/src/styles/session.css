@@ -82,7 +82,7 @@
 .status-pill {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--sp-1_75);
   flex: none;
   height: 22px;
   padding: 0 var(--sp-1);
@@ -116,7 +116,7 @@
   align-items: center;
   gap: var(--sp-1_5);
   height: 26px;
-  padding: 0 9px;
+  padding: 0 var(--sp-2_25);
   margin-right: var(--sp-1);
   border-radius: var(--r-pill);
   background: var(--fill-1);
@@ -166,7 +166,7 @@
   justify-content: center;
   gap: var(--sp-2);
   max-width: 560px;
-  margin-top: 22px;
+  margin-top: var(--sp-5_5);
 }
 .example {
   height: 32px;
@@ -208,7 +208,7 @@
   gap: var(--sp-0_5);
   width: min(380px, calc(100% - 36px));
   height: 38px;
-  padding: 0 5px 0 11px;
+  padding: 0 var(--sp-1_25) 0 var(--sp-2_75);
   border-radius: 11px;
   background: var(--glass);
   -webkit-backdrop-filter: var(--glass-blur);
@@ -252,7 +252,7 @@
 /* folder crumb that is still a choice */
 .crumb-btn {
   height: 22px;
-  padding: 0 7px 0 var(--sp-1_5);
+  padding: 0 var(--sp-1_75) 0 var(--sp-1_5);
   margin-left: -6px;
   border-radius: var(--r-2);
   color: var(--text-2);
@@ -378,7 +378,7 @@
   align-items: center;
   gap: var(--sp-2_5);
   min-height: 34px;
-  padding: 3px var(--sp-2_5) 3px var(--sp-5);
+  padding: var(--sp-0_75) var(--sp-2_5) var(--sp-0_75) var(--sp-5);
   font-size: var(--fs-small);
   color: var(--text-2);
   background: var(--inset);
@@ -419,7 +419,7 @@
 .mcp-auth-line {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: var(--sp-2_25);
   font-size: var(--fs-ui);
 }
 .mcp-auth-line.ok {

@@ -21,7 +21,7 @@
   display: grid;
   place-content: center;
   justify-items: center;
-  gap: 18px;
+  gap: var(--sp-4_5);
   color: var(--text-3);
   background: var(--canvas);
 }
@@ -101,7 +101,7 @@
   align-items: center;
   justify-content: center;
   gap: var(--sp-2);
-  padding: 7px var(--sp-3_5);
+  padding: var(--sp-1_75) var(--sp-3_5);
   font-size: var(--fs-small);
   color: var(--text-2);
   background: var(--fill-1);

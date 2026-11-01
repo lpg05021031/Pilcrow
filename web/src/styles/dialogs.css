@@ -35,7 +35,7 @@
   display: flex;
   align-items: center;
   gap: var(--sp-2_5);
-  padding: 18px var(--sp-4) var(--sp-1_5) 22px;
+  padding: var(--sp-4_5) var(--sp-4) var(--sp-1_5) var(--sp-5_5);
 }
 .dialog-title {
   flex: 1;
@@ -44,17 +44,17 @@
   letter-spacing: -0.01em;
 }
 .dialog-body {
-  padding: var(--sp-2_5) 22px var(--sp-5);
+  padding: var(--sp-2_5) var(--sp-5_5) var(--sp-5);
   overflow-y: auto;
   display: grid;
-  gap: 18px;
+  gap: var(--sp-4_5);
   align-content: start;
 }
 .dialog-foot {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: var(--sp-3_5) 18px var(--sp-4) 22px;
+  padding: var(--sp-3_5) var(--sp-4_5) var(--sp-4) var(--sp-5_5);
   box-shadow: 0 -1px 0 var(--hair);
 }
 .err-text {
@@ -81,7 +81,7 @@
 .check {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: var(--sp-2_25);
   font-size: var(--fs-ui);
   color: var(--text-2);
   cursor: pointer;
@@ -107,13 +107,13 @@
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--sp-1_25);
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   height: 26px;
-  padding: 0 11px;
+  padding: 0 var(--sp-2_75);
   border-radius: var(--r-pill);
   font-size: var(--fs-small);
   color: var(--text-2);
@@ -122,7 +122,7 @@
 }
 .chip {
   height: 24px;
-  padding: 0 9px;
+  padding: 0 var(--sp-2_25);
   border-radius: var(--r-5);
   font-size: var(--fs-micro-plus);
 }
@@ -161,7 +161,7 @@ button.chip:hover {
 .browser-item {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: var(--sp-2_25);
   width: 100%;
   height: 30px;
   padding: 0 var(--sp-2);
@@ -183,7 +183,7 @@ button.chip:hover {
 
 /* new session */
 .newsession .dialog-body {
-  gap: 18px;
+  gap: var(--sp-4_5);
 }
 .ns-section {
   display: grid;
@@ -202,7 +202,7 @@ button.chip:hover {
   align-items: center;
   gap: var(--sp-1);
   height: 40px;
-  padding: 0 5px 0 var(--sp-3);
+  padding: 0 var(--sp-1_25) 0 var(--sp-3);
   border-radius: var(--r-4);
   background: var(--fill-1);
   box-shadow: inset 0 0 0 1px var(--hair);
@@ -245,7 +245,7 @@ button.chip:hover {
 .ns-two .field > label {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--sp-1_25);
 }
 .ns-prompt {
   min-height: 76px;
@@ -340,7 +340,7 @@ button.chip:hover {
 }
 .seg.sm button {
   height: 22px;
-  padding: 0 7px;
+  padding: 0 var(--sp-1_75);
 }
 
 /* palette: Raycast-like sheet */
@@ -356,7 +356,7 @@ button.chip:hover {
   align-items: center;
   gap: var(--sp-3);
   height: 54px;
-  padding: 0 18px;
+  padding: 0 var(--sp-4_5);
   color: var(--text-3);
   box-shadow: 0 1px 0 var(--hair);
 }
@@ -379,7 +379,7 @@ button.chip:hover {
   mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent);
 }
 .pal-group {
-  padding: var(--sp-2_5) var(--sp-2_5) 5px;
+  padding: var(--sp-2_5) var(--sp-2_5) var(--sp-1_25);
   font-size: var(--fs-micro);
   font-weight: 600;
   color: var(--text-3);
@@ -387,7 +387,7 @@ button.chip:hover {
 .pal-item {
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: var(--sp-2_75);
   width: 100%;
   height: 36px;
   padding: 0 var(--sp-2_5);
@@ -437,7 +437,7 @@ button.chip:hover {
   align-items: center;
   justify-content: space-between;
   gap: var(--sp-4);
-  padding: 9px 0;
+  padding: var(--sp-2_25) 0;
 }
 .shortcut + .shortcut {
   box-shadow: 0 -1px 0 var(--hair);
@@ -445,7 +445,7 @@ button.chip:hover {
 .keys {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: var(--sp-0_75);
   white-space: nowrap;
 }
 
@@ -471,7 +471,7 @@ button.chip:hover {
   gap: var(--sp-2_5);
   max-width: 100%;
   min-height: 40px;
-  padding: 9px var(--sp-1_5) 9px 13px;
+  padding: var(--sp-2_25) var(--sp-1_5) var(--sp-2_25) var(--sp-3_25);
   border-radius: var(--r-5);
   background: var(--glass);
   -webkit-backdrop-filter: var(--glass-blur);
@@ -551,6 +551,6 @@ button.chip:hover {
 }
 .ns-options {
   display: grid;
-  gap: 18px;
+  gap: var(--sp-4_5);
   padding: var(--sp-1_5) 0 var(--sp-0_5);
 }

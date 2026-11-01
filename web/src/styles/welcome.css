@@ -8,7 +8,7 @@
   overflow-y: auto;
   display: grid;
   place-items: center;
-  padding: 40px var(--sp-6) 10vh;
+  padding: var(--sp-10) var(--sp-6) 10vh;
 }
 .welcome-inner {
   width: min(var(--col), 100%);
@@ -23,7 +23,7 @@
   box-shadow: var(--shadow-icon);
 }
 .welcome-icon {
-  margin-bottom: 22px;
+  margin-bottom: var(--sp-5_5);
 }
 .welcome-icon .app-icon-bowl,
 .session-empty-icon .app-icon-bowl {
@@ -39,7 +39,7 @@
   text-align: center;
 }
 .welcome-sub {
-  margin: var(--sp-2) 0 26px;
+  margin: var(--sp-2) 0 var(--sp-6_5);
   color: var(--text-3);
   font-size: var(--fs-body);
   text-align: center;
@@ -63,8 +63,8 @@
 }
 .welcome-keys {
   display: flex;
-  gap: 22px;
-  margin-top: 30px;
+  gap: var(--sp-5_5);
+  margin-top: var(--sp-7_5);
   font-size: var(--fs-small);
   color: var(--text-3);
 }
@@ -87,7 +87,7 @@
 /* first run without API settings */
 .setup-card {
   width: 100%;
-  margin: 0 0 18px;
+  margin: 0 0 var(--sp-4_5);
   padding: var(--sp-3_5) var(--sp-4) var(--sp-3);
   border-radius: var(--r-6);
   background: var(--card-ask);
@@ -125,7 +125,7 @@
 }
 .setup-snippet pre {
   margin: 0;
-  padding: var(--sp-2_5) 40px var(--sp-2_5) var(--sp-3);
+  padding: var(--sp-2_5) var(--sp-10) var(--sp-2_5) var(--sp-3);
   font-family: var(--font-mono);
   font-size: var(--fs-small);
   line-height: 1.55;

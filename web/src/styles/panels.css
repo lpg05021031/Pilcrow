@@ -135,7 +135,7 @@
 }
 
 .panel .empty {
-  padding: 40px 28px;
+  padding: var(--sp-10) var(--sp-7);
 }
 
 /* ---------------------------------------------------------------- changes */
@@ -220,7 +220,7 @@
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--sp-1_75);
   height: 30px;
   padding: 0 var(--sp-1);
   text-align: left;
@@ -314,7 +314,7 @@
   width: 212px;
   flex: none;
   overflow: auto;
-  padding: var(--sp-1_5) var(--sp-1_5) 18px;
+  padding: var(--sp-1_5) var(--sp-1_5) var(--sp-4_5);
   box-shadow: inset -1px 0 0 var(--hair);
   font-size: var(--fs-small-plus);
 }
@@ -401,7 +401,7 @@
   place-items: center;
   width: 20px;
   height: 20px;
-  margin-right: 5px;
+  margin-right: var(--sp-1_25);
   border-radius: var(--r-1);
   color: var(--text-3);
   opacity: 0;
@@ -468,7 +468,7 @@
 }
 .ttab button:first-child {
   height: 26px;
-  padding: 0 var(--sp-1) 0 9px;
+  padding: 0 var(--sp-1) 0 var(--sp-2_25);
   font-family: var(--font-mono);
 }
 .ttab.on {
@@ -555,7 +555,7 @@
 .ps {
   display: grid;
   gap: var(--sp-2_5);
-  padding: var(--sp-4) 0 18px;
+  padding: var(--sp-4) 0 var(--sp-4_5);
   box-shadow: inset 0 -1px 0 var(--hair);
 }
 .ps:last-child {
@@ -597,7 +597,7 @@
   display: flex;
   align-items: center;
   gap: var(--sp-2_5);
-  padding: 9px var(--sp-2_5) 9px var(--sp-3);
+  padding: var(--sp-2_25) var(--sp-2_5) var(--sp-2_25) var(--sp-3);
   border-radius: var(--r-4);
   background: var(--canvas);
   box-shadow: var(--shadow-card);
@@ -638,7 +638,7 @@
 }
 .ctx-cats {
   display: grid;
-  gap: 5px;
+  gap: var(--sp-1_25);
 }
 .ctx-cat {
   display: flex;
@@ -714,7 +714,7 @@
 .tl-scrub {
   flex: none;
   position: relative;
-  padding: 28px var(--sp-5) var(--sp-2);
+  padding: var(--sp-7) var(--sp-5) var(--sp-2);
   cursor: ew-resize;
   user-select: none;
   touch-action: none;
@@ -725,7 +725,7 @@
   top: 6px;
   transform: translateX(-50%);
   max-width: 70%;
-  padding: 1px 7px;
+  padding: 1px var(--sp-1_75);
   border-radius: var(--r-pill);
   background: var(--raised-2);
   font-size: var(--fs-micro);
@@ -846,7 +846,7 @@
   align-items: center;
   gap: var(--sp-1_5);
   width: 100%;
-  padding: 5px var(--sp-1_5) 5px var(--sp-1);
+  padding: var(--sp-1_25) var(--sp-1_5) var(--sp-1_25) var(--sp-1);
   border-radius: var(--r-2);
   text-align: left;
 }
@@ -869,7 +869,7 @@
   z-index: 1;
   width: 7px;
   height: 7px;
-  margin-top: 11px;
+  margin-top: var(--sp-2_75);
   border-radius: 50%;
   background: var(--card);
   box-shadow: inset 0 0 0 1.5px var(--hair-3);
@@ -942,7 +942,7 @@
 }
 .tl-stat {
   display: inline-flex;
-  gap: 5px;
+  gap: var(--sp-1_25);
   font-size: var(--fs-micro);
   white-space: nowrap;
 }
@@ -960,7 +960,7 @@
   width: 100%;
   text-align: left;
   gap: var(--sp-1_5);
-  padding: 5px var(--sp-1_5) 5px var(--sp-1);
+  padding: var(--sp-1_25) var(--sp-1_5) var(--sp-1_25) var(--sp-1);
   border-radius: var(--r-2);
   cursor: pointer;
 }
@@ -973,7 +973,7 @@
 }
 
 .tl-detail {
-  margin: 0 0 var(--sp-1_5) 22px;
+  margin: 0 0 var(--sp-1_5) var(--sp-5_5);
   padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-2_5);
   border-radius: 0 0 var(--r-2) var(--r-2);
   background: var(--fill-1);
@@ -1029,7 +1029,7 @@
   gap: var(--sp-0_5);
   max-height: 180px;
   overflow: auto;
-  padding: var(--sp-1_5) 0 0 18px;
+  padding: var(--sp-1_5) 0 0 var(--sp-4_5);
 }
 .tl-since-file {
   display: flex;
@@ -1062,7 +1062,7 @@
 .doc-preview {
   min-height: 0;
   overflow: auto;
-  padding: 22px 28px 56px;
+  padding: var(--sp-5_5) var(--sp-7) var(--sp-14);
 }
 .doc-md {
   max-width: 720px;
@@ -1074,7 +1074,7 @@
   margin-top: 0;
 }
 .doc-area.split .doc-preview {
-  padding: var(--sp-4) var(--sp-5) 48px;
+  padding: var(--sp-4) var(--sp-5) var(--sp-12);
 }
 .doc-area.split .doc-md {
   font-size: var(--fs-ui-plus);
@@ -1159,7 +1159,7 @@
   min-width: 0;
   display: grid;
   gap: var(--sp-0_5);
-  padding: var(--sp-2) var(--sp-2_5) 7px;
+  padding: var(--sp-2) var(--sp-2_5) var(--sp-1_75);
   border-radius: var(--r-4);
   background: var(--fill-1);
   box-shadow: inset 0 0 0 0.5px var(--hair);
@@ -1180,10 +1180,10 @@
 .touches {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: var(--sp-0_75);
   flex: none;
   height: 18px;
-  padding: 0 5px;
+  padding: 0 var(--sp-1_25);
   border-radius: var(--r-pill);
   font-size: var(--fs-tiny);
   color: var(--text-3);

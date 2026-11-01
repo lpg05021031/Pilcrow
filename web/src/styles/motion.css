@@ -929,7 +929,7 @@
   z-index: var(--z-lightbox);
   display: grid;
   place-items: center;
-  padding: 36px;
+  padding: var(--sp-9);
   background: var(--veil);
   -webkit-backdrop-filter: blur(18px) saturate(120%);
   backdrop-filter: blur(18px) saturate(120%);
@@ -1261,7 +1261,7 @@ button.chip:active,
   display: inline-block;
   width: 2px;
   height: 0.95em;
-  margin-left: 3px;
+  margin-left: var(--sp-0_75);
   vertical-align: -0.14em;
   border-radius: var(--r-pill);
   background: var(--accent);
@@ -1339,7 +1339,7 @@ button.chip:active,
   margin-top: calc(-1 * var(--header-h));
 }
 .session:not(:has(> .mcp-notice-stack, > .helpers-bar, > .session-error)) > .transcript > .transcript-inner {
-  padding-top: calc(var(--header-h) + 22px);
+  padding-top: calc(var(--header-h) + var(--sp-5_5));
 }
 .session:not(:has(> .mcp-notice-stack, > .helpers-bar, > .session-error)) > .transcript .session-empty {
   padding-top: calc(12vh - var(--header-h) + var(--sp-5));

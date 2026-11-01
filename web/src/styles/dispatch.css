@@ -9,7 +9,7 @@
   flex-direction: column;
 }
 .dp-body {
-  gap: 22px;
+  gap: var(--sp-5_5);
 }
 .dp-form {
   max-width: 920px;
@@ -129,7 +129,7 @@
 .dp-box {
   display: grid;
   gap: var(--sp-1);
-  padding: 9px var(--sp-3);
+  padding: var(--sp-2_25) var(--sp-3);
   border-radius: var(--r-4);
   background: var(--card);
   box-shadow: inset 0 0 0 0.5px var(--hair);
@@ -186,7 +186,7 @@
   text-align: right;
 }
 .dp-table td {
-  padding: 7px var(--sp-2);
+  padding: var(--sp-1_75) var(--sp-2);
   border-bottom: 1px solid var(--hair);
   white-space: nowrap;
   vertical-align: middle;
@@ -308,7 +308,7 @@
 }
 .dp-options {
   display: grid;
-  gap: 18px;
+  gap: var(--sp-4_5);
   padding: var(--sp-1_5) var(--sp-2) var(--sp-1);
 }
 .dp-group {
@@ -321,7 +321,7 @@
   color: var(--text-2);
 }
 .dp-box.dp-plan {
-  padding: 9px var(--sp-3);
+  padding: var(--sp-2_25) var(--sp-3);
 }
 .dp-inline {
   display: flex;
@@ -378,12 +378,12 @@
 }
 .dp-notes {
   grid-column: 1 / -1;
-  margin: 0 var(--sp-1_5) var(--sp-1_5) 30px;
+  margin: 0 var(--sp-1_5) var(--sp-1_5) var(--sp-7_5);
 }
 .dp-chip {
   font-size: var(--fs-micro);
   font-weight: 600;
-  padding: 1px 7px;
+  padding: 1px var(--sp-1_75);
   border-radius: 9px;
   background: var(--fill-2);
   color: var(--text-2);

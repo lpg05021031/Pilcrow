@@ -34,9 +34,9 @@
   min-height: 0;
   overflow-y: auto;
   container-type: inline-size;
-  padding: 18px var(--sp-5) 48px;
+  padding: var(--sp-4_5) var(--sp-5) var(--sp-12);
   display: grid;
-  gap: 28px;
+  gap: var(--sp-7);
   align-content: start;
   width: min(var(--col), 100%);
   box-sizing: border-box;
@@ -155,7 +155,7 @@
 .ov-two {
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(260px, 2fr);
-  gap: 28px;
+  gap: var(--sp-7);
 }
 @container (max-width: 760px) {
   .ov-two {
@@ -191,8 +191,8 @@
 .ovc {
   position: relative;
   display: grid;
-  gap: 9px;
-  padding: 13px 15px var(--sp-3);
+  gap: var(--sp-2_25);
+  padding: var(--sp-3_25) 15px var(--sp-3);
   border-radius: var(--r-6);
   background: var(--card);
   box-shadow: var(--card-shadow);
@@ -207,7 +207,7 @@
 }
 .ovc.needs {
   cursor: default;
-  padding-left: 19px;
+  padding-left: 19px; /* the side inset, moved over by the 3px rail and a hair */
   background: color-mix(in srgb, var(--accent-wash) 30%, var(--card));
 }
 .ovc-rail {
@@ -283,7 +283,7 @@
 .ovc-wf {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--sp-1_75);
   font-size: var(--fs-micro);
   color: var(--text-2);
 }
@@ -308,7 +308,7 @@
   gap: var(--sp-1);
 }
 .ovc-hot {
-  margin-left: 5px;
+  margin-left: var(--sp-1_25);
   color: var(--accent-text);
 }
 .ovc-well {
@@ -366,7 +366,7 @@
   align-items: center;
   gap: var(--sp-2_5);
   width: 100%;
-  padding: 9px var(--sp-2_5);
+  padding: var(--sp-2_25) var(--sp-2_5);
   border-radius: var(--r-3);
   text-align: left;
 }

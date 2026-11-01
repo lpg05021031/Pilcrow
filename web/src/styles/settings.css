@@ -35,7 +35,7 @@
   font-weight: 550;
 }
 .settings-body {
-  padding: 0 22px var(--sp-5) var(--sp-2_5);
+  padding: 0 var(--sp-5_5) var(--sp-5) var(--sp-2_5);
   display: grid;
   align-content: start;
   min-height: 0;
@@ -46,7 +46,7 @@
   grid-template-columns: 1fr minmax(180px, 46%);
   align-items: center;
   gap: var(--sp-5);
-  padding: 13px 0;
+  padding: var(--sp-3_25) 0;
 }
 .set-row + .set-row {
   box-shadow: 0 -1px 0 var(--hair);
@@ -71,7 +71,7 @@
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: var(--sp-3) 22px var(--sp-3_5);
+  padding: var(--sp-3) var(--sp-5_5) var(--sp-3_5);
   font-size: var(--fs-micro);
   color: var(--text-3);
   box-shadow: 0 -1px 0 var(--hair);
@@ -84,7 +84,7 @@
 .diag-row {
   display: flex;
   align-items: flex-start;
-  gap: 11px;
+  gap: var(--sp-2_75);
   padding: var(--sp-2_5) 0;
 }
 .diag-row + .diag-row {
@@ -143,7 +143,7 @@
 .cust-search {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--sp-1_75);
   width: 260px;
   height: 30px;
   padding: 0 var(--sp-2_5);
@@ -167,7 +167,7 @@
 .cust-intro {
   display: grid;
   gap: var(--sp-2);
-  padding: 18px var(--sp-5);
+  padding: var(--sp-4_5) var(--sp-5);
   border-radius: var(--r-5);
   background: var(--inset);
 }
@@ -201,7 +201,7 @@
   place-items: center;
   min-width: 18px;
   height: 18px;
-  padding: 0 5px;
+  padding: 0 var(--sp-1_25);
   border-radius: var(--r-pill);
   background: var(--fill-1);
   font-size: var(--fs-micro);
@@ -267,7 +267,7 @@
 }
 .chip.tiny {
   height: 16px;
-  padding: 0 5px;
+  padding: 0 var(--sp-1_25);
   font-size: var(--fs-tiny);
 }
 .chip.warn {
@@ -364,8 +364,8 @@
 }
 .btn.xs {
   height: 24px;
-  padding: 0 9px;
-  gap: 5px;
+  padding: 0 var(--sp-2_25);
+  gap: var(--sp-1_25);
   font-size: var(--fs-small);
   border-radius: var(--r-2);
 }
@@ -390,7 +390,7 @@
   display: flex;
   align-items: center;
   gap: var(--sp-4);
-  padding: 9px 0;
+  padding: var(--sp-2_25) 0;
 }
 .mem-setting + .mem-setting {
   box-shadow: inset 0 1px 0 var(--hair);
@@ -435,7 +435,7 @@
 }
 .mem-note {
   display: grid;
-  gap: 3px;
+  gap: var(--sp-0_75);
   padding: var(--sp-2) var(--sp-2_5) var(--sp-1_5) var(--sp-3);
   border-radius: var(--r-4);
   background: var(--card);
@@ -490,7 +490,7 @@
 }
 .mem-peek {
   display: grid;
-  gap: 5px;
+  gap: var(--sp-1_25);
   font-size: var(--fs-small);
   color: var(--text-2);
 }
@@ -503,7 +503,7 @@
 .mem-peek-dot {
   width: 5px;
   height: 5px;
-  margin-top: 7px;
+  margin-top: var(--sp-1_75);
   border-radius: 50%;
   background: var(--text-4);
 }
@@ -563,7 +563,7 @@
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: 3px var(--sp-1);
+  padding: var(--sp-0_75) var(--sp-1);
   font-size: var(--fs-small);
   min-width: 0;
 }
@@ -585,7 +585,7 @@
   display: grid;
   justify-items: center;
   gap: var(--sp-2);
-  padding: 36px var(--sp-5);
+  padding: var(--sp-9) var(--sp-5);
   text-align: center;
   color: var(--text-3);
 }
@@ -641,7 +641,7 @@
   align-items: center;
   flex-wrap: wrap;
   gap: var(--sp-1_5);
-  padding-left: 26px;
+  padding-left: var(--sp-6_5);
 }
 .rp-deps {
   padding-left: 0;
@@ -663,12 +663,12 @@ button.rp-alias:hover {
 .rp-locate {
   display: grid;
   gap: var(--sp-1_5);
-  padding-left: 26px;
+  padding-left: var(--sp-6_5);
 }
 .rp-detail {
   display: grid;
   gap: var(--sp-2);
-  padding: var(--sp-1_5) 0 var(--sp-0_5) 26px;
+  padding: var(--sp-1_5) 0 var(--sp-0_5) var(--sp-6_5);
 }
 .rp-field {
   display: grid;

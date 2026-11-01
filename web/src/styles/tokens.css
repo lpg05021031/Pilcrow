@@ -37,18 +37,37 @@
   --r-7: 16px;
   --r-pill: 999px;
 
-  /* spacing: --sp-N is N × 4px, and _5 a half step (--sp-1_5 is 6px). Padding, margins and gaps use
-     these; a value off the scale (1, 3, 5, 7, 9px…) is an optical correction and stays a number. */
+  /* spacing: --sp-N is N × 4px; _5 is a half step (--sp-1_5 is 6px) and, up to 13px, _25 and _75
+     quarter steps, the odd pixels that centre a line of 13px type in a box of even height (--sp-2_25
+     is 9px). Padding, margins and gaps use these. What stays a number: 1px (a hairline's nudge), a
+     negative margin (it undoes a padding rather than adds a step), and an inset that lines text up
+     with something drawn beside it (an icon's column): optical corrections, all of them. */
   --sp-0_5: 2px;
+  --sp-0_75: 3px;
   --sp-1: 4px;
+  --sp-1_25: 5px;
   --sp-1_5: 6px;
+  --sp-1_75: 7px;
   --sp-2: 8px;
+  --sp-2_25: 9px;
   --sp-2_5: 10px;
+  --sp-2_75: 11px;
   --sp-3: 12px;
+  --sp-3_25: 13px;
   --sp-3_5: 14px;
   --sp-4: 16px;
+  --sp-4_5: 18px;
   --sp-5: 20px;
+  --sp-5_5: 22px;
   --sp-6: 24px;
+  --sp-6_5: 26px;
+  --sp-7: 28px;
+  --sp-7_5: 30px;
+  --sp-9: 36px;
+  --sp-10: 40px;
+  --sp-11: 44px;
+  --sp-12: 48px;
+  --sp-14: 56px;
 
   /* motion: hover/press 120, menus 180, panels/dialogs 240, height 300; exits are short and accelerate */
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
