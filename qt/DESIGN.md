@@ -641,8 +641,10 @@ reparents a row that stays. Its hover state is painted.
 
 ### 10.5 Hygiene, app-wide
 
-No `setStyleSheet` and no `setVisible` from hover or refresh paths in the session view, the
-sidebar and the panels: colours and fonts via the painter, `setFont`, `setPalette`. All indicators on
+No `setStyleSheet` from hover or refresh paths in the session view, the sidebar and the panels:
+colours and fonts via the painter, `setFont`, `setPalette`; a hover repaints (`WA_Hover`), and
+what a card reveals on a hover keeps its place (`ui.bits.reveal_on_hover`; PERF §4.12 names the
+one row that still shows and hides in its layout). All indicators on
 the clock. These are small, local changes measured by the `hover_sweep`, `panel_tabs` and `idle`
 scenarios.
 

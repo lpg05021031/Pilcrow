@@ -1126,7 +1126,7 @@ class DiffFileRow(QWidget):
             for icon_name, tip, run in view.actions:
                 b = icon_btn(icon_name, tip(f), 13)
                 b.clicked.connect(lambda _c=False, fn=run, ff=f: fn(ff))
-                b.hide()
+                b.set_shown(False)
                 self.head.hover_widgets.append(b)
                 hl.addWidget(b)
         lay.addWidget(self.head)

@@ -651,15 +651,24 @@ class _Reveal(QObject):
     def eventFilter(self, _obj: QObject, e: QEvent) -> bool:
         if e.type() in (QEvent.Type.Enter, QEvent.Type.Leave):
             for w in self.widgets:
-                w.setVisible(e.type() == QEvent.Type.Enter)
+                _reveal(w, e.type() == QEvent.Type.Enter)
         return False
+
+
+def _reveal(w: QWidget, on: bool) -> None:
+    # an IconButton keeps its place and paints nothing (``opacity: 0``): no layout pass on a hover
+    if isinstance(w, IconButton):
+        w.set_shown(on)
+    else:
+        w.setVisible(on)
 
 
 def reveal_on_hover(owner: QWidget, widgets: List[QWidget]) -> None:
     """Show ``widgets`` only while the pointer is on ``owner`` (``opacity: 0`` until the row or the
-    card is hovered). They start hidden; the list may grow later, it is read at each enter."""
+    card is hovered): an IconButton keeps its place and paints nothing, anything else (placed by
+    hand, outside a layout) is hidden. The list may grow later; it is read at each enter."""
     for w in widgets:
-        w.hide()
+        _reveal(w, False)
     _Reveal(owner, widgets)
 
 

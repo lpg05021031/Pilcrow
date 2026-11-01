@@ -197,13 +197,13 @@ def test_inbox_page(app_client):
     ib.sched_cards[1].main.click()
     assert ib.filter == "s2" and len(ib.run_cards) == 0
     ib.set_filter(None)
-    # the card's Dismiss shows while the pointer is on the card (ui.bits.reveal_on_hover)
+    # the card's Dismiss shows while the pointer is on the card (ui.bits.reveal_on_hover, opacity: 0)
     card = ib.run_cards[0]
     QTest.mouseMove(card, QPoint(-30, -30))
     QApplication.processEvents()
-    assert not card.x_btn.isVisible()
+    assert not card.x_btn.shown and card.x_btn.isVisible()  # in its place, painting nothing
     QTest.mouseMove(card, card.rect().center())
     QApplication.processEvents()
-    assert card.x_btn.isVisible()
+    assert card.x_btn.shown
     card.x_btn.click()  # inbox.remove is quiet on the mock, which does not know it
     assert [r.it["id"] for r in ib.run_cards] == ["i2"]
