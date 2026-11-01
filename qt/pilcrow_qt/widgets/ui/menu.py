@@ -15,7 +15,7 @@ the pointer or the arrow keys. An item is a dict: ``{"label", "icon"?, "hint"?, 
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QEvent, QObject, QPoint, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPainter
@@ -484,12 +484,3 @@ def close_menus() -> None:
 def open_menu() -> Optional[MenuPopover]:
     """The menu on screen, if any (tests look here)."""
     return _current[-1] if _current else None
-
-
-def build_menu(items: List[Item], parent: Optional[QWidget] = None, width: int = 0) -> MenuPopover:
-    """Kept for callers that build first and place later: a menu popover not yet shown."""
-    host = host_for(parent)
-    return MenuPopover(host if host is not None else QWidget(), items, width)
-
-
-_ = Callable

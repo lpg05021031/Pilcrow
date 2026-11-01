@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import math
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter
@@ -20,13 +20,13 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from .. import icons, theme
+from ..canvas.transcript import Transcript
 from ..lib.fmt import basename, cost, duration, err_text, plural, tildify
 from ..store import ConfirmSpec, store
 from .composer import Composer, LayoutButton
@@ -63,47 +63,6 @@ def running_workflow(tasks: Optional[List[Json]]) -> Optional[str]:
         if t.get("type") == "local_workflow" and t.get("status") == "running":
             return str(t.get("workflowName") or t.get("description") or "workflow")
     return None
-
-
-def _make_transcript(session_id: str, cwd: str) -> QWidget:
-    """The conversation on the canvas engine, otherwise a stand-in with the same surface so this page runs alone."""
-    try:
-        from ..canvas.transcript import Transcript
-
-        return Transcript(session_id, cwd)
-    except Exception as e:  # the transcript is built separately; this page must not depend on it
-        print(f"[session_view] transcript unavailable, using a placeholder: {e!r}")
-        return _TranscriptPlaceholder()
-
-
-class _TranscriptPlaceholder(QScrollArea):
-    """What the page shows for the conversation until the Transcript lands: the empty state, or nothing."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.setWidgetResizable(True)
-        self.setFrameShape(QFrame.Shape.NoFrame)
-        self._host = QWidget()
-        self._lay = QVBoxLayout(self._host)
-        self._lay.setContentsMargins(0, 0, 0, 0)
-        self._lay.addStretch(1)
-        self.setWidget(self._host)
-        self._empty: Optional[QWidget] = None
-
-    def set_empty(self, w: QWidget) -> None:
-        if self._empty is not None:
-            self._empty.deleteLater()
-        self._empty = w
-        self._lay.insertWidget(0, w, 0, Qt.AlignmentFlag.AlignHCenter)
-
-    def open_find(self) -> None:
-        pass
-
-    def scroll_to_bottom(self) -> None:
-        self.verticalScrollBar().setValue(self.verticalScrollBar().maximum())
-
-    def set_scrolled_callback(self, fn: Callable[[bool], None]) -> None:
-        self.verticalScrollBar().valueChanged.connect(lambda v: fn(v > 0))
 
 
 HELPER_TONE = {
@@ -441,7 +400,7 @@ class SessionView(QWidget):
 
         # ---- conversation and composer
         cwd = self.cwd
-        self.transcript = _make_transcript(self.sid, cwd)
+        self.transcript = Transcript(self.sid, cwd)
         self.empty = SessionEmpty(session, cwd, self)
         self.transcript.set_empty(self.empty)
         self.transcript.set_scrolled_callback(self._set_scrolled)

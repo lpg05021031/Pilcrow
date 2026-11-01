@@ -21,11 +21,8 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
-    QPlainTextEdit,
     QScrollArea,
     QSizePolicy,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
@@ -36,6 +33,7 @@ from ..lib.tools_meta import str_
 from ..lib.workflow import workflow_counts
 from ..store import Runtime, store
 from .dialogs.parts import Badge, Card, ElideLabel, Kbd, LayoutButton, Text, Well, half_hairline, page_column
+from .transcript.permission import suggestion_label, typing_elsewhere
 from .ui.bits import Box, ContextRing, IconButton, Mark, Spinner, WorkingMark, button, paint_box
 from .ui.signals import bind
 
@@ -46,66 +44,6 @@ STALE_MS = 45_000
 
 def now_ms() -> float:
     return time.time() * 1000
-
-
-# ---------------------------------------------------------------- permission helpers
-# These live in widgets/transcript/permission.py (another part of the port); the control room
-# imports them lazily so it runs on its own while that module is still landing.
-
-
-def typing_elsewhere() -> bool:
-    """Number keys answer a prompt unless the person is typing somewhere. An empty composer counts as
-    not typing: it has focus by default, and a lone "1" there is never a message."""
-    fw = QApplication.focusWidget()
-    try:
-        from .transcript.permission import typing_elsewhere as impl  # type: ignore[import-not-found]
-
-        try:
-            return bool(impl(fw))
-        except TypeError:
-            return bool(impl())
-    except Exception:  # not there yet, or a different shape: use the local rule
-        pass
-    if fw is None:
-        return False
-    is_composer = fw.metaObject().className() == "ComposerEdit" or fw.objectName() == "ComposerEdit"
-    if is_composer:
-        text = fw.toPlainText() if hasattr(fw, "toPlainText") else fw.text() if hasattr(fw, "text") else ""
-        return bool(text)
-    return isinstance(fw, (QLineEdit, QTextEdit, QPlainTextEdit))
-
-
-def suggestion_label(s: Json, cwd: str = "") -> str:
-    """A short label for a permission suggestion (what "Always allow" would add)."""
-    try:
-        from .transcript.permission import suggestion_label as impl  # type: ignore[import-not-found]
-
-        return str(impl(s, cwd))
-    except Exception:
-        pass
-    dest = {
-        "session": "for this session",
-        "localSettings": "in this project (just you)",
-        "projectSettings": "in this project",
-        "userSettings": "everywhere",
-    }.get(str(s.get("destination") or ""), "")
-    if s.get("type") == "addRules" and s.get("behavior") == "allow":
-        rules = s.get("rules") or []
-        tools = {str(r.get("toolName")) for r in rules}
-        if len(tools) == 1 and (tools & {"Bash", "PowerShell"}):
-            return f"{f'Always allow these {len(rules)} commands' if len(rules) > 1 else 'Always allow this command'} {dest}".strip()
-        if len(tools) == 1:
-            return f"Always allow {next(iter(tools))} {dest}".strip()
-        return f"Always allow {len(rules)} rules {dest}".strip()
-    if s.get("type") == "setMode":
-        return (
-            f"Allow all edits {dest}" if s.get("mode") == "acceptEdits" else f"Switch to {s.get('mode')} {dest}"
-        ).strip()
-    if s.get("type") == "addDirectories":
-        return (
-            f"Allow access to {', '.join(rel_path(str(d), cwd) for d in (s.get('directories') or []))} {dest}".strip()
-        )
-    return f"{s.get('type')} {dest}".strip()
 
 
 def perm_summary(p: Json, cwd: str) -> Tuple[str, bool, str]:
@@ -1453,7 +1391,7 @@ class Overview(QWidget):
             Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier | Qt.KeyboardModifier.MetaModifier
         ):
             return False
-        if typing_elsewhere():
+        if typing_elsewhere(QApplication.focusWidget()):
             return False
         key, text = e.key(), e.text()
         if t == QEvent.Type.ShortcutOverride:

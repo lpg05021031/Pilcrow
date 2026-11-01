@@ -9,7 +9,7 @@ overlays, so they close themselves through the store and this router does the di
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Dict, Optional
 
 from PySide6.QtWidgets import QWidget
 
@@ -72,21 +72,13 @@ def open_dialog(window: QWidget, key: str, value: Any) -> None:
 
 
 def _route_other(window: QWidget, key: str, value: Any) -> None:
-    """The settings, new-session and MCP sign-in sheets register themselves in ``registry.ROUTES``
-    (each opener takes ``(window, value)`` and closes on a falsy value); until they land, say so."""
-    routes: Dict[str, Callable[[QWidget, Any], Any]] = {}
-    try:
-        from . import registry
+    """The settings, new-session and MCP sign-in sheets: their openers (``registry.ROUTES``) take
+    ``(window, value)`` and close on a falsy value. Imported here, so the window starts without them."""
+    from .registry import ROUTES
 
-        routes = registry.ROUTES
-    except Exception:  # not built yet, or half-landed
-        pass
-    fn = routes.get(key)
-    if fn is None:
-        if value:
-            print(f"[dialogs] {key} requested (not built yet)")
-        return
-    fn(window, value)
+    fn = ROUTES.get(key)
+    if fn is not None:
+        fn(window, value)
 
 
 def current(key: str) -> Optional[Sheet]:

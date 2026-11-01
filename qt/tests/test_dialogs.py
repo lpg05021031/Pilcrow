@@ -137,7 +137,7 @@ def test_schedule_dialog_preview(app_client):
     assert c.store.dialogs["schedule"] is None
 
 
-def test_lightbox_and_unbuilt_keys(app_client, capsys):
+def test_lightbox_and_unknown_keys(app_client):
     c = app_client
     _ready(c)
     from pilcrow_qt.widgets import dialogs
@@ -149,6 +149,6 @@ def test_lightbox_and_unbuilt_keys(app_client, capsys):
     assert lb.isVisible() and not lb._pm.isNull()
     lb.close_btn.click()
     assert c.store.lightbox is None and not lb.isVisible()
-    c.store.set_dialog("nope", True)
-    assert "nope requested (not built yet)" in capsys.readouterr().out
+    c.store.set_dialog("nope", True)  # a key with no dialog opens nothing and raises nothing
+    assert dialogs.current("nope") is None
     c.store.set_dialog("nope", False)

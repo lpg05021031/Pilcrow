@@ -11,7 +11,7 @@ import time
 from typing import Any, Callable, Optional
 
 from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen
 from PySide6.QtWidgets import QCheckBox, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QWidget
 
 from ... import icons, theme
@@ -506,12 +506,6 @@ def expanding(w: QWidget, h: bool = True, v: bool = False) -> QWidget:
         QSizePolicy.Policy.Expanding if v else QSizePolicy.Policy.Preferred,
     )
     return w
-
-
-def rounded_path(r: QRectF, radius: float) -> QPainterPath:
-    path = QPainterPath()
-    path.addRoundedRect(r, radius, radius)
-    return path
 
 
 class LayoutButton(QPushButton):

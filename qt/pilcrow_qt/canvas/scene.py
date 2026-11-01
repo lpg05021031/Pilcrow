@@ -409,10 +409,6 @@ class Group(Block):
             self.parent.refresh_gaps_at(self.index)
         return gone
 
-    def replace_children(self, blocks: List[Block]) -> None:
-        self.truncate(0)
-        self.extend(blocks)
-
     def insert(self, i: int, b: Block) -> None:
         at = self.child_y(min(i, len(self.children)))
         self.children.insert(i, b)
@@ -517,9 +513,6 @@ class Scene:
     def total(self) -> int:
         return self.root.h
 
-    def y_of(self, b: Block) -> int:
-        return b.y()
-
     def leaf_at(self, y: int) -> Optional[Tuple[Block, int]]:
         """The leaf block under scene y (and its y); None when the scene is empty."""
         g: Group = self.root
@@ -559,10 +552,6 @@ class Scene:
         """The lowest scene y from which the picture may have moved (None when nothing changed)."""
         ys = [b.y() + off for b, off in self.dirty.items() if b.scene is self]
         return min(ys) if ys else None
-
-    def note_rect(self, b: Block, x: int, y: int, w: int, h: int) -> None:
-        by = b.y()
-        self.dirty_rects.append((x, by + y, w, h))
 
     def note_block(self, b: Block) -> None:
         self.dirty_rects.append((0, b.y(), self.width or 1, b.h))

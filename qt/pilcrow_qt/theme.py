@@ -16,7 +16,7 @@ change and a repaint, not a re-parse of every widget's style.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from typing import Callable, Dict, Optional, Tuple, Union
 
 from PySide6.QtCore import QEasingCurve, QObject, Signal
@@ -431,11 +431,6 @@ def font_mono(size: float = MONO_SIZE, weight: int = QFont.Weight.Normal) -> QFo
     return f
 
 
-def px_to_pt(px: float) -> float:
-    """The web sizes are CSS pixels (96 dpi); Qt fonts are points. Device scaling is Qt's job."""
-    return px * 72.0 / 96.0
-
-
 # ---------------------------------------------------------------- the stylesheet
 
 
@@ -751,7 +746,3 @@ theme = Theme()
 
 def tokens() -> Tokens:
     return theme.tokens
-
-
-def token_names() -> list[str]:
-    return [f.name for f in fields(Tokens) if f.name not in ("name", "dark")]

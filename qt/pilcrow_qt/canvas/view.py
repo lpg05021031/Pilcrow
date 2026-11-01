@@ -451,10 +451,6 @@ class CanvasView(QAbstractScrollArea):
         if self.on_latest is not None:
             self.on_latest(False)
 
-    def at_bottom(self) -> bool:
-        vb = self.verticalScrollBar()
-        return vb.maximum() - vb.value() <= 60
-
     def scroll_to_block(self, b: Block, fraction: float = 0.38, only_if_hidden: bool = True) -> None:
         """Bring a block to ``fraction`` of the viewport height unless it is comfortably visible."""
         vb = self.verticalScrollBar()

@@ -192,12 +192,5 @@ class Rpc(QObject):
             _safely(fn, data)
         self.event.emit(name, data)
 
-    def raw_url(self, path: str) -> str:
-        """The HTTP address of a file the server will stream (``/api/raw``)."""
-        from urllib.parse import quote
-
-        base = self.url.replace("ws://", "http://").replace("wss://", "https://").replace("/ws", "")
-        return f"{base}/api/raw?path={quote(path, safe='')}"
-
 
 rpc = Rpc()
