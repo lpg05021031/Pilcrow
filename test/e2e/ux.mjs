@@ -355,7 +355,8 @@ test('the / and @ lists are listboxes the arrows walk; a lit row keeps its words
   await page.waitForSelector('.suggest', { state: 'detached', timeout: 3000 });
 });
 
-test('a lit row in a menu, the open session in the sidebar and the chosen mode set their faint words in --text', async ({ page }) => {
+test('a lit row in a menu, the open session in the sidebar, the chosen mode and the picked step set their faint words in --text', async ({ page }) => {
+  await ctl.call('mock.answer', { method: 'timeline.steps', result: { cwd: '/home/me/pilcrow', enabled: true, reason: null, steps: [{ n: 1, at: Date.now() - 60e3, kind: 'start', tool: null, toolUseId: null, uuid: null, label: '', commit: null, changed: false, files: [], add: 0, del: 0 }] } });
   await open(page, 'sess-login');
   const side = await inks(page, '.side-row.active .side-row-meta, .side-row.active .side-time', '--text');
   expect(side.got.length && side.got.every((c) => c === side.want), `the open session's folder and time (${JSON.stringify(side)})`);
@@ -373,6 +374,12 @@ test('a lit row in a menu, the open session in the sidebar and the chosen mode s
   await page.waitForSelector('.radio-row.on .radio-hint');
   const mode = await inks(page, '.radio-row.on .radio-hint', '--text');
   expect(mode.got.length && mode.got.every((c) => c === mode.want), `the chosen mode's hint (${JSON.stringify(mode)})`);
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Alt+6');
+  await page.click('.history .tl-row:not(.tl-now) .tl-row-btn');
+  await page.waitForSelector('.history .tl-row.on:not(.tl-now) .tl-sub');
+  const step = await inks(page, '.history .tl-row.on .tl-sub', '--text');
+  expect(step.got.length && step.got.every((c) => c === step.want), `the picked step's kind and time in the timeline (${JSON.stringify(step)})`);
 });
 
 test('messages sent while Claude works wait in a named queue, each with named actions', async ({ page }) => {

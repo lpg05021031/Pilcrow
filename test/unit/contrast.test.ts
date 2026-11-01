@@ -46,9 +46,11 @@ const SURFACES = ['canvas', 'chrome', 'raised', 'inset', 'card-ask', 'card'];
 // Rows lit by the keyboard or the selection, from the surface up, and the text on them: menus and the
 // / and @ list are glass over the conversation (menus.css, composer.css), the palette a sheet over it
 // (dialogs.css), the sidebar's rows sit on the chrome (sidebar.css), the chosen mode in a dialog is a row
-// of a sheet (dialogs.css) and the chosen answer one of a question's card (transcript.css). Each lifts its
-// secondary text to --text on the lit row, as --text-3 (and in the dark theme --text-2) falls short of
-// 4.5:1 there.
+// of a sheet (dialogs.css) and the chosen answer one of a question's card (transcript.css); the timeline's
+// steps sit on the side panel's canvas and a file's history is a popover (panels.css), the control room's
+// finished sessions a card (overview.css), the folder picker a popover (session.css). Each lifts its
+// secondary text to --text on the lit or hovered row, as --text-3 (and in the dark theme --text-2) falls
+// short of 4.5:1 there.
 const LIT: [what: string, layers: string[]][] = [
   ['a menu row (.menu-item.active: label, hint, keys)', ['canvas', 'glass', 'fill-2']],
   ['a / or @ row (.suggest-item.active: label, hint)', ['canvas', 'glass', 'fill-2']],
@@ -56,6 +58,10 @@ const LIT: [what: string, layers: string[]][] = [
   ['the open session in the sidebar (.side-row.active: title, folder, time)', ['chrome', 'fill-2']],
   ['the chosen mode in a dialog (.radio-row.on: label, hint)', ['canvas', 'glass-2', 'fill-2']],
   ["the chosen answer on a question's card (.ask-opt.on: label, description)", ['card-ask', 'fill-2']],
+  ['the picked or hovered step in the timeline (.tl-row.on, :hover: kind and time)', ['canvas', 'fill-1']],
+  ['a finished session in the control room, hovered or focused (.ovr: folder or reply, time)', ['card', 'fill-1']],
+  ["a session in a file's history, hovered (.touches-row: what it was about, when)", ['canvas', 'glass', 'fill-1']],
+  ['a recent folder in the folder picker, hovered (.fpick-row: path)', ['canvas', 'glass', 'fill-2']],
 ];
 // A sidebar row under the pointer (or with its menu open) sets its folder and time in --text-2.
 const HOVER: [what: string, layers: string[]][] = [['a sidebar row under the pointer (.side-row:hover)', ['chrome', 'fill-1']]];

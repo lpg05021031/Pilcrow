@@ -408,6 +408,13 @@
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
+/* on the hovered or focused row's fill --text-3 falls short of 4.5:1 (tokens.css) */
+.ovr:hover .ovr-sub,
+.ovr:hover .ovr-end,
+.ovr.focused .ovr-sub,
+.ovr.focused .ovr-end {
+  color: var(--text);
+}
 
 /* ---- spend */
 .spend {

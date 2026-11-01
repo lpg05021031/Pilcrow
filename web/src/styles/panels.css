@@ -943,6 +943,12 @@
   font-size: var(--fs-micro);
   color: var(--text-3);
 }
+/* on the picked or hovered row's fill --text-3 falls short of 4.5:1 (tokens.css) */
+.tl-row-head:hover .tl-sub,
+.tl-row.on .tl-sub,
+.tl-now:hover .tl-sub {
+  color: var(--text);
+}
 .tl-stat {
   display: inline-flex;
   gap: var(--sp-1_25);
@@ -980,9 +986,6 @@
 .tl-now:hover,
 .tl-now.on {
   background: var(--fill-1);
-}
-.tl-now .tl-sub {
-  color: var(--text-3);
 }
 
 .tl-detail {
@@ -1250,6 +1253,11 @@
 .touches-sub {
   font-size: var(--fs-micro);
   color: var(--text-3);
+}
+/* on the hovered row's fill --text-3 falls short of 4.5:1 (tokens.css) */
+.touches-row:hover .touches-about,
+.touches-row:hover .touches-sub {
+  color: var(--text);
 }
 .touches-go {
   color: var(--text-3);

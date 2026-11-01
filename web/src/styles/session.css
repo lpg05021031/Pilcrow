@@ -330,6 +330,11 @@
   color: var(--text-3);
   max-width: 160px;
 }
+/* on the hovered row's fill --text-3 falls short of 4.5:1, and of 3:1 for the icon (tokens.css) */
+.fpick-row:hover .fpick-ico,
+.fpick-row:hover .fpick-path {
+  color: var(--text);
+}
 .fpick-check {
   color: var(--accent-text);
 }
