@@ -13,7 +13,7 @@ import { useEffect, useState } from 'react';
 import { create } from 'zustand';
 import { folders, loadOnce } from './cache';
 import { rpc } from './rpc';
-import { TranscriptModel } from './transcript';
+import { TranscriptModel, type Item } from './transcript';
 import { setHome, plural, errText } from './format';
 import { EASE, EASE_EXIT, reducedMotion, yieldToEvents } from './motion';
 import { isBusy } from './types';
@@ -255,22 +255,45 @@ function forgetMemo(id: string) {
 }
 
 /**
- * How many conversations stay modelled once you have moved on from them. A model holds a whole
- * conversation, its images included; one you come back to after these is loaded again.
+ * How much of the conversations stays modelled once you have moved on from them, in characters of
+ * what they hold (their text, tool input and output, and images, which are held as base64): about six
+ * long ones, or many short ones. A model also costs its objects, counted as MODEL_COST each. One you
+ * come back to after it went is loaded again.
  */
-const KEEP_MODELS = 6;
+export const KEEP_CHARS = 24 << 20;
+const MODEL_COST = 128 << 10;
+const sizes = new WeakMap<TranscriptModel, { rev: number; chars: number }>();
+function charsOf(items: Item[]): number {
+  let n = 0;
+  for (const it of items) {
+    if ('text' in it && typeof it.text === 'string') n += it.text.length;
+    if (it.kind === 'user') for (const s of it.images) n += s.length;
+    if (it.kind === 'tool') {
+      n += it.inputJson.length + charsOf(it.children);
+      if (it.result) for (const s of [it.result.text, ...it.result.images]) n += s.length;
+    }
+  }
+  return n;
+}
+/** What a model holds, as KEEP_CHARS counts it (worked out again only after it changed). */
+export function modelSize(m: TranscriptModel) {
+  let s = sizes.get(m);
+  if (!s || s.rev !== m.rev) sizes.set(m, (s = { rev: m.rev, chars: MODEL_COST + charsOf(m.items) }));
+  return s.chars;
+}
 export function evictModels() {
   const { activeId, rt } = get();
-  let over = models.size - KEEP_MODELS;
-  for (const id of models.keys()) {
-    if (over <= 0) break;
+  let total = 0;
+  for (const m of models.values()) total += modelSize(m);
+  for (const [id, m] of models) {
+    if (total <= KEEP_CHARS) break;
     const r = rt[id];
     // The one on screen, one loading, one Claude is working in or waiting on you in: all stay.
     if (id === activeId || r?.loading || r?.pending?.length || isBusy(r?.status)) continue;
+    total -= modelSize(m);
     models.delete(id);
     forgetMemo(id);
     if (r) patchRt(id, { loaded: false });
-    over--;
   }
 }
 

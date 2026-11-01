@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { applyConfigUi, dismissToast, evictModels, memo, models, setDialog, toast, useStore } from '../../web/src/lib/store';
+import { applyConfigUi, dismissToast, evictModels, KEEP_CHARS, memo, models, modelSize, samePending, setDialog, toast, useStore } from '../../web/src/lib/store';
 import { TranscriptModel, findInItems, type Item } from '../../web/src/lib/transcript';
 import { isBusy, isWorking, type Config } from '../../web/src/lib/types';
 
@@ -63,9 +63,16 @@ describe('evictModels', () => {
     set({ rt: {}, activeId: null });
   });
 
-  it('keeps the six most recent, and never the one on screen, one loading, or one Claude is working in', () => {
+  /** A model holding `chars` characters of what was said. */
+  const holding = (chars: number) => {
+    const m = new TranscriptModel();
+    m.items.push({ kind: 'text', id: 't', rev: 0, text: 'x'.repeat(chars), streaming: false });
+    return m;
+  };
+
+  it('keeps the most recent while they fit in the budget, and never the one on screen, one loading, or one Claude is working in', () => {
     const ids = Array.from({ length: 10 }, (_, i) => `s${i}`);
-    for (const id of ids) models.set(id, new TranscriptModel());
+    for (const id of ids) models.set(id, holding(KEEP_CHARS / 6.5)); // six of these fit, seven do not
     set({
       activeId: 's0',
       rt: { s1: { rev: 0, loaded: true, loading: false, status: 'running' }, s2: { rev: 0, loaded: false, loading: true }, s3: { rev: 0, loaded: true, loading: false, status: 'idle', pending: [{ requestId: 'r', toolName: 'Bash', input: {} }] as never } },
@@ -74,8 +81,23 @@ describe('evictModels', () => {
     expect([...models.keys()]).toEqual(['s0', 's1', 's2', 's3', 's8', 's9']);
   });
 
+  it('counts the images a model holds, and keeps many short conversations', () => {
+    const m = holding(10);
+    const before = modelSize(m);
+    m.items.push({ kind: 'user', id: 'u', rev: 0, uuid: 'u', text: 'look', images: ['data:image/png;base64,' + 'A'.repeat(5000)], files: [] });
+    m.rev++;
+    expect(modelSize(m) - before).toBe(4 + 22 + 5000);
+    for (let i = 0; i < 40; i++) models.set(`short${i}`, holding(2000));
+    evictModels();
+    expect(models.size).toBe(40);
+    models.set('long', holding(KEEP_CHARS * 0.9));
+    evictModels();
+    expect(models.size).toBeLessThan(40);
+    expect(models.has('short0') || !models.has('short39') || !models.has('long')).toBe(false); // the oldest go first
+  });
+
   it('what a session remembers goes with its model, except unsent work and its terminals', () => {
-    for (const id of ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']) models.set(id, new TranscriptModel());
+    for (const id of ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h']) models.set(id, holding(KEEP_CHARS / 6.5));
     set({ activeId: 'h', rt: { a: { rev: 3, loaded: true, loading: false } } });
     Object.assign(memo('a'), { draft: 'half a thought', sent: ['earlier'], scroll: { index: 4, offset: 10, bottom: false } });
     memo('a').folds.set('W-1', true);
@@ -87,6 +109,16 @@ describe('evictModels', () => {
     expect(memo('a')).toMatchObject({ draft: 'half a thought', sent: [], scroll: null });
     expect(memo('a').folds.size).toBe(0);
     expect(memo('b')).toMatchObject({ terms: [{ id: 't1', title: 'pilcrow' }], preview: '' });
+  });
+});
+
+describe('samePending', () => {
+  it('a fresh list of the same requests is the same list, so what draws from it is left alone', () => {
+    const a = [{ requestId: 'r1', toolUseId: 't1', toolName: 'Bash', input: {} }] as never[];
+    expect(samePending(a, [{ requestId: 'r1', toolUseId: 't1', toolName: 'Bash', input: { other: 1 } }] as never[])).toBe(true);
+    expect(samePending(a, [{ requestId: 'r2', toolUseId: 't1', toolName: 'Bash', input: {} }] as never[])).toBe(false);
+    expect(samePending(a, [])).toBe(false);
+    expect(samePending(undefined, [])).toBe(false);
   });
 });
 
