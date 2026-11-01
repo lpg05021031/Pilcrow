@@ -12,6 +12,7 @@ import { which, uuid, log, cleanEnv, IS_WIN, HOME, slash } from './util.js';
 
 const BRIDGE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'pty_bridge.py');
 const SCROLLBACK = 400 * 1024;
+const KILL_GRACE_MS = 1500; // a shell that ignores SIGHUP this long gets SIGKILL
 const require = createRequire(import.meta.url);
 
 export const terminals = new EventEmitter();
@@ -122,15 +123,18 @@ function openUnix({ caps, argv, cwd, env, cols, rows }) {
         /* bridge gone */
       }
     },
-    kill: () => {
-      try {
+    /** Hang up, then SIGKILL after a grace period; settles when the process is gone. */
+    kill: () =>
+      new Promise((resolve) => {
+        if (proc.exitCode !== null || proc.signalCode !== null) return resolve(undefined);
+        const hard = setTimeout(() => proc.kill('SIGKILL'), KILL_GRACE_MS);
+        proc.once('exit', () => {
+          clearTimeout(hard);
+          resolve(undefined);
+        });
         proc.stdin.end();
         proc.kill('SIGHUP');
-        setTimeout(() => proc.exitCode === null && proc.kill('SIGKILL'), 1500);
-      } catch {
-        /* already gone */
-      }
-    },
+      }),
   };
 }
 
@@ -205,16 +209,16 @@ export function resize(id, cols, rows) {
   t.io.resize(cols, rows);
 }
 
-export function close(id) {
+/** End a terminal; settles when its process is gone (at once where the kill cannot be watched). */
+export async function close(id) {
   const t = all.get(id);
   if (!t) return;
   all.delete(id);
-  if (!t.exited) {
-    try {
-      t.io.kill();
-    } catch {
-      /* already gone */
-    }
+  if (t.exited) return;
+  try {
+    await t.io.kill();
+  } catch {
+    /* already gone */
   }
 }
 
@@ -228,5 +232,5 @@ export function snapshot(id) {
 }
 
 export function closeAll() {
-  for (const id of [...all.keys()]) close(id);
+  return Promise.all([...all.keys()].map(close));
 }

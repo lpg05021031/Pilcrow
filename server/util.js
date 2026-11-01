@@ -16,6 +16,16 @@ export const IS_ROOT = typeof process.getuid === 'function' && process.getuid() 
 /** The app's version, from its own package.json (the one copy every module uses). */
 export const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version || '1.0.0';
 
+/** An error that says what kind of failure it is ('invalid_params', 'not_found'), for the client to act on;
+ *  the message is for the person. */
+export class AppError extends Error {
+  /** @param {string} code @param {string} message */
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+  }
+}
+
 export const uuid = () => crypto.randomUUID();
 export const token = () => crypto.randomBytes(24).toString('base64url');
 
@@ -84,6 +94,14 @@ export function expandHome(p) {
   if (p === '~') return HOME;
   if (p.startsWith('~/') || (IS_WIN && p.startsWith('~\\'))) return slash(path.join(HOME, p.slice(2)));
   return slash(p);
+}
+
+/** Whether `p` is `dir` or inside it, by whole path segments (/a/bc is not inside /a/b). */
+export function under(dir, p) {
+  if (!dir || !p) return false;
+  const d = slash(dir);
+  const q = slash(p);
+  return q === d || q.startsWith(d.endsWith('/') ? d : d + '/');
 }
 
 export function tildify(p) {

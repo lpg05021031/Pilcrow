@@ -13,6 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { EventEmitter } from 'node:events';
 import { WebSocketServer } from 'ws';
+import { METHODS } from '../../server/main.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DIST = path.join(ROOT, 'web', 'dist');
@@ -1696,6 +1697,11 @@ const methods = {
   'mock.state': ({ id }) => S(id).state(),
 };
 
+// Every method the mock answers is one the real server has (mock.* aside): a method renamed or removed
+// there stops the mock, and with it the browser tests, instead of passing against a name that is gone.
+const strays = Object.keys(methods).filter((m) => !m.startsWith('mock.') && !METHODS.includes(m));
+if (strays.length) throw new Error(`The mock answers methods server/main.js does not have: ${strays.join(', ')}`);
+
 // ---------------------------------------------------------------- HTTP + WS
 
 const server = http.createServer((req, res) => {
@@ -1740,13 +1746,13 @@ wss.on('connection', (ws) => {
     const send = (obj) => ws.readyState === 1 && ws.send(JSON.stringify(obj));
     if (!fn) {
       console.log(`[mock] unknown method ${m.m}`);
-      return send({ t: 'res', id: m.id, ok: false, e: { message: `Unknown method ${m.m}` } });
+      return send({ t: 'res', id: m.id, ok: false, e: { code: 'unknown_method', message: `Unknown method ${m.m}` } });
     }
     try {
       const r = await fn(m.p || {});
       send({ t: 'res', id: m.id, ok: true, r: r === undefined ? null : r });
     } catch (e) {
-      send({ t: 'res', id: m.id, ok: false, e: { message: e?.message || String(e) } });
+      send({ t: 'res', id: m.id, ok: false, e: { code: 'failed', message: e?.message || String(e) } });
     }
   });
   ws.send(JSON.stringify({ t: 'ev', e: 'hello', d: { version: VERSION } }));

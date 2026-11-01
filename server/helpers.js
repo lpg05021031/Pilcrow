@@ -989,3 +989,7 @@ export function start() {
   extensions.respond.push(helpers.respond);
   extensions.state.push(helpers.stateOf);
 }
+
+export function stop() {
+  helpers.end();
+}

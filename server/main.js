@@ -23,7 +23,7 @@ import * as dispatch from './dispatch.js';
 import * as memory from './memory.js';
 import { repos } from './repos.js';
 import * as helpersMod from './helpers.js';
-import { which, log, xdg, HOME, IS_ROOT, IS_WIN, slash, readJson, writeJson, debounce, expandHome, run, privateDir, migrateLegacyDirs, VERSION } from './util.js';
+import { which, log, xdg, HOME, IS_ROOT, IS_WIN, slash, readJson, writeJson, debounce, expandHome, run, privateDir, migrateLegacyDirs, VERSION, AppError, under } from './util.js';
 
 // Old environment variable names keep working after the rename.
 for (const k of Object.keys(process.env)) if (k.startsWith('RETICLE_') && !('PILCROW_' + k.slice(8) in process.env)) process.env['PILCROW_' + k.slice(8)] = process.env[k];
@@ -33,7 +33,9 @@ const DIST = path.join(ROOT, 'web', 'dist');
 const PREFERRED_PORT = 47117;
 const LOCK = path.join(xdg('state'), 'instance.json');
 
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf', '.ico': 'image/x-icon', '.wasm': 'application/wasm', '.map': 'application/json' };
+const OCTET = 'application/octet-stream';
+/** The interface's pages may run only their own scripts and talk only to this server. */
+const CSP = "frame-ancestors 'none'; default-src 'self'; img-src 'self' data: blob: http://127.0.0.1:* http://localhost:*; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; connect-src 'self' ws://127.0.0.1:* ws://localhost:*; frame-src http: https:; worker-src 'self' blob:";
 
 function parseArgs(argv) {
   const out = {};
@@ -87,50 +89,31 @@ function openExternal(target) {
   return true;
 }
 
+// ---------------------------------------------------------------- RPC
+
+/** A required, non-empty string param; anything else is the client's mistake (invalid_params). */
+function str(v, name) {
+  if (typeof v !== 'string' || !v) throw new AppError('invalid_params', `${name} is required`);
+  return v;
+}
+
+/** A condition on the params; the error names the param that broke it. */
+function need(ok, name) {
+  if (!ok) throw new AppError('invalid_params', `${name} is missing or has the wrong type`);
+}
+
+/** A path param, with ~ expanded. */
+const pathParam = (v, name = 'path') => expandHome(str(v, name));
+
 /**
- * Start the server (the Electron shell calls this in-process; `cli()` for the other shells).
- * @param {{ shell?: string, port?: number | string | boolean, quiet?: boolean, onQuit?: () => void }} [opts]
+ * The JSON-RPC methods by name. A function of the few things they need from the running server, so
+ * the names can be listed without starting one (METHODS, which the mock server checks itself against).
+ * Params are checked where a missing one would otherwise surface as a TypeError deep in a module.
+ * @param {{ shell?: string, quit?: () => void, listChanged?: () => void }} server
  */
-export async function start({ shell = 'none', port, quiet = false, onQuit } = {}) {
-  migrateLegacyDirs();
-  privateDir(xdg('config'));
-  privateDir(xdg('state'));
-  const clients = new Set();
-  let totalConnections = 0;
-
-  const send = (ws, obj) => {
-    if (ws.readyState === 1) ws.send(JSON.stringify(obj));
-  };
-  const broadcast = (e, d) => {
-    const raw = JSON.stringify({ t: 'ev', e, d });
-    for (const ws of clients) if (ws.readyState === 1) ws.send(raw);
-  };
-
-  const listChanged = debounce(() => broadcast('sessions.changed', {}), 150);
-  bus.on('msgs', (d) => broadcast('session.msgs', d));
-  bus.on('state', (d) => broadcast('session.state', d));
-  bus.on('permission', (d) => broadcast('session.permission', d));
-  bus.on('permission-resolved', (d) => broadcast('session.permissionResolved', d));
-  bus.on('list-changed', listChanged);
-  snapshots.events.on('step', (d) => broadcast('timeline.step', d));
-  schedules.events.on('schedules', () => broadcast('schedules.changed', {}));
-  schedules.events.on('inbox', () => broadcast('inbox.changed', schedules.inboxList().unread));
-  schedules.start();
-  dispatch.events.on('changed', (d) => broadcast('dispatch.changed', d));
-  dispatch.events.on('playbooks', () => broadcast('dispatch.playbooks', {}));
-  dispatch.events.on('finished', (d) => d.scheduleId && schedules.noteDispatchFinished(d.scheduleId, d.status));
-  schedules.setDispatchRunner((playbookId, opts) => dispatch.dispatch.startFromPlaybook(playbookId, opts));
-  dispatch.start();
-  memory.events.on('changed', (d) => broadcast('memory.changed', d));
-  repos.events.on('changed', (d) => broadcast('repos.changed', d));
-  helpersMod.start();
-  helpersMod.events.on('changed', (d) => broadcast('helpers.changed', d));
-  sessions.start();
-  term.terminals.on('data', (d) => broadcast('term.data', d));
-  term.terminals.on('exit', (d) => broadcast('term.exit', d));
-
-  const S = (id) => sessions.get(id);
-  const methods = {
+function rpcMethods({ shell, quit, listChanged }) {
+  const S = (id) => sessions.get(str(id, 'id'));
+  return {
     'app.info': async () => {
       const cfg = store.getConfig();
       return {
@@ -151,7 +134,7 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
       };
     },
     'app.quit': () => {
-      setTimeout(() => (onQuit ? onQuit() : (stop(), process.exit(0))), 50);
+      setTimeout(quit, 50); // after the reply is out
       return true;
     },
     'config.get': () => store.getConfig(),
@@ -173,22 +156,26 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
     'session.setMode': async ({ id, mode }) => (await S(id)).setMode(mode),
     'session.setModel': async ({ id, model }) => (await S(id)).setModel(model),
     'session.setEffort': async ({ id, effort }) => (await S(id)).setEffort(effort),
-    'session.permission': async ({ id, requestId, decision }) => (await S(id)).respond(requestId, decision),
-    'session.rename': ({ id, title }) => sessions.rename(id, title),
+    'session.permission': async ({ id, requestId, decision }) => {
+      need(typeof decision?.behavior === 'string', 'decision');
+      return (await S(id)).respond(str(requestId, 'requestId'), decision);
+    },
+    'session.rename': ({ id, title }) => sessions.rename(str(id, 'id'), title),
     'session.delete': async ({ id, removeWorktree, removeHelpers }) => {
+      str(id, 'id');
       // a lead's helpers go with it when asked (HELPERS.md §5.10); otherwise they stay as sessions
       if (removeHelpers) for (const hid of helpersMod.helpers.helperIds(id)) await sessions.remove(hid, { removeWorktree: Boolean(removeWorktree) });
       return sessions.remove(id, { removeWorktree });
     },
     'session.archive': ({ id, archived }) => {
-      store.setMeta(id, { archived: archived || null });
+      store.setMeta(str(id, 'id'), { archived: archived || null });
       listChanged();
     },
     'session.pin': ({ id, pinned }) => {
-      store.setMeta(id, { pinned: pinned || null });
+      store.setMeta(str(id, 'id'), { pinned: pinned || null });
       listChanged();
     },
-    'session.fork': ({ id, upToMessageId, title }) => sessions.fork(id, { upToMessageId, title }),
+    'session.fork': ({ id, upToMessageId, title }) => sessions.fork(str(id, 'id'), { upToMessageId, title }),
     'session.close': async ({ id }) => sessions.find(id)?.close(),
     'session.contextUsage': async ({ id }) => (await S(id)).contextUsage(),
     'session.rewind': async ({ id, messageId, dryRun }) => (await S(id)).rewind(messageId, dryRun !== false),
@@ -202,7 +189,7 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
     // ---- skills & MCP configuration (Claude Code's own files)
     'skills.list': ({ cwd }) => customize.listSkills({ cwd: cwd ? expandHome(cwd) : undefined }),
     'skills.create': ({ scope, cwd, name, description }) => customize.createSkill({ scope, cwd: cwd ? expandHome(cwd) : undefined, name, description }),
-    'skills.remove': ({ dir, cwd }) => customize.removeSkill({ dir: expandHome(dir), cwd: cwd ? expandHome(cwd) : undefined }),
+    'skills.remove': ({ dir, cwd }) => customize.removeSkill({ dir: pathParam(dir, 'dir'), cwd: cwd ? expandHome(cwd) : undefined }),
     'skills.import': ({ scope, cwd, from, name }) => customize.importSkill({ scope, cwd: cwd ? expandHome(cwd) : undefined, from, name }),
     'skills.reloadAll': async () => {
       let n = 0;
@@ -221,13 +208,13 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
       const claude = await resolveClaude(store.getConfig().claudeBinary);
       return customize.removeMcp({ bin: claude.path, scope, cwd: cwd ? expandHome(cwd) : undefined, name });
     },
-    'mcp.approve': ({ cwd, name, approved }) => customize.approveProjectMcp({ cwd: expandHome(cwd), name, approved: Boolean(approved) }),
+    'mcp.approve': ({ cwd, name, approved }) => customize.approveProjectMcp({ cwd: pathParam(cwd, 'cwd'), name, approved: Boolean(approved) }),
     // ---- project memory and who-touched-what
-    'memory.list': ({ cwd }) => memory.list(expandHome(cwd)),
-    'memory.add': ({ cwd, text }) => memory.add(expandHome(cwd), { text }),
-    'memory.update': ({ cwd, id, text, pinned }) => memory.update(expandHome(cwd), id, { text, pinned }),
-    'memory.remove': ({ cwd, id }) => memory.remove(expandHome(cwd), id),
-    'memory.clear': ({ cwd }) => memory.clear(expandHome(cwd)),
+    'memory.list': ({ cwd }) => memory.list(pathParam(cwd, 'cwd')),
+    'memory.add': ({ cwd, text }) => memory.add(pathParam(cwd, 'cwd'), { text }),
+    'memory.update': ({ cwd, id, text, pinned }) => memory.update(pathParam(cwd, 'cwd'), id, { text, pinned }),
+    'memory.remove': ({ cwd, id }) => memory.remove(pathParam(cwd, 'cwd'), id),
+    'memory.clear': ({ cwd }) => memory.clear(pathParam(cwd, 'cwd')),
     'memory.distill': async ({ id, force }) => {
       const s = await S(id);
       await s.loadHistory();
@@ -237,7 +224,7 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
       const list = await sessions.list();
       const titles = Object.fromEntries(list.map((s) => [s.id, { title: s.title, firstPrompt: s.firstPrompt || null, lastModified: s.lastModified }]));
       const byPath = {};
-      for (const st of snapshots.folderSteps(expandHome(cwd))) {
+      for (const st of snapshots.folderSteps(pathParam(cwd, 'cwd'))) {
         for (const f of st.files) {
           (byPath[f.path] ||= []).push({ sessionId: st.sessionId, title: titles[st.sessionId]?.title || 'Session', about: titles[st.sessionId]?.firstPrompt || null, at: st.at, n: st.n, toolUseId: st.toolUseId, kind: st.kind, add: f.add, del: f.del });
         }
@@ -272,8 +259,8 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
     'repos.list': () => repos.list(),
     'repos.save': (p) => repos.save({ ...p, path: p.path ? expandHome(p.path) : p.path }),
     'repos.remove': ({ id }) => repos.remove(id),
-    'repos.register': ({ path: dir, ...patch }) => repos.register(expandHome(dir), patch),
-    'repos.scan': ({ root, depth }) => repos.scan(expandHome(root), depth),
+    'repos.register': ({ path: dir, ...patch }) => repos.register(pathParam(dir), patch),
+    'repos.scan': ({ root, depth }) => repos.scan(pathParam(root, 'root'), depth),
     'repos.refresh': ({ ids, force }) => repos.refresh(ids || null, { force: Boolean(force) }),
     'repos.resolve': ({ word }) => repos.resolve(word) || { nearest: repos.nearest(word) },
     'workspace.scan': ({ root, depth, force }) => dispatch.dispatch.scan({ root: expandHome(root), depth, force: Boolean(force) }),
@@ -326,44 +313,130 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
       return r;
     },
     'session.stopTask': async ({ id, taskId }) => (await S(id)).stopTask(taskId),
-    'session.subagent': async ({ id, agentId }) => history.loadSubagent(id, agentId, (await S(id)).cwd),
+    'session.subagent': async ({ id, agentId }) => history.loadSubagent(id, str(agentId, 'agentId'), (await S(id)).cwd),
     'session.gateway': async ({ cwd }) => gatewayInfo(cwd),
     'models.gateway': async ({ cwd, force }) => gatewayModels(cwd, { force: Boolean(force), version: VERSION }),
 
-    'git.info': ({ cwd }) => git.info(cwd),
-    'git.diff': ({ cwd, base }) => git.diff(cwd, { base }),
-    'git.branches': ({ cwd }) => git.branches(cwd),
-    'git.commit': ({ cwd, message, paths }) => git.commit(cwd, { message, paths }),
-    'git.discard': ({ cwd, path: p, untracked }) => git.discard(cwd, { path: p, untracked }),
-    'git.log': ({ cwd, n }) => git.log(cwd, n),
-    'git.worktrees': ({ cwd }) => git.listWorktrees(cwd),
+    // Without a folder, git would answer for whatever folder the server runs in.
+    'git.info': ({ cwd }) => git.info(str(cwd, 'cwd')),
+    'git.diff': ({ cwd, base }) => git.diff(str(cwd, 'cwd'), { base }),
+    'git.branches': ({ cwd }) => git.branches(str(cwd, 'cwd')),
+    'git.commit': ({ cwd, message, paths }) => git.commit(str(cwd, 'cwd'), { message: str(message, 'message'), paths }),
+    'git.discard': ({ cwd, path: p, untracked }) => git.discard(str(cwd, 'cwd'), { path: str(p, 'path'), untracked }),
+    'git.log': ({ cwd, n }) => git.log(str(cwd, 'cwd'), n),
+    'git.worktrees': ({ cwd }) => git.listWorktrees(str(cwd, 'cwd')),
     'git.removeWorktree': (p) => git.removeWorktree(p),
 
-    'fs.list': ({ dir }) => files.listDir(expandHome(dir)),
-    'fs.read': ({ path: p }) => files.readFile(expandHome(p)),
-    'fs.write': ({ path: p, text, expectedMtime, force }) => files.writeFile(expandHome(p), text, { expectedMtime, force }),
+    'fs.list': ({ dir }) => files.listDir(pathParam(dir, 'dir')),
+    'fs.read': ({ path: p }) => files.readFile(pathParam(p)),
+    'fs.write': ({ path: p, text, expectedMtime, force }) => {
+      need(typeof text === 'string', 'text');
+      return files.writeFile(pathParam(p), text, { expectedMtime, force });
+    },
     'fs.browse': ({ dir }) => files.browse(expandHome(dir)),
-    'fs.index': ({ cwd, force }) => files.fileIndex(cwd, { force }),
-    'fs.mkdir': ({ path: p }) => {
-      fs.mkdirSync(expandHome(p), { recursive: true });
+    'fs.index': ({ cwd, force }) => files.fileIndex(str(cwd, 'cwd'), { force }),
+    'fs.mkdir': async ({ path: p }) => {
+      await fs.promises.mkdir(pathParam(p), { recursive: true });
       return true;
     },
-    'fs.exists': ({ path: p }) => fs.existsSync(expandHome(p)),
+    'fs.exists': ({ path: p }) => fs.existsSync(pathParam(p)),
 
     'term.open': (p) => term.open(p),
-    'term.input': ({ id, data }) => term.write(id, data),
-    'term.resize': ({ id, cols, rows }) => term.resize(id, cols, rows),
+    'term.input': ({ id, data }) => {
+      need(typeof data === 'string', 'data');
+      return term.write(str(id, 'id'), data);
+    },
+    'term.resize': ({ id, cols, rows }) => {
+      need(Number.isInteger(cols) && Number.isInteger(rows) && cols > 0 && rows > 0, 'cols/rows');
+      return term.resize(str(id, 'id'), cols, rows);
+    },
     'term.close': ({ id }) => term.close(id),
     'term.list': () => term.list(),
     'term.snapshot': ({ id }) => term.snapshot(id),
 
     'shell.openExternal': ({ url }) => /^(https?|file|mailto):/i.test(url) && openExternal(url),
-    'shell.openPath': ({ path: p }) => openExternal(expandHome(p)),
+    'shell.openPath': ({ path: p }) => openExternal(pathParam(p)),
     'shell.which': async ({ cmd }) => which(cmd),
-    'shell.run': async ({ cmd, args, cwd }) => run(cmd, args, { cwd }),
+    'shell.run': async ({ cmd, args = [], cwd }) => {
+      need(Array.isArray(args) && args.every((a) => typeof a === 'string'), 'args');
+      return run(str(cmd, 'cmd'), args, { cwd });
+    },
+  };
+}
+
+/** Every method name the server answers. */
+export const METHODS = Object.freeze(Object.keys(rpcMethods({})));
+
+/**
+ * What the client is told when a method fails: the message it shows, and a code it can act on.
+ * A bug (TypeError and its kind) is 'internal'; an error a module threw on purpose to say no, with
+ * a message for the person, is 'failed'.
+ */
+function errorOf(e) {
+  const message = e?.message || String(e);
+  if (e instanceof AppError) return { code: e.code, message };
+  if (e?.code === 'ENOENT') return { code: 'not_found', message };
+  if (e instanceof TypeError || e instanceof RangeError || e instanceof ReferenceError || e instanceof SyntaxError) return { code: 'internal', message };
+  return { code: 'failed', message };
+}
+
+/**
+ * Start the server (the Electron shell calls this in-process; `cli()` for the other shells).
+ * @param {{ shell?: string, port?: number | string | boolean, quiet?: boolean, onQuit?: () => void }} [opts]
+ */
+export async function start({ shell = 'none', port, quiet = false, onQuit } = {}) {
+  process.on('unhandledRejection', (e) => log('unhandledRejection', e));
+  process.on('uncaughtException', (e) => log('uncaughtException', e));
+  migrateLegacyDirs();
+  privateDir(xdg('config'));
+  privateDir(xdg('state'));
+  const clients = new Set();
+  let totalConnections = 0;
+
+  const send = (ws, obj) => {
+    if (ws.readyState === 1) ws.send(JSON.stringify(obj));
+  };
+  const broadcast = (e, d) => {
+    const raw = JSON.stringify({ t: 'ev', e, d });
+    for (const ws of clients) if (ws.readyState === 1) ws.send(raw);
   };
 
+  const listChanged = debounce(() => broadcast('sessions.changed', {}), 150);
+  bus.on('msgs', (d) => broadcast('session.msgs', d));
+  bus.on('state', (d) => broadcast('session.state', d));
+  bus.on('permission', (d) => broadcast('session.permission', d));
+  bus.on('permission-resolved', (d) => broadcast('session.permissionResolved', d));
+  bus.on('list-changed', listChanged);
+  snapshots.events.on('step', (d) => broadcast('timeline.step', d));
+  schedules.events.on('schedules', () => broadcast('schedules.changed', {}));
+  schedules.events.on('inbox', () => broadcast('inbox.changed', schedules.inboxList().unread));
+  schedules.start();
+  dispatch.events.on('changed', (d) => broadcast('dispatch.changed', d));
+  dispatch.events.on('playbooks', () => broadcast('dispatch.playbooks', {}));
+  dispatch.events.on('finished', (d) => d.scheduleId && schedules.noteDispatchFinished(d.scheduleId, d.status));
+  schedules.setDispatchRunner((playbookId, opts) => dispatch.dispatch.startFromPlaybook(playbookId, opts));
+  dispatch.start();
+  memory.events.on('changed', (d) => broadcast('memory.changed', d));
+  repos.events.on('changed', (d) => broadcast('repos.changed', d));
+  helpersMod.start();
+  helpersMod.events.on('changed', (d) => broadcast('helpers.changed', d));
+  sessions.start();
+  term.terminals.on('data', (d) => broadcast('term.data', d));
+  term.terminals.on('exit', (d) => broadcast('term.exit', d));
+
+  const methods = rpcMethods({ shell, quit: () => (onQuit ? onQuit() : stop().then(() => process.exit(0))), listChanged });
+
   const server = http.createServer((req, res) => {
+    try {
+      serveHttp(req, res);
+    } catch (e) {
+      // A malformed request (a bad %-escape in the path) must get an answer, not hang.
+      log('http request failed', req.url, e);
+      if (!res.headersSent) res.writeHead(e instanceof URIError ? 400 : 500).end();
+    }
+  });
+
+  function serveHttp(req, res) {
     const url = new URL(req.url, 'http://x');
     // Only this app's own pages may talk to the server: no other website open in your browser,
     // no other localhost dev server, and no DNS-rebinding tricks.
@@ -385,9 +458,7 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
           res.writeHead(404).end('Not found');
           return;
         }
-        const ext = path.extname(p).toLowerCase();
-        const type = MIME[ext] || files.mimeFor(p) || (ext === '.txt' || ext === '.md' ? 'text/plain; charset=utf-8' : ext === '.xml' ? 'application/xml' : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : ext === '.gif' ? 'image/gif' : ext === '.webp' ? 'image/webp' : ext === '.mp4' ? 'video/mp4' : ext === '.pdf' ? 'application/pdf' : 'application/octet-stream');
-        res.writeHead(200, { 'content-type': type, 'content-length': st.size, 'cache-control': 'no-store', 'cross-origin-resource-policy': 'same-origin', 'x-content-type-options': 'nosniff' });
+        res.writeHead(200, { 'content-type': files.mimeOf(p) || OCTET, 'content-length': st.size, 'cache-control': 'no-store', 'cross-origin-resource-policy': 'same-origin', 'x-content-type-options': 'nosniff' });
         fs.createReadStream(p).pipe(res);
       });
       return;
@@ -399,13 +470,13 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
           res.writeHead(404).end('Not found');
           return;
         }
-        res.writeHead(200, { 'content-type': files.mimeFor(p) || 'application/octet-stream', 'content-length': st.size, 'cache-control': 'no-store', 'cross-origin-resource-policy': 'same-origin' });
+        res.writeHead(200, { 'content-type': files.imageMime(p) || OCTET, 'content-length': st.size, 'cache-control': 'no-store', 'cross-origin-resource-policy': 'same-origin' });
         fs.createReadStream(p).pipe(res);
       });
       return;
     }
     serveStatic(url.pathname, res);
-  });
+  }
 
   /** The port we listen on (set once listening; nothing is served before). */
   let boundPort = 0;
@@ -427,29 +498,26 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
     return host === `127.0.0.1:${p}` || host === `localhost:${p}`;
   }
 
+  /** The interface (web/dist): a path that is not a file is the app's own route, so index.html. */
   function serveStatic(pathname, res) {
-    let rel = decodeURIComponent(pathname).replace(/^\/+/, '');
-    if (!rel) rel = 'index.html';
-    let file = path.join(DIST, rel);
-    if (!file.startsWith(DIST)) {
+    const file = path.join(DIST, decodeURIComponent(pathname).replace(/^\/+/, '') || 'index.html');
+    if (!under(DIST, file)) {
       res.writeHead(403).end();
       return;
     }
-    if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(DIST, 'index.html');
-    if (!fs.existsSync(file)) {
-      res.writeHead(500, { 'content-type': 'text/plain' }).end('The interface files are missing (web/dist). Run the Pilcrow installer again to restore them.');
-      return;
-    }
-    const ext = path.extname(file);
-    const headers = {
-      'content-type': MIME[ext] || 'application/octet-stream',
-      'cache-control': file.includes(`${path.sep}assets${path.sep}`) ? 'public, max-age=31536000, immutable' : 'no-cache',
-      'x-content-type-options': 'nosniff',
-    };
-    if (ext === '.html') headers['x-frame-options'] = 'DENY';
-    if (ext === '.html') headers['content-security-policy'] = "frame-ancestors 'none'; default-src 'self'; img-src 'self' data: blob: http://127.0.0.1:* http://localhost:*; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; connect-src 'self' ws://127.0.0.1:* ws://localhost:*; frame-src http: https:; worker-src 'self' blob:";
-    res.writeHead(200, headers);
-    fs.createReadStream(file).pipe(res);
+    fs.stat(file, (err, st) => {
+      const target = err || st.isDirectory() ? path.join(DIST, 'index.html') : file;
+      const html = target.endsWith('.html');
+      const headers = {
+        'content-type': files.mimeOf(target) || OCTET,
+        'cache-control': target.includes(`${path.sep}assets${path.sep}`) ? 'public, max-age=31536000, immutable' : 'no-cache',
+        'x-content-type-options': 'nosniff',
+        ...(html ? { 'x-frame-options': 'DENY', 'content-security-policy': CSP } : {}),
+      };
+      const stream = fs.createReadStream(target);
+      stream.once('open', () => stream.pipe(res.writeHead(200, headers)));
+      stream.once('error', () => res.writeHead(500, { 'content-type': 'text/plain' }).end('The interface files are missing (web/dist). Run the Pilcrow installer again to restore them.'));
+    });
   }
 
   const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 * 1024 });
@@ -474,18 +542,19 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
       } catch {
         return;
       }
-      if (msg.t !== 'req') return;
-      const fn = methods[msg.m];
+      if (msg?.t !== 'req') return;
+      const fn = Object.hasOwn(methods, msg.m) ? methods[msg.m] : null;
       if (!fn) {
-        send(ws, { t: 'res', id: msg.id, ok: false, e: { message: `Unknown method ${msg.m}` } });
+        send(ws, { t: 'res', id: msg.id, ok: false, e: { code: 'unknown_method', message: `Unknown method ${msg.m}` } });
         return;
       }
       try {
-        const r = await fn(msg.p || {});
+        const r = await fn(msg.p && typeof msg.p === 'object' ? msg.p : {});
         send(ws, { t: 'res', id: msg.id, ok: true, r: r === undefined ? null : r });
       } catch (e) {
-        log('rpc error', msg.m, e);
-        send(ws, { t: 'res', id: msg.id, ok: false, e: { message: e?.message || String(e) } });
+        const err = errorOf(e);
+        log('rpc error', msg.m, err.code === 'internal' ? e : err.message);
+        send(ws, { t: 'res', id: msg.id, ok: false, e: err });
       }
     });
     send(ws, { t: 'ev', e: 'hello', d: { version: VERSION } });
@@ -520,26 +589,34 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
   log(`Pilcrow ${VERSION} listening on 127.0.0.1:${actualPort} (shell=${shell})`);
   if (!quiet) console.log(`Pilcrow is running on port ${actualPort}.`);
 
-  let stopped = false;
-  const stop = () => {
-    if (stopped) return;
-    stopped = true;
-    sessions.stop();
-    term.closeAll();
-    try {
-      store.flush();
-    } catch {
-      /* ignore */
-    }
-    try {
-      const cur = readJson(LOCK, {});
-      if (cur.pid === process.pid) fs.rmSync(LOCK, { force: true });
-    } catch {
-      /* ignore */
-    }
-    for (const ws of clients) ws.close();
-    server.close();
-  };
+  let stopping = null;
+  /**
+   * Stop everything, once. What is pending is written before the first await, so even a caller that
+   * cannot wait has it on disk; the promise settles when the terminals' processes are gone, and the
+   * quit paths wait for it before they exit. Dispatch and helpers let go of the sessions first, so the
+   * processes closing here read as a restart to them (their runs resume as stopped), not as failures.
+   */
+  const stop = () =>
+    (stopping ??= (async () => {
+      schedules.stop();
+      dispatch.stop();
+      helpersMod.stop();
+      sessions.stop();
+      try {
+        store.flush();
+      } catch (e) {
+        log('could not save settings', e);
+      }
+      try {
+        const cur = readJson(LOCK, {});
+        if (cur.pid === process.pid) fs.rmSync(LOCK, { force: true });
+      } catch {
+        /* someone else's lock now */
+      }
+      for (const ws of clients) ws.close();
+      server.close();
+      await term.closeAll();
+    })());
   return { url, port: actualPort, stop, busy: () => sessions.busy(), connections: () => totalConnections };
 }
 
@@ -820,10 +897,7 @@ async function cli() {
     console.error(`Pilcrow could not start: ${e.message}`);
     process.exit(1);
   }
-  const shutdown = () => {
-    app.stop();
-    setTimeout(() => process.exit(0), 300);
-  };
+  const shutdown = () => app.stop().finally(() => process.exit(0));
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
   process.on('SIGHUP', shutdown);
@@ -865,9 +939,6 @@ async function cli() {
     }, 25_000).unref();
   }
 }
-
-process.on('unhandledRejection', (e) => log('unhandledRejection', e));
-process.on('uncaughtException', (e) => log('uncaughtException', e));
 
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   cli().catch((e) => {

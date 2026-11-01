@@ -31,6 +31,7 @@ export default tseslint.config(
       'no-empty': ['error', { allowEmptyCatch: true }],
       'no-cond-assign': ['error', 'except-parens'],
       'no-undef': 'off', // typescript-eslint handles TS; the .mjs files are checked by Node at run time
+      'no-unused-vars': 'off', // the typescript-eslint rule, which understands parameters in type signatures
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', caughtErrors: 'none' }],
     },
   },

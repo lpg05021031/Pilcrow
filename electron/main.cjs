@@ -259,8 +259,12 @@ function debounce(fn, ms) {
 app.on('before-quit', (e) => {
   if (!quitting && !confirmQuit()) e.preventDefault();
 });
-app.on('window-all-closed', () => {
-  server?.stop();
-  app.quit();
+app.on('window-all-closed', () => app.quit());
+// The server saves what is pending and ends the terminals before the app exits: hold the quit until it has.
+let stopped = false;
+app.on('will-quit', (e) => {
+  if (stopped || !server) return;
+  stopped = true;
+  e.preventDefault();
+  server.stop().finally(() => app.exit(0));
 });
-app.on('will-quit', () => server?.stop());

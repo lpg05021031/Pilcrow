@@ -11,7 +11,7 @@ import * as snapshots from './snapshots.js';
 import * as memory from './memory.js';
 import * as git from './git.js';
 import { repos } from './repos.js';
-import { AsyncQueue, uuid, IS_ROOT, log, xdg, slugify, cleanEnv, slash, VERSION } from './util.js';
+import { AsyncQueue, uuid, IS_ROOT, log, xdg, slugify, cleanEnv, slash, VERSION, AppError } from './util.js';
 import { applyAssistant, applyCompact, fromHistory } from './usage.js';
 
 export const bus = new EventEmitter();
@@ -978,7 +978,7 @@ class SessionManager {
       cwd = info?.cwd;
       if (info) persisted = true;
     }
-    if (!cwd) throw new Error('Unknown session: ' + id);
+    if (!cwd) throw new AppError('not_found', 'Unknown session: ' + id);
     s = new Session(id, { cwd, persisted });
     this.sessions.set(id, s);
     return s;

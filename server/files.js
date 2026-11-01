@@ -6,10 +6,40 @@ import { git } from './git.js';
 
 const HEAVY = new Set(['node_modules', '.git', '.venv', 'venv', '__pycache__', '.cache', 'dist', 'build', '.next', 'target', '.gradle', '.idea', '.tox']);
 const MAX_READ = 4 * 1024 * 1024;
-const IMAGE_EXT = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.bmp': 'image/bmp', '.ico': 'image/x-icon' };
+/** Content types by extension: the one table for the interface's files, /api/fs, /api/raw and the image viewer. */
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json',
+  '.map': 'application/json',
+  '.txt': 'text/plain; charset=utf-8',
+  '.md': 'text/plain; charset=utf-8',
+  '.xml': 'application/xml',
+  '.wasm': 'application/wasm',
+  '.woff2': 'font/woff2',
+  '.woff': 'font/woff',
+  '.ttf': 'font/ttf',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.svg': 'image/svg+xml',
+  '.bmp': 'image/bmp',
+  '.ico': 'image/x-icon',
+  '.mp4': 'video/mp4',
+  '.pdf': 'application/pdf',
+};
 
-export function mimeFor(p) {
-  return IMAGE_EXT[path.extname(p).toLowerCase()] || null;
+/** @param {string} p */
+export const mimeOf = (p) => MIME[path.extname(p).toLowerCase()] || null;
+
+/** An image's content type, or null: what the viewer shows as a picture, and all /api/raw types. */
+export function imageMime(p) {
+  const t = mimeOf(p);
+  return t?.startsWith('image/') ? t : null;
 }
 
 export function listDir(dir, { showHidden = true } = {}) {
@@ -57,7 +87,7 @@ export function readFile(p) {
   p = slash(p);
   const st = fs.statSync(p);
   if (!st.isFile()) throw new Error('Not a file');
-  const mime = mimeFor(p);
+  const mime = imageMime(p);
   if (mime) {
     if (st.size > 12 * 1024 * 1024) return { path: p, size: st.size, mtime: st.mtimeMs, binary: true, tooLarge: true, mime };
     return { path: p, size: st.size, mtime: st.mtimeMs, binary: true, mime, dataUrl: `data:${mime};base64,${fs.readFileSync(p).toString('base64')}` };
