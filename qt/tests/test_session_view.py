@@ -190,7 +190,7 @@ def test_sending_while_busy_queues_the_message(app_client):
     c.wait_until(lambda: len(c.store.rt[sid].held) == 1, 5, "held")
     c.wait_until(lambda: v.composer.queue.isVisible(), 5, "queue tray")
     assert v.composer.queue.head_text.text() == "Queued — Claude reads it after this step"
-    from pilcrow_qt.widgets.composer import QueueItem
+    from pilcrow_qt.widgets.queue_tray import QueueItem
 
     items = c.find(QueueItem, v.composer.queue)
     assert len(items) == 1 and items[0].text_btn.text() == "and then this"
@@ -221,3 +221,17 @@ def test_screenshot(app_client):
     assert v.composer.send_btn.state == "ready"
     assert c.shot("session-view").exists()
     v.composer.edit.clear()
+
+
+def test_folder_chip_opens_the_picker_in_a_popover(app_client):
+    from pilcrow_qt.widgets.folder_picker import FolderPicker
+    from pilcrow_qt.widgets.ui.menu import Popover
+
+    c = app_client
+    v = _open(c)
+    v.pick_folder()
+    pop = v._picker
+    assert isinstance(pop, Popover) and pop.is_open and pop.findChild(FolderPicker) is not None
+    assert pop.width() == 380 and pop.styleSheet() == ""  # painted from the tokens, no colours in a stylesheet
+    v.pick_folder()  # the chip again closes it
+    assert not pop.is_open

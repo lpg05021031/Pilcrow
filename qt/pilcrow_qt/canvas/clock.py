@@ -5,8 +5,8 @@ counters), 16 ms while a tween runs, stopped when nothing subscribes. Subscriber
 references with a ``tick(now)`` method that returns the rectangle to repaint (or None).
 
 ``Tween`` animates one number on the clock with a QEasingCurve and calls back each frame; it is what
-the reveal of a fold and the easing of the scroll position run on, so a frame costs one callback and
-there is exactly one timer in the process for animation.
+the reveal of a fold, the easing of the scroll position and the composer's springs run on, so a frame
+costs one callback and the canvas and the composer share one timer for animation.
 """
 
 from __future__ import annotations
@@ -16,6 +16,8 @@ import weakref
 from typing import Any, Callable, List, Optional
 
 from PySide6.QtCore import QEasingCurve, QObject, Qt, QTimer
+
+from ..store import store
 
 SLOW_MS = 33
 FAST_MS = 16
@@ -29,7 +31,8 @@ class Clock(QObject):
         self._timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._timer.timeout.connect(self._tick)
         self._subs: List[weakref.ReferenceType] = []
-        self._fast = 0  # tweens holding the fast rate
+        # what holds the fast rate: weak, so a tween dropped (or torn down) mid-run gives it back
+        self._fast: weakref.WeakSet = weakref.WeakSet()
         self._interval = 0
 
     # ---- subscribers
@@ -44,12 +47,12 @@ class Clock(QObject):
         self._subs = [r for r in self._subs if r() is not None and r() is not obj]
         self._arm()
 
-    def hold_fast(self) -> None:
-        self._fast += 1
+    def hold_fast(self, obj: Any) -> None:
+        self._fast.add(obj)
         self._arm()
 
-    def release_fast(self) -> None:
-        self._fast = max(0, self._fast - 1)
+    def release_fast(self, obj: Any) -> None:
+        self._fast.discard(obj)
         self._arm()
 
     @property
@@ -78,6 +81,7 @@ class Clock(QObject):
                 s.tick(now)
             except RuntimeError:  # a Qt object torn down under us
                 self._subs = [x for x in self._subs if x is not r]
+                self._fast.discard(s)
         self._arm()
 
 
@@ -85,12 +89,23 @@ clock = Clock()
 
 
 class Tween:
-    """One value from ``a`` to ``b`` over ``ms`` on ``curve``; ``on_frame(value)`` each tick,
-    ``on_done()`` once at the end. Starting again retargets from the current value."""
+    """One value eased on the clock; ``on_frame(value)`` each tick, ``on_done()`` once at each end.
 
-    def __init__(self, on_frame: Callable[[float], None], on_done: Optional[Callable[[], None]] = None) -> None:
+    ``start(a, b, ms, curve)`` runs from ``a`` to ``b``. ``go(target)`` runs from where the value is
+    to ``target`` with the tween's own ``ms`` and ``curve`` (a factory such as ``theme.spring_soft``),
+    and lands at once under reduced motion. Starting again retargets from the current value."""
+
+    def __init__(
+        self,
+        on_frame: Callable[[float], None],
+        on_done: Optional[Callable[[], None]] = None,
+        ms: int = 1,
+        curve: Optional[Callable[[], QEasingCurve]] = None,
+    ) -> None:
         self._on_frame = on_frame
         self._on_done = on_done
+        self._go_ms = ms
+        self._go_curve = curve
         self.value = 0.0
         self._a = 0.0
         self._b = 0.0
@@ -99,14 +114,22 @@ class Tween:
         self._curve: Optional[QEasingCurve] = None
         self.running = False
 
-    def start(self, a: float, b: float, ms: int, curve: QEasingCurve) -> None:
+    def start(self, a: float, b: float, ms: int, curve: Optional[QEasingCurve]) -> None:
         self._a, self._b, self._ms, self._curve = float(a), float(b), max(1, int(ms)), curve
         self.value = self._a
         self._t0 = time.monotonic()
         if not self.running:
             self.running = True
-            clock.hold_fast()
+            clock.hold_fast(self)
             clock.subscribe(self)
+
+    def go(self, target: float) -> None:
+        if store.reduced_motion or abs(target - self.value) < 1e-6:
+            self.jump(target)
+            if self._on_done is not None:
+                self._on_done()
+            return
+        self.start(self.value, target, self._go_ms, self._go_curve() if self._go_curve is not None else None)
 
     def jump(self, v: float) -> None:
         self.stop()
@@ -116,7 +139,7 @@ class Tween:
     def stop(self) -> None:
         if self.running:
             self.running = False
-            clock.release_fast()
+            clock.release_fast(self)
             clock.unsubscribe(self)
 
     def tick(self, now: float) -> None:

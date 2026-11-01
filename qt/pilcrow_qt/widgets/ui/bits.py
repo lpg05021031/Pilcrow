@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import math
 import time
-from typing import Any, Callable, Optional
+from functools import lru_cache
+from typing import Any, Callable, List, Optional, Tuple
 
-from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QGuiApplication, QPainter, QPen
+from PySide6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFontMetrics, QGuiApplication, QImage, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QCheckBox, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QWidget
 
 from ... import icons, theme
@@ -212,6 +213,110 @@ def paint_box(
         p.setBrush(Qt.BrushStyle.NoBrush)
         h = line_w / 2
         p.drawRoundedRect(r.adjusted(h, h, -h, -h), max(0.0, radius - h), max(0.0, radius - h))
+
+
+def rounded_path(r: QRectF, radius: float) -> QPainterPath:
+    """A rounded rectangle as a path, to clip to."""
+    path = QPainterPath()
+    path.addRoundedRect(r, radius, radius)
+    return path
+
+
+# ---------------------------------------------------------------- box shadows (CSS ``box-shadow``)
+
+
+def _phi(z: float) -> float:
+    return 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+
+
+@lru_cache(maxsize=48)
+def _shadow_pixmap(w: int, h: int, blur: int, alpha: float, rgb: Tuple[int, int, int] = (0, 0, 0)) -> QPixmap:
+    """A CSS box shadow of a ``w``×``h`` box blurred by ``blur`` (σ = blur/2), as a pixmap with ``blur``
+    pixels of margin on every side. The Gaussian of a box is separable, so it is one row profile and
+    one column profile multiplied: a few hundred ``erf`` calls and one blit per row, not a blur pass.
+    The corners come out square rather than rounded; under a 16px radius and an 18px sigma the
+    difference is a level or two in the darkest corner."""
+    ext = blur
+    tw, th = w + 2 * ext, h + 2 * ext
+    sigma = max(0.5, blur / 2.0)
+
+    def profile(n: int, x0: float, x1: float) -> List[float]:
+        return [_phi((i + 0.5 - x0) / sigma) - _phi((i + 0.5 - x1) / sigma) for i in range(n)]
+
+    fx = profile(tw, ext, ext + w)
+    fy = profile(th, ext, ext + h)
+    r, g, b = rgb
+    row = bytearray()
+    for v in fx:
+        a = max(0, min(255, int(round(255 * alpha * v))))
+        # premultiplied BGRA, little-endian ARGB32
+        row += bytes((b * a // 255, g * a // 255, r * a // 255, a))
+    row_img = QImage(bytes(row), tw, 1, tw * 4, QImage.Format.Format_ARGB32_Premultiplied).copy()
+    img = QImage(tw, th, QImage.Format.Format_ARGB32_Premultiplied)
+    img.fill(Qt.GlobalColor.transparent)
+    p = QPainter(img)
+    for y, v in enumerate(fy):
+        if v < 0.002:
+            continue
+        p.setOpacity(v)
+        p.drawImage(0, y, row_img)
+    p.end()
+    return QPixmap.fromImage(img)
+
+
+def draw_box_shadow(
+    p: QPainter,
+    rect: QRectF,
+    dy: float,
+    blur: int,
+    spread: float,
+    alpha: float,
+    opacity: float = 1.0,
+    rgb: Tuple[int, int, int] = (0, 0, 0),
+) -> None:
+    """``box-shadow: 0 dy blur spread rgba(rgb, alpha)`` under ``rect`` (the element's border box)."""
+    if opacity <= 0.003 or alpha <= 0:
+        return
+    sr = rect.adjusted(-spread, -spread, spread, spread).translated(0, dy)
+    w, h = int(round(sr.width())), int(round(sr.height()))
+    if w <= 0 or h <= 0:
+        return
+    pm = _shadow_pixmap(w, h, blur, alpha, rgb)
+    p.setOpacity(opacity)
+    p.drawPixmap(QPointF(sr.x() - blur, sr.y() - blur), pm)
+    p.setOpacity(1.0)
+
+
+# ---------------------------------------------------------------- <kbd>
+
+
+def paint_kbd(p: QPainter, x: float, y: float, text: str, small: bool = False) -> float:
+    """Draw a ``<kbd>`` chip with its left edge at ``x`` and its top at ``y``; returns its width.
+    ``small`` is the composer-foot flavour (16px, outlined); the base one is 18px on a fill."""
+    t = theme.tokens()
+    h = 16 if small else 18
+    font = theme.font_ui(10 if small else 11, 500)
+    fm = QFontMetrics(font)
+    w = max(h, fm.horizontalAdvance(text) + 10)
+    r = QRectF(x, y, w, h)
+    p.save()
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+    p.setPen(Qt.PenStyle.NoPen)
+    if small:
+        p.setPen(QPen(theme.qcolor(t.hair_2), 1))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), theme.R1, theme.R1)
+    else:
+        p.setBrush(theme.qcolor(t.fill_2))
+        p.drawRoundedRect(r, theme.R1, theme.R1)
+        p.setClipPath(rounded_path(r, theme.R1))
+        hline(p, x, y + h - 1, w, theme.qcolor(t.hair))
+        p.setClipping(False)
+    p.setFont(font)
+    p.setPen(QColor(t.text_3))
+    p.drawText(QRect(int(x), int(y), int(w), h), Qt.AlignmentFlag.AlignCenter, text)
+    p.restore()
+    return w
 
 
 class Box(QFrame):

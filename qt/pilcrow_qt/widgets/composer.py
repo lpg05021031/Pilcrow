@@ -15,7 +15,7 @@ The pieces are reusable, so another page can build its own box the way ``.welcom
     box.body.addWidget(bar)
 
 ``column_width(w)`` gives the conversation column for a pane ``w`` wide (the web's ``--col``);
-``KbdChip`` and ``paint_kbd`` draw ``<kbd>`` chips; ``MenuPopup`` is the web's ``Popover + Menu``.
+the mode and model menus are ``ui.menu`` menus opened over the card.
 """
 
 from __future__ import annotations
@@ -24,17 +24,14 @@ import base64
 import math
 import re
 import time
-from functools import lru_cache
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from PySide6.QtCore import (
     QBuffer,
-    QEasingCurve,
     QEvent,
     QIODevice,
     QMimeData,
-    QObject,
     QPoint,
     QPointF,
     QRect,
@@ -42,19 +39,15 @@ from PySide6.QtCore import (
     QSize,
     Qt,
     QTimer,
-    QVariantAnimation,
     Signal,
 )
 from PySide6.QtGui import (
     QColor,
-    QFont,
     QFontMetrics,
     QImage,
     QKeyEvent,
     QLinearGradient,
-    QMouseEvent,
     QPainter,
-    QPainterPath,
     QPen,
     QPixmap,
     QTextBlockFormat,
@@ -66,7 +59,6 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QPlainTextEdit,
     QPushButton,
     QSizePolicy,
     QTextEdit,
@@ -75,12 +67,14 @@ from PySide6.QtWidgets import (
 )
 
 from .. import icons, theme
-from ..canvas.pixels import hline
+from ..canvas.clock import Tween
 from ..lib.fmt import bytes_, short_model, tildify
 from ..lib.fuzzy import fuzzy_filter
 from ..store import store
-from .ui.bits import ContextRing, IconButton, LayoutButton, context_label
-from .ui.button import Btn
+from .queue_tray import QueueTray
+from .suggest import SuggestPopup, word_match
+from .ui.bits import ContextRing, LayoutButton, context_label, draw_box_shadow, paint_kbd, rounded_path
+from .ui.menu import MenuPopover, close_menus, show_menu
 from .ui.signals import bind
 
 Json = Dict[str, Any]
@@ -217,7 +211,7 @@ def _host_of(url: str) -> str:
         return url
 
 
-# ---------------------------------------------------------------- colours, shadows, motion
+# ---------------------------------------------------------------- the column
 
 
 def column_width(pane_width: int) -> int:
@@ -227,223 +221,6 @@ def column_width(pane_width: int) -> int:
     avail = max(0, pane_width - 40)
     col = max(640.0, min(0.618 * avail, avail - 48.0))
     return int(round(min(col, 1080.0, max(avail, 0))))
-
-
-def _mix(a: str, b: str, pct: float) -> QColor:
-    """CSS ``color-mix(in srgb, a pct, b)`` for two opaque tokens."""
-    x, y = theme.qcolor(a), theme.qcolor(b)
-    return QColor(
-        int(round(x.red() * pct + y.red() * (1 - pct))),
-        int(round(x.green() * pct + y.green() * (1 - pct))),
-        int(round(x.blue() * pct + y.blue() * (1 - pct))),
-    )
-
-
-def _color_mix(a: str, pa: float, b: str) -> QColor:
-    """CSS ``color-mix(in srgb, a pa%, b)`` with alpha: premultiplied interpolation, as the browser does it."""
-    x, y = theme.qcolor(a), theme.qcolor(b)
-    pb = 1 - pa
-    alpha = pa * x.alphaF() + pb * y.alphaF()
-    if alpha <= 0:
-        return QColor(0, 0, 0, 0)
-
-    def ch(u: int, v: int) -> int:
-        return int(round((pa * x.alphaF() * u + pb * y.alphaF() * v) / alpha))
-
-    c = QColor(ch(x.red(), y.red()), ch(x.green(), y.green()), ch(x.blue(), y.blue()))
-    c.setAlphaF(alpha)
-    return c
-
-
-def _alpha(c: str, a: float) -> QColor:
-    q = theme.qcolor(c)
-    q.setAlphaF(a)
-    return q
-
-
-def _lerp(a: QColor, b: QColor, t: float) -> QColor:
-    t = max(0.0, min(1.0, t))
-    return QColor(
-        int(round(a.red() + (b.red() - a.red()) * t)),
-        int(round(a.green() + (b.green() - a.green()) * t)),
-        int(round(a.blue() + (b.blue() - a.blue()) * t)),
-        int(round(a.alpha() + (b.alpha() - a.alpha()) * t)),
-    )
-
-
-def _phi(z: float) -> float:
-    return 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
-
-
-@lru_cache(maxsize=48)
-def _shadow_pixmap(w: int, h: int, blur: int, alpha: float, rgb: Tuple[int, int, int] = (0, 0, 0)) -> QPixmap:
-    """A CSS box shadow of a ``w``×``h`` box blurred by ``blur`` (σ = blur/2), as a pixmap with ``blur``
-    pixels of margin on every side. The Gaussian of a box is separable, so it is one row profile and
-    one column profile multiplied: a few hundred ``erf`` calls and one blit per row, not a blur pass.
-    The corners come out square rather than rounded; under a 16px radius and an 18px sigma the
-    difference is a level or two in the darkest corner."""
-    ext = blur
-    tw, th = w + 2 * ext, h + 2 * ext
-    sigma = max(0.5, blur / 2.0)
-
-    def profile(n: int, x0: float, x1: float) -> List[float]:
-        return [_phi((i + 0.5 - x0) / sigma) - _phi((i + 0.5 - x1) / sigma) for i in range(n)]
-
-    fx = profile(tw, ext, ext + w)
-    fy = profile(th, ext, ext + h)
-    r, g, b = rgb
-    row = bytearray()
-    for v in fx:
-        a = max(0, min(255, int(round(255 * alpha * v))))
-        # premultiplied BGRA, little-endian ARGB32
-        row += bytes((b * a // 255, g * a // 255, r * a // 255, a))
-    row_img = QImage(bytes(row), tw, 1, tw * 4, QImage.Format.Format_ARGB32_Premultiplied).copy()
-    img = QImage(tw, th, QImage.Format.Format_ARGB32_Premultiplied)
-    img.fill(Qt.GlobalColor.transparent)
-    p = QPainter(img)
-    for y, v in enumerate(fy):
-        if v < 0.002:
-            continue
-        p.setOpacity(v)
-        p.drawImage(0, y, row_img)
-    p.end()
-    return QPixmap.fromImage(img)
-
-
-def draw_box_shadow(
-    p: QPainter,
-    rect: QRectF,
-    dy: float,
-    blur: int,
-    spread: float,
-    alpha: float,
-    opacity: float = 1.0,
-    rgb: Tuple[int, int, int] = (0, 0, 0),
-) -> None:
-    """``box-shadow: 0 dy blur spread rgba(rgb, alpha)`` under ``rect`` (the element's border box)."""
-    if opacity <= 0.003 or alpha <= 0:
-        return
-    sr = rect.adjusted(-spread, -spread, spread, spread).translated(0, dy)
-    w, h = int(round(sr.width())), int(round(sr.height()))
-    if w <= 0 or h <= 0:
-        return
-    pm = _shadow_pixmap(w, h, blur, alpha, rgb)
-    p.setOpacity(opacity)
-    p.drawPixmap(QPointF(sr.x() - blur, sr.y() - blur), pm)
-    p.setOpacity(1.0)
-
-
-def _rounded(r: QRectF, radius: float) -> QPainterPath:
-    path = QPainterPath()
-    path.addRoundedRect(r, radius, radius)
-    return path
-
-
-class Tween(QObject):
-    """One animated number. ``go(target)`` eases from the current value on ``curve`` over ``duration``;
-    with reduced motion it lands at once. ``on_frame`` gets every value, ``on_done`` the end."""
-
-    def __init__(self, owner: QWidget, duration: int, curve: Callable[[], Any], on_frame: Callable[[float], None]):
-        super().__init__(owner)
-        self.value = 0.0
-        self._duration = duration
-        self._curve = curve
-        self._on_frame = on_frame
-        self._anim: Optional[QVariantAnimation] = None
-        self._on_done: Optional[Callable[[], None]] = None
-
-    def set(self, v: float) -> None:
-        self.stop()
-        self.value = v
-        self._on_frame(v)
-
-    def go(self, target: float, on_done: Optional[Callable[[], None]] = None, duration: Optional[int] = None) -> None:
-        self.stop()
-        self._on_done = on_done
-        if store.reduced_motion or abs(target - self.value) < 1e-6:
-            self.value = target
-            self._on_frame(target)
-            self._finish()
-            return
-        anim = QVariantAnimation(self)
-        anim.setStartValue(float(self.value))
-        anim.setEndValue(float(target))
-        anim.setDuration(duration if duration is not None else self._duration)
-        anim.setEasingCurve(self._curve())
-        anim.valueChanged.connect(self._frame)
-        anim.finished.connect(self._finish)
-        self._anim = anim
-        anim.start()
-
-    def stop(self) -> None:
-        if self._anim is not None:
-            self._anim.stop()
-            self._anim.deleteLater()
-            self._anim = None
-
-    @property
-    def running(self) -> bool:
-        return self._anim is not None
-
-    def _frame(self, v: Any) -> None:
-        self.value = float(v)
-        self._on_frame(self.value)
-
-    def _finish(self) -> None:
-        if self._anim is not None:
-            self._anim.deleteLater()
-            self._anim = None
-        done, self._on_done = self._on_done, None
-        if done is not None:
-            done()
-
-
-# ---------------------------------------------------------------- <kbd>
-
-
-def paint_kbd(p: QPainter, x: float, y: float, text: str, small: bool = False) -> float:
-    """Draw a ``<kbd>`` chip with its left edge at ``x`` and its top at ``y``; returns its width.
-    ``small`` is the composer-foot flavour (16px, outlined); the base one is 18px on a fill."""
-    t = theme.tokens()
-    h = 16 if small else 18
-    font = theme.font_ui(10 if small else 11, 500)
-    fm = QFontMetrics(font)
-    w = max(h, fm.horizontalAdvance(text) + 10)
-    r = QRectF(x, y, w, h)
-    p.save()
-    p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    p.setPen(Qt.PenStyle.NoPen)
-    if small:
-        p.setPen(QPen(theme.qcolor(t.hair_2), 1))
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), theme.R1, theme.R1)
-    else:
-        p.setBrush(theme.qcolor(t.fill_2))
-        p.drawRoundedRect(r, theme.R1, theme.R1)
-        p.setClipPath(_rounded(r, theme.R1))
-        hline(p, x, y + h - 1, w, theme.qcolor(t.hair))
-        p.setClipping(False)
-    p.setFont(font)
-    p.setPen(QColor(t.text_3))
-    p.drawText(QRect(int(x), int(y), int(w), h), Qt.AlignmentFlag.AlignCenter, text)
-    p.restore()
-    return w
-
-
-class KbdChip(QWidget):
-    """A ``<kbd>`` as a widget, for layouts."""
-
-    def __init__(self, text: str, small: bool = False, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self._text, self._small = text, small
-        fm = QFontMetrics(theme.font_ui(10 if small else 11, 500))
-        h = 16 if small else 18
-        self.setFixedSize(max(h, fm.horizontalAdvance(text) + 10), h)
-        bind(theme.theme.changed, self, lambda _t: self.update())
-
-    def paintEvent(self, _e) -> None:
-        p = QPainter(self)
-        paint_kbd(p, 0, 0, self._text, self._small)
 
 
 # ---------------------------------------------------------------- the box (.composer)
@@ -472,7 +249,7 @@ class ComposerBox(QWidget):
         self.body = QVBoxLayout(self)
         self.body.setContentsMargins(self.PAD_X, self.PAD_TOP, self.PAD_X, pad_bottom)
         self.body.setSpacing(0)
-        self.focus_t = Tween(self, theme.SPRING_SOFT_T, theme.spring_soft, self._on_focus_frame)
+        self.focus_t = Tween(self._on_focus_frame, ms=theme.SPRING_SOFT_T, curve=theme.spring_soft)
         app = QApplication.instance()
         if app is not None:
             bind(app.focusChanged, self, self._on_focus_changed)
@@ -536,16 +313,16 @@ class ComposerBox(QWidget):
         tk = theme.tokens()
         tone = self._tone
         if tone == "plan":
-            idle, focus = _color_mix(tk.plan, 0.5, tk.hair_2), _color_mix(tk.plan, 0.65, tk.hair_3)
-            halo = _alpha(tk.plan, 0.09)
+            idle, focus = theme.mix(tk.plan, 0.5, tk.hair_2), theme.mix(tk.plan, 0.65, tk.hair_3)
+            halo = theme.with_alpha(tk.plan, 0.09)
         elif tone == "err":
-            idle, focus = _color_mix(tk.err, 0.45, tk.hair_2), _color_mix(tk.err, 0.6, tk.hair_3)
-            halo = _alpha(tk.err, 0.08)
+            idle, focus = theme.mix(tk.err, 0.45, tk.hair_2), theme.mix(tk.err, 0.6, tk.hair_3)
+            halo = theme.with_alpha(tk.err, 0.08)
         else:
             idle, focus = theme.qcolor(tk.hair_2), theme.qcolor(tk.hair_3)
-            halo = _alpha(tk.accent, 0.08 if not tk.dark else 0.07)
+            halo = theme.with_alpha(tk.accent, 0.08 if not tk.dark else 0.07)
         halo.setAlphaF(halo.alphaF() * max(0.0, min(1.0, t)))
-        return _lerp(idle, focus, t), halo
+        return theme.lerp(idle, focus, t), halo
 
     def paintEvent(self, _e) -> None:
         tk = theme.tokens()
@@ -579,7 +356,7 @@ class ComposerBox(QWidget):
         p.setBrush(QColor(tk.raised))
         p.drawRoundedRect(r, theme.R4, theme.R4)
         if tk.dark:
-            p.setClipPath(_rounded(r, theme.R4))
+            p.setClipPath(rounded_path(r, theme.R4))
             p.fillRect(QRectF(r.x(), r.y(), r.width(), 1), theme.qcolor(tk.edge_hi))
             p.setClipping(False)
 
@@ -846,8 +623,8 @@ class ChipButton(LayoutButton):
         if icon_only:
             self.setFixedWidth(30)
             lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.hover_t = Tween(self, theme.T_FAST, theme.ease, lambda _v: self.update())
-        self.chev_t = Tween(self, theme.SPRING_SNAPPY_T, theme.spring_snappy, lambda _v: self.update())
+        self.hover_t = Tween(lambda _v: self.update(), ms=theme.T_FAST, curve=theme.ease)
+        self.chev_t = Tween(lambda _v: self.update(), ms=theme.SPRING_SNAPPY_T, curve=theme.spring_snappy)
         bind(theme.theme.changed, self, lambda _t: self._paint())
         self._paint()
 
@@ -972,11 +749,11 @@ class SendButton(QPushButton):
         self._bg_to = QColor(0, 0, 0, 0)
         self._ink_from = QColor(0, 0, 0, 0)
         self._ink_to = QColor(0, 0, 0, 0)
-        self.bg_t = Tween(self, theme.T_MED, theme.ease, lambda _v: self.update())
-        self.stop_t = Tween(self, theme.SPRING_SNAPPY_T, theme.spring_snappy, lambda _v: self.update())
-        self.ready_t = Tween(self, theme.SPRING_BOUNCY_T, theme.spring_bouncy, lambda _v: self.update())
-        self.ready_t.set(1.0)
-        self.launch_t = Tween(self, 460, theme.ease, lambda _v: self.update())
+        self.bg_t = Tween(lambda _v: self.update(), ms=theme.T_MED, curve=theme.ease)
+        self.stop_t = Tween(lambda _v: self.update(), ms=theme.SPRING_SNAPPY_T, curve=theme.spring_snappy)
+        self.ready_t = Tween(lambda _v: self.update(), ms=theme.SPRING_BOUNCY_T, curve=theme.spring_bouncy)
+        self.ready_t.jump(1.0)
+        self.launch_t = Tween(lambda _v: self.update(), ms=460, curve=theme.ease)
         bind(theme.theme.changed, self, lambda _t: self._retarget(jump=True))
         self.set_state(False, False, True)
         self._retarget(jump=True)
@@ -992,7 +769,7 @@ class SendButton(QPushButton):
         self.setAccessibleName("Stop" if stop else "Send")
         if self.state != prev:
             if self.state == "ready":
-                self.ready_t.set(0.0)
+                self.ready_t.jump(0.0)
                 self.ready_t.go(1.0)
             self.stop_t.go(1.0 if self.state == "stop" else 0.0)
             self._retarget()
@@ -1006,7 +783,7 @@ class SendButton(QPushButton):
 
     def launch(self) -> None:
         """The arrow flies up and comes back from below: a message went out."""
-        self.launch_t.set(0.0)
+        self.launch_t.jump(0.0)
         self.launch_t.go(1.0)
 
     def _targets(self) -> Tuple[QColor, QColor]:
@@ -1019,13 +796,13 @@ class SendButton(QPushButton):
 
     def _retarget(self, jump: bool = False) -> None:
         bg, ink = self._targets()
-        cur_bg = _lerp(self._bg_from, self._bg_to, self.bg_t.value)
-        cur_ink = _lerp(self._ink_from, self._ink_to, self.bg_t.value)
+        cur_bg = theme.lerp(self._bg_from, self._bg_to, self.bg_t.value)
+        cur_ink = theme.lerp(self._ink_from, self._ink_to, self.bg_t.value)
         self._bg_from, self._bg_to = cur_bg, bg
         self._ink_from, self._ink_to = cur_ink, ink
-        self.bg_t.set(0.0)
+        self.bg_t.jump(0.0)
         if jump:
-            self.bg_t.set(1.0)
+            self.bg_t.jump(1.0)
         else:
             self.bg_t.go(1.0)
 
@@ -1054,8 +831,8 @@ class SendButton(QPushButton):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        bg = _lerp(self._bg_from, self._bg_to, self.bg_t.value)
-        ink = _lerp(self._ink_from, self._ink_to, self.bg_t.value)
+        bg = theme.lerp(self._bg_from, self._bg_to, self.bg_t.value)
+        ink = theme.lerp(self._ink_from, self._ink_to, self.bg_t.value)
         scale = 1.0
         if self.state == "ready":
             scale = 0.82 + 0.18 * self.ready_t.value
@@ -1076,7 +853,7 @@ class SendButton(QPushButton):
         p.drawEllipse(circle)
         if self.state == "ready" and ready_a > 0:
             # inset 0 1px 0 rgba(255,255,255,.2)
-            p.setClipPath(_rounded(circle, 16))
+            p.setClipPath(rounded_path(circle, 16))
             p.fillRect(QRectF(0, 0, 32, 1), QColor(255, 255, 255, int(51 * ready_a)))
             p.setClipping(False)
         if self.state == "idle" or (self.state == "ready" and self.bg_t.value < 1):
@@ -1141,7 +918,7 @@ class CtxButton(LayoutButton):
         self.num.hide()
         self.lay.addWidget(self.num)
         self._hot = False
-        self.hover_t = Tween(self, theme.T_FAST, theme.ease, lambda _v: self.update())
+        self.hover_t = Tween(lambda _v: self.update(), ms=theme.T_FAST, curve=theme.ease)
         bind(theme.theme.changed, self, lambda _t: self._paint())
         self._paint()
 
@@ -1199,7 +976,7 @@ class FootHints(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self._busy = False
         self._shown = False
-        self.opacity = Tween(self, theme.T_MED, theme.ease, lambda _v: self.update())
+        self.opacity = Tween(lambda _v: self.update(), ms=theme.T_MED, curve=theme.ease)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
     @property
@@ -1291,578 +1068,6 @@ class FootHints(QWidget):
             x += w + 4
 
 
-# ---------------------------------------------------------------- floating material
-
-
-def draw_glass_panel(p: QPainter, panel: QRectF, radius: float, pop_t: float = 1.0) -> None:
-    """A popover or suggest list (``.popover``, ``.suggest``): the glass fill and ``--shadow-glass``,
-    a dark half-pixel edge, a light inner edge lit along the top, and two soft shadows beneath."""
-    t = theme.tokens()
-    draw_box_shadow(p, panel, 20, 50, -14, 0.8 * pop_t)
-    draw_box_shadow(p, panel, 6, 16, -8, 0.5 * pop_t)
-    p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(theme.blend(t.glass, t.canvas))
-    p.drawRoundedRect(panel, radius, radius)
-    p.setBrush(Qt.BrushStyle.NoBrush)
-    p.setPen(QPen(QColor(0, 0, 0, 77), 1))  # 0.5px at .6 → one pixel at .3
-    p.drawRoundedRect(panel.adjusted(-0.5, -0.5, 0.5, 0.5), radius + 0.5, radius + 0.5)
-    p.setPen(QPen(QColor(255, 255, 255, 12), 1))
-    p.drawRoundedRect(panel.adjusted(0.5, 0.5, -0.5, -0.5), radius - 0.5, radius - 0.5)
-    p.setClipPath(_rounded(panel, radius))
-    p.fillRect(QRectF(panel.x(), panel.y(), panel.width(), 1), theme.qcolor(t.edge_hi))
-    p.setClipping(False)
-
-
-class _Ghost(QWidget):
-    """A snapshot of a popup that plays its exit (``pop-out-down``) after the real widget has gone."""
-
-    def __init__(self, parent: QWidget, pm: QPixmap, geometry: QRect, origin: QPointF) -> None:
-        super().__init__(parent)
-        self._pm = pm
-        self._origin = origin
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        self.setGeometry(geometry)
-        self.show()
-        self.raise_()
-        self.t = Tween(self, theme.T_EXIT, theme.ease_exit, lambda _v: self.update())
-        self.t.go(1.0, on_done=self.deleteLater)
-
-    def paintEvent(self, _e) -> None:
-        k = self.t.value
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        p.setOpacity(1 - k)
-        p.translate(self._origin.x(), self._origin.y() + 2 * k)
-        p.scale(1 - 0.03 * k, 1 - 0.03 * k)
-        p.translate(-self._origin.x(), -self._origin.y())
-        p.drawPixmap(0, 0, self._pm)
-
-
-class _TextRef:
-    """A text holder with a QLabel's ``text()``/``setText()``, for painted widgets."""
-
-    def __init__(self) -> None:
-        self._t = ""
-
-    def text(self) -> str:
-        return self._t
-
-    def setText(self, t: str) -> None:
-        self._t = t
-
-
-class _FloatingPanel(QWidget):
-    """A painted floating panel with shadow margins around it. Presses in the margins go to whatever
-    is beneath (the margins are transparent, like a CSS shadow)."""
-
-    M_X = 28
-    M_TOP = 20
-    M_BOTTOM = 36
-    RADIUS = theme.R3
-
-    def __init__(self, parent: QWidget) -> None:
-        super().__init__(parent)
-        self.setMouseTracking(True)
-        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.pop_t = Tween(self, theme.SPRING_SNAPPY_T, theme.spring_snappy, lambda _v: self.update())
-        self.hide()
-
-    def panel_rect(self) -> QRectF:
-        return QRectF(self.M_X, self.M_TOP, self.width() - 2 * self.M_X, self.height() - self.M_TOP - self.M_BOTTOM)
-
-    def place(self, panel: QRect) -> None:
-        self.setGeometry(panel.adjusted(-self.M_X, -self.M_TOP, self.M_X, self.M_BOTTOM))
-
-    def pop_in(self) -> None:
-        self.pop_t.set(0.0)
-        self.show()
-        self.raise_()
-        self.pop_t.go(1.0)
-
-    def pop_out(self) -> None:
-        """Hide now; a ghost plays the exit."""
-        if not self.isVisible():
-            return
-        parent = self.parentWidget()
-        if not store.reduced_motion and parent is not None and self.pop_t.value > 0.5:
-            pr = self.panel_rect()
-            _Ghost(parent, self.grab(), self.geometry(), QPointF(pr.center().x(), pr.bottom()))
-        self.hide()
-
-    def forward_press(self, e: QMouseEvent) -> None:
-        """A press in the shadow margin: give it to the widget underneath."""
-        parent = self.parentWidget()
-        if parent is None:
-            return
-        gp = e.globalPosition().toPoint()
-        # widgetAt looks through mouse-transparent widgets: step aside for the lookup
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        target = QApplication.widgetAt(gp)
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
-        if target is None or target is self or self.isAncestorOf(target):
-            return
-        local = target.mapFromGlobal(gp)
-        for kind in (QEvent.Type.MouseButtonPress, QEvent.Type.MouseButtonRelease):
-            ev = QMouseEvent(kind, QPointF(local), QPointF(gp), e.button(), e.buttons(), e.modifiers())
-            QApplication.sendEvent(target, ev)
-
-    def apply_pop(self, p: QPainter) -> None:
-        """``pop-spring-up``: scale .94 → 1 and 3px up, from the bottom centre, with the opacity."""
-        k = self.pop_t.value
-        pr = self.panel_rect()
-        p.setOpacity(max(0.0, min(1.0, k)))
-        ox, oy = pr.center().x(), pr.bottom()
-        p.translate(ox, oy + 3 * (1 - k))
-        s = 0.94 + 0.06 * k
-        p.scale(s, s)
-        p.translate(-ox, -oy)
-
-
-# ---------------------------------------------------------------- the @ and / popup
-
-
-def _word_match(q: str, words: List[Any]) -> bool:
-    """Whether a typed fragment is part of one of the person's names for a repository, loosely (case,
-    spaces, hyphens and underscores do not count)."""
-    n = re.sub(r"[\s_\-]+", "", q.lower())
-    return bool(n) and any(n in re.sub(r"[\s_\-]+", "", str(w).lower()) for w in words if w)
-
-
-class SuggestPopup(_FloatingPanel):
-    """The list of files or commands above the field (``.suggest``). Keyboard-driven by the Composer;
-    rows light under the pointer, a click picks. Painted whole, so it arrives on the snappy spring."""
-
-    ROW = 32
-    HEAD = 27  # padding 4px 8px 6px around an 11px line
-    PAD = 6
-
-    def __init__(self, parent: QWidget) -> None:
-        super().__init__(parent)
-        self.setObjectName("suggest")
-        self.items: List[Json] = []
-        self.index = 0
-        self.scroll = 0
-        self.head = _TextRef()
-        self.name_w = 0
-        self.on_pick: Optional[Callable[[Json], None]] = None
-        self.on_hover: Optional[Callable[[int], None]] = None
-        bind(theme.theme.changed, self, lambda _t: self.update())
-
-    # ---- data
-    def set_items(self, head: str, items: List[Json], index: int) -> None:
-        self.head.setText(head)
-        self.items = items[:40]
-        name_ch = min(30, max([8] + [len(x["label"]) for x in self.items if x["kind"] == "cmd"]))
-        fm = QFontMetrics(theme.font_mono(12.5))
-        self.name_w = int((name_ch + 1) * fm.horizontalAdvance("0"))
-        self.scroll = 0
-        self.set_index(index)
-        self.update()
-
-    def list_height(self) -> int:
-        return min(320, self.ROW * len(self.items))
-
-    def total_height(self) -> int:
-        """The panel's height (the widget is taller by its shadow margins)."""
-        return self.PAD * 2 + self.HEAD + self.list_height()
-
-    def set_index(self, index: int) -> None:
-        self.index = index
-        if 0 <= index < len(self.items):
-            top, bottom = index * self.ROW, (index + 1) * self.ROW
-            if top < self.scroll:
-                self.scroll = top
-            elif bottom > self.scroll + self.list_height():
-                self.scroll = bottom - self.list_height()
-        self.update()
-
-    # ---- geometry
-    def list_rect(self) -> QRectF:
-        pr = self.panel_rect()
-        return QRectF(pr.x() + self.PAD, pr.y() + self.PAD + self.HEAD, pr.width() - 2 * self.PAD, self.list_height())
-
-    def row_at(self, pos: QPointF) -> int:
-        lr = self.list_rect()
-        if not lr.contains(pos):
-            return -1
-        i = int((pos.y() - lr.y() + self.scroll) // self.ROW)
-        return i if 0 <= i < len(self.items) else -1
-
-    # ---- events
-    def mouseMoveEvent(self, e) -> None:
-        i = self.row_at(e.position())
-        if i >= 0 and i != self.index and self.on_hover:
-            self.on_hover(i)
-        self.setCursor(Qt.CursorShape.PointingHandCursor if i >= 0 else Qt.CursorShape.ArrowCursor)
-
-    def mousePressEvent(self, e) -> None:
-        if not self.panel_rect().contains(e.position()):
-            self.forward_press(e)
-            return
-        i = self.row_at(e.position())
-        if i >= 0 and self.on_pick:
-            self.on_pick(self.items[i])
-
-    def wheelEvent(self, e) -> None:
-        over = self.ROW * len(self.items) - self.list_height()
-        if over <= 0:
-            return
-        self.scroll = max(0, min(over, self.scroll - int(e.angleDelta().y() / 120 * 48)))
-        self.update()
-        e.accept()
-
-    # ---- paint
-    def paintEvent(self, _e) -> None:
-        t = theme.tokens()
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        self.apply_pop(p)
-        pr = self.panel_rect()
-        draw_glass_panel(p, pr, self.RADIUS, self.pop_t.value)
-        # head
-        p.setFont(theme.font_ui(theme.FS_MICRO, 600))
-        p.setPen(QColor(t.text_3))
-        p.drawText(
-            QRect(int(pr.x() + self.PAD + 8), int(pr.y() + self.PAD + 4), int(pr.width()) - 28, self.HEAD - 10),
-            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-            self.head.text(),
-        )
-        lr = self.list_rect()
-        p.save()
-        p.setClipRect(lr)
-        mono = theme.font_mono(12.5)
-        small = theme.font_ui(theme.FS_SMALL)
-        mfm = QFontMetrics(mono)
-        sfm = QFontMetrics(small)
-        y0 = lr.y() - self.scroll
-        first = max(0, int(self.scroll // self.ROW))
-        last = min(len(self.items), int((self.scroll + lr.height()) // self.ROW) + 1)
-        for i in range(first, last):
-            it = self.items[i]
-            ry = y0 + i * self.ROW
-            row = QRectF(lr.x(), ry, lr.width(), self.ROW)
-            if i == self.index:
-                p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(theme.qcolor(t.fill_2))
-                p.drawRoundedRect(row, theme.R2, theme.R2)
-            x = row.x() + 10
-            kind = it["kind"]
-            if kind in ("dir", "file", "repo"):
-                ico = "folder-git-2" if kind == "repo" else "folder" if kind == "dir" else "file"
-                p.drawPixmap(QPointF(x, ry + 9), icons.pixmap(ico, t.plan if kind == "repo" else t.text_3, 14))
-                x += 14 + 10
-            p.setFont(mono)
-            label = str(it["label"])
-            if kind == "cmd":
-                p.setPen(QColor(t.text_3))
-                p.drawText(QRect(int(x), int(ry), 20, self.ROW), Qt.AlignmentFlag.AlignVCenter, "/")
-                slash_w = mfm.horizontalAdvance("/")
-                p.setPen(QColor(t.text))
-                p.drawText(
-                    QRect(int(x + slash_w), int(ry), int(lr.width()), self.ROW),
-                    Qt.AlignmentFlag.AlignVCenter,
-                    label[1:],
-                )
-                x += max(self.name_w, mfm.horizontalAdvance(label)) + 10
-            else:
-                max_w = int(row.width() * 0.6)
-                shown = mfm.elidedText(label, Qt.TextElideMode.ElideRight, max_w)
-                p.setPen(QColor(t.text))
-                p.drawText(QRect(int(x), int(ry), max_w + 4, self.ROW), Qt.AlignmentFlag.AlignVCenter, shown)
-                x += mfm.horizontalAdvance(shown) + 10
-            hint = str(it.get("hint") or "")
-            if hint:
-                p.setFont(small)
-                p.setPen(QColor(t.text_3))
-                avail = int(row.right() - 10 - x)
-                p.drawText(
-                    QRect(int(x), int(ry), max(0, avail) + 2, self.ROW),
-                    Qt.AlignmentFlag.AlignVCenter,
-                    sfm.elidedText(hint, Qt.TextElideMode.ElideRight, max(0, avail)),
-                )
-        p.restore()
-        over = self.ROW * len(self.items) - self.list_height()
-        if over > 0:
-            # the slim overlay thumb of the web's scrollbar
-            frac = lr.height() / (self.ROW * len(self.items))
-            th = max(28, lr.height() * frac)
-            ty = lr.y() + (lr.height() - th) * (self.scroll / over)
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(theme.qcolor(t.fill_3))
-            p.drawRoundedRect(QRectF(lr.right() - 7, ty, 4, th), 2, 2)
-
-
-# ---------------------------------------------------------------- menus (Popover + Menu)
-
-
-class MenuPopup(_FloatingPanel):
-    """A menu above or below an anchor (web/src/components/ui/Popover.tsx + Menu). Items are dicts:
-    ``{"label", "icon"?, "hint"?, "mono"?, "checked"?, "danger"?, "disabled"?, "kbd"?, "on_select"}``,
-    ``{"separator": True}`` or ``{"heading": str}``. Lives on the top-level window; closes on an
-    outside press, Escape, or a pick; arrows move, Enter picks. ``open_menu(items, anchor, width)``."""
-
-    PAD = 5
-    ITEM_MIN = 30
-    GAP = 1
-
-    def __init__(self, parent: QWidget) -> None:
-        super().__init__(parent)
-        self.items: List[Json] = []
-        self.active = -1
-        self.anchor: Optional[QWidget] = None
-        self.on_close: Optional[Callable[[], None]] = None
-        self._width = 240
-        self._rows: List[Tuple[int, int, int]] = []  # (item index, y, height) within the panel
-        self._filtering = False
-        # a linear clock for the stagger; each row eases on its own slice of it
-        self.rows_t = Tween(self, 240, lambda: QEasingCurve(QEasingCurve.Type.Linear), lambda _v: self.update())
-        self.hover_t = Tween(self, theme.T_FAST, theme.ease, lambda _v: self.update())
-        bind(theme.theme.changed, self, lambda _t: self.update())
-
-    # ---- layout
-    @staticmethod
-    def item_height(it: Json) -> int:
-        if it.get("separator"):
-            return 9
-        if it.get("heading"):
-            return 29
-        if it.get("hint"):
-            return 48 if it.get("mono") else 49
-        return 30
-
-    def _layout(self) -> int:
-        self._rows = []
-        y = self.PAD
-        for i, it in enumerate(self.items):
-            h = self.item_height(it)
-            self._rows.append((i, y, h))
-            y += h + self.GAP
-        return y - self.GAP + self.PAD
-
-    def open_menu(
-        self,
-        items: List[Json],
-        anchor: QWidget,
-        width: int,
-        align_right: bool = False,
-        on_close: Optional[Callable[[], None]] = None,
-    ) -> None:
-        self.items = items
-        self.anchor = anchor
-        self.on_close = on_close
-        self._width = width
-        self.active = -1
-        h = self._layout()
-        host = anchor.window()
-        if host is None:
-            return
-        if self.parentWidget() is not host:
-            self.setParent(host)
-        a = QRect(anchor.mapTo(host, QPoint(0, 0)), anchor.size())
-        left = a.right() + 1 - width if align_right else a.x()
-        top = a.y() - h - 6
-        if top < 8:
-            top = min(host.height() - h - 8, a.bottom() + 1 + 6)
-        left = max(8, min(left, host.width() - width - 8))
-        self.place(QRect(left, max(0, top), width, h))
-        self.rows_t.set(0.0)
-        n = sum(1 for it in items if not it.get("separator") and not it.get("heading"))
-        self.rows_t.go(1.0, duration=240 + 11 * min(n, 10))
-        self.pop_in()
-        app = QApplication.instance()
-        if app is not None and not self._filtering:
-            app.installEventFilter(self)
-            self._filtering = True
-        set_open = getattr(anchor, "set_open", None)
-        if set_open is not None:
-            set_open(True)
-
-    def close_menu(self) -> None:
-        if not self.isVisible() and not self._filtering:
-            return
-        app = QApplication.instance()
-        if app is not None and self._filtering:
-            app.removeEventFilter(self)
-            self._filtering = False
-        self.pop_out()
-        set_open = getattr(self.anchor, "set_open", None)
-        if set_open is not None:
-            set_open(False)
-        done, self.on_close = self.on_close, None
-        if done is not None:
-            done()
-
-    @property
-    def is_open(self) -> bool:
-        return self.isVisible()
-
-    def selectable(self) -> List[int]:
-        return [
-            i
-            for i, it in enumerate(self.items)
-            if not it.get("separator") and not it.get("heading") and not it.get("disabled")
-        ]
-
-    def pick(self, i: int) -> None:
-        it = self.items[i]
-        fn = it.get("on_select")
-        self.close_menu()
-        if fn is not None:
-            fn()
-
-    # ---- events
-    def eventFilter(self, obj: QObject, e: QEvent) -> bool:
-        et = e.type()
-        if et == QEvent.Type.MouseButtonPress and isinstance(e, QMouseEvent):
-            gp = e.globalPosition().toPoint()
-            inside = self.rect().contains(self.mapFromGlobal(gp))
-            on_anchor = self.anchor is not None and self.anchor.rect().contains(self.anchor.mapFromGlobal(gp))
-            if not inside and not on_anchor:
-                self.close_menu()
-            return False
-        if et == QEvent.Type.ShortcutOverride and isinstance(e, QKeyEvent):
-            # the window's own shortcuts (Escape among them) wait while a menu is up
-            if e.key() in (Qt.Key.Key_Escape, Qt.Key.Key_Up, Qt.Key.Key_Down, Qt.Key.Key_Return, Qt.Key.Key_Enter):
-                e.accept()
-                return True
-            return False
-        if et == QEvent.Type.KeyPress and isinstance(e, QKeyEvent):
-            key = e.key()
-            sel = self.selectable()
-            if key == Qt.Key.Key_Escape:
-                self.close_menu()
-                return True
-            if key in (Qt.Key.Key_Down, Qt.Key.Key_Up) and sel:
-                idx = sel.index(self.active) if self.active in sel else -1
-                step = 1 if key == Qt.Key.Key_Down else -1
-                self.active = sel[(idx + step) % len(sel)] if idx >= 0 or step > 0 else sel[-1]
-                self.update()
-                return True
-            if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and self.active >= 0:
-                self.pick(self.active)
-                return True
-        if et in (QEvent.Type.Resize, QEvent.Type.Move) and obj is self.parentWidget():
-            self.close_menu()
-        if et == QEvent.Type.WindowDeactivate and obj is self.window():
-            self.close_menu()
-        return False
-
-    def row_at(self, pos: QPointF) -> int:
-        pr = self.panel_rect()
-        if not pr.contains(pos):
-            return -1
-        y = pos.y() - pr.y()
-        for i, ry, h in self._rows:
-            if ry <= y < ry + h:
-                it = self.items[i]
-                return -1 if it.get("separator") or it.get("heading") or it.get("disabled") else i
-        return -1
-
-    def mouseMoveEvent(self, e) -> None:
-        i = self.row_at(e.position())
-        if i != self.active:
-            self.active = i
-            self.update()
-        self.setCursor(Qt.CursorShape.PointingHandCursor if i >= 0 else Qt.CursorShape.ArrowCursor)
-
-    def mousePressEvent(self, e) -> None:
-        if not self.panel_rect().contains(e.position()):
-            self.close_menu()
-            self.forward_press(e)
-            return
-
-    def mouseReleaseEvent(self, e) -> None:
-        i = self.row_at(e.position())
-        if i >= 0:
-            self.pick(i)
-
-    def leaveEvent(self, e) -> None:
-        super().leaveEvent(e)
-        if self.active >= 0:
-            self.active = -1
-            self.update()
-
-    # ---- paint
-    def paintEvent(self, _e) -> None:
-        t = theme.tokens()
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        self.apply_pop(p)
-        pr = self.panel_rect()
-        draw_glass_panel(p, pr, self.RADIUS, self.pop_t.value)
-        ui = theme.font_ui(theme.FS_UI)
-        small = theme.font_ui(theme.FS_SMALL)
-        mono = theme.font_mono(11.5)
-        micro = theme.font_ui(theme.FS_MICRO, 600)
-        ufm, sfm, mfm = QFontMetrics(ui), QFontMetrics(small), QFontMetrics(mono)
-        total_t = self.rows_t.value
-        n_anim = sum(1 for it in self.items if not it.get("separator") and not it.get("heading"))
-        span = 240 + 11 * min(n_anim, 10)
-        order = 0
-        pop = self.pop_t.value
-        for i, ry, h in self._rows:
-            it = self.items[i]
-            x0, y = pr.x() + self.PAD, pr.y() + ry
-            w = pr.width() - 2 * self.PAD
-            if it.get("separator"):
-                hline(p, x0 + 6, y + 4, w - 12, theme.qcolor(t.hair))
-                continue
-            if it.get("heading"):
-                p.setFont(micro)
-                p.setPen(QColor(t.text_3))
-                p.drawText(
-                    QRect(int(x0 + 9), int(y + 8), int(w - 18), 17), Qt.AlignmentFlag.AlignVCenter, it["heading"]
-                )
-                continue
-            # rows unfold a few milliseconds apart (menu-in: opacity 0, translateY(-3px))
-            delay = 11 * min(order, 10)
-            order += 1
-            k = max(0.0, min(1.0, (total_t * span - delay) / 240.0)) if not store.reduced_motion else 1.0
-            k = theme.ease().valueForProgress(k)
-            p.save()
-            p.setOpacity(pop * k)
-            p.translate(0, -3 * (1 - k))
-            row = QRectF(x0, y, w, h)
-            danger, disabled = bool(it.get("danger")), bool(it.get("disabled"))
-            if i == self.active and not disabled:
-                p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(theme.qcolor(t.fill_2))
-                p.drawRoundedRect(row, theme.R2, theme.R2)
-            ink = t.err if danger else t.text_3 if disabled else t.text
-            icon_color = t.err if danger else (t.text_2 if i == self.active else t.text_3)
-            if it.get("checked"):
-                p.drawPixmap(QPointF(x0 + 9 + 1, y + 6 + 2), icons.pixmap("check", icon_color, 14))
-            elif it.get("icon"):
-                p.drawPixmap(QPointF(x0 + 9 + 1, y + 6 + 2), icons.pixmap(str(it["icon"]), icon_color, 14))
-            tx = x0 + 9 + 16 + 9
-            tw = w - (tx - x0) - 9
-            kbd = str(it.get("kbd") or "")
-            if kbd:
-                p.setFont(theme.font_ui(theme.FS_MICRO, 500))
-                kw = QFontMetrics(p.font()).horizontalAdvance(kbd)
-                p.setPen(QColor(t.text_4))
-                p.drawText(QRect(int(row.right() - 9 - kw), int(y), kw + 2, h), Qt.AlignmentFlag.AlignVCenter, kbd)
-                tw -= kw + 9
-            p.setFont(ui)
-            p.setPen(QColor(ink))
-            label = ufm.elidedText(str(it.get("label", "")), Qt.TextElideMode.ElideRight, int(tw))
-            hint = str(it.get("hint") or "")
-            if hint:
-                p.drawText(QRect(int(tx), int(y + 6), int(tw), 18), Qt.AlignmentFlag.AlignVCenter, label)
-                is_mono = bool(it.get("mono"))
-                p.setFont(mono if is_mono else small)
-                p.setPen(QColor(t.text_3))
-                fmh = mfm if is_mono else sfm
-                p.drawText(
-                    QRect(int(tx), int(y + 6 + 18 + 2), int(tw), 16 if is_mono else 17),
-                    Qt.AlignmentFlag.AlignVCenter,
-                    fmh.elidedText(hint, Qt.TextElideMode.ElideRight, int(tw)),
-                )
-            else:
-                p.drawText(QRect(int(tx), int(y), int(tw), h), Qt.AlignmentFlag.AlignVCenter, label)
-            p.restore()
-
-
 # ---------------------------------------------------------------- attachments
 
 
@@ -1911,7 +1116,7 @@ class _Pops(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.pop_t = Tween(self, theme.SPRING_SNAPPY_T, theme.spring_snappy, lambda _v: self.update())
+        self.pop_t = Tween(lambda _v: self.update(), ms=theme.SPRING_SNAPPY_T, curve=theme.spring_snappy)
 
     def showEvent(self, e) -> None:
         super().showEvent(e)
@@ -1955,7 +1160,7 @@ class ImageChip(_Pops):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         self.apply_pop(p)
-        path = _rounded(QRectF(0, 0, 60, 60), theme.R3)
+        path = rounded_path(QRectF(0, 0, 60, 60), theme.R3)
         p.setClipPath(path)
         pm = self._pm.scaled(
             60, 60, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation
@@ -2002,256 +1207,6 @@ class FileChip(_Pops):
         )
 
 
-# ---------------------------------------------------------------- the queue tray
-
-
-class QueueTray(QFrame):
-    """Messages waiting for the current step to finish (``.queue``). Each can be edited, sent right away, or dropped."""
-
-    def __init__(self, session_id: str, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self.sid = session_id
-        self.held: List[Json] = []
-        self._key: List[tuple] = []
-        self.editing: Optional[str] = None
-        self.setObjectName("queue")
-        self.setAccessibleName("Queued messages")
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        self.lay = QVBoxLayout(self)
-        self.lay.setContentsMargins(6, 6, 6, 4)
-        self.lay.setSpacing(0)
-        head = QWidget()
-        hl = QHBoxLayout(head)
-        hl.setContentsMargins(8, 2, 8, 6)
-        hl.setSpacing(6)
-        self.head_ico = QLabel()
-        hl.addWidget(self.head_ico)
-        self.head_text = QLabel()
-        head_font = theme.font_ui(theme.FS_MICRO, 600)
-        head_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 0.1)
-        self.head_text.setFont(head_font)
-        theme.tint(self.head_text, fg="text_3")
-        hl.addWidget(self.head_text, 1)
-        self.lay.addWidget(head)
-        self.rows = QVBoxLayout()
-        self.rows.setContentsMargins(0, 0, 0, 0)
-        self.rows.setSpacing(0)
-        self.lay.addLayout(self.rows)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
-
-    def _paint(self) -> None:
-        t = theme.tokens()
-        self.head_ico.setPixmap(icons.pixmap("clock-3", t.accent_text, 12))
-        self.update()
-
-    def paintEvent(self, _e) -> None:
-        t = theme.tokens()
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        r = QRectF(self.rect())
-        p.setPen(QPen(theme.qcolor(t.hair), 1))
-        p.setBrush(_mix(t.raised, t.canvas, 0.7))  # color-mix(in srgb, var(--raised) 70%, var(--canvas))
-        p.drawRoundedRect(r.adjusted(0.5, 0.5, -0.5, -0.5), theme.R3, theme.R3)
-
-    def set_held(self, held: List[Json], force: bool = False) -> None:
-        """Rebuild the rows when the queue changed (a rebuild while a row is being edited would lose the typing)."""
-        key = [(h.get("uuid"), h.get("text"), h.get("images"), tuple(h.get("files") or [])) for h in held]
-        if not force and key == self._key:
-            return
-        self._key = key
-        self.held = held
-        n = len(held)
-        self.head_text.setText(
-            "Queued — Claude reads it after this step"
-            if n == 1
-            else f"{n} queued — Claude reads them in order after this step"
-        )
-        while self.rows.count():
-            w = self.rows.takeAt(0).widget()
-            if w is not None:
-                w.deleteLater()
-        for i, h in enumerate(held):
-            self.rows.addWidget(QueueItem(self, h, i + 1, editing=self.editing == h.get("uuid")))
-        self.setVisible(n > 0)
-
-    def start_edit(self, uuid: str) -> None:
-        self.editing = uuid
-        self.set_held(self.held, force=True)
-
-    def save(self, h: Json, text: str) -> None:
-        self.editing = None
-        t = text.strip()
-        if not t and not h.get("images") and not (h.get("files") or []):
-            store.remove_held(self.sid, h["uuid"]).catch(lambda _e: None)
-        elif t != h.get("text"):
-            store.update_held(self.sid, h["uuid"], t).catch(lambda _e: None)
-        else:
-            self.set_held(self.held, force=True)
-
-    def cancel_edit(self) -> None:
-        self.editing = None
-        self.set_held(self.held, force=True)
-
-
-class QueueAttach(QWidget):
-    """``.queue-attach``: a small pill with an icon and a count or file name."""
-
-    def __init__(self, icon: str, text: str, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self._icon, self._text = icon, text
-        fm = QFontMetrics(theme.font_ui(11))
-        self.setFixedSize(6 + 11 + 3 + fm.horizontalAdvance(text) + 6, 18)
-
-    def paintEvent(self, _e) -> None:
-        t = theme.tokens()
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(theme.qcolor(t.fill_2))
-        p.drawRoundedRect(QRectF(self.rect()), 9, 9)
-        p.drawPixmap(QPointF(6, 3.5), icons.pixmap(self._icon, t.text_3, 11))
-        p.setFont(theme.font_ui(11))
-        p.setPen(QColor(t.text_3))
-        p.drawText(QRect(20, 0, self.width() - 20, 18), Qt.AlignmentFlag.AlignVCenter, self._text)
-
-
-class QueueItem(QWidget):
-    """``.queue-item``: number, text (click to edit), attachment pills, and the actions under the pointer."""
-
-    def __init__(self, tray: QueueTray, h: Json, n: int, editing: bool) -> None:
-        super().__init__(tray)
-        self.tray, self.h = tray, h
-        self._editing = editing
-        t = theme.tokens()
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(8, 5, 6, 5)
-        lay.setSpacing(8)
-        num = QLabel(str(n))
-        num.setFixedWidth(18)
-        num.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
-        num.setStyleSheet(f"color: {t.text_4}; font-size: 11px; font-weight: 600; margin-top: 3px;")
-        lay.addWidget(num)
-        if editing:
-            self.edit = _QueueEdit(str(h.get("text") or ""), lambda text: tray.save(h, text), tray.cancel_edit)
-            lay.addWidget(self.edit, 1)
-            QTimer.singleShot(0, self.edit.setFocus)
-        else:
-            text = str(h.get("text") or "")
-            lines = text.split("\n")
-            shown = "\n".join(lines[:3]) + ("…" if len(lines) > 3 else "")
-            self.text_btn = QPushButton(shown or "(no text)")
-            self.text_btn.setFlat(True)
-            self.text_btn.setToolTip("Click to edit")
-            self.text_btn.setAccessibleName("Edit queued message")
-            self.text_btn.setCursor(Qt.CursorShape.IBeamCursor)
-            self.text_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            self.text_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-            self.text_btn.setStyleSheet(
-                f"QPushButton {{ border: none; text-align: left; padding: 2px 0; font-size: {theme.FS_UI}px; background: transparent; }}"
-            )
-            theme.tint(self.text_btn, fg="text_4" if not text else "text_2")
-            self.text_btn.clicked.connect(lambda: tray.start_edit(h["uuid"]))
-            lay.addWidget(self.text_btn, 1)
-            if (h.get("images") or 0) > 0:
-                lay.addWidget(QueueAttach("image", str(h["images"])), 0, Qt.AlignmentFlag.AlignTop)
-            for f in h.get("files") or []:
-                lay.addWidget(QueueAttach("file", str(f)), 0, Qt.AlignmentFlag.AlignTop)
-        self.actions = QWidget()
-        al = QHBoxLayout(self.actions)
-        al.setContentsMargins(0, 0, 0, 0)
-        al.setSpacing(2)
-        self.now = Btn(
-            "Now",
-            icon="zap",
-            kind="more",
-            icon_size=12,
-            tooltip="Send now — interrupts the current step",
-            on_click=lambda: store.send_held_now(tray.sid, h["uuid"]),
-        )
-        self.now.override = {"fs": 11, "fw": 600}
-        self.now.setAccessibleName("Send now")
-        al.addWidget(self.now)
-        self.x = IconButton("x", "Remove queued message", 13)
-        self.x.setFixedSize(24, 24)
-        self.x.setToolTip("Remove")
-        self.x.clicked.connect(lambda: store.remove_held(tray.sid, h["uuid"]))
-        al.addWidget(self.x)
-        # the actions keep their room and show under the pointer (opacity 0 → 1 in CSS)
-        for b in (self.now, self.x):
-            sp = b.sizePolicy()
-            sp.setRetainSizeWhenHidden(True)
-            b.setSizePolicy(sp)
-            b.setVisible(editing)
-        lay.addWidget(self.actions, 0, Qt.AlignmentFlag.AlignTop)
-        self.setMouseTracking(True)
-
-    def enterEvent(self, e) -> None:
-        super().enterEvent(e)
-        self.now.show()
-        self.x.show()
-        self.update()
-
-    def leaveEvent(self, e) -> None:
-        super().leaveEvent(e)
-        if not self._editing:
-            self.now.hide()
-            self.x.hide()
-        self.update()
-
-    def paintEvent(self, _e) -> None:
-        if not (self.underMouse() or self._editing):
-            return
-        t = theme.tokens()
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(theme.qcolor(t.fill_1))
-        p.drawRoundedRect(QRectF(self.rect()), theme.R2, theme.R2)
-
-
-class _QueueEdit(QPlainTextEdit):
-    """``.queue-edit``: an inset field; Enter saves, Escape cancels, so does leaving it."""
-
-    def __init__(self, text: str, on_save: Callable[[str], None], on_cancel: Callable[[], None]) -> None:
-        super().__init__()
-        self._save, self._cancel = on_save, on_cancel
-        self._done = False
-        self.setFrameShape(QFrame.Shape.NoFrame)
-        self.document().setDocumentMargin(0)
-        self.setStyleSheet(
-            f"QPlainTextEdit {{ background: palette(base); border: 1px solid palette(dark);"
-            f" border-radius: {theme.R1}px; padding: 2px 6px; font-size: {theme.FS_UI}px; }}"
-            " QPlainTextEdit:focus { border-color: palette(link-visited); }"
-        )
-        self.setPlainText(text)
-        lines = min(6, max(1, text.count("\n") + 1))
-        self.setFixedHeight(max(24, lines * self.fontMetrics().lineSpacing() + 8))
-        self.moveCursor(QTextCursor.MoveOperation.End)
-        self.setAccessibleName("Queued message")
-
-    def keyPressEvent(self, e: QKeyEvent) -> None:
-        if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not (e.modifiers() & Qt.KeyboardModifier.ShiftModifier):
-            self._finish(self.toPlainText())
-            return
-        if e.key() == Qt.Key.Key_Escape:
-            if not self._done:
-                self._done = True
-                self._cancel()
-            return
-        super().keyPressEvent(e)
-
-    def focusOutEvent(self, e) -> None:
-        super().focusOutEvent(e)
-        self._finish(self.toPlainText())
-
-    def _finish(self, text: str) -> None:
-        if self._done:
-            return
-        self._done = True
-        self._save(text)
-
-
 # ---------------------------------------------------------------- overlays
 
 
@@ -2262,12 +1217,12 @@ class GhostHint(QWidget):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self._text = ""
-        self.fade = Tween(self, theme.T_MED, theme.ease, lambda _v: self.update())
+        self.fade = Tween(lambda _v: self.update(), ms=theme.T_MED, curve=theme.ease)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
     def set_text(self, text: str) -> None:
         if text and not self._text:
-            self.fade.set(0.0)
+            self.fade.jump(0.0)
             self.fade.go(1.0)
         self._text = text
         self.setVisible(bool(text))
@@ -2298,11 +1253,11 @@ class DropHint(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        self.fade = Tween(self, theme.T_FAST, theme.ease, lambda _v: self.update())
+        self.fade = Tween(lambda _v: self.update(), ms=theme.T_FAST, curve=theme.ease)
         self.hide()
 
     def appear(self) -> None:
-        self.fade.set(0.0)
+        self.fade.jump(0.0)
         self.show()
         self.raise_()
         self.fade.go(1.0)
@@ -2313,7 +1268,7 @@ class DropHint(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setOpacity(self.fade.value)
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(_alpha(t.raised, 0.88))
+        p.setBrush(theme.with_alpha(t.raised, 0.88))
         p.drawRoundedRect(QRectF(self.rect()), theme.R4, theme.R4)
         p.setFont(theme.font_ui(theme.FS_UI, 500))
         p.setPen(QColor(t.text))
@@ -2364,7 +1319,8 @@ class Composer(QWidget):
         self._sent_at = 0.0
         self._last_h = 0
         self._dragging = False
-        self._anim: Optional[QVariantAnimation] = None
+        # after a send the field settles back to one line on the soft spring
+        self.settle_t = Tween(lambda v: self.edit.setFixedHeight(int(v)))
         self.col = theme.COL
         self.setObjectName("composer-wrap")
 
@@ -2440,7 +1396,7 @@ class Composer(QWidget):
         self.popup.on_pick = self.apply_suggestion
         self.popup.on_hover = self._hover_suggestion
         self.fade = FadeOverlay(host) if parent is not None else None
-        self.menu = MenuPopup(self.window() if self.window() is not None else host)
+        self.menu: Optional[MenuPopover] = None  # the mode or model menu, while it is up
 
         self.edit.setPlainText(_drafts.get(session_id, ""))
         self.edit.apply_line_height()
@@ -2614,18 +1570,9 @@ class Composer(QWidget):
         prev = self._last_h
         nxt = min(max(FIELD_MIN - FIELD_PAD[1] - FIELD_PAD[3], want), cap)
         self._last_h = nxt
-        if self._anim is not None:
-            self._anim.stop()
-            self._anim = None
+        self.settle_t.stop()
         if not self.text and prev > nxt + 2 and time.time() - self._sent_at < 0.6 and not store.reduced_motion:
-            anim = QVariantAnimation(self)
-            anim.setStartValue(prev)
-            anim.setEndValue(nxt)
-            anim.setDuration(theme.SPRING_SOFT_T)
-            anim.setEasingCurve(theme.spring_soft())
-            anim.valueChanged.connect(lambda v: self.edit.setFixedHeight(int(v)))
-            anim.start()
-            self._anim = anim
+            self.settle_t.start(prev, nxt, theme.SPRING_SOFT_T, theme.spring_soft())
         else:
             self.edit.setFixedHeight(nxt)
         self._place_popup()
@@ -2671,7 +1618,8 @@ class Composer(QWidget):
 
     def hideEvent(self, e) -> None:
         self.popup.hide()
-        self.menu.close_menu()
+        if self.menu is not None:
+            self.menu.dismiss()
         if self.fade is not None:
             self.fade.hide()
         super().hideEvent(e)
@@ -2865,7 +1813,7 @@ class Composer(QWidget):
                     "kind": "repo",
                 }
                 for e in store.repos
-                if e.get("name") and (not q or _word_match(q, [e.get("name")] + list(e.get("aliases") or [])))
+                if e.get("name") and (not q or word_match(q, [e.get("name")] + list(e.get("aliases") or [])))
             ]
             self.suggestions = repos[:8] + files
             head = ("Repositories and files" if repos else "Files") if q else "Files — keep typing to narrow down"
@@ -2929,10 +1877,20 @@ class Composer(QWidget):
             self.close_popup()
 
     # ---------------------------------------------------------------- menus
-    def _open_mode_menu(self) -> None:
-        if self.menu.is_open and self.menu.anchor is self.mode_btn:
-            self.menu.close_menu()
+    def _toggle_menu(self, anchor: ChipButton, items: Callable[[], List[Json]], width: int, align_right: bool = False):
+        """A chip's menu, over the card; the chip closes it again and turns its chevron while it is up."""
+        if anchor.is_open:
+            close_menus()
             return
+        self.menu = show_menu(items(), anchor, width, align_right=align_right, above=True)
+        if self.menu is not None:
+            anchor.set_open(True)
+            self.menu.closed.connect(lambda: anchor.set_open(False))
+
+    def _open_mode_menu(self) -> None:
+        self._toggle_menu(self.mode_btn, self.mode_menu_items, 372)
+
+    def mode_menu_items(self) -> List[Json]:
         is_root = bool((store.info or {}).get("isRoot"))
         mode = self.mode
         items = [
@@ -2947,7 +1905,7 @@ class Composer(QWidget):
             for m in MODES
             if not (m["id"] == "bypassPermissions" and is_root)
         ]
-        self.menu.open_menu(items, self.mode_btn, 372)
+        return items
 
     def model_menu_items(self) -> List[Json]:
         r = self.rt
@@ -3014,11 +1972,9 @@ class Composer(QWidget):
         return items
 
     def _open_model_menu(self) -> None:
-        if self.menu.is_open and self.menu.anchor is self.model_btn:
-            self.menu.close_menu()
-            return
-        store.load_gateway_models()
-        self.menu.open_menu(self.model_menu_items(), self.model_btn, 320, align_right=True)
+        if not self.model_btn.is_open:
+            store.load_gateway_models()
+        self._toggle_menu(self.model_btn, self.model_menu_items, 320, align_right=True)
 
     # ---------------------------------------------------------------- attachments
     def set_dragging(self, on: bool) -> None:

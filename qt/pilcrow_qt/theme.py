@@ -324,6 +324,45 @@ def over(f: QColor, b: QColor) -> QColor:
     )
 
 
+Colorish = Union[str, QColor]
+
+
+def mix(a: Colorish, pa: float, b: Colorish) -> QColor:
+    """CSS ``color-mix(in srgb, a pa%, b)``: premultiplied interpolation, as the browser does it, so a
+    translucent token mixes by its coverage (two opaque ones mix channel by channel)."""
+    x = a if isinstance(a, QColor) else qcolor(a)
+    y = b if isinstance(b, QColor) else qcolor(b)
+    pb = 1 - pa
+    alpha = pa * x.alphaF() + pb * y.alphaF()
+    if alpha <= 0:
+        return QColor(0, 0, 0, 0)
+
+    def ch(u: int, v: int) -> int:
+        return int(round((pa * x.alphaF() * u + pb * y.alphaF() * v) / alpha))
+
+    c = QColor(ch(x.red(), y.red()), ch(x.green(), y.green()), ch(x.blue(), y.blue()))
+    c.setAlphaF(alpha)
+    return c
+
+
+def with_alpha(c: str, a: float) -> QColor:
+    """A token at an opacity (``rgb(from var(--accent) r g b / 8%)``)."""
+    q = qcolor(c)
+    q.setAlphaF(a)
+    return q
+
+
+def lerp(a: QColor, b: QColor, t: float) -> QColor:
+    """The colour ``t`` of the way from ``a`` to ``b``, alpha included (a transition's frame)."""
+    t = max(0.0, min(1.0, t))
+    return QColor(
+        int(round(a.red() + (b.red() - a.red()) * t)),
+        int(round(a.green() + (b.green() - a.green()) * t)),
+        int(round(a.blue() + (b.blue() - a.blue()) * t)),
+        int(round(a.alpha() + (b.alpha() - a.alpha()) * t)),
+    )
+
+
 # ---------------------------------------------------------------- springs
 
 

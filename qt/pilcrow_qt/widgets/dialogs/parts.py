@@ -16,17 +16,6 @@ from ..ui.bits import Box, LayoutButton, Pill, paint_box  # noqa: F401 - LayoutB
 from ..ui.signals import bind
 
 
-def mix(a: str, b: str, weight: float) -> QColor:
-    """``color-mix(in srgb, a weight%, b)`` for two tokens (translucent ones are first laid on the canvas)."""
-    t = theme.tokens()
-    ca, cb = theme.blend(a, t.canvas), theme.blend(b, t.canvas)
-    return QColor(
-        int(round(ca.red() * weight + cb.red() * (1 - weight))),
-        int(round(ca.green() * weight + cb.green() * (1 - weight))),
-        int(round(ca.blue() * weight + cb.blue() * (1 - weight))),
-    )
-
-
 class Card(QFrame):
     """The card surface (``--card`` with ``--card-shadow``): raised, a hairline all round, rounded corners.
     ``set_focused`` draws the keyboard ring; ``set_tone("needs")`` tints it with the accent wash."""
@@ -54,7 +43,11 @@ class Card(QFrame):
 
     def paintEvent(self, _e) -> None:
         t = theme.tokens()
-        bg = mix(t.accent_wash, t.raised, 0.3) if self._tone == "needs" else QColor(t.raised)
+        bg = (
+            theme.mix(theme.blend(t.accent_wash, t.canvas), 0.3, t.raised)
+            if self._tone == "needs"
+            else QColor(t.raised)
+        )
         if self._focused:
             line = QColor(t.text_3)
         else:

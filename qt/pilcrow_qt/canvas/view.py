@@ -92,13 +92,13 @@ class FollowEase:
         if not self.running:
             self.running = True
             self._last = time.monotonic()
-            clock.hold_fast()
+            clock.hold_fast(self)
             clock.subscribe(self)
 
     def stop(self) -> None:
         if self.running:
             self.running = False
-            clock.release_fast()
+            clock.release_fast(self)
             clock.unsubscribe(self)
         self.target = None
 

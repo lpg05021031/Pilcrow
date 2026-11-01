@@ -12,10 +12,9 @@ import math
 import time
 from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter
 from PySide6.QtWidgets import (
-    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -35,7 +34,7 @@ from .mcp_notice import McpNotice
 from .sidebar import IconBtn
 from .ui.bits import Box, Mark, button, copy_text, hairline, label, paint_box
 from .ui.button import Btn
-from .ui.menu import show_menu
+from .ui.menu import Popover, host_for, show_menu
 from .ui.signals import bind
 
 Json = Dict[str, Any]
@@ -305,7 +304,7 @@ class SessionView(QWidget):
         self._git_timer.timeout.connect(self._fetch_git)
         self._git_cwd = ""
         self._git_tick = ""
-        self._picker: Optional[QFrame] = None
+        self._picker: Optional[Popover] = None
         self._title_edit: Optional[QLineEdit] = None
         self._status_seen = ""
         self.setObjectName("session")
@@ -613,40 +612,28 @@ class SessionView(QWidget):
         edit.finished.connect(done)
 
     def pick_folder(self) -> None:
-        if self._picker is not None:
-            self._picker.close()
+        """The folder chooser in a popover under the folder chip (``FolderPicker`` in the web)."""
+        if self._picker is not None and self._picker.is_open:
+            self._picker.dismiss()
             return
-        pop = QFrame(self, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
-        pop.setObjectName("popover")
-        pop.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        pop.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
-        t = theme.tokens()
-        glass, line = theme.blend(t.glass, t.canvas).name(), theme.blend(t.hair_2, t.raised).name()
-        pop.setStyleSheet(f"#popover {{ background: {glass}; border: 1px solid {line}; border-radius: {theme.R3}px; }}")
-        lay = QVBoxLayout(pop)
-        lay.setContentsMargins(1, 1, 1, 1)
+        host = host_for(self)
+        if host is None:
+            return
+        pop = Popover(host, 380)
+        pop.lay.setContentsMargins(0, 0, 0, 0)
         cwd = self.cwd
 
         def picked(d: str) -> None:
-            pop.close()
+            pop.dismiss()
             if d != cwd:
                 store.set_cwd(self.sid, d).catch(lambda _e: None)
 
         picker = FolderPicker(cwd, picked)
-        lay.addWidget(picker)
+        pop.set_content(picker)
+        pop.closed.connect(lambda: self.folder_btn.set_on(False))
         self._picker = pop
+        pop.open_at(self.folder_btn, "bottom-start")
         self.folder_btn.set_on(True)
-
-        def closed(*_a: Any) -> None:
-            self._picker = None
-            try:
-                self.folder_btn.set_on(False)
-            except RuntimeError:
-                pass
-
-        pop.destroyed.connect(closed)
-        pop.move(self.folder_btn.mapToGlobal(QPoint(0, self.folder_btn.height() + 4)))
-        pop.show()
         picker.q.setFocus()
 
     def open_menu(self) -> None:
