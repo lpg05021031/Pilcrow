@@ -282,7 +282,9 @@ button.chip:hover {
 .radio-ico {
   color: var(--text-3);
 }
-/* on the chosen row's fill the faint inks fall short of 4.5:1 (tokens.css) */
+/* on the chosen or hovered row's fill the faint inks fall short of 4.5:1 (tokens.css) */
+.radio-row:hover .radio-ico,
+.radio-row:hover .radio-hint,
 .radio-row.on .radio-ico,
 .radio-row.on .radio-hint {
   color: var(--text);

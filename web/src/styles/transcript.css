@@ -814,6 +814,13 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   font-size: var(--fs-micro);
   color: var(--text-3);
 }
+/* on the hovered head's fill --text-3 falls short of 4.5:1 (tokens.css) */
+.tool-head:hover .tool-verb,
+.tool-head:hover .tool-meta,
+.tool.denied .tool-head:hover .tool-target,
+.tool.interrupted .tool-head:hover .tool-target {
+  color: var(--text);
+}
 .tool-stats {
   display: inline-flex;
   gap: var(--sp-1_25);
@@ -1538,7 +1545,8 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   color: var(--text-3);
   line-height: 1.45;
 }
-/* on the chosen row's fill --text-3 falls short of 4.5:1 (tokens.css) */
+/* on the chosen or hovered row's fill --text-3 falls short of 4.5:1 (tokens.css) */
+.ask-opt:hover .ask-opt-desc,
 .ask-opt.on .ask-opt-desc {
   color: var(--text);
 }
@@ -2022,6 +2030,10 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 .wfd-sub {
   font-size: var(--fs-micro);
 }
+/* on the hovered head's fill --text-3 falls short of 4.5:1 (tokens.css) */
+.wfd-head:hover .wfd-sub {
+  color: var(--text);
+}
 .wfd-end {
   display: inline-flex;
   align-items: center;
@@ -2204,8 +2216,17 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   font-size: var(--fs-micro);
   color: var(--text-3);
 }
-.wfa.error .wfa-detail,
-.wfa.blocked .wfa-detail {
+/* on the hovered or open row's fill --text-3 falls short of 4.5:1 (tokens.css); a failure keeps its colour */
+.wfa-row:hover .wfa-label,
+.wfa-row:hover .wfa-end,
+.wfa-row:hover .wfa-detail,
+.wfa.open > .wfa-row .wfa-label,
+.wfa.open > .wfa-row .wfa-end,
+.wfa.open > .wfa-row .wfa-detail {
+  color: var(--text);
+}
+.wfa.error > .wfa-row .wfa-detail,
+.wfa.blocked > .wfa-row .wfa-detail {
   color: var(--err);
 }
 .wfa-body {
@@ -2434,7 +2455,9 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   margin-left: -8px;
   border-radius: var(--r-2);
 }
-.work-head:hover {
+/* on the hovered line's fill --text-3 falls short of 4.5:1 and --text-2 holds (tokens.css) */
+.work-head:hover,
+.work-head:hover .work-n {
   color: var(--text-2);
 }
 .work-head .tool-chev {

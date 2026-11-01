@@ -1205,7 +1205,7 @@
 }
 .touches:hover,
 .touches.on {
-  color: var(--text-2);
+  color: var(--text);
   background: var(--fill-2);
 }
 .cfile-head .touches {

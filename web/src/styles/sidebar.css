@@ -62,8 +62,10 @@
   color: var(--text-3);
   opacity: 0;
 }
+/* shown on the hovered row's fill, where --text-3 falls short of 4.5:1 (tokens.css) */
 .side-new:hover .side-kbd {
   opacity: 1;
+  color: var(--text);
 }
 .side-search {
   cursor: text;

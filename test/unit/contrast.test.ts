@@ -62,9 +62,17 @@ const LIT: [what: string, layers: string[]][] = [
   ['a finished session in the control room, hovered or focused (.ovr: folder or reply, time)', ['card', 'fill-1']],
   ["a session in a file's history, hovered (.touches-row: what it was about, when)", ['canvas', 'glass', 'fill-1']],
   ['a recent folder in the folder picker, hovered (.fpick-row: path)', ['canvas', 'glass', 'fill-2']],
+  ["a tool's head or a dispatch run in the conversation's canvas, hovered (.tool-head: verb, meta; .dp-row)", ['canvas', 'fill-1']],
+  ["a workflow's head or agent on its card, hovered or open (.wfd-head, .wfa-row: count, model, detail)", ['card', 'fill-1']],
+  ["a question's answer under the pointer, on the options' own fill (.ask-opt:hover: description)", ['card-ask', 'fill-1', 'fill-1']],
+  ["a mode under the pointer, on the list's own fill (.radio-row:hover: hint)", ['canvas', 'glass-2', 'fill-1', 'fill-1']],
 ];
-// A sidebar row under the pointer (or with its menu open) sets its folder and time in --text-2.
-const HOVER: [what: string, layers: string[]][] = [['a sidebar row under the pointer (.side-row:hover)', ['chrome', 'fill-1']]];
+// A sidebar row under the pointer (or with its menu open) sets its folder and time in --text-2, as does
+// the line that folds a turn's work (its summary and count).
+const HOVER: [what: string, layers: string[]][] = [
+  ['a sidebar row under the pointer (.side-row:hover)', ['chrome', 'fill-1']],
+  ["a turn's work line under the pointer (.work-head:hover)", ['canvas', 'fill-1']],
+];
 const SOLIDS = ['accent-solid', 'accent-solid-2', 'err-solid'];
 
 describe('tokens.css contrast', () => {

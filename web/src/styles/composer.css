@@ -448,7 +448,10 @@
   overflow: hidden;
   cursor: text;
 }
-.queue-item:hover .queue-text {
+/* on the hovered row's fill --text-3 falls short of 4.5:1 (tokens.css) */
+.queue-item:hover .queue-text,
+.queue-item:hover .queue-n,
+.queue-item.editing .queue-n {
   color: var(--text);
 }
 .queue-attach {

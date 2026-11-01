@@ -148,8 +148,9 @@
   /* Text, primary to faintest. --text-2 and --text-3 meet WCAG AA (4.5:1) as small text on every
      opaque surface: canvas, chrome, raised, inset and the cards (test/unit/contrast.test.ts checks
      both themes). On the translucent selection fill of a lit row (and on --raised-2) they fall short,
-     to 2.8:1, so a lit row sets its secondary text in --text; on the hover fill --text-2 holds and
-     --text-3 does not (the rows lit, and their surfaces, are checked by the same test). --text-4 is for marks that are not text
+     to 2.8:1, so a lit or hovered row sets its secondary text in --text; on the hover fill over the
+     canvas or the chrome --text-2 holds too, over a card or glass it does not (the rows lit, and their
+     surfaces, are checked by the same test). --text-4 is for marks that are not text
      (dots, rails, rings) and for disabled controls, and meets the 3:1 asked of those. */
   --text: #ededed;
   --text-2: #9c9c9c;

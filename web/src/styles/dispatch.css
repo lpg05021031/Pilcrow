@@ -197,6 +197,13 @@
 .dp-row:hover td {
   background: var(--fill-1);
 }
+/* on the hovered row's fill --text-3 falls short of 4.5:1 (tokens.css) */
+.dp-row:hover .faint,
+.dp-row:hover .dp-word.queued,
+.dp-row:hover .dp-word.skipped,
+.dp-row:hover .dp-word.stopped {
+  color: var(--text);
+}
 .dp-row.needs_action td {
   background: var(--warn-wash);
 }
@@ -359,6 +366,10 @@
 }
 .dp-target:hover {
   background: var(--fill-1);
+}
+/* on the hovered row's fill --text-3 falls short of 4.5:1 in the light theme (tokens.css) */
+.dp-target:hover .faint {
+  color: var(--text);
 }
 .dp-target-main {
   display: flex;
