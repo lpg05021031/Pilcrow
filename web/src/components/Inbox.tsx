@@ -221,7 +221,6 @@ function RunCard({ it, index, onOpen, onRead, onRemove }: { it: InboxItem; index
   );
 }
 
-/** A dispatch job's report: the badge, the name, what landed where, the prose when an agent wrote it, one line per repository. */
 /** A lead's helpers once they are all done (HELPERS.md §6.6): a row per helper with its handoff's first line. */
 function HelpersCard({ it, index, onRead, onRemove }: { it: InboxItem; index: number; onRead: () => void; onRemove: () => void }) {
   const helpers = it.helpers || [];
@@ -258,26 +257,7 @@ function HelpersCard({ it, index, onRead, onRemove }: { it: InboxItem; index: nu
         <p className="run-sum">{line}</p>
         <div className="dp-report-rows">
           {helpers.slice(0, 12).map((h) => (
-            <div key={h.id} className="dp-report-row">
-              <span className={`dp-glyph ${h.state}`} aria-hidden="true" />
-              <span className="dp-report-name ellipsis">{h.name}</span>
-              <span className="dp-report-what ellipsis faint">{h.state !== 'done' ? h.reason || h.state : firstLine(h.handoff || '') || 'done'}</span>
-              <span className="dp-report-nums tnum faint">
-                {h.files > 0 && (
-                  <>
-                    {plural(h.files, 'file')} <span className="num-add">+{h.add}</span> <span className="num-del">−{h.del}</span>
-                  </>
-                )}
-                {h.cost > 0 && <span> {cost(h.cost)}</span>}
-                {h.commit && <span className="mono"> {h.commit}</span>}
-                {h.pr && (
-                  <a href={h.pr} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
-                    {' '}
-                    PR
-                  </a>
-                )}
-              </span>
-            </div>
+            <ReportRow key={h.id} r={h} done={firstLine(h.handoff || '')} />
           ))}
           {helpers.length > 12 && <div className="hint">and {helpers.length - 12} more</div>}
         </div>
@@ -301,6 +281,33 @@ function HelpersCard({ it, index, onRead, onRemove }: { it: InboxItem; index: nu
   );
 }
 
+/** One helper or repository in a report: how it ended, its name, what it did (`done`, when it is done), its numbers. */
+function ReportRow({ r, done }: { r: { state: string; name: string; reason?: string | null; files: number; add: number; del: number; cost: number; commit?: string | null; pr?: string | null }; done: string }) {
+  return (
+    <div className="dp-report-row">
+      <span className={`dp-glyph ${r.state}`} aria-hidden="true" />
+      <span className="dp-report-name ellipsis">{r.name}</span>
+      <span className="dp-report-what ellipsis faint">{r.state !== 'done' ? r.reason || r.state : done || 'done'}</span>
+      <span className="dp-report-nums tnum faint">
+        {r.files > 0 && (
+          <>
+            {plural(r.files, 'file')} <span className="num-add">+{r.add}</span> <span className="num-del">−{r.del}</span>
+          </>
+        )}
+        {r.cost > 0 && <span> {cost(r.cost)}</span>}
+        {r.commit && <span className="mono"> {r.commit}</span>}
+        {r.pr && (
+          <a href={r.pr} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
+            {' '}
+            PR
+          </a>
+        )}
+      </span>
+    </div>
+  );
+}
+
+/** A dispatch job's report: the badge, the name, what landed where, the prose when an agent wrote it, one line per repository. */
 function DispatchCard({ it, index, onRead, onRemove }: { it: InboxItem; index: number; onRead: () => void; onRemove: () => void }) {
   const rep = it.dispatch;
   const targets = rep?.targets || [];
@@ -333,26 +340,7 @@ function DispatchCard({ it, index, onRead, onRemove }: { it: InboxItem; index: n
         {rep?.prose ? <p className="run-sum dp-prose">{rep.prose}</p> : rep?.proseState === 'writing' ? <p className="run-sum faint">An agent is writing the report…</p> : null}
         <div className="dp-report-rows">
           {targets.slice(0, 12).map((t) => (
-            <div key={t.path} className="dp-report-row">
-              <span className={`dp-glyph ${t.state}`} aria-hidden="true" />
-              <span className="dp-report-name ellipsis">{t.name}</span>
-              <span className="dp-report-what ellipsis faint">{t.state !== 'done' ? t.reason || t.state : t.summary || 'done'}</span>
-              <span className="dp-report-nums tnum faint">
-                {t.files > 0 && (
-                  <>
-                    {plural(t.files, 'file')} <span className="num-add">+{t.add}</span> <span className="num-del">−{t.del}</span>
-                  </>
-                )}
-                {t.cost > 0 && <span> {cost(t.cost)}</span>}
-                {t.commit && <span className="mono"> {t.commit}</span>}
-                {t.pr && (
-                  <a href={t.pr} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
-                    {' '}
-                    PR
-                  </a>
-                )}
-              </span>
-            </div>
+            <ReportRow key={t.path} r={t} done={t.summary} />
           ))}
           {targets.length > 12 && <div className="hint">and {targets.length - 12} more</div>}
         </div>
