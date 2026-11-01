@@ -42,25 +42,33 @@ export async function findTranscriptFile(sessionId) {
   return null;
 }
 
-/** uuid -> toolUseResult from the raw transcript (best effort; format may evolve). */
-async function readToolResults(file) {
-  const out = new Map();
-  if (!file) return out;
+/**
+ * One read of the raw transcript for what the SDK's reader leaves out: each record's toolUseResult by
+ * uuid, and, with `all` (after a compaction), every record by uuid for withEarlierMessages. A line is
+ * parsed only when it can hold what is asked for. Null when the file cannot be read.
+ * @param {string} file @param {{ all?: boolean }} [opts]
+ */
+export async function readTranscript(file, { all = false } = {}) {
+  const results = new Map();
+  const byUuid = new Map();
   try {
     const rl = readline.createInterface({ input: fs.createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity });
     for await (const line of rl) {
-      if (!line.includes('"toolUseResult"')) continue;
+      if (!line.includes(all ? '"uuid"' : '"toolUseResult"')) continue;
       try {
         const e = JSON.parse(line);
-        if (e.uuid && e.toolUseResult !== undefined) out.set(e.uuid, e.toolUseResult);
+        if (!e.uuid) continue;
+        if (all) byUuid.set(e.uuid, e);
+        if (e.toolUseResult !== undefined) results.set(e.uuid, e.toolUseResult);
       } catch {
         /* skip a malformed line */
       }
     }
   } catch (e) {
-    log('readToolResults failed', file, e);
+    log('reading the transcript failed', file, e);
+    return null;
   }
-  return out;
+  return { results, byUuid };
 }
 
 export async function loadTranscript(sessionId, dir) {
@@ -77,11 +85,12 @@ export async function loadTranscript(sessionId, dir) {
   }
   const file = await findTranscriptFile(sessionId);
   // After a compaction the SDK reader starts at the newest compact boundary and leaves out what came before.
-  if (file && msgs.some((m) => m.isCompactSummary)) msgs = await withEarlierMessages(msgs, file, sessionId);
-  const results = await readToolResults(file);
+  const compacted = msgs.some((m) => m.isCompactSummary);
+  const raw = file ? await readTranscript(file, { all: compacted }) : null;
+  if (raw && compacted) msgs = withEarlierMessages(msgs, raw.byUuid, sessionId);
   for (const m of msgs) {
     m._history = true;
-    if (m.type === 'user' && results.has(m.uuid)) m.tool_use_result = results.get(m.uuid);
+    if (m.type === 'user' && raw?.results.has(m.uuid)) m.tool_use_result = raw.results.get(m.uuid);
   }
   return msgs;
 }
@@ -91,25 +100,10 @@ export async function loadTranscript(sessionId, dir) {
  * `parentUuid` is null), so the SDK's reader, which follows `parentUuid`, shows only what came after the
  * newest compaction, and returns the boundary without its details. Put the earlier conversation back
  * (across older compactions too) and give each boundary its trigger and token counts, so a reopened
- * session reads the same as it did live.
+ * session reads the same as it did live. `byUuid` is every raw record (readTranscript with `all`).
+ * @param {Record<string, any>[]} msgs @param {Map<string, Record<string, any>>} byUuid @param {string} sessionId
  */
-export async function withEarlierMessages(msgs, file, sessionId) {
-  const byUuid = new Map();
-  try {
-    const rl = readline.createInterface({ input: fs.createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity });
-    for await (const line of rl) {
-      if (!line.includes('"uuid"')) continue;
-      try {
-        const e = JSON.parse(line);
-        if (e.uuid) byUuid.set(e.uuid, e);
-      } catch {
-        /* skip a malformed line */
-      }
-    }
-  } catch (e) {
-    log('withEarlierMessages failed', file, e);
-    return msgs;
-  }
+export function withEarlierMessages(msgs, byUuid, sessionId) {
   const boundaryOf = (e) => ({
     type: 'system',
     subtype: 'compact_boundary',
@@ -156,7 +150,7 @@ export async function withEarlierMessages(msgs, file, sessionId) {
   const all = [...earlier, ...upgraded.filter((m) => !have.has(m.uuid))];
   // Chain order puts a "/compact" command after the boundary it caused; time order reads the way it happened.
   const t = (m) => Date.parse(m.timestamp) || 0;
-  return all.map((m, i) => [m, i]).sort((a, b) => t(a[0]) - t(b[0]) || a[1] - b[1]).map(([m]) => m);
+  return all.map((m, i) => ({ m, i })).sort((a, b) => t(a.m) - t(b.m) || a.i - b.i).map((x) => x.m);
 }
 
 export async function loadSubagent(sessionId, agentId, dir) {

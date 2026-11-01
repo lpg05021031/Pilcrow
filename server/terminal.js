@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { which, uuid, log, cleanEnv, IS_WIN, HOME, slash } from './util.js';
 
 const BRIDGE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'pty_bridge.py');
-const SCROLLBACK = 400 * 1024;
+const SCROLLBACK = 400 * 1024; // characters of output a terminal keeps for a window that opens it later
 const KILL_GRACE_MS = 1500; // a shell that ignores SIGHUP this long gets SIGKILL
 const require = createRequire(import.meta.url);
 
@@ -161,13 +161,15 @@ export function open({ cwd, cols = 100, rows = 30, command }) {
     io = openUnix({ caps, argv: command ? [shell, '-lc', command] : [shell, '-l'], cwd: dir, env, cols, rows });
   }
   const id = uuid();
-  const term = { id, cwd: slash(dir), io, resizable: io.resizable, buffer: '', exited: null, title: path.basename(dir) || dir, cols, rows, typed: false };
+  // The scrollback is a list of chunks: dropping whole old chunks keeps an append from copying it all.
+  const term = { id, cwd: slash(dir), io, resizable: io.resizable, chunks: [], size: 0, exited: null, title: path.basename(dir) || dir, cols, rows, typed: false };
   all.set(id, term);
   const started = Date.now();
   const emit = (data) => {
     if (!data) return;
-    term.buffer += data;
-    if (term.buffer.length > SCROLLBACK) term.buffer = term.buffer.slice(-SCROLLBACK);
+    term.chunks.push(data);
+    term.size += data.length;
+    while (term.size - term.chunks[0].length >= SCROLLBACK) term.size -= term.chunks.shift().length;
     terminals.emit('data', { id, data });
   };
   const attach = (cur) => {
@@ -228,7 +230,7 @@ export function list() {
 
 export function snapshot(id) {
   const t = all.get(id);
-  return t ? { id, buffer: t.buffer, exited: t.exited, cwd: t.cwd, resizable: t.resizable } : null;
+  return t ? { id, buffer: t.chunks.join('').slice(-SCROLLBACK), exited: t.exited, cwd: t.cwd, resizable: t.resizable } : null;
 }
 
 export function closeAll() {
