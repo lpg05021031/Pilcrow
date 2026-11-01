@@ -16,7 +16,7 @@
     "server": "node server/main.js --shell=none",
     "mock": "node test/mock/mock-server.mjs 5300",
     "check": "tsc --noEmit -p tsconfig.json",
-    "lint": "eslint web/src test",
+    "lint": "eslint web/src test scripts/css-overlap.mjs && node scripts/css-overlap.mjs",
     "test": "npm run check && npm run lint && npm run test:unit && npm run test:e2e && npm run test:webkit",
     "test:unit": "vitest run",
     "test:e2e": "node test/e2e/run.mjs",

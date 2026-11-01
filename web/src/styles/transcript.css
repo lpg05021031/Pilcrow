@@ -162,9 +162,10 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   font-size: var(--fs-small);
   font-weight: 550;
   color: var(--text);
-  background: var(--raised);
-  box-shadow: var(--shadow-float);
-  animation: jump-in var(--t-med) var(--ease);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-glass);
   z-index: 3;
 }
 @keyframes jump-in {
@@ -227,7 +228,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   max-width: 220px;
   max-height: 160px;
   border-radius: var(--r-3);
-  cursor: zoom-in;
   box-shadow: 0 0 0 1px var(--hair);
 }
 .msg-file {
@@ -290,7 +290,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   border-radius: var(--r-2);
   font-size: var(--fs-ui);
   color: var(--text-3);
-  transition: color var(--t-fast), background var(--t-fast);
 }
 .thinking-head:hover {
   color: var(--text-2);
@@ -298,7 +297,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 }
 .thinking-chev {
   opacity: 0.7;
-  transition: transform var(--t-med) var(--ease);
 }
 .thinking.open .thinking-chev {
   transform: rotate(90deg);
@@ -789,7 +787,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 .tool-ico-swap {
   display: grid;
   place-items: center;
-  animation: pop var(--t-med) var(--ease);
 }
 .tool-meta {
   animation: fade var(--t-med) var(--ease);
@@ -831,7 +828,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   font-size: var(--fs-ui);
   text-align: left;
   cursor: pointer;
-  transition: background var(--t-fast);
 }
 .tool-head:hover {
   background: var(--fill-1);
@@ -922,7 +918,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   margin-left: -3px;
   color: var(--text-3);
   opacity: 0;
-  transition: opacity var(--t-fast), transform var(--t-med) var(--ease);
 }
 .tool-head:hover .tool-chev,
 .tool-head:focus-visible .tool-chev {
@@ -1409,12 +1404,9 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   margin: 6px 0 14px 28px;
   padding: 14px 16px 14px;
   border-radius: 12px;
-  background: var(--raised);
+  background: var(--card-ask);
   box-shadow: inset 0 0 0 1.5px var(--accent-ring), 0 6px 20px -12px rgba(0, 0, 0, 0.5);
   animation: perm-in var(--t-panel) var(--ease);
-}
-[data-theme='dark'] .perm {
-  background: #232326;
 }
 @keyframes perm-in {
   from {
@@ -1434,7 +1426,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   opacity: 0;
   /* the border brightens once to full amber and settles; no glow spilling outside the card */
   box-shadow: inset 0 0 0 1.5px var(--accent), 0 0 12px -2px var(--accent-wash);
-  animation: ping 900ms 300ms var(--ease-io) both;
+  animation: ping 1100ms 300ms var(--ease-io) both;
 }
 @keyframes ping {
   0% {
@@ -1537,17 +1529,10 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 
 .askcard,
 .plancard {
-  border-radius: 12px;
-  background: var(--raised);
-  box-shadow: var(--shadow-card);
-}
-[data-theme='dark'] .askcard,
-[data-theme='dark'] .plancard {
-  background: #212124;
-}
-.askcard,
-.plancard {
   position: relative;
+  border-radius: 12px;
+  background: var(--card-ask);
+  box-shadow: var(--shadow-card);
 }
 .askcard.live,
 .plancard.live {
@@ -1617,7 +1602,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   gap: 12px;
   padding: 10px 12px;
   text-align: left;
-  transition: background var(--t-fast);
   cursor: pointer;
 }
 .ask-opt + .ask-opt {
@@ -1647,7 +1631,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 .ask-opt.on .ask-mark {
   background: var(--text);
   box-shadow: none;
-  animation: pop var(--t-fast) var(--spring);
 }
 .ask-opt-text {
   display: grid;
@@ -1798,9 +1781,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 }
 .agent-prompt-toggle:hover {
   color: var(--text);
-}
-.agent-prompt-toggle svg {
-  transition: transform var(--t-med) var(--ease);
 }
 .agent-prompt {
   padding: 10px 12px;
@@ -1955,7 +1935,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   animation: perm-in var(--t-panel) var(--ease);
 }
 [data-theme='dark'] .tool.awaiting {
-  background: var(--raised);
   box-shadow: inset 0 0 0 1.5px var(--accent-ring), 0 2px 6px rgba(0, 0, 0, 0.25);
 }
 .tool.awaiting > .tool-head {
@@ -2111,7 +2090,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 }
 .wf-bar > div {
   height: 100%;
-  transition: width var(--t-med) var(--ease);
 }
 .wf-bar-done {
   background: var(--ok);
@@ -2322,7 +2300,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   padding: 4px 6px 4px 5px;
   border-radius: var(--r-1);
   text-align: left;
-  transition: background var(--t-fast);
 }
 .wfa-row:hover,
 .wfa.open > .wfa-row {
@@ -2564,6 +2541,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 
 
 .status-sub {
+  color: var(--text-3);
   font-weight: 450;
   opacity: 0.85;
 }
@@ -2591,13 +2569,14 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 100%;
+  width: calc(100% + 16px);
   min-height: 30px;
-  padding: 0;
+  padding: 0 8px;
   font-size: var(--fs-ui);
   color: var(--text-3);
   text-align: left;
-  transition: color var(--t-fast);
+  margin-left: -8px;
+  border-radius: var(--r-2);
 }
 .work-head:hover {
   color: var(--text-2);
@@ -2715,10 +2694,12 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  width: 100%;
+  width: calc(100% + 12px);
   min-height: 24px;
   text-align: left;
   border-radius: var(--r-2);
+  margin-left: -6px;
+  padding: 0 6px;
 }
 .chap-title {
   flex: 1;

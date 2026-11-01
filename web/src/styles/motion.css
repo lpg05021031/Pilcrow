@@ -1,8 +1,11 @@
-/* ================================================================ motion and material
+/* ================================================================ motion
    The choreography layer, loaded last. tokens.css holds the springs; this file says what each thing
-   does with them: what the floating surfaces are made of, how they arrive and how they leave, how
-   the shell opens and closes, and how every control answers the hand. Nothing here changes what a
-   thing is, only how it moves and what it is made of. */
+   does with them: how it arrives and leaves, how the shell opens and closes, and how every control
+   answers the hand. It owns `animation` and `transition` for the selectors it names, and the moving
+   parts that exist only to move (the segmented thumb, the settings ink, the sidebar's selection).
+   A component's own rule never repeats one of those properties: scripts/css-overlap.mjs checks.
+   Besides motion it keeps the lightbox, whose look is its motion, and two finishes of the dark theme
+   that cut across components. */
 
 /* ---------------------------------------------------------------- arrivals and departures */
 @keyframes pop-spring {
@@ -88,32 +91,9 @@
   }
 }
 
-/* ---------------------------------------------------------------- floating material
-   Menus, sheets, the find bar, toasts: a translucent pane over a deep blur, lit along the top edge. */
-.popover,
-.suggest,
-.findbar,
-.toast,
-.jump {
-  background: var(--glass);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
-  box-shadow: var(--shadow-glass);
-}
-[data-theme='dark'] .popover,
-[data-theme='dark'] .findbar,
-[data-theme='dark'] .toast {
-  background: var(--glass);
-}
-.dialog {
-  background: var(--glass-2);
-  -webkit-backdrop-filter: var(--glass-blur);
-  backdrop-filter: var(--glass-blur);
-  box-shadow: var(--shadow-sheet);
-}
-[data-theme='dark'] .dialog {
-  background: var(--glass-2);
-}
+/* ---------------------------------------------------------------- finishes of the dark theme
+   Two touches that cut across components and exist only on dark: a sheet's inset wells read through
+   its material, and raised things are lit from above. */
 /* A sheet's footer and header hairlines stay, but its inset wells read through the material. */
 [data-theme='dark'] .dialog .confirm-list,
 [data-theme='dark'] .dialog .browser,
@@ -136,11 +116,6 @@
 [data-theme='dark'] .wfd {
   background-image: linear-gradient(to bottom, var(--edge-hi), transparent 1px);
 }
-[data-theme='dark'] .main,
-[data-theme='dark'] .panel-shell {
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 1px 2px rgba(0, 0, 0, 0.18);
-}
-
 /* ---- popovers: grow from the anchor's corner, shrink back into it */
 .popover {
   animation: pop-spring var(--spring-snappy-t) var(--spring-snappy);
@@ -175,8 +150,6 @@
 
 /* ---- sheets */
 .scrim {
-  -webkit-backdrop-filter: var(--scrim-blur);
-  backdrop-filter: var(--scrim-blur);
   animation: veil-in var(--t-panel) var(--ease);
 }
 .dialog {
@@ -331,12 +304,6 @@ body.resizing .main {
 .settings-nav button {
   position: relative;
   z-index: 1;
-}
-.settings-nav button.on {
-  background: transparent;
-}
-.settings-nav button:hover {
-  background: var(--fill-1);
 }
 .settings-nav button.on:hover {
   background: transparent;
@@ -499,11 +466,6 @@ button.chip:active,
   position: relative;
   z-index: 1;
 }
-.seg button.on,
-[data-theme='dark'] .seg button.on {
-  background: transparent;
-  box-shadow: none;
-}
 .seg-thumb {
   position: absolute;
   top: 2px;
@@ -579,10 +541,6 @@ button.chip:active,
 }
 .composer:focus-within {
   transform: translateY(-1px);
-  box-shadow: 0 0 0 1px var(--hair-3), 0 0 0 5px color-mix(in srgb, var(--accent) 7%, transparent), 0 12px 36px -14px rgba(0, 0, 0, 0.6);
-}
-[data-theme='light'] .composer:focus-within {
-  box-shadow: 0 0 0 1px var(--hair-3), 0 0 0 5px color-mix(in srgb, var(--accent) 8%, transparent), 0 14px 36px -16px rgba(17, 17, 26, 0.28);
 }
 .composer-wrap.dragging .composer {
   transform: none;
@@ -616,19 +574,8 @@ button.chip:active,
   animation: pop-spring-sm var(--spring-snappy-t) var(--spring-snappy);
 }
 /* the fold line of a turn is a row: it lights under the pointer like the steps beneath it */
-.work-head {
-  width: calc(100% + 16px);
-  margin-left: -8px;
-  padding: 0 8px;
-  border-radius: var(--r-2);
-}
 .work-head:hover {
   background: var(--fill-1);
-}
-.chap-head {
-  margin-left: -6px;
-  padding: 0 6px;
-  width: calc(100% + 12px);
 }
 .chap-head:hover {
   background: var(--fill-1);
@@ -645,13 +592,6 @@ button.chip:active,
 .msg-thumb:hover,
 .tool-img:hover {
   transform: scale(1.015);
-}
-
-/* the "needs you" ring draws itself once more deliberately */
-.perm::after,
-.askcard.live::after,
-.plancard.live::after {
-  animation-duration: 1100ms;
 }
 
 /* ---------------------------------------------------------------- sidebar */
@@ -695,11 +635,6 @@ button.chip:active,
 /* ---------------------------------------------------------------- the conversation's edges
    The header is frosted glass and the conversation scrolls under it; at the bottom the text dissolves
    into a progressive blur before it reaches the composer, the way a list does under an iOS bar. */
-.session-head {
-  background: color-mix(in srgb, var(--canvas) 74%, transparent);
-  -webkit-backdrop-filter: blur(22px) saturate(160%);
-  backdrop-filter: blur(22px) saturate(160%);
-}
 .session:not(:has(> .mcp-notice-stack, > .helpers-bar, > .session-error)) > .transcript {
   margin-top: calc(-1 * var(--header-h));
 }
@@ -708,15 +643,6 @@ button.chip:active,
 }
 .session:not(:has(> .mcp-notice-stack, > .helpers-bar, > .session-error)) > .transcript .session-empty {
   padding-top: calc(12vh - var(--header-h) + 20px);
-}
-.composer-wrap::before {
-  top: -44px;
-  height: 44px;
-  background: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--canvas) 88%, transparent));
-  -webkit-backdrop-filter: blur(7px);
-  backdrop-filter: blur(7px);
-  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 75%);
-  mask-image: linear-gradient(to bottom, transparent, #000 75%);
 }
 
 /* ---- the send: the arrow launches, the field settles back to one line (Composer), and the
@@ -851,72 +777,9 @@ button.chip:active,
   }
 }
 
-/* ---------------------------------------------------------------- the session gauge */
-.gauge-row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-.gauge-wrap {
-  position: relative;
-  flex: none;
-  display: grid;
-  place-items: center;
-}
-.gauge {
-  display: block;
-}
-.gauge-track {
-  stroke: var(--fill-2);
-}
+/* the session gauge fills on a spring */
 .gauge-arc {
   transition: stroke-dashoffset var(--spring-soft-t) var(--spring-soft), stroke var(--t-slow) var(--ease);
-}
-.gauge-num {
-  position: absolute;
-  font-size: 17px;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  font-variant-numeric: tabular-nums;
-}
-.gauge-side {
-  display: grid;
-  gap: 10px;
-  min-width: 0;
-  flex: 1;
-}
-.gauge-line {
-  font-size: var(--fs-small);
-  color: var(--text-3);
-}
-.gauge-line b {
-  font-weight: 600;
-  color: var(--text);
-}
-.stat-row {
-  display: flex;
-  gap: 8px;
-}
-.stat {
-  flex: 1;
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-  padding: 8px 10px 7px;
-  border-radius: 10px;
-  background: var(--fill-1);
-  box-shadow: inset 0 0 0 0.5px var(--hair);
-}
-.stat-k {
-  font-size: var(--fs-micro);
-  color: var(--text-3);
-  white-space: nowrap;
-}
-.stat-v {
-  font-size: 14px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  font-variant-numeric: tabular-nums;
 }
 
 /* ---------------------------------------------------------------- small things */

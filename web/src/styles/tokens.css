@@ -79,6 +79,7 @@
   --chrome: #1f1f1f; /* sidebar and side panel */
   --raised: #262626; /* composer, cards, menus */
   --raised-2: #303030; /* hover / selected on raised */
+  --card-ask: #212124; /* cards that wait on you: a permission, a question, a plan, setup */
   --inset: #141414; /* code, diffs, fields */
   --hair: rgba(255, 255, 255, 0.07);
   --hair-2: rgba(255, 255, 255, 0.12);
@@ -190,6 +191,7 @@
   --chrome: #fafafa;
   --raised: #ffffff;
   --raised-2: #f2f2f2;
+  --card-ask: #ffffff;
   --inset: #f9f9f9;
   --hair: rgba(0, 0, 0, 0.08);
   --hair-2: rgba(0, 0, 0, 0.12);

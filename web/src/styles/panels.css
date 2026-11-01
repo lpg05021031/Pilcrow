@@ -45,7 +45,6 @@
   font-size: var(--fs-ui);
   color: var(--text-3);
   white-space: nowrap;
-  transition: color var(--t-fast), background var(--t-fast);
 }
 .panel-tab:hover {
   color: var(--text);
@@ -69,7 +68,6 @@
   height: 2px;
   border-radius: 2px 2px 0 0;
   background: var(--text);
-  transition: transform var(--t-panel) var(--ease), width var(--t-panel) var(--ease);
   pointer-events: none;
   z-index: 1;
 }
@@ -162,15 +160,7 @@
   white-space: nowrap;
 }
 .select-btn.ghost-select {
-  height: 26px;
   max-width: 200px;
-  padding: 0 6px 0 8px;
-  background: transparent;
-  box-shadow: none;
-  font-weight: 550;
-}
-.select-btn.ghost-select:hover {
-  background: var(--fill-2);
 }
 .changes-stat {
   display: inline-flex;
@@ -247,7 +237,6 @@
 .cfile-toggle > svg {
   flex: none;
   color: var(--text-3);
-  transition: transform var(--t-med) var(--ease);
 }
 .cfile-name {
   font-family: var(--font-mono);
@@ -349,7 +338,6 @@
   text-align: left;
   color: var(--text-2);
   white-space: nowrap;
-  transition: background var(--t-fast), color var(--t-fast);
 }
 .tree-row:hover {
   background: var(--fill-1);
@@ -368,7 +356,6 @@
 }
 .tree-row > .lucide-chevron-right {
   color: var(--text-4);
-  transition: transform var(--t-fast) var(--ease);
 }
 .tree-err {
   font-size: 11.5px;
@@ -399,7 +386,6 @@
   border-radius: var(--r-2) var(--r-2) 0 0;
   font-size: 12px;
   color: var(--text-3);
-  transition: color var(--t-fast), background var(--t-fast);
 }
 .ftab:hover {
   color: var(--text);
@@ -486,7 +472,6 @@
   border-radius: var(--r-2);
   font-size: 12px;
   color: var(--text-3);
-  transition: color var(--t-fast), background var(--t-fast);
 }
 .ttab:hover {
   color: var(--text);
@@ -617,7 +602,6 @@
   height: 100%;
   border-radius: 2px;
   background: var(--text-2);
-  transition: width 0.5s var(--ease);
 }
 .task-row {
   display: flex;
@@ -661,7 +645,6 @@
   height: 100%;
   border-radius: 3px;
   background: var(--text-2);
-  transition: width 0.5s var(--ease);
 }
 .ctx-meter > .warm {
   background: var(--accent);
@@ -940,7 +923,6 @@
   padding: 5px 6px 5px 4px;
   border-radius: var(--r-2);
   text-align: left;
-  transition: background var(--t-fast);
 }
 .tl-row-btn:hover,
 .tl-row.on > .tl-row-btn {
@@ -1219,4 +1201,69 @@
   width: 100%;
   border: 0;
   background: #fff;
+}
+
+/* ================================================================ the session gauge (Info) */
+.gauge-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.gauge-wrap {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+.gauge {
+  display: block;
+}
+.gauge-track {
+  stroke: var(--fill-2);
+}
+.gauge-num {
+  position: absolute;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.gauge-side {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+.gauge-line {
+  font-size: var(--fs-small);
+  color: var(--text-3);
+}
+.gauge-line b {
+  font-weight: 600;
+  color: var(--text);
+}
+.stat-row {
+  display: flex;
+  gap: 8px;
+}
+.stat {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px 7px;
+  border-radius: 10px;
+  background: var(--fill-1);
+  box-shadow: inset 0 0 0 0.5px var(--hair);
+}
+.stat-k {
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.stat-v {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
 }

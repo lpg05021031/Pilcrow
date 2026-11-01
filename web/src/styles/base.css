@@ -206,13 +206,9 @@ kbd {
   color: var(--text);
   font-weight: 500;
   white-space: nowrap;
-  transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast), transform var(--t-fast) var(--ease), opacity var(--t-fast);
 }
 .btn:hover {
   background: var(--fill-3);
-}
-.btn:active:not(:disabled) {
-  transform: scale(0.98);
 }
 .btn:disabled {
   opacity: 0.45;
@@ -286,15 +282,11 @@ kbd {
   height: 28px;
   border-radius: var(--r-2);
   color: var(--text-3);
-  transition: background var(--t-fast), color var(--t-fast), transform var(--t-fast) var(--ease);
   flex: none;
 }
 .icon-btn:hover {
   background: var(--fill-2);
   color: var(--text);
-}
-.icon-btn:active {
-  transform: scale(0.94);
 }
 .icon-btn.active,
 .icon-btn[aria-expanded='true'] {
@@ -332,7 +324,6 @@ kbd {
   box-shadow: inset 0 0 0 1px var(--hair);
   color: var(--text);
   outline: none;
-  transition: box-shadow var(--t-fast), background var(--t-fast);
 }
 .input::placeholder,
 .textarea::placeholder {
@@ -381,7 +372,6 @@ kbd {
   height: 20px;
   border-radius: 10px;
   background: var(--fill-3);
-  transition: background var(--t-med) var(--ease);
   flex: none;
 }
 .switch::after {
@@ -394,7 +384,6 @@ kbd {
   border-radius: 50%;
   background: #fff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-  transition: transform var(--t-med) var(--spring);
 }
 /* On = lit amber track; the knob stays white in both states so "off" can never read as "on". */
 .switch.on {
