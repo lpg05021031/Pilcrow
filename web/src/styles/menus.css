@@ -86,6 +86,11 @@
   box-shadow: none;
   color: var(--text-3);
 }
+/* on the lit row's fill the faint inks fall short of 4.5:1 (tokens.css) */
+.menu-item.active .menu-hint,
+.menu-item.active kbd {
+  color: var(--text);
+}
 .menu-sep {
   height: 1px;
   margin: var(--sp-1) var(--sp-1_5);

@@ -370,6 +370,12 @@
   font-size: var(--fs-small);
   color: var(--text-3);
 }
+/* on the lit row's fill the faint inks fall short of 4.5:1 (tokens.css) */
+.suggest-item.active svg,
+.suggest-item.active .suggest-slash,
+.suggest-item.active .suggest-hint {
+  color: var(--text);
+}
 
 .composer-wrap.dragging .composer {
   box-shadow: 0 0 0 2px var(--accent-line), 0 0 0 6px var(--accent-wash);

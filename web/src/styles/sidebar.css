@@ -259,6 +259,17 @@
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
+/* on a row's hover and selection fills the faint ink falls short of 4.5:1 (tokens.css) */
+.side-row:hover .side-row-meta,
+.side-row:hover .side-time,
+.side-row.menu-open .side-row-meta,
+.side-row.menu-open .side-time {
+  color: var(--text-2);
+}
+.side-row.active .side-row-meta,
+.side-row.active .side-time {
+  color: var(--text);
+}
 .side-row-menu {
   position: absolute;
   right: 0;
