@@ -8,6 +8,7 @@ frame per session, coalesced).
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
@@ -19,6 +20,8 @@ from . import theme as theme_mod
 from .lib.fmt import err_text, set_home
 from .lib.transcript_model import TranscriptModel
 from .rpc import Call, RpcError, rpc
+
+log = logging.getLogger(__name__)
 
 Json = Dict[str, Any]
 
@@ -137,6 +140,8 @@ class Store(QObject):
     notify = Signal(str, str, str)  # session id, title, body
     attention = Signal()
     sent = Signal(str)  # a message went out for this session: the transcript goes to its live end
+    term_data = Signal(object)  # {"id", "data"}: a terminal's output (the Terminal tab)
+    term_exit = Signal(object)  # {"id", "code"}: a terminal's process ended
 
     def __init__(self) -> None:
         super().__init__()
@@ -315,6 +320,8 @@ class Store(QObject):
         rpc.on("dispatch.changed", self._on_dispatch)
         rpc.on("dispatch.playbooks", lambda _d: self.load_playbooks())
         rpc.on("timeline.step", self._on_timeline_step)
+        rpc.on("term.data", self.term_data.emit)
+        rpc.on("term.exit", self.term_exit.emit)
         hints = QGuiApplication.styleHints()
         if hasattr(hints, "colorSchemeChanged"):
             hints.colorSchemeChanged.connect(lambda _s: self.apply_theme())
@@ -360,10 +367,10 @@ class Store(QObject):
                     self.open_session(last)
 
         rpc.call("app.info").then(lambda r: (pending.__setitem__("info", r or {}), ready())).catch(
-            lambda e: print("[store] app.info failed", e)
+            lambda e: log.warning("app.info failed: %s", e)
         )
         rpc.call("config.get").then(lambda r: (pending.__setitem__("config", r or {}), ready())).catch(
-            lambda e: print("[store] config.get failed", e)
+            lambda e: log.warning("config.get failed: %s", e)
         )
 
     def _on_msgs(self, d: Json) -> None:

@@ -16,6 +16,7 @@ tints (``theme.tint``), so a theme change costs a repaint and no stylesheet is r
 from __future__ import annotations
 
 import html
+import logging
 import re
 import time
 from typing import Callable, Dict, List, Optional
@@ -38,6 +39,8 @@ from ...store import store
 from ..ui.bits import Hairline, IconButton  # Hairline is re-exported to the panels
 from ..ui.button import Btn  # noqa: F401 - re-exported to the panels
 from ..ui.signals import bind
+
+log = logging.getLogger(__name__)
 
 TABS = [
     {"id": "changes", "label": "Changes", "icon": "git-compare", "key": "1"},
@@ -745,8 +748,8 @@ class RightPanel(QWidget):
                 w = PreviewPanel(sid, cwd)
             else:
                 return placeholder(f"No such tab: {tab}")
-        except Exception as e:  # a tab that cannot load must not take the panel down
-            print(f"[panel] {tab} is not available: {e!r}")
+        except Exception:  # a tab that cannot load must not take the panel down
+            log.warning("the %s tab is not available", tab, exc_info=True)
             return placeholder(f"The {tab} tab is not available in this build.")
         set_session = getattr(w, "set_session", None)
         if set_session:

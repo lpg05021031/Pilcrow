@@ -875,25 +875,6 @@ class Flow(QWidget):
             self.updateGeometry()
 
 
-def folder_picker(value: str, on_pick: Callable[[str], None]) -> Optional[QWidget]:
-    """The in-app folder chooser (widgets/folder_picker.py, written separately) when it exists and takes
-    ``(value, on_pick)``; None when it is not there yet, so callers fall back to a path field + QFileDialog."""
-    try:
-        from ..folder_picker import FolderPicker  # noqa: WPS433 — optional, lands with another module
-    except Exception:
-        return None
-    for make in (lambda: FolderPicker(value, on_pick), lambda: FolderPicker(value=value, on_pick=on_pick)):
-        try:
-            w = make()
-        except TypeError:
-            continue
-        except Exception as e:  # a broken picker must not take the dialog down
-            print(f"[dialogs] FolderPicker failed: {e!r}")
-            return None
-        return w if isinstance(w, QWidget) else None
-    return None
-
-
 # ---------------------------------------------------------------- the model picker
 
 CUSTOM = "__custom"

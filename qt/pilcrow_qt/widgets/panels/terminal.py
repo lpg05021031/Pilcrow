@@ -20,7 +20,6 @@ from PySide6.QtWidgets import QAbstractScrollArea, QFrame, QStackedWidget, QVBox
 
 from ... import icons, theme
 from ...lib.fmt import basename, err_text
-from ...rpc import rpc
 from ...store import store
 from ..ui.bits import IconButton, Row
 from ..ui.menu import show_menu_at
@@ -675,9 +674,8 @@ class TerminalPanel(QWidget):
         self.empty = self._empty_state()
         root.addWidget(self.empty, 1)
         self.empty.hide()
-        self._off_data = rpc.on("term.data", self._on_data)
-        self._off_exit = rpc.on("term.exit", self._on_exit)
-        self.destroyed.connect(lambda *_a: (self._off_data(), self._off_exit()))
+        bind(store.term_data, self, self._on_data)
+        bind(store.term_exit, self, self._on_exit)
         bind(store.info_changed, self, lambda _i: self.render())
         self.render()
 
@@ -847,6 +845,7 @@ if __name__ == "__main__":  # pragma: no cover - development window
     from PySide6.QtWidgets import QApplication
 
     from ... import fonts
+    from ...rpc import rpc
 
     app = QApplication(sys.argv)
     fonts.load()

@@ -8,10 +8,13 @@ when the answer arrives; ``on()`` subscribes to an event by name.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Callable, Dict, List, Optional
 
 from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 from PySide6.QtWebSockets import QWebSocket
+
+log = logging.getLogger(__name__)
 
 Params = Dict[str, Any]
 
@@ -54,7 +57,7 @@ class Call(QObject):
     def _reject(self, error: RpcError) -> None:
         self._done, self._error = True, error
         if not self._err:
-            print(f"[rpc] {self.method} failed: {error}")
+            log.warning("%s failed: %s", self.method, error)
         for fn in self._err:
             _safely(fn, error)
 
@@ -62,8 +65,8 @@ class Call(QObject):
 def _safely(fn: Callable, arg: Any) -> None:
     try:
         fn(arg)
-    except Exception as e:  # a handler must never take the socket down
-        print(f"[rpc] handler failed: {e!r}")
+    except Exception:  # a handler must never take the socket down
+        log.warning("an rpc handler failed", exc_info=True)
 
 
 class Rpc(QObject):

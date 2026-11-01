@@ -7,6 +7,7 @@ device pixel ratio and caches it.
 
 from __future__ import annotations
 
+import logging
 from functools import lru_cache
 from pathlib import Path
 from typing import Optional
@@ -14,6 +15,8 @@ from typing import Optional
 from PySide6.QtCore import QByteArray, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
+
+log = logging.getLogger(__name__)
 
 ICON_DIR = Path(__file__).parent / "assets" / "icons"
 STROKE = 2.0
@@ -24,7 +27,7 @@ def _svg(name: str, color: str, stroke: float) -> bytes:
     path = ICON_DIR / f"{name}.svg"
     if not path.exists():
         # A missing icon draws nothing rather than crashing; the name is the clue in the log.
-        print(f"[icons] no icon named {name!r}")
+        log.warning("no icon named %r", name)
         return b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"/>'
     src = path.read_text(encoding="utf-8")
     src = src.replace("currentColor", color)

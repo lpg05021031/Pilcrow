@@ -10,6 +10,7 @@ cools the ones far away between frames, under a time budget.
 
 from __future__ import annotations
 
+import logging
 import math
 import time
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
@@ -28,6 +29,8 @@ from .blocks.island import IslandBlock
 from .clock import Tween, clock
 from .paint import FULL, Measurer, PaintState, rounded
 from .scene import GRADE_EXACT, GRADE_FAST, Block, Group, Scene, Target
+
+log = logging.getLogger(__name__)
 
 PAD_TOP = 22
 PAD_BOTTOM = 44
@@ -737,9 +740,9 @@ class CanvasView(QAbstractScrollArea):
             b.paint(p, rect.x(), rect.y(), rect.width(), st)
             if st.focus is not None and self.hasFocus():
                 self._paint_focus_ring(p, rect, st)
-        except Exception as ex:  # one row's painter must not blank the frame
+        except Exception:  # one row's painter must not blank the frame
             if not getattr(b, "_paint_failed", False):
-                print(f"[canvas] {b.key} could not paint: {ex!r}")
+                log.warning("%s could not paint", b.key, exc_info=True)
                 try:
                     b._paint_failed = True  # type: ignore[attr-defined]
                 except AttributeError:
@@ -775,8 +778,8 @@ class CanvasView(QAbstractScrollArea):
             bst.caching = True
             try:
                 b.paint(pp, 0, 0, rect.width(), bst)
-            except Exception as ex:
-                print(f"[canvas] {b.key} could not paint: {ex!r}")
+            except Exception:  # a painter that trips leaves the canvas colour, not a hole
+                log.warning("%s could not paint", b.key, exc_info=True)
             pp.end()
             self.m.pixmaps.put(key, pm)
         p.drawPixmap(rect.topLeft(), pm)

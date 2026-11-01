@@ -12,6 +12,7 @@ from the document's layout (ported from widgets/transcript/items.py MarkdownView
 from __future__ import annotations
 
 import html
+import logging
 import math
 from collections import OrderedDict
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -42,6 +43,8 @@ from PySide6.QtGui import (
 from .. import icons, markdown, theme
 from .estimate import Calibration, Metrics
 from .pixels import hline, pen_width, snap
+
+log = logging.getLogger(__name__)
 
 Rect = Tuple[int, int, int, int]
 FULL = "full"
@@ -622,11 +625,11 @@ class Measurer:
             tokens = markdown.parse_tokens(src, streaming) if src else []
             b = build.Builder(doc, m, self.tokens, self, width, cwd, streaming, line_height)
             b.run(tokens)
-        except Exception as ex:  # a builder failure must not take the row down
+        except Exception:  # a builder failure must not take the row down
             global _build_failed
             if not _build_failed:
                 _build_failed = True
-                print(f"[canvas] document builder failed, HTML renderer used: {ex!r}")
+                log.warning("the document builder failed; the HTML renderer is used", exc_info=True)
             return self.markdown_doc_html(src, width, compact, quiet, streaming, cwd, line_height, size)
         if b.used_checks:
             for name, on in ((markdown.CHECK_ON, True), (markdown.CHECK_OFF, False)):
