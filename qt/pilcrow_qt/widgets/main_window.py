@@ -137,16 +137,16 @@ class MainWindow(QMainWindow):
 
         install_overlays(self)
 
-        store.connected_changed.connect(self._on_connected)
+        bind(store.connected_changed, self, self._on_connected)
         bind(store.config_changed, self, lambda _c: self._after_boot())
         bind(store.active_changed, self, lambda _a: self._route())
         bind(store.page_changed, self, lambda _p: self._route())
         bind(store.sessions_changed, self, lambda _s: self._route())
         bind(store.ui_changed, self, lambda _u: self._on_ui())
         bind(store.info_changed, self, lambda _i: self.update_notice.refresh())
-        store.dialog_changed.connect(self._on_dialog)
+        bind(store.dialog_changed, self, self._on_dialog)
         bind(store.toasts_changed, self, lambda _t: self._ensure_toasts())
-        store.notify.connect(self._notify)
+        bind(store.notify, self, self._notify)
         bind(
             store.attention,
             self,
@@ -630,6 +630,20 @@ class Card(QWidget):
     def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         self._frame.setGeometry(self.rect())
+        self._frame.setMask(self._frame_region())
+
+    def _frame_region(self) -> QRegion:
+        """What the frame draws on: the band above the sheet with its top line and the light under
+        it, the corners, the side and bottom lines. Nothing else: Qt repaints the whole of a scrolled
+        rect that a sibling overlaps, and the conversation blits its scroll (CanvasView.scrollContentsBy)
+        only because the frame lies over nothing of it but the margins it leaves out."""
+        r, rad, w = self.sheet_rect(), self.RADIUS, self.width()
+        rg = QRegion(0, 0, w, r.top() + 3) + QRegion(0, r.bottom(), w, 1)
+        rg += QRegion(r.left(), r.top(), 1, r.height()) + QRegion(r.right(), r.top(), 1, r.height())
+        for x in (r.left(), r.right() + 1 - rad):
+            for y in (r.top(), r.bottom() + 1 - rad):
+                rg += QRegion(x, y, rad, rad)
+        return rg
 
     def paintEvent(self, e) -> None:
         t = theme.tokens()

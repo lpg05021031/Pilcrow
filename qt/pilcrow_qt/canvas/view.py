@@ -40,6 +40,8 @@ PREFETCH_BUDGET = 0.004
 FLING_BUDGET = 0.002
 OPEN_BUDGET = 0.014  # measuring a fold's children before it opens, so the reveal runs on true heights
 SCROLL_BUDGET = 0.008  # exact measuring on a person's scroll or a resize step; the rest follows in the drain
+BLIT_SIDE = 4  # px at each side of the viewport a seam's handle may lie over (4 of its 9)
+BLIT_FOOT = 44  # px at its bottom the composer's fade lies over
 WARM_MAX = 600  # warm blocks kept before the far ones are cooled regardless of movement
 
 _measurer: Optional[Measurer] = None
@@ -425,8 +427,21 @@ class CanvasView(ViewInput, QAbstractScrollArea):
             self._rehover()
 
     def scrollContentsBy(self, dx: int, dy: int) -> None:
-        if not self._silent:
-            self.viewport().scroll(0, dy)
+        """Blit the picture by ``dy``. Qt blits only where no other widget lies over the scrolled rect
+        (else it repaints the whole viewport): the composer's fade lies over the view's bottom and a
+        seam's handle over its sides, so the blit leaves those margins out and they are repainted."""
+        if self._silent:
+            return
+        vp = self.viewport()
+        w, h = vp.width(), vp.height()
+        inner = QRect(BLIT_SIDE, 0, w - 2 * BLIT_SIDE, h - BLIT_FOOT)
+        if inner.width() <= 0 or inner.height() <= abs(dy):
+            vp.update()
+            return
+        vp.scroll(0, dy, inner)
+        vp.update(QRect(0, 0, BLIT_SIDE, h))
+        vp.update(QRect(w - BLIT_SIDE, 0, BLIT_SIDE, h))
+        vp.update(QRect(0, h - BLIT_FOOT, w, BLIT_FOOT))
 
     def scroll_to_bottom(self, animate: bool = True) -> None:
         self.follow.on_jump_to_end()

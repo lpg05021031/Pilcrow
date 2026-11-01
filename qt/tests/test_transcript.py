@@ -370,3 +370,40 @@ def test_a_screen_reader_hears_every_row_of_a_long_conversation_once_and_in_word
     assert {"##", "- ", "In"} <= set(prose), sorted(prose)
     assert re.match(r"Module \d+: what it does$", prose["##"]) and "`" not in prose["In"], prose
     assert any("Copy the code" in kids for _b, _n, kids in md.values()), "a code well's Copy is a child of its row"
+
+
+def test_a_scroll_in_the_window_blits_and_repaints_only_what_it_uncovers(app_client):
+    """Qt repaints the whole of a scrolled widget that another widget lies over; in the window the
+    composer's fade and a seam's handle lie over the conversation, and the card's frame did over all
+    of it. The view blits all but those margins, so a 24 px step repaints a strip and the margins."""
+    from PySide6.QtCore import QEvent, QObject
+
+    c = app_client
+    win, tr = _mount(c, "sess-long")
+    try:
+        assert win is c.win, "the real window: its overlays are the point"
+        vp = tr.view.viewport()
+        vb = tr.verticalScrollBar()
+        vb.setValue(vb.maximum() // 2)
+        c.sleep(200)
+        areas: list = []
+
+        class Paints(QObject):
+            def eventFilter(self, obj, e) -> bool:
+                if obj is vp and e.type() == QEvent.Type.Paint:
+                    areas.append(sum(r.width() * r.height() for r in e.region()))
+                return False
+
+        f = Paints()
+        vp.installEventFilter(f)
+        try:
+            for _ in range(4):
+                vb.setValue(vb.value() - 24)
+                c.sleep(30)
+        finally:
+            vp.removeEventFilter(f)
+        whole = vp.width() * vp.height()
+        assert areas and max(areas) < whole // 2, (areas, whole)
+    finally:
+        if win is not c.win:
+            win.close()
