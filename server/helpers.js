@@ -11,11 +11,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
-import { findRepos, groupHunks, ruleKey, ruleLabel } from './dispatch_core.js';
+import { findRepos, groupHunks, ruleKey, ruleLabel, TERMINAL, ACTIVE } from './dispatch_core.js';
+import { absolute, fmtCost, textOfContent, under } from './util.js';
 
 export const STATES = ['queued', 'preparing', 'running', 'needs_action', 'done', 'failed', 'stopped', 'skipped'];
-export const TERMINAL = new Set(['done', 'failed', 'stopped', 'skipped']);
-export const ACTIVE = new Set(['preparing', 'running', 'needs_action']);
 export const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 export const HANDOFF_MAX = 4000;
 export const READ_DEFAULT = 8000;
@@ -65,7 +64,6 @@ export function fmtDuration(ms) {
   if (m < 60) return `${m}m${String(s % 60).padStart(2, '0')}s`;
   return `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}m`;
 }
-const fmtCost = (usd) => `$${(usd || 0).toFixed(2)}`;
 
 /** A unified diff as text from git.diff's files, cut per file at a budget. */
 export function renderDiff(files, { maxChars = READ_DEFAULT, only = '' } = {}) {
@@ -110,8 +108,6 @@ export function createHelpers(deps) {
     now = () => Date.now(),
     uuid = () => crypto.randomUUID(),
     slash = (p) => p,
-    expandHome = (p) => p,
-    textOfContent = (c) => (Array.isArray(c) ? c.filter((x) => x?.type === 'text').map((x) => x.text).join('\n') : typeof c === 'string' ? c : ''),
     homeDir = slash(os.homedir()),
     cpus = os.cpus().length || 2,
     exists = (p) => fs.existsSync(p),
@@ -141,7 +137,6 @@ export function createHelpers(deps) {
   };
   const helpersOf = (leadId) => [...helpers.values()].filter((h) => h.leadId === leadId && !h.removed).sort((a, b) => a.startedAt - b.startedAt);
   const byName = (leadId, name) => helpersOf(leadId).find((h) => h.name === name) || null;
-  const absolute = (p) => slash(path.resolve(expandHome(String(p || '').trim()))).replace(/(?<=.)\/+$/, '');
   const leadMeta = (leadId) => store.getMeta(leadId) || {};
 
   // ---- persistence
@@ -213,10 +208,11 @@ export function createHelpers(deps) {
     const s = leadSessionOf(leadId);
     return slash(m.worktree?.repoRoot || m.project || m.cwd || s?.cwd || '');
   }
-  const under = (dir, p) => Boolean(dir) && (p === dir || p.startsWith(dir.endsWith('/') ? dir : dir + '/'));
 
-  /** The folder a start names, from `repo` (a registered name or alias, or a path) or `cwd`. */
-  /** @param {{ repo?: string, cwd?: string }} where */
+  /**
+   * The folder a start names, from `repo` (a registered name or alias, or a path) or `cwd`.
+   * @param {{ repo?: string, cwd?: string }} where
+   */
   function resolveFolder({ repo, cwd }) {
     if (repo) {
       const hit = registry?.resolve(repo);
@@ -327,12 +323,12 @@ export function createHelpers(deps) {
     setState(h, 'preparing');
     try {
       const session = await sessions.get(h.id);
-      const deps_ = (h.after || []).map((a) => byName(h.leadId, a)).filter((d) => d && d.state === 'done');
+      const waitedFor = (h.after || []).map((a) => byName(h.leadId, a)).filter((d) => d && d.state === 'done');
       let text = HEADER + '\n\n' + h.brief;
       const notes = registry?.notesFor(h.folder || h.cwd);
       if (notes) text += `\n\n## About this repository\n${notes}`;
-      if (deps_.length) {
-        text += '\n\n## From helpers you waited for\n' + deps_.map((d) => `- ${d.name} (done, ${fmtDuration((d.endedAt || now()) - (d.launchedAt || d.startedAt))})${d.worktree ? `: worktree ${d.worktree.path} on branch ${d.worktree.branch}. Read the change there before you start.` : ''}\n${(d.handoff || 'no handoff').replace(/^/gm, '  ')}`).join('\n');
+      if (waitedFor.length) {
+        text += '\n\n## From helpers you waited for\n' + waitedFor.map((d) => `- ${d.name} (done, ${fmtDuration((d.endedAt || now()) - (d.launchedAt || d.startedAt))})${d.worktree ? `: worktree ${d.worktree.path} on branch ${d.worktree.branch}. Read the change there before you start.` : ''}\n${(d.handoff || 'no handoff').replace(/^/gm, '  ')}`).join('\n');
       }
       h.briefSent = text;
       setState(h, 'running');
@@ -359,14 +355,14 @@ export function createHelpers(deps) {
     const cp = caps();
     for (const h of helpersOf(leadId)) {
       if (h.state !== 'queued') continue;
-      const deps_ = (h.after || []).map((a) => byName(leadId, a));
-      const bad = deps_.find((d) => !d || (TERMINAL.has(d.state) && d.state !== 'done'));
+      const waitedFor = (h.after || []).map((a) => byName(leadId, a));
+      const bad = waitedFor.find((d) => !d || (TERMINAL.has(d.state) && d.state !== 'done'));
       if (bad) {
         setState(h, 'skipped', `${bad?.name || 'a helper it waited for'} ${bad ? bad.state : 'is gone'}`);
         note(leadId, h, 'skipped');
         continue;
       }
-      if (!deps_.every((d) => d.state === 'done')) continue;
+      if (!waitedFor.every((d) => d.state === 'done')) continue;
       if (helpersOf(leadId).filter((x) => ACTIVE.has(x.state)).length >= cp.parallel) continue;
       launch(h).catch((e) => log('helper launch failed', e?.message));
     }
@@ -407,7 +403,7 @@ export function createHelpers(deps) {
   }
 
   /** The text of the helper's last reply, whole (the session's lastReply is a one-line gist). */
-  function lastAssistantText(session) {
+  function lastReplyText(session) {
     const msgs = session?.messages || [];
     const parts = [];
     for (let i = msgs.length - 1; i >= 0; i--) {
@@ -461,7 +457,7 @@ export function createHelpers(deps) {
           h.stopping = null;
           end(h, 'stopped', why);
         } else {
-          h.handoff = extractHandoff(lastAssistantText(sessions.find?.(h.id)));
+          h.handoff = extractHandoff(lastReplyText(sessions.find?.(h.id)));
           persist(h);
           end(h, 'done', null);
         }
@@ -594,7 +590,7 @@ export function createHelpers(deps) {
     if (what === 'summary') return { ...base, ...cut(h.handoff || (TERMINAL.has(h.state) ? h.reason || 'No handoff.' : `Still ${h.state}; nothing to summarize yet.`)) };
     const session = sessions.find?.(h.id) || (await sessions.get(h.id).catch(() => null));
     await session?.loadHistory?.(); // a session reopened, or one whose transcript was let go when idle
-    if (what === 'last') return { ...base, ...cut(lastAssistantText(session) || 'Nothing said yet.') };
+    if (what === 'last') return { ...base, ...cut(lastReplyText(session) || 'Nothing said yet.') };
     if (what === 'files') {
       await collect(h);
       const list = h.fileList || [];
@@ -972,13 +968,13 @@ export function createHelpers(deps) {
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { store } from './config.js';
-import { sessions, bus, extensions, textOfContent } from './sessions.js';
+import { sessions, bus, extensions } from './sessions.js';
 import * as git from './git.js';
 import { pushInbox, updateInbox } from './schedules.js';
 import { repos } from './repos.js';
-import { expandHome, log, slash, run, which } from './util.js';
+import { log, slash, run, which } from './util.js';
 
-export const helpers = createHelpers({ sessions, bus, store, git, registry: repos, pushInbox, updateInbox, which, run, log, slash, expandHome, textOfContent });
+export const helpers = createHelpers({ sessions, bus, store, git, registry: repos, pushInbox, updateInbox, which, run, log, slash });
 export const events = helpers.events;
 
 /** Wire the instance into sessions.js: the MCP server, the permission decisions, the state fields. */

@@ -150,7 +150,6 @@ function harness({ realWorktrees = false, file = null as string | null, shell = 
     },
     run: async () => ({ code: 1, stdout: '', stderr: 'no gh in tests' }),
     which: () => null,
-    textOfContent: (c: any) => (Array.isArray(c) ? c.filter((x) => x.type === 'text').map((x) => x.text).join('\n') : ''),
   });
   d.begin();
   return { d, bus, sessions, inbox, inboxUpdates, shellCalls, store };

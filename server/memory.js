@@ -2,13 +2,11 @@
 // kept as short notes and handed to every new session in that folder. Notes are distilled by a
 // small one-shot run at the end of a turn, or written by hand.
 import path from 'node:path';
-import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { store } from './config.js';
 import { resolveClaude } from './claude.js';
-import { xdg, readJson, writeJson, uuid, log, slash, cleanEnv } from './util.js';
-import { textOfContent } from './sessions.js';
+import { xdg, readJson, writeJson, uuid, log, slash, cleanEnv, textOfContent, folderKey } from './util.js';
 
 export const events = new EventEmitter();
 
@@ -17,17 +15,16 @@ const MAX_NOTES = 80;
 const MAX_INJECT_CHARS = 2600;
 const MIN_GAP_MS = 10 * 60e3;
 
-const keyOf = (cwd) => crypto.createHash('sha1').update(slash(cwd)).digest('hex').slice(0, 16);
-const fileOf = (cwd) => path.join(ROOT, `${keyOf(cwd)}.json`);
+const fileOf = (cwd) => path.join(ROOT, `${folderKey(cwd)}.json`);
 const cache = new Map();
 
 function load(cwd) {
-  const k = keyOf(cwd);
+  const k = folderKey(cwd);
   if (!cache.has(k)) cache.set(k, readJson(fileOf(cwd), { cwd: slash(cwd), notes: [], distills: {} }));
   return cache.get(k);
 }
 function save(cwd, data) {
-  cache.set(keyOf(cwd), data);
+  cache.set(folderKey(cwd), data);
   writeJson(fileOf(cwd), data);
   events.emit('changed', { cwd: slash(cwd) });
 }

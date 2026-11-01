@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { readJson as readJsonFile, writeJson as writeJsonFile, lastAssistantText, fmtCost } from './util.js';
 
 export const TERMINAL = new Set(['done', 'failed', 'stopped', 'skipped']);
 export const ACTIVE = new Set(['preparing', 'running', 'needs_action']);
@@ -40,7 +41,9 @@ const COALESCE_MS = 16;
 // The file is saved at most this often: a running job changes many times a second (what each run is
 // doing now), and every save rewrites the whole file. end() writes what is left.
 const SAVE_MS = 1000;
-const CLOSE_AFTER_MS = 1500; // a finished run's process lingers this long for its last messages
+const CLOSE_AFTER_MS = 1500;
+const SCAN_TTL_MS = 60_000; // a workspace scan walks folders; the picker asks again on every open
+const MAX_BACKOFF_MS = 60_000; // a rate-limited run waits twice as long each time, up to this // a finished run's process lingers this long for its last messages
 
 // ---------------------------------------------------------------- pure helpers
 
@@ -193,18 +196,10 @@ export function forecastFrom(canaryRuns, remaining, parallel) {
   return { cost: Math.round(costPer * ru * 100) / 100, minutes: Math.max(1, Math.round((msPer * ru) / Math.max(1, parallel) / 60e3)), from: done.map((r) => r.name), runs: remaining.length };
 }
 
-function readJsonFile(p) {
-  try {
-    return JSON.parse(fs.readFileSync(p, 'utf8'));
-  } catch {
-    return null;
-  }
-}
-
 /** Local dependencies a manifest declares: package.json file:/link:/workspace:, go.mod replace, Cargo path. */
 export function manifestOf(dir) {
   const out = { name: null, kind: null, localDeps: [], depNames: [] };
-  const pkg = readJsonFile(path.join(dir, 'package.json'));
+  const pkg = readJsonFile(path.join(dir, 'package.json'), null);
   if (pkg && typeof pkg === 'object') {
     out.kind = 'node';
     out.name = typeof pkg.name === 'string' ? pkg.name : null;
@@ -306,13 +301,9 @@ export function createDispatcher(deps) {
     uuid = () => crypto.randomUUID(),
     slugify = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40),
     slash = (p) => p,
-    textOfContent = () => '',
     registry = null, // the repositories registry (REPOSITORIES.md): policy, defaults and notes per folder
-    readJson = (p, fb) => readJsonFile(p) ?? fb,
-    writeJson = (p, d) => {
-      fs.mkdirSync(path.dirname(p), { recursive: true });
-      fs.writeFileSync(p, JSON.stringify(d, null, 2));
-    },
+    readJson = readJsonFile,
+    writeJson = writeJsonFile,
   } = deps;
 
   const events = new EventEmitter();
@@ -408,7 +399,7 @@ export function createDispatcher(deps) {
   async function scan({ root, depth = 3, force = false } = {}) {
     if (!root || !fs.existsSync(root)) throw new Error('Pick a folder that exists.');
     const hit = scanCache.get(root);
-    if (hit && !force && now() - hit.at < 60_000) return hit.result;
+    if (hit && !force && now() - hit.at < SCAN_TTL_MS) return hit.result;
     const dirs = findRepos(root, depth);
     const repos = [];
     const metaAll = store.meta || {};
@@ -982,21 +973,9 @@ export function createDispatcher(deps) {
     run.del = del;
     if (session) {
       run.cost = session.usage?.costUsd || run.cost || 0;
-      const text = session.lastReply?.text || lastAssistantText(session) || '';
+      const text = session.lastReply?.text || lastAssistantText(session.messages);
       if (text) run.summary = text.slice(0, 1200);
     }
-  }
-
-  function lastAssistantText(session) {
-    const msgs = session?.messages || [];
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      const m = msgs[i];
-      if (m.type === 'assistant' && !m.parent_tool_use_id) {
-        const t = textOfContent(m.message?.content);
-        if (t) return t.replace(/\s+/g, ' ').trim();
-      }
-    }
-    return '';
   }
 
   function endRun(job, run, state, reason, session) {
@@ -1050,7 +1029,7 @@ export function createDispatcher(deps) {
     if (st.status === 'error') {
       if (RATE_LIMIT.test(String(st.error || '')) && run.attempt < 4) {
         clearRunTimer(run);
-        job.backoffMs = Math.min(60_000, (job.backoffMs || 2000) * 2);
+        job.backoffMs = Math.min(MAX_BACKOFF_MS, (job.backoffMs || 2000) * 2);
         job.backoffUntil = now() + job.backoffMs;
         run.state = 'queued';
         run.attempt += 1;
@@ -1305,7 +1284,7 @@ export function createDispatcher(deps) {
     const gh = which('gh');
     if (!gh) throw new Error('gh is not on the path.');
     const wt = run.worktree;
-    const push = await run_(['push', '-u', 'origin', wt.branch], wt.path);
+    const push = await git.git(wt.path, ['push', '-u', 'origin', wt.branch]);
     if (push.code) throw new Error((push.stderr || push.stdout || 'push failed').trim());
     const body = `${job.brief}\n\n---\n${run.summary || ''}\n\nOpened by Pilcrow Dispatch (job “${job.name}”).`;
     const r = await exec(gh, ['pr', 'create', '--head', wt.branch, '--title', `${job.name}`, '--body', body], { cwd: wt.repoRoot, timeout: 60_000 });
@@ -1313,7 +1292,6 @@ export function createDispatcher(deps) {
     const url = (r.stdout || '').trim().split('\n').pop();
     return url || null;
   }
-  const run_ = (args, cwd) => git.git(cwd, args);
 
   function maybeFinish(job) {
     if (job.state !== 'reviewing' || job.wave === 'canary') return;
@@ -1382,7 +1360,7 @@ export function createDispatcher(deps) {
     if (!rep || rep.proseState !== 'writing') return;
     clearTimeout(timers.get(`report:${job.id}`));
     timers.delete(`report:${job.id}`);
-    const text = error ? '' : session?.lastReply?.text || lastAssistantText(session) || '';
+    const text = error ? '' : session?.lastReply?.text || lastAssistantText(session?.messages);
     rep.proseState = text ? 'done' : 'failed';
     rep.prose = text || null;
     rep.proseError = text ? null : error || 'The report session wrote nothing';
@@ -1444,7 +1422,6 @@ export function createDispatcher(deps) {
   function exportMarkdown(id) {
     const job = jobOf(id);
     const rep = job.report || buildReport(job);
-    const fmtCost = (c) => `$${(c || 0).toFixed(2)}`;
     const fmtMin = (ms) => `${Math.round((ms || 0) / 60e3)} min`;
     const rows = rep.targets.map((t) => `| ${t.name} | ${t.state}${t.reason ? ` · ${t.reason}` : ''} | ${t.files || 0} (+${t.add || 0} −${t.del || 0}) | ${fmtCost(t.cost)} | ${fmtMin(t.durationMs)} | ${t.commit ? `\`${t.commit}\`` : t.finished || ''}${t.pr ? ` [PR](${t.pr})` : ''} |`);
     const rules = rep.rules?.length ? `\n\n## Allowed for every repository\n\n${rep.rules.map((r) => `- ${r.label || r.key}`).join('\n')}` : '';
@@ -1453,7 +1430,7 @@ export function createDispatcher(deps) {
   }
 
   // ---- lifecycle
-  function start_() {
+  function begin() {
     if (started) return;
     started = true;
     bus.on('state', onState);
@@ -1484,7 +1461,7 @@ export function createDispatcher(deps) {
     }
     pump();
   }
-  function stop_() {
+  function end() {
     if (!started) return;
     started = false;
     bus.off('state', onState);
@@ -1529,8 +1506,8 @@ export function createDispatcher(deps) {
     pump,
     flush,
     summary,
-    begin: start_,
-    end: stop_,
+    begin,
+    end,
     _data: data,
   };
 }

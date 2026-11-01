@@ -3,9 +3,9 @@
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { store } from './config.js';
-import { sessions, bus, textOfContent } from './sessions.js';
+import { sessions, bus } from './sessions.js';
 import * as snapshots from './snapshots.js';
-import { xdg, readJson, writeJson, uuid, log, slash } from './util.js';
+import { xdg, readJson, writeJson, uuid, log, slash, lastAssistantText } from './util.js';
 
 export const events = new EventEmitter();
 
@@ -284,7 +284,7 @@ function finishRun(s, session, entry, status, reason) {
       files.set(f.path, cur);
     }
   }
-  const lastText = session.lastReply?.text || lastAssistantText(session) || '';
+  const lastText = session.lastReply?.text || lastAssistantText(session.messages);
   const item = {
     id: uuid(),
     scheduleId: s.id,
@@ -311,17 +311,6 @@ function finishRun(s, session, entry, status, reason) {
   // The process is not needed any more; the transcript stays and the session reopens on demand.
   setTimeout(() => session.close(), 1500);
   log('schedule done', s.name, status);
-}
-
-function lastAssistantText(session) {
-  for (let i = session.messages.length - 1; i >= 0; i--) {
-    const m = session.messages[i];
-    if (m.type === 'assistant' && !m.parent_tool_use_id) {
-      const t = textOfContent(m.message?.content);
-      if (t) return t.replace(/\s+/g, ' ').trim();
-    }
-  }
-  return '';
 }
 
 let ticker = null;

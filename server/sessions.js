@@ -98,11 +98,6 @@ function titleFromPrompt(p) {
   return line.length > 72 ? line.slice(0, 70).replace(/\s+\S*$/, '') + '…' : line;
 }
 
-function textOfContent(content) {
-  if (typeof content === 'string') return content;
-  return (content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
-}
-
 /**
  * A workflow (the Workflow tool) reports its agents, phases and log lines through task_progress. The
  * list is usually cumulative, one entry per agent/phase index; keep the latest per index, and the
@@ -162,8 +157,8 @@ class Session {
     this.init = null;
     this.commands = null;
     this.models = null;
-    const saved = store.getMeta(id) || {};
-    this.usage = { contextTokens: 0, contextWindow: saved.contextWindow || 0, costUsd: saved.costUsd || 0, outputTokens: 0, model: null, afterCompact: false };
+    const meta = store.getMeta(id) || {};
+    this.usage = { contextTokens: 0, contextWindow: meta.contextWindow || 0, costUsd: meta.costUsd || 0, outputTokens: 0, model: null, afterCompact: false };
     this.suggestion = null;
     this.error = null;
     this.stderrTail = '';
@@ -175,7 +170,6 @@ class Session {
     this.lastActivity = Date.now();
     this.outbox = [];
     this.flushTimer = null;
-    const meta = store.getMeta(id) || {};
     this.mode = meta.mode || store.getConfig().defaultMode || 'default';
     this.model = meta.model || store.getConfig().defaultModel || '';
     this.effort = meta.effort || store.getConfig().defaultEffort || '';
@@ -1212,4 +1206,3 @@ class SessionManager {
 }
 
 export const sessions = new SessionManager();
-export { textOfContent };

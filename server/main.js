@@ -34,6 +34,7 @@ const PREFERRED_PORT = 47117;
 const HEARTBEAT_MS = 30_000; // a window that misses a ping for this long is gone (the laptop slept, a tunnel dropped)
 const MAX_BUFFERED = 32 * 1024 * 1024; // bytes queued for one window; past this it cannot keep up (see deliver)
 const MAX_PAYLOAD = 64 * 1024 * 1024; // a message from a window: attachments travel inline
+const LIST_CHANGED_MS = 150; // a burst of session changes is one "the list changed" to the windows
 const LOCK = path.join(xdg('state'), 'instance.json');
 
 const OCTET = 'application/octet-stream';
@@ -417,7 +418,7 @@ export async function start({ shell = 'none', port, quiet = false, onQuit, heart
     for (const ws of clients) deliver(ws, raw);
   };
 
-  const listChanged = debounce(() => broadcast('sessions.changed', {}), 150);
+  const listChanged = debounce(() => broadcast('sessions.changed', {}), LIST_CHANGED_MS);
   bus.on('msgs', (d) => broadcast('session.msgs', d));
   bus.on('state', (d) => broadcast('session.state', d));
   bus.on('permission', (d) => broadcast('session.permission', d));
@@ -872,23 +873,23 @@ async function restartOutdatedPrompt() {
   const busy = existing.busy;
   if (busy === 0) {
     await retireOutdated(existing);
-    say(`  ✓ 已關閉還在背景執行的舊版 Pilcrow ${existing.version}；重新開啟就是 ${VERSION}`);
+    say(`  ✓ Stopped Pilcrow ${existing.version}, which was still running in the background; the next launch runs ${VERSION}.`);
     return 0;
   }
-  const what = busy ? `Claude 還有 ${busy} 個 session 正在工作，關閉會中斷它們（對話會保留）。` : '如果 Claude 正在工作，關閉會中斷它（對話會保留）。';
+  const what = busy ? `Claude is still working in ${busy} session${busy > 1 ? 's' : ''}; stopping interrupts ${busy > 1 ? 'them' : 'it'} (the conversations are kept).` : 'If Claude is working, stopping interrupts it (the conversation is kept).';
   if (!process.stdin.isTTY) {
-    say(`  ! 舊版 Pilcrow ${existing.version} 還在背景執行。${what}`);
-    say('    關閉所有 Pilcrow 視窗後再重新開啟，就會改用新版。');
+    say(`  ! Pilcrow ${existing.version} is still running in the background. ${what}`);
+    say('    Close every Pilcrow window and open it again to use the new version.');
     return 0;
   }
   const rl = (await import('node:readline/promises')).createInterface({ input: process.stdin, output: process.stdout });
-  const ans = (await rl.question(`  ? 舊版 Pilcrow ${existing.version} 還在背景執行。${what}現在關閉它？[Y/n] `)).trim().toLowerCase();
+  const ans = (await rl.question(`  ? Pilcrow ${existing.version} is still running in the background. ${what} Stop it now? [Y/n] `)).trim().toLowerCase();
   rl.close();
   if (ans === '' || ans === 'y' || ans === 'yes') {
     await retireOutdated(existing, { force: true });
-    say(`  ✓ 已關閉舊版；重新開啟 Pilcrow 就是 ${VERSION}`);
+    say(`  ✓ Stopped; the next launch runs ${VERSION}.`);
   } else {
-    say('  ! 沒有關閉。之後關閉所有 Pilcrow 視窗再重新開啟，就會改用新版。');
+    say('  ! Not stopped. Close every Pilcrow window and open it again to use the new version.');
   }
   return 0;
 }

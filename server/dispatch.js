@@ -3,11 +3,11 @@
 // in dispatch_core.js so the tests can drive it with fakes.
 import path from 'node:path';
 import { store } from './config.js';
-import { sessions, bus, textOfContent } from './sessions.js';
+import { sessions, bus } from './sessions.js';
 import * as git from './git.js';
 import * as snapshots from './snapshots.js';
 import { pushInbox, updateInbox } from './schedules.js';
-import { xdg, readJson, writeJson, uuid, log, slash, slugify, run, which, IS_WIN } from './util.js';
+import { xdg, uuid, log, slash, slugify, run, which, IS_WIN } from './util.js';
 import { createDispatcher } from './dispatch_core.js';
 import { repos } from './repos.js';
 
@@ -35,10 +35,7 @@ export const dispatch = createDispatcher({
   uuid,
   slugify,
   slash,
-  textOfContent,
   registry: repos,
-  readJson,
-  writeJson,
 });
 
 export const events = dispatch.events;

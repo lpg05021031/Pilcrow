@@ -211,7 +211,7 @@ function make(realWorktrees = false) {
   bus = new EventEmitter();
   store = fakeStore();
   sessions = new FakeSessions(bus, store, realWorktrees);
-  reg = createRegistry({ store, git, expandHome: (p: string) => p });
+  reg = createRegistry({ store, git });
   inbox = [];
   H = createHelpers({
     sessions,
@@ -229,7 +229,6 @@ function make(realWorktrees = false) {
       Object.assign(it, patch);
       return true;
     },
-    expandHome: (p: string) => p,
     homeDir: '/home/nobody',
     cpus: 4,
     noteMs: 20,
@@ -603,7 +602,7 @@ describe('the person and a restart', () => {
     expect(store.getMeta(a.id).helper.state).toBe('running');
     H.end();
     const L = sessions.all.get('lead')!;
-    H = createHelpers({ sessions, bus, store, git, registry: reg, expandHome: (p: string) => p, homeDir: '/home/nobody', noteMs: 20 });
+    H = createHelpers({ sessions, bus, store, git, registry: reg, homeDir: '/home/nobody', noteMs: 20 });
     H.begin();
     expect(H.list('lead').helpers[0]).toMatchObject({ name: 'api', state: 'stopped', reason: 'server restarted' });
     await sleep(60);

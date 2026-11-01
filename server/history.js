@@ -6,10 +6,11 @@ import readline from 'node:readline';
 import { listSessions, getSessionMessages, getSubagentMessages, renameSession, deleteSession, forkSession, listSubagents } from '@anthropic-ai/claude-agent-sdk';
 import { claudeConfigDir, log } from './util.js';
 
+const LIST_TTL_MS = 4000; // the list is asked for on every change; the SDK reads every transcript's head
 let listCache = { at: 0, data: [], pending: null };
 
 export async function listHistory({ force = false } = {}) {
-  const fresh = Date.now() - listCache.at < 4000;
+  const fresh = Date.now() - listCache.at < LIST_TTL_MS;
   if (!force && fresh) return listCache.data;
   if (listCache.pending) return listCache.pending;
   listCache.pending = (async () => {

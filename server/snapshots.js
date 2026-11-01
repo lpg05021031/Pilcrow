@@ -4,9 +4,8 @@
 // lives in Pilcrow's state folder and uses the folder only as its work tree.
 import fs from 'node:fs';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { run, xdg, slash, log, readJson, readJsonAsync, writeJson, writeJsonAsync, privateDir, under, HOME } from './util.js';
+import { run, xdg, slash, log, readJson, readJsonAsync, writeJson, writeJsonAsync, privateDir, under, folderKey, HOME } from './util.js';
 import { parseUnifiedDiff } from './git.js';
 
 export const events = new EventEmitter();
@@ -20,8 +19,7 @@ const SLOW_MS = 12_000;
 /** Tools whose completion may have changed files. MCP tools are opaque, so they count too. */
 export const FILE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Bash', 'PowerShell']);
 
-const keyOf = (cwd) => crypto.createHash('sha1').update(slash(cwd)).digest('hex').slice(0, 16);
-const dirOf = (cwd) => path.join(ROOT, keyOf(cwd));
+const dirOf = (cwd) => path.join(ROOT, folderKey(cwd));
 const stepsFile = (cwd, sid) => path.join(dirOf(cwd), `steps-${sid}.json`);
 
 const ready = new Map(); // cwd -> Promise<boolean>

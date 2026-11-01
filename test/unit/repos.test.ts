@@ -45,7 +45,7 @@ beforeEach(() => {
   web = mkRepo(path.join(tmp, 'code', 'web'), { 'package.json': JSON.stringify({ name: '@shop/web', dependencies: { '@shop/api': 'file:../api' } }), 'README.md': '# web\n' });
   api = mkRepo(path.join(tmp, 'code', 'api'), { 'package.json': JSON.stringify({ name: '@shop/api' }), 'CLAUDE.md': 'hi\n' });
   store = fakeStore();
-  reg = createRegistry({ store, git, expandHome: (p: string) => p });
+  reg = createRegistry({ store, git });
 });
 afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });

@@ -27,6 +27,27 @@ export class AppError extends Error {
 }
 
 export const uuid = () => crypto.randomUUID();
+/** A short, stable file name for a folder (the timeline's shadow repository, the project's notes). */
+export const folderKey = (cwd) => crypto.createHash('sha1').update(slash(cwd)).digest('hex').slice(0, 16);
+export const fmtCost = (usd) => `$${(usd || 0).toFixed(2)}`;
+
+/** The text of a message's content: a string, or its text blocks joined. */
+export function textOfContent(content) {
+  if (typeof content === 'string') return content;
+  return Array.isArray(content) ? content.filter((b) => b?.type === 'text').map((b) => b.text).join('\n') : '';
+}
+
+/** What Claude said last in a transcript (its newest message of its own with text), on one line. */
+export function lastAssistantText(messages) {
+  for (let i = (messages?.length || 0) - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.type === 'assistant' && !m.parent_tool_use_id) {
+      const t = textOfContent(m.message?.content);
+      if (t) return t.replace(/\s+/g, ' ').trim();
+    }
+  }
+  return '';
+}
 export const token = () => crypto.randomBytes(24).toString('base64url');
 
 /**
@@ -95,6 +116,9 @@ export function expandHome(p) {
   if (p.startsWith('~/') || (IS_WIN && p.startsWith('~\\'))) return slash(path.join(HOME, p.slice(2)));
   return slash(p);
 }
+
+/** A folder the person typed, as one absolute path: ~ expanded, forward slashes, no trailing slash. */
+export const absolute = (p) => slash(path.resolve(expandHome(String(p || '').trim()))).replace(/(?<=.)\/+$/, '');
 
 /** Whether `p` is `dir` or inside it, by whole path segments (/a/bc is not inside /a/b). */
 export function under(dir, p) {
