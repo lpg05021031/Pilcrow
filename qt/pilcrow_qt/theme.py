@@ -439,6 +439,12 @@ def _pt(x: float, y: float) -> QPointF:
     return QPointF(x, y)
 
 
+def column_width(box: float) -> int:
+    """``--col: clamp(640px, min(61.8%, 100% - 48px), 1080px)`` (app.css) resolved against a box this
+    wide: the golden-section reading column every page and the composer share."""
+    return int(max(640.0, min(box * 0.618, box - 48.0, 1080.0)))
+
+
 def breath(now: float, period: float, low: float) -> float:
     """``@keyframes breathe``: an opacity that eases from ``low`` up to 1 and back once a ``period``
     (seconds), on a cosine; ``now`` is ``time.monotonic()``, so every mark breathes in step."""

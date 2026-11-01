@@ -14,7 +14,17 @@ from PySide6.QtGui import QColor, QPainter, QTextDocument
 
 from ... import theme
 from ...lib.transcript_model import ThinkingItem
-from ..paint import FULL, Measurer, PaintState, doc_height, doc_pos_at, draw_doc, paint_decor, selection
+from ..paint import (
+    FULL,
+    Measurer,
+    PaintState,
+    doc_height,
+    doc_pos_at,
+    draw_doc,
+    paint_decor,
+    selection,
+    set_line_height,
+)
 from ..pixels import vline
 from ..scene import Block, Group, Target
 from .base import chevron, paint_head_tint
@@ -50,7 +60,7 @@ class ThinkingBody(Block):
                 self.doc = m.markdown_doc(text, width - 15, quiet=True, size=BODY_SIZE)
             else:
                 self.doc = m.plain_doc(text, width - 15, m.font(BODY_SIZE))
-                _set_line_height(self.doc, BODY_LINE)
+                set_line_height(self.doc, BODY_LINE)
             self._src, self._md = text, md
         self.warm = True
         return doc_height(self.doc) + 8
@@ -146,6 +156,9 @@ class ThinkingBlock(Group):
         self.sig = (item.rev, item.streaming, item.redacted, view_mode)
         return changed
 
+    def head_text(self) -> str:
+        return self.title(time.time())
+
     def title(self, now: float) -> str:
         it = self.item
         if it.streaming:
@@ -162,7 +175,7 @@ class ThinkingBlock(Group):
         text = self.item.text[-320:]
         if self.peek_doc is None or self._peek_src != text or self._peek_w != width:
             self.peek_doc = m.plain_doc(text, max(40, width - 15), m.font(BODY_SIZE))
-            _set_line_height(self.peek_doc, BODY_LINE)
+            set_line_height(self.peek_doc, BODY_LINE)
             self._peek_src, self._peek_w = text, width
         return min(doc_height(self.peek_doc), int(PEEK_LINES * BODY_LINE)) + 6
 
@@ -242,13 +255,3 @@ def _clean(text: str) -> str:
     """Document text as words: paragraph separators as newlines, the padding and joiners of inline
     code gone."""
     return text.replace("\u2029", "\n").replace("\u00a0", "").replace("\u202f", "").replace("\u2060", "")
-
-
-def _set_line_height(doc: QTextDocument, px: int) -> None:
-    from PySide6.QtGui import QTextBlockFormat, QTextCursor
-
-    cur = QTextCursor(doc)
-    cur.select(QTextCursor.SelectionType.Document)
-    bf = QTextBlockFormat()
-    bf.setLineHeight(px, QTextBlockFormat.LineHeightTypes.FixedHeight.value)
-    cur.mergeBlockFormat(bf)

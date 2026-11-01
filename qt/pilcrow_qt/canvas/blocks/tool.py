@@ -20,7 +20,7 @@ from ...widgets.transcript.ctx import ToolCtx
 from ..paint import Measurer, PaintState, rounded
 from ..pixels import vline
 from ..scene import Block, Group, Target
-from .base import chevron, paint_head_tint, paint_needs_frame
+from .base import MetaPart, chevron, meta_width, paint_head_tint, paint_meta, paint_needs_frame
 from .bodies import ToolBodyBlock
 from .island import IslandBlock
 
@@ -255,7 +255,7 @@ class ToolBlock(Group):
 
             ft = QFont(ft)
             ft.setStrikeOut(True)
-        meta_w = self._meta_width(st)
+        meta_w = meta_width(st, self._meta_parts(st))
         chev_w = 13 + 7
         open_w = (13 + 7) if self.file else 0
         avail = max(40, (x + w) - cx - meta_w - chev_w - open_w - 8)
@@ -290,7 +290,7 @@ class ToolBlock(Group):
                 )
             self._meta_rects["open-file"] = QRect(int(cx) - x - 4, (head_h - 22) // 2, 22, 22)
         # meta, right-aligned
-        self._paint_meta(p, x + w, y, head_h, st)
+        paint_meta(p, x + w, y, head_h, st, self._meta_parts(st))
         # the rule down the left of an open body (the agent children get their own rail)
 
     def _paint_status(self, p: QPainter, x: int, y: int, st: PaintState) -> None:
@@ -322,18 +322,18 @@ class ToolBlock(Group):
         }.get(stt, (self.meta.icon_name, t.text_2))
         p.drawPixmap(x, y, st.m.icon(name, QColor(color), 14))
 
-    def _meta_parts(self, st: PaintState) -> List[Tuple[str, str, str]]:
+    def _meta_parts(self, st: PaintState) -> List[MetaPart]:
         """(kind, text, tone): badges and figures at the right of the head."""
         it = self.item
         t = st.t
-        out: List[Tuple[str, str, str]] = []
+        out: List[MetaPart] = []
         stt = it.status
         if stt == "background":
             out.append(("badge", "background", "info"))
         if stt == "denied":
             out.append(("badge", "declined", "err"))
         if stt == "error":
-            out.append(("text", "Failed", t.err))
+            out.append(("strong", "Failed", t.err))
         if stt == "interrupted":
             out.append(("badge", "stopped", ""))
         if it.name in ("Workflow", "RunWorkflow"):
@@ -356,42 +356,6 @@ class ToolBlock(Group):
         if ms > 1500 and not has_stats:
             out.append(("micro", duration(ms), t.text_3))
         return out
-
-    def _meta_width(self, st: PaintState) -> int:
-        w = 0
-        for kind, text, _tone in self._meta_parts(st):
-            if kind == "badge":
-                w += int(st.m.text_w(text, st.m.font(11, 600))) + 14 + 8
-            elif kind == "mono":
-                w += int(st.m.text_w(text, st.m.font(11.5, 400, True))) + 5
-            else:
-                w += int(st.m.text_w(text, st.m.font(theme.FS_MICRO, 600 if text == "Failed" else 400))) + 8
-        return w
-
-    def _paint_meta(self, p: QPainter, right: int, y: int, head_h: int, st: PaintState) -> None:
-        x = right
-        for kind, text, tone in reversed(self._meta_parts(st)):
-            if kind == "badge":
-                f = st.m.font(11, 600)
-                bw = int(st.m.text_w(text, f)) + 14
-                x -= bw
-                t = st.t
-                fg, bg = {"err": (t.err, t.err_wash), "info": (t.info, t.info_wash)}.get(tone, (t.text_2, t.fill_2))
-                rounded(p, QRect(x, y + (head_h - 19) // 2, bw, 19), theme.blend(bg, t.canvas), None, 9)
-                st.m.draw_text(p, x + 7, y + (head_h - st.m.line_h(f)) / 2, text, f, QColor(fg))
-                x -= 8
-            elif kind == "mono":
-                f = st.m.font(11.5, 400, True)
-                tw = st.m.text_w(text, f)
-                x -= tw
-                st.m.draw_text(p, x, y + (head_h - st.m.line_h(f)) / 2, text, f, QColor(tone))
-                x -= 5
-            else:
-                f = st.m.font(theme.FS_MICRO, 600 if text == "Failed" else 400)
-                tw = st.m.text_w(text, f)
-                x -= tw
-                st.m.draw_text(p, x, y + (head_h - st.m.line_h(f)) / 2, text, f, QColor(tone))
-                x -= 8
 
     # ---- interaction
     def hit(self, x: int, y: int) -> Optional[Target]:

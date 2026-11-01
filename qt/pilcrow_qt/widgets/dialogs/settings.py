@@ -10,14 +10,15 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QPushButton, QScrollArea, QWidget
+from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QPushButton, QScrollArea, QSizePolicy, QWidget
 
 from ... import theme
 from ...store import store
 from ..ui.bits import Mark
+from ..ui.button import Btn
 from ..ui.signals import bind
 from .parts import Text, sheet_bg
-from .settings_ui import Sheet, open_sheet, styled, vbox
+from .settings_ui import Sheet, open_sheet, vbox
 
 SECTIONS: List[Tuple[str, str]] = [
     ("general", "General"),
@@ -51,28 +52,26 @@ class SettingsSheet(Sheet):
         self.group.setExclusive(True)
         self.nav_buttons: Dict[str, QPushButton] = {}
         for sid, text in SECTIONS:
-            b = QPushButton(text)
+            b = Btn(text, size="")
+            b.override.update(h=30, px=10, fs=theme.FS_UI, fw=400, r=theme.R2)
+            b.pad_left = 10
+            b.set_look(
+                "text_2",
+                "text",
+                hover_bg=lambda t: theme.blend(t.fill_1, sheet_bg(t).name()),
+                on_fg="text",
+                on_bg=lambda t: theme.blend(t.fill_2, sheet_bg(t).name()),
+            )
+            b.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             b.setCheckable(True)
             b.setAutoDefault(False)
-            b.setAccessibleName(text)
-            b.setCursor(Qt.CursorShape.PointingHandCursor)
-            b.setFixedHeight(30)
-            b.setFont(theme.font_ui(theme.FS_UI))
+            b.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+            b.toggled.connect(lambda on, b=b: (b.override.update(fw=600 if on else 400), b.update()))
             b.clicked.connect(lambda _c=False, s=sid: self.show_section(s))
             nl.addWidget(b)
             self.group.addButton(b)
             self.nav_buttons[sid] = b
         nl.addStretch(1)
-        styled(
-            self.nav,
-            lambda t: (
-                f"""
-            #settings-nav QPushButton {{ text-align: left; border: none; background: transparent; padding: 0 10px; min-height: 30px; max-height: 30px; border-radius: {theme.R2}px; color: {t.text_2}; font-weight: 400; }}
-            #settings-nav QPushButton:hover {{ background: {theme.blend(t.fill_1, sheet_bg(t).name()).name()}; color: {t.text}; }}
-            #settings-nav QPushButton:checked {{ background: {theme.blend(t.fill_2, sheet_bg(t).name()).name()}; color: {t.text}; font-weight: 600; }}
-        """
-            ),
-        )
         row.addWidget(self.nav)
 
         self.page_scroll = QScrollArea()

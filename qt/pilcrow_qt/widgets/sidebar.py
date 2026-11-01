@@ -36,7 +36,7 @@ from ..canvas.clock import Tween
 from ..lib.fmt import basename, tildify, time_ago
 from ..lib.fuzzy import fuzzy_score
 from ..store import ConfirmSpec, store
-from .ui.bits import Indicator, Mark
+from .ui.bits import IconButton, Indicator, Mark
 from .ui.menu import show_menu, show_menu_at
 from .ui.signals import bind
 
@@ -70,7 +70,7 @@ class Sidebar(QWidget):
         self._heads: Dict[str, GroupHead] = {}
         self._labels: Dict[str, SectionLabel] = {}
         self._mores: Dict[str, MoreButton] = {}
-        self._note: Optional[EmptyNote] = None
+        self._note: Optional[SideEmpty] = None
         self._archived_view = store.ui.show_archived
         self._archived_head: Optional[ListHead] = None
         self._now_timer = QTimer(self)
@@ -96,7 +96,7 @@ class Sidebar(QWidget):
         self.brand_name = QLabel("Pilcrow")
         self.brand_name.setFont(theme.font_ui(14, 600))  # .brand-name: 13.5px at 600, a touch tighter
         bl.addWidget(self.brand_name, 1)
-        self.collapse_btn = IconBtn("panel-left-close", "Hide sidebar (Ctrl+B)", 15, 24)
+        self.collapse_btn = IconButton("panel-left-close", "Hide sidebar (Ctrl+B)", 15, "text_3", box=24, over="chrome")
         self.collapse_btn.clicked.connect(lambda: store.set_ui(sidebar=False))
         bl.addWidget(self.collapse_btn)
         tl.addWidget(brand)
@@ -109,8 +109,14 @@ class Sidebar(QWidget):
         self.new_btn.setToolTip("New session in the current folder (Ctrl+N) · Shift+click for options")
         self.new_btn.clicked.connect(self._new_session)
         nl.addWidget(self.new_btn, 1)
-        self.new_opts = IconBtn(
-            "sliders-horizontal", "New session with options… (Ctrl+Shift+N)", 13, 26, "text_4", True
+        self.new_opts = IconButton(
+            "sliders-horizontal",
+            "New session with options… (Ctrl+Shift+N)",
+            13,
+            "text_4",
+            box=26,
+            over="chrome",
+            reveal=True,
         )
         self.new_opts.clicked.connect(lambda: store.set_dialog("newSession", {}))
         nl.addWidget(self.new_opts)
@@ -171,10 +177,10 @@ class Sidebar(QWidget):
         self.settings_btn.clicked.connect(lambda: store.set_dialog("settings", True))
         fl.addWidget(self.settings_btn)
         fl.addStretch(1)
-        self.archive_btn = IconBtn("archive", "Archived sessions", 15, 28)
+        self.archive_btn = IconButton("archive", "Archived sessions", 15, "text_3", box=28, over="chrome")
         self.archive_btn.clicked.connect(lambda: store.set_ui(show_archived=not store.ui.show_archived))
         fl.addWidget(self.archive_btn)
-        self.theme_btn = IconBtn("monitor", "Appearance", 15, 28)
+        self.theme_btn = IconButton("monitor", "Appearance", 15, "text_3", box=28, over="chrome")
         self.theme_btn.clicked.connect(self._cycle_theme)
         fl.addWidget(self.theme_btn)
         root.addWidget(foot)
@@ -437,7 +443,7 @@ class Sidebar(QWidget):
             note = "Nothing archived." if show_archived else "No matching sessions."
         if note:
             if self._note is None:
-                self._note = EmptyNote(note)
+                self._note = SideEmpty(note)
             elif self._note.text() != note:
                 self._note.setText(note)
             wanted.append(self._note)
@@ -605,80 +611,6 @@ class NavButton(QAbstractButton):
         p.drawText(QRectF(x, 0, max(0, right - x), h), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
 
 
-class IconBtn(QAbstractButton):
-    """``.icon-btn`` (28px) and ``.icon-btn.sm`` (24px): a square with only an icon in it. With
-    ``reveal`` it keeps its place but shows nothing until ``set_shown(True)`` (the buttons that
-    appear when the row around them is hovered)."""
-
-    def __init__(
-        self,
-        name: str,
-        tooltip: str = "",
-        icon_size: int = 15,
-        size: int = 28,
-        tone: str = "text_3",
-        reveal: bool = False,
-        parent: Optional[QWidget] = None,
-        width: int = 0,
-    ) -> None:
-        super().__init__(parent)
-        self._name, self._icon_size, self._tone, self._reveal = name, icon_size, tone, reveal
-        self._shown = not reveal
-        self._active = False
-        self.last_modifiers = Qt.KeyboardModifier.NoModifier
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedSize(width or size, size)
-        if tooltip:
-            self.setToolTip(tooltip)
-            self.setAccessibleName(tooltip)
-        bind(theme.theme.changed, self, lambda _t: self.update())
-
-    @property
-    def shown(self) -> bool:
-        return self._shown
-
-    def set_shown(self, on: bool) -> None:
-        if self._shown != on:
-            self._shown = on
-            self.update()
-
-    def set_active(self, on: bool) -> None:
-        self._active = on
-        self.update()
-
-    def set_icon_name(self, name: str) -> None:
-        self._name = name
-        self.update()
-
-    def mousePressEvent(self, e) -> None:
-        self.last_modifiers = e.modifiers()
-        super().mousePressEvent(e)
-
-    def enterEvent(self, e) -> None:
-        self.update()
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:
-        self.update()
-        super().leaveEvent(e)
-
-    def paintEvent(self, _e) -> None:
-        if self._reveal and not self._shown:
-            return
-        t = theme.tokens()
-        hover = self.underMouse()
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        if hover or self._active:
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(_fill("fill_2"))
-            r = min(theme.R2, self.width() / 2)
-            p.drawRoundedRect(QRectF(self.rect()), r, r)
-        colour = t.text if (hover or self._active) else getattr(t, self._tone)
-        s = self._icon_size
-        p.drawPixmap((self.width() - s) // 2, (self.height() - s) // 2, icons.pixmap(self._name, colour, s))
-
-
 class _HoverWrap(QWidget):
     """``.side-new-wrap``: tells its options button when the pointer is over the pair."""
 
@@ -716,7 +648,7 @@ class SearchRow(QWidget):
         self.edit.setAccessibleName("Search sessions")
         self.edit.installEventFilter(self)
         lay.addWidget(self.edit, 1)
-        self.clear_btn = IconBtn("x", "Clear search", 12, 18)
+        self.clear_btn = IconButton("x", "Clear search", 12, "text_3", box=18, over="chrome")
         self.clear_btn.hide()
         self.clear_btn.clicked.connect(self.edit.clear)
         lay.addWidget(self.clear_btn)
@@ -800,7 +732,7 @@ class ListHead(QWidget):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(PAD - 4, GROUP_GAP, PAD, 0)
         lay.setSpacing(4)
-        self.back = IconBtn("arrow-left", back_tip, 14, 24)
+        self.back = IconButton("arrow-left", back_tip, 14, "text_3", box=24, over="chrome")
         self.back.clicked.connect(on_back)
         lay.addWidget(self.back)
         self.label = QLabel(text)
@@ -847,8 +779,14 @@ class GroupHead(QWidget):
         self.btn.setToolTip(tildify(path, (store.info or {}).get("home")))
         self.btn.clicked.connect(self.toggled.emit)
         lay.addWidget(self.btn, 1)
-        self.add = IconBtn(
-            icon, add_tip or f"New session in {label_text} · Shift+click for options", 13, 22, "text_3", True
+        self.add = IconButton(
+            icon,
+            add_tip or f"New session in {label_text} · Shift+click for options",
+            13,
+            "text_3",
+            box=22,
+            over="chrome",
+            reveal=True,
         )
         self.add.clicked.connect(self._add)
         lay.addWidget(self.add)
@@ -961,8 +899,9 @@ class MoreButton(QPushButton):
         super().leaveEvent(e)
 
 
-class EmptyNote(QLabel):
-    """``.side-empty``."""
+class SideEmpty(QLabel):
+    """``.side-empty``: the centred sentence of an empty list (the control room's boxed note is
+    ``overview.EmptyNote``, another rule)."""
 
     def __init__(self, text: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(text, parent)
@@ -1280,7 +1219,7 @@ class _RowEnd(QWidget):
         self.time.setFont(theme.font_ui(theme.FS_MICRO))
         theme.tint(self.time, fg="text_4")
         lay.addWidget(self.time)
-        self.menu = IconBtn("ellipsis", "Session actions", 14, 24)
+        self.menu = IconButton("ellipsis", "Session actions", 14, "text_3", box=24, over="chrome")
         self.menu.setParent(self)
         self.menu.hide()
         self._quiet = True

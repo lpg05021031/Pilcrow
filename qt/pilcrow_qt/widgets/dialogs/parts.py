@@ -247,13 +247,6 @@ class ElideLabel(QLabel):
         )
 
 
-def page_column(width: int, padding: int = 0) -> int:
-    """``--col`` as the web resolves it inside a pane: clamp(640px, min(61.8%, 100% - 48px), 1080px) of
-    the pane less ``padding`` on each side (the welcome pads 24px; the control room and inbox none)."""
-    inner = width - 2 * padding
-    return max(640, min(int(round(inner * 0.618)), inner - 48, 1080))
-
-
 def half_hairline(surface: str) -> QWidget:
     """A 0.5px CSS hairline (``.ovr + .ovr``, ``.cust-row``): one pixel of the hair at half strength."""
 
@@ -281,21 +274,6 @@ def field_label(text: str) -> QLabel:
     lb = QLabel(text)
     lb.setFont(theme.font_ui(theme.FS_SMALL, 550))
     theme.tint(lb, fg="text_2")
-    return lb
-
-
-def styled(lb: QLabel, color: str = "", size: float = 0, weight: int = 0, mono: bool = False) -> QLabel:
-    """Give a label an explicit colour (a token name or a literal), size and weight (for the handful of
-    one-off styles)."""
-    if color:
-        theme.tint(lb, fg=color)
-    f = theme.font_mono() if mono else lb.font()
-    if size:
-        f.setPixelSize(max(1, int(size + 0.5)))
-    if weight:
-        f.setWeight(theme._weight(weight))
-    if mono or size or weight:
-        lb.setFont(f)
     return lb
 
 

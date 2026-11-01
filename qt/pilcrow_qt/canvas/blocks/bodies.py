@@ -139,11 +139,6 @@ def _esc(s: str) -> str:
     return html.escape(s)
 
 
-def pre_html(text: str, limit: int = 60000, line_height: float = 1.55, size: int = 12) -> str:
-    lh = int(size * line_height + 0.5)
-    return f'<div style="white-space:pre-wrap;line-height:{lh}px">{_esc(truncate(text, limit)) or "&nbsp;"}</div>'
-
-
 def json_pretty(v: Any) -> str:
     try:
         return json.dumps(v, indent=2, ensure_ascii=False)

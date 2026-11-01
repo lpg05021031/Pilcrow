@@ -262,7 +262,9 @@ def test_accessibility_lists_the_blocks_on_screen(view):
     iface = QAccessible.queryAccessibleInterface(v.viewport())
     assert iface is not None and iface.role() == QAccessible.Role.List
     n = iface.childCount()
-    assert n == len([b for b in v.visible_blocks() if b.h > 0 and (b.text() or hasattr(b, "children"))]) and n >= 3
+    from pilcrow_qt.canvas.a11y import describe
+
+    assert n == len([b for b in v.visible_blocks() if b.h > 0 and describe(b) is not None]) and n >= 3
     names = [iface.child(i).text(QAccessible.Text.Name) for i in range(n)]
     assert names[0] == "Please look at the parser."
     assert any("reads lines" in s for s in names)
@@ -345,8 +347,8 @@ def test_accessibility_forgets_what_is_gone(app):
     v.show()
     pump(30)
     lst = QAccessible.queryAccessibleInterface(v.viewport())
-    items = {lst.child(i)._key: lst.child(i) for i in range(lst.childCount())}  # each group and its paragraph
-    assert len(items) == 6
+    items = {lst.child(i)._key: lst.child(i) for i in range(lst.childCount())}  # each paragraph, not its group
+    assert sorted(items) == ["text:g0:0", "text:g1:0", "text:g2:0"]
     # a dropped block's item goes at the next prune
     v.begin()
     try:
@@ -354,8 +356,8 @@ def test_accessibility_forgets_what_is_gone(app):
     finally:
         v.end()
     lst._prune()
-    assert sorted(lst._items) == ["text:g0", "text:g0:0"]
-    assert not shiboken6.isValid(items["text:g2"]) and shiboken6.isValid(items["text:g0"])
+    assert sorted(lst._items) == ["text:g0:0"]
+    assert not shiboken6.isValid(items["text:g2:0"]) and shiboken6.isValid(items["text:g0:0"])
     # the view's list goes once Qt has let go of it with the viewport
     v.close()
     v.deleteLater()

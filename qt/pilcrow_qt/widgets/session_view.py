@@ -27,12 +27,12 @@ from PySide6.QtWidgets import (
 from .. import icons, theme
 from ..canvas.transcript import Transcript
 from ..lib.fmt import basename, cost, duration, err_text, plural, tildify
+from ..lib.workflow import running_workflow
 from ..store import ConfirmSpec, store
 from .composer import Composer, LayoutButton
 from .folder_picker import FolderPicker
 from .mcp_notice import McpNotice
-from .sidebar import IconBtn
-from .ui.bits import Box, Indicator, Mark, button, copy_text, hairline, label, paint_box
+from .ui.bits import Box, IconButton, Indicator, Mark, button, copy_text, hairline, label, paint_box
 from .ui.button import Btn
 from .ui.menu import Popover, host_for, show_menu
 from .ui.signals import bind
@@ -55,13 +55,6 @@ EXAMPLES = [
     "Write tests for the module I changed last",
     "Review my uncommitted changes",
 ]
-
-
-def running_workflow(tasks: Optional[List[Json]]) -> Optional[str]:
-    for t in tasks or []:
-        if t.get("type") == "local_workflow" and t.get("status") == "running":
-            return str(t.get("workflowName") or t.get("description") or "workflow")
-    return None
 
 
 HELPER_TONE = {
@@ -323,7 +316,7 @@ class SessionView(QWidget):
         hl.setContentsMargins(20, 0, 10, 0)
         hl.setSpacing(12)
         # .icon-btn.head-sidebar: 28px, shown only while the sidebar is hidden
-        self.side_btn = IconBtn("panel-left-open", "Show sidebar (Ctrl+B)", 16, 28)
+        self.side_btn = IconButton("panel-left-open", "Show sidebar (Ctrl+B)", 16, "text_3", box=28, over="chrome")
         self.side_btn.clicked.connect(lambda: store.set_ui(sidebar=True))
         hl.addWidget(self.side_btn)
 
@@ -370,10 +363,10 @@ class SessionView(QWidget):
         self.diffstat.hide()
         self.diffstat.clicked.connect(self._toggle_changes)
         al.addWidget(self.diffstat)
-        self.panel_btn = IconBtn("panel-right", "Side panel (Ctrl+\\)", 16, 28)
+        self.panel_btn = IconButton("panel-right", "Side panel (Ctrl+\\)", 16, "text_3", box=28, over="chrome")
         self.panel_btn.clicked.connect(lambda: store.set_ui(panel=not store.ui.panel))
         al.addWidget(self.panel_btn)
-        self.menu_btn = IconBtn("ellipsis", "Session actions", 16, 28)
+        self.menu_btn = IconButton("ellipsis", "Session actions", 16, "text_3", box=28, over="chrome")
         self.menu_btn.clicked.connect(self.open_menu)
         al.addWidget(self.menu_btn)
         hl.addWidget(actions)
@@ -511,7 +504,10 @@ class SessionView(QWidget):
             # the lead itself is quiet, its helpers are not: live work, in the accent
             self.pill.set_status("leading", f"{len(active_helpers)} of {plural(len(helpers), 'helper')}")
         else:
-            self.pill.set_status(status, running_workflow(tasks) if status == "running" else None)
+            wf = running_workflow(tasks) if status == "running" else None
+            self.pill.set_status(
+                status, str(wf.get("workflowName") or wf.get("description") or "workflow") if wf else None
+            )
         self.helpers_bar.sync(helpers, (r.get("lead") if r else None) or {})
         helper = r.get("helper") if r and isinstance(r.get("helper"), dict) else None
         if helper and helper.get("leadId"):

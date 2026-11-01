@@ -14,7 +14,7 @@ from ... import theme
 from ...lib.fmt import cost as fmt_cost
 from ...lib.fmt import duration, now_ms, plural
 from ...store import store
-from ..dialogs.parts import Card, Text, half_hairline, page_column
+from ..dialogs.parts import Card, Text, half_hairline
 from ..overview import EmptyNote, SectionHead
 from ..ui.bits import IconButton, LayoutButton, button
 from ..ui.signals import bind
@@ -299,7 +299,7 @@ class Board(QWidget):
     def eventFilter(self, obj, e) -> bool:
         if obj is self.scroll.viewport() and e.type() == QEvent.Type.Resize:
             vw = self.scroll.viewport().width()
-            self.body.setFixedWidth(max(320, min(page_column(vw), vw)))
+            self.body.setFixedWidth(max(320, min(theme.column_width(vw), vw)))
         return False
 
     # ---- data

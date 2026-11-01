@@ -29,9 +29,9 @@ from PySide6.QtWidgets import (
 from .. import icons, theme
 from ..lib.fmt import basename, cost, duration, now_ms, plural, rel_path, time_ago
 from ..lib.tools_meta import str_
-from ..lib.workflow import workflow_counts
+from ..lib.workflow import running_workflow, workflow_counts
 from ..store import Runtime, store
-from .dialogs.parts import Badge, Card, ElideLabel, Kbd, LayoutButton, Text, Well, half_hairline, page_column
+from .dialogs.parts import Badge, Card, ElideLabel, Kbd, LayoutButton, Text, Well, half_hairline
 from .transcript.permission import suggestion_label, typing_elsewhere
 from .ui.bits import Box, ContextRing, IconButton, Mark, Spinner, WorkingMark, button, paint_box
 from .ui.signals import bind
@@ -74,18 +74,6 @@ def activity_line(st: Json) -> Tuple[str, str, bool]:
     if a.get("kind") == "text":
         return "message-square-quote", str(a.get("label") or ""), False
     return "brain", "Thinking…", True
-
-
-def running_workflow(tasks: Any) -> Optional[Json]:
-    for t in tasks or []:
-        if (
-            isinstance(t, dict)
-            and t.get("type") == "local_workflow"
-            and t.get("status") == "running"
-            and not t.get("ambient")
-        ):
-            return t
-    return None
 
 
 def short_model(m: Any) -> str:
@@ -365,7 +353,7 @@ class WorkingCard(Card):
         self.act.setText(text)
         theme.tint(self.act, fg="text_3" if quiet else "text_2")
         self.live.setToolTip("Quiet for a while" if stale else "Working")
-        wf = running_workflow(st.get("tasks"))
+        wf = running_workflow(st.get("tasks"), ambient=False)
         if wf:
             c = workflow_counts(((wf.get("workflow") or {}).get("agents")) or [])
             total = max(1, c.total)
@@ -1147,7 +1135,7 @@ class Overview(QWidget):
 
     def _fit_body(self) -> None:
         vw = self.scroll.viewport().width()
-        self.body.setFixedWidth(max(320, min(page_column(vw), vw)))
+        self.body.setFixedWidth(max(320, min(theme.column_width(vw), vw)))
         content = self.body.width() - 40
         tiles = 2 if content <= 640 else 4
         if tiles != self._laid_tiles:

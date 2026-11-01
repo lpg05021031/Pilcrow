@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 from .. import icons, theme
 from ..lib.fmt import basename, cost, duration, now_ms, plural, tildify, time_ago
 from ..store import ConfirmSpec, store
-from .dialogs.parts import Badge, Card, ElideLabel, LayoutButton, Switch, Text, hint, page_column
+from .dialogs.parts import Badge, Card, ElideLabel, LayoutButton, Switch, Text, hint
 from .ui.bits import Box, IconButton, Mark, Pill, Spinner, button
 from .ui.menu import show_menu
 from .ui.signals import bind
@@ -870,7 +870,7 @@ class InboxPage(QWidget):
     def eventFilter(self, obj, e) -> bool:
         if obj is self.scroll.viewport() and e.type() == QEvent.Type.Resize:
             vw = self.scroll.viewport().width()
-            self.body.setFixedWidth(max(320, min(page_column(vw), vw)))
+            self.body.setFixedWidth(max(320, min(theme.column_width(vw), vw)))
             self._place(1 if self.body.width() - 40 <= 760 else 2)
         return False
 

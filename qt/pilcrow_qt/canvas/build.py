@@ -109,6 +109,22 @@ class Inline:
         self.spacing = spacing  # a heading's letter spacing
 
 
+def trim_margins(doc: QTextDocument) -> None:
+    """No margin above the first block or under the last: the room around a document is its
+    block's to give (``> :first-child { margin-top: 0 }``)."""
+    first, last = doc.firstBlock(), doc.lastBlock()
+    if first.blockFormat().topMargin():
+        cur = QTextCursor(first)
+        bf = cur.blockFormat()
+        bf.setTopMargin(0)
+        cur.setBlockFormat(bf)
+    if last.blockFormat().bottomMargin():
+        cur = QTextCursor(last)
+        bf = cur.blockFormat()
+        bf.setBottomMargin(0)
+        cur.setBlockFormat(bf)
+
+
 class Builder:
     def __init__(
         self,
@@ -202,7 +218,7 @@ class Builder:
                 self.cur.insertText(tok.content.rstrip("\n"), self._cf(self._inline_ctx().font, None))
                 self._close()
             i += 1
-        self._finish()
+        trim_margins(self.doc)
 
     # ------------------------------------------------------------ boxes and blocks
     def _open(self, kind: str, mt: int, mb: int, i: int, data: Any = None, hidden: bool = False) -> None:
@@ -334,20 +350,6 @@ class Builder:
         bcf.setFont(self.fonts.font(self.m.base), SPECIFIED)
         self._new_block(bf, bcf)
         self._close()
-
-    def _finish(self) -> None:
-        doc = self.doc
-        first, last = doc.firstBlock(), doc.lastBlock()
-        if first.blockFormat().topMargin():
-            cur = QTextCursor(first)
-            bf = cur.blockFormat()
-            bf.setTopMargin(0)
-            cur.setBlockFormat(bf)
-        if last.blockFormat().bottomMargin():
-            cur = QTextCursor(last)
-            bf = cur.blockFormat()
-            bf.setBottomMargin(0)
-            cur.setBlockFormat(bf)
 
     # ------------------------------------------------------------ inline content
     def _inline_ctx(self) -> Inline:

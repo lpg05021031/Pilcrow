@@ -126,11 +126,6 @@ def lbl(
     return lb
 
 
-def set_color(lb: QLabel, color: str, base: str = "") -> None:
-    """Recolour a ``lbl`` with a token name (``base`` is unused; kept for callers)."""
-    theme.tint(lb, fg=color)
-
-
 def set_rich(lb: QLabel, text: str, line_height: float = 1.45) -> None:
     """Set a wrapped label's words (kept for callers; ``Text.setText`` does the same)."""
     if isinstance(lb, Text):

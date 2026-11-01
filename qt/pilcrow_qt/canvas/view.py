@@ -56,11 +56,6 @@ def measurer() -> Measurer:
     return _measurer
 
 
-def column_width(pane: int) -> int:
-    """``--col: clamp(640px, min(61.8%, 100% - 48px), 1080px)``: the reading column of a pane."""
-    return int(max(640, min(pane * 0.618, pane - 48, 1080)))
-
-
 class Selection:
     __slots__ = ("a_key", "a_pos", "f_key", "f_pos")
 
@@ -218,7 +213,7 @@ class CanvasView(QAbstractScrollArea):
             col = max(120, vw - 2 * self.gutter)
             self.col_x = self.gutter
         else:
-            col = column_width(max(vw, 200))
+            col = theme.column_width(max(vw, 200))
             col = min(col, max(200, vw - 48))
             self.col_x = (vw - col) // 2
         self.col_w = col

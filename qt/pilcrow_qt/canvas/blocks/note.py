@@ -23,7 +23,7 @@ from ...store import store
 from .. import nodes as nd
 from ..paint import Measurer, PaintState, rounded
 from ..scene import Group, Target
-from .base import NodeBlock, chevron, paint_head_tint
+from .base import MetaPart, NodeBlock, chevron, meta_width, paint_head_tint, paint_meta
 
 NOTE_RE = re.compile(r"<helper-note\s+([^>]*)>\n?(.*?)\n?</helper-note>", re.S)
 ATTR_RE = re.compile(r'(\w+)="([^"]*)"')
@@ -36,7 +36,6 @@ VERBS = {
     "skipped": "Helper skipped",
     "running": "Helper",
 }
-MetaPart = Tuple[str, str, Any]
 
 
 def parse_notes(text: str) -> Tuple[List[Dict[str, str]], str]:
@@ -69,33 +68,6 @@ def _well(text: str, cwd: str) -> nd.Node:
 
 
 # ---------------------------------------------------------------- the head, as a tool card draws it
-
-
-def _meta_width(st: PaintState, parts: List[MetaPart]) -> int:
-    w = 0
-    for kind, text, _tone in parts:
-        if kind == "mono":
-            w += int(st.m.text_w(text, st.m.font(11.5, 400, True))) + 5
-        else:
-            w += int(st.m.text_w(text, st.m.font(theme.FS_MICRO))) + 8
-    return w
-
-
-def _paint_meta(p: QPainter, right: int, y: int, head_h: int, st: PaintState, parts: List[MetaPart]) -> None:
-    x = right
-    for kind, text, tone in reversed(parts):
-        if kind == "mono":
-            f = st.m.font(11.5, 400, True)
-            tw = st.m.text_w(text, f)
-            x -= tw
-            st.m.draw_text(p, x, y + (head_h - st.m.line_h(f)) / 2, text, f, QColor(tone))
-            x -= 5
-        else:
-            f = st.m.font(theme.FS_MICRO)
-            tw = st.m.text_w(text, f)
-            x -= tw
-            st.m.draw_text(p, x, y + (head_h - st.m.line_h(f)) / 2, text, f, QColor(tone))
-            x -= 8
 
 
 def paint_card_head(
@@ -141,7 +113,7 @@ def paint_card_head(
     if verb:
         st.m.draw_text(p, cx, y + (head_h - st.m.line_h(fv)) / 2, verb, fv, QColor(t.text_3))
         cx += st.m.text_w(verb, fv) + 7
-    meta_w = _meta_width(st, meta)
+    meta_w = meta_width(st, meta)
     chev_w = 13 + 7
     open_w = 13 + 7
     avail = max(40, (x + w) - cx - meta_w - chev_w - open_w - 8)
@@ -161,7 +133,7 @@ def paint_card_head(
         p.drawPixmap(
             int(cx), y + (head_h - 13) // 2, st.m.icon("arrow-up-right", QColor(t.text if hover_open else t.text_3), 13)
         )
-    _paint_meta(p, x + w, y, head_h, st, meta)
+    paint_meta(p, x + w, y, head_h, st, meta)
 
 
 class _Card(Group):
@@ -185,6 +157,10 @@ class _Card(Group):
     # what a subclass says
     def _build(self, m: Measurer) -> nd.Node:  # pragma: no cover - abstract
         raise NotImplementedError
+
+    def head_text(self) -> str:
+        h = self.head()
+        return f"{h['verb']} {h['target']}"
 
     def head(self) -> Dict[str, Any]:  # pragma: no cover - abstract
         raise NotImplementedError
@@ -288,9 +264,8 @@ class NoteCard(_Card):
         return "Open the helper's session"
 
     def text(self) -> str:
-        h = self.head()
         body = (self.part.get("body") or "").strip()
-        return f"{h['verb']} {h['target']}" + (f"\n{body}" if body else "")
+        return self.head_text() + (f"\n{body}" if body else "")
 
 
 class NoteBlock(Group):

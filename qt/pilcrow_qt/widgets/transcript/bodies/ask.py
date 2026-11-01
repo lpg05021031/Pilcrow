@@ -27,7 +27,6 @@ from .common import (
     caption,
     faint,
     markdown_label,
-    restyle,
     vbox,
 )
 
@@ -96,7 +95,7 @@ class OptionRow(QWidget):
         text = QWidget()
         tl = vbox(text, spacing=1)
         name = bits.label(label, wrap=True)
-        restyle(name, lambda t: f"QLabel {{ font-weight: 500; color: {t.text}; }}")
+        name.setFont(theme.font_ui(theme.FS_UI, 500))
         tl.addWidget(name)
         if description:
             tl.addWidget(bits.label(description, tone="faint", size="small", wrap=True))
@@ -196,7 +195,7 @@ class AskBody(QWidget):
             block = QWidget()
             bl = vbox(block, margins=(0, 8 if k else 0, 0, 0), spacing=2)
             ql = bits.label(qt, tone="muted", wrap=True)
-            restyle(ql, lambda t: f"QLabel {{ font-weight: 500; color: {t.text_2}; }}")
+            ql.setFont(theme.font_ui(theme.FS_UI, 500))
             bl.addWidget(ql)
             ans = Row(spacing=6)
             if answered.get(qt):
@@ -256,11 +255,11 @@ class AskBody(QWidget):
         bl = vbox(box, spacing=9)
         line = Row(spacing=8)
         if q.get("header"):
-            tag = bits.label(str(q["header"]), size="micro")
-            restyle(tag, lambda t: f"QLabel {{ font-weight: 600; color: {t.text_3}; font-size: {theme.FS_MICRO}px; }}")
+            tag = bits.label(str(q["header"]), tone="faint")
+            tag.setFont(theme.font_ui(theme.FS_MICRO, 600))
             line.add(tag)
         qt = bits.label(str(q.get("question") or ""), wrap=True)
-        restyle(qt, lambda t: f"QLabel {{ font-size: {theme.FS_BODY}px; font-weight: 600; color: {t.text}; }}")
+        qt.setFont(theme.font_ui(theme.FS_BODY, 600))
         line.add(qt, 1)
         if multi:
             line.add(faint("Choose any"))

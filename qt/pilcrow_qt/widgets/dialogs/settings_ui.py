@@ -33,9 +33,10 @@ from PySide6.QtWidgets import (
 from ... import icons, theme
 from ...store import store
 from ..ui.bits import Box, IconButton, Pill, hairline, label, paint_box
+from ..ui.button import Btn
 from ..ui.menu import Menu, Popover, host_for
 from ..ui.signals import bind
-from .parts import Backdrop, Text, sheet_bg, sheet_line, well_bg, well_line
+from .parts import Backdrop, ElideLabel, Text, sheet_bg, sheet_line, well_bg, well_line
 from .parts import Switch as _Switch
 
 Json = Dict[str, Any]
@@ -101,12 +102,6 @@ def home() -> str:
 # ---------------------------------------------------------------- styling helpers
 
 
-def styled(w: QWidget, css: Callable[[theme.Tokens], str]) -> None:
-    """Give ``w`` a stylesheet computed from the tokens, and recompute it when the theme changes."""
-    w.setStyleSheet(css(theme.tokens()))
-    bind(theme.theme.changed, w, lambda t: w.setStyleSheet(css(t)))
-
-
 def repolish(w: QWidget) -> None:
     """Re-run the stylesheet after a dynamic property changed."""
     w.style().unpolish(w)
@@ -131,42 +126,14 @@ def mono_label(text: str = "", tone: str = "faint") -> QLabel:
     return lb
 
 
-class ElidedLabel(QLabel):
-    """A one-line label that gives up width rather than widening its row and ends in … when cut
-    (the web ``.ellipsis``). The full text is its tooltip unless another is set."""
-
-    def __init__(self, text: str = "", parent: Optional[QWidget] = None) -> None:
-        super().__init__(text, parent)
-        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        self.setMinimumWidth(0)
-        self.setWordWrap(False)
-        if text:
-            self.setToolTip(text)
-
-    def setText(self, text: str) -> None:
-        super().setText(text)
-        if not self.toolTip():
-            self.setToolTip(text)
-
-    def paintEvent(self, _e) -> None:
-        p = QPainter(self)
-        p.setPen(self.palette().color(self.foregroundRole()))
-        p.setFont(self.font())
-        r = self.contentsRect()
-        p.drawText(
-            r,
-            int(self.alignment()) | Qt.TextFlag.TextSingleLine,
-            self.fontMetrics().elidedText(self.text(), Qt.TextElideMode.ElideRight, r.width()),
-        )
-
-
 def elide(lb: QLabel) -> QLabel:
-    """``lb``'s text and look on an :class:`ElidedLabel`; the original is discarded."""
-    out = ElidedLabel(lb.text())
+    """``lb``'s text and look on an :class:`ElideLabel` (one line that ends in … when cut, the
+    whole text its tooltip); the original is discarded."""
+    out = ElideLabel(lb.text())
+    out.setToolTip(lb.text())
     for name in ("fs", "mono"):
         if lb.property(name) is not None:
             out.setProperty(name, lb.property(name))
-    out.setStyleSheet(lb.styleSheet())
     out.setFont(lb.font())
     tint = theme.tint_of(lb)
     if tint:
@@ -178,42 +145,79 @@ def elide(lb: QLabel) -> QLabel:
 
 def line_edit(placeholder: str = "", mono: bool = False, name: str = "") -> QLineEdit:
     """``.input``: the global stylesheet draws it; ``mono`` is ``.input.mono``."""
-    e = QLineEdit()
+    e = Field()
     e.setObjectName("input")
     e.setPlaceholderText(placeholder)
     e.setClearButtonEnabled(False)
     e.setFixedHeight(34)
     e.setAccessibleName(name or placeholder)
-    styled(e, lambda t: input_css("#input", t, mono, "0 10px"))
+    style_field(e, mono, "0 10px")
     return e
 
 
-def input_css(sel: str, t: theme.Tokens, mono: bool = False, padding: str = "0 10px") -> str:
-    """``.input`` / ``.textarea``: a quiet fill with a hairline, the page colour and a stronger line on focus."""
-    surface = sheet_bg(t).name()
-    bg = theme.blend(t.fill_1, surface).name()
+def _field_bg(t: theme.Tokens) -> QColor:
+    return theme.blend(t.fill_1, sheet_bg(t).name())
+
+
+def style_field(w: QWidget, mono: bool = False, padding: str = "0 10px") -> None:
+    """The geometry and font of a sheet's field (``.input`` / ``.textarea``); its box is painted
+    (``paint_field``), so the stylesheet clears the native one and names no colour."""
     font = (
-        f'font-family: "{theme._MONO_FAMILY or "monospace"}"; font-size: 12.5px;'
-        if mono
-        else f"font-size: {theme.FS_UI}px;"
+        f'font-family: "{theme.font_mono().family()}"; font-size: 12.5px;' if mono else f"font-size: {theme.FS_UI}px;"
     )
-    return (
-        f"{sel} {{ background: {bg}; border: 1px solid {theme.blend(t.hair, bg).name()}; border-radius: {theme.R2}px; padding: {padding}; color: {t.text}; {font} selection-background-color: {theme.blend(t.selection, bg).name()}; }}"
-        f" {sel}:hover {{ border-color: {theme.blend(t.hair_2, bg).name()}; }}"
-        f" {sel}:focus {{ background: {t.canvas}; border-color: {theme.blend(t.hair_3, t.canvas).name()}; }}"
+    w.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+    w.setStyleSheet(
+        f"#{w.objectName()} {{ background: transparent; border: none; padding: {padding}; {font}"
+        " selection-background-color: palette(highlight); }"
     )
+
+
+def paint_field(w: QWidget) -> None:
+    """``.input``: a quiet fill over the sheet with a hairline, a stronger line under the pointer,
+    the page colour and the strongest line while it has the focus."""
+    t = theme.tokens()
+    if w.hasFocus():
+        bg, line = theme.qcolor(t.canvas), theme.blend(t.hair_3, t.canvas)
+    else:
+        bg = _field_bg(t)
+        line = theme.blend(t.hair_2 if w.underMouse() else t.hair, bg.name())
+    p = QPainter(w)
+    paint_box(p, QRectF(w.rect()), bg, line, theme.R2)
+    p.end()
+
+
+class Field(QLineEdit):
+    """A one-line field on a sheet, its box painted under the text (``paint_field``)."""
+
+    def event(self, e) -> bool:
+        if e.type() == QEvent.Type.Paint:
+            paint_field(self)
+        elif e.type() in (QEvent.Type.HoverEnter, QEvent.Type.HoverLeave):
+            self.update()
+        return super().event(e)
+
+
+class TextField(QPlainTextEdit):
+    """A plain text box on a sheet, its box painted under the viewport (``paint_field``)."""
+
+    def event(self, e) -> bool:
+        if e.type() == QEvent.Type.Paint:
+            paint_field(self)
+        elif e.type() in (QEvent.Type.HoverEnter, QEvent.Type.HoverLeave, QEvent.Type.FocusIn, QEvent.Type.FocusOut):
+            self.update()
+        return super().event(e)
 
 
 def text_area(placeholder: str = "", rows: int = 2, mono: bool = False, name: str = "") -> QPlainTextEdit:
     """``.textarea``: a plain text box ``rows`` lines tall that does not grow with its content."""
-    t = QPlainTextEdit()
+    t = TextField()
     t.setObjectName("textarea")
     t.setPlaceholderText(placeholder)
     t.setTabChangesFocus(True)
     t.setFixedHeight(int(round(rows * (12.5 if mono else theme.FS_UI) * 1.55)) + 18)
     t.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
     t.setAccessibleName(name or placeholder)
-    styled(t, lambda tk: input_css("#textarea", tk, mono, "6px 8px"))
+    style_field(t, mono, "6px 8px")
     return t
 
 
@@ -641,8 +645,6 @@ class Seg(QWidget):
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
-        self.setObjectName("seg")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setAccessibleName(name)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         lay = QHBoxLayout(self)
@@ -651,8 +653,18 @@ class Seg(QWidget):
         self.group = QButtonGroup(self)
         self.group.setExclusive(True)
         self.buttons: Dict[str, QPushButton] = {}
+        h = 22 if small else 24
+        pad = 7 if small else 10
         for v, text in options:
-            b = QPushButton(text)
+            b = Btn(text)
+            b.override.update(h=h - 2, px=pad - 1, fs=theme.FS_SMALL, fw=500, r=6)
+            b.set_look(
+                "text_3",
+                "text",
+                on_fg="text",
+                on_bg=lambda t: theme.blend(t.fill_3, sheet_bg(t).name()) if t.dark else theme.qcolor(t.raised),
+                on_line=lambda t: None if t.dark else theme.blend(t.hair, t.raised),
+            )
             b.setCheckable(True)
             b.setAutoDefault(False)
             b.setAccessibleName(text)
@@ -662,24 +674,14 @@ class Seg(QWidget):
             lay.addWidget(b)
             self.group.addButton(b)
             self.buttons[v] = b
-        h = 22 if small else 24
-        pad = 7 if small else 10
-
-        def css(t: theme.Tokens) -> str:
-            surface = sheet_bg(t).name()
-            bg = theme.blend(t.fill_1, surface)
-            on_bg = theme.blend(t.fill_3, surface).name() if t.dark else t.raised
-            on_border = "transparent" if t.dark else theme.blend(t.hair, t.raised).name()
-            return f"""
-            #seg {{ background: {bg.name()}; border: 1px solid {theme.blend(t.hair, bg.name()).name()}; border-radius: 8px; }}
-            QPushButton {{ border: 1px solid transparent; background: transparent; color: {t.text_3}; padding: 0 {pad - 1}px; min-height: {h - 2}px; max-height: {h - 2}px; border-radius: 6px; font-size: {theme.FS_SMALL}px; font-weight: 500; }}
-            QPushButton:hover {{ color: {t.text}; }}
-            QPushButton:checked {{ background: {on_bg}; color: {t.text}; border-color: {on_border}; }}
-            QPushButton:disabled {{ color: {t.text_4}; }}
-            """
-
-        styled(self, css)
+        bind(theme.theme.changed, self, lambda _t: self.update())
         self.set_value(value)
+
+    def paintEvent(self, _e) -> None:
+        t = theme.tokens()
+        bg = _field_bg(t)
+        p = QPainter(self)
+        paint_box(p, QRectF(self.rect()), bg, theme.blend(t.hair, bg.name()), 8)
 
     @property
     def value(self) -> str:

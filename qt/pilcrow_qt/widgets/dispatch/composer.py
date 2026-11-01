@@ -11,7 +11,7 @@ from PySide6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QScrollA
 from ... import icons, theme
 from ...lib.fmt import dirname
 from ...store import store
-from ..dialogs.parts import Switch, Text, hint, page_column
+from ..dialogs.parts import Switch, Text, hint
 from ..dialogs.schedule import NumInput
 from ..dialogs.settings_ui import Select, line_edit, text_area
 from ..ui.bits import Box, IconButton, LayoutButton, button
@@ -405,7 +405,7 @@ class JobComposer(QWidget):
     def eventFilter(self, obj, e) -> bool:
         if obj is self.scroll.viewport() and e.type() == QEvent.Type.Resize:
             vw = self.scroll.viewport().width()
-            self.body.setFixedWidth(max(320, min(page_column(vw), vw)))
+            self.body.setFixedWidth(max(320, min(theme.column_width(vw), vw)))
         return False
 
     def reset(self) -> None:

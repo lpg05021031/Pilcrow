@@ -16,7 +16,7 @@ from PySide6.QtCore import QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPixmap, QTextDocument
 
 from .. import theme
-from .paint import Measurer, PaintState, doc_height, draw_doc, find_selections, paint_decor, rounded
+from .paint import Measurer, PaintState, doc_height, draw_doc, find_selections, paint_decor, rounded, set_line_height
 from .pixels import hline
 from .scene import Target
 
@@ -310,13 +310,7 @@ class Text(Node):
                 else:
                     self._doc = m.plain_doc(self._text, w, f)
                     if self.line_h:
-                        from PySide6.QtGui import QTextBlockFormat, QTextCursor
-
-                        cur = QTextCursor(self._doc)
-                        cur.select(QTextCursor.SelectionType.Document)
-                        bf = QTextBlockFormat()
-                        bf.setLineHeight(self.line_h, QTextBlockFormat.LineHeightTypes.FixedHeight.value)
-                        cur.mergeBlockFormat(bf)
+                        set_line_height(self._doc, self.line_h)
             self.h = doc_height(self._doc)
             if self.max_h and self.h > self.max_h:
                 self.h = self.max_h

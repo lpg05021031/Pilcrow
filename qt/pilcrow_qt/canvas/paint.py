@@ -30,6 +30,7 @@ from PySide6.QtGui import (
     QPen,
     QPixmap,
     QStaticText,
+    QTextBlockFormat,
     QTextCharFormat,
     QTextCursor,
     QTextDocument,
@@ -42,6 +43,8 @@ from PySide6.QtGui import (
 )
 
 from .. import icons, markdown, theme
+from . import build
+from .build import trim_margins
 from .estimate import Calibration, Metrics
 from .pixels import hline, pen_width, snap
 
@@ -58,20 +61,20 @@ def rect_of(r: Rect) -> QRect:
 # ---------------------------------------------------------------- documents
 
 
+def set_line_height(doc: QTextDocument, px: int) -> None:
+    """Every line of a plain document on a fixed pitch (``line-height`` in px)."""
+    cur = QTextCursor(doc)
+    cur.select(QTextCursor.SelectionType.Document)
+    bf = QTextBlockFormat()
+    bf.setLineHeight(px, QTextBlockFormat.LineHeightTypes.FixedHeight.value)
+    cur.mergeBlockFormat(bf)
+
+
 def tidy_doc(doc: QTextDocument) -> None:
     """No margin above the first block or under the last; the empty paragraph QTextDocument leaves
     after a code block's table takes no room."""
-    first, last = doc.firstBlock(), doc.lastBlock()
-    if first.blockFormat().topMargin():
-        cur = QTextCursor(first)
-        bf = cur.blockFormat()
-        bf.setTopMargin(0)
-        cur.setBlockFormat(bf)
-    if last.blockFormat().bottomMargin():
-        cur = QTextCursor(last)
-        bf = cur.blockFormat()
-        bf.setBottomMargin(0)
-        cur.setBlockFormat(bf)
+    trim_margins(doc)
+    last = doc.lastBlock()
     for frame in doc.rootFrame().childFrames():
         b = doc.findBlock(frame.lastPosition() + 1)
         if b.isValid() and not b.text() and b != last and b.charFormat().fontPointSize() != 1:
@@ -655,8 +658,6 @@ class Measurer:
         """A laid-out document for one Markdown source (a top-level block or a whole text). ``size``
         picks a style of its own (a thought at 13.5px) over the prose and compact ones. Built from
         the token stream with a cursor (canvas/build.py); the HTML renderer stands in if that fails."""
-        from . import build
-
         m = markdown.metrics_for(size) if size else markdown.metrics(compact or quiet)
         doc = self._doc(self.font(m.base), width, tab_font=self.code_font())
         doc.setIndentWidth(m.list_indent)
@@ -875,6 +876,7 @@ __all__ = [
     "rounded",
     "selection",
     "table_rect",
+    "set_line_height",
     "tidy_doc",
     "well_rects",
 ]

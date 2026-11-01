@@ -46,19 +46,6 @@ def step_title(s: Json) -> str:
     return str(s.get("label") or s.get("tool") or "Step")
 
 
-def step_sub(s: Json) -> str:
-    kind = s.get("kind")
-    if kind == "tool":
-        return str(s.get("tool") or "")
-    if kind == "external":
-        return plural(len(s.get("files") or []), "file") + " changed between turns"
-    if kind == "message":
-        return "You"
-    if kind == "start":
-        return "Claude Code"
-    return "Timeline"
-
-
 def off_reason(reason: Optional[str]) -> str:
     if reason in ("home folder", "root of a drive", "too close to the root"):
         where = "your home folder" if reason == "home folder" else "a folder this close to the root"

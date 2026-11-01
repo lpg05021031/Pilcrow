@@ -251,6 +251,11 @@ class Group(Block):
         self.warm = True
         return self.h
 
+    def head_text(self) -> str:
+        """What the head says (the name a screen reader gives a group that opens and closes); the
+        group's own text unless its text is its content."""
+        return self.text()
+
     # ---- margins: a headless group shows its children's margins to its siblings
     def mt(self) -> int:
         if self.head_h == 0 and self.children:

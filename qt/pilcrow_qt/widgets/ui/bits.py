@@ -96,25 +96,55 @@ def button(
 
 
 class IconButton(QPushButton):
-    """A quiet square button with only an icon (``.icon-btn``): a fill under the pointer, and kept
-    while ``active``. The icon is painted in text-2 (or ``color``), text under the pointer."""
+    """A quiet square button with only an icon (``.icon-btn``, ``.icon-btn.sm``): a fill under the
+    pointer, kept while ``active``. The icon (``size`` px) is painted in ``color`` (text-2 unless
+    given), text under the pointer. ``box`` is the square (the icon and 6px around unless given),
+    ``width`` a wider one; ``over`` the surface the fill lies on. With ``reveal`` it keeps its place
+    but shows nothing until ``set_shown(True)`` (the buttons that appear when the row around them is
+    hovered). ``last_modifiers`` are the keys held at the last press (Shift+click for options)."""
 
     def __init__(
-        self, name: str, tooltip: str = "", size: int = 15, color: str = "", parent: Optional[QWidget] = None
+        self,
+        name: str,
+        tooltip: str = "",
+        size: int = 15,
+        color: str = "",
+        parent: Optional[QWidget] = None,
+        *,
+        box: int = 0,
+        width: int = 0,
+        over: str = "canvas",
+        reveal: bool = False,
     ) -> None:
         super().__init__(parent)
-        self._name, self._size, self._color = name, size, color
+        self._name, self._size, self._color, self._over, self._reveal = name, size, color, over, reveal
+        self._shown = not reveal
         self._active = False
         self._hover = False
+        self.last_modifiers = Qt.KeyboardModifier.NoModifier
         self.setFlat(True)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedSize(size + 12, size + 12)
+        box = box or size + 12
+        self.setFixedSize(width or box, box)
         self.setIconSize(QSize(size, size))
         if tooltip:
             self.setToolTip(tooltip)
             self.setAccessibleName(tooltip)
         bind(theme.theme.changed, self, lambda _t: self.update())
+
+    @property
+    def shown(self) -> bool:
+        return self._shown
+
+    def set_shown(self, on: bool) -> None:
+        if self._shown != on:
+            self._shown = on
+            self.update()
+
+    def mousePressEvent(self, e) -> None:
+        self.last_modifiers = e.modifiers()
+        super().mousePressEvent(e)
 
     def set_icon_name(self, name: str) -> None:
         self._name = name
@@ -136,14 +166,17 @@ class IconButton(QPushButton):
         super().leaveEvent(e)
 
     def paintEvent(self, _e) -> None:
+        if not self._shown:
+            return
         t = theme.tokens()
         lit = (self._hover and self.isEnabled()) or self._active
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         if lit:
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(theme.blend(t.fill_2, t.canvas))
-            p.drawRoundedRect(QRectF(self.rect()), theme.R2, theme.R2)
+            p.setBrush(theme.blend(t.fill_2, getattr(t, self._over)))
+            r = min(theme.R2, self.width() / 2)
+            p.drawRoundedRect(QRectF(self.rect()), r, r)
         if not self.isEnabled():
             p.setOpacity(0.45)
         color = t.text if lit else (self._color or t.text_2)
@@ -612,14 +645,6 @@ class Clickable(QObject):
 
 def copy_text(text: str) -> None:
     QGuiApplication.clipboard().setText(text)
-
-
-def expanding(w: QWidget, h: bool = True, v: bool = False) -> QWidget:
-    w.setSizePolicy(
-        QSizePolicy.Policy.Expanding if h else QSizePolicy.Policy.Preferred,
-        QSizePolicy.Policy.Expanding if v else QSizePolicy.Policy.Preferred,
-    )
-    return w
 
 
 class LayoutButton(QPushButton):
