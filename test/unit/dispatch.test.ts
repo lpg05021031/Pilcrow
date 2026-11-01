@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- the server module is plain JavaScript */
 // Dispatch (server/dispatch_core.js): the pure helpers, the workspace scan and the plan on real
 // temporary repositories, and the job state machine driven through fake sessions and the bus.
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -330,6 +330,25 @@ async function jobWithRepos(h: ReturnType<typeof harness>, settings: any = {}, b
 }
 
 describe('a job through its life', () => {
+  it('past its minute cap a run is interrupted, and the idle that follows ends it as stopped, not done', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const h = harness();
+      const { job } = await jobWithRepos(h, { canary: 0, parallel: 1 });
+      await h.d.start(job.id);
+      await sleep(40);
+      const s1 = h.sessions.last();
+      vi.advanceTimersByTime(10 * 60e3);
+      expect(s1.interrupted).toBe(1);
+      s1.say('Half way.');
+      s1.idle();
+      await sleep(40);
+      expect(h.d.get(job.id).runs[0]).toMatchObject({ state: 'stopped', reason: 'Stopped after 10 minutes' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('canary first, one answer for every repository, dependents after dependencies, a report at the end', async () => {
     const h = harness();
     const { job } = await jobWithRepos(h);

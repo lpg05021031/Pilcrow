@@ -247,6 +247,7 @@ export async function diff(cwd, { base } = {}) {
   return { isRepo: true, root: i.root, base: baseLabel, baseRef, branch: i.branch, files, error: r.code ? r.stderr : null };
 }
 
+/** Commit everything (or `paths`) in the repository `cwd` is in. @param {string} cwd @param {{ message: string, paths?: string[] }} opts */
 export async function commit(cwd, { message, paths }) {
   const { info: i } = await status(cwd);
   if (!i.isRepo) return { ok: false, output: 'Not a git repository' };

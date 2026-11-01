@@ -6,6 +6,7 @@ import { store } from './config.js';
 import { sessions, bus } from './sessions.js';
 import * as snapshots from './snapshots.js';
 import * as inbox from './inbox.js';
+import { MAX_FILES, SUMMARY_MAX, capRun, changesOf } from './runs.js';
 import { xdg, readJson, writeJson, uuid, log, slash, lastAssistantText } from './util.js';
 
 export const events = new EventEmitter();
@@ -233,21 +234,17 @@ export async function runNow(id, { manual = true } = {}) {
   store.setMeta(sessionId, { scheduled: { id: s.id, name: s.name, at: startedAt, manual } });
   const session = sessions.find(sessionId);
   session.unattended = true;
-  const entry = { sessionId, startedAt, timer: null };
+  const entry = { sessionId, startedAt, timer: null, stopping: null };
   running.set(id, entry);
   s.lastRunAt = startedAt;
   s.runs = (s.runs || 0) + 1;
   persist();
   log('schedule run', s.name, sessionId);
   const finish = (status, reason) => finishRun(s, session, entry, status, reason);
-  entry.timer = setTimeout(() => {
-    log('schedule timeout', s.name);
-    session.interrupt().catch(() => {});
-    setTimeout(() => finish('stopped', `Stopped after ${s.maxMinutes} minutes`), 3000);
-  }, s.maxMinutes * 60e3);
+  entry.timer = capRun(entry, s.maxMinutes, () => session, (why) => finish('stopped', why));
   const onState = (st) => {
     if (st.id !== sessionId || !running.has(id) || running.get(id) !== entry) return;
-    if (st.status === 'idle') finish('completed');
+    if (st.status === 'idle') finish(entry.stopping ? 'stopped' : 'completed', entry.stopping);
     else if (st.status === 'error') finish('failed', st.error);
     else if (st.status === 'stopped') finish(session.lastReply ? 'completed' : 'failed', 'Claude Code exited');
   };
@@ -268,16 +265,7 @@ function finishRun(s, session, entry, status, reason) {
   clearTimeout(entry.timer);
   bus.off('state', entry.onState);
   const endedAt = Date.now();
-  const files = new Map();
-  for (const st of snapshots.steps(session).steps) {
-    if (st.at < entry.startedAt) continue;
-    for (const f of st.files) {
-      const cur = files.get(f.path) || { path: f.path, add: 0, del: 0 };
-      cur.add += f.add;
-      cur.del += f.del;
-      files.set(f.path, cur);
-    }
-  }
+  const { files } = changesOf({ steps: snapshots.steps(session).steps, since: entry.startedAt });
   const lastText = session.lastReply?.text || lastAssistantText(session.messages);
   const item = {
     id: uuid(),
@@ -290,9 +278,9 @@ function finishRun(s, session, entry, status, reason) {
     durationMs: endedAt - entry.startedAt,
     status,
     reason: reason || null,
-    summary: lastText.slice(0, 1200),
+    summary: lastText.slice(0, SUMMARY_MAX),
     cost: session.usage?.costUsd || 0,
-    files: [...files.values()].slice(0, 60),
+    files: files.slice(0, MAX_FILES),
     read: false,
     manual: Boolean(store.getMeta(session.id)?.scheduled?.manual),
   };

@@ -9,10 +9,9 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { readJson as readJsonFile, writeJson as writeJsonFile, lastAssistantText, fmtCost } from './util.js';
-import { findRepos, groupHunks, joinNotes, manifestOf, ruleKey, ruleLabel } from './workspace.js';
+import { findRepos, joinNotes, manifestOf, ruleKey, ruleLabel } from './workspace.js';
+import { ACTIVE, MAX_FILES, SUMMARY_MAX, TERMINAL, capRun, changesOf, land, review as reviewRuns, tally } from './runs.js';
 
-export const TERMINAL = new Set(['done', 'failed', 'stopped', 'skipped']);
-export const ACTIVE = new Set(['preparing', 'running', 'needs_action']);
 export const DEFAULTS = Object.freeze({
   mode: 'acceptEdits', // 'ask' | 'acceptEdits' | 'allowlist'
   allowedTools: [],
@@ -34,7 +33,6 @@ export const DEFAULTS = Object.freeze({
 });
 export const REPORT_MAX_MIN = 6;
 export const MAX_BRIEF = 60_000;
-export const MAX_FILES = 60;
 export const SIZE_UNITS = { small: 1, medium: 2, large: 4 };
 const RATE_LIMIT = /rate.?limit|429|overloaded|too many requests/i;
 const COALESCE_MS = 16;
@@ -720,16 +718,7 @@ export function createDispatcher(deps) {
       run.state = 'running';
       run.now = 'starting';
       touch(job, run);
-      timers.set(
-        run.id,
-        setTimeout(() => {
-          const s = sessions.find(run.sessionId);
-          s?.interrupt?.().catch?.(() => null);
-          setTimeout(() => {
-            if (ACTIVE.has(run.state)) endRun(job, run, 'stopped', `Stopped after ${job.settings.maxMinutes} minutes`, s);
-          }, 3000);
-        }, job.settings.maxMinutes * 60e3),
-      );
+      armCap(job, run);
       const extras = { learned: job.wave === 'main' && job.settings.learn ? job.learned : [], deps: run.dependsOn.map((d) => job.runs.find((x) => x.path === d && x.state === 'done')).filter(Boolean).map((d) => ({ name: d.name, summary: d.summary })) };
       const tgt = job.targets.find((x) => x.path === run.path);
       run.brief = renderBrief(job.brief, { job, target: { ...run, notes: joinNotes(registry?.notesFor(run.path), tgt?.notes) }, ...extras });
@@ -737,6 +726,15 @@ export function createDispatcher(deps) {
     } catch (e) {
       if (ACTIVE.has(run.state)) endRun(job, run, 'failed', e?.message || 'Could not start', session);
     }
+  }
+
+  /** The run's minute cap (runs.js); `ms` is what is left of it for a run picked up after a restart. */
+  function armCap(job, run, ms) {
+    const session = () => sessions.find(run.sessionId);
+    timers.set(
+      run.id,
+      capRun(run, job.settings.maxMinutes, session, (why) => ACTIVE.has(run.state) && endRun(job, run, 'stopped', why, session()), ms),
+    );
   }
 
   function clearRunTimer(run) {
@@ -775,52 +773,23 @@ export function createDispatcher(deps) {
     endRun(job, run, 'done', null, session);
   }
 
+  /** What the run changed (its steps and its worktree's diff), what it cost and what it said last. */
   async function collect(job, run, session) {
-    const files = new Map();
-    if (session) {
-      try {
-        for (const st of snapshots.steps(session).steps || []) {
-          if (st.at < (run.startedAt || 0)) continue;
-          for (const f of st.files || []) {
-            const cur = files.get(f.path) || { path: f.path, add: 0, del: 0 };
-            cur.add += f.add || 0;
-            cur.del += f.del || 0;
-            files.set(f.path, cur);
-          }
-        }
-      } catch {
-        /* no snapshots */
-      }
+    let steps = [];
+    try {
+      if (session) steps = snapshots.steps(session).steps || [];
+    } catch {
+      /* no snapshots */
     }
-    let add = 0;
-    let del = 0;
-    if (run.worktree?.path) {
-      try {
-        const d = await git.diff(run.worktree.path, { base: run.worktree.base });
-        for (const f of d.files || []) {
-          const fa = Number(f.additions ?? f.add ?? 0);
-          const fd = Number(f.deletions ?? f.del ?? 0);
-          add += fa;
-          del += fd;
-          if (!files.has(f.path)) files.set(f.path, { path: f.path, add: fa, del: fd });
-        }
-      } catch {
-        /* the worktree may be gone */
-      }
-    }
-    if (!add && !del) {
-      for (const f of files.values()) {
-        add += f.add;
-        del += f.del;
-      }
-    }
-    run.files = [...files.values()].slice(0, MAX_FILES);
-    run.add = add;
-    run.del = del;
+    const d = run.worktree?.path ? await git.diff(run.worktree.path, { base: run.worktree.base }).catch(() => null) : null;
+    const ch = changesOf({ steps, since: run.startedAt || 0, diff: d?.files || [] });
+    run.files = ch.files.slice(0, MAX_FILES);
+    run.add = ch.add;
+    run.del = ch.del;
     if (session) {
       run.cost = session.usage?.costUsd || run.cost || 0;
       const text = session.lastReply?.text || lastAssistantText(session.messages);
-      if (text) run.summary = text.slice(0, 1200);
+      if (text) run.summary = text.slice(0, SUMMARY_MAX);
     }
   }
 
@@ -869,7 +838,8 @@ export function createDispatcher(deps) {
       changed = true;
     }
     if (st.status === 'idle' && (run.state === 'running' || run.state === 'needs_action')) {
-      onIdle(job, run, session).catch((e) => log('dispatch idle failed', e?.message));
+      if (run.stopping) endRun(job, run, 'stopped', run.stopping, session);
+      else onIdle(job, run, session).catch((e) => log('dispatch idle failed', e?.message));
       return;
     }
     if (st.status === 'error') {
@@ -1017,7 +987,7 @@ export function createDispatcher(deps) {
     if (!TERMINAL.has(old.state)) throw new Error('That run is still going.');
     if (typeof brief === 'string' && brief.trim()) job.brief = brief;
     const t = job.plan?.targets.find((x) => x.path === old.path);
-    const run = { ...old, id: uuid(), state: 'queued', attempt: (old.attempt || 1) + 1, sessionId: null, worktree: null, startedAt: null, endedAt: null, durationMs: 0, cost: 0, summary: '', files: [], add: 0, del: 0, reason: null, verify: null, prepare: null, now: null, pending: [], retried: false, commit: null, pr: null, finished: null, wave: 'main', brief: t?.brief || old.brief };
+    const run = { ...old, id: uuid(), state: 'queued', attempt: (old.attempt || 1) + 1, sessionId: null, worktree: null, startedAt: null, endedAt: null, durationMs: 0, cost: 0, summary: '', files: [], add: 0, del: 0, reason: null, verify: null, prepare: null, now: null, pending: [], retried: false, commit: null, pr: null, prError: null, finished: null, finishError: null, stopping: null, wave: 'main', brief: t?.brief || old.brief };
     old.superseded = run.id;
     job.runs.push(run);
     if (job.state !== 'running') {
@@ -1062,18 +1032,8 @@ export function createDispatcher(deps) {
   // ---- review and finish
   async function review(id) {
     const job = jobOf(id);
-    const diffs = [];
-    for (const r of job.runs) {
-      if (!r.worktree?.path || r.superseded) continue;
-      if (!fs.existsSync(r.worktree.path)) continue;
-      try {
-        const d = await git.diff(r.worktree.path, { base: r.worktree.base });
-        diffs.push({ runId: r.id, name: r.name, files: d.files || [] });
-      } catch {
-        /* skip */
-      }
-    }
-    return { id, ...groupHunks(diffs) };
+    const live = job.runs.filter((r) => !r.superseded);
+    return { id, ...(await reviewRuns(git, live.map((r) => ({ id: r.id, name: r.name, dir: r.worktree?.path, base: r.worktree?.base })))) };
   }
 
   /** @param {string} id @param {{ runId?: string, action?: string, message?: string, pr?: boolean }} [opts] */
@@ -1084,59 +1044,20 @@ export function createDispatcher(deps) {
     const results = [];
     for (const run of runs) {
       if (!TERMINAL.has(run.state)) throw new Error(`${run.name} is still going.`);
-      const res = { runId: run.id, name: run.name, ok: true, output: '' };
-      try {
-        if (action === 'keep') run.finished = 'keep';
-        else if (!run.worktree?.path || !fs.existsSync(run.worktree.path)) {
-          run.finished = action;
-          res.output = 'No worktree.';
-        } else if (action === 'discard') {
-          const r = await git.removeWorktree({ repoRoot: run.worktree.repoRoot, dir: run.worktree.path, branch: run.worktree.branch, deleteBranch: true });
-          res.ok = r.ok !== false;
-          res.output = r.output || '';
-          run.finished = 'discard';
-        } else {
-          const msg = renderBrief(message || job.settings.commitMessage || `${job.name}`, { job, target: run });
-          const c = await git.commit(run.worktree.path, { message: msg });
-          if (!c.ok && !/nothing to commit|nothing added/i.test(c.output || '')) throw new Error(c.output || 'commit failed');
-          const head = await git.git(run.worktree.path, ['rev-parse', '--short', 'HEAD']);
-          run.commit = (head.stdout || '').trim() || null;
-          if (pr ?? job.settings.pr) {
-            const url = await openPr(job, run).catch((e) => {
-              run.prError = e?.message || 'Could not open a pull request';
-              return null;
-            });
-            if (url) run.pr = url;
-          }
-          const r = await git.removeWorktree({ repoRoot: run.worktree.repoRoot, dir: run.worktree.path, branch: run.worktree.branch, deleteBranch: false });
-          res.output = r.output || '';
-          run.finished = 'commit';
-        }
-        const s = run.sessionId ? sessions.find(run.sessionId) : null;
-        if (action !== 'keep') s?.close?.();
-      } catch (e) {
-        res.ok = false;
-        res.output = e?.message || String(e);
-        run.finishError = res.output;
-      }
-      results.push(res);
+      const how = {
+        git,
+        which,
+        exec,
+        message: renderBrief(message || job.settings.commitMessage || `${job.name}`, { job, target: run }),
+        pr: (pr ?? job.settings.pr) ? { title: job.name, body: `${job.brief}\n\n---\n${run.summary || ''}\n\nOpened by Pilcrow Dispatch (job “${job.name}”).` } : null,
+      };
+      const res = await land(run, action, how);
+      if (res.ok && action !== 'keep') (run.sessionId ? sessions.find(run.sessionId) : null)?.close?.();
+      results.push({ runId: run.id, name: run.name, ...res });
       touch(job, run);
     }
     maybeFinish(job);
     return { job: summary(job), results };
-  }
-
-  async function openPr(job, run) {
-    const gh = which('gh');
-    if (!gh) throw new Error('gh is not on the path.');
-    const wt = run.worktree;
-    const push = await git.git(wt.path, ['push', '-u', 'origin', wt.branch]);
-    if (push.code) throw new Error((push.stderr || push.stdout || 'push failed').trim());
-    const body = `${job.brief}\n\n---\n${run.summary || ''}\n\nOpened by Pilcrow Dispatch (job “${job.name}”).`;
-    const r = await exec(gh, ['pr', 'create', '--head', wt.branch, '--title', `${job.name}`, '--body', body], { cwd: wt.repoRoot, timeout: 60_000 });
-    if (r.code) throw new Error((r.stderr || r.stdout || 'gh pr create failed').trim());
-    const url = (r.stdout || '').trim().split('\n').pop();
-    return url || null;
   }
 
   function maybeFinish(job) {
@@ -1237,12 +1158,8 @@ export function createDispatcher(deps) {
 
   function inboxItem(job) {
     const rep = job.report || buildReport(job);
-    const done = rep.targets.filter((t) => t.state === 'done').length;
-    const failed = rep.targets.filter((t) => t.state === 'failed' || t.state === 'stopped').length;
     const prs = rep.targets.filter((t) => t.pr).length;
-    const files = [];
-    for (const r of job.runs) for (const f of r.files || []) if (files.length < MAX_FILES) files.push({ ...f, repo: r.name });
-    const lines = rep.targets.map((t) => `- ${t.name}: ${t.state}${t.reason ? ` (${t.reason})` : ''}${t.summary ? ` — ${t.summary.slice(0, 160)}` : ''}`);
+    const files = job.runs.flatMap((r) => (r.files || []).map((f) => ({ ...f, repo: r.name }))).slice(0, MAX_FILES);
     return {
       id: uuid(),
       kind: 'dispatch',
@@ -1254,9 +1171,10 @@ export function createDispatcher(deps) {
       startedAt: job.startedAt,
       endedAt: job.finishedAt || now(),
       durationMs: rep.durationMs,
-      status: failed && !done ? 'failed' : 'completed',
-      reason: failed ? `${failed} of ${rep.targets.length} did not finish` : null,
-      summary: `${done} of ${rep.targets.length} repositories done${prs ? `, ${prs} pull request${prs === 1 ? '' : 's'}` : ''}.\n${lines.join('\n')}`.slice(0, 1200),
+      ...tally(
+        rep.targets.map((t) => ({ ...t, gist: t.summary })),
+        `repositories done${prs ? `, ${prs} pull request${prs === 1 ? '' : 's'}` : ''}`,
+      ),
       cost: rep.cost,
       files,
       read: false,
@@ -1289,12 +1207,8 @@ export function createDispatcher(deps) {
       for (const r of job.runs) {
         if (!ACTIVE.has(r.state)) continue;
         const s = r.sessionId ? sessions.find(r.sessionId) : null;
-        if (s && s.q) {
-          timers.set(
-            r.id,
-            setTimeout(() => endRun(job, r, 'stopped', `Stopped after ${job.settings.maxMinutes} minutes`, s), Math.max(1000, job.settings.maxMinutes * 60e3 - (now() - (r.startedAt || now())))),
-          );
-        } else {
+        if (s && s.q) armCap(job, r, Math.max(1000, job.settings.maxMinutes * 60e3 - (now() - (r.startedAt || now()))));
+        else {
           r.state = 'stopped';
           r.reason = 'The server restarted';
           r.endedAt = now();

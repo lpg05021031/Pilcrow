@@ -11,8 +11,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
-import { TERMINAL, ACTIVE } from './dispatch_core.js';
-import { findRepos, groupHunks, ruleKey, ruleLabel } from './workspace.js';
+import { TERMINAL, ACTIVE, capRun, changesOf, land, review as reviewRuns, tally } from './runs.js';
+import { findRepos, ruleKey, ruleLabel } from './workspace.js';
 import { absolute, fmtCost, textOfContent, under } from './util.js';
 
 export const STATES = ['queued', 'preparing', 'running', 'needs_action', 'done', 'failed', 'stopped', 'skipped'];
@@ -27,6 +27,7 @@ export const TOOLS = ['start', 'wait', 'read', 'send', 'stop', 'list'];
 export const TOOL_PREFIX = 'mcp__helpers__';
 const MODE_WIDTH = { plan: 0, default: 1, acceptEdits: 2, bypassPermissions: 3 };
 const DEFAULTS = { enabled: true, total: 8, parallel: 0, maxMinutes: 30, costUsd: 0, wakeLead: true };
+const FILE_LIST_MAX = 200; // changed files a helper's `read files` lists
 
 /** Prepended to every helper's brief: what a helper is and how to end. */
 export const HEADER =
@@ -335,15 +336,7 @@ export function createHelpers(deps) {
       setState(h, 'running');
       timers.set(
         h.id,
-        setTimeout(() => {
-          const s = sessions.find?.(h.id);
-          h.stopping = `Stopped after ${h.maxMinutes} minutes`;
-          persist(h);
-          s?.interrupt?.().catch?.(() => null);
-          setTimeout(() => {
-            if (ACTIVE.has(h.state)) end(h, 'stopped', h.stopping);
-          }, 3000);
-        }, h.maxMinutes * 60e3),
+        capRun(h, h.maxMinutes, () => sessions.find?.(h.id), (why) => ACTIVE.has(h.state) && end(h, 'stopped', why)),
       );
       await session.send({ text, from: 'lead' });
     } catch (e) {
@@ -390,17 +383,14 @@ export function createHelpers(deps) {
   async function collect(h) {
     const dir = h.worktree?.path || h.cwd;
     if (!dir || !exists(dir)) return;
-    try {
-      const d = await git.diff(dir, { base: h.worktree?.base });
-      const files = d.files || [];
-      h.files = files.length;
-      h.add = files.reduce((s, f) => s + Number(f.additions ?? f.add ?? 0), 0);
-      h.del = files.reduce((s, f) => s + Number(f.deletions ?? f.del ?? 0), 0);
-      h.fileList = files.slice(0, 200).map((f) => ({ path: f.path, add: Number(f.additions ?? f.add ?? 0), del: Number(f.deletions ?? f.del ?? 0) }));
-      persist(h);
-    } catch {
-      /* not a repository, or gone */
-    }
+    const d = await git.diff(dir, { base: h.worktree?.base }).catch(() => null);
+    if (!d) return; // not a repository, or gone
+    const ch = changesOf({ diff: d.files || [] });
+    h.files = ch.files.length;
+    h.add = ch.add;
+    h.del = ch.del;
+    h.fileList = ch.files.slice(0, FILE_LIST_MAX);
+    persist(h);
   }
 
   /** The text of the helper's last reply, whole (the session's lastReply is a one-line gist). */
@@ -444,7 +434,7 @@ export function createHelpers(deps) {
       h.pending = pending;
       changed = true;
     }
-    const line = st.activity?.label || (st.status === 'idle' ? h.lastLine : h.lastLine);
+    const line = st.activity?.label || h.lastLine;
     if (line && line !== h.lastLine) {
       h.lastLine = line;
       changed = true;
@@ -704,77 +694,38 @@ export function createHelpers(deps) {
     return out;
   }
   async function review(leadId) {
-    const diffs = [];
-    for (const h of helpersOf(leadId)) {
-      const dir = h.worktree?.path;
-      if (!dir || !exists(dir) || h.finished === 'discard' || h.finished === 'commit') continue;
-      try {
-        const d = await git.diff(dir, { base: h.worktree.base });
-        diffs.push({ runId: h.id, name: h.name, files: d.files || [] });
-      } catch {
-        /* skip */
-      }
-    }
-    return { id: leadId, ...groupHunks(diffs) };
+    const open = helpersOf(leadId).filter((h) => h.finished !== 'discard' && h.finished !== 'commit');
+    return { id: leadId, ...(await reviewRuns(git, open.map((h) => ({ id: h.id, name: h.name, dir: h.worktree?.path, base: h.worktree?.base })))) };
   }
   /** @param {string} leadId @param {{ name?: string, action?: string, message?: string, pr?: boolean }} [opts] */
   async function finish(leadId, { name, action, message, pr } = {}) {
     if (!['commit', 'discard', 'keep', 'pr'].includes(action)) throw new Error('Finish with commit, pr, discard or keep.');
     const mine = helpersOf(leadId).filter((h) => (!name || h.name === name) && TERMINAL.has(h.state) && !h.finished);
+    const title = leadMeta(leadId).title;
     const results = [];
     for (const h of mine) {
-      const res = { name: h.name, ok: true, output: '' };
-      try {
-        if (action === 'keep') h.finished = 'keep';
-        else if (!h.worktree?.path || !exists(h.worktree.path)) {
-          h.finished = action;
-          res.output = 'No worktree.';
-        } else if (action === 'discard') {
-          const r = await git.removeWorktree({ repoRoot: h.worktree.repoRoot, dir: h.worktree.path, branch: h.worktree.branch, deleteBranch: true });
-          res.ok = r.ok !== false;
-          res.output = r.output || '';
-          h.finished = 'discard';
-        } else {
-          const msg = (message || '').trim() || `${leadMeta(leadId).title || 'Helper'}: ${h.name}`;
-          const c = await git.commit(h.worktree.path, { message: msg });
-          if (!c.ok && !/nothing to commit|nothing added/i.test(c.output || '')) throw new Error(c.output || 'commit failed');
-          const head = await git.git(h.worktree.path, ['rev-parse', '--short', 'HEAD']);
-          h.commit = (head.stdout || '').trim() || null;
-          if (action === 'pr' || pr) {
-            const url = await openPr(leadId, h).catch((e) => {
-              h.prError = e?.message || 'Could not open a pull request';
-              return null;
-            });
-            if (url) h.pr = url;
-          }
-          const r = await git.removeWorktree({ repoRoot: h.worktree.repoRoot, dir: h.worktree.path, branch: h.worktree.branch, deleteBranch: false });
-          res.output = r.output || '';
-          h.finished = 'commit';
-        }
-        if (action !== 'keep') sessions.find?.(h.id)?.close?.();
-      } catch (e) {
-        res.ok = false;
-        res.output = e?.message || String(e);
-        h.finishError = res.output;
-      }
+      const siblings = helpersOf(leadId).filter((x) => x.id !== h.id && x.pr);
+      const how = {
+        git,
+        which,
+        exec,
+        message: (message || '').trim() || `${title || 'Helper'}: ${h.name}`,
+        pr:
+          action === 'pr' || pr
+            ? {
+                title: `${title || 'Helper'}: ${h.name}`,
+                body: `${h.brief}\n\n---\n${h.handoff || ''}${siblings.length ? `\n\nRelated pull requests from the same lead:\n${siblings.map((s) => `- ${s.name}: ${s.pr}`).join('\n')}` : ''}\n\nOpened by Pilcrow (helper “${h.name}” of “${title || 'a lead session'}”).`,
+              }
+            : null,
+      };
+      const res = await land(h, action === 'pr' ? 'commit' : action, how);
+      if (res.ok && action !== 'keep') sessions.find?.(h.id)?.close?.();
       persist(h);
-      results.push(res);
+      results.push({ name: h.name, ...res });
     }
     emitLead(leadId);
     maybeReport(leadId, true);
     return { results };
-  }
-  async function openPr(leadId, h) {
-    const gh = which('gh');
-    if (!gh || !exec) throw new Error('gh is not on the path.');
-    const wt = h.worktree;
-    const push = await git.git(wt.path, ['push', '-u', 'origin', wt.branch]);
-    if (push.code) throw new Error((push.stderr || push.stdout || 'push failed').trim());
-    const siblings = helpersOf(leadId).filter((x) => x.id !== h.id && x.pr);
-    const body = `${h.brief}\n\n---\n${h.handoff || ''}${siblings.length ? `\n\nRelated pull requests from the same lead:\n${siblings.map((s) => `- ${s.name}: ${s.pr}`).join('\n')}` : ''}\n\nOpened by Pilcrow (helper “${h.name}” of “${leadMeta(leadId).title || 'a lead session'}”).`;
-    const r = await exec(gh, ['pr', 'create', '--head', wt.branch, '--title', `${leadMeta(leadId).title || 'Helper'}: ${h.name}`, '--body', body], { cwd: wt.repoRoot, timeout: 60_000 });
-    if (r.code) throw new Error((r.stderr || r.stdout || 'gh pr create failed').trim());
-    return (r.stdout || '').trim().split('\n').pop() || null;
   }
   /** One inbox item per lead once every helper has reached a terminal state and one changed files; updated, not duplicated. */
   function maybeReport(leadId, force = false) {
@@ -783,8 +734,6 @@ export function createHelpers(deps) {
     if (!force && !mine.some((h) => (h.files || 0) > 0)) return;
     const lm = leadMeta(leadId);
     const title = lm.title || lm.firstPrompt || 'A lead session';
-    const done = mine.filter((h) => h.state === 'done').length;
-    const lines = mine.map((h) => `- ${h.name}: ${h.state}${h.reason ? ` (${h.reason})` : ''}; ${h.files || 0} files (+${h.add || 0} −${h.del || 0})${h.handoff ? ` — ${h.handoff.replace(/\s+/g, ' ').slice(0, 160)}` : ''}`);
     const item = {
       kind: 'helpers',
       leadId,
@@ -794,9 +743,10 @@ export function createHelpers(deps) {
       startedAt: Math.min(...mine.map((h) => h.startedAt)),
       endedAt: Math.max(...mine.map((h) => h.endedAt || now())),
       durationMs: Math.max(...mine.map((h) => h.endedAt || now())) - Math.min(...mine.map((h) => h.launchedAt || h.startedAt)),
-      status: done === mine.length ? 'completed' : done ? 'completed' : 'failed',
-      reason: done === mine.length ? null : `${mine.length - done} of ${mine.length} did not finish`,
-      summary: `${done} of ${mine.length} helper${mine.length === 1 ? '' : 's'} done.\n${lines.join('\n')}`.slice(0, 1200),
+      ...tally(
+        mine.map((h) => ({ ...h, gist: h.handoff })),
+        `helper${mine.length === 1 ? '' : 's'} done`,
+      ),
       cost: Math.round(mine.reduce((s, h) => s + (h.cost || 0), 0) * 10000) / 10000,
       helpers: mine.map((h) => ({ ...publicState(h), handoff: h.handoff || '' })),
       title,
