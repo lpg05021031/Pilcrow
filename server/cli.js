@@ -12,7 +12,8 @@ import * as term from './terminal.js';
 import { start, gatewayInfo, openExternal, ROOT, DIST, LOCK } from './main.js';
 import { which, log, xdg, HOME, IS_ROOT, IS_WIN, slash, readJson, privateDir, VERSION } from './util.js';
 
-function parseArgs(argv) {
+/** `--name=value` and `--flag` (true); anything else is not an option. */
+export function parseArgs(argv) {
   const out = {};
   for (const a of argv) {
     const m = a.match(/^--([^=]+)(?:=(.*))?$/);
@@ -96,7 +97,7 @@ export async function retireOutdated(existing, { force = false } = {}) {
 }
 
 /** The snap a browser binary belongs to (Ubuntu ships Firefox and Chromium as snaps), or null. */
-function snapOf(bin) {
+export function snapOf(bin) {
   if (!bin) return null;
   const name = path.basename(bin).split('.')[0];
   if (bin.startsWith('/snap/bin/')) return name;
