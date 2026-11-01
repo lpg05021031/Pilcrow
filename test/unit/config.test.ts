@@ -1,7 +1,7 @@
 // config.js and the JSON files the server keeps (util.jsonFile): a config.json edited by hand into
 // something setConfig would refuse reads as the defaults, the old type scale moves to the new one, and
 // a write that a newer one overtook (or the quit's synchronous one) never lands over it.
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -52,16 +52,24 @@ describe('jsonFile', () => {
   });
 
   it('on quit writes what is waiting at once, and the write already under way does not land over it', async () => {
+    // The first write is held at its writeFile, so the quit comes while it is under way whatever the
+    // timers do (left to a 0 ms timer, the write sometimes finished first, and then nothing was waiting).
+    let release = () => {};
+    const held = new Promise<void>((r) => (release = r));
+    const writeFile = fs.promises.writeFile;
+    const spy = vi.spyOn(fs.promises, 'writeFile').mockImplementationOnce((...a) => held.then(() => writeFile.apply(fs.promises, a)));
     let data = { n: 'async' };
     const f = jsonFile(file, () => data);
     f.save();
-    await new Promise((r) => setTimeout(r, 0)); // the async write has started
+    await vi.waitFor(() => expect(spy).toHaveBeenCalled());
     data = { n: 'quit' };
     flushSaves();
     expect(read()).toEqual({ n: 'quit' });
+    release();
     await new Promise((r) => setTimeout(r, 50));
     expect(read()).toEqual({ n: 'quit' });
     expect(fs.readdirSync(path.dirname(file)).filter((x) => x.endsWith('.tmp'))).toEqual([]);
+    spy.mockRestore();
   });
 
   it('on quit with nothing waiting writes nothing', () => {
