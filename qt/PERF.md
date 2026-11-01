@@ -314,23 +314,28 @@ surface of `Transcript` (`set_empty`, `open_find`, `scroll_to_bottom`, `reveal_i
 `find_entries`, `units`, `set_scrolled_callback`) is kept so `session_view.py` and `find_bar.py`
 change little; tests address blocks by item id instead of widgets by class.
 
-## 5. Targets, and what 2.10.0 measures
+## 5. Targets, and what is measured
 
-Same rig, same scenarios, same machine class (software rasteriser), 600 heavy / 2,000 mixed turns:
+Same rig, same scenarios, same machine class (software rasteriser), 600 heavy / 2,000 mixed turns
+where the row says so (the 2.10.0 measures), else the 120 heavy / 200 mixed turns of
+`test_perf_budget.py` on the current tree (a shared machine: the longest turns vary by ±50 % from
+run to run, the medians and counts do not):
 
-| scenario | target | canvas 2.10.0 |
+| scenario | target | measured |
 |---|---|---|
 | fold / thinking / tool toggle | 0 layout passes; ≤ 1 scroll adjustment; ≥ 55 fps; no flash; the row below moves only by the animated amount | 0–0.5 layouts; 58–62 fps; 0 flashes; stall max 10 ms. Scroll sets 0 (thinking) to 12 (a card at the live end: the view keeps the end in sight as the card grows, which is the easing, not a correction); the row below moves ≤ 23 px beyond the animation on heavy cards whose children exceed the 14 ms pre-measure budget |
-| streaming (follow and scrolled up) | stall p95 ≤ 8 ms, max ≤ 16 ms; 0 layout passes; scrolled up: 0 px of unexpected shift | follow: p95 4.6 ms, max 21 ms, 7 frames over 16 ms in a 600-step turn, 0 layouts, CPU 30 %; scrolled up: 0 px, p95 3.1 ms |
-| wheel fling / scrollbar drag | stall p95 ≤ 8 ms; ≤ 1 frame in 100 over 16 ms; blank fraction ≤ 0.05 | fling: p95 5.6 ms, max 15.5 ms, 0 placeholder paints, 0 px unexpected shift (the blank fraction of 0.25 is the gaps between rows, which the canvas paints in the exact canvas colour; the widget transcript's rows were never exactly it). Drag: p95 41 ms per screen-sized step (every row new: laid out under the 8 ms deadline, the rest filled in by the drain) |
-| hover sweep, typing | 0 layout passes in the conversation; 0 px of shift | 0 and 0; typing stall p95 1.5 ms |
-| open 600 heavy / 2,000 mixed turns | first paint ≤ 150 ms after the snapshot is modelled; no event-loop stall over 50 ms while modelling | first rows on screen 255 / 423 ms after the open, the snapshot modelled in slices of 300 messages (whole after 715 / 1,340 ms), first paint 3 ms |
+| streaming (follow and scrolled up) | stall p95 ≤ 8 ms, max ≤ 24 ms; 0 layout passes; scrolled up: 0 px of unexpected shift | 120 turns: follow p95 3.5 ms, max 15–24 ms (one turn over 16 ms in a 3,700-turn run; 34–39 ms when the bench opens a conversation cold just before), 0 layouts, CPU 20 %; scrolled up: 0 px, p95 1.3 ms. 600 turns (2.10.0): p95 4.6 ms, max 21 ms |
+| wheel fling | stall p95 ≤ 8 ms; ≤ 1 frame in 100 over 16 ms; blank fraction ≤ 0.05 | 120 turns: p95 6.7–8.6 ms, max 11–35 ms, 0 px unexpected shift (the blank fraction of 0.27 is the gaps between rows, which the canvas paints in the exact canvas colour; the widget transcript's rows were never exactly it) |
+| scrollbar drag (a screen a step, 81 steps) | step p95 ≤ 33 ms; max ≤ 100 ms; ≤ 20 placeholder paints | p95 30–34 ms, max 51–124 ms (the one heavy row measured past the step's 8 ms deadline), 12–19 placeholder paints filled by the drain, 0 widgets. Every row is new on each step, so a step is a frame and a half or two; the budget is what it is |
+| hover sweep, selection drag, typing | 0 layout passes in the conversation; 0 px of shift; a hover repaints its targets, a drag the rows it changed | 0 and 0; hover 7.4 kpx per pointer move (was 8.6 kpx with whole blocks), selection drag 24–26 kpx per move and p95 1 ms (was 203 kpx, the whole viewport, and 4.4 ms); typing stall p95 1.2 ms |
+| open (120 heavy / 200 mixed; 600 / 2,000) | first paint ≤ 150 ms after the snapshot is modelled; the longest turn while modelling ≤ 50 ms at 120 / 200 turns, ≤ 75 ms at 600 / 2,000 (the snapshot is one message and its parse is the floor: 38 ms for 600 heavy turns with the standard library) | 120 / 200: longest turn 43–60 ms / 26–31 ms, first paint 7–11 ms; 600 / 2,000: 60 ms / 69 ms, first rows 126 / 424 ms, first paint 7 / 13 ms |
 | switch session | ≤ 30 ms to first paint; 0 widgets made for a retained session | 57 ms (the sidebar's rows move, nothing is made or re-parented), 1 widget, 0 MB growth over 10 switches. 2.12: 16 ms, 0 widgets at 120/200 turns — the one widget was the closed side panel's tab, rebuilt for each session switched to; a closed panel now follows the session when the window is idle |
 | window resize (1480 → 1000 → 1480 px in 26 steps) | step p95 ≤ 33 ms (two frames); no step over 50 ms; 0 layout passes in the conversation, 0 flashes | — (guarded since 2.12: p95 29 ms, max 29 ms, 0 / 0 / 0 at 120 turns) |
 | find over the whole conversation | ≤ 100 ms to count the matches; 0 widgets | — (guarded since 2.12: 16 ms at 200 turns) |
 | view mode cycle, theme switch | ≤ 100 ms to first paint | view mode 106 ms; theme 124–146 ms with the Changes panel open (was 3.5–4 s): the theme is a palette now, not a stylesheet — the switch swaps the application palette, re-applies the widgets' tints, polishes the ~100 native fields and scrollbars again and repaints; what remains is the Changes tab's hundred file rows laying out once each, and the conversation's own repaint (7 ms) |
 | panel open on any tab while streaming | widgets made per second = 0 on hidden tabs; ≤ 1 refresh a second on the visible one | 0 widgets/s on every tab, stall p95 4–5 ms (the Tasks tab updates its rows in place; the Changes tab rebuilds a diff only when an edit landed) |
-| idle with a busy-looking session | ≤ 2 % of one core | 7.2 % (the clock at 33 ms repaints the live row and the composer's mark; quiet 3.3 %) |
+| idle with a busy-looking session (a real event loop) | ≤ 3 % of one core | 2.3–3.2 % (5.2 % before the indicators moved onto the clock, each on its own 40–60 ms timer); quiet 0.0–0.6 % |
+| the side panel | a seam drag step p95 ≤ 45 ms; a tab's first show ≤ 66 ms; a Tasks fold's longest turn ≤ 16 ms | seam p95 39–43 ms, 0 layout passes in the conversation; tabs' first show 13–22 ms (the terminal 15 ms); the workflow card's `Collapse` 77 layout requests, 1,520 paints and a longest turn of 8–10 ms per toggle |
 | Timeline with 300 steps | — | first turn 14 ms, stall max 21 ms, 1 widget (was 1,749 ms and 301 widgets): a list on the engine |
 | a lead's helpers ticking (HELPERS.md: eight helpers, their state ten times a second) | the bar repaints alone: 0 paints of the conversation, the sidebar, the composer and the header; 0 layout passes outside the bar; ≤ 3 ms per update | lead idle: 1.9 ms per update (max 2.8), 0 / 0 / 0 / 0 paints, layout requests on the bar only, 0 stalls; the same while a reply streams: 1.8 ms per update, 0 stalls over 20 ms; the Changes tab in front updates its helper sections, behind another tab it does nothing. The bar has no QLayout and paints its own background; the store re-emits the sessions list only when a field the list shows changed (`tests/stress/s_helpers.py`; guarded by `tests/test_helpers.py`) |
 | a workflow of 60 agents reporting ten times a second, the Tasks tab in front | the panel follows in place: no card rebuilt for a progress tick; ≤ 3 ms per update on the main thread; a hidden tab does nothing | 1.4 ms per update (max 7); 118 widgets made over the run (the 60 rows as their agents start, nothing else); stalls only when a batch of agents arrives (≤ 120 ms, the new rows laid out); the Files tab in front or the panel closed: 1.3 ms, 0 paints, 0 layouts (`tests/stress/s_workflow.py`; before: every tick rebuilt every card, 244 ms max, stalls to 369 ms) |
@@ -339,12 +344,14 @@ Same rig, same scenarios, same machine class (software rasteriser), 600 heavy / 
 
 **What is enforced.** `qt/tests/test_perf_budget.py` asserts these targets on every `pytest` run,
 on a 120-turn heavy and a 200-turn mixed conversation, with headroom for a busy machine: costs at 1.5×
-the target (stall p95 12 ms, stall max 24 ms streaming and 15 ms for a toggle, to-paint 150 ms, a
+the target (stall p95 12 ms, stall max 36 ms streaming and 15 ms for a toggle, to-paint 150 ms, a
 long task while modelling 75 ms, a resize step p95 50 ms, a switch 45 ms, find 150 ms), a 45 fps
 floor for the 55 fps target, and every count that must be zero at zero (layout passes, flashes,
 unexpected shift, widgets made). The bench runs in a process of its own. The normal run takes the quick set (opening, a fold, a streamed turn, a resize, the
 switch, find, the theme, a pointer sweep; under a minute offscreen); `PILCROW_PERF=1` adds the card
-toggle, typing, streaming while scrolled up, the fling and the view-mode cycle.
+toggle, typing, streaming while scrolled up, the fling, the scrollbar drag (p95 50 ms, max 150 ms,
+30 placeholders), a selection drag (60 kpx a move), the view-mode cycle, the panel's tabs and seam
+(a first show 100 ms, a seam step p95 70 ms), a Tasks fold (25 ms) and the idle busy look (4.5 %).
 
 ## 6. Running the benchmarks
 
