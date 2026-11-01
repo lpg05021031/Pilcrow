@@ -219,6 +219,59 @@ def test_an_attached_image_is_decoded_once_across_resizes_and_rewarms(app, monke
     assert (pm.width(), pm.height()) == (user.THUMB_W, 137) == (r.width(), r.height())  # 1280×800 in 220×160
 
 
+def test_a_line_whose_words_change_is_painted_again(app, monkeypatch):
+    """The "N earlier steps" line of an open fold and a compaction's divider change their words with
+    their rev and sig as they were: the commit repaints them from the new words, not from the pixmap
+    cached of the old ones."""
+    from PySide6.QtTest import QTest
+
+    from pilcrow_qt.canvas.blocks.fold import MoreBlock, Steps, sync_row
+    from pilcrow_qt.canvas.blocks.misc import DividerBlock, compact_label
+    from pilcrow_qt.canvas.scene import Group, Scene
+    from pilcrow_qt.canvas.view import CanvasView
+    from pilcrow_qt.lib.transcript_model import CompactItem
+
+    def bash(i: int) -> ToolItem:
+        return ToolItem(id=f"t{i}", name="Bash", input={"command": f"echo {i}"}, input_done=True, status="done")
+
+    ctx = ToolCtx("sess", "/proj", view="verbose")
+    items = [bash(i) for i in range(12)]
+    steps = Steps(items, ctx, "sess", "steps:1")
+    compact = CompactItem(id="c1", trigger="auto")
+    divider = DividerBlock("compact:c1", compact_label(compact))
+    scene = Scene()
+    v = CanvasView(scene)
+    v.resize(760, 900)  # all of it on screen
+    v.show()
+    v.mutate(lambda: (scene.root.append(divider), scene.root.append(steps)))
+    QTest.qWait(80)  # measured
+    v.viewport().repaint()  # both lines go into the pixmap cache
+    more = next(c for c in steps.children if isinstance(c, MoreBlock))
+    assert more.label == "6 earlier steps"
+    painted = []
+    for cls in (MoreBlock, DividerBlock):
+        monkeypatch.setattr(
+            cls, "paint", lambda self, *a, real=cls.paint: (painted.append(self.label), real(self, *a))[1]
+        )
+    # the compaction's figures arrive: nothing else changes, so nothing else would repaint
+    compact.pre_tokens = 120_000
+    assert v.mutate(lambda: sync_row(divider, compact, ctx)) == [divider]
+    QTest.qWait(40)
+    assert compact_label(compact) in painted, painted
+    # a 13th step: one more hidden
+    v.begin()
+    changed = steps.sync(items + [bash(12)], ctx, live=True)
+    for b in changed:
+        if isinstance(b, Group):
+            v.estimate(b)
+        elif b.warm:
+            v._exact(b)
+    v.end()
+    QTest.qWait(40)
+    assert more in changed and "7 earlier steps" in painted, painted
+    v.close()
+
+
 def test_column_width_is_the_golden_section_of_the_pane():
     from pilcrow_qt.theme import column_width
 

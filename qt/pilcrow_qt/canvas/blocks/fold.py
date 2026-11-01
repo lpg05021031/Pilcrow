@@ -141,6 +141,7 @@ def sync_row(b: Block, item: Item, ctx: ToolCtx) -> List[Block]:
         label = compact_label(item) if item.kind == "compact" else item.text
         if label != b.label:
             b.label = label
+            b.redraw()
             return [b]
     return []
 
@@ -402,6 +403,7 @@ class Steps(Group):
             if hidden and i == 0:
                 if isinstance(b, MoreBlock) and b.label != label:
                     b.label = label
+                    b.redraw()
                     return [b]
                 return []
             s = visible[i - (1 if hidden else 0)]

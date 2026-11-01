@@ -342,8 +342,9 @@ device pixel ratio and blitted afterwards. Key: `(key, rev, sig, gen, width, the
 scale is not in the key: a scale change runs `Measurer.refresh()`, which empties the cache (once,
 however many views ask), so no picture of the old scale survives it.
 LRU by bytes, 48 MB budget; a block's entry is dropped when its `rev`/`sig` changes or it cools.
-`gen` moves on when a `NodeBlock` is rebuilt while its `rev` and `sig` stand (a list row whose data
-changed: a dispatch run, a timeline step), so the old picture is never blitted again; the rebuild
+`gen` moves on when a block's picture changes while its `rev` and `sig` stand (`Block.redraw`: a
+`NodeBlock` rebuilt because a list row's data changed, a dispatch run or a timeline step; the "N
+earlier steps" line or a divider given new words), so the old picture is never blitted again; it
 also notes the block's own rectangle, so the commit repaints it although its height may not change.
 The pixmap is opaque (the canvas background is uniform), so the blit is a memcpy per scanline.
 Blocks that are not static paint directly; text drawn from a laid-out document costs ~0.1 ms per

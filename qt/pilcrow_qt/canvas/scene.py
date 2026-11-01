@@ -115,6 +115,14 @@ class Block:
         """Drop documents and pixmaps; keep the height."""
         self.warm = False
 
+    def redraw(self) -> None:
+        """The picture changed with the rev and sig as they were: the generation moves on, so a pixmap
+        cached of the old picture is not blitted again, and the rectangle is noted, so the commit
+        repaints it even when its height stays the same."""
+        self.gen += 1
+        if self.scene is not None:
+            self.scene.note_block(self)  # its own rectangle; a height change notes the rest itself
+
     # ---- painting and interaction (block coordinates: origin at the block's top-left)
     def paint(self, p: QPainter, x: int, y: int, w: int, st: PaintState) -> None:
         """Draw the block with its top-left at (x, y) and width ``w`` (viewport coordinates)."""
