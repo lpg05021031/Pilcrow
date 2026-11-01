@@ -50,7 +50,10 @@ def _open(c, sid: str = "sess-login"):
 
 
 def _idle(c, sid: str) -> None:
-    c.wait_until(lambda: c.store.rt[sid].status == "idle" and not c.store.rt[sid].busy, 20, "idle")
+    # and the frame's rt_changed has gone out (the store coalesces a session's changes per frame)
+    c.wait_until(
+        lambda: c.store.rt[sid].status == "idle" and not c.store.rt[sid].busy and not c.store._dirty, 20, "idle"
+    )
 
 
 # ---------------------------------------------------------------- pure helpers
