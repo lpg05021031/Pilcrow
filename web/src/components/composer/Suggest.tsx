@@ -1,6 +1,6 @@
 import { useId, useMemo, useState, type RefObject } from 'react';
 import { File as FileIcon, Folder, FolderGit2 } from 'lucide-react';
-import { useStore, fileIndex } from '../../lib/store';
+import { useStore, useFileIndex } from '../../lib/store';
 import { fuzzyFilter } from '../../lib/fuzzy';
 import { tildify } from '../../lib/format';
 import type { SlashCommandInfo } from '../../lib/types';
@@ -35,7 +35,8 @@ export function useSuggest({ sessionId, cwd, text, setText, field }: { sessionId
   const repos = useStore((s) => s.config?.repos);
   const home = useStore((s) => s.info?.home);
   const [popup, setPopup] = useState<Popup>(null);
-  const [files, setFiles] = useState<string[]>([]);
+  // A folder that cannot be listed still offers the registered repositories.
+  const files = useFileIndex(cwd, popup?.kind === 'mention');
   const listId = useId();
 
   const commands: SlashCommandInfo[] = useMemo(() => {
@@ -68,8 +69,6 @@ export function useSuggest({ sessionId, cwd, text, setText, field }: { sessionId
     if (slash) return setPopup({ kind: 'slash', query: slash[1], start: 0, index: 0 });
     const at = before.match(/(?:^|\s)@([^\s@]*)$/);
     if (!at) return setPopup(null);
-    // A folder that cannot be listed still offers the registered repositories.
-    if (!files.length) fileIndex(cwd).then(setFiles, () => {});
     setPopup({ kind: 'mention', query: at[1], start: caret - at[1].length - 1, index: 0 });
   };
 

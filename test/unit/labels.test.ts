@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { exploreLabel, isQuiet, langOf, liveLabel, parseNotes, tally, toolWord, workSummary } from '../../web/src/lib/labels';
+import { exploreLabel, isQuiet, langOf, liveLabel, parseNotes, toolWord, workSummary } from '../../web/src/lib/labels';
 import type { Item, ToolItem } from '../../web/src/lib/transcript';
 
 let n = 0;
@@ -28,13 +28,6 @@ describe('workSummary', () => {
   });
   it('a stretch of thinking alone', () => {
     expect(workSummary([thinking()]).text).toBe('Thought it through');
-  });
-});
-
-describe('tally', () => {
-  it('counts the steps under a chapter heading and the time they took', () => {
-    const t = tally([tool('Edit', {}, 'done', { startTs: 1000, endTs: 2000 }), tool('Grep', {}, 'done', { startTs: 2000, endTs: 4000 }), tool('Grep', {}, 'denied', { startTs: 4000, endTs: 5000 })]);
-    expect(t).toEqual({ text: '1 edit · 2 searches', failed: 1, ms: 4000, n: 3 });
   });
 });
 

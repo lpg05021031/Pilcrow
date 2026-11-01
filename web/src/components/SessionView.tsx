@@ -262,7 +262,7 @@ export function SessionView({ session }: { session: SessionSummary }) {
           )}
         </Leave>
       )}
-      {finding && <FindBar root={() => document.querySelector('.session .transcript-inner')} onClose={closeFind} />}
+      {finding && <FindBar sessionId={id} onClose={closeFind} />}
       <Transcript sessionId={id} cwd={cwd} onScrolled={setScrolled} empty={<SessionEmpty session={session} git={git} cwd={cwd} fresh={fresh} onPickFolder={() => setPickingFolder(true)} />} />
       <ErrorBoundary label="The message box">
         <Composer sessionId={id} cwd={cwd} />

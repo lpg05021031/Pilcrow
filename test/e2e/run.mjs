@@ -201,6 +201,25 @@ test('permission: Deny tells Claude so', async ({ page }) => {
   expect((await page.locator('.work.has-failed').count()) >= 1, 'the fold should show the denied step as failed');
 });
 
+test('an open Agent card shows its sub-agent\'s steps as they arrive', async ({ page }) => {
+  await open(page, 'sess-tests');
+  const id = 'toolu_agent_live';
+  const say = (msgs) => ctl.call('mock.messages', { id: 'sess-tests', msgs });
+  await say([{ type: 'assistant', message: { id: 'msg_agent', role: 'assistant', content: [{ type: 'tool_use', id, name: 'Agent', input: { description: 'Check the call sites', prompt: 'Find every call site.', subagent_type: 'Explore' } }] } }]);
+  await page.waitForFunction(() => document.querySelectorAll('.work-head').length >= 2, null, { timeout: 5000 });
+  await page.locator('.work-head').last().click();
+  await page.locator('.tool[data-tool="Agent"] .tool-head').click();
+  await page.waitForSelector('.tool[data-tool="Agent"].open', { timeout: 3000 });
+  const shown = () => page.evaluate(() => document.querySelectorAll('.tool[data-tool="Agent"] .agent-children .msg-assistant').length);
+  // The sub-agent's messages land in the card's own list, which the model grows in place.
+  for (let n = 1; n <= 6; n++) {
+    await say([{ type: 'assistant', parent_tool_use_id: id, message: { id: `msg_child_${n}`, role: 'assistant', content: [{ type: 'text', text: `Child step ${n}` }] } }]);
+    await page.waitForFunction((n) => document.querySelectorAll('.tool[data-tool="Agent"] .agent-children .msg-assistant').length === n, n, { timeout: 3000 }).catch(async () => {
+      throw new Error(`after ${n} messages from the sub-agent the open card shows ${await shown()}`);
+    });
+  }
+});
+
 test('archive: the row folds away and the other rows keep their DOM', async ({ page }) => {
   await open(page, 'sess-login');
   const before = await page.evaluate(() => {
@@ -326,24 +345,35 @@ test('typing in the composer does not move the conversation', async ({ page }) =
   expect(seen.every((g) => g.fromBottom < 4), `the view left the live end while typing: ${seen.map((g) => g.fromBottom).join(', ')}`);
 });
 
-test('find draws every page and counts matches across the whole conversation', async ({ page }) => {
+test('find counts matches across the whole conversation without drawing it, and stepping to one draws only its page', async ({ page }) => {
   await open(page, 'sess-long');
-  expect((await page.locator('.page.far').count()) > 0, 'no stand-in pages before find');
+  const drawn = () => page.locator('.page:not(.far)').count();
+  const before = await drawn();
+  expect((await page.locator('.page.far').count()) > 20, 'no stand-in pages before find');
   await page.keyboard.press('Control+f');
   await page.waitForSelector('.findbar', { timeout: 3000 });
-  await page.waitForFunction(() => document.querySelectorAll('.page.far').length === 0, null, { timeout: 8000 });
   await page.locator('.findbar input').fill('typo');
   await page.waitForFunction(() => /of \d+/.test(document.querySelector('.findbar-count')?.textContent || ''), null, { timeout: 8000 });
   const parse = async () => (await page.locator('.findbar-count').innerText()).match(/(\d+) of (\d+)/).slice(1, 3).map(Number);
   const [at, count] = await parse();
-  expect(count >= 150, `expected the word in every fourth turn to be found across 400 turns, got ${count}`);
-  await page.keyboard.press('Enter');
-  await sleep(300);
-  const [next] = await parse();
-  expect(next === (at % count) + 1, `Enter should step from match ${at} to ${(at % count) + 1}, got ${next}`);
+  // "fix the typo in module N" and "Fixed the typo in module N", every fourth of 400 turns
+  expect(count === 200, `expected the 200 matches across 400 turns, got ${count}`);
+  expect((await drawn()) <= before + 1, `counting drew pages: ${before} → ${await drawn()}`);
+  // Forward past the last match wraps to the first, at the top of the conversation, in a page never drawn.
+  for (let i = at; i <= count; i++) await page.keyboard.press('Enter');
+  await page.waitForFunction(() => /^1 of/.test(document.querySelector('.findbar-count')?.textContent || ''), null, { timeout: 3000 });
+  await page.waitForFunction(() => {
+    const r = [...(CSS.highlights.get('find-current') || [])][0];
+    const box = r?.getBoundingClientRect();
+    const view = document.querySelector('.transcript').getBoundingClientRect();
+    return box && box.height > 0 && box.top >= view.top && box.bottom <= view.bottom && /typo/i.test(r.toString());
+  }, null, { timeout: 5000 });
+  expect((await drawn()) <= before + 6, `stepping to a match drew more than its neighbourhood: ${before} → ${await drawn()}`);
+  await page.keyboard.press('Shift+Enter');
+  await page.waitForFunction((n) => document.querySelector('.findbar-count')?.textContent === `${n} of ${n}`, count, { timeout: 3000 });
   await page.keyboard.press('Escape');
   await page.waitForSelector('.findbar', { state: 'detached', timeout: 3000 });
-  expect((await page.locator('.page.far').count()) === 0, 'closing find should not undraw pages (that would move the view)');
+  expect(await page.evaluate(() => !CSS.highlights.has('find') && !CSS.highlights.has('find-current')), 'the highlights stayed after closing find');
 });
 
 test('switching away and back lands on the same spot', async ({ page }) => {

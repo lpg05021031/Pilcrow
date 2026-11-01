@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { renderMarkdown, asPathRef, extendBlocks } from '../lib/markdown';
 import { CHUNK_OPEN, escapeHtml, highlightHtml, PAINT_LINES } from '../lib/highlight';
 import { rpc } from '../lib/rpc';
@@ -39,13 +39,41 @@ async function paintCode(pre: HTMLPreElement, code: string, html: string) {
 }
 
 /**
+ * The code of a block that is one code fence not closed yet, as it is drawn (lib/markdown closes it
+ * for the parse, and the renderer drops the newline before the closing fence); null for anything else.
+ */
+function openFenceCode(raw: string): string | null {
+  const m = /^```[^\n`]*\n/.exec(raw);
+  if (!m || /\n```/.test(raw.slice(m[0].length - 1))) return null;
+  return raw.slice(m[0].length).replace(/\n$/, '');
+}
+
+/**
  * One top-level block. Finished blocks never re-render, so their DOM (and the reader's selection)
  * survives streaming; while a reply streams, only the open block at the end renders, and only its
  * own DOM is looked over afterwards.
  */
 const Block = memo(function Block({ raw, open, baseDir }: { raw: string; open: boolean; baseDir?: string }) {
   const ref = useRef<HTMLDivElement>(null);
-  const html = useMemo(() => renderMarkdown(raw, { streaming: open, baseDir }), [raw, open, baseDir]);
+  // A code fence being written grows at its end, so what arrives is appended to the code's text
+  // (below) instead of the block being parsed, sanitised and laid out whole again for every piece:
+  // the markup stays the one drawn when the fence opened, and the block is drawn whole once it closes.
+  const fence = useRef<{ html: string; code: string } | null>(null); // what the DOM holds of an open fence
+  const code = open ? openFenceCode(raw) : null;
+  const drawn = fence.current;
+  const growing = code !== null && drawn !== null && code.startsWith(drawn.code);
+  const html = useMemo(() => (growing && drawn ? drawn.html : renderMarkdown(raw, { streaming: open, baseDir })), [raw, open, baseDir, growing, drawn]);
+  useLayoutEffect(() => {
+    const el = ref.current?.querySelector('pre:last-of-type code');
+    if (code === null || !el) fence.current = null;
+    else if (!growing || !drawn) fence.current = el.textContent === code ? { html, code } : null;
+    // Not what was drawn (something else changed it): the next piece draws the block whole.
+    else if (el.textContent !== drawn.code) fence.current = null;
+    else if (code.length > drawn.code.length) {
+      el.append(code.slice(drawn.code.length));
+      drawn.code = code;
+    }
+  }, [code, html, growing, drawn]);
 
   useEffect(() => {
     const el = ref.current;

@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Plus, SlidersHorizontal, PanelLeft, PanelRight, GitCompare, FolderTree, SquareTerminal, AppWindow, ListChecks, Info, Sun, Settings, Keyboard, CircleStop, GitFork, Archive, RefreshCw, MessageSquare, File as FileIcon, Search, X, CircleCheck, CircleAlert, TriangleAlert, Minimize2, Power, Eye, ScrollText, Plug, History, LayoutGrid } from 'lucide-react';
-import { useStore, setDialog, setUi, setTheme, openSession, interrupt, setMode, forkSession, refreshSessions, openFile, sendMessage, dismissToast, fileIndex, openFind, quitApp, quickNewSession, type PanelTab, cycleView, showPage, holdToast, releaseToast, closeLightbox, type Toast } from '../lib/store';
+import { useStore, setDialog, setUi, setTheme, openSession, interrupt, setMode, forkSession, refreshSessions, openFile, sendMessage, dismissToast, useFileIndex, openFind, quitApp, quickNewSession, type PanelTab, cycleView, showPage, holdToast, releaseToast, closeLightbox, type Toast } from '../lib/store';
 import { useExitGhost, useFlipRows } from '../lib/motion';
 import { fuzzyFilter } from '../lib/fuzzy';
 import { basename, timeAgo } from '../lib/format';
@@ -29,17 +29,13 @@ export function CommandPalette() {
   const rt = useStore((s) => (activeId ? s.rt[activeId] : undefined));
   const [q, setQ] = useState('');
   const [idx, setIdx] = useState(0);
-  const [files, setFiles] = useState<string[]>([]);
   const list = useRef<HTMLDivElement>(null);
   const listId = useId();
   const close = () => setDialog('palette', false);
   const active = sessions.find((s) => s.id === activeId);
   const cwd = rt?.cwd || active?.cwd;
 
-  useEffect(() => {
-    // A folder that cannot be listed leaves the @ list empty, which says as much.
-    if (q.startsWith('@') && cwd && !files.length) fileIndex(cwd).then(setFiles, () => {});
-  }, [q, cwd, files.length]);
+  const files = useFileIndex(cwd, q.startsWith('@'));
 
   const panel = (tab: PanelTab) => () => setUi({ panel: true, panelTab: tab });
   const actions: Cmd[] = useMemo(

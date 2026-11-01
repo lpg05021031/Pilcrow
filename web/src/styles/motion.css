@@ -361,7 +361,6 @@ button.chip,
 .wfa-row,
 .work-head,
 .tool-head,
-.chap-head,
 .thinking-head,
 .explore > .tool-head,
 .steps-more,
@@ -416,7 +415,6 @@ button.chip:active,
 .wfd-head:active,
 .work-head:active,
 .tool-head:active,
-.chap-head:active,
 .thinking-head:active,
 .steps-more:active,
 .spend-row:active {
@@ -572,9 +570,6 @@ button.chip:active,
 }
 /* the fold line of a turn is a row: it lights under the pointer like the steps beneath it */
 .work-head:hover {
-  background: var(--fill-1);
-}
-.chap-head:hover {
   background: var(--fill-1);
 }
 /* a new user message lands on a spring; replies simply rise (both from Transcript's observer, this is the fallback) */

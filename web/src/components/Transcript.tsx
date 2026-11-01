@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { ArrowDown, ArrowUpRight, CornerDownRight, PencilLine, GitFork, ChevronRight, Info, TriangleAlert, CircleAlert, Layers, Paperclip, Terminal as TermIcon, History, Telescope, CircleCheck, Sparkles } from 'lucide-react';
-import { useStore, models, forkSession, insertIntoComposer, toast, call, confirmAction, bumpFs, openLightbox, openSession } from '../lib/store';
+import { useStore, models, forkSession, insertIntoComposer, toast, call, confirmAction, bumpFs, openLightbox, openSession, memo as sessionMemo } from '../lib/store';
 import type { Item, ToolItem, UserItem, ThinkingItem, TextItem, NoticeItem, ResultItem, CompactItem, CommandOutputItem } from '../lib/transcript';
 import type { PermissionRequest } from '../lib/types';
 import { duration, tokens, cost, truncate, relPath, plural } from '../lib/format';
@@ -11,15 +11,19 @@ import { useNow, CopyButton, WorkingMark, onActivate } from './ui/bits';
 import { useSmoothText, useThrottled, useExitGhost } from '../lib/motion';
 import { Collapse } from './ui/Collapse';
 import { ErrorBoundary } from './ui/ErrorBoundary';
-import { chaptersOf, extendTurns, groupItems, liveTurnFolds, type Chapter, type Turns, type Unit } from '../lib/units';
-import { exploreLabel, isQuiet, langOf, liveLabel, parseNotes, tally, workSummary } from '../lib/labels';
-import { useFollow } from './useFollow';
+import { extendTurns, groupItems, liveTurnFolds, type Turns, type Unit } from '../lib/units';
+import { exploreLabel, isQuiet, langOf, liveLabel, parseNotes, workSummary } from '../lib/labels';
+import { useFollow, REVEAL_EVENT } from './useFollow';
 
 // ---------------------------------------------------------------- list with step grouping
 // The grouping and the words on folds are pure and live in lib/units.ts and lib/labels.ts.
 
-/** The items of one slice of the conversation, with runs of tool calls drawn as steps. */
-const Flat = memo(function Flat({ items, ctx }: { items: Item[]; ctx: ToolCtx }) {
+/**
+ * The items of one slice of the conversation, with runs of tool calls drawn as steps. A unit's slice
+ * is a fresh array whenever it changes (lib/units), but an agent's children are its tool's own array,
+ * which the model grows in place: `rev` (the tool's) is what tells the memo they changed.
+ */
+const Flat = memo(function Flat({ items, ctx }: { items: Item[]; ctx: ToolCtx; rev?: number }) {
   const groups = groupItems(items);
   return (
     <>
@@ -36,26 +40,19 @@ const Flat = memo(function Flat({ items, ctx }: { items: Item[]; ctx: ToolCtx })
 
 // ---------------------------------------------------------------- turns: the work folds, what Claude says stays
 
-// Which folds you opened in the conversation on screen. Opening a conversation starts clean.
-const turnOpen = new Map<string, boolean>();
-const chapterOpen = new Map<string, boolean>();
-/** How a jump to a step inside a closed fold opens it: each fold on the page registers here. */
-const foldOpeners = new Map<string, () => void>();
-export function forgetFolds() {
-  turnOpen.clear();
-  chapterOpen.clear();
-}
-
 const WorkFold = memo(function WorkFold({ unit, ctx }: { unit: Extract<Unit, { kind: 'work' }>; ctx: ToolCtx }) {
   const { work, live, key } = unit;
   const waiting = work.some((it) => it.kind === 'tool' && ctx.pending.has(it.id));
   // Normal view keeps every stretch of work to its one line, running or not; the other views open it.
   const defaultOpen = ctx.view === 'thinking' || ctx.view === 'verbose';
-  const [open, setOpen] = useState<boolean>(() => turnOpen.get(key) ?? defaultOpen);
+  // A fold opened or closed by hand stays so while the conversation is in memory (its memo), like
+  // where it was scrolled; a jump to a step inside it (revealItem) opens it through `openers`.
+  const [open, setOpen] = useState<boolean>(() => sessionMemo(ctx.sessionId).folds.get(key) ?? defaultOpen);
   useEffect(() => {
-    foldOpeners.set(key, () => setOpen(true));
-    return () => void foldOpeners.delete(key);
-  }, [key]);
+    const openers = sessionMemo(ctx.sessionId).openers;
+    openers.set(key, () => setOpen(true));
+    return () => void openers.delete(key);
+  }, [key, ctx.sessionId]);
   const summary = useMemo(() => workSummary(work), [work]);
   const doing = live ? liveLabel(work) : null;
   const now = useNow(1000, live);
@@ -64,7 +61,7 @@ const WorkFold = memo(function WorkFold({ unit, ctx }: { unit: Extract<Unit, { k
   const t0 = live ? started || first?.ts || first?.startTs || 0 : 0;
   const elapsed = t0 ? now - t0 : 0;
   const toggle = () => {
-    turnOpen.set(key, !open);
+    sessionMemo(ctx.sessionId).folds.set(key, !open);
     setOpen(!open);
   };
   // A pause to think, with no steps, is its own one-line row already; a fold around it would be ceremony.
@@ -89,7 +86,7 @@ const WorkFold = memo(function WorkFold({ unit, ctx }: { unit: Extract<Unit, { k
       <Collapse open={isOpen}>
         {() => (
           <div className="work-body">
-            <Chapters items={work} ctx={ctx} />
+            <Flat items={work} ctx={ctx} />
           </div>
         )}
       </Collapse>
@@ -97,89 +94,21 @@ const WorkFold = memo(function WorkFold({ unit, ctx }: { unit: Extract<Unit, { k
   );
 });
 
-// ---------------------------------------------------------------- chapters: the work, told in Claude's own words
-
-function ChapterView({ ch, ctx, last }: { ch: Chapter; ctx: ToolCtx; last: boolean }) {
-  const t = useMemo(() => tally(ch.steps), [ch.steps]);
-  const waiting = ch.steps.some((it) => it.kind === 'tool' && ctx.pending.has(it.id));
-  const live = ch.steps.some((it) => (it.kind === 'tool' && (it.status === 'running' || it.status === 'streaming')) || (it.kind === 'thinking' && it.streaming)) || Boolean(ch.title?.streaming);
-  // Normal view shows only the headings; a chapter opens itself only while it is running or waiting on you.
-  const defaultOpen = ctx.view === 'verbose' || waiting || live;
-  const [openState, setOpenState] = useState<boolean | null>(() => chapterOpen.get(ch.key) ?? null);
-  const open = openState ?? defaultOpen;
-  const toggle = () => {
-    chapterOpen.set(ch.key, !open);
-    setOpenState(!open);
-  };
-  return (
-    <div className={`chap${open ? ' open' : ''}${last ? ' last' : ''}${t.failed ? ' has-failed' : ''}`}>
-      <span className="chap-rail" aria-hidden="true">
-        <span className={`chap-dot${live ? ' live' : ''}`} />
-        {!last && <span className="chap-line" />}
-      </span>
-      {
-        <button className="chap-head" onClick={toggle} aria-expanded={open}>
-          <span className={`chap-title${ch.title ? '' : ' untitled'}`}>
-            {ch.title ? <Markdown text={ch.title.text} cwd={ctx.cwd} className="md-compact" streaming={Boolean(ch.title.streaming)} /> : t.n ? 'Steps' : 'Thinking'}
-          </span>
-          {ch.steps.length > 0 && (
-            <span className="chap-tally tnum">
-              {t.text}
-              {t.failed > 0 && <span className="chap-fail"> · {t.failed} failed</span>}
-              {t.ms > 1500 ? ` · ${duration(t.ms)}` : ''}
-              <ChevronRight size={12} className={`tool-chev${open ? ' open' : ''}`} />
-            </span>
-          )}
-        </button>
-      }
-      {ch.thought && (
-        <div className="chap-thought">
-          <Thinking item={ch.thought} view={ctx.view} />
-        </div>
-      )}
-      <Collapse open={open}>
-        {() => (
-          <div className="chap-steps">
-            <Flat items={ch.steps} ctx={ctx} />
-          </div>
-        )}
-      </Collapse>
-    </div>
-  );
-}
-
-function Chapters({ items, ctx }: { items: Item[]; ctx: ToolCtx }) {
-  const chapters = useMemo(() => chaptersOf(items), [items]);
-  // One chapter with no narration is just a list of steps; the rail would be ceremony.
-  if (chapters.length === 1 && !chapters[0].title) return <Flat items={items} ctx={ctx} />;
-  return (
-    <div className="chapters">
-      {chapters.map((ch, i) => (
-        <ChapterView key={ch.key} ch={ch} ctx={ctx} last={i === chapters.length - 1} />
-      ))}
-    </div>
-  );
-}
-
 /**
  * Long conversations. Units are gathered into pages of a few units each, and a page far from the
  * viewport is an empty box of about the right height until the reader comes near (IntersectionObserver,
  * well ahead of them): no Markdown, no rows, no icons for the thousand turns nobody is looking at,
  * which is what makes a long conversation open at once and stay light. A page keeps its stand-in
  * height until it is drawn (transcript.css), so the scrollbar is the same either way; once drawn, a
- * page stays drawn, and which pages are drawn is remembered per conversation. A unit's page never
+ * page stays drawn while the conversation is on screen. Shown again, it starts from the pages around
+ * where the reader was (the scroll memory, useFollow) and the rest come back as they come near, so
+ * switching back costs a few pages, however much of the history was read before. A unit's page never
  * changes (units only ever append), so nothing is ever moved between boxes and re-mounted.
  */
 const PAGE = 8;
 const EST = { items: 260, work: 44 }; // stand-in heights, matching transcript.css
 
-/** Where a conversation on screen can be asked to show one of its items (a tool, a message). */
-const revealers = new Map<string, (id: string) => boolean>();
-// Kept with the conversation's items array, which lives as long as its model: a conversation evicted
-// from memory (store.ts) or deleted takes its drawn pages with it, and reopened, starts afresh.
-const drawnPages = new WeakMap<Item[], NearSet>();
-
-/** Which pages have been drawn, per conversation; each page listens for its own key only. */
+/** Which pages have been drawn; each page listens for its own key only. */
 class NearSet {
   keys = new Set<string>();
   private listeners = new Map<string, Set<() => void>>();
@@ -208,8 +137,11 @@ class NearSet {
  * around it first if need be — and return the element, or null when it is not in this conversation.
  */
 export async function revealItem(sessionId: string, domId: string, itemId: string): Promise<HTMLElement | null> {
+  // A jump the reader asked for: the conversation stops following its live end first (useFollow), so
+  // the page drawn here does not pull the view back down before the caller scrolls to it.
+  document.querySelector('.session .transcript')?.dispatchEvent(new Event(REVEAL_EVENT));
   let el = document.getElementById(domId);
-  if (!el && revealers.get(sessionId)?.(itemId)) {
+  if (!el && sessionMemo(sessionId).reveal?.(itemId)) {
     for (let i = 0; i < 12 && !el; i++) {
       await new Promise((r) => requestAnimationFrame(r));
       el = document.getElementById(domId);
@@ -281,32 +213,36 @@ export const ItemList = memo(function ItemList({ items, ctx, rev, running, flat 
   }
   const liveFrom = Math.min(Math.floor(tailStart / PAGE), pages.length - 1);
 
-  // Which far-off pages have been drawn (sticky, and remembered per conversation so coming back to one
-  // finds the same pages drawn, the same heights, and the same scroll position).
-  const nearRef = useRef<NearSet>(null as unknown as NearSet);
-  if (!nearRef.current) nearRef.current = drawnPages.get(items) || new NearSet();
-  useEffect(() => {
-    if (!flat) drawnPages.set(items, nearRef.current);
-  }, [items, flat]);
+  // Which far-off pages have been drawn (sticky while on screen). Coming back to a conversation, the
+  // pages around the one the reader was at are drawn in the first frame, so the place they return to
+  // is there at once; the others are drawn again only as they come near.
+  const [near] = useState(() => {
+    const set = new NearSet();
+    const at = flat ? null : sessionMemo(ctx.sessionId).scroll;
+    if (at && !at.bottom) for (let p = Math.max(0, at.index - 1); p <= at.index + 2; p++) set.add('pg' + p);
+    return set;
+  });
   const io = useRef<IntersectionObserver | null>(null);
+  const drawing = useRef<number | null>(null);
   const keys = useRef(new WeakMap<Element, string>());
   const unitsRef = useRef(units);
   unitsRef.current = units;
   const observe = useMemo(
     () => (el: HTMLDivElement | null, key: string) => {
       if (!el) return;
-      if (nearRef.current.has(key)) return;
+      if (near.has(key)) return;
       if (!io.current && typeof IntersectionObserver === 'function') {
         // Pages are drawn one per frame, nearest the viewport first, and not at all while the
         // reader is flinging past them: a fast scroll through the history then costs short frames
-        // and the pages fill in as soon as it slows, the way a native list does.
+        // and the pages fill in as soon as it slows, the way a native list does. A page that leaves
+        // the margin before its turn comes is dropped from the queue, so a fling (or a jump) draws
+        // where it ends, not everything it passed.
         const queue: { key: string; dist: number }[] = [];
-        let drawing: number | null = null;
         let lastTop = 0;
         let lastAt = 0;
         const sc = el.closest('.transcript');
         const draw = () => {
-          drawing = null;
+          drawing.current = null;
           const top = sc ? sc.scrollTop : 0;
           const now = performance.now();
           const flinging = lastAt && now - lastAt < 80 && Math.abs(top - lastTop) > (sc?.clientHeight || 900) * 1.5;
@@ -314,23 +250,27 @@ export const ItemList = memo(function ItemList({ items, ctx, rev, running, flat 
           lastAt = now;
           if (!flinging) {
             queue.sort((a, b) => a.dist - b.dist);
-            while (queue.length) if (nearRef.current.add(queue.shift()!.key)) break;
+            while (queue.length) if (near.add(queue.shift()!.key)) break;
           }
-          if (queue.length) drawing = requestAnimationFrame(draw);
+          if (queue.length) drawing.current = requestAnimationFrame(draw);
         };
         io.current = new IntersectionObserver(
           (entries) => {
             const vh = sc?.clientHeight || window.innerHeight || 900;
             for (const e of entries) {
-              if (!e.isIntersecting) continue;
               const k = keys.current.get(e.target);
-              io.current?.unobserve(e.target);
-              if (!k || nearRef.current.has(k)) continue;
+              if (!k || near.has(k)) {
+                io.current?.unobserve(e.target);
+                continue;
+              }
+              const queued = queue.findIndex((q) => q.key === k);
+              if (queued >= 0) queue.splice(queued, 1);
+              if (!e.isIntersecting) continue;
               const r = e.boundingClientRect;
               const dist = r.bottom < 0 ? -r.bottom : r.top > vh ? r.top - vh : 0;
               queue.push({ key: k, dist });
             }
-            if (queue.length && drawing == null) drawing = requestAnimationFrame(draw);
+            if (queue.length && drawing.current == null) drawing.current = requestAnimationFrame(draw);
           },
           // The conversation scrolls inside its own box, so that box is the root: measured against the
           // viewport, a row scrolled out of it would never count as near, margin or no margin.
@@ -340,38 +280,42 @@ export const ItemList = memo(function ItemList({ items, ctx, rev, running, flat 
       keys.current.set(el, key);
       io.current?.observe(el);
     },
+    [near],
+  );
+  useEffect(
+    () => () => {
+      io.current?.disconnect();
+      if (drawing.current != null) cancelAnimationFrame(drawing.current);
+    },
     [],
   );
-  useEffect(() => () => io.current?.disconnect(), []);
-  // Find in the conversation needs every row on the page: opening the bar draws every page, and a
-  // drawn page stays drawn, so closing it never moves what the reader is looking at.
-  const finding = useStore((s) => s.findOpen);
-  useEffect(() => {
-    if (finding) for (const pg of pagesRef.current) nearRef.current.add(pg.key);
-  }, [finding]);
-  const near = typeof IntersectionObserver === 'function' ? nearRef.current : null;
-  // Jumps from the timeline or a file's history land on items that may sit in a far page or a closed fold.
+  const shownNear = typeof IntersectionObserver === 'function' ? near : null;
+  // Jumps from the timeline, a file's history or Find land on items that may sit in a far page or a closed fold.
   useEffect(() => {
     if (flat) return;
-    revealers.set(ctx.sessionId, (id) => {
+    const m = sessionMemo(ctx.sessionId);
+    const reveal = (id: string) => {
       const i = unitsRef.current.findIndex((x) => (x.kind === 'work' ? x.work : x.items).some((it) => it.id === id || (it as { uuid?: string }).uuid === id));
       if (i < 0) return false;
       const u = unitsRef.current[i];
-      nearRef.current.add('pg' + Math.floor(i / PAGE));
+      near.add('pg' + Math.floor(i / PAGE));
       if (u.kind === 'work') {
-        turnOpen.set(u.key, true);
-        foldOpeners.get(u.key)?.();
+        m.folds.set(u.key, true);
+        m.openers.get(u.key)?.();
       }
       return true;
-    });
-    return () => void revealers.delete(ctx.sessionId);
-  }, [ctx.sessionId, flat]);
+    };
+    m.reveal = reveal;
+    return () => {
+      if (m.reveal === reveal) m.reveal = null;
+    };
+  }, [ctx.sessionId, flat, near]);
 
-  if (flat) return <Flat items={items} ctx={ctx} />;
+  if (flat) return <Flat items={items} ctx={ctx} rev={rev} />;
   return (
     <div className="units">
       {pages.map((pg, i) => (
-        <PageBox key={pg.key} page={pg} ctx={ctx} live={i >= liveFrom} near={near} observe={observe} />
+        <PageBox key={pg.key} page={pg} ctx={ctx} live={i >= liveFrom} near={shownNear} observe={observe} />
       ))}
     </div>
   );
@@ -573,7 +517,7 @@ function renderMentions(text: string) {
 function AssistantText({ item, ctx }: { item: TextItem; ctx: ToolCtx }) {
   const shown = useSmoothText(item.text, Boolean(item.streaming));
   return (
-    <div className="msg-assistant" lang={langOf(item.text)}>
+    <div className="msg-assistant" lang={langOf(item.text)} id={`text-${item.id}`}>
       <Markdown text={shown} streaming={Boolean(item.streaming) || shown.length < item.text.length} cwd={ctx.cwd} />
     </div>
   );
@@ -746,12 +690,6 @@ function WorkingLine({ sessionId, startTs, quiet }: { sessionId: string; startTs
 export function Transcript({ sessionId, cwd, empty, onScrolled }: { sessionId: string; cwd: string; empty?: React.ReactNode; onScrolled?: (scrolled: boolean) => void }) {
   const rt = useStore((s) => s.rt[sessionId]);
   const model = models.get(sessionId);
-  // Opening a conversation starts it clean: every fold closed, before any turn reads its memory.
-  const shownSid = useRef('');
-  if (shownSid.current !== sessionId) {
-    shownSid.current = sessionId;
-    forgetFolds();
-  }
   const pendingList = rt?.pending;
   const pending = useMemo(() => {
     const m = new Map<string, PermissionRequest>();

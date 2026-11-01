@@ -1,98 +1,126 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Search, ChevronUp, ChevronDown, X } from 'lucide-react';
 import { useExitGhost } from '../lib/motion';
-import { useStore, setFindQuery } from '../lib/store';
+import { useStore, setFindQuery, models } from '../lib/store';
+import { findInItems, type FindHit } from '../lib/transcript';
+import { revealItem } from './Transcript';
 
 const supported = typeof CSS !== 'undefined' && 'highlights' in CSS;
 
+/** How often the matches are looked for again while the conversation changes underneath (streaming, pages drawn). */
+const AGAIN_MS = 250;
+
+/** The element an item is drawn in, when it is drawn. */
+const domIdOf = (h: FindHit) => (h.item.kind === 'text' ? `text-${h.item.id}` : h.item.uuid ? `msg-${h.item.uuid}` : '');
+
+/** The text of a drawn item, matched case-insensitively, as ranges in reading order (its controls left out). */
+function rangesIn(el: HTMLElement, needle: string): Range[] {
+  const out: Range[] = [];
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => (n.parentElement?.closest('.md-code-head, .msg-actions, .msg-queued') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+  });
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+    const t = (n.nodeValue || '').toLocaleLowerCase();
+    for (let i = t.indexOf(needle); i >= 0; i = t.indexOf(needle, i + needle.length)) {
+      const r = new Range();
+      r.setStart(n, i);
+      r.setEnd(n, i + needle.length);
+      out.push(r);
+    }
+  }
+  return out;
+}
+
 /**
- * Find in the conversation. Matches are painted with the CSS Custom Highlight API, so the transcript's
- * DOM is never rewritten and streaming keeps working underneath. The list refreshes as new output
- * arrives; Enter / Shift+Enter step through matches and the current one is brought into view.
+ * Find in the conversation. The matches are found in the transcript model (lib/transcript
+ * findInItems), so nothing has to be drawn to be counted; stepping to one reveals it (revealItem
+ * draws its page), and only what is drawn is painted, with the CSS Custom Highlight API, so the
+ * transcript's DOM is never rewritten and streaming keeps working underneath. The matches are looked
+ * for again as output arrives and as pages are drawn; Enter / Shift+Enter step through them.
  */
-export function FindBar({ root, onClose }: { root: () => HTMLElement | null; onClose: () => void }) {
+export function FindBar({ sessionId, onClose }: { sessionId: string; onClose: () => void }) {
   const [q, setQ] = useState(() => useStore.getState().findQuery);
-  const [count, setCount] = useState(0);
+  const [hits, setHits] = useState<FindHit[]>([]);
   const [index, setIndex] = useState(0);
-  const ranges = useRef<Range[]>([]);
   const input = useRef<HTMLInputElement>(null);
-  const indexRef = useRef(0);
-  indexRef.current = index;
   const box = useRef<HTMLDivElement>(null);
   useExitGhost(box, { duration: 160 });
+  const needle = q.trim().toLocaleLowerCase();
+  const rev = useStore((s) => s.rt[sessionId]?.rev || 0);
+  const at = useRef({ hits, index, needle });
+  at.current = { hits, index, needle };
 
-  const paintCurrent = useCallback((i: number, reveal: boolean) => {
-    const r = ranges.current[i];
+  /** Paint the matches that are drawn, and the current one; with `reveal`, bring the current one into view first. */
+  const paint = async (reveal: boolean) => {
+    const { hits, index, needle } = at.current;
     const hl = CSS.highlights;
-    if (!r) {
-      hl.delete('find-current');
-      return;
+    const cur = hits[index];
+    let el = cur ? document.getElementById(domIdOf(cur)) : null;
+    if (cur && !el && reveal) el = await revealItem(sessionId, domIdOf(cur), cur.item.id);
+    if (at.current.hits !== hits || at.current.index !== index) return; // moved on meanwhile
+    const all: Range[] = [];
+    const seen = new Set<string>();
+    let current: Range | undefined;
+    for (const h of hits) {
+      const id = domIdOf(h);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const e = id ? document.getElementById(id) : null;
+      if (!e) continue;
+      const rs = rangesIn(e, needle);
+      all.push(...rs);
+      if (h.item === cur?.item) current = rs[Math.min(cur.k, rs.length - 1)];
     }
-    hl.set('find-current', new Highlight(r));
-    if (!reveal) return;
-    const scroller = (r.startContainer.parentElement as HTMLElement | null)?.closest('.transcript') as HTMLElement | null;
-    if (!scroller) return;
-    let box = r.getBoundingClientRect();
-    if (!box.width && !box.height) {
-      // A match in a row far off screen has no layout yet (content-visibility): bring the row in
-      // first, which lays it out, then place the match.
-      (r.startContainer.parentElement as HTMLElement | null)?.scrollIntoView({ block: 'center' });
-      box = r.getBoundingClientRect();
-    }
-    const view = scroller.getBoundingClientRect();
-    if (box.top < view.top + 56 || box.bottom > view.bottom - 24) {
-      scroller.scrollTo({ top: scroller.scrollTop + (box.top - view.top) - view.height * 0.38, behavior: 'smooth' });
-    }
-  }, []);
+    if (all.length) hl.set('find', new Highlight(...all));
+    else hl.delete('find');
+    if (current) hl.set('find-current', new Highlight(current));
+    else hl.delete('find-current');
+    if (reveal && el) bringIntoView(el, current);
+  };
 
-  const search = useCallback(
-    (keepIndex: boolean) => {
-      const el = root();
-      const hl = CSS.highlights;
-      const found: Range[] = [];
-      const needle = q.trim().toLocaleLowerCase();
-      if (el && needle) {
-        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, {
-          acceptNode: (n) => (n.parentElement?.closest('.findbar, script, style') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
-        });
-        for (let n = walker.nextNode(); n && found.length < 3000; n = walker.nextNode()) {
-          const t = (n.nodeValue || '').toLocaleLowerCase();
-          for (let i = t.indexOf(needle); i >= 0; i = t.indexOf(needle, i + needle.length)) {
-            const r = new Range();
-            r.setStart(n, i);
-            r.setEnd(n, i + needle.length);
-            found.push(r);
-          }
-        }
-      }
-      ranges.current = found;
-      setCount(found.length);
-      if (found.length) hl.set('find', new Highlight(...found));
-      else hl.delete('find');
-      const next = keepIndex ? Math.min(indexRef.current, Math.max(0, found.length - 1)) : nearest(found);
-      setIndex(next);
-      paintCurrent(next, !keepIndex);
-    },
-    [q, root, paintCurrent],
-  );
-
-  // Search as you type, and again whenever the conversation changes underneath.
+  // Search as you type: from the match nearest the top of the view.
   useEffect(() => {
     setFindQuery(q);
-    search(false);
-    const el = root();
-    if (!el) return;
-    let t: number | undefined;
-    const mo = new MutationObserver(() => {
-      window.clearTimeout(t);
-      t = window.setTimeout(() => search(true), 250);
-    });
-    mo.observe(el, { childList: true, subtree: true, characterData: true });
+    const found = findInItems(models.get(sessionId)?.items || [], needle);
+    at.current = { hits: found, index: nearest(found, needle), needle };
+    setHits(found);
+    setIndex(at.current.index);
+    paint(true);
+  }, [q]); // eslint-disable-line react-hooks/exhaustive-deps -- a new query searches afresh; paint reads the latest through `at`
+
+  // Again as the conversation grows (at most every AGAIN_MS, however fast it streams), keeping the place.
+  const timer = useRef<number | undefined>(undefined);
+  const again = useRef(() => {});
+  again.current = () => {
+    const { needle, index } = at.current;
+    const found = findInItems(models.get(sessionId)?.items || [], needle);
+    const i = Math.min(index, Math.max(0, found.length - 1));
+    at.current = { hits: found, index: i, needle };
+    setHits(found);
+    setIndex(i);
+    paint(false);
+  };
+  const soon = (fn: () => void) => {
+    if (timer.current === undefined)
+      timer.current = window.setTimeout(() => {
+        timer.current = undefined;
+        fn();
+      }, AGAIN_MS);
+  };
+  useEffect(() => {
+    if (at.current.needle) soon(() => again.current());
+  }, [rev]);
+  // Pages drawn as the reader scrolls, folds opened: only the painting changes.
+  useEffect(() => {
+    const root = document.querySelector('.session .transcript-inner');
+    if (!root) return;
+    const mo = new MutationObserver(() => at.current.needle && soon(() => again.current()));
+    mo.observe(root, { childList: true, subtree: true });
     return () => {
       mo.disconnect();
-      window.clearTimeout(t);
+      window.clearTimeout(timer.current);
     };
-  }, [q]); // eslint-disable-line react-hooks/exhaustive-deps -- a new query searches afresh; search and root are stable for the bar's life
+  }, []);
 
   useEffect(() => {
     input.current?.select();
@@ -102,11 +130,13 @@ export function FindBar({ root, onClose }: { root: () => HTMLElement | null; onC
     };
   }, []);
 
+  const count = hits.length;
   const step = (d: number) => {
     if (!count) return;
     const i = (index + d + count) % count;
+    at.current = { ...at.current, index: i };
     setIndex(i);
-    paintCurrent(i, true);
+    paint(true);
   };
 
   if (!supported) return null;
@@ -132,7 +162,7 @@ export function FindBar({ root, onClose }: { root: () => HTMLElement | null; onC
           }
         }}
       />
-      <span className={`findbar-count tnum${q.trim() && !count ? ' none' : ''}`}>{q.trim() ? (count ? `${index + 1} of ${count}` : 'No matches') : ''}</span>
+      <span className={`findbar-count tnum${needle && !count ? ' none' : ''}`}>{needle ? (count ? `${index + 1} of ${count}` : 'No matches') : ''}</span>
       <button className="icon-btn sm" title="Previous match (Shift+Enter)" aria-label="Previous match" disabled={!count} onClick={() => step(-1)}>
         <ChevronUp size={14} />
       </button>
@@ -146,11 +176,39 @@ export function FindBar({ root, onClose }: { root: () => HTMLElement | null; onC
   );
 }
 
-/** Start from the first match below the top of the visible part of the conversation. */
-function nearest(found: Range[]) {
-  if (!found.length) return 0;
-  const scroller = (found[0].startContainer.parentElement as HTMLElement | null)?.closest('.transcript');
+/** Scroll the conversation so the match (or, without one, its row) sits a little above the middle. */
+function bringIntoView(el: HTMLElement, r: Range | undefined) {
+  const scroller = el.closest<HTMLElement>('.transcript');
+  if (!scroller) return;
+  let box = (r || el).getBoundingClientRect();
+  if (!box.width && !box.height) {
+    // A row far off screen has no layout yet (content-visibility): bring it in first, which lays it out.
+    el.scrollIntoView({ block: 'center' });
+    box = (r || el).getBoundingClientRect();
+  }
+  const view = scroller.getBoundingClientRect();
+  if (box.top >= view.top + 56 && box.bottom <= view.bottom - 24) return;
+  // A short way glides; a long one jumps, since gliding past the history would draw it as it went.
+  const by = box.top - view.top - view.height * 0.38;
+  scroller.scrollTo({ top: scroller.scrollTop + by, behavior: Math.abs(by) > view.height * 2 ? 'instant' : 'smooth' });
+}
+
+/**
+ * Start from the first match at or below the top of the view. The rows in view are drawn, so their
+ * matches are in the DOM; when none is below, the next one after the last drawn one above, which the
+ * reader at the end of a conversation, scrolled past everything drawn, reads as the latest.
+ */
+function nearest(hits: FindHit[], needle: string) {
+  if (!hits.length) return 0;
+  const scroller = document.querySelector('.session .transcript');
   const top = scroller ? scroller.getBoundingClientRect().top + 40 : 0;
-  const i = found.findIndex((r) => r.getBoundingClientRect().top >= top);
-  return i < 0 ? found.length - 1 : i;
+  let lastAbove = -1;
+  for (let i = 0; i < hits.length; i++) {
+    const el = document.getElementById(domIdOf(hits[i]));
+    if (!el) continue;
+    const r = rangesIn(el, needle)[hits[i].k] || el;
+    if (r.getBoundingClientRect().top >= top) return i;
+    lastAbove = i;
+  }
+  return lastAbove < 0 ? hits.length - 1 : Math.min(lastAbove + 1, hits.length - 1);
 }

@@ -2,7 +2,7 @@
 import { Marked, type Tokens } from 'marked';
 import DOMPurify from 'dompurify';
 import { cachedHtml, normalizeLang } from './highlight';
-import { LruBytes } from './lru';
+import { LruBytes } from './cache';
 
 // How code-block languages are labelled: people say "TypeScript", not "ts".
 const LANG_NAMES: Record<string, string> = {

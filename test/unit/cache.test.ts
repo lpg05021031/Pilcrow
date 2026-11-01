@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { LruBytes } from '../../web/src/lib/lru';
+import { describe, expect, it, vi } from 'vitest';
+import { LruBytes, loadOnce } from '../../web/src/lib/cache';
 
 const byLength = (k: string, v: string) => k.length + v.length;
 
@@ -48,5 +48,44 @@ describe('LruBytes', () => {
     c.set('e', 'x'.repeat(24)); // 25: a, b and c have to go
     expect(['a', 'b', 'c', 'd', 'e'].map((k) => c.get(k) !== undefined)).toEqual([false, false, false, true, true]);
     expect(c.bytes).toBe(35);
+  });
+});
+
+describe('LruBytes with an age', () => {
+  it('an entry older than the ttl is gone when next asked for, and its size with it', () => {
+    vi.useFakeTimers();
+    try {
+      const c = new LruBytes<string>(100, byLength, 1000);
+      c.set('a', '123456789');
+      vi.advanceTimersByTime(999);
+      expect(c.get('a')).toBe('123456789');
+      vi.advanceTimersByTime(2);
+      expect(c.get('a')).toBeUndefined();
+      expect(c.bytes).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clear and delete give the budget back', () => {
+    const c = new LruBytes<string>(100, byLength);
+    c.set('a', '123');
+    c.set('b', '123');
+    c.delete('a');
+    expect(c.bytes).toBe(4);
+    c.clear();
+    expect([c.bytes, c.size]).toEqual([0, 0]);
+  });
+});
+
+describe('loadOnce', () => {
+  it('shares one load per key, and forgets a load that failed so the next ask tries again', async () => {
+    const c = new LruBytes<Promise<string>>(8, () => 1);
+    let n = 0;
+    const ok = () => Promise.resolve(`v${++n}`);
+    expect(await Promise.all([loadOnce(c, 'k', ok), loadOnce(c, 'k', ok)])).toEqual(['v1', 'v1']);
+    const bad = loadOnce(c, 'x', () => Promise.reject(new Error('no')));
+    await expect(bad).rejects.toThrow('no');
+    expect(await loadOnce(c, 'x', ok)).toBe('v2');
   });
 });
