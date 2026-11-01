@@ -30,12 +30,8 @@ body {
   overflow: hidden;
 }
 
-/* Smooth colour change when switching theme (class set briefly by applyTheme). */
-html.theme-switch * {
-  transition: background-color var(--t-slow) var(--ease-io), border-color var(--t-slow) var(--ease-io), color var(--t-slow) var(--ease-io), fill var(--t-slow), stroke var(--t-slow) !important;
-}
-
-/* Theme switches reveal through a clip-path circle animated from script; no default cross-fade. */
+/* Theme switches are View Transitions animated from script (store.ts flipTheme): a circle growing
+   from the click in Settings, a fade when the system's theme changes; no default cross-fade. */
 ::view-transition-old(root),
 ::view-transition-new(root) {
   animation: none;

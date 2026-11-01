@@ -15,7 +15,7 @@ import { folders, loadOnce } from './cache';
 import { rpc } from './rpc';
 import { TranscriptModel } from './transcript';
 import { setHome, plural, errText } from './format';
-import { EASE_EXIT, reducedMotion, yieldToEvents } from './motion';
+import { EASE, EASE_EXIT, reducedMotion, yieldToEvents } from './motion';
 import { isBusy } from './types';
 import type { AppInfo, Config, SessionState, SessionSummary, PermissionMode, Effort, RawMsg, GatewayModels, TimelineStep, PermissionDecision, PermissionRequest, DispatchJob, DispatchRun, DispatchDelta, Playbook } from './types';
 import type { RepoEntry } from './types';
@@ -620,13 +620,37 @@ export function applyTheme() {
   const root = document.documentElement;
   const startup = !themeReady;
   if (get().config) themeReady = true;
-  if (!startup && !quietSwitch && root.dataset.theme && root.dataset.theme !== theme) {
-    // Cross-fade colours for a moment instead of flashing to the other theme.
-    root.classList.add('theme-switch');
-    setTimeout(() => root.classList.remove('theme-switch'), 360);
-  }
-  root.dataset.theme = theme;
-  set({ theme });
+  const apply = () => {
+    root.dataset.theme = theme;
+    set({ theme });
+  };
+  // The system's theme changed under the window: the new look fades in over the old one.
+  if (!startup && !quietSwitch && root.dataset.theme && root.dataset.theme !== theme) flipTheme(apply, (r) => r.animate({ opacity: [0, 1] }, { duration: 360, easing: EASE, pseudoElement: '::view-transition-new(root)' }));
+  else apply();
+}
+
+/**
+ * Flip the visible theme inside a View Transition: the window's old and new looks are two pictures
+ * the compositor blends while `reveal` animates the new one in, so a flip costs one style pass however
+ * long the conversation drawn, not a transition on every element. Without View Transitions, or with
+ * reduced motion, it flips at once.
+ */
+function flipTheme(apply: () => void, reveal: (root: HTMLElement) => void) {
+  const doc = document as Document & { startViewTransition?: (cb: () => void) => { ready: Promise<void> } };
+  // applyTheme inside does not start a flip of its own.
+  const quiet = () => {
+    quietSwitch = true;
+    try {
+      apply();
+    } finally {
+      quietSwitch = false;
+    }
+  };
+  if (!doc.startViewTransition || reducedMotion()) return quiet();
+  doc
+    .startViewTransition(quiet)
+    .ready.then(() => reveal(document.documentElement))
+    .catch(() => {}); // a skipped transition: the theme has changed all the same
 }
 
 let saveUiTimer: ReturnType<typeof setTimeout> | null = null;
@@ -649,27 +673,13 @@ export function setTheme(pref: Config['theme'], at?: { x: number; y: number }) {
   if (!config) return;
   const before = document.documentElement.dataset.theme;
   const resolved = pref === 'dark' || (pref === 'system' && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
-  const doc = document as Document & { startViewTransition?: (cb: () => void) => { finished: Promise<void> } };
   set({ config: { ...config, theme: pref } });
-  if (resolved === before || !doc.startViewTransition || matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    applyTheme();
-  } else {
+  if (resolved === before) applyTheme();
+  else {
     const x = at?.x ?? innerWidth / 2;
     const y = at?.y ?? innerHeight / 2;
     const r = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
-    const vt = doc.startViewTransition(() => {
-      quietSwitch = true;
-      applyTheme();
-      quietSwitch = false;
-    });
-    vt.ready
-      .then(() =>
-        document.documentElement.animate(
-          { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${r}px at ${x}px ${y}px)`] },
-          { duration: 520, easing: 'cubic-bezier(0.65, 0, 0.35, 1)', pseudoElement: '::view-transition-new(root)' },
-        ),
-      )
-      .catch(() => {}); // a skipped transition: the theme has changed all the same
+    flipTheme(applyTheme, (root) => root.animate({ clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${r}px at ${x}px ${y}px)`] }, { duration: 520, easing: 'cubic-bezier(0.65, 0, 0.35, 1)', pseudoElement: '::view-transition-new(root)' }));
   }
   call<Config>('config.set', { theme: pref }).then((c) => set({ config: c }), toasted);
 }
