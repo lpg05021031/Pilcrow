@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { RULES } from '../../web/src/lib/highlight';
 
 // The contrast tokens.css promises, checked against its own values: the secondary and tertiary text
 // on every opaque surface, in both themes, white on the solid fills that carry words, and the text on
@@ -74,6 +75,9 @@ const HOVER: [what: string, layers: string[]][] = [
   ["a turn's work line under the pointer (.work-head:hover)", ['canvas', 'fill-1']],
 ];
 const SOLIDS = ['accent-solid', 'accent-solid-2', 'err-solid'];
+// Code: the editor draws the --cm-* inks on the Files pane's canvas (its own theme is transparent,
+// Editor.tsx); Shiki's rows (highlight.ts) are drawn on --inset, in Markdown code, tool output and diffs.
+const SHIKI_COMMENT = RULES.findIndex(([scopes]) => scopes.includes('comment'));
 
 describe('tokens.css contrast', () => {
   for (const [name, t] of [
@@ -92,6 +96,16 @@ describe('tokens.css contrast', () => {
     });
     it(`${name}: --text-2 on a row under the pointer is 4.5:1 or more`, () => {
       for (const [what, layers] of HOVER) expect(ratio(hex(t['text-2'], t), stack(layers, t)), `--text-2 on ${what}`).toBeGreaterThanOrEqual(4.5);
+    });
+    it(`${name}: a code comment is 4.5:1 or more on its surface, and still the dimmest ink there`, () => {
+      const cm = Object.keys(t).filter((k) => k.startsWith('cm-') && k !== 'cm-comment');
+      const editor = ratio(hex(t['cm-comment'], t), hex(t.canvas, t));
+      expect(editor, '--cm-comment on canvas').toBeGreaterThanOrEqual(4.5);
+      for (const k of cm) expect(editor, `--cm-comment below --${k}`).toBeLessThan(ratio(hex(t[k], t), hex(t.canvas, t)));
+      const col = name === 'dark' ? 1 : 2;
+      const shiki = (row: (typeof RULES)[number]) => ratio(row[col] as string, hex(t.inset, t));
+      expect(shiki(RULES[SHIKI_COMMENT]), "Shiki's comment on inset").toBeGreaterThanOrEqual(4.5);
+      for (const row of RULES.filter((r, i) => r[col] && i !== SHIKI_COMMENT)) expect(shiki(RULES[SHIKI_COMMENT]), `Shiki's comment below ${row[0][0]}`).toBeLessThan(shiki(row));
     });
     it(`${name}: words on a solid fill (white) are 4.5:1 or more`, () => {
       for (const s of SOLIDS) expect(ratio(hex(t['accent-ink'], t), hex(t[s], t)), `accent-ink on ${s}`).toBeGreaterThanOrEqual(4.5);

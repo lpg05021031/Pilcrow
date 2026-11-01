@@ -236,7 +236,7 @@
   --shadow-sheet: 0 0 0 0.5px rgba(0, 0, 0, 0.7), inset 0 0 0 0.5px rgba(255, 255, 255, 0.1), inset 0 1px 0 var(--edge-hi), 0 36px 90px -24px rgba(0, 0, 0, 0.85), 0 12px 28px -12px rgba(0, 0, 0, 0.55);
   --scrim-blur: blur(10px) saturate(120%);
 
-  --cm-comment: #767369;
+  --cm-comment: #8d897d;
   --cm-keyword: #c7aaee;
   --cm-string: #a8d19a;
   --cm-number: #ecb37e;
@@ -352,7 +352,7 @@
   --shadow-sheet: 0 0 0 0.5px rgba(0, 0, 0, 0.14), inset 0 1px 0 var(--edge-hi), 0 36px 80px -24px rgba(44, 40, 30, 0.35), 0 10px 24px -10px rgba(44, 40, 30, 0.14);
   --scrim-blur: blur(10px) saturate(120%);
 
-  --cm-comment: #8d8a80;
+  --cm-comment: #797569;
   --cm-keyword: #7c3fbf;
   --cm-string: #2f7a37;
   --cm-number: #b2570f;

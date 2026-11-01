@@ -92,8 +92,8 @@ export function normalizeLang(lang?: string | null): string | null {
  * then a font style. Shiki is given a single theme whose colours stand for rows of this table, so it
  * tokenizes once instead of once per theme (half the time), and each token gets both colours.
  */
-const RULES: [scopes: string[], dark: string | null, light: string | null, fontStyle?: string][] = [
-  [['comment', 'punctuation.definition.comment', 'string.comment'], '#6C6C75', '#8A8A93', 'italic'],
+export const RULES: [scopes: string[], dark: string | null, light: string | null, fontStyle?: string][] = [
+  [['comment', 'punctuation.definition.comment', 'string.comment'], '#7F7F89', '#70707B', 'italic'],
   [['keyword', 'storage', 'storage.type', 'keyword.control', 'keyword.operator.new', 'keyword.operator.expression', 'variable.language', 'keyword.other'], '#C3A6EC', '#7B3BC0'],
   [['string', 'string.quoted', 'string.template', 'markup.inline.raw'], '#A2CF98', '#2D7A33'],
   [['constant.numeric', 'constant.language', 'constant.character', 'support.constant', 'constant.other', 'keyword.other.unit'], '#E9B07C', '#B2560E'],
