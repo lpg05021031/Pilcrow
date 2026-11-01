@@ -3,10 +3,10 @@ import { WorkflowDetail } from '../tools/WorkflowBody';
 import { useStore, models, call } from '../../lib/store';
 import type { SessionSummary, TaskInfo } from '../../lib/types';
 import { duration, tokens, plural, timeAgo } from '../../lib/format';
-import { TodoBody } from '../tools/ToolCard';
+import { TodoBody } from '../tools/TodoBody';
 import { Spinner } from '../ui/bits';
 import { str } from '../../lib/tools';
-import type { Todo } from '../tools/ToolCard';
+import type { Todo } from '../tools/TodoBody';
 
 function reconstructTodos(sessionId: string) {
   const m = models.get(sessionId);
