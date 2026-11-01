@@ -251,6 +251,13 @@ export function coalesce(fn, ms) {
   };
   /** Run now if a call is waiting (the server is quitting); nothing waiting, nothing to write. */
   call.flush = () => t !== null && run();
+  /** Forget the waiting call; true if there was one. */
+  call.cancel = () => {
+    const was = t !== null;
+    clearTimeout(t);
+    t = null;
+    return was;
+  };
   return call;
 }
 
@@ -258,12 +265,17 @@ let tmpSeq = 0;
 /** A temp file beside `file` for an atomic write; unique per write, so overlapping writes stay whole. */
 export const tempPath = (file) => `${file}.${process.pid}.${++tmpSeq}.tmp`;
 
-/** writeJson without blocking the event loop. */
-export async function writeJsonAsync(file, data) {
+/**
+ * writeJson without blocking the event loop (and without indentation). `data` is taken as it is at
+ * the call; `current()` is asked again before the rename, and a write it says is stale is dropped.
+ */
+export async function writeJsonAsync(file, data, current = () => true) {
+  const text = JSON.stringify(data);
   await fs.promises.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   const tmp = tempPath(file);
-  await fs.promises.writeFile(tmp, JSON.stringify(data), { mode: 0o600 });
-  await fs.promises.rename(tmp, file);
+  await fs.promises.writeFile(tmp, text, { mode: 0o600 });
+  if (current()) await fs.promises.rename(tmp, file);
+  else await fs.promises.rm(tmp, { force: true });
 }
 
 export function debounce(fn, ms) {
@@ -274,19 +286,38 @@ export function debounce(fn, ms) {
   };
 }
 
+/** pilcrow.log moves to pilcrow.log.1 (replacing the one before) past this, at start or while running. */
+export const LOG_MAX_BYTES = 4 * 1024 * 1024;
 let logStream = null;
+let logBytes = 0;
+
+const logFile = () => path.join(xdg('state'), 'pilcrow.log');
+
+function openLog() {
+  const file = logFile();
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  logBytes = fs.existsSync(file) ? fs.statSync(file).size : 0;
+  if (logBytes >= LOG_MAX_BYTES) {
+    fs.renameSync(file, file + '.1');
+    logBytes = 0;
+  }
+  const fd = fs.openSync(file, 'a', 0o600);
+  fs.fchmodSync(fd, 0o600); // also tightens logs left by older versions
+  logStream = fs.createWriteStream(null, { fd });
+}
+
 export function log(...args) {
   const line = `[${new Date().toISOString()}] ${args.map((a) => (typeof a === 'string' ? a : a instanceof Error ? a.stack : JSON.stringify(a))).join(' ')}\n`;
   if (process.env.PILCROW_DEBUG) process.stderr.write(line);
   try {
-    if (!logStream) {
-      const dir = xdg('state');
-      fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-      const fd = fs.openSync(path.join(dir, 'pilcrow.log'), 'a', 0o600);
-      fs.fchmodSync(fd, 0o600); // also tightens logs left by older versions
-      logStream = fs.createWriteStream(null, { fd });
+    if (logStream && logBytes >= LOG_MAX_BYTES) {
+      logStream.end(); // what it still holds lands in the file under its new name
+      logStream = null;
+      fs.renameSync(logFile(), logFile() + '.1');
     }
+    if (!logStream) openLog();
     logStream.write(line);
+    logBytes += Buffer.byteLength(line);
   } catch {
     /* logging must never crash the app */
   }

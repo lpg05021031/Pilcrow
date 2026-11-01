@@ -490,29 +490,32 @@ export async function start({ shell = 'none', port, quiet = false, onQuit, heart
     if (url.pathname.startsWith('/api/fs/')) {
       let p = decodeURIComponent(url.pathname.slice('/api/fs'.length));
       if (/^\/[a-zA-Z]:\//.test(p)) p = p.slice(1); // Windows drive paths arrive as /C:/…
-      fs.stat(p, (err, st) => {
-        if (err || !st.isFile()) {
-          res.writeHead(404).end('Not found');
-          return;
-        }
-        res.writeHead(200, { 'content-type': files.mimeOf(p) || OCTET, 'content-length': st.size, 'cache-control': 'no-store', 'cross-origin-resource-policy': 'same-origin', 'x-content-type-options': 'nosniff' });
-        fs.createReadStream(p).pipe(res);
-      });
+      sendFile(res, p, { 'content-type': files.mimeOf(p) || OCTET, 'x-content-type-options': 'nosniff' });
       return;
     }
     if (url.pathname === '/api/raw') {
       const p = expandHome(url.searchParams.get('path') || '');
-      fs.stat(p, (err, st) => {
-        if (err || !st.isFile()) {
-          res.writeHead(404).end('Not found');
-          return;
-        }
-        res.writeHead(200, { 'content-type': files.imageMime(p) || OCTET, 'content-length': st.size, 'cache-control': 'no-store', 'cross-origin-resource-policy': 'same-origin' });
-        fs.createReadStream(p).pipe(res);
-      });
+      sendFile(res, p, { 'content-type': files.imageMime(p) || OCTET });
       return;
     }
     serveStatic(url.pathname, res);
+  }
+
+  /** A file from disk for the page, or 404; a read that fails (unreadable, gone midway) ends the answer. */
+  function sendFile(res, p, headers) {
+    fs.stat(p, (err, st) => {
+      if (err || !st.isFile()) {
+        res.writeHead(404).end('Not found');
+        return;
+      }
+      const stream = fs.createReadStream(p);
+      stream.once('open', () => stream.pipe(res.writeHead(200, { ...headers, 'content-length': st.size, 'cache-control': 'no-store', 'cross-origin-resource-policy': 'same-origin' })));
+      stream.once('error', (e) => {
+        log('file read failed', p, e.message);
+        if (res.headersSent) res.destroy();
+        else res.writeHead(500).end();
+      });
+    });
   }
 
   /** The port we listen on (set once listening; nothing is served before). */
@@ -553,7 +556,7 @@ export async function start({ shell = 'none', port, quiet = false, onQuit, heart
       };
       const stream = fs.createReadStream(target);
       stream.once('open', () => stream.pipe(res.writeHead(200, headers)));
-      stream.once('error', () => res.writeHead(500, { 'content-type': 'text/plain' }).end('The interface files are missing (web/dist). Run the Pilcrow installer again to restore them.'));
+      stream.once('error', () => (res.headersSent ? res.destroy() : res.writeHead(500, { 'content-type': 'text/plain' }).end('The interface files are missing (web/dist). Run the Pilcrow installer again to restore them.')));
     });
   }
 
@@ -561,7 +564,7 @@ export async function start({ shell = 'none', port, quiet = false, onQuit, heart
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, 'http://x');
     if (url.pathname !== '/ws' || !originOk(req) || !hostOk(req) || !fetchSiteOk(req)) {
-      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); // as the HTTP refusals
       socket.destroy();
       return;
     }

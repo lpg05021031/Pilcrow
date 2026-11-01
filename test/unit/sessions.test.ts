@@ -351,3 +351,16 @@ describe('what one window receives', () => {
     expect(r.stallMs).toBeLessThan(STALL_MS);
   });
 });
+
+describe('quitting', () => {
+  it('starts no process once the server is quitting, not even for a held message', async () => {
+    const { id, s, q } = await live();
+    await s.send({ text: 'held' });
+    sessions.stop();
+    q.emit(result(id)); // the turn ends: the held message would start a process
+    const before = sdk.queries.length;
+    await expect(s.send({ text: 'too late' })).rejects.toThrow(/quitting/);
+    await new Promise((r) => setTimeout(r, 120));
+    expect(sdk.queries.length).toBe(before);
+  });
+});

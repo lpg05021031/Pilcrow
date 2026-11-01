@@ -294,6 +294,7 @@ function finishRun(s, session, entry, status, reason) {
 }
 
 let ticker = null;
+let firstTick = null;
 export function start() {
   if (ticker) return;
   data = readJson(FILE, data);
@@ -322,12 +323,13 @@ export function start() {
     }
   };
   ticker = setInterval(tick, 30_000);
-  setTimeout(tick, 5000);
+  firstTick = setTimeout(tick, 5000);
 }
 
 export function stop() {
   clearInterval(ticker);
-  ticker = null;
+  clearTimeout(firstTick);
+  ticker = firstTick = null;
 }
 
 /** A dispatch job started by a schedule ended: the schedule's record moves on (the report is the job's own inbox item). */

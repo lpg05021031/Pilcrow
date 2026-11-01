@@ -1,6 +1,6 @@
 // Persistent app settings and per-session metadata (titles, worktrees, archive flags).
 import path from 'node:path';
-import { xdg, readJson, writeJson, coalesce } from './util.js';
+import { xdg, readJson, writeJson, writeJsonAsync, coalesce, log } from './util.js';
 
 const DIR = xdg('config');
 const CONFIG_FILE = path.join(DIR, 'config.json');
@@ -45,13 +45,26 @@ function loadConfig() {
 
 /**
  * Both files are read on first use, not at import, so importing a module (a test, `--doctor`) never
- * reads or writes the person's files before it means to.
+ * reads or writes the person's files before it means to. Session ids come from the clients, so the
+ * metadata has no prototype: no id ('__proto__', 'toString') names anything but a session.
+ *
+ * sessions.json changes with every turn and grows with the sessions, so it is written off the event
+ * loop; flush() (quitting) writes it at once instead, and a write still in flight is then dropped
+ * rather than renamed over it, as is any write a newer one has overtaken.
  */
 class Store {
   #config = null;
   #meta = null;
+  #metaSeq = 0; // writes of sessions.json started; only the newest may land
+  #metaWriting = 0;
   saveConfig = coalesce(() => writeJson(CONFIG_FILE, this.config), SAVE_MS);
-  saveMeta = coalesce(() => writeJson(META_FILE, this.meta), SAVE_MS);
+  saveMeta = coalesce(() => {
+    const seq = ++this.#metaSeq;
+    this.#metaWriting++;
+    writeJsonAsync(META_FILE, this.meta, () => seq === this.#metaSeq)
+      .catch((e) => log('could not save sessions.json', e))
+      .finally(() => this.#metaWriting--);
+  }, SAVE_MS);
 
   /** @type {Record<string, any>} */
   get config() {
@@ -60,7 +73,7 @@ class Store {
 
   /** @type {Record<string, Record<string, any>>} id -> that session's metadata */
   get meta() {
-    return (this.#meta ??= readJson(META_FILE, {}));
+    return (this.#meta ??= Object.assign(Object.create(null), readJson(META_FILE, {})));
   }
 
   getConfig() {
@@ -69,7 +82,7 @@ class Store {
 
   setConfig(patch) {
     for (const [k, v] of Object.entries(patch || {})) {
-      if (!(k in DEFAULT_CONFIG)) continue;
+      if (!Object.hasOwn(DEFAULT_CONFIG, k)) continue;
       if (k === 'ui' && v && typeof v === 'object') this.config.ui = { ...this.config.ui, ...v };
       else this.config[k] = v;
     }
@@ -104,10 +117,13 @@ class Store {
     this.saveMeta();
   }
 
-  /** Write now what is waiting to be saved. */
+  /** Write now what is waiting to be saved (the server is quitting). */
   flush() {
     this.saveConfig.flush();
-    this.saveMeta.flush();
+    if (this.saveMeta.cancel() || this.#metaWriting) {
+      this.#metaSeq++;
+      writeJson(META_FILE, this.meta);
+    }
   }
 }
 

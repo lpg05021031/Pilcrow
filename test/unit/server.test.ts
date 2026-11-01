@@ -1,10 +1,16 @@
 // The real server (serve.ts): the RPC dispatcher's error codes, the parameter guards, the Host / Origin /
-// Sec-Fetch-Site checks on HTTP and WebSocket, and a window that sends a broken frame or goes silent.
-import { afterAll, describe, expect, it } from 'vitest';
+// Sec-Fetch-Site checks on HTTP and WebSocket, a file that fails to read, a window that sends a broken
+// frame or goes silent, settings keys and session ids that name nothing, and a terminal's scrollback.
+import { afterAll, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
+import path from 'node:path';
+import { Readable } from 'node:stream';
 import WebSocket from 'ws';
 import { METHODS } from '../../server/main.js';
+import { store } from '../../server/config.js';
+import * as term from '../../server/terminal.js';
 import { logSays, serve } from './serve.js';
 
 const HEARTBEAT_MS = 1000;
@@ -139,11 +145,35 @@ describe('who may talk to the server', () => {
     expect(await get('/api/hello', { 'sec-fetch-site': 'cross-site' })).toBe(403);
   });
 
-  it('accepts a WebSocket only from its own origin', async () => {
+  it('accepts a WebSocket only from its own origin, and refuses the rest with 403 as HTTP does', async () => {
     expect(await upgrade({})).toBe(true);
     expect(await upgrade({ origin: `http://127.0.0.1:${app.port}` })).toBe(true);
     expect(await upgrade({ origin: 'http://evil.example' })).toBe(false);
     expect(await upgrade({ 'sec-fetch-site': 'cross-site' })).toBe(false);
+    const status = await new Promise((resolve) => {
+      const req = http.request({ host: '127.0.0.1', port: app.port, path: '/ws', headers: { host: `127.0.0.1:${app.port}`, origin: 'http://evil.example', connection: 'Upgrade', upgrade: 'websocket', 'sec-websocket-version': '13', 'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==' } });
+      req.on('response', (res) => resolve(res.statusCode));
+      req.on('error', () => resolve('error'));
+      req.end();
+    });
+    expect(status).toBe(403);
+  });
+
+  it('answers a file that fails to read with 500 and keeps serving', async () => {
+    const file = path.join(os.tmpdir(), `pilcrow-unreadable-${process.pid}.txt`);
+    fs.writeFileSync(file, 'x');
+    const read = vi.spyOn(fs, 'createReadStream').mockImplementationOnce(() => {
+      const r = new Readable({ read() {} });
+      process.nextTick(() => r.destroy(Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' })));
+      return r as unknown as fs.ReadStream;
+    });
+    try {
+      expect(await get(`/api/fs${file}`)).toBe(500);
+      expect(await logSays(/file read failed .*EIO/)).not.toMatch(/uncaughtException/);
+      expect(await get(`/api/fs${file}`)).toBe(200);
+    } finally {
+      read.mockRestore();
+    }
   });
 
   it('answers a malformed path with 400 instead of hanging', async () => {
@@ -179,6 +209,15 @@ describe('windows that break or go silent', () => {
 });
 
 describe('terminals', () => {
+  it('keeps the last 400 KB of output for a window that opens one later', async () => {
+    const t = term.open({ cwd: os.tmpdir(), command: "head -c 600000 /dev/zero | tr '\\0' a; echo; echo END" });
+    for (const end = Date.now() + 10_000; !term.list().find((x) => x.id === t.id)?.exited && Date.now() < end; ) await new Promise((r) => setTimeout(r, 20));
+    const snap = term.snapshot(t.id)!;
+    expect(snap.buffer.length).toBe(400 * 1024);
+    expect(snap.buffer).toMatch(/a+\r?\nEND/);
+    await term.close(t.id);
+  });
+
   it('closing one waits until its process is gone', async () => {
     const t = await rpc('term.open', { cwd: os.tmpdir(), command: "trap '' HUP; sleep 30" });
     expect(t.ok).toBe(true);
@@ -186,5 +225,29 @@ describe('terminals', () => {
     expect((await rpc('term.close', { id: t.r.id })).ok).toBe(true);
     expect(Date.now() - t0).toBeLessThan(2500); // SIGHUP, and SIGKILL after 1.5 s at the latest
     expect((await rpc('term.list')).r).toEqual([]);
+  });
+});
+
+describe('names that are not settings or sessions', () => {
+  it('ignores a settings key the defaults do not have, inherited ones included', async () => {
+    const r = (await rpc('config.set', { toString: 'x', constructor: 'y', theme: 'dark' })).r;
+    expect(r.theme).toBe('dark');
+    expect(Object.hasOwn(store.getConfig(), 'toString') || Object.hasOwn(store.getConfig(), 'constructor')).toBe(false);
+  });
+
+  it('keeps session ids such as __proto__ as plain entries', async () => {
+    expect((await rpc('session.archive', { id: '__proto__', archived: true })).ok).toBe(true);
+    expect(Object.getPrototypeOf(store.meta)).toBe(null);
+    expect(store.getMeta('__proto__')).toEqual({ archived: true });
+    expect(store.getMeta('toString')).toBe(null);
+    store.deleteMeta('__proto__');
+  });
+
+  it('writes the metadata on quit even with a save still waiting', () => {
+    store.setMeta('sess-flush', { title: 'kept' });
+    store.flush();
+    const file = path.join(process.env.XDG_CONFIG_HOME!, 'pilcrow', 'sessions.json');
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))['sess-flush']).toEqual({ title: 'kept' });
+    store.deleteMeta('sess-flush');
   });
 });

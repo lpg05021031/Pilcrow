@@ -66,6 +66,9 @@ const MCP_AUTH_POLLS = 90; // …for three minutes
 /** Processes Pilcrow is shutting down on purpose (idle, settings change): their end is not an error.
  *  Kept per process, so a later crash of the session's next process is still reported. */
 const closing = new WeakSet();
+/** Set once the server is quitting (SessionManager.stop): from then on nothing starts a process, not
+ *  a held message draining nor a request that lands while the others close. */
+let quitting = false;
 
 /**
  * MCP sign-in calls that newer Claude Code builds have and the SDK's types do not list yet; each is
@@ -348,6 +351,7 @@ class Session {
 
   /** Start Claude Code for this session once, even when several requests arrive together. */
   ensureStarted() {
+    if (quitting) return Promise.reject(new AppError('failed', 'Pilcrow is quitting.'));
     if (this.q && !closing.has(this.q)) return Promise.resolve();
     if (!this.starting) {
       this.starting = (async () => {
@@ -1073,54 +1077,39 @@ class SessionManager {
     return touched;
   }
 
+  /**
+   * A row of the list, from Pilcrow's metadata and what Claude Code's transcript says (`h`; null for a
+   * session created here that has not reached disk yet).
+   */
+  rowOf(id, meta, h) {
+    return {
+      id,
+      title: meta.title || h?.customTitle || (meta.firstPrompt ? titleFromPrompt(meta.firstPrompt) : null) || h?.summary || h?.firstPrompt || (h ? 'Untitled session' : 'New session'),
+      firstPrompt: h?.firstPrompt,
+      cwd: slash(h?.cwd || meta.cwd),
+      project: slash(meta.worktree?.repoRoot || meta.project || h?.cwd || meta.cwd),
+      gitBranch: meta.worktree?.branch || h?.gitBranch || null,
+      lastModified: h ? this.orderOf(id, meta, h.lastModified) : meta.touched || meta.createdAt,
+      createdAt: h ? h.createdAt : meta.createdAt,
+      archived: Boolean(meta.archived),
+      pinned: Boolean(meta.pinned),
+      worktree: meta.worktree || null,
+      scheduled: meta.scheduled || null,
+      dispatch: meta.dispatch || null,
+      helper: meta.helper ? { leadId: meta.helper.leadId, name: meta.helper.name, state: meta.helper.state || null } : null,
+      lead: meta.lead ? { since: meta.lead.since, count: (meta.lead.helpers || []).length } : null,
+      status: h ? 'stopped' : 'idle',
+      live: false,
+    };
+  }
+
   async list() {
     const hist = await history.listHistory();
     const out = new Map();
     const metaAll = store.meta;
-    for (const h of hist) {
-      const meta = metaAll[h.sessionId] || {};
-      out.set(h.sessionId, {
-        id: h.sessionId,
-        title: meta.title || h.customTitle || (meta.firstPrompt ? titleFromPrompt(meta.firstPrompt) : null) || h.summary || h.firstPrompt || 'Untitled session',
-        firstPrompt: h.firstPrompt,
-        cwd: slash(h.cwd || meta.cwd),
-        project: slash(meta.worktree?.repoRoot || meta.project || h.cwd),
-        gitBranch: meta.worktree?.branch || h.gitBranch,
-        lastModified: this.orderOf(h.sessionId, meta, h.lastModified),
-        createdAt: h.createdAt,
-        archived: Boolean(meta.archived),
-        pinned: Boolean(meta.pinned),
-        worktree: meta.worktree || null,
-        scheduled: meta.scheduled || null,
-        dispatch: meta.dispatch || null,
-        helper: meta.helper ? { leadId: meta.helper.leadId, name: meta.helper.name, state: meta.helper.state || null } : null,
-        lead: meta.lead ? { since: meta.lead.since, count: (meta.lead.helpers || []).length } : null,
-        status: 'stopped',
-        live: false,
-      });
-    }
-    // Sessions created here that have not reached disk yet.
-    for (const [id, meta] of Object.entries(metaAll)) {
-      if (out.has(id) || !meta.cwd || !this.sessions.has(id)) continue;
-      out.set(id, {
-        id,
-        title: meta.title || (meta.firstPrompt ? titleFromPrompt(meta.firstPrompt) : null) || 'New session',
-        cwd: meta.cwd,
-        project: meta.worktree?.repoRoot || meta.project || meta.cwd,
-        gitBranch: meta.worktree?.branch || null,
-        lastModified: meta.touched || meta.createdAt,
-        createdAt: meta.createdAt,
-        archived: Boolean(meta.archived),
-        pinned: Boolean(meta.pinned),
-        worktree: meta.worktree || null,
-        scheduled: meta.scheduled || null,
-        dispatch: meta.dispatch || null,
-        helper: meta.helper ? { leadId: meta.helper.leadId, name: meta.helper.name, state: meta.helper.state || null } : null,
-        lead: meta.lead ? { since: meta.lead.since, count: (meta.lead.helpers || []).length } : null,
-        status: 'idle',
-        live: false,
-      });
-    }
+    for (const h of hist) out.set(h.sessionId, this.rowOf(h.sessionId, metaAll[h.sessionId] || {}, h));
+    // …and the sessions created here that have not reached disk yet
+    for (const [id, meta] of Object.entries(metaAll)) if (!out.has(id) && meta.cwd && this.sessions.has(id)) out.set(id, this.rowOf(id, meta, null));
     for (const s of this.sessions.values()) {
       const e = out.get(s.id);
       if (!e) continue;
@@ -1218,8 +1207,9 @@ class SessionManager {
     return [...this.sessions.values()].filter((s) => s.q && s.isBusy()).map((s) => ({ id: s.id, cwd: s.cwd, status: s.status }));
   }
 
-  /** Stop reaping and close every Claude Code process (the server is quitting). */
+  /** Stop reaping and close every Claude Code process; none starts again (the server is quitting). */
   stop() {
+    quitting = true;
     clearInterval(this.reaper);
     this.reaper = null;
     for (const s of this.sessions.values()) s.close();
