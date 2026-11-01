@@ -1,7 +1,8 @@
 // The two walks over many folders: skills.list over a plugin cache of 600 skills, and findRepos over a
 // workspace of 6 000 folders. Each finds what is there and lets the event loop in while it walks, a turn
-// at least every 10 ms of the walk (util.slicer yields every 4 ms). Counted in turns rather than timed:
-// the longest stall moves with whatever else the machine runs (alone: 32 and 53 ms before, about 5 now).
+// at least every 10 ms of the CPU time it takes (util.slicer yields every 4 ms). Counted in turns per CPU
+// millisecond rather than timed: the longest stall, and the wall clock, move with whatever else the
+// machine runs (alone: 32 and 53 ms in one piece before, about 5 ms now).
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -13,7 +14,7 @@ import { findRepos } from '../../server/workspace.js';
 const TURN_EVERY_MS = 10;
 const base = fs.mkdtempSync(path.join(os.tmpdir(), 'pilcrow-walks-'));
 
-/** What `fn` returned, how long it took, how many turns the event loop had meanwhile, and the longest stall. */
+/** What `fn` returned, the CPU time it took, how many turns the event loop had meanwhile, and the longest stall. */
 async function walked<T>(fn: () => Promise<T>) {
   const h = monitorEventLoopDelay({ resolution: 1 });
   h.enable();
@@ -22,12 +23,13 @@ async function walked<T>(fn: () => Promise<T>) {
   let done = false;
   const spin = () => !done && (turns++, setImmediate(spin));
   setImmediate(spin);
-  const t0 = performance.now();
+  const cpu0 = process.cpuUsage();
   const r = await fn();
-  const ms = performance.now() - t0;
+  const cpu = process.cpuUsage(cpu0);
+  const ms = (cpu.user + cpu.system) / 1000;
   done = true;
   h.disable();
-  console.log(`  ${ms.toFixed(0)} ms, ${turns} turns of the event loop, longest stall ${(h.max / 1e6).toFixed(1)} ms`);
+  console.log(`  ${ms.toFixed(0)} ms of CPU, ${turns} turns of the event loop, longest stall ${(h.max / 1e6).toFixed(1)} ms`);
   return { r, ms, turns };
 }
 
