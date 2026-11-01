@@ -237,32 +237,6 @@ export function writeJson(file, data, indent = 2) {
   fs.renameSync(tmp, file);
 }
 
-/**
- * Run `fn` once, `ms` after the first call of a burst. Unlike a debounce, a steady stream of calls
- * cannot starve it: a file saved this way is never more than `ms` behind.
- */
-export function coalesce(fn, ms) {
-  let t = null;
-  const run = () => {
-    clearTimeout(t);
-    t = null;
-    fn();
-  };
-  const call = () => {
-    t ??= setTimeout(run, ms);
-  };
-  /** Run now if a call is waiting (the server is quitting); nothing waiting, nothing to write. */
-  call.flush = () => t !== null && run();
-  /** Forget the waiting call; true if there was one. */
-  call.cancel = () => {
-    const was = t !== null;
-    clearTimeout(t);
-    t = null;
-    return was;
-  };
-  return call;
-}
-
 let tmpSeq = 0;
 /** A temp file beside `file` for an atomic write; unique per write, so overlapping writes stay whole. */
 export const tempPath = (file) => `${file}.${process.pid}.${++tmpSeq}.tmp`;
@@ -285,24 +259,30 @@ const jsonFiles = new Set();
 
 /**
  * One of Pilcrow's own JSON files, saved off the event loop: save() writes `data()` `ms` after the first
- * call of a burst (coalesce), and a write that a newer one overtook is dropped rather than renamed over
- * it. flushSaves() (quitting) writes at once, synchronously, every file with a save waiting or under way.
+ * call of a burst (unlike a debounce, a steady stream of calls cannot starve it), and a write that a
+ * newer one overtook is dropped rather than renamed over it. flushSaves() (quitting) writes at once,
+ * synchronously, every file with a save waiting or under way.
  * @param {string} file @param {() => unknown} data @param {number} [ms]
  */
 export function jsonFile(file, data, ms = 0) {
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let timer = null;
   let seq = 0; // writes started; only the newest may land
   let writing = 0;
-  const save = coalesce(() => {
+  const write = () => {
+    timer = null;
     const mine = ++seq;
     writing++;
     writeJsonAsync(file, data(), () => mine === seq)
       .catch((e) => log('could not save', file, e))
       .finally(() => writing--);
-  }, ms);
+  };
   const f = {
-    save,
+    save: () => void (timer ??= setTimeout(write, ms)),
     flush() {
-      if (!save.cancel() && !writing) return;
+      if (timer === null && !writing) return;
+      if (timer) clearTimeout(timer);
+      timer = null;
       seq++;
       writeJson(file, data(), 0);
     },
