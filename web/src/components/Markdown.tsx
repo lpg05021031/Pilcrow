@@ -1,5 +1,5 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
-import { renderMarkdown, asPathRef, extendBlocks } from '../lib/markdown';
+import { renderMarkdown, asPathRef, extendBlocks, openFenceCode } from '../lib/markdown';
 import { CHUNK_OPEN, escapeHtml, highlightHtml, PAINT_LINES } from '../lib/highlight';
 import { rpc } from '../lib/rpc';
 import { openFile, toast } from '../lib/store';
@@ -39,13 +39,35 @@ async function paintCode(pre: HTMLPreElement, code: string, html: string) {
 }
 
 /**
- * The code of a block that is one code fence not closed yet, as it is drawn (lib/markdown closes it
- * for the parse, and the renderer drops the newline before the closing fence); null for anything else.
+ * Add text to a code block being written, PAINT_LINES lines to a block of their own (the blocks a long
+ * one is coloured in, paintCode): one growing run of text is laid out and painted whole for every
+ * piece, while a new piece in the last of these blocks leaves the others as they were.
  */
-function openFenceCode(raw: string): string | null {
-  const m = /^```[^\n`]*\n/.exec(raw);
-  if (!m || /\n```/.test(raw.slice(m[0].length - 1))) return null;
-  return raw.slice(m[0].length).replace(/\n$/, '');
+function appendCode(code: Element, text: string) {
+  let chunk = code.lastElementChild instanceof HTMLElement && code.lastElementChild.classList.contains('hl-chunk') ? code.lastElementChild : null;
+  if (!chunk) {
+    chunk = code.appendChild(newChunk());
+    chunk.append(...[...code.childNodes].filter((n) => n !== chunk));
+    chunk.dataset.lines = String((chunk.textContent || '').split('\n').length - 1);
+  }
+  let lines = Number(chunk.dataset.lines);
+  for (const part of text.split(/(?<=\n)/)) {
+    if (lines >= PAINT_LINES) {
+      chunk.dataset.lines = String(lines);
+      chunk = code.appendChild(newChunk());
+      lines = 0;
+    }
+    chunk.append(part);
+    if (part.endsWith('\n')) lines++;
+  }
+  chunk.dataset.lines = String(lines);
+}
+
+function newChunk() {
+  const el = document.createElement('span');
+  el.className = 'hl-chunk';
+  el.style.display = 'block';
+  return el;
 }
 
 /**
@@ -70,7 +92,7 @@ const Block = memo(function Block({ raw, open, baseDir }: { raw: string; open: b
     // Not what was drawn (something else changed it): the next piece draws the block whole.
     else if (el.textContent !== drawn.code) fence.current = null;
     else if (code.length > drawn.code.length) {
-      el.append(code.slice(drawn.code.length));
+      appendCode(el, code.slice(drawn.code.length));
       drawn.code = code;
     }
   }, [code, html, growing, drawn]);

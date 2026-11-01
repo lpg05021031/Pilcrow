@@ -1,6 +1,7 @@
 // The keyboard shortcuts, in one table: the window's key handler (App) runs the ones with `run`, the
 // command palette shows their keys, and the Keyboard shortcuts sheet lists every entry in this order.
 import { useStore, setUi, setDialog, openSession, interrupt, native, quickNewSession, cycleView, showPage, showDispatch, openFind, toasted, quitApp, PANEL_TABS } from './store';
+import { isWorking } from './types';
 
 export interface Shortcut {
   /** As shown: modifiers first, then the key ("Ctrl+Shift+N"). Ctrl also means ⌘ on a Mac. */
@@ -60,10 +61,14 @@ export const SHORTCUTS = {
     label: 'Stop Claude',
     combos: ['Escape'],
     when: (e) => {
-      const r = st().activeId ? st().rt[st().activeId!] : undefined;
-      return !typing(e) && (r?.status === 'running' || r?.status === 'starting');
+      const id = st().activeId;
+      const r = id ? st().rt[id] : undefined;
+      return !typing(e) && isWorking(r?.status);
     },
-    run: () => interrupt(st().activeId!).catch(toasted),
+    run: () => {
+      const id = st().activeId;
+      if (id) interrupt(id).catch(toasted);
+    },
   },
   recall: { keys: '↑ in an empty box', label: 'Recall your previous message' },
   mention: { keys: '@', label: 'Mention a file or folder' },
@@ -79,7 +84,7 @@ export const SHORTCUTS = {
 /** Whether a key press is this combo: every modifier as written, no other, and the key itself. */
 export function matches(combo: string, e: Pick<KeyboardEvent, 'key' | 'ctrlKey' | 'metaKey' | 'shiftKey' | 'altKey'>) {
   const parts = combo.split(/\+(?!$)/);
-  const key = parts.pop()!;
+  const key = parts.pop() || '';
   return (e.ctrlKey || e.metaKey) === parts.includes('Ctrl') && e.shiftKey === parts.includes('Shift') && e.altKey === parts.includes('Alt') && (key.length === 1 ? e.key.toLowerCase() === key.toLowerCase() : e.key === key);
 }
 

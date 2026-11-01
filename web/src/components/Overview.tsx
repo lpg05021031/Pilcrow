@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowUpRight, Bot, Brain, Wrench, MessageSquareQuote, Workflow, PanelLeftOpen, Hourglass, CircleCheck, CircleAlert, Activity, CircleDollarSign } from 'lucide-react';
 import { useStore, call, openSession, respond, setUi, mergeLive } from '../lib/store';
-import type { PermissionRequest, SessionState, SessionSummary, TaskInfo } from '../lib/types';
+import { isWorking, type PermissionRequest, type SessionState, type SessionSummary, type TaskInfo } from '../lib/types';
 import { basename, cost, duration, timeAgo, relPath, plural } from '../lib/format';
 import { ContextRing, Spinner, useNow, Num, WorkingMark, Mark, useWindowKey, onActivate } from './ui/bits';
 import { suggestionLabel, typingElsewhere } from './tools/Permission';
@@ -59,7 +59,7 @@ export function Overview() {
   const byId = useMemo(() => Object.fromEntries(sessions.map((s) => [s.id, s])), [sessions]);
   const st = (id: string) => rt[id] || fleet?.live[id];
   const needs = sessions.filter((s) => (st(s.id)?.pending?.length || 0) > 0 || s.status === 'requires_action');
-  const working = sessions.filter((s) => !needs.includes(s) && (s.status === 'running' || s.status === 'starting'));
+  const working = sessions.filter((s) => !needs.includes(s) && isWorking(s.status));
   const dayStart = new Date(now);
   dayStart.setHours(0, 0, 0, 0);
   const finished = sessions
@@ -304,7 +304,7 @@ function NeedsCard({ s, st, first, focused, now }: { s: SessionSummary; st?: Par
     }
   };
   const allow = () => decide({ behavior: 'allow', decisionClassification: 'user_temporary' });
-  const always = () => decide({ behavior: 'allow', updatedPermissions: perm!.suggestions, decisionClassification: 'user_permanent' });
+  const always = () => decide({ behavior: 'allow', updatedPermissions: perm?.suggestions, decisionClassification: 'user_permanent' });
   const deny = () => decide({ behavior: 'deny', message: 'The user declined this action.', decisionClassification: 'user_reject' });
   // a helper's request can be answered for every helper of its lead at once (HELPERS.md §5.6)
   const helperOf = s.helper || null;

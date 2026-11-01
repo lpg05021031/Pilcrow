@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Plus, SlidersHorizontal, PanelLeft, PanelRight, GitCompare, FolderTree, SquareTerminal, AppWindow, ListChecks, Info, Sun, Settings, Keyboard, CircleStop, GitFork, Archive, RefreshCw, MessageSquare, File as FileIcon, Search, X, CircleCheck, CircleAlert, TriangleAlert, Minimize2, Power, Eye, ScrollText, Plug, History, LayoutGrid } from 'lucide-react';
-import { useStore, setDialog, setUi, setTheme, openSession, interrupt, setMode, forkSession, refreshSessions, openFile, sendMessage, dismissToast, useFileIndex, openFind, quitApp, quickNewSession, type PanelTab, cycleView, showPage, holdToast, releaseToast, closeLightbox, type Toast } from '../lib/store';
+import { useStore, setDialog, setUi, setTheme, openSession, interrupt, setMode, forkSession, refreshSessions, openFile, sendMessage, dismissToast, useFileIndex, openFind, quitApp, quickNewSession, type PanelTab, cycleView, showPage, holdToast, releaseToast, closeLightbox, type Toast, type ConfirmSpec } from '../lib/store';
 import { useExitGhost, useFlipRows } from '../lib/motion';
 import { fuzzyFilter } from '../lib/fuzzy';
 import { basename, timeAgo } from '../lib/format';
@@ -169,8 +169,7 @@ export function ShortcutsDialog() {
   );
 }
 
-export function ConfirmDialog() {
-  const spec = useStore((s) => s.dialogs.confirm)!;
+export function ConfirmDialog({ spec }: { spec: ConfirmSpec }) {
   const [checked, setChecked] = useState(spec.checkbox?.value || false);
   const close = () => setDialog('confirm', null);
   return (
@@ -181,12 +180,13 @@ export function ConfirmDialog() {
       footer={
         <>
           <div className="grow" />
-          <button className="btn" onClick={close}>
+          {/* Enter right away should never be the destructive answer: a danger asks from Cancel. */}
+          <button className="btn" onClick={close} autoFocus={spec.danger}>
             Cancel
           </button>
           <button
             className={`btn ${spec.danger ? 'danger solid' : 'primary'}`}
-            autoFocus
+            autoFocus={!spec.danger}
             onClick={() => {
               close();
               spec.onConfirm(checked);

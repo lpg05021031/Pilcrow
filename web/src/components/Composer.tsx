@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUp, Square, Plus, CornerDownLeft } from 'lucide-react';
 import { useStore, sendMessage, interrupt, setMode, setUi, removeHeld, memo, toasted } from '../lib/store';
-import type { PermissionMode, HeldMsg } from '../lib/types';
+import { isBusy, type PermissionMode, type HeldMsg } from '../lib/types';
 import { ContextRing, contextLabel, focusIfFree, Num } from './ui/bits';
 import { markLaunch, reducedMotion, spring } from '../lib/motion';
 import { useSuggest } from './composer/Suggest';
@@ -33,7 +33,7 @@ export function Composer({ sessionId, cwd }: { sessionId: string; cwd: string })
   const suggest = useSuggest({ sessionId, cwd, text, setText, field: ta });
   const attach = useAttachments();
 
-  const busy = status === 'running' || status === 'starting' || status === 'requires_action';
+  const busy = isBusy(status);
   const mode = (rtMode || defaultMode || 'default') as PermissionMode;
 
   // Each session keeps its own draft.

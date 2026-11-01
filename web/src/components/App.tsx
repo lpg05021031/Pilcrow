@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { WifiOff, RefreshCw } from 'lucide-react';
 import { useStore, setUi, setDialog, native, quickNewSession } from '../lib/store';
+import { isBusy } from '../lib/types';
 import { shortcutFor } from '../lib/shortcuts';
 import { Sidebar } from './Sidebar';
 import { SessionView } from './SessionView';
@@ -23,7 +24,9 @@ const SettingsDialog = lazy(() => import('./SettingsDialog').then((m) => ({ defa
 const PAGE_NAMES = { session: 'The conversation', overview: 'The control room', inbox: 'The inbox', dispatch: 'Dispatch' };
 
 export function App() {
-  const ui = useStore((s) => s.ui);
+  // The layout fields read here, each on its own: dragging a width re-renders only what shows it.
+  const sidebar = useStore((s) => s.ui.sidebar);
+  const panel = useStore((s) => s.ui.panel);
   const dialogs = useStore((s) => s.dialogs);
   const activeId = useStore((s) => s.activeId);
   const sessions = useStore((s) => s.sessions);
@@ -76,16 +79,16 @@ export function App() {
   }, [booting, bootDone]);
   // The side panel glides shut when the page changes away from a session; it keeps showing that
   // session while it goes, rather than emptying first.
-  const panelOpen = Boolean(session && page === 'session' && ui.panel);
+  const panelOpen = Boolean(session && page === 'session' && panel);
   const lastPanelSession = useRef(session);
   if (session) lastPanelSession.current = session;
   const panelSession = session || lastPanelSession.current;
   const shell = (
-    <div className={`app${ui.sidebar ? '' : ' no-side'}`}>
-      <Slot open={ui.sidebar} side="left">
+    <div className={`app${sidebar ? '' : ' no-side'}`}>
+      <Slot open={sidebar} side="left">
         <Sidebar />
       </Slot>
-      {ui.sidebar && <Resizer side="left" onResize={resizeSidebar} />}
+      {sidebar && <Resizer side="left" onResize={resizeSidebar} />}
       <main className="main">
         {!connected && everConnected && (
           <div className="offline">
@@ -107,16 +110,16 @@ export function App() {
           </ErrorBoundary>
         )}
       </Slot>
-      {dialogs.newSession && <NewSessionDialog />}
+      {dialogs.newSession && <NewSessionDialog spec={dialogs.newSession} />}
       {dialogs.settings && config && (
         <Suspense fallback={null}>
-          <SettingsDialog />
+          <SettingsDialog config={config} />
         </Suspense>
       )}
       {dialogs.palette && <CommandPalette />}
       {dialogs.shortcuts && <ShortcutsDialog />}
-      {dialogs.confirm && <ConfirmDialog />}
-      {dialogs.mcpAuth && <McpAuthDialog />}
+      {dialogs.confirm && <ConfirmDialog spec={dialogs.confirm} />}
+      {dialogs.mcpAuth && <McpAuthDialog spec={dialogs.mcpAuth} />}
       <Lightbox />
     </div>
   );
@@ -180,7 +183,7 @@ function compareVersions(a: string, b: string) {
 function UpdateNotice() {
   const connected = useStore((s) => s.connected);
   const server = useStore((s) => s.info?.version);
-  const busy = useStore((s) => s.sessions.some((x) => x.status === 'running' || x.status === 'starting' || x.status === 'requires_action'));
+  const busy = useStore((s) => s.sessions.some((x) => isBusy(x.status)));
   const newer = Boolean(connected && server && server !== __APP_VERSION__ && compareVersions(server, __APP_VERSION__) > 0);
   // A newer Pilcrow is installed and nothing is mid-flight: pick it up without asking. While Claude
   // is working, the window stays as it is and the line below offers the reload instead.
@@ -197,7 +200,7 @@ function UpdateNotice() {
     if (tried === server) return;
     const t = setTimeout(() => {
       try {
-        sessionStorage.setItem('pilcrow.reloadedFor', server!);
+        sessionStorage.setItem('pilcrow.reloadedFor', server || '');
       } catch {
         /* fine */
       }

@@ -66,7 +66,10 @@ export function SessionView({ session }: { session: SessionSummary }) {
   const helper = useStore((s) => s.rt[id]?.helper);
   const workflow = useStore((s) => runningWorkflow(s.rt[id]?.tasks));
   const error = useStore((s) => s.rt[id]?.error);
-  const ui = useStore((s) => s.ui);
+  const view = useStore((s) => s.ui.view);
+  const sidebar = useStore((s) => s.ui.sidebar);
+  const panel = useStore((s) => s.ui.panel);
+  const panelTab = useStore((s) => s.ui.panelTab);
   const info = useStore((s) => s.info);
   const cwd = rtCwd || session.cwd;
   const status = rtStatus || session.status;
@@ -116,7 +119,7 @@ export function SessionView({ session }: { session: SessionSummary }) {
       },
     },
     { separator: true },
-    ...VIEW_MODES.map((v) => ({ label: `${v.label} view`, hint: v.hint, checked: v.id === ui.view, onSelect: () => setUi({ view: v.id }) })),
+    ...VIEW_MODES.map((v) => ({ label: `${v.label} view`, hint: v.hint, checked: v.id === view, onSelect: () => setUi({ view: v.id }) })),
     { separator: true },
     { label: 'Copy session ID', icon: Copy, onSelect: () => copyText(id).then(() => toast('Session ID copied', 'success'), () => toast('Could not copy to the clipboard', 'error')) },
     ...(spent > 0 ? [{ label: `Cost so far ${cost(spent)}`, icon: CircleDollarSign, onSelect: () => setUi({ panel: true, panelTab: 'info' }) }] : []),
@@ -144,7 +147,7 @@ export function SessionView({ session }: { session: SessionSummary }) {
   return (
     <div className="session" ref={root}>
       <header className={`session-head${scrolled ? ' scrolled' : ''}`}>
-        {!ui.sidebar && (
+        {!sidebar && (
           <button className="icon-btn head-sidebar" title="Show sidebar (Ctrl+B)" aria-label="Show sidebar" onClick={() => setUi({ sidebar: true })}>
             <PanelLeftOpen size={16} />
           </button>
@@ -208,7 +211,7 @@ export function SessionView({ session }: { session: SessionSummary }) {
               </button>
             )}
             {session.dispatch?.jobId && (
-              <button className="crumb crumb-btn wt" title="Open the job" onClick={() => openJob(session.dispatch!.jobId)}>
+              <button className="crumb crumb-btn wt" title="Open the job" onClick={() => session.dispatch && openJob(session.dispatch.jobId)}>
                 <ArrowUpRight size={12} />
                 <span className="ellipsis">run of {session.dispatch.name || 'a job'}</span>
               </button>
@@ -233,12 +236,12 @@ export function SessionView({ session }: { session: SessionSummary }) {
         </div>
         <div className="session-actions">
           {git?.isRepo && changes > 0 && (
-            <button className={`diffstat${ui.panel && ui.panelTab === 'changes' ? ' on' : ''}`} onClick={() => setUi({ panel: !(ui.panel && ui.panelTab === 'changes'), panelTab: 'changes' })} title={`${plural(changes, 'changed file')} — review (Alt+1)`}>
+            <button className={`diffstat${panel && panelTab === 'changes' ? ' on' : ''}`} onClick={() => setUi({ panel: !(panel && panelTab === 'changes'), panelTab: 'changes' })} title={`${plural(changes, 'changed file')} — review (Alt+1)`}>
               <span className={`num-add${git.insertions ? '' : ' zero'}`}>+{git.insertions ?? 0}</span>
               <span className={`num-del${git.deletions ? '' : ' zero'}`}>−{git.deletions ?? 0}</span>
             </button>
           )}
-          <button className={`icon-btn${ui.panel ? ' active' : ''}`} title="Side panel (Ctrl+\)" aria-label="Side panel" onClick={() => setUi({ panel: !ui.panel })}>
+          <button className={`icon-btn${panel ? ' active' : ''}`} title="Side panel (Ctrl+\)" aria-label="Side panel" onClick={() => setUi({ panel: !panel })}>
             <PanelRight size={16} />
           </button>
           <MenuButton items={menu} title="Session actions" width={250}>

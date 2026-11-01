@@ -11,6 +11,7 @@ import { TasksPanel } from './panels/TasksPanel';
 import { InfoPanel } from './panels/InfoPanel';
 import { HistoryPanel } from './panels/HistoryPanel';
 import type { LucideIcon } from 'lucide-react';
+import { useInk } from './ui/bits';
 
 // xterm is a third of a megabyte and only this tab uses it: it loads the first time the tab opens.
 const TerminalPanel = lazy(() => import('./panels/TerminalPanel').then((m) => ({ default: m.TerminalPanel })));
@@ -27,37 +28,26 @@ const TABS: { id: PanelTab; label: string; icon: LucideIcon }[] = [
 ];
 
 export function RightPanel({ session }: { session: SessionSummary }) {
-  const ui = useStore((s) => s.ui);
+  const panelTab = useStore((s) => s.ui.panelTab);
+  const panelW = useStore((s) => s.ui.panelW);
   // Narrow reads: the runtime record changes with every streamed frame, these two rarely.
   const cwd = useStore((s) => s.rt[session.id]?.cwd) || session.cwd;
   const running = useStore((s) => (s.rt[session.id]?.tasks || []).filter((t) => t.status === 'running').length);
-  const [mounted, setMounted] = useState<Record<string, boolean>>({ [ui.panelTab]: true });
-  useEffect(() => setMounted((m) => (m[ui.panelTab] ? m : { ...m, [ui.panelTab]: true })), [ui.panelTab]);
+  const [mounted, setMounted] = useState<Record<string, boolean>>({ [panelTab]: true });
+  useEffect(() => setMounted((m) => (m[panelTab] ? m : { ...m, [panelTab]: true })), [panelTab]);
   const tabsRef = useRef<HTMLDivElement>(null);
   const ids = useId();
   // Left and Right (Home, End) move along the tabs and show each as they go, the focus with them.
   const onTabKey = (e: React.KeyboardEvent) => {
-    const at = TABS.findIndex((t) => t.id === ui.panelTab);
+    const at = TABS.findIndex((t) => t.id === panelTab);
     const to = e.key === 'ArrowRight' ? (at + 1) % TABS.length : e.key === 'ArrowLeft' ? (at - 1 + TABS.length) % TABS.length : e.key === 'Home' ? 0 : e.key === 'End' ? TABS.length - 1 : -1;
     if (to < 0) return;
     e.preventDefault();
     setUi({ panelTab: TABS[to].id });
     document.getElementById(`${ids}-${TABS[to].id}`)?.focus();
   };
-  const [ink, setInk] = useState<{ left: number; width: number } | null>(null);
-  useLayoutEffect(() => {
-    const measure = () => {
-      const el = tabsRef.current?.querySelector<HTMLElement>('.panel-tab.on');
-      if (el) setInk({ left: el.offsetLeft, width: el.offsetWidth });
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    if (tabsRef.current) ro.observe(tabsRef.current);
-    // The chosen tab grows its name in a narrow panel; follow it as it settles.
-    const on = tabsRef.current?.querySelector<HTMLElement>('.panel-tab.on');
-    if (on) ro.observe(on);
-    return () => ro.disconnect();
-  }, [ui.panelTab]);
+  // The chosen tab grows its name in a narrow panel; the ink follows it as it settles.
+  const ink = useInk(tabsRef, '.panel-tab.on', panelTab);
 
   // The chosen tab's content settles in under the ink; the first tab shown simply is there.
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -70,14 +60,14 @@ export function RightPanel({ session }: { session: SessionSummary }) {
     if (reducedMotion()) return;
     const el = Array.from(bodyRef.current?.children || []).find((c) => (c as HTMLElement).style.display !== 'none') as HTMLElement | undefined;
     el?.animate([{ opacity: 0, transform: 'translateY(5px)' }, { opacity: 1, transform: 'none' }], { duration: 220, easing: EASE });
-  }, [ui.panelTab]);
+  }, [panelTab]);
 
   return (
-    <section className="panel" style={{ width: ui.panelW }}>
+    <section className="panel" style={{ width: panelW }}>
       <div className="panel-tabs" role="tablist" aria-label="Side panel" ref={tabsRef} onKeyDown={onTabKey}>
         {ink && <span className="panel-ink" style={{ transform: `translateX(${ink.left}px)`, width: ink.width }} />}
         {TABS.map((t, i) => (
-          <button key={t.id} id={`${ids}-${t.id}`} role="tab" aria-selected={ui.panelTab === t.id} aria-controls={`${ids}-panel`} tabIndex={ui.panelTab === t.id ? 0 : -1} className={`panel-tab${ui.panelTab === t.id ? ' on' : ''}`} onClick={() => setUi({ panelTab: t.id })} title={`${t.label} (${SHORTCUTS.tabs.combos[i]})`}>
+          <button key={t.id} id={`${ids}-${t.id}`} role="tab" aria-selected={panelTab === t.id} aria-controls={`${ids}-panel`} tabIndex={panelTab === t.id ? 0 : -1} className={`panel-tab${panelTab === t.id ? ' on' : ''}`} onClick={() => setUi({ panelTab: t.id })} title={`${t.label} (${SHORTCUTS.tabs.combos[i]})`}>
             <t.icon size={15} className="panel-tab-ico" aria-hidden="true" />
             <span className="panel-tab-label">{t.label}</span>
             {t.id === 'tasks' && running > 0 && <span className="tab-count">{running}</span>}
@@ -88,24 +78,24 @@ export function RightPanel({ session }: { session: SessionSummary }) {
           <X size={14} />
         </button>
       </div>
-      <div className="panel-body" ref={bodyRef} role="tabpanel" id={`${ids}-panel`} aria-labelledby={`${ids}-${ui.panelTab}`}>
-        {ui.panelTab === 'changes' && <ChangesPanel session={session} cwd={cwd} />}
+      <div className="panel-body" ref={bodyRef} role="tabpanel" id={`${ids}-panel`} aria-labelledby={`${ids}-${panelTab}`}>
+        {panelTab === 'changes' && <ChangesPanel session={session} cwd={cwd} />}
         {mounted.files && (
-          <div className="panel-keep" style={{ display: ui.panelTab === 'files' ? 'flex' : 'none' }}>
-            <FilesPanel session={session} cwd={cwd} visible={ui.panelTab === 'files'} />
+          <div className="panel-keep" style={{ display: panelTab === 'files' ? 'flex' : 'none' }}>
+            <FilesPanel session={session} cwd={cwd} visible={panelTab === 'files'} />
           </div>
         )}
         {mounted.terminal && (
-          <div className="panel-keep" style={{ display: ui.panelTab === 'terminal' ? 'flex' : 'none' }}>
+          <div className="panel-keep" style={{ display: panelTab === 'terminal' ? 'flex' : 'none' }}>
             <Suspense fallback={null}>
-              <TerminalPanel session={session} cwd={cwd} visible={ui.panelTab === 'terminal'} />
+              <TerminalPanel session={session} cwd={cwd} visible={panelTab === 'terminal'} />
             </Suspense>
           </div>
         )}
-        {ui.panelTab === 'preview' && <PreviewPanel session={session} />}
-        {ui.panelTab === 'tasks' && <TasksPanel session={session} />}
-        {ui.panelTab === 'history' && <HistoryPanel session={session} cwd={cwd} />}
-        {ui.panelTab === 'info' && <InfoPanel session={session} cwd={cwd} />}
+        {panelTab === 'preview' && <PreviewPanel session={session} />}
+        {panelTab === 'tasks' && <TasksPanel session={session} />}
+        {panelTab === 'history' && <HistoryPanel session={session} cwd={cwd} />}
+        {panelTab === 'info' && <InfoPanel session={session} cwd={cwd} />}
       </div>
     </section>
   );

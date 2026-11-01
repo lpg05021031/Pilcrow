@@ -2,11 +2,11 @@ import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { EASE, reducedMotion } from '../lib/motion';
 import { Plus, Search, Settings, Sun, Moon, Monitor, ChevronRight, Archive, FolderGit2, GitBranch, Pin, Ellipsis, Pencil, GitFork, Trash, PinOff, ArchiveRestore, X, SquarePen, SlidersHorizontal, PanelLeftClose, LayoutGrid, Inbox, Send } from 'lucide-react';
 import { foldingRows, useStore, openSession, setDialog, setTheme, setUi, archiveSession, pinSession, forkSession, deleteSession, confirmAction, renameSession, quickNewSession, showPage, showDispatch, dispatchNeeds, repoFor } from '../lib/store';
-import type { SessionSummary } from '../lib/types';
+import { isBusy, isWorking, type SessionSummary } from '../lib/types';
 import { basename, timeAgo, tildify } from '../lib/format';
 import { fuzzyScore } from '../lib/fuzzy';
 import { Mark, StatusGlyph, useNow } from './ui/bits';
-import { MenuButton, Popover, Menu } from './ui/Popover';
+import { MenuButton, Popover, Menu, type Anchor } from './ui/Popover';
 import { Collapse } from './ui/Collapse';
 import { ErrorBoundary } from './ui/ErrorBoundary';
 
@@ -28,16 +28,17 @@ export function Sidebar() {
   const dispatchNeedsN = useStore((s) => dispatchNeeds(s.jobs));
   const config = useStore((s) => s.config);
   const info = useStore((s) => s.info);
-  const ui = useStore((s) => s.ui);
+  const showArchived = useStore((s) => s.ui.showArchived);
+  const sidebarW = useStore((s) => s.ui.sidebarW);
   const [q, setQ] = useState('');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [showAll, setShowAll] = useState<Record<string, boolean>>({});
   const now = useNow(30_000);
   const list = useRef<HTMLElement>(null);
-  useFlip(list, sessions, [q, collapsed, showAll, ui.showArchived, activeId]);
+  useFlip(list, sessions, [q, collapsed, showAll, showArchived, activeId]);
 
   const { attention, pinned, groups, archivedCount, helpers } = useMemo(() => {
-    let list = sessions.filter((s) => (ui.showArchived ? s.archived : !s.archived));
+    let list = sessions.filter((s) => (showArchived ? s.archived : !s.archived));
     // Runs started by a schedule live in the inbox; the active one still shows so its row can be found.
     if (!q.trim()) list = list.filter((s) => (!s.scheduled && !s.dispatch) || s.id === activeId);
     if (q.trim()) list = list.filter((s) => fuzzyScore(q, `${s.title} ${basename(s.project || s.cwd)}`));
@@ -47,8 +48,8 @@ export function Sidebar() {
     const helperMap = new Map<string, SessionSummary[]>();
     for (const s of list) {
       if (s.helper && listed.has(s.helper.leadId) && s.id !== activeId) {
-        if (!helperMap.has(s.helper.leadId)) helperMap.set(s.helper.leadId, []);
-        helperMap.get(s.helper.leadId)!.push(s);
+        const under = helperMap.get(s.helper.leadId) || [];
+        helperMap.set(s.helper.leadId, [...under, s]);
       }
     }
     const nested = new Set([...helperMap.values()].flat().map((s) => s.id));
@@ -61,17 +62,18 @@ export function Sidebar() {
     const map = new Map<string, Group>();
     for (const s of rest) {
       const key = s.project || s.cwd;
-      if (!map.has(key)) {
+      let group = map.get(key);
+      if (!group) {
         // a registered repository (REPOSITORIES.md) goes by the person's name for it
         const reg = repoFor(key, config?.repos);
-        map.set(key, { key, label: reg && reg.path.replace(/\/+$/, '') === key.replace(/\/+$/, '') ? reg.name : basename(key), path: key, items: [] });
+        map.set(key, (group = { key, label: reg && reg.path.replace(/\/+$/, '') === key.replace(/\/+$/, '') ? reg.name : basename(key), path: key, items: [] }));
       }
-      map.get(key)!.items.push(s);
+      group.items.push(s);
     }
     const groups = [...map.values()].sort((a, b) => (b.items[0]?.lastModified || 0) - (a.items[0]?.lastModified || 0));
     return { attention, pinned, groups, archivedCount: sessions.filter((s) => s.archived).length, helpers: helperMap };
-  }, [sessions, q, ui.showArchived, activeId, config?.repos]);
-  const working = sessions.filter((s) => !s.archived && (s.status === 'running' || s.status === 'starting')).length;
+  }, [sessions, q, showArchived, activeId, config?.repos]);
+  const working = sessions.filter((s) => !s.archived && isWorking(s.status)).length;
   const needsAll = sessions.filter((s) => !s.archived && (s.status === 'requires_action' || (s.pending || 0) > 0)).length;
 
   const theme = config?.theme || 'system';
@@ -87,7 +89,7 @@ export function Sidebar() {
   const ThemeIcon = theme === 'system' ? Monitor : theme === 'dark' ? Moon : Sun;
 
   return (
-    <aside className="sidebar" style={{ width: ui.sidebarW }}>
+    <aside className="sidebar" style={{ width: sidebarW }}>
       <div className="side-top">
         <div className="brand">
           <Mark size={17} tight />
@@ -178,7 +180,7 @@ export function Sidebar() {
             );
           })}
           {sessionsLoaded && !sessions.length && <div className="side-empty">No sessions yet. Start one to see it here.</div>}
-          {sessions.length > 0 && !groups.length && !attention.length && !pinned.length && <div className="side-empty">{ui.showArchived ? 'Nothing archived.' : 'No matching sessions.'}</div>}
+          {sessions.length > 0 && !groups.length && !attention.length && !pinned.length && <div className="side-empty">{showArchived ? 'Nothing archived.' : 'No matching sessions.'}</div>}
         </nav>
       </ErrorBoundary>
 
@@ -188,7 +190,7 @@ export function Sidebar() {
           <span>Settings</span>
         </button>
         <div className="grow" />
-        <button className={`icon-btn${ui.showArchived ? ' active' : ''}`} title={ui.showArchived ? 'Back to active sessions' : `Archived sessions (${archivedCount})`} aria-label={ui.showArchived ? 'Back to active sessions' : `Archived sessions (${archivedCount})`} onClick={() => setUi({ showArchived: !ui.showArchived })}>
+        <button className={`icon-btn${showArchived ? ' active' : ''}`} title={showArchived ? 'Back to active sessions' : `Archived sessions (${archivedCount})`} aria-label={showArchived ? 'Back to active sessions' : `Archived sessions (${archivedCount})`} onClick={() => setUi({ showArchived: !showArchived })}>
           <Archive size={15} />
         </button>
         <button className="icon-btn" title={`Appearance: ${theme} — click for ${nextTheme}`} aria-label={`Appearance: ${theme} — click for ${nextTheme}`} onClick={(e) => setTheme(nextTheme, { x: e.clientX, y: e.clientY })}>
@@ -214,7 +216,7 @@ const Row = memo(function Row({ s, active, unread, now, showProject, q, indent }
   const [renaming, setRenaming] = useState(false);
   // Right-click opens the same actions as the ⋯ button, at the pointer.
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
-  const pointAnchor = useMemo(() => (menuAt ? ({ getBoundingClientRect: () => new DOMRect(menuAt.x, menuAt.y, 0, 0), contains: () => false } as unknown as HTMLElement) : null), [menuAt]);
+  const pointAnchor = useMemo<Anchor | null>(() => (menuAt ? { getBoundingClientRect: () => new DOMRect(menuAt.x, menuAt.y, 0, 0) } : null), [menuAt]);
   const [title, setTitle] = useState(s.title);
   const items = [
     { label: 'Rename', icon: Pencil, onSelect: () => (setTitle(s.title), setRenaming(true)) },
@@ -287,7 +289,7 @@ const Row = memo(function Row({ s, active, unread, now, showProject, q, indent }
       <span className="side-row-end">
         <span className="side-row-status">
           <StatusGlyph status={s.status} pending={s.pending} unread={unread && !active} />
-          {!(s.status === 'running' || s.status === 'starting' || s.status === 'requires_action' || s.pending || s.status === 'error' || (unread && !active)) && <span className="side-time">{timeAgo(s.lastModified, now, true)}</span>}
+          {!(isBusy(s.status) || s.pending || s.status === 'error' || (unread && !active)) && <span className="side-time">{timeAgo(s.lastModified, now, true)}</span>}
         </span>
         <MenuButton items={items} className="icon-btn sm side-row-menu" title="Session actions" width={210}>
           <Ellipsis size={14} />
@@ -339,7 +341,10 @@ function useFlip(list: React.RefObject<HTMLElement | null>, data: unknown, layou
     const rows = Array.from(root.querySelectorAll<HTMLElement>('[data-sid]'));
     const measure = () => {
       const next = new Map<string, number>();
-      for (const el of rows) if (!next.has(el.dataset.sid!)) next.set(el.dataset.sid!, topOf(el));
+      for (const el of rows) {
+        const id = el.dataset.sid || '';
+        if (!next.has(id)) next.set(id, topOf(el));
+      }
       return next;
     };
     // When a section appears or disappears ("Needs you", "Pinned"), headers move too; gliding rows past
@@ -349,7 +354,7 @@ function useFlip(list: React.RefObject<HTMLElement | null>, data: unknown, layou
     // keeps the same rows must not restart one. A row that folded itself away before leaving has
     // already closed the gap under it, so its departure is shown as plain layout too.
     const order = rows.map((el) => el.dataset.sid).join();
-    const ids = new Set(rows.map((el) => el.dataset.sid!));
+    const ids = new Set(rows.map((el) => el.dataset.sid || ''));
     const left = [...last.current.keys()].filter((id) => !ids.has(id));
     const animate = lastData.current !== null && lastData.current !== data && last.current.size > 0 && order !== lastOrder.current && shape === lastShape.current && !left.some((id) => foldingRows.has(id)) && !reducedMotion();
     lastShape.current = shape;
@@ -376,10 +381,10 @@ function useFlip(list: React.RefObject<HTMLElement | null>, data: unknown, layou
     {
       let moved = false;
       for (const el of rows) {
-        const id = el.dataset.sid!;
+        const id = el.dataset.sid || '';
         const before = last.current.get(id);
-        const after = next.get(id)!;
-        if (before !== undefined && Math.abs(before - after) > 1) {
+        const after = next.get(id);
+        if (before !== undefined && after !== undefined && Math.abs(before - after) > 1) {
           el.animate([{ transform: `translateY(${before - after}px)` }, { transform: 'none' }], { duration: 320, easing: EASE });
           moved = true;
         }

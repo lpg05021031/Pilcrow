@@ -830,12 +830,25 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 .tool.streaming .tool-ico {
   color: var(--text-2);
 }
-.tool-line {
+.tool-line,
+.tool-toggle {
   display: flex;
   align-items: center;
   gap: 7px;
   min-width: 0;
   white-space: nowrap;
+}
+/* The head's own button (ToolCard): its words and chevron sit in the line as if it were not there,
+   and the focus ring goes round the whole head. */
+.tool-toggle {
+  text-align: left;
+}
+.tool-toggle:focus-visible {
+  outline: none;
+}
+.tool-head:has(.tool-toggle:focus-visible) {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 2px;
 }
 .wait-dot {
   width: 7px;
@@ -900,7 +913,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   opacity: 0;
 }
 .tool-head:hover .tool-chev,
-.tool-head:focus-visible .tool-chev {
+.tool-head:has(.tool-toggle:focus-visible) .tool-chev {
   opacity: 1;
 }
 .tool.open > .tool-head .tool-chev,

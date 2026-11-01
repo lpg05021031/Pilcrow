@@ -7,7 +7,7 @@ import type { PermissionRequest } from '../../lib/types';
 import { toolMeta, isFileTool, filePathOf } from '../../lib/tools';
 import { duration, relPath, plural, truncate } from '../../lib/format';
 import { openFile, setDialog, call, toast, useStore, openLightbox } from '../../lib/store';
-import { Spinner, CopyButton, onActivate } from '../ui/bits';
+import { Spinner, CopyButton } from '../ui/bits';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { CodeView, DiffView, AnsiText, hunksFromPatch } from '../Code';
 import { Markdown } from '../Markdown';
@@ -108,16 +108,20 @@ export const ToolCard = memo(function ToolCard({ item, ctx }: { item: ToolItem; 
 
   return (
     <div className={`tool ${item.status}${isOpen ? ' open' : ''}${perm ? ' awaiting' : ''}`} data-tool={item.name} id={`tool-${item.id}`}>
-      <div className="tool-head" role="button" tabIndex={0} onClick={() => setOpen(!isOpen)} onKeyDown={onActivate(() => setOpen(!isOpen))} aria-expanded={isOpen}>
+      {/* The head opens the card wherever it is clicked. Its button, the step's name and the chevron,
+          is what the keyboard and a screen reader reach; Open in Files is a button beside it, not in it. */}
+      <div className="tool-head" onClick={() => setOpen(!isOpen)}>
         <span className="tool-ico">
           <span key={perm ? 'wait' : item.status} className="tool-ico-swap">
             <StatusIcon item={item} waiting={!!perm} />
           </span>
         </span>
         <span className="tool-line">
-          {meta.verb && <span className="tool-verb">{meta.verb}</span>}
-          <span className={`tool-target${meta.mono ? ' mono' : ''}`}>{meta.target}</span>
-          <ChevronRight size={13} className="tool-chev" />
+          <button className="tool-toggle" aria-expanded={isOpen}>
+            {meta.verb && <span className="tool-verb">{meta.verb}</span>}
+            <span className={`tool-target${meta.mono ? ' mono' : ''}`}>{meta.target}</span>
+            <ChevronRight size={13} className="tool-chev" />
+          </button>
           {file && (
             <button
               className="icon-btn sm tool-open"
@@ -384,7 +388,7 @@ function BashBody({ item, ctx }: { item: ToolItem; ctx: ToolCtx }) {
             </span>
           )}
           {item.task?.outputFile && (
-            <button className="btn sm ghost" onClick={() => openFile(item.task!.outputFile!)}>
+            <button className="btn sm ghost" onClick={() => item.task?.outputFile && openFile(item.task.outputFile)}>
               <FileText size={12} /> Output file
             </button>
           )}

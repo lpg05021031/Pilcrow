@@ -36,7 +36,8 @@ export function Dialog({ title, label, onClose, onSubmit, children, footer, widt
   useEscape(dismiss);
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
-    const box = ref.current!;
+    const box = ref.current;
+    if (!box) return;
     // Everything else on the page sleeps while the sheet is up (a sheet over a sheet puts the first to
     // sleep too), except the announcer, so a toast raised from the sheet is still read out.
     const asleep = [...document.body.children].filter((n): n is HTMLElement => n instanceof HTMLElement && n !== scrim.current && !n.inert && !('awake' in n.dataset));

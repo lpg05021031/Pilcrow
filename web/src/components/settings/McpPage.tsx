@@ -104,7 +104,7 @@ export function McpPage() {
   };
   const signIn = (name: string) => {
     if (!needsSession('Signing in')) return;
-    setDialog('mcpAuth', { sessionId: sessionId!, name });
+    if (sessionId) setDialog('mcpAuth', { sessionId, name });
   };
   const signOut = (name: string) =>
     confirmAction({
@@ -132,7 +132,8 @@ export function McpPage() {
       },
     });
   const approve = async (s: McpEntry, approved: boolean) => {
-    setData(await call<McpList>('mcp.approve', { cwd, name: s.name, approved }).catch(() => data!));
+    const next = await call<McpList>('mcp.approve', { cwd, name: s.name, approved }).catch(() => null); // toasted: the list stays as it was
+    if (next) setData(next);
   };
 
   const toolsOf = showTools ? live.find((s) => s.name === showTools) : null;
@@ -263,7 +264,7 @@ export function McpPage() {
           }}
         />
       )}
-      {toolsOf && <ToolsDialog server={toolsOf} sessionId={sessionId!} onClose={() => setShowTools(null)} />}
+      {toolsOf && sessionId && <ToolsDialog server={toolsOf} sessionId={sessionId} onClose={() => setShowTools(null)} />}
     </div>
   );
 }

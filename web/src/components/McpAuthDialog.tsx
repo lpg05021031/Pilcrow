@@ -18,8 +18,7 @@ interface AuthStart {
  * localhost; Pilcrow opens the sign-in page, watches the server's status and offers a paste box for
  * the cases where the redirect cannot reach this machine.
  */
-export function McpAuthDialog() {
-  const spec = useStore((s) => s.dialogs.mcpAuth)!;
+export function McpAuthDialog({ spec }: { spec: { sessionId: string; name: string } }) {
   const status = useStore((s) => s.rt[spec.sessionId]?.mcp?.find((m) => m.name === spec.name)?.status);
   const [start, setStart] = useState<AuthStart | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -85,7 +84,7 @@ export function McpAuthDialog() {
       footer={
         <>
           {start?.authUrl && !done && (
-            <button className="btn sm ghost" onClick={() => copyText(start.authUrl!).then(() => toast('Link copied', 'success'))}>
+            <button className="btn sm ghost" onClick={() => copyText(start.authUrl || '').then(() => toast('Link copied', 'success'))}>
               Copy link
             </button>
           )}

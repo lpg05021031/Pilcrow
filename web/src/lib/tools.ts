@@ -35,7 +35,7 @@ export function toolMeta(name: string, input: ToolInput | undefined | null, cwd?
     case 'TaskStop':
       return { icon: CircleStop, verb: 'Stop task', target: S('task_id') || S('shell_id') || '' };
     case 'Read':
-      return { icon: FileText, verb: 'Read', target: short(S('file_path'), cwd) + (N('offset') ? `:${N('offset')}${N('limit') ? '–' + (N('offset')! + N('limit')!) : ''}` : ''), mono: true };
+      return { icon: FileText, verb: 'Read', target: short(S('file_path'), cwd) + (N('offset') ? `:${N('offset')}${N('limit') ? '–' + ((N('offset') || 0) + (N('limit') || 0)) : ''}` : ''), mono: true };
     case 'Edit':
     case 'MultiEdit':
       return { icon: FilePen, verb: 'Edit', target: short(S('file_path'), cwd), mono: true };
@@ -109,7 +109,7 @@ export function toolMeta(name: string, input: ToolInput | undefined | null, cwd?
           list: [HelperList, 'Listed helpers'],
         };
         const [icon, verb] = meta[tool] || [HelperStart, `Helpers · ${tool}`];
-        const names = Array.isArray(i?.names) ? (i!.names as unknown[]).map(String) : null;
+        const names = Array.isArray(i?.names) ? (i.names as unknown[]).map(String) : null;
         const where = S('repo') || (S('cwd') ? basename(S('cwd')) : '');
         const target = tool === 'wait' ? (names?.length ? names.join(', ') : 'all helpers') : tool === 'list' ? '' : tool === 'start' && where ? `${S('name')} in ${where}` : S('name');
         return { icon, verb, target };

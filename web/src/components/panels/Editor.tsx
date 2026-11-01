@@ -150,6 +150,8 @@ export function Editor({ path, doc, onChange, onSave, line, nonce }: { path: str
   cbs.current = { onChange, onSave };
 
   useEffect(() => {
+    const parent = host.current;
+    if (!parent) return;
     const state = EditorState.create({
       doc,
       extensions: [
@@ -177,7 +179,7 @@ export function Editor({ path, doc, onChange, onSave, line, nonce }: { path: str
         }),
       ],
     });
-    const v = new EditorView({ state, parent: host.current! });
+    const v = new EditorView({ state, parent });
     view.current = v;
     let alive = true;
     languageFor(path).then((ext) => {

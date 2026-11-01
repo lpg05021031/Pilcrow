@@ -1,18 +1,19 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { ArrowDown, ArrowUpRight, CornerDownRight, PencilLine, GitFork, ChevronRight, Info, TriangleAlert, CircleAlert, Layers, Paperclip, Terminal as TermIcon, History, Telescope, CircleCheck, Sparkles } from 'lucide-react';
-import { useStore, models, forkSession, insertIntoComposer, toast, call, confirmAction, bumpFs, openLightbox, openSession, memo as sessionMemo } from '../lib/store';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { ArrowDown, PencilLine, GitFork, ChevronRight, Info, TriangleAlert, CircleAlert, Layers, Paperclip, Terminal as TermIcon, History, Telescope, CircleCheck, Sparkles } from 'lucide-react';
+import { useStore, models, forkSession, insertIntoComposer, toast, call, confirmAction, bumpFs, openLightbox, memo as sessionMemo } from '../lib/store';
 import type { Item, ToolItem, UserItem, ThinkingItem, TextItem, NoticeItem, ResultItem, CompactItem, CommandOutputItem } from '../lib/transcript';
-import type { PermissionRequest } from '../lib/types';
+import { isBusy, isWorking, type PermissionRequest } from '../lib/types';
 import { duration, tokens, cost, truncate, relPath, plural } from '../lib/format';
 import { Markdown } from './Markdown';
 import { ToolCard, type ToolCtx } from './tools/ToolCard';
 import { PermissionCard } from './tools/Permission';
-import { useNow, CopyButton, WorkingMark, onActivate } from './ui/bits';
+import { HelperNote, FromLead } from './tools/HelpersBody';
+import { useNow, CopyButton, WorkingMark } from './ui/bits';
 import { useSmoothText, useThrottled, useExitGhost } from '../lib/motion';
 import { Collapse } from './ui/Collapse';
 import { ErrorBoundary } from './ui/ErrorBoundary';
 import { extendTurns, groupItems, liveTurnFolds, type Turns, type Unit } from '../lib/units';
-import { exploreLabel, isQuiet, langOf, liveLabel, parseNotes, workSummary } from '../lib/labels';
+import { exploreLabel, isQuiet, langOf, liveLabel, workSummary } from '../lib/labels';
 import { useFollow, REVEAL_EVENT } from './useFollow';
 
 // ---------------------------------------------------------------- list with step grouping
@@ -122,12 +123,12 @@ class NearSet {
     return true;
   }
   subscribe(k: string, fn: () => void) {
-    let set = this.listeners.get(k);
-    if (!set) this.listeners.set(k, (set = new Set()));
+    const set = this.listeners.get(k) || new Set();
+    this.listeners.set(k, set);
     set.add(fn);
     return () => {
-      set!.delete(fn);
-      if (!set!.size) this.listeners.delete(k);
+      set.delete(fn);
+      if (!set.size) this.listeners.delete(k);
     };
   }
 }
@@ -250,7 +251,7 @@ export const ItemList = memo(function ItemList({ items, ctx, rev, running, flat 
           lastAt = now;
           if (!flinging) {
             queue.sort((a, b) => a.dist - b.dist);
-            while (queue.length) if (near.add(queue.shift()!.key)) break;
+            for (let next = queue.shift(); next; next = queue.shift()) if (near.add(next.key)) break;
           }
           if (queue.length) drawing.current = requestAnimationFrame(draw);
         };
@@ -330,7 +331,7 @@ function Steps({ items, ctx }: { items: ToolItem[]; ctx: ToolCtx }) {
   // While Claude is still working, the steps at the tail stay as rows: folding them into "Explored"
   // the moment each one finishes would make the end of the list jump with every tool call. They
   // fold once something follows them, or when the turn is over.
-  const live = useStore((s) => ['running', 'starting', 'requires_action'].includes(s.rt[ctx.sessionId]?.status || ''));
+  const live = useStore((s) => isBusy(s.rt[ctx.sessionId]?.status));
   // A step that changes gives its unit, and so this list, a new array (lib/units): `items` is enough.
   const segs = useMemo(() => {
     const out: Seg[] = [];
@@ -426,7 +427,7 @@ const ItemView = memo(function ItemView({ item, ctx }: { item: Item; rev: number
 
 function UserMessage({ item, ctx }: { item: UserItem; ctx: ToolCtx }) {
   const queued = useStore((s) => s.rt[ctx.sessionId]?.queued?.includes(item.uuid));
-  const busy = useStore((s) => ['running', 'starting', 'requires_action'].includes(s.rt[ctx.sessionId]?.status || ''));
+  const busy = useStore((s) => isBusy(s.rt[ctx.sessionId]?.status));
   if (item.note) return <HelperNote item={item} ctx={ctx} />;
   if (item.from) return <FromLead item={item} ctx={ctx} />;
   if (item.command) {
@@ -670,7 +671,7 @@ function WorkingLine({ sessionId, startTs, quiet }: { sessionId: string; startTs
   const thinkingTokens = useStore((s) => s.rt[sessionId]?.thinkingTokens);
   const now = useNow(1000);
   const [verb] = useState(() => VERBS[Math.floor(Math.random() * VERBS.length)]);
-  if (!(status === 'running' || status === 'starting')) return null;
+  if (!isWorking(status)) return null;
   const elapsed = startTs ? now - startTs : 0;
   if (quiet && !compacting) return null; // the turn's own fold line is breathing already
   return (
@@ -730,7 +731,7 @@ export function Transcript({ sessionId, cwd, empty, onScrolled }: { sessionId: s
           </div>
         )}
         {rt?.loaded && items.length === 0 && empty}
-        <ItemList items={items} ctx={ctx} rev={rt?.rev || 0} running={rt?.status === 'running' || rt?.status === 'starting' || rt?.status === 'requires_action'} />
+        <ItemList items={items} ctx={ctx} rev={rt?.rev || 0} running={isBusy(rt?.status)} />
         {orphans.map((p) => (
           <div key={p.requestId} className="tool awaiting orphan">
             <PermissionCard perm={p} ctx={ctx} />
@@ -750,117 +751,5 @@ function Jump({ onClick }: { onClick: () => void }) {
     <button ref={ref} className="jump" onClick={onClick}>
       <ArrowDown size={14} /> Latest
     </button>
-  );
-}
-
-// ---------------------------------------------------------------- a helper's note to its lead (HELPERS.md §5.4)
-
-const HELPER_VERB: Record<string, string> = { done: 'Helper finished', failed: 'Helper failed', stopped: 'Helper stopped', needs_action: 'Helper needs you', skipped: 'Helper skipped' };
-const HELPER_HEADER_PREFIX = 'You are a helper started by another Pilcrow session';
-
-/** Words another session wrote, drawn as a tool card: a glyph in the status column, a verb, a target, figures
- *  at the right, Open on hover, and a body that folds under the head (HELPERS.md §6.1). */
-function SessionCard({ id, glyph, verb, target, meta, openTip, onOpen, children }: { id?: string; glyph: ReactNode; verb: string; target: string; meta?: ReactNode; openTip: string; onOpen?: () => void; children?: ReactNode }) {
-  const [open, setOpen] = useState(true);
-  const foldable = Boolean(children);
-  return (
-    <div className={`tool session-card${open && foldable ? ' open' : ''}`} id={id}>
-      <div className="tool-head" role="button" tabIndex={0} onClick={() => foldable && setOpen(!open)} onKeyDown={onActivate(() => foldable && setOpen(!open))} aria-expanded={foldable ? open : undefined}>
-        <span className="tool-ico">{glyph}</span>
-        <span className="tool-line">
-          <span className="tool-verb">{verb}</span>
-          <span className="tool-target">{target}</span>
-          {foldable && <ChevronRight size={13} className="tool-chev" />}
-          {onOpen && (
-            <button
-              className="icon-btn sm tool-open"
-              title={openTip} aria-label={openTip}
-              onClick={(e) => {
-                e.stopPropagation();
-                onOpen();
-              }}
-            >
-              <ArrowUpRight size={13} />
-            </button>
-          )}
-        </span>
-        <span className="tool-meta">{meta}</span>
-      </div>
-      {foldable && <Collapse open={open}>{() => <div className="tool-body">{children}</div>}</Collapse>}
-    </div>
-  );
-}
-
-/** A note Pilcrow wrote to a lead: one card per helper it speaks of; the text around the cards is for the model. */
-function HelperNote({ item, ctx }: { item: UserItem; ctx: ToolCtx }) {
-  const helpers = useStore((s) => s.rt[ctx.sessionId]?.helpers);
-  const { parts } = useMemo(() => parseNotes(item.text), [item.text]);
-  const list = parts.length ? parts : [{ name: 'note', state: '', body: item.text }];
-  return (
-    <div className="msg-notes" id={`msg-${item.uuid}`}>
-      {list.map((p, k) => {
-        const h = helpers?.find((x) => x.name === p.name);
-        const files = p.files && p.files !== '0';
-        return (
-          <SessionCard
-            key={k}
-            glyph={<span className={`dp-glyph ${p.state || 'stopped'}`} aria-hidden="true" />}
-            verb={HELPER_VERB[p.state] || 'Helper'}
-            target={p.name}
-            openTip="Open the helper's session"
-            onOpen={h ? () => openSession(h.id) : undefined}
-            meta={
-              <>
-                {p.elapsed && <span className="tnum">{p.elapsed}</span>}
-                {p.cost && <span className="tnum">{p.cost}</span>}
-                {files && (
-                  <span className="tool-stats tnum">
-                    {p.add && p.add !== '0' && <span className="num-add">+{p.add}</span>}
-                    {p.del && p.del !== '0' && <span className="num-del">−{p.del}</span>}
-                  </span>
-                )}
-              </>
-            }
-          >
-            {p.body ? (
-              <div className="tool-well">
-                <Markdown text={p.body} cwd={ctx.cwd} className="md-compact" />
-              </div>
-            ) : null}
-          </SessionCard>
-        );
-      })}
-    </div>
-  );
-}
-
-/** A brief or a message the lead sent to this helper (`_from: lead`): not the person speaking, so a card
- *  rather than a bubble; the standing instructions a brief opens with fold under it. */
-function FromLead({ item, ctx }: { item: UserItem; ctx: ToolCtx }) {
-  const lead = useStore((s) => s.rt[ctx.sessionId]?.helper);
-  const [showHeader, setShowHeader] = useState(false);
-  let header = '';
-  let brief = item.text;
-  if (item.text.startsWith(HELPER_HEADER_PREFIX)) {
-    const i = item.text.indexOf('\n\n');
-    header = i < 0 ? item.text : item.text.slice(0, i);
-    brief = i < 0 ? '' : item.text.slice(i + 2).trim();
-  }
-  return (
-    <SessionCard id={`msg-${item.uuid}`} glyph={<CornerDownRight size={14} />} verb="From the lead" target={lead?.leadTitle || 'the lead session'} openTip="Open the lead session" onOpen={lead ? () => openSession(lead.leadId) : undefined}>
-      {brief && (
-        <div className="tool-well">
-          <Markdown text={brief} cwd={ctx.cwd} className="md-compact" />
-        </div>
-      )}
-      {header && (
-        <div className="hb-fold">
-          <button className="tool-toggle" onClick={() => setShowHeader(!showHeader)}>
-            <ChevronRight size={12} className={showHeader ? 'rot' : ''} /> Standing instructions for a helper
-          </button>
-          <Collapse open={showHeader}>{() => <div className="tool-note">{header}</div>}</Collapse>
-        </div>
-      )}
-    </SessionCard>
   );
 }

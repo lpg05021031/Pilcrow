@@ -16,6 +16,7 @@ import { rpc } from './rpc';
 import { TranscriptModel } from './transcript';
 import { setHome, plural, errText } from './format';
 import { EASE_EXIT, reducedMotion, yieldToEvents } from './motion';
+import { isBusy } from './types';
 import type { AppInfo, Config, SessionState, SessionSummary, PermissionMode, Effort, RawMsg, GatewayModels, TimelineStep, PermissionDecision, DispatchJob, DispatchRun, DispatchDelta, Playbook } from './types';
 import type { RepoEntry } from './types';
 import type { PilcrowNative } from './globals';
@@ -70,9 +71,9 @@ export const VIEW_MODES: { id: ViewMode; label: string; hint: string }[] = [
 ];
 export function cycleView() {
   const cur = get().ui.view;
-  const next = VIEW_MODES[(VIEW_MODES.findIndex((v) => v.id === cur) + 1) % VIEW_MODES.length].id;
-  setUi({ view: next });
-  toast(`View: ${VIEW_MODES.find((v) => v.id === next)!.label}`, 'info');
+  const next = VIEW_MODES[(VIEW_MODES.findIndex((v) => v.id === cur) + 1) % VIEW_MODES.length];
+  setUi({ view: next.id });
+  toast(`View: ${next.label}`, 'info');
 }
 
 interface Dialogs {
@@ -258,14 +259,14 @@ function forgetMemo(id: string) {
  * conversation, its images included; one you come back to after these is loaded again.
  */
 const KEEP_MODELS = 6;
-function evictModels() {
+export function evictModels() {
   const { activeId, rt } = get();
   let over = models.size - KEEP_MODELS;
   for (const id of models.keys()) {
     if (over <= 0) break;
     const r = rt[id];
     // The one on screen, one loading, one Claude is working in or waiting on you in: all stay.
-    if (id === activeId || r?.loading || r?.pending?.length || r?.status === 'running' || r?.status === 'starting' || r?.status === 'requires_action') continue;
+    if (id === activeId || r?.loading || r?.pending?.length || isBusy(r?.status)) continue;
     models.delete(id);
     forgetMemo(id);
     if (r) patchRt(id, { loaded: false });
@@ -376,7 +377,7 @@ function quitNow() {
 /** Quit, asking first when Claude is still working (the desktop shell asks natively instead). */
 export function quitApp() {
   if (native()) return quitNow();
-  const busy = useStore.getState().sessions.filter((s) => s.status === 'running' || s.status === 'requires_action').length;
+  const busy = useStore.getState().sessions.filter((s) => isBusy(s.status)).length;
   if (!busy) return quitNow();
   setDialog('confirm', { title: 'Quit Pilcrow?', body: `Claude is still working in ${plural(busy, 'session')}. Quitting stops ${busy > 1 ? 'them' : 'it'}.`, confirm: 'Quit', danger: true, onConfirm: quitNow });
 }
@@ -497,7 +498,8 @@ function onState(st: SessionState) {
     next[i] = { ...row, status: st.status, live: st.live, pending: st.pending.length };
     set({ sessions: next });
   }
-  const wasBusy = prev && (prev.status === 'running' || prev.status === 'requires_action');
+  // A turn was under way (a process starting is not one): its end is news.
+  const wasBusy = isBusy(prev?.status) && prev?.status !== 'starting';
   if (wasBusy && st.status === 'idle') {
     if (get().activeId !== st.id || document.hidden) set({ unread: { ...get().unread, [st.id]: true } });
     notify(st.id, 'Claude finished', titleOf(st.id));
@@ -565,7 +567,7 @@ export function initApp() {
 export const PANEL_TABS: PanelTab[] = ['changes', 'files', 'terminal', 'preview', 'tasks', 'history', 'info'];
 
 /** The saved window layout, taken field by field: the file on disk is loose JSON that an older version may have written. */
-function applyConfigUi(config: Config) {
+export function applyConfigUi(config: Config) {
   const ui = config.ui || {};
   const oneOf = <T extends string>(v: unknown, allowed: readonly T[]): T | undefined => (typeof v === 'string' && (allowed as readonly string[]).includes(v) ? (v as T) : undefined);
   const panelTab = oneOf(ui.panelTab, PANEL_TABS);
@@ -813,7 +815,7 @@ async function foldRow(id: string): Promise<() => void> {
   foldingRows.add(id);
   const h = el.offsetHeight;
   // The row's own min-height and the list's row gap would both keep a sliver of space; fold them too.
-  const gap = parseFloat(getComputedStyle(el.parentElement!).rowGap) || 0;
+  const gap = el.parentElement ? parseFloat(getComputedStyle(el.parentElement).rowGap) || 0 : 0;
   el.style.overflow = 'hidden';
   el.style.minHeight = '0';
   el.style.pointerEvents = 'none';

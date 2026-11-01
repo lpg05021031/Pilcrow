@@ -258,7 +258,8 @@ export class TranscriptModel {
     }
     const msgId = this.current.get(parent);
     if (!msgId) return;
-    const drafts = this.drafts.get(msgId)!;
+    const drafts = this.drafts.get(msgId);
+    if (!drafts) return;
     const index = e.index ?? 0;
     if (e.type === 'content_block_start') {
       if ((this.ordinals.get(msgId) || 0) > index) return; // final block already shown
@@ -397,10 +398,10 @@ export class TranscriptModel {
     for (const r of results) {
       const t = r.tool_use_id ? this.tools.get(r.tool_use_id) : undefined;
       if (!t) continue;
-      t.result = contentToResult(r.content, Boolean(r.is_error));
+      const res = (t.result = contentToResult(r.content, Boolean(r.is_error)));
       if (results.length === 1 && m.tool_use_result && typeof m.tool_use_result === 'object') t.structured = m.tool_use_result as StructuredResult;
       t.endTs = ts;
-      t.status = classifyResult(t);
+      t.status = classifyResult(t, res);
       this.bump(t);
     }
     if (results.length) return;
@@ -625,8 +626,7 @@ export class TranscriptModel {
   }
 }
 
-function classifyResult(t: ToolItem): ToolStatus {
-  const r = t.result!;
+function classifyResult(t: ToolItem, r: ToolResult): ToolStatus {
   const s = t.structured;
   if (s && typeof s === 'object') {
     if (s.isAsync || s.status === 'async_launched' || (s.backgroundTaskId && !r.isError)) return t.task && t.task.status !== 'running' ? (t.task.status === 'completed' ? 'done' : 'interrupted') : 'background';

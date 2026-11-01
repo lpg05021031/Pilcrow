@@ -1,6 +1,6 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { LoaderCircle, Copy, Check } from 'lucide-react';
-import type { SessionStatus } from '../../lib/types';
+import { isWorking, type SessionStatus } from '../../lib/types';
 import { tokens } from '../../lib/format';
 import { useExitGhost, useCountUp } from '../../lib/motion';
 
@@ -51,6 +51,31 @@ export function Switch({ on, onChange, label }: { on: boolean; onChange: (v: boo
   return <button type="button" role="switch" aria-checked={on} aria-label={label} className={`switch${on ? ' on' : ''}`} onClick={() => onChange(!on)} />;
 }
 
+type Ink = { left: number; top: number; width: number; height: number };
+
+/**
+ * Where the chosen item (`selector`, inside `ref`) sits in its container, for an ink or a thumb that
+ * glides to it (the segmented control, the panel tabs, the settings pages): measured when `key`
+ * changes, and again whenever the container or the item changes size.
+ */
+export function useInk(ref: RefObject<HTMLElement | null>, selector: string, key: unknown): Ink | null {
+  const [ink, setInk] = useState<Ink | null>(null);
+  useLayoutEffect(() => {
+    const measure = () => {
+      const el = ref.current?.querySelector<HTMLElement>(selector);
+      const next = el ? { left: el.offsetLeft, top: el.offsetTop, width: el.offsetWidth, height: el.offsetHeight } : null;
+      setInk((cur) => (cur && next && cur.left === next.left && cur.top === next.top && cur.width === next.width && cur.height === next.height ? cur : next));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    if (ref.current) ro.observe(ref.current);
+    const on = ref.current?.querySelector(selector);
+    if (on) ro.observe(on);
+    return () => ro.disconnect();
+  }, [ref, selector, key]);
+  return ink;
+}
+
 /**
  * Segmented control. One raised thumb slides between the segments on a spring, the way the control
  * does on iOS; the labels never move. The thumb is measured from the chosen segment, so segments can
@@ -58,18 +83,8 @@ export function Switch({ on, onChange, label }: { on: boolean; onChange: (v: boo
  */
 export function Seg<T extends string>({ value, options, onChange, size, className = '', label }: { value: T; options: { value: T; label: ReactNode; disabled?: boolean; title?: string }[]; onChange: (v: T, e: React.MouseEvent<HTMLButtonElement>) => void; size?: 'sm'; className?: string; label?: string }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [thumb, setThumb] = useState<{ x: number; w: number } | null>(null);
+  const thumb = useInk(ref, 'button.on', `${value}:${options.length}`);
   const [settled, setSettled] = useState(false);
-  useLayoutEffect(() => {
-    const measure = () => {
-      const el = ref.current?.querySelector<HTMLElement>('button.on');
-      setThumb(el ? { x: el.offsetLeft, w: el.offsetWidth } : null);
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    if (ref.current) ro.observe(ref.current);
-    return () => ro.disconnect();
-  }, [value, options.length]);
   // The thumb's first position is not a move.
   useEffect(() => {
     const t = requestAnimationFrame(() => setSettled(true));
@@ -77,7 +92,7 @@ export function Seg<T extends string>({ value, options, onChange, size, classNam
   }, []);
   return (
     <div ref={ref} className={`seg${size ? ` ${size}` : ''}${settled ? ' settled' : ''} ${className}`} role="radiogroup" aria-label={label}>
-      {thumb && <span className="seg-thumb" aria-hidden="true" style={{ transform: `translateX(${thumb.x}px)`, width: thumb.w }} />}
+      {thumb && <span className="seg-thumb" aria-hidden="true" style={{ transform: `translateX(${thumb.left}px)`, width: thumb.width }} />}
       {options.map((o) => (
         <button key={o.value} type="button" role="radio" aria-checked={o.value === value} className={o.value === value ? 'on' : ''} disabled={o.disabled} title={o.title} onClick={(e) => onChange(o.value, e)}>
           {o.label}
@@ -144,13 +159,13 @@ export function Leave({ className = '', duration = 220, children, ...rest }: Rea
   );
 }
 
-/** Status mark for lists: only states that deserve attention get one; idle shows nothing. */
+/**
+ * Status mark for lists: only states that deserve attention get one; idle shows nothing. It is the
+ * row's only word on its state, so it is an image with a name a screen reader says, besides the tip.
+ */
 export function StatusGlyph({ status, pending, unread }: { status: SessionStatus | undefined; pending?: number; unread?: boolean }) {
-  if (pending || status === 'requires_action') return <span className="glyph needs" title="Needs your input" />;
-  if (status === 'running' || status === 'starting') return <span className="glyph running" title="Working" />;
-  if (status === 'error') return <span className="glyph error" title="Stopped with an error" />;
-  if (unread) return <span className="glyph unread" title="New activity" />;
-  return null;
+  const [kind, name] = pending || status === 'requires_action' ? ['needs', 'Needs your input'] : isWorking(status) ? ['running', 'Working'] : status === 'error' ? ['error', 'Stopped with an error'] : unread ? ['unread', 'New activity'] : [];
+  return kind ? <span className={`glyph ${kind}`} role="img" aria-label={name} title={name} /> : null;
 }
 
 export function ContextRing({ used, total, size = 18 }: { used: number; total: number; size?: number }) {

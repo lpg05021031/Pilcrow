@@ -255,7 +255,8 @@ export function useFollow({ sessionId, model, loaded, rev, extra, onScrolled }: 
   }, [sessionId]);
 
   const onScroll = () => {
-    const el = scroller.current!;
+    const el = scroller.current;
+    if (!el) return;
     // Raised by the follow itself (the position is exactly the one it set): reading scrollHeight here
     // would force a layout for every streamed frame, and all it would say is what we already know —
     // we are at the bottom. A reader's scroll lands anywhere else.

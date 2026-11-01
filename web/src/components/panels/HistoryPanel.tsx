@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { History, ChevronRight, Undo2, RotateCcw, ArrowUpRight, ArrowDownToLine } from 'lucide-react';
 import { useStore, call, setTimeline, confirmAction, toast, bumpFs, openFile, toasted } from '../../lib/store';
-import type { DiffFile, SessionSummary, TimelineStep } from '../../lib/types';
+import { isBusy, type DiffFile, type SessionSummary, type TimelineStep } from '../../lib/types';
 import { basename, clock, dirname, plural, duration } from '../../lib/format';
 import { DiffView } from '../Code';
 import { Collapse } from '../ui/Collapse';
@@ -33,7 +33,7 @@ function stepTitle(s: TimelineStep) {
 export function HistoryPanel({ session, cwd }: { session: SessionSummary; cwd: string }) {
   const id = session.id;
   const steps = useStore((s) => s.timeline[id]);
-  const working = useStore((s) => s.rt[id]?.status === 'running' || s.rt[id]?.status === 'requires_action');
+  const working = useStore((s) => isBusy(s.rt[id]?.status));
   const [meta, setMeta] = useState<{ enabled: boolean; reason: string | null } | null>(null);
   const [sel, setSel] = useState<number | null>(null); // step n; null = now
   const [follow, setFollow] = useState(true);
@@ -189,7 +189,8 @@ function Scrubber({ steps, sel, onPick, now }: { steps: TimelineStep[]; sel: num
   }, [steps, Math.floor(now / 15_000)]); // eslint-disable-line react-hooks/exhaustive-deps -- positions move with the steps and every 15 s of the clock, not every second
   const xAt = (i: number) => (i >= n ? 100 : pos[i] ?? 0);
   const nearest = (clientX: number) => {
-    const r = ref.current!.getBoundingClientRect();
+    const r = ref.current?.getBoundingClientRect();
+    if (!r) return n;
     const pad = 20;
     const x = Math.max(0, Math.min(100, ((clientX - r.left - pad) / (r.width - pad * 2)) * 100));
     let best = n;
@@ -411,11 +412,12 @@ async function doRestore(sessionId: string, step: TimelineStep, paths?: string[]
   try {
     const r = await call<{ ok: boolean; safety: TimelineStep | null; step: TimelineStep | null }>('timeline.restore', { id: sessionId, n: step.n, paths });
     bumpFs();
-    const undo = r.safety
+    const safety = r.safety;
+    const undo = safety
       ? {
           label: 'Undo',
           run: () =>
-            call('timeline.restore', { id: sessionId, n: r.safety!.n }).then(() => (bumpFs(), toast('Put the files back', 'success')), toasted),
+            call('timeline.restore', { id: sessionId, n: safety.n }).then(() => (bumpFs(), toast('Put the files back', 'success')), toasted),
         }
       : undefined;
     toast(paths?.length ? `Restored ${paths.length === 1 ? basename(paths[0]) : plural(paths.length, 'file')}` : `Restored the folder to step ${step.n}`, 'success', undo);

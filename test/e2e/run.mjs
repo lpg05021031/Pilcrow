@@ -389,6 +389,23 @@ test('switching away and back lands on the same spot', async ({ page }) => {
   expect((await page.locator('.jump').count()) === 1, 'Latest should offer the way back down');
 });
 
+test('changes: a file past the diff budget says so in one line and opens in Files', async ({ page }) => {
+  await ctl.call('mock.answer', {
+    method: 'git.diff',
+    result: { isRepo: true, root: '/home/me/pilcrow', base: 'HEAD', branch: 'main', files: [{ path: 'web/dist/bundle.js', oldPath: null, status: 'M', binary: false, additions: 48210, deletions: 47950, hunks: [], truncated: true }] },
+  });
+  try {
+    await open(page, 'sess-login');
+    await page.keyboard.press('Alt+1');
+    // One file: it is shown open.
+    await page.waitForSelector('.cfile.open .cfile-note:has-text("Too large to show here")', { timeout: 5000 });
+    await page.click('.cfile-note button:has-text("Open in Files")');
+    await page.waitForSelector('.ftab.on[title="/home/me/pilcrow/web/dist/bundle.js"]', { timeout: 5000 });
+  } finally {
+    await ctl.call('mock.answer', { method: 'git.diff', result: null });
+  }
+});
+
 test('control room: tiles fit their row and sit below the header', async ({ page }) => {
   await page.locator('.side-page', { hasText: 'Control room' }).click();
   await page.waitForSelector('.ov-stats', { timeout: 5000 });

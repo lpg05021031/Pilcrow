@@ -17,6 +17,7 @@ interface Usage {
 }
 
 export function InfoPanel({ session, cwd }: { session: SessionSummary; cwd: string }) {
+  const wt = session.worktree;
   // The fields shown here, compared one by one: the runtime record itself is new on every streamed frame.
   const rt = useStore(
     useShallow((s) => {
@@ -224,23 +225,23 @@ export function InfoPanel({ session, cwd }: { session: SessionSummary; cwd: stri
         )}
       </section>
 
-      {session.worktree && (
+      {wt && (
         <section className="ps">
           <div className="ps-head">
             <FolderGit2 size={14} /> Worktree
           </div>
           <div className="kv">
             <span>Branch</span>
-            <span className="mono">{session.worktree.branch}</span>
+            <span className="mono">{wt.branch}</span>
             <span>Based on</span>
-            <span className="mono">{session.worktree.base}</span>
+            <span className="mono">{wt.base}</span>
             <span>Location</span>
-            <span className="mono ellipsis" title={session.worktree.path}>
-              {tildify(session.worktree.path, info?.home)}
+            <span className="mono ellipsis" title={wt.path}>
+              {tildify(wt.path, info?.home)}
             </span>
           </div>
           <div className="row">
-            <button className="btn sm" onClick={() => call('shell.openPath', { path: session.worktree!.path })}>
+            <button className="btn sm" onClick={() => call('shell.openPath', { path: wt.path })}>
               <FolderOpen size={13} /> Open folder
             </button>
             <button
@@ -248,10 +249,10 @@ export function InfoPanel({ session, cwd }: { session: SessionSummary; cwd: stri
               onClick={() =>
                 confirmAction({
                   title: 'Remove this worktree?',
-                  body: `Deletes ${session.worktree!.path} and the branch ${session.worktree!.branch}. Uncommitted work there is lost.`,
+                  body: `Deletes ${wt.path} and the branch ${wt.branch}. Uncommitted work there is lost.`,
                   confirm: 'Remove worktree',
                   danger: true,
-                  onConfirm: () => call('git.removeWorktree', { repoRoot: session.worktree!.repoRoot, dir: session.worktree!.path, branch: session.worktree!.branch, deleteBranch: true }).then(() => toast('Worktree removed', 'success')),
+                  onConfirm: () => call('git.removeWorktree', { repoRoot: wt.repoRoot, dir: wt.path, branch: wt.branch, deleteBranch: true }).then(() => toast('Worktree removed', 'success')),
                 })
               }
             >

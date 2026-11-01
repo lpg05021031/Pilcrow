@@ -131,14 +131,7 @@ export const AnsiText = memo(function AnsiText({ text }: { text: string }) {
 
 // ---------------------------------------------------------------- DiffView
 
-interface Row {
-  kind: 'hunk' | 'line' | 'split';
-  hunk?: DiffHunk;
-  hi?: number;
-  line?: DiffLine;
-  left?: DiffLine | null;
-  right?: DiffLine | null;
-}
+type Row = { kind: 'hunk'; hunk: DiffHunk; hi: number } | { kind: 'line'; line: DiffLine } | { kind: 'split'; left: DiffLine | null; right: DiffLine | null };
 
 function wordRanges(hunks: DiffHunk[]) {
   const map = new WeakMap<DiffLine, Range[]>();
@@ -323,8 +316,8 @@ export const DiffView = memo(function DiffView({
       <div className="diff-grid" data-hl={toks.size ? '1' : '0'}>
         {shown.map((r, i) => {
           if (r.kind === 'hunk') {
-            const h = r.hunk!;
-            const prev = r.hi! > 0 ? hunks[r.hi! - 1] : null;
+            const h = r.hunk;
+            const prev = r.hi > 0 ? hunks[r.hi - 1] : null;
             const gap = prev ? h.oldStart - (prev.oldStart + prev.oldLines) : h.oldStart - 1;
             return (
               <div key={i} className="diff-hunk" style={{ gridColumn: '1 / -1' }}>
@@ -335,7 +328,7 @@ export const DiffView = memo(function DiffView({
             );
           }
           if (r.kind === 'line') {
-            const l = r.line!;
+            const l = r.line;
             const cls = l.t === '+' ? 'add' : l.t === '-' ? 'del' : 'ctx';
             const st = order(i);
             return (

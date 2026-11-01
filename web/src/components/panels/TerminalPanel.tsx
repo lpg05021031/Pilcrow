@@ -128,6 +128,8 @@ function XTerm({ id, visible }: { id: string; visible: boolean }) {
   const theme = useStore((s) => s.theme);
 
   useEffect(() => {
+    const el = host.current;
+    if (!el) return;
     const t = new Terminal({
       fontFamily: cssVar('--font-mono') || 'monospace',
       fontSize: 12.5,
@@ -140,7 +142,7 @@ function XTerm({ id, visible }: { id: string; visible: boolean }) {
     const f = new FitAddon();
     t.loadAddon(f);
     t.loadAddon(new WebLinksAddon((_e, uri) => rpc.call('shell.openExternal', { url: uri }).catch(() => {}))); // a link that will not open stays text
-    t.open(host.current!);
+    t.open(el);
     // Let the app's panel and session shortcuts through instead of sending them to the shell.
     t.attachCustomKeyEventHandler((e) => {
       if (e.altKey && !e.ctrlKey && !e.metaKey && /^[1-6]$/.test(e.key)) return false;
@@ -163,7 +165,7 @@ function XTerm({ id, visible }: { id: string; visible: boolean }) {
         /* not visible yet */
       }
     });
-    ro.observe(host.current!);
+    ro.observe(el);
     return () => {
       sub.dispose();
       off();
