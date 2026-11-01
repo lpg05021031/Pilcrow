@@ -158,7 +158,7 @@ async function freshPage() {
   const page = await context.newPage();
   page.__console = [];
   page.on('console', (m) => page.__console.push(`${m.type()}: ${m.text()}`));
-  page.on('pageerror', (e) => page.__console.push(`page error: ${e.message}`));
+  page.on('pageerror', (e) => (page.__console.push(`page error: ${e.message}`), pageErrors.push(e.message)));
   await page.goto(URL_);
   await page.waitForSelector('.sidebar .side-row', { timeout: 20_000 });
   const cdp = await context.newCDPSession(page);
@@ -644,14 +644,19 @@ const check = (what, value, max) => {
 const results = {};
 let current = null;
 
-/** One scenario; a failure prints the page's state and counts against the run, and the run goes on. */
+/** What the pages threw and nothing caught (a handler, a timer, a promise) since the last scenario ended. */
+const pageErrors = [];
+/** One scenario; a failure, or anything the page threw, prints the page's state and counts against the run, and the run goes on. */
 async function scenario(name, fn) {
   if (!runs(name)) return;
   try {
     await fn();
+    if (pageErrors.length) throw new Error(`the page threw: ${pageErrors.join(' | ')}`);
   } catch (e) {
     failures.push(`${name}: ${e.message.split('\n')[0]}`);
     await dump(current, name, e);
+  } finally {
+    pageErrors.length = 0;
   }
 }
 

@@ -108,10 +108,12 @@ async function settled(page, timeout = 8000) {
 }
 
 
+/** What the page of the running test threw and nothing caught (a handler, a timer, a promise): the test fails on it. */
+let pageErrors = [];
 async function fresh() {
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 }, reducedMotion: 'no-preference' });
   const page = await context.newPage();
-  page.on('pageerror', (e) => console.error('   page error:', e.message));
+  page.on('pageerror', (e) => (console.error('   page error:', e.message), pageErrors.push(e.message)));
   // How many times the window has had the session list back (sessions.list over its socket).
   page.__listed = 0;
   page.on('websocket', (ws) => {
@@ -605,8 +607,10 @@ for (const t of chosen) {
   let ctx;
   try {
     await ctl.call('mock.reset');
+    pageErrors = [];
     ctx = await fresh();
     await t.fn(ctx);
+    expect(!pageErrors.length, `the page threw:\n${pageErrors.join('\n')}`);
     results.push({ name: t.name, ok: true });
     console.log(`  ✓ ${t.name}  (${Date.now() - started}ms)`);
   } catch (e) {

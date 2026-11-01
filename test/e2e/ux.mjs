@@ -94,10 +94,12 @@ async function settled(page, timeout = 8000) {
   await page.waitForFunction(() => window.__still.n >= 5, null, { timeout, polling: 30 });
 }
 
+/** What the pages of the running test threw and nothing caught (a handler, a timer, a promise): the test fails on it. */
+let pageErrors = [];
 async function fresh(opts = {}) {
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 }, reducedMotion: 'no-preference', ...opts });
   const page = await context.newPage();
-  page.on('pageerror', (e) => console.error('   page error:', e.message));
+  page.on('pageerror', (e) => (console.error('   page error:', e.message), pageErrors.push(e.message)));
   await page.goto(URL_);
   await page.waitForSelector('.sidebar .side-row', { timeout: 20_000 });
   return { context, page };
@@ -247,9 +249,17 @@ test('the panel tabs: Alt+1…7 pick a tab, Left and Right move along them, the 
   expect((await page.locator('[role="tab"][tabindex="0"]').count()) === 1, 'one tab stop for the tab list');
 });
 
-test('every control on the main screens has a name a screen reader can say', async ({ page }) => {
+test('every screen draws, and every control on it has a name a screen reader can say', async ({ page }) => {
+  // Something on the screens that are empty out of the mock: a run in the inbox, a schedule, a file.
+  await ctl.call('mock.answer', { method: 'inbox.list', result: { unread: 1, items: [{ id: 'run-1', scheduleId: null, scheduleName: 'Nightly tests', sessionId: 'sess-login', cwd: '/home/tester/code/pilcrow', startedAt: Date.now() - 120e3, endedAt: Date.now() - 60e3, durationMs: 60e3, status: 'failed', reason: 'Two tests failed', summary: 'Ran the suite.', cost: 0.12, files: [{ path: 'src/a.ts', add: 3, del: 1 }], read: false }] } });
+  await ctl.call('schedules.save', { name: 'Nightly tests', cwd: '/home/tester/code/pilcrow', prompt: 'run the tests' });
+  await ctl.call('mock.answer', { method: 'fs.list', result: { entries: [{ name: 'store.ts', path: '/home/tester/code/pilcrow/store.ts', type: 'file', size: 2048 }] } });
   const problems = [];
+  // Every part of the page is fenced (ErrorBoundary): a screen that throws as it draws shows a fault in
+  // place, with a named button, which the name check alone would pass.
   const scan = async (where) => {
+    const faults = await page.locator('.render-fault-text').allInnerTexts();
+    expect(!faults.length, `${where}: drawn as a fault: ${faults.join(' | ')}`);
     for (const p of await unnamed(page)) problems.push(`${where}: ${p}`);
   };
   await scan('welcome');
@@ -257,11 +267,16 @@ test('every control on the main screens has a name a screen reader can say', asy
   expect(await page.getByRole('textbox', { name: 'Message to Claude' }).count(), 'the message box keeps its name whatever its placeholder says');
   expect(await page.getByRole('button', { name: 'Attach images or files' }).count(), 'an icon button is named');
   await scan('session');
-  for (const k of [1, 2, 5, 6, 7]) {
+  for (const k of [1, 2, 3, 4, 5, 6, 7]) {
     await page.keyboard.press(`Alt+${k}`);
     await settled(page);
     await scan(`panel tab ${k}`);
   }
+  await page.keyboard.press('Alt+2');
+  await page.click('.tree-row.file');
+  await page.waitForSelector('.files-editor .cm-editor', { timeout: 10_000 });
+  await settled(page);
+  await scan('editor');
   await page.keyboard.press('Control+,');
   await page.waitForSelector('.settings');
   for (const t of ['General', 'Repositories', 'Claude Code', 'Skills', 'MCP servers', 'Memory', 'Diagnostics']) {
@@ -283,7 +298,8 @@ test('every control on the main screens has a name a screen reader can say', asy
   await settled(page);
   await scan('control room');
   await page.click('.side-page:has-text("Inbox")');
-  await page.waitForSelector('.inbox-rail-h', { timeout: 5000 });
+  await page.waitForSelector('.inbox-main .run', { timeout: 5000 });
+  await page.waitForSelector('.inbox-rail .sched', { timeout: 5000 });
   await settled(page);
   await scan('inbox');
   await page.click('.inbox-rail-h button:has-text("New")');
@@ -515,8 +531,10 @@ for (const t of chosen) {
   let ctx;
   try {
     await ctl.call('mock.reset');
+    pageErrors = [];
     ctx = await fresh();
     await t.fn(ctx);
+    expect(!pageErrors.length, `the page threw:\n${pageErrors.join('\n')}`);
     console.log(`  ✓ ${t.name}  (${Date.now() - started}ms)`);
   } catch (e) {
     failed++;
