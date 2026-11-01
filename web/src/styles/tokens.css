@@ -145,7 +145,7 @@
      White on --accent is 3.12:1, which is fine for a mark (the send button's arrow, a focus ring,
      a dot) and not for words. Anything orange that carries words or figures (a primary button, a
      count, the current find match) is --accent-solid: white on it 4.77:1, on --accent-solid-2 (its
-     hover, darker) 5.54:1. A danger button with words is --err-solid: 5.33:1, and 4.9:1 under the
+     hover, darker) 5.54:1. A danger button with words is --err-solid: 5.33:1, and 4.84:1 under the
      hover's brightness(1.06). In the light theme the same pairs hold (the ink is white there too). */
   --accent: #d97757;
   --accent-2: #e2896c;
