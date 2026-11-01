@@ -206,6 +206,20 @@ describe('who may talk to the server', () => {
     }
   });
 
+  it('serves a file as a sandboxed page that cannot act as the app, and nothing it may be sniffed into', async () => {
+    const file = path.join(os.tmpdir(), `pilcrow-page-${process.pid}.html`);
+    fs.writeFileSync(file, '<script>fetch("/api/hello")</script>');
+    const headersOf = (p: string): Promise<http.IncomingHttpHeaders> =>
+      new Promise((resolve, reject) => {
+        http.get({ host: '127.0.0.1', port: app.port, path: p, headers: { host: `127.0.0.1:${app.port}` } }, (res) => (res.resume(), resolve(res.headers))).on('error', reject);
+      });
+    const page = await headersOf(`/api/fs${file}`);
+    expect(page['content-type']).toMatch(/text\/html/);
+    expect(page['content-security-policy']).toMatch(/^sandbox /);
+    expect(page['content-security-policy']).not.toMatch(/allow-same-origin/);
+    expect((await headersOf(`/api/raw?path=${encodeURIComponent(file)}`))['x-content-type-options']).toBe('nosniff');
+  });
+
   it('answers a malformed path with 400 instead of hanging', async () => {
     expect(await get('/api/fs/%zz')).toBe(400);
     expect(await get('/%zz')).toBe(400);

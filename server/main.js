@@ -41,6 +41,9 @@ const LIST_CHANGED_MS = 150; // a burst of session changes is one "the list chan
 export const LOCK = path.join(xdg('state'), 'instance.json');
 
 const OCTET = 'application/octet-stream';
+/** A file the Files panel shows as a page runs in a sandbox of its own (an opaque origin, as the panel's
+ *  iframe asks): whoever opens it, it can never act as this app (its WebSocket, its /api). */
+const FILE_CSP = 'sandbox allow-scripts allow-forms allow-popups allow-modals';
 /** The interface's pages may run only their own scripts and talk only to this server. */
 const CSP = "frame-ancestors 'none'; default-src 'self'; img-src 'self' data: blob: http://127.0.0.1:* http://localhost:*; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; connect-src 'self' ws://127.0.0.1:* ws://localhost:*; frame-src http: https:; worker-src 'self' blob:";
 
@@ -523,12 +526,12 @@ export async function start({ shell = 'none', port, quiet = false, onQuit, heart
     if (url.pathname.startsWith('/api/fs/')) {
       let p = decodeURIComponent(url.pathname.slice('/api/fs'.length));
       if (/^\/[a-zA-Z]:\//.test(p)) p = p.slice(1); // Windows drive paths arrive as /C:/…
-      sendFile(res, p, { 'content-type': files.mimeOf(p) || OCTET, 'x-content-type-options': 'nosniff' });
+      sendFile(res, p, { 'content-type': files.mimeOf(p) || OCTET, 'x-content-type-options': 'nosniff', 'content-security-policy': FILE_CSP });
       return;
     }
     if (url.pathname === '/api/raw') {
       const p = expandHome(url.searchParams.get('path') || '');
-      sendFile(res, p, { 'content-type': files.imageMime(p) || OCTET });
+      sendFile(res, p, { 'content-type': files.imageMime(p) || OCTET, 'x-content-type-options': 'nosniff' });
       return;
     }
     serveStatic(url.pathname, res);
