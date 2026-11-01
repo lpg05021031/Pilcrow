@@ -187,3 +187,43 @@ describe('TranscriptModel: system messages', () => {
     expect(m.latestTool('TodoWrite')).toBeNull();
   });
 });
+
+describe('TranscriptModel: rev', () => {
+  // ItemList (lib/units extendTurns) tells an earlier turn changed from this alone.
+  it('is the sum of the top-level items’ revs, through streaming, sub-agents, background tasks and retries', () => {
+    const m = new TranscriptModel();
+    const sum = () => m.items.reduce((n, it) => n + it.rev, 0);
+    const steps: RawMsg[] = [
+      userMsg('look around'),
+      stream({ type: 'message_start', message: { id: 'msg_1' } }),
+      stream({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }),
+      stream({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Starting.' } }),
+      stream({ type: 'content_block_stop', index: 0 }),
+      stream({ type: 'content_block_start', index: 1, content_block: { type: 'tool_use', id: 'agent_1', name: 'Agent', input: {} } }),
+      stream({ type: 'content_block_delta', index: 1, delta: { type: 'input_json_delta', partial_json: '{"description":"x"}' } }),
+      stream({ type: 'content_block_stop', index: 1 }),
+      assistant('msg_1', [{ type: 'text', text: 'Starting.' }, { type: 'tool_use', id: 'agent_1', name: 'Agent', input: { description: 'x' } }]),
+      { ...assistant('m2', [{ type: 'tool_use', id: 'sub_1', name: 'Grep', input: { pattern: 'x' } }]), parent_tool_use_id: 'agent_1' },
+      { ...assistant('m3', [{ type: 'tool_use', id: 'sub_2', name: 'Agent', input: {} }]), parent_tool_use_id: 'agent_1' },
+      { ...assistant('m4', [{ type: 'tool_use', id: 'sub_3', name: 'Read', input: {} }]), parent_tool_use_id: 'sub_2' },
+      { ...toolResult('sub_3', 'deep'), parent_tool_use_id: 'sub_2' },
+      { ...toolResult('sub_1', 'found'), parent_tool_use_id: 'agent_1' },
+      toolResult('agent_1', 'done'),
+      assistant('m5', [{ type: 'tool_use', id: 'bg_1', name: 'Bash', input: { run_in_background: true } }]),
+      toolResult('bg_1', 'started', false, { isAsync: true, backgroundTaskId: 'task_9' }),
+      { type: 'system', subtype: 'api_retry', uuid: uid(), attempt: 1, max_retries: 3, error_status: 529 },
+      { type: 'system', subtype: 'api_retry', uuid: uid(), attempt: 2, max_retries: 3, error_status: 529 },
+      assistant('m6', [{ type: 'text', text: 'Back.' }]),
+      { type: 'tool_use_summary', uuid: uid(), summary: 'Looked around', preceding_tool_use_ids: ['agent_1'] },
+      result(),
+      userMsg('next'),
+      { type: 'system', subtype: 'task_notification', uuid: uid(), task_id: 'task_9', tool_use_id: 'bg_1', status: 'completed', summary: 'ok' },
+      result(),
+    ];
+    for (const msg of steps) {
+      m.push(msg);
+      expect(m.rev).toBe(sum());
+    }
+    expect(m.items.length).toBeGreaterThan(6);
+  });
+});

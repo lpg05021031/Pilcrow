@@ -1,7 +1,8 @@
 // App-wide tooltips. Any element with a `title` gets a styled tooltip instead of the browser's:
 // it appears after a short pause, or at once while the pointer moves between controls ("warm"),
 // shows keyboard shortcuts as keycaps, and never covers the thing you are pointing at.
-// Components keep using plain `title=…`; nothing else needs to change.
+// Components keep using plain `title=…`. A title is not a name: an icon-only control carries its own
+// aria-label, so taking the title over here changes nothing a screen reader hears.
 
 const SHOW_DELAY = 480;
 const WARM_FOR = 450;
@@ -17,8 +18,6 @@ let suppressed: HTMLElement | null = null;
 function text(el: HTMLElement) {
   const t = el.getAttribute('title');
   if (t !== null) {
-    // Keep the accessible name the title used to provide, then take the title over.
-    if (!el.getAttribute('aria-label') && !(el.textContent || '').trim()) el.setAttribute('aria-label', t);
     el.dataset.tip = t;
     el.removeAttribute('title');
   }

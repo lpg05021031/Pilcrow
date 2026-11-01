@@ -102,6 +102,11 @@ export function firstLine(s: string): string {
   return (s || '').split('\n')[0];
 }
 
+/** A 24-hour time of day, "14:05", or "14:05:09" with `seconds`. */
+export function clock(ms: number, seconds = false) {
+  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', ...(seconds ? { second: '2-digit' } : {}), hour12: false });
+}
+
 export function plural(n: number, one: string, many = one + 's') {
   return `${n} ${n === 1 ? one : many}`;
 }

@@ -2,6 +2,7 @@
 import { Marked, type Tokens } from 'marked';
 import DOMPurify from 'dompurify';
 import { cachedHtml, normalizeLang } from './highlight';
+import { LruBytes } from './lru';
 
 // How code-block languages are labelled: people say "TypeScript", not "ts".
 const LANG_NAMES: Record<string, string> = {
@@ -61,7 +62,8 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
   }
 });
 
-const cache = new Map<string, string>();
+// Finished blocks by their source: a conversation drawn again, or a block scrolled back into view, costs nothing.
+const cache = new LruBytes<string>(4 << 20, (k, v) => k.length + v.length);
 
 export function renderMarkdown(src: string, { streaming = false, baseDir }: { streaming?: boolean; baseDir?: string } = {}): string {
   if (!src) return '';
@@ -79,10 +81,7 @@ export function renderMarkdown(src: string, { streaming = false, baseDir }: { st
     FORBID_TAGS: ['style', 'form', 'input', 'button', 'iframe', 'script'],
   });
   currentBase = null;
-  if (!streaming) {
-    if (cache.size > 400) cache.delete(cache.keys().next().value!);
-    cache.set(key, out);
-  }
+  if (!streaming) cache.set(key, out);
   return out;
 }
 
@@ -105,6 +104,23 @@ export function splitBlocks(src: string): string[] {
     else out.push(t.raw);
   }
   return out.length ? out : [src];
+}
+
+/**
+ * splitBlocks for text that grows at its end, as a reply does while it streams. What is added can only
+ * change the last block (or follow it with new ones), so the text is lexed again from where the last
+ * block starts and the blocks before it are kept: the work per frame follows the block being written,
+ * not the length of the reply. Anything else (an edit in the middle, text that lexing normalised so the
+ * blocks no longer add up to it) is split from the start.
+ */
+export function extendBlocks(prev: { text: string; blocks: string[] }, text: string): string[] {
+  const n = prev.blocks.length;
+  if (!n || !text.startsWith(prev.text)) return splitBlocks(text);
+  let from = 0;
+  for (let i = 0; i < n - 1; i++) from += prev.blocks[i].length;
+  if (from + prev.blocks[n - 1].length !== prev.text.length) return splitBlocks(text);
+  const tail = splitBlocks(text.slice(from));
+  return n === 1 ? tail : prev.blocks.slice(0, -1).concat(tail);
 }
 
 export { normalizeLang };

@@ -5,10 +5,11 @@ import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 import { Plus, X, SquareTerminal } from 'lucide-react';
 import { rpc } from '../../lib/rpc';
-import { useStore, call, toast } from '../../lib/store';
+import { useStore, call, toast, toasted } from '../../lib/store';
 import type { SessionSummary } from '../../lib/types';
 import { basename } from '../../lib/format';
 import { errText } from '../../lib/format';
+import { Empty } from '../ui/Empty';
 
 interface TermRef {
   id: string;
@@ -74,7 +75,7 @@ export function TerminalPanel({ session, cwd, visible }: { session: SessionSumma
 
   useEffect(() => {
     if (visible && !(perSession.get(session.id) || []).length && info?.terminal.pty !== false) create();
-  }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps -- a first terminal opens the first time the tab is shown, not again on each render
 
   useEffect(
     () =>
@@ -87,17 +88,14 @@ export function TerminalPanel({ session, cwd, visible }: { session: SessionSumma
   );
 
   const closeTerm = (id: string) => {
-    call('term.close', { id }).catch(() => {});
+    call('term.close', { id }).catch(toasted);
     const list = (perSession.get(session.id) || []).filter((t) => t.id !== id);
     save(list, list[list.length - 1]?.id || null);
   };
 
   if (info && !info.terminal.pty) {
     return (
-      <div className="empty">
-        <SquareTerminal size={22} />
-        <div>The terminal needs python3 (or util-linux `script`) on this machine.</div>
-      </div>
+      <Empty icon={SquareTerminal} title="The terminal needs python3 (or util-linux `script`) on this machine." />
     );
   }
 
@@ -116,7 +114,7 @@ export function TerminalPanel({ session, cwd, visible }: { session: SessionSumma
             </button>
           </div>
         ))}
-        <button className="icon-btn sm" title="New terminal" onClick={create}>
+        <button className="icon-btn sm" title="New terminal" aria-label="New terminal" onClick={create}>
           <Plus size={14} />
         </button>
       </div>
@@ -147,7 +145,7 @@ function XTerm({ id, visible }: { id: string; visible: boolean }) {
     });
     const f = new FitAddon();
     t.loadAddon(f);
-    t.loadAddon(new WebLinksAddon((_e, uri) => rpc.call('shell.openExternal', { url: uri }).catch(() => {})));
+    t.loadAddon(new WebLinksAddon((_e, uri) => rpc.call('shell.openExternal', { url: uri }).catch(() => {}))); // a link that will not open stays text
     t.open(host.current!);
     // Let the app's panel and session shortcuts through instead of sending them to the shell.
     t.attachCustomKeyEventHandler((e) => {
@@ -157,15 +155,16 @@ function XTerm({ id, visible }: { id: string; visible: boolean }) {
     });
     term.current = t;
     fit.current = f;
-    const sub = t.onData((data) => rpc.call('term.input', { id, data }).catch(() => {}));
+    // Keystrokes to a terminal that has gone: the terminal says so itself when it reconnects or closes.
+      const sub = t.onData((data) => rpc.call('term.input', { id, data }).catch(() => {}));
     const off = rpc.on('term.data', (d) => d.id === id && t.write(d.data));
     const offExit = rpc.on('term.exit', (d) => d.id === id && t.write(`\r\n\x1b[2m[process exited${d.code != null ? ` with code ${d.code}` : ''}]\x1b[0m\r\n`));
-    rpc.call<{ buffer?: string } | null>('term.snapshot', { id }).then((s) => s?.buffer && t.write(s.buffer)).catch(() => {});
+    rpc.call<{ buffer?: string } | null>('term.snapshot', { id }).then((s) => s?.buffer && t.write(s.buffer), () => {}); // a new terminal has no backlog to show
     const ro = new ResizeObserver(() => {
       if (!host.current?.offsetParent) return;
       try {
         f.fit();
-        rpc.call('term.resize', { id, cols: t.cols, rows: t.rows }).catch(() => {});
+        rpc.call('term.resize', { id, cols: t.cols, rows: t.rows }).catch(() => {}); // the next resize tries again
       } catch {
         /* not visible yet */
       }
@@ -190,7 +189,7 @@ function XTerm({ id, visible }: { id: string; visible: boolean }) {
       try {
         fit.current?.fit();
         const t = term.current;
-        if (t) rpc.call('term.resize', { id, cols: t.cols, rows: t.rows }).catch(() => {});
+        if (t) rpc.call('term.resize', { id, cols: t.cols, rows: t.rows }).catch(() => {}); // the next resize tries again
         t?.focus();
       } catch {
         /* ignore */

@@ -1,4 +1,9 @@
 import { createRoot } from 'react-dom/client';
+// The order is the cascade's order, so it is part of the design: tokens before anything reads them,
+// base elements and controls before the components that compose them, and motion last, because it
+// owns `animation` and `transition` for what it names (styles/README.md). No selector declares the
+// same property in two of these files, so the order never decides which of two rules renders
+// (scripts/css-overlap.mjs, run by `npm run lint`).
 import './styles/fonts.css';
 import './styles/tokens.css';
 import './styles/base.css';

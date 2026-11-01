@@ -1,7 +1,7 @@
 // WebSocket JSON-RPC client with automatic reconnect.
 
 // Handlers are registered per event with the payload type they expect; the wire carries unknown.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- each subscriber states its payload's type; `unknown` would not let it
 type Handler = (data: any) => void;
 
 class Rpc {

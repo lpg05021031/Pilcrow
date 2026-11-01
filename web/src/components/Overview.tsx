@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowUpRight, Bot, Brain, Wrench, MessageSquareQuote, Workflow, PanelLeftOpen, Hourglass, CircleCheck, CircleAlert, Activity, CircleDollarSign } from 'lucide-react';
-import { useStore, call, openSession, respond, setUi } from '../lib/store';
+import { useStore, call, openSession, respond, setUi, mergeLive } from '../lib/store';
 import type { PermissionRequest, SessionState, SessionSummary, TaskInfo } from '../lib/types';
 import { basename, cost, duration, timeAgo, relPath, plural } from '../lib/format';
-import { ContextRing, Spinner, useNow, Num, WorkingMark, Mark } from './ui/bits';
+import { ContextRing, Spinner, useNow, Num, WorkingMark, Mark, useWindowKey, onActivate } from './ui/bits';
 import { suggestionLabel, typingElsewhere } from './tools/Permission';
 import { workflowCounts } from '../lib/workflow';
 import { str } from '../lib/tools';
@@ -25,11 +25,14 @@ const order = (i: number) => ({ '--i': i }) as React.CSSProperties;
  */
 export function Overview() {
   const sessions = useStore((s) => s.sessions);
-  const rt = useStore((s) => s.rt);
   const unread = useStore((s) => s.unread);
   const sidebar = useStore((s) => s.ui.sidebar);
   const [fleet, setFleet] = useState<Fleet | null>(null);
   const now = useNow(1000, true);
+  // Every session's runtime changes with each streamed frame of every session at work; the cards read
+  // only what session.state carries. So they read a snapshot taken on the clock's tick, and at once
+  // when a row's status or waiting count changes (the session list only changes then).
+  const rt = useMemo(() => useStore.getState().rt, [now, sessions, fleet]); // eslint-disable-line react-hooks/exhaustive-deps -- the deps are when to take the snapshot
   const [focus, setFocus] = useState(-1); // keyboard focus; none until the keys are used
   const box = useRef<HTMLDivElement>(null);
 
@@ -37,16 +40,14 @@ export function Overview() {
   useEffect(() => {
     let alive = true;
     const load = () =>
-      call<Fleet>('fleet.state', {}, { quiet: true })
-        .then((f) => {
+      call<Fleet>('fleet.state', {}, { quiet: true }).then(
+        (f) => {
           if (!alive) return;
           setFleet(f);
-          const cur = useStore.getState().rt;
-          const next = { ...cur };
-          for (const [id, st] of Object.entries(f.live)) next[id] = { ...(cur[id] || { rev: 0, loaded: false, loading: false }), ...st };
-          useStore.setState({ rt: next });
-        })
-        .catch(() => {});
+          mergeLive(f.live);
+        },
+        () => {}, // the cards keep what they show; the next tick asks again
+      );
     load();
     const t = setInterval(load, 20_000);
     return () => {
@@ -83,7 +84,7 @@ export function Overview() {
   }, [ordered, focus]);
   useEffect(() => {
     box.current?.querySelector<HTMLElement>(`[data-card="${ordered[focus]?.id}"]`)?.scrollIntoView({ block: 'nearest' });
-  }, [focus]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [focus]); // eslint-disable-line react-hooks/exhaustive-deps -- scrolls when the keyboard focus moves, to the card it moved to
 
   const totalCost = fleet?.today.cost || 0;
   const median = useMemo(() => {
@@ -235,7 +236,7 @@ function WorkingCard({ s, st, focused, now, hot, index }: { s: SessionSummary; s
   const u = st?.usage;
   const stale = st?.lastActivity ? now - st.lastActivity > 45_000 : false;
   return (
-    <article className={`ovc busy${focused ? ' focused' : ''}${stale ? ' stale' : ''}`} data-card={s.id} onClick={() => openSession(s.id)} role="button" tabIndex={0} style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}>
+    <article className={`ovc busy${focused ? ' focused' : ''}${stale ? ' stale' : ''}`} data-card={s.id} onClick={() => openSession(s.id)} onKeyDown={onActivate(() => openSession(s.id))} role="button" tabIndex={0} style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}>
       <div className="ovc-row">
         <CardHead s={s} st={st} />
         <span className="ovc-live" title={stale ? 'Quiet for a while' : 'Working'}>
@@ -318,19 +319,14 @@ function NeedsCard({ s, st, first, focused, now }: { s: SessionSummary; st?: Par
       setBusy(false);
     }
   };
-  useEffect(() => {
-    if (!first || !perm || perm.interactive) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (typingElsewhere(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === '1' && !perm.defaultToNo) allow();
-      else if (e.key === '2' && allowAlways) always();
-      else if (e.key === (allowAlways ? '3' : '2')) deny();
-      else return;
-      e.preventDefault();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  });
+  useWindowKey((e) => {
+    if (!perm || typingElsewhere(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === '1' && !perm.defaultToNo) allow();
+    else if (e.key === '2' && allowAlways) always();
+    else if (e.key === (allowAlways ? '3' : '2')) deny();
+    else return;
+    e.preventDefault();
+  }, Boolean(first && perm && !perm.interactive));
   const what = perm ? permSummary(perm, s.cwd) : null;
   const key = (n: number) => (first && perm && !perm.interactive ? <span className="key">{n}</span> : null);
   return (
@@ -339,7 +335,7 @@ function NeedsCard({ s, st, first, focused, now }: { s: SessionSummary; st?: Par
       <div className="ovc-row">
         <CardHead s={s} st={st} />
         <span className="ovc-wait tnum">{perm ? `waiting ${duration(now - perm.at)}` : ''}</span>
-        <button className="icon-btn sm" title="Open the session" onClick={() => openSession(s.id)}>
+        <button className="icon-btn sm" title="Open the session" aria-label="Open the session" onClick={() => openSession(s.id)}>
           <ArrowUpRight size={14} />
         </button>
       </div>
@@ -408,7 +404,7 @@ function permSummary(p: PermissionRequest, cwd: string): { text: string; mono: b
     case 'WebFetch':
       return { text: str(i, 'url'), mono: true };
     case 'AskUserQuestion':
-      return { text: i.questions?.[0]?.question || 'Claude has a question', mono: false };
+      return { text: (Array.isArray(i.questions) ? (i.questions as { question?: string }[]) : [])[0]?.question || 'Claude has a question', mono: false };
     case 'ExitPlanMode':
       return { text: 'A plan is ready for review', mono: false };
     default:
@@ -446,7 +442,7 @@ function Spend({ fleet, byId, now }: { fleet: Fleet; byId: Record<string, Sessio
       if (i >= 0 && i < n) out[i] += e.delta;
     }
     return out;
-  }, [fleet.spend, Math.floor(now / 60e3)]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fleet.spend, Math.floor(now / 60e3)]); // eslint-disable-line react-hooks/exhaustive-deps -- buckets move with the spend and once a minute, not every second
   const hour = buckets.reduce((a, b) => a + b, 0);
   const max = Math.max(...buckets, 0.0001);
   const top = fleet.today.perSession.slice(0, 5);

@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Play, Ellipsis, Pencil, Trash, CircleCheck, CircleAlert, CircleStop, ArrowUpRight, RotateCw, X, PanelLeftOpen, Check, MailOpen, Pause, Send, ClipboardPaste } from 'lucide-react';
-import { useStore, call, openSession, setUi, toast, confirmAction, openJob } from '../lib/store';
+import { useStore, call, openSession, setUi, toast, confirmAction, openJob, setDialog, toasted } from '../lib/store';
 import { copyText } from './ui/bits';
 import type { InboxItem, Schedule } from '../lib/types';
-import { basename, cost, duration, timeAgo, plural, tildify } from '../lib/format';
+import { basename, clock, cost, duration, timeAgo, plural, tildify } from '../lib/format';
 import { MenuButton } from './ui/Popover';
 import { Switch, Spinner, useNow, Mark } from './ui/bits';
 import { ScheduleDialog } from './ScheduleDialog';
+import { Loading } from './ui/Empty';
 
-const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 function dayLabel(ms: number, now: number) {
   const d = new Date(ms);
   const t = new Date(now);
@@ -38,7 +38,7 @@ function until(ms: number, now: number) {
 export function InboxPage() {
   const rev = useStore((s) => s.schedRev);
   const sidebar = useStore((s) => s.ui.sidebar);
-  const dialog = useStore((s) => s.scheduleDialog);
+  const dialog = useStore((s) => s.dialogs.schedule);
   const [items, setItems] = useState<InboxItem[] | null>(null);
   const [schedules, setSchedules] = useState<Schedule[] | null>(null);
   const [filter, setFilter] = useState<string | null>(null);
@@ -74,11 +74,11 @@ export function InboxPage() {
   const markOne = (id: string) => {
     const it = items?.find((i) => i.id === id);
     if (!it || it.read) return;
-    call('inbox.markRead', { ids: [id] }, { quiet: true }).catch(() => {});
+    call('inbox.markRead', { ids: [id] }, { quiet: true }).catch(() => {}); // the dot comes back with the next list if it did not stick
     setItems((xs) => (xs || []).map((i) => (i.id === id ? { ...i, read: true } : i)));
   };
   const remove = (id: string) => {
-    call('inbox.remove', { id }, { quiet: true }).catch(() => {});
+    call('inbox.remove', { id }, { quiet: true }).catch(() => {}); // the item comes back with the next list if it was not removed
     setItems((xs) => (xs || []).filter((i) => i.id !== id));
   };
 
@@ -110,15 +110,7 @@ export function InboxPage() {
             </div>
           )}
           {items === null && (
-            <div className="changes-loading">
-              {[0, 1, 2].map((k) => (
-                <div key={k} className="sk-file">
-                  <div className="sk" style={{ width: `${46 - k * 9}%` }} />
-                  <div className="sk" />
-                  <div className="sk short" />
-                </div>
-              ))}
-            </div>
+            <Loading label="Loading the inbox" rows={3} />
           )}
           {items && !shown.length && (
             <div className="inbox-empty">
@@ -128,7 +120,7 @@ export function InboxPage() {
                 {schedules?.length ? 'The first result lands here when a schedule fires. You can also run one now from the list on the right.' : 'A schedule runs a prompt in a folder at a set time — a nightly dependency audit, a Monday test sweep — and leaves the result here with a link back to the full session.'}
               </div>
               {!schedules?.length && (
-                <button className="btn primary sm" onClick={() => useStore.setState({ scheduleDialog: {} })}>
+                <button className="btn primary sm" onClick={() => setDialog('schedule', {})}>
                   <Plus size={13} /> New schedule
                 </button>
               )}
@@ -151,7 +143,7 @@ export function InboxPage() {
             Schedules
             {schedules && schedules.length > 0 && <span className="ov-count">{schedules.length}</span>}
             <div className="grow" />
-            <button className="btn xs" onClick={() => useStore.setState({ scheduleDialog: {} })}>
+            <button className="btn xs" onClick={() => setDialog('schedule', {})}>
               <Plus size={12} /> New
             </button>
           </div>
@@ -305,7 +297,7 @@ function HelpersCard({ it, index, onRead, onRemove }: { it: InboxItem; index: nu
               <ArrowUpRight size={11} /> Open the lead
             </button>
           )}
-          <button className="icon-btn sm run-x" title="Dismiss" onClick={(e) => (e.stopPropagation(), onRemove())}>
+          <button className="icon-btn sm run-x" title="Dismiss" aria-label="Dismiss" onClick={(e) => (e.stopPropagation(), onRemove())}>
             <X size={13} />
           </button>
         </div>
@@ -408,17 +400,17 @@ function ScheduleCard({ s, now, index, active, onFilter }: { s: Schedule; now: n
       setBusy(false);
     }
   };
-  const toggle = (on: boolean) => call('schedules.toggle', { id: s.id, enabled: on }).catch(() => {});
+  const toggle = (on: boolean) => call('schedules.toggle', { id: s.id, enabled: on }).catch(toasted);
   const del = () =>
     confirmAction({
       title: `Delete the schedule “${s.name}”?`,
       body: 'Its past runs stay in the inbox.',
       confirm: 'Delete schedule',
       danger: true,
-      onConfirm: () => call('schedules.remove', { id: s.id }).catch(() => {}),
+      onConfirm: () => call('schedules.remove', { id: s.id }).catch(toasted),
     });
   const menu = [
-    { label: 'Edit…', icon: Pencil, onSelect: () => useStore.setState({ scheduleDialog: { id: s.id } }) },
+    { label: 'Edit…', icon: Pencil, onSelect: () => setDialog('schedule', { id: s.id }) },
     { label: 'Run now', icon: Play, onSelect: run },
     { label: s.enabled ? 'Pause' : 'Resume', icon: s.enabled ? Pause : Play, onSelect: () => toggle(!s.enabled) },
     { separator: true },
@@ -458,7 +450,7 @@ function ScheduleCard({ s, now, index, active, onFilter }: { s: Schedule; now: n
       </button>
       <div className="sched-end">
         <Switch on={s.enabled} onChange={toggle} label={s.enabled ? 'Pause' : 'Resume'} />
-        <button className="icon-btn sm" title="Run now" onClick={run} disabled={busy || Boolean(s.running)}>
+        <button className="icon-btn sm" title="Run now" aria-label="Run now" onClick={run} disabled={busy || Boolean(s.running)}>
           {busy ? <Spinner size={12} /> : <Play size={13} />}
         </button>
         <MenuButton items={menu} title="Schedule actions" width={200}>

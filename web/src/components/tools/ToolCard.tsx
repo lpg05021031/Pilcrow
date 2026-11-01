@@ -7,7 +7,8 @@ import type { PermissionRequest } from '../../lib/types';
 import { toolMeta, isFileTool, filePathOf } from '../../lib/tools';
 import { duration, relPath, plural, truncate } from '../../lib/format';
 import { openFile, setDialog, call, toast, useStore, openLightbox } from '../../lib/store';
-import { Spinner, CopyButton } from '../ui/bits';
+import { Spinner, CopyButton, onActivate } from '../ui/bits';
+import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { CodeView, DiffView, AnsiText, hunksFromPatch } from '../Code';
 import { Markdown } from '../Markdown';
 import { PermissionCard } from './Permission';
@@ -79,77 +80,82 @@ function openByDefault(item: ToolItem, waiting: boolean) {
   return false;
 }
 
-export const ToolCard = memo(
-  function ToolCard({ item, ctx }: { item: ToolItem; rev: number; ctx: ToolCtx; perm?: PermissionRequest }) {
-    const perm = ctx.pending.get(item.id);
-    const interactive = perm && (item.name === 'AskUserQuestion' || item.name === 'ExitPlanMode');
-    const [open, setOpen] = useState<boolean | null>(null);
-    const planFile = item.name === 'Write' && /\/\.claude\/plans\//.test(str(item.input, 'file_path'));
-    const isOpen = open ?? ((openByDefault(item, Boolean(perm)) || (ctx.view === 'verbose' && item.status !== 'running' && item.status !== 'streaming')) && !planFile);
-    const meta = toolMeta(item.name, item.input, ctx.cwd);
-    // A failed edit changed nothing, so it gets no +/− counts.
-    const stats = item.status === 'error' ? null : diffStats(item);
-    const elapsed = item.endTs && item.startTs ? item.endTs - item.startTs : item.elapsed ? item.elapsed * 1000 : 0;
-    const file = isFileTool(item.name) ? filePathOf(item.name, item.input) : null;
-    // Keep showing the answered request while it folds away, instead of having it vanish mid-layout.
-    const lastPerm = useRef(perm);
-    if (perm) lastPerm.current = perm;
+// `rev` is passed (not read) so the memo sees an item that changed in place; `perm` comes from
+// ctx.pending, so a ctx that is the same object means the same answer there too.
+export const ToolCard = memo(function ToolCard({ item, ctx }: { item: ToolItem; rev: number; ctx: ToolCtx; perm?: PermissionRequest }) {
+  const perm = ctx.pending.get(item.id);
+  const interactive = perm && (item.name === 'AskUserQuestion' || item.name === 'ExitPlanMode');
+  const [open, setOpen] = useState<boolean | null>(null);
+  const planFile = item.name === 'Write' && /\/\.claude\/plans\//.test(str(item.input, 'file_path'));
+  const isOpen = open ?? ((openByDefault(item, Boolean(perm)) || (ctx.view === 'verbose' && item.status !== 'running' && item.status !== 'streaming')) && !planFile);
+  const meta = toolMeta(item.name, item.input, ctx.cwd);
+  // A failed edit changed nothing, so it gets no +/− counts.
+  const stats = item.status === 'error' ? null : diffStats(item);
+  const elapsed = item.endTs && item.startTs ? item.endTs - item.startTs : item.elapsed ? item.elapsed * 1000 : 0;
+  const file = isFileTool(item.name) ? filePathOf(item.name, item.input) : null;
+  // Keep showing the answered request while it folds away, instead of having it vanish mid-layout.
+  const lastPerm = useRef(perm);
+  if (perm) lastPerm.current = perm;
 
-    if (interactive || (item.name === 'AskUserQuestion' && item.status !== 'streaming') || (item.name === 'ExitPlanMode' && item.status !== 'streaming')) {
-      return (
-        <div className={`tool special ${item.status}`}>
-          {item.name === 'AskUserQuestion' ? <AskBody item={item} perm={perm} ctx={ctx} /> : <PlanBody item={item} perm={perm} ctx={ctx} />}
-        </div>
-      );
-    }
-
+  if (interactive || (item.name === 'AskUserQuestion' && item.status !== 'streaming') || (item.name === 'ExitPlanMode' && item.status !== 'streaming')) {
     return (
-      <div className={`tool ${item.status}${isOpen ? ' open' : ''}${perm ? ' awaiting' : ''}`} data-tool={item.name} id={`tool-${item.id}`}>
-        <div className="tool-head" role="button" tabIndex={0} onClick={() => setOpen(!isOpen)} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setOpen(!isOpen))} aria-expanded={isOpen}>
-          <span className="tool-ico">
-            <span key={perm ? 'wait' : item.status} className="tool-ico-swap">
-              <StatusIcon item={item} waiting={!!perm} />
-            </span>
-          </span>
-          <span className="tool-line">
-            {meta.verb && <span className="tool-verb">{meta.verb}</span>}
-            <span className={`tool-target${meta.mono ? ' mono' : ''}`}>{meta.target}</span>
-            <ChevronRight size={13} className="tool-chev" />
-            {file && (
-              <button
-                className="icon-btn sm tool-open"
-                title="Open in Files"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  openFile(file);
-                }}
-              >
-                <ArrowUpRight size={13} />
-              </button>
-            )}
-          </span>
-          <span className="tool-meta" key={item.status === 'streaming' || item.status === 'running' ? 'live' : 'done'}>
-            {item.status === 'background' && <span className="badge info">background</span>}
-            {item.status === 'denied' && <span className="badge err">declined</span>}
-            {item.status === 'error' && <span className="tool-flag err">Failed</span>}
-            {item.status === 'interrupted' && <span className="badge">stopped</span>}
-            {(item.name === 'Workflow' || item.name === 'RunWorkflow') && <WorkflowMeta sessionId={ctx.sessionId} toolUseId={item.id} />}
-            {stats && (stats.add > 0 || stats.del > 0) && (
-              <span className="tool-stats tnum">
-                {stats.add > 0 && <span className="num-add">+{stats.add}</span>}
-                {stats.del > 0 && <span className="num-del">−{stats.del}</span>}
-              </span>
-            )}
-            {elapsed > 1500 && !(stats && (stats.add > 0 || stats.del > 0)) && <span className="tool-time tnum">{duration(elapsed)}</span>}
-          </span>
-        </div>
-        <Collapse open={isOpen}>{() => <div className="tool-body">{renderBody(item, ctx)}</div>}</Collapse>
-        <Collapse open={Boolean(perm)}>{() => lastPerm.current && <PermissionCard perm={lastPerm.current} item={item} ctx={ctx} stale={!perm} />}</Collapse>
+      <div className={`tool special ${item.status}`}>
+        {item.name === 'AskUserQuestion' ? <AskBody item={item} perm={perm} ctx={ctx} /> : <PlanBody item={item} perm={perm} ctx={ctx} />}
       </div>
     );
-  },
-  (a, b) => a.item === b.item && a.rev === b.rev && a.ctx.pending === b.ctx.pending && a.ctx.cwd === b.ctx.cwd && a.ctx.view === b.ctx.view,
-);
+  }
+
+  return (
+    <div className={`tool ${item.status}${isOpen ? ' open' : ''}${perm ? ' awaiting' : ''}`} data-tool={item.name} id={`tool-${item.id}`}>
+      <div className="tool-head" role="button" tabIndex={0} onClick={() => setOpen(!isOpen)} onKeyDown={onActivate(() => setOpen(!isOpen))} aria-expanded={isOpen}>
+        <span className="tool-ico">
+          <span key={perm ? 'wait' : item.status} className="tool-ico-swap">
+            <StatusIcon item={item} waiting={!!perm} />
+          </span>
+        </span>
+        <span className="tool-line">
+          {meta.verb && <span className="tool-verb">{meta.verb}</span>}
+          <span className={`tool-target${meta.mono ? ' mono' : ''}`}>{meta.target}</span>
+          <ChevronRight size={13} className="tool-chev" />
+          {file && (
+            <button
+              className="icon-btn sm tool-open"
+              title="Open in Files" aria-label="Open in Files"
+              onClick={(e) => {
+                e.stopPropagation();
+                openFile(file);
+              }}
+            >
+              <ArrowUpRight size={13} />
+            </button>
+          )}
+        </span>
+        <span className="tool-meta" key={item.status === 'streaming' || item.status === 'running' ? 'live' : 'done'}>
+          {item.status === 'background' && <span className="badge info">background</span>}
+          {item.status === 'denied' && <span className="badge err">declined</span>}
+          {item.status === 'error' && <span className="tool-flag err">Failed</span>}
+          {item.status === 'interrupted' && <span className="badge">stopped</span>}
+          {(item.name === 'Workflow' || item.name === 'RunWorkflow') && <WorkflowMeta sessionId={ctx.sessionId} toolUseId={item.id} />}
+          {stats && (stats.add > 0 || stats.del > 0) && (
+            <span className="tool-stats tnum">
+              {stats.add > 0 && <span className="num-add">+{stats.add}</span>}
+              {stats.del > 0 && <span className="num-del">−{stats.del}</span>}
+            </span>
+          )}
+          {elapsed > 1500 && !(stats && (stats.add > 0 || stats.del > 0)) && <span className="tool-time tnum">{duration(elapsed)}</span>}
+        </span>
+      </div>
+      <Collapse open={isOpen}>
+        {() => (
+          <div className="tool-body">
+            <ErrorBoundary label={`The ${item.name} step`}>{renderBody(item, ctx)}</ErrorBoundary>
+          </div>
+        )}
+      </Collapse>
+      <Collapse open={Boolean(perm)}>{() => lastPerm.current && <PermissionCard perm={lastPerm.current} item={item} ctx={ctx} stale={!perm} />}</Collapse>
+    </div>
+  );
+});
 
 function renderBody(item: ToolItem, ctx: ToolCtx): ReactNode {
   const i = item.input || {};

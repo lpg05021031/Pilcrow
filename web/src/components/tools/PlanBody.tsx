@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useWindowKey } from '../ui/bits';
 import { Check, FileText } from 'lucide-react';
 import type { ToolItem } from '../../lib/transcript';
 import type { PermissionRequest } from '../../lib/types';
@@ -31,20 +32,15 @@ export function PlanBody({ item, perm, ctx }: { item: ToolItem; perm?: Permissio
   const outcome = !perm && item.result ? (item.status === 'denied' || item.result.isError ? 'kept' : 'approved') : null;
 
   // Same keys as a permission prompt: 1 approve and start, 2 approve but ask before edits, 3 keep planning.
-  useEffect(() => {
-    if (!perm || revising || busy) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (typingElsewhere(e.target)) return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === '1') approve('acceptEdits');
-      else if (e.key === '2') approve('default');
-      else if (e.key === '3') setRevising(true);
-      else return;
-      e.preventDefault();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  });
+  useWindowKey((e) => {
+    if (typingElsewhere(e.target)) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === '1') approve('acceptEdits');
+    else if (e.key === '2') approve('default');
+    else if (e.key === '3') setRevising(true);
+    else return;
+    e.preventDefault();
+  }, Boolean(perm) && !revising && !busy);
 
   return (
     <div className={`plancard${perm ? ' live' : ''}`}>
@@ -76,7 +72,7 @@ export function PlanBody({ item, perm, ctx }: { item: ToolItem; perm?: Permissio
         <div className="plan-actions">
           {revising ? (
             <div className="plan-feedback">
-              <textarea className="textarea" rows={2} autoFocus placeholder="What should change in the plan?" value={feedback} onChange={(e) => setFeedback(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.metaKey || e.ctrlKey) && keepPlanning()} />
+              <textarea aria-label="What should change in the plan?" className="textarea" rows={2} autoFocus placeholder="What should change in the plan?" value={feedback} onChange={(e) => setFeedback(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.metaKey || e.ctrlKey) && keepPlanning()} />
               <div className="row">
                 <span className="hint grow">Ctrl+Enter sends</span>
                 <button className="btn ghost" onClick={() => setRevising(false)} disabled={busy}>

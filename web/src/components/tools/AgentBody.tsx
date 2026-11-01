@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ChevronRight, Download } from 'lucide-react';
 import type { ToolItem, Item, TextItem } from '../../lib/transcript';
 import { TranscriptModel } from '../../lib/transcript';
@@ -23,6 +23,8 @@ export function AgentBody({ item, ctx }: { item: ToolItem; ctx: ToolCtx }) {
   const running = item.status === 'running' || item.status === 'background' || item.status === 'streaming';
   const report: string = item.task?.summary && item.status !== 'running' ? '' : s && !s.isAsync ? textOf(s.content) || item.result?.text || '' : !s?.isAsync ? item.result?.text || '' : '';
   const children = item.children.length ? item.children : loaded?.items || [];
+  // One object for as long as the parent's: the list under it is memoised on it.
+  const childCtx = useMemo(() => ({ ...ctx, depth: ctx.depth + 1 }), [ctx]);
 
   const loadTranscript = async () => {
     if (!agentId) return;
@@ -60,7 +62,7 @@ export function AgentBody({ item, ctx }: { item: ToolItem; ctx: ToolCtx }) {
       {showPrompt && <div className="agent-prompt">{str(i, 'prompt')}</div>}
       {children.length > 0 && (
         <div className="agent-children">
-          <ItemList items={children} ctx={{ ...ctx, depth: ctx.depth + 1 }} rev={item.rev} running={running} flat />
+          <ItemList items={children} ctx={childCtx} rev={item.rev} running={running} flat />
         </div>
       )}
       {!children.length && !running && agentId && !loaded && (

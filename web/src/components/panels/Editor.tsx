@@ -36,14 +36,14 @@ const theme = EditorView.theme({
   '.cm-content': { caretColor: 'var(--accent)' },
   '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--accent)', borderLeftWidth: '2px' },
   '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': { backgroundColor: 'var(--selection) !important' },
-  '.cm-gutters': { backgroundColor: 'var(--bg-2)', color: 'var(--text-3)', border: 'none', borderRight: '1px solid var(--line)' },
-  '.cm-activeLine': { backgroundColor: 'color-mix(in srgb, var(--bg-3) 70%, transparent)' },
-  '.cm-activeLineGutter': { backgroundColor: 'var(--bg-3)', color: 'var(--text-2)' },
+  '.cm-gutters': { backgroundColor: 'var(--chrome)', color: 'var(--text-3)', border: 'none', borderRight: '1px solid var(--hair)' },
+  '.cm-activeLine': { backgroundColor: 'color-mix(in srgb, var(--raised) 70%, transparent)' },
+  '.cm-activeLineGutter': { backgroundColor: 'var(--raised)', color: 'var(--text-2)' },
   '.cm-searchMatch': { backgroundColor: 'var(--accent-wash)', outline: '1px solid var(--accent-line)' },
   '.cm-selectionMatch': { backgroundColor: 'var(--info-wash)' },
-  '.cm-panels': { backgroundColor: 'var(--bg-2)', color: 'var(--text)', borderTop: '1px solid var(--line)' },
+  '.cm-panels': { backgroundColor: 'var(--chrome)', color: 'var(--text)', borderTop: '1px solid var(--hair)' },
   '.cm-panels input, .cm-panels button': { fontFamily: 'var(--font-ui)', fontSize: '12px' },
-  '.cm-foldPlaceholder': { backgroundColor: 'var(--bg-3)', border: '1px solid var(--line-2)', color: 'var(--text-2)' },
+  '.cm-foldPlaceholder': { backgroundColor: 'var(--raised)', border: '1px solid var(--hair-2)', color: 'var(--text-2)' },
   '.cm-line.cm-flash': { backgroundColor: 'var(--accent-wash)' },
 });
 
@@ -188,7 +188,7 @@ export function Editor({ path, doc, onChange, onSave, line, nonce }: { path: str
       v.destroy();
       view.current = null;
     };
-  }, [path]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [path]); // eslint-disable-line react-hooks/exhaustive-deps -- one editor per file; the document and handlers are read at creation and kept current through refs
 
   // External reloads replace the document.
   useEffect(() => {

@@ -4,7 +4,7 @@ import { Collapse } from '../ui/Collapse';
 import { useStore, call, showDispatch, openJob, loadPlaybooks, toast, defaultCwd } from '../../lib/store';
 import type { DispatchPlan, DispatchSettings, DispatchTarget, Playbook, WorkspaceRepo } from '../../lib/types';
 import { basename, dirname, plural, tildify } from '../../lib/format';
-import { Switch } from '../ui/bits';
+import { Switch, Field } from '../ui/bits';
 import { Select } from '../ui/Select';
 import { Popover } from '../ui/Popover';
 import { FolderPicker } from '../FolderPicker';
@@ -35,7 +35,7 @@ export function Composer() {
   const [playbookId, setPlaybookId] = useState('');
   const [starting, setStarting] = useState(false);
   const [showOptions, setShowOptions] = useState(false);
-  const folderBtn = useRef<HTMLButtonElement>(null);
+  const [folderBtn, setFolderBtn] = useState<HTMLButtonElement | null>(null);
   const planSeq = useRef(0);
 
   // the workspace
@@ -50,7 +50,7 @@ export function Composer() {
       alive = false;
     };
   }, [root]);
-  const rescan = () => call<{ repos: WorkspaceRepo[] }>('workspace.scan', { root, force: true }, { quiet: true }).then((r) => setRepos(r.repos)).catch(() => {});
+  const rescan = () => call<{ repos: WorkspaceRepo[] }>('workspace.scan', { root, force: true }, { quiet: true }).then((r) => setRepos(r.repos), () => {}); // the list keeps the last scan
   const shown = useMemo(() => {
     const q = filter.trim().toLowerCase();
     return (repos || [])
@@ -182,7 +182,7 @@ export function Composer() {
         </button>
         <h1 className="ov-title">New job</h1>
         <div className="grow" />
-        <Select
+        <Select label="Playbook"
           className="ghost-select"
           value={playbookId}
           options={[{ value: '', label: 'No playbook', hint: 'Start from a blank brief' }, ...playbooks.map((p) => ({ value: p.id, label: p.name, hint: `${plural(p.targets.length, 'repository', 'repositories')} · used ${p.uses}×` }))]}
@@ -201,29 +201,31 @@ export function Composer() {
         </button>
       </header>
       <div className="ov-body dp-body dp-form">
-        <div className="field">
-          <label>Name</label>
-          <input className="input" value={name} placeholder="Bump eslint to v9" onChange={(e) => onName(e.target.value)} />
-        </div>
-        <div className="field">
-          <label>Brief</label>
-          <textarea className="textarea" rows={6} value={brief} placeholder="Upgrade eslint to v9 with the flat config. Keep the rules we have; drop the deprecated ones. Run the linter and fix what it reports. Repository: {{repo.name}} on {{repo.branch}}. {{notes}}" onChange={(e) => setBrief(e.target.value)} />
-          <div className="hint">Variables: {VARIABLES}. Each repository gets its own copy; a target’s notes land in {'{{notes}}'}.</div>
-        </div>
+        <Field label="Name">
+          {(id) => <input id={id} className="input" value={name} placeholder="Bump eslint to v9" onChange={(e) => onName(e.target.value)} />}
+        </Field>
+        <Field label="Brief">
+          {(id) => (
+            <>
+              <textarea id={id} className="textarea" rows={6} value={brief} placeholder="Upgrade eslint to v9 with the flat config. Keep the rules we have; drop the deprecated ones. Run the linter and fix what it reports. Repository: {{repo.name}} on {{repo.branch}}. {{notes}}" onChange={(e) => setBrief(e.target.value)} />
+              <div className="hint">Variables: {VARIABLES}. Each repository gets its own copy; a target’s notes land in {'{{notes}}'}.</div>
+            </>
+          )}
+        </Field>
         <div className="field">
           <label className="dp-label-line">
             <span>Targets</span>
             <span className="faint tnum">{planSummary}</span>
           </label>
           <div className="dp-targets-top">
-            <button ref={folderBtn} className={`ns-folder sd-folder dp-folder${picking ? ' on' : ''}`} onClick={() => setPicking(!picking)} title={tildify(root, info?.home)}>
+            <button ref={setFolderBtn} className={`ns-folder sd-folder dp-folder${picking ? ' on' : ''}`} onClick={() => setPicking(!picking)} title={tildify(root, info?.home)}>
               <Folder size={14} className="ns-folder-ico" />
               <span className="ellipsis grow" style={{ textAlign: 'left' }}>
                 {basename(root) || 'Pick a folder'}
               </span>
               <ChevronDown size={13} className="faint" />
             </button>
-            <Popover anchor={folderBtn.current} open={picking} onClose={() => setPicking(false)} placement="bottom-start" width={380}>
+            <Popover anchor={folderBtn} open={picking} onClose={() => setPicking(false)} placement="bottom-start" width={380} role="dialog" label="Choose a folder">
               <FolderPicker
                 value={root}
                 onPick={(d) => {
@@ -232,10 +234,10 @@ export function Composer() {
                 }}
               />
             </Popover>
-            <button className="icon-btn" title="Scan the folder again" onClick={rescan}>
+            <button className="icon-btn" title="Scan the folder again" aria-label="Scan the folder again" onClick={rescan}>
               <RefreshCw size={14} />
             </button>
-            <input className="input grow" value={filter} placeholder="Filter by name, path or kind" onChange={(e) => setFilter(e.target.value)} />
+            <input aria-label="Filter repositories" className="input grow" value={filter} placeholder="Filter by name, path or kind" onChange={(e) => setFilter(e.target.value)} />
             <span className="faint tnum">{repos ? `${selected} of ${repos.length} selected` : ''}</span>
             <button className="btn xs ghost" onClick={() => setChecked((c) => ({ ...c, ...Object.fromEntries(shown.map((r) => [r.path, true])) }))}>
               All
@@ -273,24 +275,22 @@ export function Composer() {
           <div className="dp-group">
             <div className="dp-group-h">Run</div>
             <div className="ns-two">
-              <div className="field">
-                <label>Permissions</label>
-                <Select value={settings.mode} options={[{ value: 'acceptEdits', label: 'Allow edits in the worktree' }, { value: 'ask', label: 'Ask for everything' }]} onChange={(v) => set('mode', v)} width={260} />
-              </div>
-              <div className="field">
-                <label>Model</label>
-                <input className="input dp-model" value={settings.model} placeholder="default model" onChange={(e) => set('model', e.target.value)} />
-              </div>
+              <Field label="Permissions">
+                {(id) => <Select id={id} value={settings.mode} options={[{ value: 'acceptEdits', label: 'Allow edits in the worktree' }, { value: 'ask', label: 'Ask for everything' }]} onChange={(v) => set('mode', v)} width={260} />}
+              </Field>
+              <Field label="Model">
+                {(id) => <input id={id} className="input dp-model" value={settings.model} placeholder="default model" onChange={(e) => set('model', e.target.value)} />}
+              </Field>
             </div>
             <div className="dp-inline">
               <span className="sd-inline">parallel</span>
-              <input className="input sd-num" type="number" min={1} max={16} value={settings.parallel} onChange={(e) => set('parallel', Math.max(1, Math.min(16, Number(e.target.value) || 3)))} />
+              <input aria-label="Runs in parallel" className="input sd-num" type="number" min={1} max={16} value={settings.parallel} onChange={(e) => set('parallel', Math.max(1, Math.min(16, Number(e.target.value) || 3)))} />
               <span className="sd-inline">minutes each</span>
-              <input className="input sd-num" type="number" min={1} max={240} value={settings.maxMinutes} onChange={(e) => set('maxMinutes', Math.max(1, Math.min(240, Number(e.target.value) || 20)))} />
+              <input aria-label="Minutes each" className="input sd-num" type="number" min={1} max={240} value={settings.maxMinutes} onChange={(e) => set('maxMinutes', Math.max(1, Math.min(240, Number(e.target.value) || 20)))} />
               <span className="sd-inline">cost cap $</span>
-              <input className="input sd-num" type="number" min={0} value={settings.costCap} onChange={(e) => set('costCap', Math.max(0, Number(e.target.value) || 0))} />
+              <input aria-label="Cost cap in dollars" className="input sd-num" type="number" min={0} value={settings.costCap} onChange={(e) => set('costCap', Math.max(0, Number(e.target.value) || 0))} />
               <span className="sd-inline">canary</span>
-              <input className="input sd-num" type="number" min={0} max={8} value={settings.canary} onChange={(e) => set('canary', Math.max(0, Math.min(8, Number(e.target.value) || 0)))} />
+              <input aria-label="Canary runs" className="input sd-num" type="number" min={0} max={8} value={settings.canary} onChange={(e) => set('canary', Math.max(0, Math.min(8, Number(e.target.value) || 0)))} />
             </div>
             <div className="dp-learn">
               <Switch on={settings.learn} onChange={(v) => set('learn', v)} label="the rest learn from the canary" />
@@ -300,14 +300,12 @@ export function Composer() {
           <div className="dp-group">
             <div className="dp-group-h">Before and after each run</div>
             <div className="ns-two">
-              <div className="field">
-                <label>Prepare (before the agent, in the worktree)</label>
-                <input className="input mono" value={settings.prepare} placeholder="npm ci" onChange={(e) => set('prepare', e.target.value)} />
-              </div>
-              <div className="field">
-                <label>Verify (after the agent)</label>
-                <input className="input mono" value={settings.verify} placeholder="npm test" onChange={(e) => set('verify', e.target.value)} />
-              </div>
+              <Field label="Prepare (before the agent, in the worktree)">
+                {(id) => <input id={id} className="input mono" value={settings.prepare} placeholder="npm ci" onChange={(e) => set('prepare', e.target.value)} />}
+              </Field>
+              <Field label="Verify (after the agent)">
+                {(id) => <input id={id} className="input mono" value={settings.verify} placeholder="npm test" onChange={(e) => set('verify', e.target.value)} />}
+              </Field>
             </div>
             <div className="dp-learn">
               <Switch on={settings.verifyRetry} onChange={(v) => set('verifyRetry', v)} label="send a failing verify back to the agent once" />
@@ -317,27 +315,26 @@ export function Composer() {
           <div className="dp-group">
             <div className="dp-group-h">Finish</div>
             <div className="ns-two">
-              <div className="field">
-                <label>Branch in every repository</label>
-                <input
-                  className="input mono"
-                  value={branch}
-                  placeholder="pilcrow/<job>"
-                  onChange={(e) => {
-                    setBranch(e.target.value);
-                    setBranchAuto(false);
-                  }}
-                />
-              </div>
-              <div className="field">
-                <label>Commit message</label>
-                <input className="input" value={settings.commitMessage} placeholder="chore: {{job.name}}" onChange={(e) => set('commitMessage', e.target.value)} />
-              </div>
+              <Field label="Branch in every repository">
+                {(id) => (
+                  <input id={id}
+                    className="input mono"
+                    value={branch}
+                    placeholder="pilcrow/<job>"
+                    onChange={(e) => {
+                      setBranch(e.target.value);
+                      setBranchAuto(false);
+                    }}
+                  />
+                )}
+              </Field>
+              <Field label="Commit message">
+                {(id) => <input id={id} className="input" value={settings.commitMessage} placeholder="chore: {{job.name}}" onChange={(e) => set('commitMessage', e.target.value)} />}
+              </Field>
             </div>
-            <div className="field">
-              <label>Report</label>
-              <Select value={settings.report} options={[{ value: 'table', label: 'The table of repositories', hint: 'What each run did, landed and cost' }, { value: 'agent', label: 'The table, with prose written by an agent', hint: 'One more session reads the summaries and writes three paragraphs' }]} onChange={(v) => set('report', v)} width={360} />
-            </div>
+            <Field label="Report">
+              {(id) => <Select id={id} value={settings.report} options={[{ value: 'table', label: 'The table of repositories', hint: 'What each run did, landed and cost' }, { value: 'agent', label: 'The table, with prose written by an agent', hint: 'One more session reads the summaries and writes three paragraphs' }]} onChange={(v) => set('report', v)} width={360} />}
+            </Field>
             <div className="dp-learn">
               <Switch on={settings.pr} onChange={(v) => set('pr', v)} label="open pull requests with gh after committing" />
               <span className="faint">open pull requests with gh after committing</span>
@@ -378,10 +375,10 @@ function TargetRow({ repo, checked, notes, verdict, onToggle, onNotes }: { repo:
           </span>
         ))}
       </label>
-      <button className="icon-btn sm" title="Notes for this repository (reach the brief as {{notes}})" onClick={() => setOpen(!open)}>
+      <button className="icon-btn sm" title="Notes for this repository (reach the brief as {{notes}})" aria-label="Notes for this repository (reach the brief as {{notes}})" onClick={() => setOpen(!open)}>
         <Pencil size={12} />
       </button>
-      {open && <input className="input dp-notes" autoFocus value={notes} placeholder="Notes for this repository, appended to its brief" onChange={(e) => onNotes(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && setOpen(false)} />}
+      {open && <input aria-label="Notes for this repository" className="input dp-notes" autoFocus value={notes} placeholder="Notes for this repository, appended to its brief" onChange={(e) => onNotes(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && setOpen(false)} />}
     </div>
   );
 }

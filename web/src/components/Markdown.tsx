@@ -1,6 +1,6 @@
 import { memo, useEffect, useMemo, useRef } from 'react';
-import { renderMarkdown, asPathRef, splitBlocks } from '../lib/markdown';
-import { highlightHtml } from '../lib/highlight';
+import { renderMarkdown, asPathRef, extendBlocks } from '../lib/markdown';
+import { CHUNK_OPEN, escapeHtml, highlightHtml, PAINT_LINES } from '../lib/highlight';
 import { rpc } from '../lib/rpc';
 import { openFile, toast } from '../lib/store';
 import { copyText } from './ui/bits';
@@ -13,46 +13,75 @@ export function resolvePath(p: string, cwd?: string) {
   return base ? `${base}/${p.replace(/^\.\//, '')}` : p;
 }
 
-/** One top-level block. Finished blocks never re-render, so their DOM (and the reader's selection) survives streaming. */
-const Block = memo(
-  function Block({ raw, open, baseDir }: { raw: string; open: boolean; baseDir?: string }) {
-    const html = useMemo(() => renderMarkdown(raw, { streaming: open, baseDir }), [raw, open, baseDir]);
-    return <div className="md-b" dangerouslySetInnerHTML={{ __html: html }} />;
-  },
-  (a, b) => a.raw === b.raw && a.open === b.open && a.baseDir === b.baseDir,
-);
+/**
+ * Swap a code block's plain text for its colour. A long one (lib/highlight linesToHtml) is first cut
+ * into the same blocks of plain lines, then coloured a block per frame, so no frame styles, lays out
+ * and paints all of it at once; it arrives gradually that way, so it goes without the fade-in.
+ */
+async function paintCode(pre: HTMLPreElement, code: string, html: string) {
+  const c = pre.querySelector('code');
+  if (!c) return;
+  const chunks = html.split(CHUNK_OPEN).slice(1);
+  if (!chunks.length) {
+    c.innerHTML = html;
+    pre.dataset.hl = '1';
+    return;
+  }
+  const lines = code.split('\n');
+  c.style.animation = 'none';
+  c.innerHTML = chunks.map((_, i) => `${CHUNK_OPEN}${escapeHtml(lines.slice(i * PAINT_LINES, (i + 1) * PAINT_LINES).join('\n'))}${i < chunks.length - 1 ? '\n' : ''}</span>`).join('');
+  for (let i = 0; i < chunks.length; i++) {
+    await new Promise(requestAnimationFrame);
+    if (!c.isConnected) return; // the block was drawn again meanwhile
+    c.children[i].outerHTML = CHUNK_OPEN + chunks[i];
+  }
+  pre.dataset.hl = '1';
+}
 
-export const Markdown = memo(function Markdown({ text, streaming = false, cwd, className = '', baseDir }: { text: string; streaming?: boolean; cwd?: string; className?: string; baseDir?: string }) {
+/**
+ * One top-level block. Finished blocks never re-render, so their DOM (and the reader's selection)
+ * survives streaming; while a reply streams, only the open block at the end renders, and only its
+ * own DOM is looked over afterwards.
+ */
+const Block = memo(function Block({ raw, open, baseDir }: { raw: string; open: boolean; baseDir?: string }) {
   const ref = useRef<HTMLDivElement>(null);
-  const blocks = useMemo(() => splitBlocks(text), [text]);
+  const html = useMemo(() => renderMarkdown(raw, { streaming: open, baseDir }), [raw, open, baseDir]);
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const pres = Array.from(el.querySelectorAll<HTMLPreElement>('pre.hl:not([data-hl])'));
+    const pres = el.querySelectorAll<HTMLPreElement>('pre.hl:not([data-hl])');
     pres.forEach((pre, i) => {
-      if (streaming && i === pres.length - 1 && !pre.closest('.md-b')?.nextElementSibling) return; // still being written
+      if (open && i === pres.length - 1) return; // still being written
       const code = pre.textContent || '';
       pre.dataset.hl = 'pending';
       highlightHtml(code, pre.dataset.lang || null).then((h) => {
-        if (h && pre.isConnected && pre.textContent === code) {
-          const c = pre.querySelector('code');
-          if (c) c.innerHTML = h;
-          pre.dataset.hl = '1';
-        }
+        if (h && pre.isConnected && pre.textContent === code) paintCode(pre, code, h);
       });
     });
-    el.querySelectorAll('code:not([data-pr])').forEach((c) => {
-      (c as HTMLElement).dataset.pr = '1';
+    el.querySelectorAll<HTMLElement>('code:not([data-pr])').forEach((c) => {
+      c.dataset.pr = '1';
       if (c.closest('pre')) return;
       const r = asPathRef(c.textContent || '');
       if (!r) return;
       c.classList.add('md-path');
-      (c as HTMLElement).dataset.path = r.path;
-      if (r.line) (c as HTMLElement).dataset.line = String(r.line);
-      (c as HTMLElement).title = 'Open in Files';
+      c.dataset.path = r.path;
+      if (r.line) c.dataset.line = String(r.line);
+      c.title = 'Open in Files';
     });
-  }, [blocks, streaming]);
+  }, [html, open]);
+
+  return <div ref={ref} className="md-b" dangerouslySetInnerHTML={{ __html: html }} />;
+});
+
+export const Markdown = memo(function Markdown({ text, streaming = false, cwd, className = '', baseDir }: { text: string; streaming?: boolean; cwd?: string; className?: string; baseDir?: string }) {
+  // The last split is kept so a growing text is lexed again only from its last block (lib/markdown).
+  const split = useRef<{ text: string; blocks: string[] }>({ text: '', blocks: [] });
+  const blocks = useMemo(() => {
+    const next = { text, blocks: extendBlocks(split.current, text) };
+    split.current = next;
+    return next.blocks;
+  }, [text]);
 
   const onClick = (e: React.MouseEvent) => {
     const t = e.target as HTMLElement;
@@ -83,7 +112,7 @@ export const Markdown = memo(function Markdown({ text, streaming = false, cwd, c
   };
 
   return (
-    <div ref={ref} className={`md ${className}${streaming ? ' streaming' : ''}`} onClick={onClick}>
+    <div className={`md ${className}${streaming ? ' streaming' : ''}`} onClick={onClick}>
       {blocks.map((b, i) => (
         <Block key={i} raw={b} open={streaming && i === blocks.length - 1} baseDir={baseDir} />
       ))}

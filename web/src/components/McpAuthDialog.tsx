@@ -20,8 +20,7 @@ interface AuthStart {
  */
 export function McpAuthDialog() {
   const spec = useStore((s) => s.dialogs.mcpAuth)!;
-  const rt = useStore((s) => s.rt[spec.sessionId]);
-  const status = rt?.mcp?.find((m) => m.name === spec.name)?.status;
+  const status = useStore((s) => s.rt[spec.sessionId]?.mcp?.find((m) => m.name === spec.name)?.status);
   const [start, setStart] = useState<AuthStart | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pasted, setPasted] = useState('');
@@ -58,7 +57,7 @@ export function McpAuthDialog() {
       }, 900);
       return () => clearTimeout(t);
     }
-  }, [status, start]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [status, start]); // eslint-disable-line react-hooks/exhaustive-deps -- reacts to the sign-in completing; close and the name are the same for the dialog's life
 
   const submitPasted = async () => {
     const url = pasted.trim();
@@ -124,7 +123,7 @@ export function McpAuthDialog() {
                 : 'When the provider sends you back, Claude Code finishes the sign-in. If the browser ends on a page it cannot open, paste that page’s address below.'}
             </div>
             <div className="mcp-auth-paste">
-              <input className="input mono" placeholder="http://localhost:…/callback?code=…" value={pasted} onChange={(e) => setPasted(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submitPasted()} />
+              <input aria-label="Address the browser ended on" className="input mono" placeholder="http://localhost:…/callback?code=…" value={pasted} onChange={(e) => setPasted(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submitPasted()} />
               <button className="btn sm" disabled={!pasted.trim() || busy} onClick={submitPasted}>
                 {busy ? <Spinner size={12} /> : <ClipboardPaste size={13} />} Use
               </button>

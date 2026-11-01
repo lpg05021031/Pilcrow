@@ -1,11 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { LoaderCircle, Copy, Check } from 'lucide-react';
 import type { SessionStatus } from '../../lib/types';
 import { tokens } from '../../lib/format';
 import { useExitGhost, useCountUp } from '../../lib/motion';
 
-/** The Pilcrow mark: an alignment pilcrow with a safelight core. */
-/** The pilcrow mark. `tight` crops to the ink so it sits in a row like any other icon. */
+/** The Pilcrow mark: an alignment pilcrow with a safelight core. `tight` crops to the ink so it sits in a row like any other icon. */
 export function Mark({ size = 20, className = '', tight = false }: { size?: number; className?: string; tight?: boolean }) {
   return (
     <svg className={`mark ${className}`} width={tight ? Math.round((size * 14) / 16) : size} height={size} viewBox={tight ? '4.5 4 14 16' : '0 0 24 24'} aria-hidden="true">
@@ -84,6 +83,22 @@ export function Seg<T extends string>({ value, options, onChange, size, classNam
           {o.label}
         </button>
       ))}
+    </div>
+  );
+}
+
+/**
+ * A labelled form row: the label names the control that takes the `id` it is handed (a <Select> also
+ * keeps its current value in its name). Rows with several controls name each one with aria-label.
+ */
+export function Field({ label, children, style }: { label: ReactNode; children: (id: string) => ReactNode; style?: CSSProperties }) {
+  const id = useId();
+  return (
+    <div className="field" style={style}>
+      <label htmlFor={id} id={`${id}-label`}>
+        {label}
+      </label>
+      {children(id)}
     </div>
   );
 }
@@ -188,10 +203,6 @@ export function Resizer({ onResize, side }: { onResize: (dx: number) => void; si
   );
 }
 
-export function Collapsible({ open, children }: { open: boolean; children: ReactNode }) {
-  return open ? <>{children}</> : null;
-}
-
 export function useNow(intervalMs = 1000, active = true) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -200,6 +211,58 @@ export function useNow(intervalMs = 1000, active = true) {
     return () => clearInterval(t);
   }, [intervalMs, active]);
   return now;
+}
+
+/** A keydown listener on the window while `active`, subscribed once; it always calls the latest `onKey`. */
+export function useWindowKey(onKey: (e: KeyboardEvent) => void, active = true) {
+  const latest = useRef(onKey);
+  useLayoutEffect(() => {
+    latest.current = onKey;
+  });
+  useEffect(() => {
+    if (!active) return;
+    const h = (e: KeyboardEvent) => latest.current(e);
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [active]);
+}
+
+// Esc closes the innermost layer only: a menu over a dialog, the dialog over the window. Each open
+// layer (dialog, popover, lightbox) is on this stack; one capture listener serves the top of it.
+const layers: { current: () => void }[] = [];
+function onEscapeKey(e: KeyboardEvent) {
+  const top = layers[layers.length - 1];
+  if (e.key !== 'Escape' || !top) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  top.current();
+}
+
+/** Close this layer with Esc while `active`, before anything under it hears the key. */
+export function useEscape(onEscape: () => void, active = true) {
+  const latest = useRef(onEscape);
+  useLayoutEffect(() => {
+    latest.current = onEscape;
+  });
+  useEffect(() => {
+    if (!active) return;
+    if (!layers.length) window.addEventListener('keydown', onEscapeKey, true);
+    layers.push(latest);
+    return () => {
+      layers.splice(layers.indexOf(latest), 1);
+      if (!layers.length) window.removeEventListener('keydown', onEscapeKey, true);
+    };
+  }, [active]);
+}
+
+/** Keyboard activation for a card that is a role="button": Enter or Space on the card itself, not on a control inside it. */
+export function onActivate(run: () => void) {
+  return (e: React.KeyboardEvent) => {
+    if ((e.key !== 'Enter' && e.key !== ' ') || e.target !== e.currentTarget) return;
+    e.preventDefault();
+    e.stopPropagation();
+    run();
+  };
 }
 
 /** Focus an element unless the user is busy elsewhere (a dialog, the palette, another text field). */
@@ -240,7 +303,7 @@ export function CopyButton({ text, title = 'Copy', size = 13 }: { text: string; 
   return (
     <button
       className={`icon-btn sm copy-btn${done ? ' done' : ''}`}
-      title={done ? 'Copied' : title}
+      title={done ? 'Copied' : title} aria-label={done ? 'Copied' : title}
       onClick={() =>
         copyText(text).then(
           () => {

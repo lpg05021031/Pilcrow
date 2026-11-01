@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { History, ArrowUpRight } from 'lucide-react';
 import { useStore, call, openSession, setUi } from '../lib/store';
 import type { FileTouch } from '../lib/types';
@@ -42,7 +42,7 @@ export function useFileHistory(cwd: string): HistoryMap | null {
  */
 export function FileTouches({ touches, compact = false }: { touches: FileTouch[] | undefined; compact?: boolean }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLButtonElement>(null);
+  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
   const now = useNow(30_000, open);
   const activeId = useStore((s) => s.activeId);
   if (!touches?.length) return null;
@@ -68,9 +68,9 @@ export function FileTouches({ touches, compact = false }: { touches: FileTouch[]
   return (
     <>
       <button
-        ref={ref}
+        ref={setAnchor}
         className={`touches${open ? ' on' : ''}`}
-        title={`Changed in ${plural(n, 'session')}`}
+        title={`Changed in ${plural(n, 'session')}`} aria-label={`Changed in ${plural(n, 'session')}`}
         onClick={(e) => {
           e.stopPropagation();
           setOpen(!open);
@@ -79,7 +79,7 @@ export function FileTouches({ touches, compact = false }: { touches: FileTouch[]
         <History size={11} />
         <span className="tnum">{n}</span>
       </button>
-      <Popover anchor={ref.current} open={open} onClose={() => setOpen(false)} placement="bottom-end" width={360}>
+      <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} placement="bottom-end" width={360} role="dialog" label="Sessions that changed this file">
         <div className="touches-pop">
           <div className="touches-h">Changed in {plural(n, 'session')}</div>
           {[...sessions.entries()].map(([id, ts]) => {

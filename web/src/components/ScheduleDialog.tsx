@@ -1,12 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CalendarClock, Folder, ChevronDown, FilePen, ShieldOff, Map as MapIcon, ShieldCheck, Check } from 'lucide-react';
-import { useStore, call, toast } from '../lib/store';
+import { useStore, call, toast, setDialog } from '../lib/store';
 import type { Cadence, Schedule, PermissionMode } from '../lib/types';
 import { basename, tildify } from '../lib/format';
 import { Dialog } from './ui/Dialog';
 import { Popover } from './ui/Popover';
 import { Select } from './ui/Select';
-import { Switch } from './ui/bits';
+import { Switch, Field } from './ui/bits';
 import { FolderPicker } from './FolderPicker';
 import { ModelSelect } from './ModelSelect';
 import type { LucideIcon } from 'lucide-react';
@@ -33,7 +33,7 @@ export function ScheduleDialog({ spec, schedule }: { spec: { id?: string; cwd?: 
   const config = useStore((s) => s.config);
   const info = useStore((s) => s.info);
   const sessions = useStore((s) => s.sessions);
-  const close = () => useStore.setState({ scheduleDialog: null });
+  const close = () => setDialog('schedule', null);
   const playbooks = useStore((s) => s.playbooks);
   const [kind, setKind] = useState<'prompt' | 'dispatch'>(schedule?.kind || spec.kind || 'prompt');
   const [playbookId, setPlaybookId] = useState(schedule?.playbookId || spec.playbookId || '');
@@ -51,11 +51,11 @@ export function ScheduleDialog({ spec, schedule }: { spec: { id?: string; cwd?: 
   const [more, setMore] = useState(false);
   const [preview, setPreview] = useState<{ nextRunAt: number | null; label: string; error?: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  const folderBtn = useRef<HTMLButtonElement>(null);
+  const [folderBtn, setFolderBtn] = useState<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     let alive = true;
-    const t = setTimeout(() => call<{ nextRunAt: number | null; label: string; error?: string }>('schedules.preview', { cadence }, { quiet: true }).then((r) => alive && setPreview(r)).catch(() => {}), 150);
+    const t = setTimeout(() => call<{ nextRunAt: number | null; label: string; error?: string }>('schedules.preview', { cadence }, { quiet: true }).then((r) => alive && setPreview(r), () => {}), 150); // the preview line waits for a cadence it understands
     return () => {
       alive = false;
       clearTimeout(t);
@@ -105,65 +105,70 @@ export function ScheduleDialog({ spec, schedule }: { spec: { id?: string; cwd?: 
         <div className="field">
           <label>What runs</label>
           <div className="sd-when">
-            <Select<'prompt' | 'dispatch'> value={kind} onChange={setKind} options={[{ value: 'prompt', label: 'A prompt in a folder', hint: 'One session, in one folder' }, { value: 'dispatch', label: 'A dispatch playbook', hint: "One job across the playbook's repositories" }]} width={260} />
-            {kind === 'dispatch' && <Select value={playbook?.id || ''} onChange={setPlaybookId} options={playbooks.length ? playbooks.map((p) => ({ value: p.id, label: p.name, hint: `${p.targets.length} repositories` })) : [{ value: '', label: 'No playbooks yet — save one from a job' }]} width={300} />}
+            <Select<'prompt' | 'dispatch'> label="What runs" value={kind} onChange={setKind} options={[{ value: 'prompt', label: 'A prompt in a folder', hint: 'One session, in one folder' }, { value: 'dispatch', label: 'A dispatch playbook', hint: "One job across the playbook's repositories" }]} width={260} />
+            {kind === 'dispatch' && <Select label="Playbook" value={playbook?.id || ''} onChange={setPlaybookId} options={playbooks.length ? playbooks.map((p) => ({ value: p.id, label: p.name, hint: `${p.targets.length} repositories` })) : [{ value: '', label: 'No playbooks yet — save one from a job' }]} width={300} />}
           </div>
           {kind === 'dispatch' && <div className="hint">The playbook's brief, repositories and settings are used as saved. Nobody is there to answer, so permissions are declined and there is no canary; the report lands in the inbox.</div>}
         </div>
         <div className="ns-two">
-          <div className="field">
-            <label>Name</label>
-            <input className="input" autoFocus value={name} placeholder="Nightly dependency audit" onChange={(e) => setName(e.target.value)} />
-          </div>
-          <div className="field" style={kind === 'dispatch' ? { display: 'none' } : undefined}>
-            <label>Folder</label>
-            <button ref={folderBtn} className={`ns-folder sd-folder${picking ? ' on' : ''}`} onClick={() => setPicking(!picking)} title={tildify(cwd, info?.home)}>
-              <Folder size={14} className="ns-folder-ico" />
-              <span className="ellipsis grow" style={{ textAlign: 'left' }}>
-                {basename(cwd) || 'Pick a folder'}
-              </span>
-              <ChevronDown size={13} className="faint" />
-            </button>
-            <Popover anchor={folderBtn.current} open={picking} onClose={() => setPicking(false)} placement="bottom-start" width={380}>
-              <FolderPicker
-                value={cwd}
-                onPick={(d) => {
-                  setCwd(d);
-                  setPicking(false);
-                }}
-              />
-            </Popover>
-          </div>
+          <Field label="Name">
+            {(id) => <input id={id} className="input" autoFocus value={name} placeholder="Nightly dependency audit" onChange={(e) => setName(e.target.value)} />}
+          </Field>
+          <Field label="Folder" style={kind === 'dispatch' ? { display: 'none' } : undefined}>
+            {(id) => (
+              <>
+                <button id={id} ref={setFolderBtn} className={`ns-folder sd-folder${picking ? ' on' : ''}`} onClick={() => setPicking(!picking)} title={tildify(cwd, info?.home)}>
+                  <Folder size={14} className="ns-folder-ico" />
+                  <span className="ellipsis grow" style={{ textAlign: 'left' }}>
+                    {basename(cwd) || 'Pick a folder'}
+                  </span>
+                  <ChevronDown size={13} className="faint" />
+                </button>
+                <Popover anchor={folderBtn} open={picking} onClose={() => setPicking(false)} placement="bottom-start" width={380} role="dialog" label="Choose a folder">
+                  <FolderPicker
+                    value={cwd}
+                    onPick={(d) => {
+                      setCwd(d);
+                      setPicking(false);
+                    }}
+                  />
+                </Popover>
+              </>
+            )}
+          </Field>
         </div>
 
         {kind !== 'dispatch' && (
-          <div className="field">
-            <label>What Claude does each time</label>
-            <textarea className="textarea ns-prompt" rows={4} value={prompt} placeholder="Run the test suite, fix any failing tests you can, and summarise what changed. Do not push." onChange={(e) => setPrompt(e.target.value)} />
-            <div className="hint">Nobody is there to answer questions during a run, so say what to assume and what to leave alone.</div>
-          </div>
+          <Field label="What Claude does each time">
+            {(id) => (
+              <>
+                <textarea id={id} className="textarea ns-prompt" rows={4} value={prompt} placeholder="Run the test suite, fix any failing tests you can, and summarise what changed. Do not push." onChange={(e) => setPrompt(e.target.value)} />
+                <div className="hint">Nobody is there to answer questions during a run, so say what to assume and what to leave alone.</div>
+              </>
+            )}
+          </Field>
         )}
 
         <div className="field">
           <label>When</label>
           <div className="sd-when">
-            <Select value={cadence.kind} onChange={(kind) => setCadence({ ...cadence, kind })} options={KINDS} width={240} />
-            {cadence.kind === 'weekly' && <Select value={String(cadence.weekday ?? 1)} onChange={(d) => setCadence({ ...cadence, weekday: Number(d) })} options={DAYS.map((d, i) => ({ value: String(i), label: d }))} width={170} />}
+            <Select label="When" value={cadence.kind} onChange={(kind) => setCadence({ ...cadence, kind })} options={KINDS} width={240} />
+            {cadence.kind === 'weekly' && <Select label="Day of the week" value={String(cadence.weekday ?? 1)} onChange={(d) => setCadence({ ...cadence, weekday: Number(d) })} options={DAYS.map((d, i) => ({ value: String(i), label: d }))} width={170} />}
             {cadence.kind === 'interval' && (
               <label className="sd-inline">
                 every
-                <input className="input sd-num" type="number" min={2} max={48} value={cadence.everyHours || 6} onChange={(e) => setCadence({ ...cadence, everyHours: Math.max(2, Math.min(48, Number(e.target.value) || 6)) })} />
+                <input aria-label="Every how many hours" className="input sd-num" type="number" min={2} max={48} value={cadence.everyHours || 6} onChange={(e) => setCadence({ ...cadence, everyHours: Math.max(2, Math.min(48, Number(e.target.value) || 6)) })} />
                 hours, from
               </label>
             )}
             {cadence.kind === 'hourly' && <span className="sd-inline">at minute</span>}
             {cadence.kind !== 'cron' && cadence.kind !== 'hourly' && <span className="sd-inline">at</span>}
             {cadence.kind === 'hourly' ? (
-              <input className="input sd-num" type="number" min={0} max={59} value={Number(time.split(':')[1]) || 0} onChange={(e) => setCadence({ ...cadence, time: `00:${String(Math.max(0, Math.min(59, Number(e.target.value) || 0))).padStart(2, '0')}` })} />
+              <input aria-label="Minute of the hour" className="input sd-num" type="number" min={0} max={59} value={Number(time.split(':')[1]) || 0} onChange={(e) => setCadence({ ...cadence, time: `00:${String(Math.max(0, Math.min(59, Number(e.target.value) || 0))).padStart(2, '0')}` })} />
             ) : cadence.kind === 'cron' ? (
-              <input className="input mono sd-cron" value={cadence.cron || ''} placeholder="0 9 * * 1-5" onChange={(e) => setCadence({ ...cadence, cron: e.target.value })} spellCheck={false} />
+              <input aria-label="Cron expression" className="input mono sd-cron" value={cadence.cron || ''} placeholder="0 9 * * 1-5" onChange={(e) => setCadence({ ...cadence, cron: e.target.value })} spellCheck={false} />
             ) : (
-              <input className="input sd-time" type="time" value={time} onChange={(e) => setCadence({ ...cadence, time: e.target.value || '09:00' })} />
+              <input aria-label="Time of day" className="input sd-time" type="time" value={time} onChange={(e) => setCadence({ ...cadence, time: e.target.value || '09:00' })} />
             )}
           </div>
         </div>
@@ -199,14 +204,13 @@ export function ScheduleDialog({ spec, schedule }: { spec: { id?: string; cwd?: 
         {kind !== 'dispatch' && more && (
           <div className="sd-more">
             <div className="ns-two">
-              <div className="field">
-                <label>Model</label>
-                <ModelSelect value={model} onChange={(v) => setModel(v)} />
-              </div>
+              <Field label="Model">
+                {(id) => <ModelSelect id={id} value={model} onChange={(v) => setModel(v)} />}
+              </Field>
               <div className="field">
                 <label>Stop after</label>
                 <label className="sd-inline">
-                  <input className="input sd-num" type="number" min={1} max={240} value={maxMinutes} onChange={(e) => setMaxMinutes(Math.max(1, Math.min(240, Number(e.target.value) || 45)))} /> minutes
+                  <input aria-label="Stop after how many minutes" className="input sd-num" type="number" min={1} max={240} value={maxMinutes} onChange={(e) => setMaxMinutes(Math.max(1, Math.min(240, Number(e.target.value) || 45)))} /> minutes
                 </label>
               </div>
             </div>

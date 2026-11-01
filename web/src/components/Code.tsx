@@ -1,9 +1,9 @@
 import { Fragment, memo, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { diffWordsWithSpace } from 'diff';
 import { MessageSquarePlus, Trash, Check } from 'lucide-react';
-import { highlightTokens, cachedTokens, type Tok } from '../lib/highlight';
+import { highlightTokens, cachedTokens, PAINT_LINES, type Tok } from '../lib/highlight';
 import { parseAnsi } from '../lib/ansi';
-import { langFromPath } from '../lib/format';
+import { langFromPath, plural } from '../lib/format';
 import type { DiffHunk, DiffLine } from '../lib/types';
 
 type Range = [number, number];
@@ -45,11 +45,10 @@ function renderContent(text: string, toks?: Tok[] | null, ranges?: Range[] | nul
   return out.length ? out : '\u200b';
 }
 
-/** Token lines for a text, filled in once highlighting finishes. */
-export function useTokens(text: string, lang: string | null, enabled = true) {
-  const [toks, setToks] = useState<Tok[][] | null>(() => (enabled ? cachedTokens(text, lang) : null));
+/** Token lines for a text, filled in once highlighting finishes (never, past MAX_HIGHLIGHT in lib/highlight). */
+export function useTokens(text: string, lang: string | null) {
+  const [toks, setToks] = useState<Tok[][] | null>(() => cachedTokens(text, lang));
   useEffect(() => {
-    if (!enabled) return;
     let alive = true;
     const hit = cachedTokens(text, lang);
     if (hit) setToks(hit);
@@ -60,7 +59,7 @@ export function useTokens(text: string, lang: string | null, enabled = true) {
     return () => {
       alive = false;
     };
-  }, [text, lang, enabled]);
+  }, [text, lang]);
   return toks;
 }
 
@@ -75,15 +74,21 @@ export const CodeView = memo(function CodeView({ text, path, lang, startLine = 1
     return l;
   }, [text]);
   const shown = all ? lines : lines.slice(0, maxLines);
-  const toks = useTokens(text, language, lines.length < 20000);
+  const toks = useTokens(text, language);
+  // Colour goes on PAINT_LINES lines per frame (as in Markdown's paintCode): all of a long file's at
+  // once, after "Show all", was a 240 ms frame for 1,300 lines here. Coloured that way it arrives
+  // gradually, so a long grid goes without the fade-in.
+  const [painted, setPainted] = useState(PAINT_LINES);
+  useEffect(() => {
+    if (!toks || painted >= shown.length) return;
+    const t = requestAnimationFrame(() => setPainted((p) => p + PAINT_LINES));
+    return () => cancelAnimationFrame(t);
+  }, [toks, painted, shown.length]);
   return (
     <div className={`code-view${wrap ? ' wrap' : ''}${lines.length > shown.length ? ' clipped' : ''}`}>
-      <div className="code-grid" data-hl={toks ? '1' : '0'}>
+      <div className="code-grid" data-hl={toks ? (shown.length > PAINT_LINES ? 'sliced' : '1') : '0'}>
         {shown.map((l, i) => (
-          <Fragment key={i}>
-            <span className={`ln${highlightLine === startLine + i ? ' hit' : ''}`}>{startLine + i}</span>
-            <span className={`hl-line${highlightLine === startLine + i ? ' hit' : ''}`}>{renderContent(l, toks?.[i])}</span>
-          </Fragment>
+          <CodeLine key={i} n={startLine + i} text={l} toks={i < painted ? toks?.[i] : null} hit={highlightLine === startLine + i} />
         ))}
       </div>
       {lines.length > shown.length && (
@@ -92,6 +97,16 @@ export const CodeView = memo(function CodeView({ text, path, lang, startLine = 1
         </button>
       )}
     </div>
+  );
+});
+
+/** One numbered line; unchanged lines are skipped while the colour spreads down the grid. */
+const CodeLine = memo(function CodeLine({ n, text, toks, hit }: { n: number; text: string; toks?: Tok[] | null; hit: boolean }) {
+  return (
+    <>
+      <span className={`ln${hit ? ' hit' : ''}`}>{n}</span>
+      <span className={`hl-line${hit ? ' hit' : ''}`}>{renderContent(text, toks)}</span>
+    </>
   );
 });
 
@@ -284,10 +299,10 @@ export const DiffView = memo(function DiffView({
         ) : (
           <div className="diff-comment">
             <span className="grow">{existing}</span>
-            <button className="icon-btn sm" title="Edit comment" onClick={() => setEditing(key)}>
+            <button className="icon-btn sm" title="Edit comment" aria-label="Edit comment" onClick={() => setEditing(key)}>
               <MessageSquarePlus size={13} />
             </button>
-            <button className="icon-btn sm" title="Delete comment" onClick={() => onComment?.(key, null, l)}>
+            <button className="icon-btn sm" title="Delete comment" aria-label="Delete comment" onClick={() => onComment?.(key, null, l)}>
               <Trash size={13} />
             </button>
           </div>
@@ -298,7 +313,7 @@ export const DiffView = memo(function DiffView({
 
   const gutterBtn = (l: DiffLine) =>
     onComment ? (
-      <button className="diff-add-comment" title="Comment on this line" onClick={() => setEditing(keyOf(l))}>
+      <button className="diff-add-comment" title="Comment on this line" aria-label="Comment on this line" onClick={() => setEditing(keyOf(l))}>
         <MessageSquarePlus size={12} />
       </button>
     ) : null;
@@ -314,7 +329,7 @@ export const DiffView = memo(function DiffView({
             return (
               <div key={i} className="diff-hunk" style={{ gridColumn: '1 / -1' }}>
                 <span className="diff-hunk-dots">⋯</span>
-                <span>{gap > 0 ? `${gap} unchanged line${gap > 1 ? 's' : ''}` : ''}</span>
+                <span>{gap > 0 ? plural(gap, 'unchanged line') : ''}</span>
                 {h.header && <span className="diff-hunk-ctx mono ellipsis">{h.header}</span>}
               </div>
             );
@@ -375,7 +390,7 @@ function CommentEditor({ initial, onSave, onCancel }: { initial: string; onSave:
   const [text, setText] = useState(initial);
   return (
     <div className="comment-editor">
-      <textarea
+      <textarea aria-label="Note for Claude about this line"
         className="textarea"
         autoFocus
         rows={2}

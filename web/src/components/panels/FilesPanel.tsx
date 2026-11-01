@@ -1,14 +1,14 @@
-import { useCallback, useEffect, useRef, useState, createContext, useContext } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, createContext, useContext } from 'react';
 import { ChevronRight, File as FileIcon, Folder, FolderOpen, RefreshCw, X, Save, PanelLeft, Eye, EyeOff, ExternalLink, AtSign, BookOpen, PencilLine, Columns2, RotateCw } from 'lucide-react';
-import { useStore, call, toast, confirmAction, insertIntoComposer, bumpFs } from '../../lib/store';
+import { useStore, call, toast, confirmAction, insertIntoComposer, bumpFs, toasted } from '../../lib/store';
 import { FileTouches, useFileHistory } from '../FileTouches';
 import { Markdown } from '../Markdown';
 import type { FileTouch, SessionSummary } from '../../lib/types';
 import { basename, bytes, relPath, dirname } from '../../lib/format';
-import { Editor } from './Editor';
 import { Spinner, Seg } from '../ui/bits';
 import type { FileRead, FileWrite } from '../../lib/types';
 import { errText } from '../../lib/format';
+import { Empty, Loading } from '../ui/Empty';
 
 interface Entry {
   name: string;
@@ -41,12 +41,15 @@ interface FilesState {
   showHidden: boolean;
 }
 
+// CodeMirror is most of a megabyte and only an open file needs it: it loads with the first one.
+const Editor = lazy(() => import('./Editor').then((m) => ({ default: m.Editor })));
+
 const perCwd = new Map<string, FilesState>();
 const dirCache = new Map<string, Entry[]>();
 
 const HistoryCtx = createContext<{ cwd: string; map: Record<string, FileTouch[]> | null }>({ cwd: '', map: null });
 
-export function FilesPanel({ session, cwd }: { session: SessionSummary; cwd: string }) {
+export function FilesPanel({ session, cwd, visible }: { session: SessionSummary; cwd: string; visible: boolean }) {
   const fileOpen = useStore((s) => s.fileOpen);
   const history = useFileHistory(cwd);
   const rev = useStore((s) => s.rt[session.id]?.rev || 0);
@@ -74,18 +77,20 @@ export function FilesPanel({ session, cwd }: { session: SessionSummary; cwd: str
         update((s) => ({ ...s, tabs: s.tabs.map((t) => (t.path === path ? { ...t, loading: false, error: errText(e) } : t)) }));
       }
     },
-    [cwd], // eslint-disable-line react-hooks/exhaustive-deps
+    [cwd], // eslint-disable-line react-hooks/exhaustive-deps -- update() is a fresh closure each render over the same perCwd entry
   );
 
   useEffect(() => {
     if (fileOpen) openTab(fileOpen.path, fileOpen.line);
-  }, [fileOpen?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fileOpen?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps -- each request to open a file (a new nonce) opens it once
 
-  // Pick up edits Claude makes to open files (only when there are no unsaved local edits).
-  const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Pick up edits Claude makes to open files (only when there are no unsaved local edits). The tab
+  // stays mounted when another one is chosen; hidden, it does nothing, and catches up once when shown.
+  const checkedRev = useRef(-1);
   useEffect(() => {
-    if (reloadTimer.current) clearTimeout(reloadTimer.current);
-    reloadTimer.current = setTimeout(async () => {
+    if (!visible || checkedRev.current === rev) return;
+    const timer = setTimeout(async () => {
+      checkedRev.current = rev;
       const cur = perCwd.get(cwd);
       if (!cur) return;
       for (const t of cur.tabs) {
@@ -100,7 +105,8 @@ export function FilesPanel({ session, cwd }: { session: SessionSummary; cwd: str
       }
       setTreeNonce((n) => n + 1);
     }, 900);
-  }, [rev, cwd]); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => clearTimeout(timer);
+  }, [rev, cwd, visible]); // eslint-disable-line react-hooks/exhaustive-deps -- update() is a fresh closure each render over the same perCwd entry
 
   const active = st.tabs.find((t) => t.path === st.active) || null;
 
@@ -135,14 +141,14 @@ export function FilesPanel({ session, cwd }: { session: SessionSummary; cwd: str
   return (
     <div className="files">
       <div className="panel-toolbar">
-        <button className={`icon-btn sm${st.showTree ? ' active' : ''}`} title="Toggle file tree" onClick={() => update((s) => ({ ...s, showTree: !s.showTree }))}>
+        <button className={`icon-btn sm${st.showTree ? ' active' : ''}`} title="Toggle file tree" aria-label="Toggle file tree" onClick={() => update((s) => ({ ...s, showTree: !s.showTree }))}>
           <PanelLeft size={14} />
         </button>
         <span className="mono faint ellipsis grow" title={cwd}>
           {active ? relPath(active.path, cwd) : basename(cwd)}
         </span>
         {active && (
-          <button className="icon-btn sm" title="Mention this file in the message" onClick={() => insertIntoComposer(session.id, `@${relPath(active.path, cwd)} `)}>
+          <button className="icon-btn sm" title="Mention this file in the message" aria-label="Mention this file in the message" onClick={() => insertIntoComposer(session.id, `@${relPath(active.path, cwd)} `)}>
             <AtSign size={13} />
           </button>
         )}
@@ -161,16 +167,16 @@ export function FilesPanel({ session, cwd }: { session: SessionSummary; cwd: str
           />
         )}
         {active && !active.binary && (
-          <button className="icon-btn sm" title="Save (Ctrl+S)" disabled={active.doc === active.saved} onClick={() => save(active)}>
+          <button className="icon-btn sm" title="Save (Ctrl+S)" aria-label="Save" disabled={active.doc === active.saved} onClick={() => save(active)}>
             <Save size={14} />
           </button>
         )}
-        <button className="icon-btn sm" title={st.showHidden ? 'Hide dotfiles' : 'Show dotfiles'} onClick={() => update((s) => ({ ...s, showHidden: !s.showHidden }))}>
+        <button className="icon-btn sm" title={st.showHidden ? 'Hide dotfiles' : 'Show dotfiles'} aria-label={st.showHidden ? 'Hide dotfiles' : 'Show dotfiles'} onClick={() => update((s) => ({ ...s, showHidden: !s.showHidden }))}>
           {st.showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
         </button>
         <button
           className="icon-btn sm"
-          title="Refresh"
+          title="Refresh" aria-label="Refresh"
           onClick={() => {
             dirCache.clear();
             setTreeNonce((n) => n + 1);
@@ -205,38 +211,39 @@ export function FilesPanel({ session, cwd }: { session: SessionSummary; cwd: str
           )}
           {active ? (
             active.loading ? (
-              <div className="empty">
-                <Spinner /> Opening…
-              </div>
+              <Loading label="Opening…" />
             ) : active.error ? (
-              <div className="empty">{active.error}</div>
+              <Empty title={active.error} />
             ) : active.dataUrl ? (
               <div className="img-preview">
                 <img src={active.dataUrl} alt={basename(active.path)} />
                 <div className="faint">{bytes(active.size || 0)}</div>
               </div>
             ) : active.binary || active.tooLarge ? (
-              <div className="empty">
-                <div>{active.tooLarge ? 'This file is too large to open here' : 'Binary file'} · {bytes(active.size || 0)}</div>
-                <button className="btn sm" onClick={() => call('shell.openPath', { path: active.path })}>
+              <Empty title={`${active.tooLarge ? 'This file is too large to open here' : 'Binary file'} · ${bytes(active.size || 0)}`}>
+                <button className="btn sm" onClick={() => call('shell.openPath', { path: active.path }).catch(toasted)}>
                   <ExternalLink size={13} /> Open with system app
                 </button>
-              </div>
+              </Empty>
             ) : (
               <div className={`doc-area${isDoc(active.path) ? ` ${docView(active)}` : ' edit'}`}>
                 {(!isDoc(active.path) || docView(active) !== 'preview') && (
-                  <Editor
-                    key={active.path}
-                    path={active.path}
-                    doc={active.doc === active.saved ? active.saved : active.doc}
-                    line={line.line}
-                    nonce={line.nonce}
-                    onChange={(text) => update((s) => ({ ...s, tabs: s.tabs.map((t) => (t.path === active.path ? { ...t, doc: text } : t)) }))}
-                    onSave={() => {
-                      const cur = perCwd.get(cwd)?.tabs.find((t) => t.path === active.path);
-                      if (cur) save(cur);
-                    }}
-                  />
+                  <Suspense
+                    fallback={<Loading label="Opening…" />}
+                  >
+                    <Editor
+                      key={active.path}
+                      path={active.path}
+                      doc={active.doc === active.saved ? active.saved : active.doc}
+                      line={line.line}
+                      nonce={line.nonce}
+                      onChange={(text) => update((s) => ({ ...s, tabs: s.tabs.map((t) => (t.path === active.path ? { ...t, doc: text } : t)) }))}
+                      onSave={() => {
+                        const cur = perCwd.get(cwd)?.tabs.find((t) => t.path === active.path);
+                        if (cur) save(cur);
+                      }}
+                    />
+                  </Suspense>
                 )}
                 {docKind(active.path) === 'md' && docView(active) !== 'edit' && (
                   <div className="doc-preview" key={`p-${active.path}`}>
@@ -247,11 +254,7 @@ export function FilesPanel({ session, cwd }: { session: SessionSummary; cwd: str
               </div>
             )
           ) : (
-            <div className="empty">
-              <FileIcon size={22} />
-              <div>Pick a file to view or edit it.</div>
-              <div className="hint">File paths in Claude's replies open here too.</div>
-            </div>
+            <Empty icon={FileIcon} title="Pick a file to view or edit it." hint="File paths in Claude's replies open here too." />
           )}
         </div>
       </div>
@@ -360,10 +363,10 @@ function HtmlPreview({ path, saved, dirty, onSave }: { path: string; saved: stri
             <Save size={11} /> Save to refresh
           </button>
         )}
-        <button className="icon-btn sm" title="Reload" onClick={() => setNonce((n) => n + 1)}>
+        <button className="icon-btn sm" title="Reload" aria-label="Reload" onClick={() => setNonce((n) => n + 1)}>
           <RotateCw size={12} />
         </button>
-        <button className="icon-btn sm" title="Open in your browser" onClick={() => call('shell.openPath', { path })}>
+        <button className="icon-btn sm" title="Open in your browser" aria-label="Open in your browser" onClick={() => call('shell.openPath', { path })}>
           <ExternalLink size={12} />
         </button>
       </div>

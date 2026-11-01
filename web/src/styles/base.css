@@ -99,6 +99,16 @@ svg {
   outline-offset: 2px;
   border-radius: var(--r-1);
 }
+/* A field drawn borderless inside a row of its own hides its outline; the row carries the focus. */
+.pal-input:focus-within,
+.findbar:focus-within,
+.ask-other:focus-within,
+.fpick-search:focus-within,
+.side-search:focus-within,
+.history:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: -2px;
+}
 
 /* Scrollbars: a slim overlay-style thumb with no track, no arrows, that darkens on hover.
    Only the -webkit- rules are used: once `scrollbar-color` is set, Chromium ignores them and falls
@@ -116,7 +126,7 @@ svg {
   background: var(--fill-3);
   border: 3px solid transparent;
   background-clip: padding-box;
-  border-radius: 10px;
+  border-radius: var(--r-3);
 }
 ::-webkit-scrollbar-thumb:hover {
   background-color: var(--hair-3);
@@ -150,11 +160,11 @@ kbd {
   height: 18px;
   padding: 0 5px;
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--fs-micro);
   font-weight: 500;
-  color: var(--text-3);
+  color: var(--text-2);
   border-radius: var(--r-1);
-  background: var(--fill-2);
+  background: var(--fill-1);
   box-shadow: inset 0 -1px 0 var(--hair);
 }
 
@@ -198,21 +208,17 @@ kbd {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: var(--sp-1_5);
   height: 30px;
-  padding: 0 12px;
+  padding: 0 var(--sp-3);
   border-radius: var(--r-2);
   background: var(--fill-2);
   color: var(--text);
   font-weight: 500;
   white-space: nowrap;
-  transition: background var(--t-fast), color var(--t-fast), box-shadow var(--t-fast), transform var(--t-fast) var(--ease), opacity var(--t-fast);
 }
 .btn:hover {
   background: var(--fill-3);
-}
-.btn:active:not(:disabled) {
-  transform: scale(0.98);
 }
 .btn:disabled {
   opacity: 0.45;
@@ -230,7 +236,7 @@ kbd {
 .btn.primary {
   background: var(--accent);
   color: var(--accent-ink);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 1px 2px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-solid);
 }
 .btn.primary:hover {
   background: var(--accent-2);
@@ -261,21 +267,21 @@ kbd {
 }
 .btn.danger.solid {
   background: var(--err);
-  color: #fff;
+  color: var(--accent-ink);
 }
 .btn.danger.solid:hover {
   filter: brightness(1.06);
 }
 .btn.sm {
   height: 26px;
-  padding: 0 10px;
+  padding: 0 var(--sp-2_5);
   font-size: var(--fs-small);
   border-radius: var(--r-2);
 }
 .btn.lg {
   height: 36px;
-  padding: 0 16px;
-  font-size: 13.5px;
+  padding: 0 var(--sp-4);
+  font-size: var(--fs-ui-plus);
   border-radius: var(--r-3);
 }
 
@@ -286,15 +292,11 @@ kbd {
   height: 28px;
   border-radius: var(--r-2);
   color: var(--text-3);
-  transition: background var(--t-fast), color var(--t-fast), transform var(--t-fast) var(--ease);
   flex: none;
 }
 .icon-btn:hover {
   background: var(--fill-2);
   color: var(--text);
-}
-.icon-btn:active {
-  transform: scale(0.94);
 }
 .icon-btn.active,
 .icon-btn[aria-expanded='true'] {
@@ -310,7 +312,7 @@ kbd {
 .link {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--sp-1);
   color: var(--text-2);
   font-size: inherit;
   transition: color var(--t-fast);
@@ -332,7 +334,6 @@ kbd {
   box-shadow: inset 0 0 0 1px var(--hair);
   color: var(--text);
   outline: none;
-  transition: box-shadow var(--t-fast), background var(--t-fast);
 }
 .input::placeholder,
 .textarea::placeholder {
@@ -355,7 +356,7 @@ kbd {
   box-shadow: inset 0 0 0 1px var(--hair-3), 0 0 0 3px var(--fill-1);
 }
 .input.mono {
-  font-size: 12.5px;
+  font-size: var(--fs-small-plus);
 }
 
 .field {
@@ -379,9 +380,8 @@ kbd {
   position: relative;
   width: 34px;
   height: 20px;
-  border-radius: 10px;
-  background: var(--fill-3);
-  transition: background var(--t-med) var(--ease);
+  border-radius: var(--r-3);
+  background: var(--switch-off);
   flex: none;
 }
 .switch::after {
@@ -392,9 +392,8 @@ kbd {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--accent-ink);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-  transition: transform var(--t-med) var(--spring);
 }
 /* On = lit amber track; the knob stays white in both states so "off" can never read as "on". */
 .switch.on {
@@ -403,18 +402,16 @@ kbd {
 .switch.on::after {
   transform: translateX(14px);
 }
-[data-theme='dark'] .switch:not(.on) {
-  background: #3a3a3e;
-}
+
 
 .badge {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--sp-1);
   height: 19px;
   padding: 0 7px;
-  border-radius: 999px;
-  font-size: 11px;
+  border-radius: var(--r-5);
+  font-size: var(--fs-micro);
   font-weight: 550;
   color: var(--text-2);
   background: var(--fill-2);
@@ -444,7 +441,7 @@ kbd {
 .num-add,
 .num-del {
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: var(--fs-micro-plus);
   font-variant-numeric: tabular-nums;
 }
 .num-add {
@@ -455,7 +452,7 @@ kbd {
 }
 .num-add.zero,
 .num-del.zero {
-  color: var(--text-4);
+  color: var(--text-3);
 }
 
 .spin {
@@ -489,20 +486,54 @@ kbd {
 .empty {
   display: grid;
   place-items: center;
-  gap: 8px;
-  padding: 44px 20px;
+  gap: var(--sp-2);
+  padding: 44px var(--sp-5);
   text-align: center;
   color: var(--text-3);
   line-height: 1.55;
 }
 
+/* Something on its way (ui/Empty Loading): faint lines with a slow sheen where rows will be. */
+.loading-rows {
+  display: grid;
+  gap: 22px;
+  padding: var(--sp-4) var(--sp-3_5);
+  animation: fade var(--t-med) var(--ease) 120ms both;
+}
+.sk-row {
+  display: grid;
+  gap: 9px;
+}
+.sk-row .sk {
+  height: 11px;
+}
+.sk {
+  height: 14px;
+  border-radius: 7px;
+  background: linear-gradient(90deg, var(--fill-1), var(--fill-2), var(--fill-1));
+  background-size: 200% 100%;
+  animation: sheen 1.4s linear infinite;
+}
+.sk.short {
+  width: 60%;
+}
+@keyframes sheen {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+/* Less motion, by request: everything lands at once. The delays go too, inline staggers included
+   (an !important here outranks a style attribute), or a list would still appear row by row. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
   *::after {
     animation-duration: 0.001ms !important;
+    animation-delay: 0s !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+    transition-delay: 0s !important;
   }
 }
 
@@ -510,8 +541,8 @@ kbd {
 .render-fault {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
   border-radius: var(--r-2);
   color: var(--err);
   background: var(--err-wash);
@@ -527,6 +558,6 @@ kbd {
 .render-fault-retry {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--sp-1);
   color: var(--text-2);
 }

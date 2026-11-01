@@ -64,7 +64,7 @@ export function Welcome() {
         {info?.claude.path && info.gateway && !info.gateway.error && !info.gateway.hasToken && !info.gateway.loggedIn && <SetupCard />}
         <div className="composer welcome-composer">
           <div className="composer-field">
-            <textarea
+            <textarea aria-label="First message"
               className="composer-input"
               rows={2}
               autoFocus
@@ -86,7 +86,7 @@ export function Welcome() {
               <ChevronDown size={12} className="cbtn-chev" />
             </button>
             <div className="grow" />
-            <button className={`send${prompt.trim() ? ' ready' : ''}`} disabled={!prompt.trim() || busy || !connected} onClick={go} title="Start (Enter)">
+            <button className={`send${prompt.trim() ? ' ready' : ''}`} disabled={!prompt.trim() || busy || !connected} onClick={go} title="Start (Enter)" aria-label="Start">
               {busy ? <Spinner size={14} /> : <ArrowUp size={16} strokeWidth={2.25} className="send-arrow" />}
             </button>
           </div>

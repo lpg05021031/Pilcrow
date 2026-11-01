@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Gauge, Plug, Cpu, FolderGit2, Copy, RefreshCw, ChevronRight, FolderOpen, Trash, Wrench, Globe, BookMarked, Sparkles } from 'lucide-react';
-import { useStore, call, toast, confirmAction, setDialog } from '../../lib/store';
+import { useStore, call, toast, confirmAction, setDialog, toasted } from '../../lib/store';
 import type { SessionSummary, MemoryNote } from '../../lib/types';
-import { tokens, cost, tildify } from '../../lib/format';
+import { tokens, cost, tildify, plural } from '../../lib/format';
 import { modelLabel, useGatewayModels } from '../../lib/models';
 import { contextLabel, copyText, Spinner, Num, RingGauge } from '../ui/bits';
-import { MODES } from '../Composer';
+import { MODES } from '../composer/Menus';
 import type { McpStatus } from '../../lib/types';
+import { useShallow } from 'zustand/react/shallow';
 
 interface Usage {
   categories: { name: string; tokens: number; color: string; kind: string }[];
@@ -16,7 +17,13 @@ interface Usage {
 }
 
 export function InfoPanel({ session, cwd }: { session: SessionSummary; cwd: string }) {
-  const rt = useStore((s) => s.rt[session.id]);
+  // The fields shown here, compared one by one: the runtime record itself is new on every streamed frame.
+  const rt = useStore(
+    useShallow((s) => {
+      const r = s.rt[session.id];
+      return { activeModel: r?.activeModel, model: r?.model, init: r?.init, usage: r?.usage, mcp: r?.mcp, mode: r?.mode, live: r?.live, models: r?.models, effort: r?.effort };
+    }),
+  );
   const gw = useGatewayModels();
   const modelId = rt?.activeModel || rt?.model || '';
   const info = useStore((s) => s.info);
@@ -139,7 +146,7 @@ export function InfoPanel({ session, cwd }: { session: SessionSummary; cwd: stri
           <span>Session ID</span>
           <span className="mono row">
             <span className="ellipsis">{session.id.slice(0, 13)}…</span>
-            <button className="icon-btn sm" onClick={() => copyText(session.id).then(() => toast('Copied', 'success'), () => toast('Could not copy to the clipboard', 'error'))} title="Copy session ID">
+            <button className="icon-btn sm" onClick={() => copyText(session.id).then(() => toast('Copied', 'success'), () => toast('Could not copy to the clipboard', 'error'))} title="Copy session ID" aria-label="Copy session ID">
               <Copy size={12} />
             </button>
           </span>
@@ -186,7 +193,7 @@ export function InfoPanel({ session, cwd }: { session: SessionSummary; cwd: stri
             Manage
           </button>
           {rt?.live && (
-            <button className="icon-btn sm" title="Refresh" onClick={refreshMcp}>
+            <button className="icon-btn sm" title="Refresh" aria-label="Refresh" onClick={refreshMcp}>
               {loading === 'mcp' ? <Spinner size={12} /> : <RefreshCw size={12} />}
             </button>
           )}
@@ -203,7 +210,7 @@ export function InfoPanel({ session, cwd }: { session: SessionSummary; cwd: stri
                     Sign in
                   </button>
                 ) : s.status === 'failed' ? (
-                  <button className="btn xs" onClick={() => call('session.mcp.reconnect', { id: session.id, name: s.name }).then(refreshMcp, () => {})}>
+                  <button className="btn xs" onClick={() => call('session.mcp.reconnect', { id: session.id, name: s.name }).then(refreshMcp, toasted)}>
                     Retry
                   </button>
                 ) : (
@@ -273,19 +280,20 @@ export function InfoPanel({ session, cwd }: { session: SessionSummary; cwd: stri
   );
 }
 
+// Two categories past the semantic colours borrow the terminal palette's, which has a value per theme.
 const CAT_COLORS: Record<string, string> = {
   'System prompt': 'var(--text-3)',
   'System tools': 'var(--info)',
   'MCP tools': 'var(--plan)',
   'Memory files': 'var(--ok)',
   Messages: 'var(--accent)',
-  'Custom agents': '#c9a2f2',
-  Skills: '#e6c08a',
+  'Custom agents': 'var(--ansi-magenta)',
+  Skills: 'var(--ansi-yellow)',
 };
 
 function catColor(c: { name: string; kind: string }) {
   if (c.kind === 'free') return 'transparent';
-  if (c.kind === 'buffer') return 'var(--line-2)';
+  if (c.kind === 'buffer') return 'var(--hair-2)';
   return CAT_COLORS[c.name] || 'var(--text-2)';
 }
 
@@ -308,7 +316,7 @@ function MemorySection({ session }: { session: SessionSummary }) {
     setBusy(true);
     try {
       const r = await call<{ added: MemoryNote[] }>('memory.distill', { id: session.id, force: true });
-      toast(r.added.length ? `Saved ${r.added.length} note${r.added.length > 1 ? 's' : ''} for ${session.project ? session.project.split('/').pop() : 'this folder'}` : 'Nothing new worth keeping yet', r.added.length ? 'success' : 'info');
+      toast(r.added.length ? `Saved ${plural(r.added.length, 'note')} for ${session.project ? session.project.split('/').pop() : 'this folder'}` : 'Nothing new worth keeping yet', r.added.length ? 'success' : 'info');
     } catch {
       /* toasted */
     } finally {
@@ -322,7 +330,7 @@ function MemorySection({ session }: { session: SessionSummary }) {
         <BookMarked size={14} /> Project memory
         <div className="grow" />
         <button className="link ps-link" onClick={() => setDialog('settings', 'memory')}>
-          {notes?.length ? `${notes.length} note${notes.length > 1 ? 's' : ''}` : 'Manage'}
+          {notes?.length ? plural(notes.length, 'note') : 'Manage'}
         </button>
       </div>
       {notes === null ? (

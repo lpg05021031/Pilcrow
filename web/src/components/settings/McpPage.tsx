@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Plus, Search, Plug, Globe, Terminal, RefreshCw, Ellipsis, Trash, KeyRound, LogOut, Power, Wrench, FileJson, CircleCheck, CircleAlert, CircleDashed, ShieldCheck, ShieldOff } from 'lucide-react';
-import { useStore, call, confirmAction, toast, setDialog } from '../../lib/store';
+import { useStore, call, confirmAction, toast, setDialog, toasted } from '../../lib/store';
 import type { McpConfigSummary, McpEntry, McpList, McpLive } from '../../lib/types';
 
 /** Claude Code reports a server's tools as a count or as the list itself, depending on version. */
@@ -9,7 +9,7 @@ import { tildify } from '../../lib/format';
 import { MenuButton } from '../ui/Popover';
 import { Dialog } from '../ui/Dialog';
 import { Select } from '../ui/Select';
-import { Spinner } from '../ui/bits';
+import { Spinner, Field } from '../ui/bits';
 import { errText } from '../../lib/format';
 
 type Scope = 'user' | 'project' | 'local';
@@ -60,6 +60,7 @@ export function McpPage() {
     setLoading(true);
     try {
       setData(await call<McpList>('mcp.list', { cwd }, { quiet: true }));
+      // The live status comes back as a pushed state; a session that cannot answer keeps its last one.
       if (sessionId && rt?.live) call('session.mcpStatus', { id: sessionId }, { quiet: true }).catch(() => {});
     } catch (e) {
       toast(errText(e) || 'Could not read the MCP configuration', 'error');
@@ -69,7 +70,7 @@ export function McpPage() {
   };
   useEffect(() => {
     load();
-  }, [cwd]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cwd]); // eslint-disable-line react-hooks/exhaustive-deps -- loads per folder; load() reads the session state of the moment
 
   const servers = useMemo(() => {
     const n = q.trim().toLowerCase();
@@ -99,7 +100,7 @@ export function McpPage() {
   };
   const toggle = async (name: string, enabled: boolean) => {
     if (!needsSession(enabled ? 'Enabling' : 'Disabling')) return;
-    await call('session.mcp.toggle', { id: sessionId, name, enabled }).catch(() => {});
+    await call('session.mcp.toggle', { id: sessionId, name, enabled }).catch(toasted);
   };
   const signIn = (name: string) => {
     if (!needsSession('Signing in')) return;
@@ -112,8 +113,7 @@ export function McpPage() {
       confirm: 'Sign out',
       onConfirm: async () => {
         if (!needsSession('Signing out')) return;
-        await call('session.mcp.clearAuth', { id: sessionId, name }).catch(() => {});
-        toast(`Signed out of ${name}`, 'success');
+        await call('session.mcp.clearAuth', { id: sessionId, name }).then(() => toast(`Signed out of ${name}`, 'success'), toasted);
       },
     });
   const remove = (s: McpEntry) =>
@@ -142,10 +142,10 @@ export function McpPage() {
       <div className="cust-bar">
         <label className="cust-search">
           <Search size={13} />
-          <input placeholder="Search servers" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input aria-label="Search servers" placeholder="Search servers" value={q} onChange={(e) => setQ(e.target.value)} />
         </label>
         <div className="grow" />
-        <button className="icon-btn sm" title="Refresh" onClick={load}>
+        <button className="icon-btn sm" title="Refresh" aria-label="Refresh" onClick={load}>
           {loading ? <Spinner size={13} /> : <RefreshCw size={13} />}
         </button>
         <button className="btn sm primary" onClick={() => setAdding(true)}>
@@ -219,6 +219,7 @@ export function McpPage() {
                 </span>
                 <MenuButton
                   className="icon-btn sm cust-more"
+                  title={`More for ${s.name}`}
                   placement="bottom-end"
                   items={[
                     ...(st?.status === 'connected' ? [{ label: `Show ${st.tools} tools`, icon: Wrench, onSelect: () => setShowTools(s.name) }] : []),
@@ -342,7 +343,7 @@ function AddMcpDialog({ cwd, onClose, onAdded }: { cwd: string; onClose: () => v
             Cancel
           </button>
           {mode === 'form' ? (
-            <button className="btn primary" disabled={!valid || busy} onClick={submit}>
+            <button className="btn primary" disabled={!valid || busy} onClick={submit} aria-label="Add server">
               {busy ? <Spinner size={13} /> : 'Add server'}
             </button>
           ) : (
@@ -358,68 +359,68 @@ function AddMcpDialog({ cwd, onClose, onAdded }: { cwd: string; onClose: () => v
           <div className="hint">
             Paste what the server’s docs give you: a <code>mcpServers</code> block, or a single server’s config.
           </div>
-          <textarea className="textarea mono" rows={9} autoFocus value={json} onChange={(e) => setJson(e.target.value)} placeholder={'{\n  "mcpServers": {\n    "linear": { "type": "http", "url": "https://mcp.linear.app/mcp" }\n  }\n}'} />
+          <textarea aria-label="Server configuration as JSON" className="textarea mono" rows={9} autoFocus value={json} onChange={(e) => setJson(e.target.value)} placeholder={'{\n  "mcpServers": {\n    "linear": { "type": "http", "url": "https://mcp.linear.app/mcp" }\n  }\n}'} />
         </div>
       ) : (
         <div className="cust-form">
           <div className="cust-two">
-            <div className="field">
-              <label>Name</label>
-              <input className="input" autoFocus placeholder="linear" value={name} onChange={(e) => setName(e.target.value)} />
-            </div>
-            <div className="field">
-              <label>Type</label>
-              <Select
-                value={type}
-                onChange={(v) => setType(v as McpConfigSummary['type'])}
-                options={[
-                  { value: 'http', label: 'HTTP', hint: 'Remote server; signs in with OAuth when needed' },
-                  { value: 'sse', label: 'SSE', hint: 'Older remote servers' },
-                  { value: 'stdio', label: 'Command', hint: 'A program Claude Code starts on this machine' },
-                ]}
-              />
-            </div>
+            <Field label="Name">
+              {(id) => <input id={id} className="input" autoFocus placeholder="linear" value={name} onChange={(e) => setName(e.target.value)} />}
+            </Field>
+            <Field label="Type">
+              {(id) => (
+                <Select id={id}
+                  value={type}
+                  onChange={(v) => setType(v as McpConfigSummary['type'])}
+                  options={[
+                    { value: 'http', label: 'HTTP', hint: 'Remote server; signs in with OAuth when needed' },
+                    { value: 'sse', label: 'SSE', hint: 'Older remote servers' },
+                    { value: 'stdio', label: 'Command', hint: 'A program Claude Code starts on this machine' },
+                  ]}
+                />
+              )}
+            </Field>
           </div>
           {type === 'stdio' ? (
             <>
-              <div className="field">
-                <label>Command</label>
-                <input className="input mono" placeholder="npx" value={command} onChange={(e) => setCommand(e.target.value)} />
-              </div>
-              <div className="field">
-                <label>Arguments</label>
-                <input className="input mono" placeholder="-y @modelcontextprotocol/server-filesystem /path" value={args} onChange={(e) => setArgs(e.target.value)} />
-              </div>
-              <div className="field">
-                <label>Environment variables</label>
-                <textarea className="textarea mono" rows={2} placeholder={'API_KEY=…\nONE_PER_LINE=…'} value={env} onChange={(e) => setEnv(e.target.value)} />
-              </div>
+              <Field label="Command">
+                {(id) => <input id={id} className="input mono" placeholder="npx" value={command} onChange={(e) => setCommand(e.target.value)} />}
+              </Field>
+              <Field label="Arguments">
+                {(id) => <input id={id} className="input mono" placeholder="-y @modelcontextprotocol/server-filesystem /path" value={args} onChange={(e) => setArgs(e.target.value)} />}
+              </Field>
+              <Field label="Environment variables">
+                {(id) => <textarea id={id} className="textarea mono" rows={2} placeholder={'API_KEY=…\nONE_PER_LINE=…'} value={env} onChange={(e) => setEnv(e.target.value)} />}
+              </Field>
             </>
           ) : (
             <>
-              <div className="field">
-                <label>URL</label>
-                <input className="input mono" placeholder="https://mcp.example.com/mcp" value={url} onChange={(e) => setUrl(e.target.value)} />
-              </div>
-              <div className="field">
-                <label>Headers</label>
-                <textarea className="textarea mono" rows={2} placeholder={'Authorization: Bearer …\nOne-Per-Line: …'} value={headers} onChange={(e) => setHeaders(e.target.value)} />
-                <div className="hint">Leave empty for servers that sign you in with OAuth; Pilcrow asks when the server does.</div>
-              </div>
+              <Field label="URL">
+                {(id) => <input id={id} className="input mono" placeholder="https://mcp.example.com/mcp" value={url} onChange={(e) => setUrl(e.target.value)} />}
+              </Field>
+              <Field label="Headers">
+                {(id) => (
+                  <>
+                    <textarea id={id} className="textarea mono" rows={2} placeholder={'Authorization: Bearer …\nOne-Per-Line: …'} value={headers} onChange={(e) => setHeaders(e.target.value)} />
+                    <div className="hint">Leave empty for servers that sign you in with OAuth; Pilcrow asks when the server does.</div>
+                  </>
+                )}
+              </Field>
             </>
           )}
-          <div className="field">
-            <label>Available in</label>
-            <Select
-              value={scope}
-              onChange={(v) => setScope(v as Scope)}
-              options={[
-                { value: 'user', label: SCOPE_LABEL.user, hint: `Saved in ~/.claude.json` },
-                { value: 'local', label: SCOPE_LABEL.local, hint: cwd ? `For ${tildify(cwd, info?.home)}, not shared` : 'Open a session first', disabled: !cwd },
-                { value: 'project', label: SCOPE_LABEL.project, hint: cwd ? `Committed with the repository` : 'Open a session first', disabled: !cwd },
-              ]}
-            />
-          </div>
+          <Field label="Available in">
+            {(id) => (
+              <Select id={id}
+                value={scope}
+                onChange={(v) => setScope(v as Scope)}
+                options={[
+                  { value: 'user', label: SCOPE_LABEL.user, hint: `Saved in ~/.claude.json` },
+                  { value: 'local', label: SCOPE_LABEL.local, hint: cwd ? `For ${tildify(cwd, info?.home)}, not shared` : 'Open a session first', disabled: !cwd },
+                  { value: 'project', label: SCOPE_LABEL.project, hint: cwd ? `Committed with the repository` : 'Open a session first', disabled: !cwd },
+                ]}
+              />
+            )}
+          </Field>
         </div>
       )}
     </Dialog>

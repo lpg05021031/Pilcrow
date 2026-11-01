@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { History, ChevronRight, Undo2, RotateCcw, ArrowUpRight, ArrowDownToLine } from 'lucide-react';
-import { useStore, call, setTimeline, confirmAction, toast, bumpFs, openFile } from '../../lib/store';
+import { useStore, call, setTimeline, confirmAction, toast, bumpFs, openFile, toasted } from '../../lib/store';
 import type { DiffFile, SessionSummary, TimelineStep } from '../../lib/types';
-import { basename, dirname, plural, duration } from '../../lib/format';
+import { basename, clock, dirname, plural, duration } from '../../lib/format';
 import { DiffView } from '../Code';
 import { Collapse } from '../ui/Collapse';
 import { revealItem } from '../Transcript';
 import { Spinner, useNow, Mark } from '../ui/bits';
+import { Empty, Loading } from '../ui/Empty';
 
-const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-const clockS = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 
 function stepTitle(s: TimelineStep) {
   switch (s.kind) {
@@ -34,7 +33,7 @@ function stepTitle(s: TimelineStep) {
 export function HistoryPanel({ session, cwd }: { session: SessionSummary; cwd: string }) {
   const id = session.id;
   const steps = useStore((s) => s.timeline[id]);
-  const rt = useStore((s) => s.rt[id]);
+  const working = useStore((s) => s.rt[id]?.status === 'running' || s.rt[id]?.status === 'requires_action');
   const [meta, setMeta] = useState<{ enabled: boolean; reason: string | null } | null>(null);
   const [sel, setSel] = useState<number | null>(null); // step n; null = now
   const [follow, setFollow] = useState(true);
@@ -103,11 +102,7 @@ export function HistoryPanel({ session, cwd }: { session: SessionSummary; cwd: s
   if (meta && !meta.enabled) {
     return (
       <div className="history">
-        <div className="empty">
-          <History size={22} />
-          <div>The timeline is off for this folder.</div>
-          <div className="hint">{meta.reason === 'home folder' || meta.reason === 'root of a drive' || meta.reason === 'too close to the root' ? `Snapshots are not taken for ${meta.reason === 'home folder' ? 'your home folder' : 'a folder this close to the root'} — it would be too large. Start the session in a project folder.` : meta.reason || 'Turn it on in Settings → General.'}</div>
-        </div>
+        <Empty icon={History} title="The timeline is off for this folder." hint={meta.reason === 'home folder' || meta.reason === 'root of a drive' || meta.reason === 'too close to the root' ? `Snapshots are not taken for ${meta.reason === 'home folder' ? 'your home folder' : 'a folder this close to the root'} — it would be too large. Start the session in a project folder.` : meta.reason || 'Turn it on in Settings → General.'} />
       </div>
     );
   }
@@ -130,22 +125,11 @@ export function HistoryPanel({ session, cwd }: { session: SessionSummary; cwd: s
       </div>
 
       {!steps && (
-        <div className="changes-loading">
-          {[0, 1, 2].map((k) => (
-            <div key={k} className="sk-file">
-              <div className="sk" style={{ width: `${46 - k * 9}%` }} />
-              <div className="sk short" />
-            </div>
-          ))}
-        </div>
+        <Loading label="Loading the timeline" rows={3} />
       )}
 
       {steps && !list.length && (
-        <div className="empty">
-          <History size={22} />
-          <div>Nothing on the timeline yet.</div>
-          <div className="hint">Each step that can change files — an edit, a command, a message — becomes a point here. Pick any point to see what changed and put files back the way they were.</div>
-        </div>
+        <Empty icon={History} title="Nothing on the timeline yet." hint="Each step that can change files — an edit, a command, a message — becomes a point here. Pick any point to see what changed and put files back the way they were." />
       )}
 
       {list.length > 0 && (
@@ -155,15 +139,15 @@ export function HistoryPanel({ session, cwd }: { session: SessionSummary; cwd: s
             {list.map((s, i) => (
               <StepRow key={s.n} step={s} sessionId={id} cwd={cwd} selected={sel === s.n} isLast={i === list.length - 1} onPick={() => pick(sel === s.n ? null : s.n)} />
             ))}
-            <div className={`tl-row tl-now${sel === null ? ' on' : ''}`} onClick={() => pick(null)} role="button">
+            <button className={`tl-row tl-now${sel === null ? ' on' : ''}`} onClick={() => pick(null)}>
               <span className="tl-rail" aria-hidden="true">
                 <Mark size={14} className="tl-now-mark" />
               </span>
               <span className="tl-main">
                 <span className="tl-title">Now</span>
-                <span className="tl-sub">{rt?.status === 'running' || rt?.status === 'requires_action' ? 'Claude is working — new steps appear as they happen' : 'The folder as it is right now'}</span>
+                <span className="tl-sub">{working ? 'Claude is working — new steps appear as they happen' : 'The folder as it is right now'}</span>
               </span>
-            </div>
+            </button>
           </div>
           {selected && <SinceBar step={selected} sessionId={id} />}
         </>
@@ -202,7 +186,7 @@ function Scrubber({ steps, sel, onPick, now }: { steps: TimelineStep[]; sel: num
     const over = raw[raw.length - 1] - 96;
     if (over > 0) for (let i = 0; i < raw.length; i++) raw[i] = Math.max(0, raw[i] - over * (i / Math.max(1, raw.length - 1)));
     return raw;
-  }, [steps, Math.floor(now / 15_000)]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [steps, Math.floor(now / 15_000)]); // eslint-disable-line react-hooks/exhaustive-deps -- positions move with the steps and every 15 s of the clock, not every second
   const xAt = (i: number) => (i >= n ? 100 : pos[i] ?? 0);
   const nearest = (clientX: number) => {
     const r = ref.current!.getBoundingClientRect();
@@ -240,7 +224,7 @@ function Scrubber({ steps, sel, onPick, now }: { steps: TimelineStep[]; sel: num
   const selIdx = sel === null ? n : steps.findIndex((s) => s.n === sel);
   const hi = hover === null ? selIdx : hover;
   const hiStep = hi >= n ? null : steps[hi];
-  const label = hiStep ? `${clockS(hiStep.at)} · ${stepTitle(hiStep)}` : 'Now';
+  const label = hiStep ? `${clock(hiStep.at, true)} · ${stepTitle(hiStep)}` : 'Now';
   const first = steps[0].at;
   return (
     <div className={`tl-scrub${drag ? ' dragging' : ''}`} ref={ref} onPointerDown={onDown} onPointerMove={(e) => setHover(nearest(e.clientX))} onPointerLeave={() => setHover(null)} role="slider" aria-valuemin={0} aria-valuemax={n} aria-valuenow={selIdx} aria-label="Timeline">
@@ -266,8 +250,8 @@ function Scrubber({ steps, sel, onPick, now }: { steps: TimelineStep[]; sel: num
 
 function StepRow({ step, sessionId, cwd, selected, isLast, onPick }: { step: TimelineStep; sessionId: string; cwd: string; selected: boolean; isLast: boolean; onPick: () => void }) {
   const sub = step.kind === 'tool' ? step.tool : step.kind === 'external' ? plural(step.files.length, 'file') + ' changed between turns' : step.kind === 'message' ? 'You' : step.kind === 'start' ? 'Claude Code' : 'Timeline';
-  const jump = async (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const jump = async (e?: React.MouseEvent) => {
+    e?.stopPropagation();
     const el = step.toolUseId ? await revealItem(sessionId, `tool-${step.toolUseId}`, step.toolUseId) : step.uuid ? await revealItem(sessionId, `msg-${step.uuid}`, step.uuid) : null;
     if (!el) return toast('That step is not in the conversation view.', 'info');
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -285,7 +269,7 @@ function StepRow({ step, sessionId, cwd, selected, isLast, onPick }: { step: Tim
           <span className="tl-title ellipsis">{stepTitle(step)}</span>
           <span className="tl-sub">
             <span>{sub}</span>
-            <span className="tnum">{clockS(step.at)}</span>
+            <span className="tnum">{clock(step.at, true)}</span>
           </span>
         </span>
         {step.changed ? (
@@ -297,17 +281,18 @@ function StepRow({ step, sessionId, cwd, selected, isLast, onPick }: { step: Tim
           <span className="tl-stat faint">—</span>
         )}
         {(step.toolUseId || step.uuid) && (
-          <span className="icon-btn sm tl-jump" title="Show in the conversation" onClick={jump} role="button">
+          // A shortcut for the pointer; the keyboard has the same action in the step's details.
+          <span className="icon-btn sm tl-jump" title="Show in the conversation" onClick={jump} aria-hidden="true">
             <ArrowUpRight size={13} />
           </span>
         )}
       </button>
-      <Collapse open={selected}>{() => <StepDetail step={step} sessionId={sessionId} cwd={cwd} />}</Collapse>
+      <Collapse open={selected}>{() => <StepDetail step={step} sessionId={sessionId} cwd={cwd} onJump={step.toolUseId || step.uuid ? () => jump() : undefined} />}</Collapse>
     </div>
   );
 }
 
-function StepDetail({ step, sessionId, cwd }: { step: TimelineStep; sessionId: string; cwd: string }) {
+function StepDetail({ step, sessionId, cwd, onJump }: { step: TimelineStep; sessionId: string; cwd: string; onJump?: () => void }) {
   const [files, setFiles] = useState<DiffFile[] | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>({});
   useEffect(() => {
@@ -336,6 +321,7 @@ function StepDetail({ step, sessionId, cwd }: { step: TimelineStep; sessionId: s
     return (
       <div className="tl-detail">
         <div className="tl-note faint">{step.kind === 'message' ? 'Nothing had changed on disk when this message went out.' : step.kind === 'start' ? 'This is where the timeline begins.' : 'No files changed in this step.'}</div>
+        {onJump && <JumpButton onJump={onJump} />}
         <RestoreAll step={step} sessionId={sessionId} />
       </div>
     );
@@ -343,10 +329,11 @@ function StepDetail({ step, sessionId, cwd }: { step: TimelineStep; sessionId: s
     <div className="tl-detail">
       <div className="tl-detail-head">
         <span className="tool-label">Changed in this step</span>
+        {onJump && <JumpButton onJump={onJump} />}
         <RestoreAll step={step} sessionId={sessionId} />
       </div>
       {!files && (
-        <div className="tl-note faint">
+        <div className="tl-note faint" role="status">
           <Spinner size={12} /> Loading the diff…
         </div>
       )}
@@ -363,10 +350,10 @@ function StepDetail({ step, sessionId, cwd }: { step: TimelineStep; sessionId: s
               </button>
               <span className={`num-add${f.additions ? '' : ' zero'}`}>+{f.additions}</span>
               <span className={`num-del${f.deletions ? '' : ' zero'}`}>−{f.deletions}</span>
-              <button className="icon-btn sm" title="Open the file as it is now" onClick={() => openFile(`${cwd}/${f.path}`)}>
+              <button className="icon-btn sm" title="Open the file as it is now" aria-label="Open the file as it is now" onClick={() => openFile(`${cwd}/${f.path}`)}>
                 <ArrowUpRight size={13} />
               </button>
-              <button className="icon-btn sm" title="Put this file back to how it was after this step" onClick={() => restoreFile(f.path)}>
+              <button className="icon-btn sm" title="Put this file back to how it was after this step" aria-label="Put this file back to how it was after this step" onClick={() => restoreFile(f.path)}>
                 <Undo2 size={13} />
               </button>
             </div>
@@ -381,6 +368,14 @@ function StepDetail({ step, sessionId, cwd }: { step: TimelineStep; sessionId: s
         );
       })}
     </div>
+  );
+}
+
+function JumpButton({ onJump }: { onJump: () => void }) {
+  return (
+    <button className="btn xs ghost" onClick={onJump}>
+      <ArrowUpRight size={12} aria-hidden="true" /> Show in the conversation
+    </button>
   );
 }
 
@@ -420,9 +415,7 @@ async function doRestore(sessionId: string, step: TimelineStep, paths?: string[]
       ? {
           label: 'Undo',
           run: () =>
-            call('timeline.restore', { id: sessionId, n: r.safety!.n })
-              .then(() => (bumpFs(), toast('Put the files back', 'success')))
-              .catch(() => {}),
+            call('timeline.restore', { id: sessionId, n: r.safety!.n }).then(() => (bumpFs(), toast('Put the files back', 'success')), toasted),
         }
       : undefined;
     toast(paths?.length ? `Restored ${paths.length === 1 ? basename(paths[0]) : plural(paths.length, 'file')}` : `Restored the folder to step ${step.n}`, 'success', undo);
