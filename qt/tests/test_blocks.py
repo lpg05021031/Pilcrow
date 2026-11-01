@@ -144,6 +144,17 @@ def test_find_lights_matches_and_the_current_one(app):
     b = prose("next and next again")
     ranges = find_ranges(b.doc, "next")
     assert len(ranges) == 2 and all(b.doc.toPlainText()[a:z] == "next" for a, z in ranges)
+    # remembered for the next paint, asked again when the needle or the document changes
+    assert find_ranges(b.doc, "next") is ranges
+    assert find_ranges(b.doc, "again") == [(14, 19)]
+    edited = prose("next")
+    first = find_ranges(edited.doc, "next")
+    from PySide6.QtGui import QTextCursor
+
+    cur = QTextCursor(edited.doc)
+    cur.movePosition(QTextCursor.MoveOperation.End)
+    cur.insertText(" next")
+    assert len(find_ranges(edited.doc, "next")) == 2 and len(first) == 1
     # painted: the current match in the accent, the other in the wash
     m = measurer()
     img = QImage(700, b.h, QImage.Format.Format_ARGB32_Premultiplied)
@@ -158,7 +169,7 @@ def test_find_lights_matches_and_the_current_one(app):
     p.end()
     seen = {img.pixelColor(x, 12).name() for x in range(0, 200)}
     assert theme.tokens().accent in seen
-    assert theme.blend("rgba(217, 119, 87, 0.28)", theme.tokens().canvas).name() in seen
+    assert theme.blend(theme.tokens().find_mark, theme.tokens().canvas).name() in seen
 
 
 def test_user_bubble_is_the_webs_size(app):

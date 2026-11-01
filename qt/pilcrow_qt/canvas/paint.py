@@ -14,6 +14,7 @@ from __future__ import annotations
 import html
 import logging
 import math
+import weakref
 from collections import OrderedDict
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -213,13 +214,21 @@ def selection(doc: QTextDocument, a: int, b: int, bg: QColor, fg: Optional[QColo
     return sel
 
 
+_found: weakref.WeakKeyDictionary[QTextDocument, Tuple[int, str, List[Tuple[int, int]]]] = weakref.WeakKeyDictionary()
+
+
 def find_ranges(doc: QTextDocument, needle: str, limit: int = 2000) -> List[Tuple[int, int]]:
     """Document positions of every occurrence of ``needle`` (case-insensitive), skipping the word
-    joiners inline code carries so that a match may span them."""
+    joiners inline code carries so that a match may span them. Remembered per document revision and
+    needle: with the find bar open every frame of a scroll paints the matches again."""
     if not needle:
         return []
+    rev = doc.revision()
+    hit = _found.get(doc)
+    if hit is not None and hit[0] == rev and hit[1] == needle:
+        return hit[2]
     raw = doc.toPlainText()
-    pos = [i for i, ch in enumerate(raw) if ch != "⁠"]
+    pos = [i for i, ch in enumerate(raw) if ch != "\u2060"]  # WORD JOINER
     text = "".join(raw[i] for i in pos).lower()
     n = needle.lower()
     out: List[Tuple[int, int]] = []
@@ -227,7 +236,28 @@ def find_ranges(doc: QTextDocument, needle: str, limit: int = 2000) -> List[Tupl
     while i >= 0 and len(out) < limit:
         out.append((pos[i], pos[i + len(n) - 1] + 1))
         i = text.find(n, i + len(n))
+    _found[doc] = (rev, needle, out)
     return out
+
+
+def find_selections(doc: QTextDocument, st: PaintState) -> List[Any]:
+    """The find matches (the current one in full) and the text selection of a document, to paint."""
+    sels: List[Any] = []
+    t = st.t
+    if st.needle:
+        for k, (a, b) in enumerate(find_ranges(doc, st.needle)):
+            if k == st.needle_current:
+                sels.append(selection(doc, a, b, QColor(t.accent), QColor(t.accent_ink)))
+            else:
+                sels.append(selection(doc, a, b, theme.blend(t.find_mark, t.canvas)))
+    if st.selection is not None:
+        bg = theme.blend(t.selection, t.canvas)
+        if st.selection == FULL:
+            sels.append(selection(doc, 0, doc.characterCount(), bg))
+        else:
+            a, b = st.selection
+            sels.append(selection(doc, a, b, bg))
+    return sels
 
 
 # ---------------------------------------------------------------- decorations (items.py MarkdownView)
@@ -492,13 +522,22 @@ class Measurer:
         self._fms: Dict[Tuple, QFontMetricsF] = {}
         self._static: OrderedDict[Tuple, QStaticText] = OrderedDict()
         self._checks: Dict[Tuple, QPixmap] = {}
+        self._stamp: Optional[Tuple[str, float]] = None
         self.refresh()
 
     def refresh(self) -> None:
-        """After a theme change or a font-scale change: new fonts, new metrics, empty caches."""
+        """After a theme change or a font-scale change: new fonts, new metrics, empty caches (the
+        pixmaps among them, which is why their keys need not name the scale). Every live view calls it
+        on the switch; the first does the work and the others find it done."""
+        stamp = (theme.tokens().name, theme.scale)
+        if stamp == self._stamp:
+            return
+        self._stamp = stamp
         self.tokens = theme.tokens()
         self.theme_name = self.tokens.name
         app = QGuiApplication.instance()
+        # The documents are shared by every view, so the images inside them (task boxes) are drawn
+        # at the highest ratio of any screen (what this returns): sharp wherever the window goes.
         self.dpr = float(app.devicePixelRatio()) if app is not None else 1.0
         self._fonts.clear()
         self._fms.clear()
@@ -727,7 +766,7 @@ class Measurer:
         if pm is None:
             size = markdown.CHECK_SIZE
             dpr = self.dpr
-            pm = QPixmap(int(width * dpr), int(size * dpr))
+            pm = QPixmap(math.ceil(width * dpr), math.ceil(size * dpr))
             pm.setDevicePixelRatio(dpr)
             pm.fill(Qt.GlobalColor.transparent)
             t = self.tokens

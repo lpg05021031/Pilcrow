@@ -663,7 +663,8 @@ class CanvasView(QAbstractScrollArea):
         leaves = self.scene.leaves_between(y0, y1)
         if getattr(self.scene, "loading", False):
             # a conversation still arriving: its skeleton alone, where it sits at the top
-            leaves = [(b, by) for b, by in self.scene.leaves_between(0, 10**9) if b.KIND == "skeleton"]
+            sk = self.scene.skeleton
+            leaves = [(sk, sk.y())]
         region = e.region()
         for b, by in leaves:
             if b.h <= 0 or isinstance(b, IslandBlock):
@@ -770,7 +771,8 @@ class CanvasView(QAbstractScrollArea):
         key = (b.key, b.rev, b.sig, b.gen, rect.width(), self.m.theme_name, dpr)
         pm = self.m.pixmaps.get(key)
         if pm is None:
-            pm = QPixmap(int(rect.width() * dpr), int(max(1, rect.height()) * dpr))
+            # rounded up: at a fractional ratio a truncated pixmap is a device pixel short of the row
+            pm = QPixmap(math.ceil(rect.width() * dpr), math.ceil(max(1, rect.height()) * dpr))
             pm.setDevicePixelRatio(dpr)
             pm.fill(QColor(st.t.canvas))
             pp = QPainter(pm)

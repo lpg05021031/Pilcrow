@@ -60,6 +60,14 @@ def test_fenwick_matches_a_list():
         f.truncate(k)
         del vals[k:]
         assert f.values() == vals and f.total() == sum(vals)
+        assert f._tree == Fenwick(vals)._tree  # the cut tree is the one a rebuild would make
+        f.append(55)  # and grows on from there
+        vals.append(55)
+        f.remove(len(vals) - 1)  # the last one goes the same way as a truncate
+        vals.pop()
+        f.insert(len(vals), 66)  # one at the end is an append
+        vals.append(66)
+        assert f._tree == Fenwick(vals)._tree
         if vals:
             i = rnd.randrange(len(vals))
             f.insert(i, 77)

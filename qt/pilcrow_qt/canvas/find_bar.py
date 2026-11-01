@@ -181,5 +181,5 @@ class FindBar(QWidget):
 
 
 def _glass(t: theme.Tokens) -> QColor:
-    """The bar's material: ``#252528`` on dark (the client's popover), raised on light."""
-    return QColor("#252528" if t.dark else t.raised)
+    """The bar's material: the client's popover."""
+    return QColor(t.popover)

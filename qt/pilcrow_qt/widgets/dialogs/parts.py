@@ -182,13 +182,13 @@ class Switch(QAbstractButton):
         shadow = QColor(0, 0, 0, 77)  # 0 1px 3px rgba(0,0,0,.3), as two soft rings
         p.setBrush(shadow)
         p.drawEllipse(QRectF(x - 0.5, 2.5, 17, 17))
-        p.setBrush(QColor("#ffffff"))
+        p.setBrush(QColor(t.accent_ink))  # white on either track, like the web's knob
         p.drawEllipse(QRectF(x, 2, 16, 16))
 
 
 def switch_off(t: theme.Tokens) -> QColor:
-    """The off track: ``[data-theme='dark'] .switch:not(.on)`` is ``#3a3a3e``; light uses fill-3 over the page."""
-    return QColor("#3a3a3e") if t.dark else theme.blend(t.fill_3, t.canvas)
+    """The off track (``.switch:not(.on)``), laid on the page."""
+    return theme.blend(t.switch_off, t.canvas)
 
 
 # ---------------------------------------------------------------- the floating materials
@@ -215,11 +215,6 @@ def sheet_line(t: theme.Tokens) -> QColor:
 def well_line(t: theme.Tokens) -> QColor:
     """A well's edge: the hair over its surface."""
     return theme.over(theme.qcolor(t.hair), well_bg(t))
-
-
-def popover_bg(t: theme.Tokens) -> QColor:
-    """``.popover``: glass over the blurred page (what the eye sees is close to glass over raised)."""
-    return theme.blend(t.glass, t.raised)
 
 
 def toast_bg(t: theme.Tokens) -> QColor:

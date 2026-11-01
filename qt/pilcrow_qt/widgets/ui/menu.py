@@ -29,8 +29,8 @@ Item = Dict[str, Any]
 
 
 def popover_bg(t: theme.Tokens) -> str:
-    """The popover material: ``#252528`` on dark (app.css ``[data-theme='dark'] .popover``), raised on light."""
-    return "#252528" if t.dark else t.raised
+    """The popover material (app.css ``.popover``)."""
+    return t.popover
 
 
 def host_for(w: Optional[QWidget]) -> Optional[QWidget]:

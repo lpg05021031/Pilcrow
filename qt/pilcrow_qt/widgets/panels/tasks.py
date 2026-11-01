@@ -773,7 +773,7 @@ class PhaseNode(QWidget):
         if self.state in ("done", "error"):
             p.setBrush(QColor(t.ok if self.state == "done" else t.err))
             p.drawEllipse(QRectF(0, 0, 18, 18))
-            p.drawPixmap(3.5, 3.5, icons.pixmap("check" if self.state == "done" else "x", "#ffffff", 11))
+            p.drawPixmap(3.5, 3.5, icons.pixmap("check" if self.state == "done" else "x", t.accent_ink, 11))
             return
         p.setBrush(theme.qcolor(t.raised))
         p.drawEllipse(QRectF(0, 0, 18, 18))

@@ -240,6 +240,9 @@ def test_text_scale_grows_the_prose_and_the_bubble(app):
     try:
         theme.theme.set_scale(1.3)
         m.refresh()
+        metrics = m.metrics
+        m.refresh()  # every live view asks on a switch; the work is done once
+        assert m.metrics is metrics
         b = ProseBlock("p", "one line")
         assert b.measure(700, m) == 31  # 14.5 × 1.3 on 1.65
         assert bubble_line() == 29

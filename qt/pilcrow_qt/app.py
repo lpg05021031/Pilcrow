@@ -18,7 +18,7 @@ from PySide6.QtWidgets import QApplication
 from . import fonts, icons
 from .rpc import rpc
 from .store import store
-from .theme import theme
+from .theme import DARK, theme
 
 # ---------------------------------------------------------------- finding or starting the server
 
@@ -242,7 +242,7 @@ def _app_icon() -> QIcon:
     svg = Path(__file__).resolve().parents[2] / "assets" / "icon.svg"
     if svg.exists():
         return QIcon(str(svg))
-    return QIcon(icons.pixmap("pilcrow", "#d97757", 64)) if "pilcrow" in icons.available() else QIcon()
+    return QIcon(icons.pixmap("pilcrow", DARK.accent, 64)) if "pilcrow" in icons.available() else QIcon()
 
 
 def _system_reduced_motion() -> bool:

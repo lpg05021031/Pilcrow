@@ -98,6 +98,9 @@ class Tokens:
     diff_del_hl: str
     scrim: str
     selection: str
+    find_mark: str  # a find match that is not the current one (app.css ``.find-hit``)
+    popover: str  # the client's floating material (app.css ``.popover``, ``.find-bar``)
+    switch_off: str  # the switch's off track, laid on the canvas
     glass: str
     glass_2: str
     edge_hi: str
@@ -183,6 +186,9 @@ DARK = Tokens(
     diff_del_hl="rgba(255, 44, 86, 0.3)",
     scrim="rgba(12, 11, 9, 0.55)",
     selection="rgba(122, 167, 240, 0.3)",
+    find_mark="rgba(217, 119, 87, 0.28)",
+    popover="#252528",
+    switch_off="#3a3a3e",
     glass="rgba(40, 40, 43, 0.96)",
     glass_2="rgba(33, 33, 36, 0.98)",
     edge_hi="rgba(255, 255, 255, 0.07)",
@@ -257,6 +263,9 @@ LIGHT = Tokens(
     diff_del_hl="rgba(205, 32, 84, 0.24)",
     scrim="rgba(40, 36, 28, 0.24)",
     selection="rgba(44, 98, 196, 0.16)",
+    find_mark="rgba(217, 119, 87, 0.28)",
+    popover="#ffffff",
+    switch_off="rgba(0, 0, 0, 0.145)",
     glass="rgba(255, 255, 255, 0.97)",
     glass_2="rgba(255, 255, 255, 0.98)",
     edge_hi="rgba(255, 255, 255, 0.9)",

@@ -23,16 +23,14 @@ from ... import markdown, theme
 from ...lib.transcript_model import TextItem
 from .. import grow
 from ..paint import (
-    FULL,
     Measurer,
     PaintState,
     doc_height,
     doc_pos_at,
     draw_doc,
-    find_ranges,
+    find_selections,
     paint_decor,
     rounded,
-    selection,
     table_rect,
     well_rects,
 )
@@ -245,20 +243,7 @@ class ProseBlock(Block):
         if not st.caching:
             self._paint_copies(p, x, top, st)
         color = QColor(st.t.text_2 if self.quiet else st.t.text)
-        sels: List[Any] = []
-        if st.needle:
-            for k, (a, b) in enumerate(find_ranges(self.doc, st.needle)):
-                if k == st.needle_current:
-                    sels.append(selection(self.doc, a, b, QColor(st.t.accent), QColor("#ffffff")))
-                else:
-                    sels.append(selection(self.doc, a, b, theme.blend("rgba(217, 119, 87, 0.28)", st.t.canvas)))
-        if st.selection is not None:
-            bg = theme.blend(st.t.selection, st.t.canvas)
-            if st.selection == FULL:
-                sels.append(selection(self.doc, 0, self.doc.characterCount(), bg))
-            else:
-                a, b = st.selection
-                sels.append(selection(self.doc, a, b, bg))
+        sels = find_selections(self.doc, st)
         draw_doc(p, self.doc, x, top, clip, color, sels or None)
 
     # ---- interaction

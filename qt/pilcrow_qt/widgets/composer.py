@@ -1889,7 +1889,7 @@ class RoundX(QPushButton):
         if self._disc:
             p.setBrush(QColor(0, 0, 0, 158))
             p.drawEllipse(QRectF(0, 0, 18, 18))
-            ink = "#ffffff"
+            ink = t.accent_ink
         else:
             if self.underMouse():
                 p.setBrush(theme.qcolor(t.fill_3))

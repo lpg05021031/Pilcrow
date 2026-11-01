@@ -163,7 +163,7 @@ class Btn(QPushButton):
             bg = theme.blend(t.fill_1, t.canvas) if hover else None
             return bg, QColor(t.text), 0.85, theme.blend(t.hair_2, t.raised)
         if k == "danger":
-            return QColor(t.err), QColor("#ffffff"), 1.0, None
+            return QColor(t.err), QColor(t.accent_ink), 1.0, None
         if k == "danger-text":
             return (theme.blend(t.err_wash, t.canvas) if hover else None), QColor(t.err), 0.85, None
         if k in ("link", "toggle"):
