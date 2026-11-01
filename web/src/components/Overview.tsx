@@ -411,7 +411,7 @@ function permSummary(p: PermissionRequest, cwd: string): { text: string; mono: b
     case 'WebFetch':
       return { text: str(i, 'url'), mono: true };
     case 'AskUserQuestion':
-      return { text: i.questions?.[0]?.question || 'Claude has a question', mono: false };
+      return { text: (Array.isArray(i.questions) ? (i.questions as { question?: string }[]) : [])[0]?.question || 'Claude has a question', mono: false };
     case 'ExitPlanMode':
       return { text: 'A plan is ready for review', mono: false };
     default:

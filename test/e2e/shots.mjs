@@ -2,7 +2,7 @@
 // Reference screenshots of the web interface, one per scene the Qt client also has (qt/tests/snap.py,
 // qt/tests/panel_probe.py), at the same window size, for comparing the two side by side.
 //
-//   node test/e2e/shots.mjs [--size 1480x940] [--out test/out]
+//   node test/e2e/shots.mjs [--size 1480x940] [--out test/out] [--theme dark|light]
 //
 // Needs web/dist (npm run build) and a browser the way test/e2e/run.mjs does. Writes test/out/web-*.png.
 import { spawn } from 'node:child_process';
@@ -16,6 +16,7 @@ const args = process.argv.slice(2);
 const arg = (k, d) => (args.includes(k) ? args[args.indexOf(k) + 1] : d);
 const OUT = resolve(ROOT, arg('--out', join('test', 'out')));
 const [W, H] = arg('--size', '1480x940').split('x').map(Number);
+const THEME = arg('--theme', 'dark');
 const PORT = Number(process.env.MOCK_PORT || 5331);
 const URL_ = `http://127.0.0.1:${PORT}/`;
 
@@ -53,8 +54,8 @@ function findBrowser() {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const browser = await chromium.launch({ headless: true, ...findBrowser() });
-const context = await browser.newContext({ viewport: { width: W, height: H }, colorScheme: 'dark', reducedMotion: 'no-preference' });
-await context.addInitScript(() => localStorage.setItem('pilcrow.theme', 'dark'));
+const context = await browser.newContext({ viewport: { width: W, height: H }, colorScheme: THEME, reducedMotion: 'no-preference' });
+await context.addInitScript((t) => localStorage.setItem('pilcrow.theme', t), THEME);
 const page = await context.newPage();
 page.on('pageerror', (e) => console.error('   page error:', e.message));
 
