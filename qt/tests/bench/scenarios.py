@@ -102,21 +102,24 @@ class Ctx:
     def open(self, sid: str, timeout: float = 60.0) -> Dict[str, float]:
         """Open a conversation and time the stages: the first rows on screen (the snapshot is modelled
         in slices, so rows show before it is whole), the whole of it modelled, the first paint."""
+
+        def rows() -> bool:
+            tv = self.transcript()
+            return bool(sid in self.store.rt and tv is not None and getattr(tv, "sid", sid) == sid and tv.units())
+
+        def loaded() -> bool:
+            return sid in self.store.rt and self.store.rt[sid].loaded
+
         t0 = time.perf_counter()
         self.store.open_session(sid)
-        self.c.wait_until(
-            lambda: (
-                sid in self.store.rt
-                and self.transcript() is not None
-                and getattr(self.transcript(), "sid", sid) == sid
-                and self.transcript().units()
-            ),
-            timeout,
-            "rows",
-        )
+        # the event loop is timed while the snapshot is modelled: no turn of it may block for long
+        p_rows = pump(timeout, until=rows)
+        assert rows(), f"no rows of {sid} within {timeout}s"
         t_rows = time.perf_counter() - t0
-        self.c.wait_until(lambda: sid in self.store.rt and self.store.rt[sid].loaded, timeout, f"load {sid}")
+        p_load = pump(timeout, until=loaded)
+        assert loaded(), f"{sid} not loaded within {timeout}s"
         t_loaded = time.perf_counter() - t0
+        modelling = p_rows.stalls + p_load.stalls
         tv = self.transcript()
         self.c.app.processEvents()
         p0 = time.perf_counter()
@@ -128,6 +131,7 @@ class Ctx:
             "rows_ms": round(t_rows * 1000),
             "first_paint_ms": round(t_paint * 1000, 1),
             "total_ms": round((time.perf_counter() - t0) * 1000),
+            "modelling_stall_max_ms": round(max(modelling, default=0.0) * 1000, 1),
         }
 
     def scope(self, name: str, root: QWidget):

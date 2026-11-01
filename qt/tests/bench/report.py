@@ -43,6 +43,7 @@ ROWS: List[Tuple[str, str, Callable[[Json], Any], Callable[[Any], str]]] = [
     ("open_cold", "mixed: widgets under the content", lambda s: g(s, "mixed", "widgets"), n),
     ("open_cold", "heavy 600 turns: rows on screen", lambda s: g(s, "heavy", "rows_ms"), ms),
     ("open_cold", "heavy: first paint", lambda s: g(s, "heavy", "first_paint_ms"), ms),
+    ("open_cold", "heavy: longest turn while modelling", lambda s: g(s, "heavy", "modelling_stall_max_ms"), ms),
     ("open_cold", "heavy: RSS added", lambda s: g(s, "heavy", "rss_delta_mb"), lambda v: f"{v:g} MB"),
     ("view_mode_cycle", "→ verbose: to first paint", lambda s: g(s, "verbose", "to_paint_ms"), ms),
     ("view_mode_cycle", "→ verbose: widgets made", lambda s: g(s, "verbose", "widgets_made"), n),

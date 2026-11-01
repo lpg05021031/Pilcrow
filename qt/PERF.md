@@ -272,13 +272,15 @@ the live turn only.
 
 The history snapshot is modelled in slices (a few hundred messages per event-loop turn) behind the
 loading skeleton, so the window stays responsive during the longest load; the first paint waits
-only for the blocks of the last screen to be measured. `orjson`, when installed, parses the
-snapshot several times faster than the standard library.
+only for the blocks of the last screen to be measured. `orjson`, when installed (it is optional),
+parses the snapshot several times faster than the standard library.
 
 ### 4.11 One clock
 
-All breathing marks, spinners, rails, elapsed counters and scroll easing share one timer that runs
-only while something live is on screen, at 30 Hz for indicators and 60 Hz during an animation. A
+All breathing marks, spinners, rails, elapsed counters, the scroll easing and the composer's springs
+and every other animation in the window share one timer (`canvas/clock.py`) that runs only while
+something live is on screen, at 30 Hz for indicators and 60 Hz during an animation. (The widgets'
+other timers are not animations: debounces, toasts, polling.) A
 tick repaints the small rectangles that changed. A counter changing from "12s" to "13s" repaints
 its rectangle; nothing is relaid out.
 
@@ -316,7 +318,9 @@ Same rig, same scenarios, same machine class (software rasteriser), 600 heavy / 
 | wheel fling / scrollbar drag | stall p95 ≤ 8 ms; ≤ 1 frame in 100 over 16 ms; blank fraction ≤ 0.05 | fling: p95 5.6 ms, max 15.5 ms, 0 placeholder paints, 0 px unexpected shift (the blank fraction of 0.25 is the gaps between rows, which the canvas paints in the exact canvas colour; the widget transcript's rows were never exactly it). Drag: p95 41 ms per screen-sized step (every row new: laid out under the 8 ms deadline, the rest filled in by the drain) |
 | hover sweep, typing | 0 layout passes in the conversation; 0 px of shift | 0 and 0; typing stall p95 1.5 ms |
 | open 600 heavy / 2,000 mixed turns | first paint ≤ 150 ms after the snapshot is modelled; no event-loop stall over 50 ms while modelling | first rows on screen 255 / 423 ms after the open, the snapshot modelled in slices of 300 messages (whole after 715 / 1,340 ms), first paint 3 ms |
-| switch session | ≤ 30 ms to first paint; 0 widgets made for a retained session | 57 ms (the sidebar's rows move, nothing is made or re-parented), 1 widget, 0 MB growth over 10 switches |
+| switch session | ≤ 30 ms to first paint; 0 widgets made for a retained session | 57 ms (the sidebar's rows move, nothing is made or re-parented), 1 widget, 0 MB growth over 10 switches. 2.12: 16 ms, 0 widgets at 120/200 turns — the one widget was the closed side panel's tab, rebuilt for each session switched to; a closed panel now follows the session when the window is idle |
+| window resize (1480 → 1000 → 1480 px in 26 steps) | step p95 ≤ 33 ms (two frames); no step over 50 ms; 0 layout passes in the conversation, 0 flashes | — (guarded since 2.12: p95 29 ms, max 29 ms, 0 / 0 / 0 at 120 turns) |
+| find over the whole conversation | ≤ 100 ms to count the matches; 0 widgets | — (guarded since 2.12: 16 ms at 200 turns) |
 | view mode cycle, theme switch | ≤ 100 ms to first paint | view mode 106 ms; theme 124–146 ms with the Changes panel open (was 3.5–4 s): the theme is a palette now, not a stylesheet — the switch swaps the application palette, re-applies the widgets' tints, polishes the ~100 native fields and scrollbars again and repaints; what remains is the Changes tab's hundred file rows laying out once each, and the conversation's own repaint (7 ms) |
 | panel open on any tab while streaming | widgets made per second = 0 on hidden tabs; ≤ 1 refresh a second on the visible one | 0 widgets/s on every tab, stall p95 4–5 ms (the Tasks tab updates its rows in place; the Changes tab rebuilds a diff only when an edit landed) |
 | idle with a busy-looking session | ≤ 2 % of one core | 7.2 % (the clock at 33 ms repaints the live row and the composer's mark; quiet 3.3 %) |
@@ -325,6 +329,15 @@ Same rig, same scenarios, same machine class (software rasteriser), 600 heavy / 
 | a workflow of 60 agents reporting ten times a second, the Tasks tab in front | the panel follows in place: no card rebuilt for a progress tick; ≤ 3 ms per update on the main thread; a hidden tab does nothing | 1.4 ms per update (max 7); 118 widgets made over the run (the 60 rows as their agents start, nothing else); stalls only when a batch of agents arrives (≤ 120 ms, the new rows laid out); the Files tab in front or the panel closed: 1.3 ms, 0 paints, 0 layouts (`tests/stress/s_workflow.py`; before: every tick rebuilt every card, 244 ms max, stalls to 369 ms) |
 | a dispatch job of 40 repositories, its runs reporting ten times a second (DISPATCH.md) | the hidden page does nothing; the board touches its one card and no layout; the job view patches the rows that changed; the sidebar does not rebuild for a run's progress | board in front: 3.3 ms per update (was 5.0; paints halved, no card re-laid for a progress tick), the sidebar paints its badge when it changes (was 6 paints per update); the job view in front: 9.4 ms per update (was 11; some 19 rows rebuilt and painted per tick under this load); another page in front: 0.8 ms (was 10.3: both views refreshed while hidden). Found on the way: a rebuilt row kept the pixmap cached of its old state and asked for no repaint, so the table showed states long gone, and none of the engine's lists followed a theme switch (`tests/stress/s_dispatch.py`; guarded by `tests/test_dispatch.py`) |
 | a lead's conversation: 960 messages with 60 helper notes and 180 helpers cards | fling with 0 stalls over 20 ms and no cold placeholders; a note measured under 1 ms | open 108 ms; fling top to bottom in 297 wheel steps, 0 stalls, 0 cold placeholders; a note measures in 0.5 ms; a pointer sweep over notes and cards 0 stalls |
+
+**What is enforced.** `qt/tests/test_perf_budget.py` asserts these targets on every `pytest` run,
+on a 120-turn heavy and a 200-turn mixed conversation, with headroom for a busy machine: costs at 1.5×
+the target (stall p95 12 ms, stall max 24 ms streaming and 15 ms for a toggle, to-paint 150 ms, a
+long task while modelling 75 ms, a resize step p95 50 ms, a switch 45 ms, find 150 ms), a 45 fps
+floor for the 55 fps target, and every count that must be zero at zero (layout passes, flashes,
+unexpected shift, widgets made). The bench runs in a process of its own. The normal run takes the quick set (opening, a fold, a streamed turn, a resize, the
+switch, find, the theme, a pointer sweep; under a minute offscreen); `PILCROW_PERF=1` adds the card
+toggle, typing, streaming while scrolled up, the fling and the view-mode cycle.
 
 ## 6. Running the benchmarks
 
