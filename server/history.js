@@ -30,19 +30,14 @@ export function invalidateList() {
   listCache.at = 0;
 }
 
-/** Find the raw JSONL transcript for a session id. */
-export function findTranscriptFile(sessionId) {
+/** Find the raw JSONL transcript for a session id (one folder per project under ~/.claude/projects). */
+export async function findTranscriptFile(sessionId) {
   const root = path.join(claudeConfigDir(), 'projects');
-  let dirs = [];
-  try {
-    dirs = fs.readdirSync(root, { withFileTypes: true });
-  } catch {
-    return null;
-  }
+  const dirs = await fs.promises.readdir(root, { withFileTypes: true }).catch(() => []);
   for (const d of dirs) {
     if (!d.isDirectory()) continue;
     const f = path.join(root, d.name, `${sessionId}.jsonl`);
-    if (fs.existsSync(f)) return f;
+    if (await fs.promises.access(f).then(() => true, () => false)) return f;
   }
   return null;
 }
@@ -80,7 +75,7 @@ export async function loadTranscript(sessionId, dir) {
       msgs = [];
     }
   }
-  const file = findTranscriptFile(sessionId);
+  const file = await findTranscriptFile(sessionId);
   // After a compaction the SDK reader starts at the newest compact boundary and leaves out what came before.
   if (file && msgs.some((m) => m.isCompactSummary)) msgs = await withEarlierMessages(msgs, file, sessionId);
   const results = await readToolResults(file);
@@ -98,7 +93,7 @@ export async function loadTranscript(sessionId, dir) {
  * (across older compactions too) and give each boundary its trigger and token counts, so a reopened
  * session reads the same as it did live.
  */
-async function withEarlierMessages(msgs, file, sessionId) {
+export async function withEarlierMessages(msgs, file, sessionId) {
   const byUuid = new Map();
   try {
     const rl = readline.createInterface({ input: fs.createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity });
@@ -199,8 +194,8 @@ export async function remove(sessionId, dir) {
     await deleteSession(sessionId, { dir });
   } catch (e) {
     log('deleteSession failed', e?.message);
-    const f = findTranscriptFile(sessionId);
-    if (f) fs.rmSync(f, { force: true });
+    const f = await findTranscriptFile(sessionId);
+    if (f) await fs.promises.rm(f, { force: true });
   }
   invalidateList();
 }

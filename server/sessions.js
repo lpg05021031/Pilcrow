@@ -1023,7 +1023,7 @@ class SessionManager {
     if (s) return s;
     const meta = store.getMeta(id) || {};
     let cwd = meta.cwd;
-    let persisted = Boolean(history.findTranscriptFile(id));
+    let persisted = Boolean(await history.findTranscriptFile(id));
     if (!cwd) {
       const info = (await history.listHistory()).find((x) => x.sessionId === id);
       cwd = info?.cwd;
