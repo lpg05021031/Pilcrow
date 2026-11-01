@@ -56,6 +56,7 @@ class Block:
         "key",
         "rev",
         "sig",
+        "gen",
         "parent",
         "index",
         "h",
@@ -72,6 +73,7 @@ class Block:
         self.key = key
         self.rev = -1
         self.sig: Any = None
+        self.gen = 0  # moves on when the block is rebuilt with its rev and sig unchanged
         self.parent: Optional[Group] = None
         self.index = -1
         self.h = 0

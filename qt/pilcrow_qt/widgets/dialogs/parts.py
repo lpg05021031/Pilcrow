@@ -4,7 +4,7 @@ labels that elide. Everything paints from the theme tokens and follows a theme c
 from __future__ import annotations
 
 import math
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QFontMetricsF, QPainter, QPalette
@@ -408,6 +408,9 @@ class Text(QWidget):
         self._align = align
         self._lines: List[str] = []
         self._laid_w = -1
+        # the lines at each width asked for: a layout pass asks several widths in a row, and a
+        # neighbour's change asks them all again
+        self._laid: Dict[int, List[str]] = {}
         # Vertically Preferred, not Fixed: a box layout caps a Fixed item at its one-line size hint
         # before it asks for the height-for-width, and the extra lines would be cut off.
         sp = QSizePolicy(
@@ -417,7 +420,16 @@ class Text(QWidget):
         sp.setHeightForWidth(wrap)
         self.setSizePolicy(sp)
         self._max_w = 0
-        bind(theme.theme.changed, self, lambda _t: self.update())
+        bind(theme.theme.changed, self, lambda _t: self._relayout())
+
+    def _relayout(self) -> None:
+        self._laid.clear()
+        self._laid_w = -1
+        self.updateGeometry()
+        self.update()
+
+    def _advance(self, text: str) -> float:
+        return QFontMetricsF(self.qfont()).horizontalAdvance(text) if text else 0.0
 
     # ---- the QLabel-shaped bits callers use
     def text(self) -> str:
@@ -425,9 +437,13 @@ class Text(QWidget):
 
     def setText(self, text: str) -> None:  # noqa: N802
         if text != self._text:
+            # one line as wide as before (a clock, a count): the layout need not run again
+            same_box = not self._wrap and self._advance(text) == self._advance(self._text)
             self._text = text
+            self._laid.clear()
             self._laid_w = -1
-            self.updateGeometry()
+            if not same_box:
+                self.updateGeometry()
             self.update()
 
     def setAlignment(self, a: Qt.AlignmentFlag) -> None:  # noqa: N802
@@ -441,18 +457,14 @@ class Text(QWidget):
     def set_max_width(self, w: int) -> None:
         """``max-width`` on a block of text: lines wrap at ``w`` even when the column is wider."""
         self._max_w = w
-        self._laid_w = -1
-        self.updateGeometry()
-        self.update()
+        self._relayout()
 
     def set_font(self, size: Optional[float] = None, weight: Optional[int] = None) -> None:
         if size is not None:
             self._size = size
         if weight is not None:
             self._weight = weight
-        self._laid_w = -1
-        self.updateGeometry()
-        self.update()
+        self._relayout()
 
     # ---- metrics
     def qfont(self) -> QFont:
@@ -473,6 +485,10 @@ class Text(QWidget):
             width = min(width, self._max_w)
         if width == self._laid_w:
             return self._lines
+        known = self._laid.get(width)
+        if known is not None:
+            self._lines, self._laid_w = known, width
+            return known
         from PySide6.QtGui import QTextLayout, QTextOption
 
         lay = QTextLayout(self._text, self.qfont())
@@ -488,6 +504,9 @@ class Text(QWidget):
             line.setLineWidth(max(1, width))
             lines.append(self._text[line.textStart() : line.textStart() + line.textLength()].rstrip("\n"))
         lay.endLayout()
+        if len(self._laid) >= 12:
+            self._laid.clear()
+        self._laid[width] = lines
         self._lines, self._laid_w = lines, width
         return lines
 

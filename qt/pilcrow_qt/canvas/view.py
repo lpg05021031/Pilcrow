@@ -21,6 +21,7 @@ from PySide6.QtWidgets import QAbstractScrollArea, QToolTip, QWidget
 from .. import theme
 from ..lib.fmt import resolve_path
 from ..store import store
+from ..widgets.ui.signals import bind
 from . import a11y
 from .anchor import Follow
 from .blocks.island import IslandBlock
@@ -125,6 +126,9 @@ class CanvasView(QAbstractScrollArea):
         super().__init__(parent)
         self.scene = scene
         self.m = measurer()
+        # the theme and the font scale change the tokens and the metrics: every view re-measures
+        bind(theme.theme.changed, self, lambda _t: self.on_theme())
+        bind(theme.theme.scale_changed, self, lambda _k: self.on_theme())
         #: 'reading': the centred golden-section column of the conversation; 'fill': the whole width
         #: less the side gutters (a list in a panel)
         self.column = column
@@ -661,10 +665,15 @@ class CanvasView(QAbstractScrollArea):
         if getattr(self.scene, "loading", False):
             # a conversation still arriving: its skeleton alone, where it sits at the top
             leaves = [(b, by) for b, by in self.scene.leaves_between(0, 10**9) if b.KIND == "skeleton"]
+        region = e.region()
         for b, by in leaves:
             if b.h <= 0 or isinstance(b, IslandBlock):
                 continue
             vy = by + self.pad_top - scroll
+            # several small damages (rows that changed, a glyph that breathes) arrive as one event
+            # whose rect spans them: a block between two of them has nothing to paint
+            if not region.intersects(QRect(0, vy, vp.width(), b.h)):
+                continue
             x = self.col_x + b.indent
             w = self.col_w - b.indent
             rect = QRect(x, vy, w, b.h)
@@ -759,7 +768,7 @@ class CanvasView(QAbstractScrollArea):
 
     def _paint_cached(self, p: QPainter, b: Block, rect: QRect, st: PaintState) -> None:
         dpr = self.viewport().devicePixelRatioF()
-        key = (b.key, b.rev, b.sig, rect.width(), self.m.theme_name, dpr)
+        key = (b.key, b.rev, b.sig, b.gen, rect.width(), self.m.theme_name, dpr)
         pm = self.m.pixmaps.get(key)
         if pm is None:
             pm = QPixmap(int(rect.width() * dpr), int(max(1, rect.height()) * dpr))

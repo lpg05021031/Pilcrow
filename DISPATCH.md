@@ -48,6 +48,17 @@ puts them first with their notes prefilled, the plan blocks a repository whose p
 target's notes join the registry's standing notes in the brief, and prepare and verify fall back to
 the registry's defaults.
 
+Both clients were toured state by state (board, job view asking / canary waiting / running / review /
+finished, composer, inbox card, a run's own conversation; dark and light) and measured under a job of
+forty repositories reporting ten times a second (`qt/tests/stress/s_dispatch.py`, figures in
+`qt/PERF.md` §5). What that found and fixed: a run's row on the canvas kept the picture of its old
+state (a rebuilt block now paints anew and asks for its repaint), the engine's lists did not follow a
+theme switch, the board and the job view refreshed while hidden, the board re-laid every card on
+every delta, the sidebar rebuilt its rows on every delta, the composer's switches had no words beside
+them, a run's own conversation did not say which job it runs for (a crumb opens the job now, as a
+helper's opens its lead), and on the web the state cell broke out of its table row, a finished row's
+name was squeezed to nothing and the inbox card's actions overflowed.
+
 Pull requests through `gh` are implemented on the server and not yet exercised against a live GitHub
 remote. A lead agent that splits one task into per-repository briefs is the other shape, Helpers
 (HELPERS.md), built since. Not built: sessions on other machines (Pilcrow runs where its server runs).
@@ -299,6 +310,11 @@ inline with the control room's Allow / Deny, so most jobs never need opening. A 
 asked alike shows once, with its count and *Allow for all*. Keyboard: j/k move, Enter opens, a/d answer,
 A answers for all, Space pauses.
 
+As built: a job that needs a hand is the control room's needs card (the accent tint, the rail), and
+its requests and the canary waiting to be read are wells inside it (`.ovc-well`), each with the key
+buttons; the focused card's first request shows the keys' caps. A finished job is the control room's
+finished row.
+
 ### 4.3 The job view
 
 ```
@@ -336,6 +352,15 @@ The rows are a `RowScene` on the canvas engine, like the Timeline and Tasks list
 repositories scroll at 60 Hz, a run's change repaints its row, and a streaming "now" label costs the
 row's strip.
 
+As built: the job's state is the sessions' status pill beside the title (*Running*, *Needs you*,
+*Canary done*, *In review*, *Paused*; nothing once the job is over) and the line after it holds only
+the size, the cost and the time. Above the rows, what needs the person comes in the control room's
+card grammar: the canary that finished is a card with its name and how it went, its summary in the
+well, *Continue* with the forecast, and the switch that lets the rest learn from it; each request
+group is a card with the tool as its title, who asked under it, how long it has waited at the right,
+what it asks in the well, and the answers. The table's actions keep a column of their own, in the
+head too, so a row with buttons and one without line up; hairlines rule the rows.
+
 ### 4.4 The composer (a new job)
 
 ```
@@ -359,6 +384,13 @@ row's strip.
 │                                                     [ Plan ]  [ Start → ]   │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
+
+As built, the form is three things and a line: the name, the brief, the targets (the plan's verdict
+beside the label: *5 of 5 ready · 1 warning · up to 34 min · 2 levels*; what it has to say about a
+target under the picker, only when there is something), then **Options**, the new-session dialog's
+disclosure, closed, its line reading the settings as a sentence (*allow edits · 3 parallel · 20 min
+each · canary 1 · branch pilcrow/bump-eslint*). Opened, it holds *Run*, *Before and after each run*
+and *Finish*. The plan runs as you type; there is no Plan button.
 
 The target picker is the workspace scan: a tree of repositories with branch and cleanliness, a text
 filter (name, or *has file*, *has dependency*, *language*, which the scan indexes cheaply from

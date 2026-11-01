@@ -184,7 +184,8 @@ class Sidebar(QWidget):
         bind(store.ui_changed, self, lambda _u: self._on_ui())
         bind(store.page_changed, self, lambda _p: self._on_page())
         bind(store.inbox_unread_changed, self, lambda _n: self._on_page())
-        bind(store.dispatch_changed, self, lambda _d: self.rebuild())
+        self._jobs_sig: tuple = ()
+        bind(store.dispatch_changed, self, lambda _d: self._on_dispatch())
         bind(store.repos_changed, self, lambda _r: self.rebuild())
         bind(store.config_changed, self, lambda _c: self._on_config())
         bind(theme.theme.changed, self, lambda _t: self._on_config())
@@ -240,6 +241,16 @@ class Sidebar(QWidget):
         )
         self.page_overview.set_count(needs if needs else working, "needs" if needs else "")
         self.page_inbox.set_count(store.inbox_unread, "unread")
+
+    def _on_dispatch(self) -> None:
+        """A job changed. The rows depend only on which jobs exist and their names (the groups);
+        the badge on the Dispatch entry on what needs a hand. A run's progress touches neither."""
+        sig = tuple(sorted((jid, str(j.get("name") or "")) for jid, j in store.jobs.items()))
+        if sig != self._jobs_sig:
+            self._jobs_sig = sig
+            self.rebuild()
+        else:
+            self._on_page()
 
     def _tick(self) -> None:
         for r in self._rows.values():
@@ -531,12 +542,14 @@ class NavButton(QAbstractButton):
         super().leaveEvent(e)
 
     def set_on(self, on: bool) -> None:
-        self._on = on
-        self.update()
+        if on != self._on:
+            self._on = on
+            self.update()
 
     def set_count(self, n: int, tone: str = "") -> None:
-        self._count, self._count_tone = n, tone
-        self.update()
+        if (n, tone) != (self._count, self._count_tone):
+            self._count, self._count_tone = n, tone
+            self.update()
 
     def paintEvent(self, _e) -> None:  # noqa: N802
         t = theme.tokens()

@@ -23,8 +23,8 @@ export function Sidebar() {
   const unread = useStore((s) => s.unread);
   const page = useStore((s) => s.page);
   const inboxUnread = useStore((s) => s.inboxUnread);
-  const jobs = useStore((s) => s.jobs);
-  const dispatchNeedsN = dispatchNeeds(jobs);
+  // a number, so a run's progress (a new jobs map ten times a second) does not re-render the list
+  const dispatchNeedsN = useStore((s) => dispatchNeeds(s.jobs));
   const config = useStore((s) => s.config);
   const info = useStore((s) => s.info);
   const ui = useStore((s) => s.ui);

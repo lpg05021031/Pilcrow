@@ -15,177 +15,26 @@ from ...lib.fmt import cost as fmt_cost
 from ...lib.fmt import duration, plural
 from ...store import store
 from ..dialogs.parts import Card, Text, half_hairline, page_column
-from ..overview import EmptyNote, KeyButton, SectionHead
-from ..ui.bits import Box, IconButton, Mark, button
+from ..overview import EmptyNote, SectionHead
+from ..ui.bits import IconButton, LayoutButton, Mark, button
 from ..ui.signals import bind
-from .common import (
-    SegmentBar,
-    asked_by,
-    counts_text,
-    elapsed_text,
-    group_requests,
-    job_cost_text,
-    job_state_text,
-    now_ms,
-)
+from .cards import CanaryRow, RequestRow
+from .common import SegmentBar, counts_text, elapsed_text, group_requests, job_cost_text, job_state_text, now_ms
 
 Json = Dict[str, Any]
 
 
-class RequestRow(Box):
-    """A request waiting on a job (``.ask``): what, who asked, and Allow / Allow for all / Deny."""
-
-    def __init__(self, jid: str, entry: Json, parent: Optional[QWidget] = None) -> None:
-        super().__init__(bg="warn_wash/raised", radius=theme.R2, parent=parent)
-        self.jid = jid
-        self.entry = entry
-        self._busy = False
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(12, 7, 8, 7)
-        lay.setSpacing(10)
-        label = str(entry.get("label") or "")
-        tool, _sep, what = label.partition(": ")
-        self.tool = Text(tool if what else label, theme.FS_SMALL, 600, "text", wrap=False)
-        lay.addWidget(self.tool)
-        if what:
-            self.what = Text(what, theme.FS_SMALL, 400, "text", wrap=False, mono=True)
-            lay.addWidget(self.what, 1)
-        else:
-            lay.addStretch(1)
-        self.who = Text(asked_by(entry.get("names") or []), theme.FS_MICRO, 400, "text_3", wrap=False)
-        lay.addWidget(self.who)
-        n = len(entry.get("asks") or [])
-        interactive = bool(entry.get("interactive"))
-        self.allow = KeyButton("Allow", "primary")
-        self.allow.clicked.connect(self.allow_one)
-        self.allow_all = KeyButton(f"Allow for all{f' · {n}' if n > 1 else ''}")
-        self.allow_all.setToolTip("Answer every run of this job that asks the same thing, now and later")
-        self.allow_all.clicked.connect(self.allow_everyone)
-        self.deny = KeyButton("Deny", "ghost")
-        self.deny.clicked.connect(self.deny_one)
-        self.open = button("Open to respond", kind="primary", size="sm")
-        self.open.clicked.connect(self.open_session)
-        for b in (self.allow, self.allow_all, self.deny):
-            b.setVisible(not interactive)
-            lay.addWidget(b)
-        self.open.setVisible(interactive)
-        lay.addWidget(self.open)
-
-    def paintEvent(self, e) -> None:  # noqa: N802
-        super().paintEvent(e)
-        t = theme.tokens()
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(t.warn))
-        p.drawRoundedRect(0, 6, 3, self.height() - 12, 1.5, 1.5)
-
-    def _first(self) -> Optional[tuple]:
-        asks = self.entry.get("asks") or []
-        return asks[0] if asks else None
-
-    def _lock(self) -> None:
-        self._busy = True
-        for b in (self.allow, self.allow_all, self.deny):
-            b.setEnabled(False)
-
-    def allow_one(self) -> None:
-        first = self._first()
-        if not first or self._busy:
-            return
-        run, p = first
-        self._lock()
-        store.respond(
-            str(run.get("sessionId") or ""),
-            str(p.get("requestId") or ""),
-            {"behavior": "allow", "decisionClassification": "user_temporary"},
-        )
-
-    def allow_everyone(self) -> None:
-        if self._busy:
-            return
-        self._lock()
-        store.call("dispatch.allow", {"id": self.jid, "key": self.entry.get("key")})
-
-    def deny_one(self) -> None:
-        first = self._first()
-        if not first or self._busy:
-            return
-        run, p = first
-        self._lock()
-        store.respond(
-            str(run.get("sessionId") or ""),
-            str(p.get("requestId") or ""),
-            {"behavior": "deny", "message": "The user declined this action.", "decisionClassification": "user_reject"},
-        )
-
-    def open_session(self) -> None:
-        first = self._first()
-        if first and first[0].get("sessionId"):
-            store.open_session(str(first[0]["sessionId"]))
-
-
-class CanaryRow(Box):
-    """The canary finished: read it and continue (``.canary``), with the forecast for the rest."""
-
-    def __init__(self, job: Json, parent: Optional[QWidget] = None) -> None:
-        super().__init__(bg="plan_wash/raised", radius=theme.R2, parent=parent)
-        self.job = job
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(12, 7, 8, 7)
-        lay.setSpacing(10)
-        learned = [x for x in (job.get("learned") or []) if isinstance(x, dict)]
-        names = ", ".join(str(x.get("name")) for x in learned) or "the canary"
-        self.text = Text(f"Canary {names} finished. Read it and continue.", theme.FS_SMALL, 400, "text", wrap=False)
-        lay.addWidget(self.text, 1)
-        f = job.get("forecast") or {}
-        if f:
-            self.forecast = Text(
-                f"forecast {fmt_cost(float(f.get('cost') or 0))} · {int(f.get('minutes') or 0)} min for {plural(int(f.get('runs') or 0), 'repo')}",
-                theme.FS_MICRO,
-                400,
-                "text_3",
-                wrap=False,
-            )
-            lay.addWidget(self.forecast)
-        self.open = button("Open canary", kind="ghost", size="sm")
-        self.open.clicked.connect(self.open_canary)
-        lay.addWidget(self.open)
-        self.cont = button("Continue", kind="primary", size="sm", icon="play")
-        self.cont.clicked.connect(self.go_on)
-        lay.addWidget(self.cont)
-
-    def paintEvent(self, e) -> None:  # noqa: N802
-        super().paintEvent(e)
-        t = theme.tokens()
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(t.plan))
-        p.drawRoundedRect(0, 6, 3, self.height() - 12, 1.5, 1.5)
-
-    def open_canary(self) -> None:
-        jid = str(self.job.get("id"))
-        run = next((r for r in store.runs_of(jid) if r.get("wave") == "canary" and r.get("sessionId")), None)
-        if run is not None:
-            store.open_session(str(run["sessionId"]))
-        else:
-            store.open_job(jid)
-
-    def go_on(self) -> None:
-        self.cont.setEnabled(False)
-        store.call("dispatch.continue", {"id": self.job.get("id")}).catch(lambda _e: self.cont.setEnabled(True))
-
-
 class JobCard(Card):
-    """One job (``.card``): name, scope, the segmented bar, counts, cost; then what needs a hand."""
+    """One job (``.card``): name, scope, the segmented bar, counts, cost; then what needs a hand, in
+    wells, the card tinted and railed like a session that waits in the control room."""
 
     def __init__(self, jid: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(12, parent)
         self.jid = jid
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._sig: Any = None
-        lay = QVBoxLayout(self)
+        self._keys = False
+        self._lay = lay = QVBoxLayout(self)
         lay.setContentsMargins(14, 11, 14, 11)
         lay.setSpacing(8)
         line = QHBoxLayout()
@@ -206,7 +55,21 @@ class JobCard(Card):
         self.extra.setSpacing(6)
         lay.addLayout(self.extra)
 
+    def paintEvent(self, e) -> None:  # noqa: N802
+        super().paintEvent(e)
+        if self._tone != "needs":
+            return
+        t = theme.tokens()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(t.accent))
+        p.drawRoundedRect(0, 12, 3, self.height() - 24, 1.5, 1.5)
+
     def update_from(self, job: Json, runs: List[Json], now: float, detail: bool) -> None:
+        if detail != (self._tone == "needs"):
+            self.set_tone("needs" if detail else "")
+            self._lay.setContentsMargins(19 if detail else 14, 11, 14, 11)
         self.name.setText(str(job.get("name") or "Untitled job"))
         state = job_state_text(job, now)
         self.scope.setText(f"{plural(int(job.get('total') or len(job.get('targets') or [])), 'repo')} · {state}")
@@ -235,6 +98,20 @@ class JobCard(Card):
             self.extra.addWidget(RequestRow(self.jid, e))
         if job.get("canaryWaiting"):
             self.extra.addWidget(CanaryRow(job))
+        self._apply_keys()
+
+    def set_keys(self, on: bool) -> None:
+        if on != self._keys:
+            self._keys = on
+            self._apply_keys()
+
+    def _apply_keys(self) -> None:
+        first = True
+        for i in range(self.extra.count()):
+            w = self.extra.itemAt(i).widget()
+            if isinstance(w, RequestRow):
+                w.set_keys(self._keys and first)
+                first = False
 
     def mouseReleaseEvent(self, e) -> None:  # noqa: N802
         if e.button() == Qt.MouseButton.LeftButton and self.rect().contains(e.position().toPoint()):
@@ -242,13 +119,18 @@ class JobCard(Card):
         super().mouseReleaseEvent(e)
 
 
-class FinishedLine(QWidget):
-    """A finished job as one quiet row: name, scope, counts, cost, time."""
+class FinishedLine(LayoutButton):
+    """A finished job as one quiet row (``.ovr``, the control room's finished rows): name, scope,
+    counts, cost, time; a fill under the pointer and while focused."""
 
     def __init__(self, jid: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.jid = jid
+        self._focused = False
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setAccessibleName("Open the job")
+        self.setAutoDefault(False)
+        self.clicked.connect(lambda: store.open_job(self.jid))
         lay = QHBoxLayout(self)
         lay.setContentsMargins(12, 7, 12, 7)
         lay.setSpacing(12)
@@ -260,6 +142,17 @@ class FinishedLine(QWidget):
         lay.addWidget(self.cost)
         self.time = Text("", theme.FS_SMALL, 400, "text_3", wrap=False, mono=True)
         lay.addWidget(self.time)
+        bind(theme.theme.changed, self, lambda _t: self._paint())
+        self._paint()
+
+    def set_focused(self, on: bool) -> None:
+        if on != self._focused:
+            self._focused = on
+            self._paint()
+
+    def _paint(self) -> None:
+        self.set_look(hover="fill_1/raised", on="fill_1/raised", radius=8)
+        self.look_active = self._focused
 
     def update_from(self, job: Json, now: float) -> None:
         self.name.setText(f"{job.get('name')} · {plural(int(job.get('total') or 0), 'repo')}")
@@ -278,11 +171,6 @@ class FinishedLine(QWidget):
         started, ended = float(job.get("startedAt") or 0), float(job.get("finishedAt") or job.get("updatedAt") or 0)
         self.time.setText(duration(ended - started) if started and ended else "")
 
-    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
-        if e.button() == Qt.MouseButton.LeftButton:
-            store.open_job(self.jid)
-        super().mouseReleaseEvent(e)
-
 
 class Board(QWidget):
     """Every job: needs a hand, running, in review, finished."""
@@ -296,6 +184,9 @@ class Board(QWidget):
         self.lines: Dict[str, FinishedLine] = {}
         self._focus = -1
         self.ordered: List[str] = []
+        self._order: Dict[str, List[str]] = {}  # each section's cards, in order, as laid out
+        self._fin_order: List[str] = []
+        self._stale = False
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
@@ -379,7 +270,7 @@ class Board(QWidget):
         self._tick_timer = QTimer(self)
         self._tick_timer.setInterval(1000)
         self._tick_timer.timeout.connect(self._tick)
-        bind(store.dispatch_changed, self, lambda _d: self.refresh())
+        bind(store.dispatch_changed, self, lambda _d: self._on_change())
         bind(store.ui_changed, self, lambda _u: self.side_btn.setVisible(not store.ui.sidebar))
         bind(store.connected_changed, self, lambda on: on and store.load_jobs())
         self.side_btn.setVisible(not store.ui.sidebar)
@@ -387,9 +278,18 @@ class Board(QWidget):
         self.refresh()
 
     # ---- lifecycle
+    def _on_change(self) -> None:
+        """A job changed: the board refreshes when it shows, else when it shows next."""
+        if self.isVisible():
+            self.refresh()
+        else:
+            self._stale = True
+
     def showEvent(self, e) -> None:  # noqa: N802
         super().showEvent(e)
         self._tick_timer.start()
+        if self._stale:
+            self.refresh()
         store.load_jobs()
 
     def hideEvent(self, e) -> None:  # noqa: N802
@@ -422,7 +322,11 @@ class Board(QWidget):
         return out
 
     def refresh(self) -> None:
+        """Bring the board in line with the jobs. A card is re-laid only when its section's
+        membership or order changed; otherwise its texts are set in place, so a run's progress
+        touches one card and no layout."""
         self.now = now_ms()
+        self._stale = False
         b = self.buckets()
         self.ordered = [str(j.get("id")) for k in self.SECTIONS for j in b[k]]
         focus_id = self.ordered[self._focus] if 0 <= self._focus < len(self.ordered) else None
@@ -435,44 +339,53 @@ class Board(QWidget):
         keep = set()
         for key in ("needs", "running", "review", "drafts"):
             jobs = b[key]
+            ids = [str(j.get("id")) for j in jobs]
             lay = self.lists[key]
-            while lay.count():
-                lay.takeAt(0)
+            if ids != self._order.get(key):
+                while lay.count():
+                    lay.takeAt(0)
+                for jid in ids:
+                    card = self.cards.get(jid)
+                    if card is None:
+                        card = self.cards[jid] = JobCard(jid)
+                    lay.addWidget(card)
+                self._order[key] = ids
             for j in jobs:
                 jid = str(j.get("id"))
                 keep.add(jid)
-                card = self.cards.get(jid)
-                if card is None:
-                    card = self.cards[jid] = JobCard(jid)
+                card = self.cards[jid]
                 card.update_from(j, store.runs_of(jid), self.now, detail=key == "needs")
                 card.set_focused(jid == focus_id)
-                lay.addWidget(card)
+                card.set_keys(jid == focus_id)
             self.heads[key].count.set_count(len(jobs))
             self.sections[key].setVisible(bool(jobs))
         for jid in list(self.cards):
             if jid not in keep:
                 self.cards.pop(jid).deleteLater()
         # finished: quiet rows in one card
-        while self.finished_lay.count():
-            w = self.finished_lay.takeAt(0).widget()
-            if isinstance(w, FinishedLine):
-                w.hide()
-            elif w is not None:
-                w.deleteLater()
-        keep = set()
-        for i, j in enumerate(b["finished"]):
+        fin_ids = [str(j.get("id")) for j in b["finished"]]
+        if fin_ids != self._fin_order:
+            while self.finished_lay.count():
+                w = self.finished_lay.takeAt(0).widget()
+                if isinstance(w, FinishedLine):
+                    w.hide()
+                elif w is not None:
+                    w.deleteLater()
+            for i, jid in enumerate(fin_ids):
+                if i:
+                    self.finished_lay.addWidget(half_hairline("raised"))
+                line = self.lines.get(jid)
+                if line is None:
+                    line = self.lines[jid] = FinishedLine(jid)
+                line.show()
+                self.finished_lay.addWidget(line)
+            self._fin_order = fin_ids
+        for j in b["finished"]:
             jid = str(j.get("id"))
-            keep.add(jid)
-            if i:
-                self.finished_lay.addWidget(half_hairline("raised"))
-            line = self.lines.get(jid)
-            if line is None:
-                line = self.lines[jid] = FinishedLine(jid)
-            line.update_from(j, self.now)
-            line.show()
-            self.finished_lay.addWidget(line)
+            self.lines[jid].update_from(j, self.now)
+            self.lines[jid].set_focused(jid == focus_id)
         for jid in list(self.lines):
-            if jid not in keep:
+            if jid not in fin_ids:
                 self.lines.pop(jid).deleteLater()
         self.heads["finished"].count.set_count(len(b["finished"]))
         self.sections["finished"].setVisible(bool(b["finished"]))

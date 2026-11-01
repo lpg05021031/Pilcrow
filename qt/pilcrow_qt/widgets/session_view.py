@@ -436,6 +436,8 @@ class SessionView(QWidget):
         root.addWidget(self.helpers_bar)
         self.lead_crumb: Optional[CrumbButton] = None
         self._lead_id = ""
+        self.job_crumb: Optional[CrumbButton] = None  # a dispatch run: the job it runs for
+        self._job_id = ""
 
         # ---- conversation and composer
         cwd = self.cwd
@@ -564,6 +566,17 @@ class SessionView(QWidget):
             self.lead_crumb.show()
         elif self.lead_crumb is not None:
             self.lead_crumb.hide()
+        d = s.get("dispatch") if isinstance(s.get("dispatch"), dict) else None
+        if d and d.get("jobId"):
+            if self.job_crumb is None:
+                self.job_crumb = CrumbButton("Open the job")
+                self.job_crumb.clicked.connect(lambda: self._job_id and store.open_job(self._job_id))
+                self.crumbs.layout().addWidget(self.job_crumb)
+            self._job_id = str(d.get("jobId"))
+            self.job_crumb.set_text(f"run of {d.get('name') or 'a job'}")
+            self.job_crumb.show()
+        elif self.job_crumb is not None:
+            self.job_crumb.hide()
         changes = int(git.get("changed") or 0) + int(git.get("untracked") or 0)
         self.diffstat.setVisible(bool(git.get("isRepo")) and changes > 0)
         if changes > 0:
@@ -981,17 +994,18 @@ class StatusPill(QWidget):
         lay.addWidget(self.link)
         bind(theme.theme.changed, self, lambda _t: self._paint())
 
-    def set_status(self, status: str, workflow: Optional[str] = None) -> None:
-        if (status, workflow) == getattr(self, "_shown_status", None):
+    def set_status(self, status: str, workflow: Optional[str] = None, label: Optional[str] = None) -> None:
+        """``status`` picks the colour and the dot; ``label`` replaces the status word (a job's own)."""
+        if (status, workflow, label) == getattr(self, "_shown_status", None):
             return
-        self._shown_status = (status, workflow)
+        self._shown_status = (status, workflow, label)
         self.status = status
         show = bool(status) and status not in ("idle", "stopped")
         self.setVisible(show)
         if not show:
             self.dot.set_live(False)
             return
-        self.lb.setText(STATUS_TEXT.get(status, status))
+        self.lb.setText(label or STATUS_TEXT.get(status, status))
         self.link.setVisible(bool(workflow))
         if workflow:
             self.link.setText(f"· {workflow}")

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { GitBranch, PanelRight, PanelLeftOpen, Ellipsis, Pencil, GitFork, FolderOpen, Archive, Trash, Copy, SquareTerminal, RotateCcw, Power, FolderGit2, Folder, Settings2, CircleDollarSign, ChevronDown, BookMarked, ArrowUpRight } from 'lucide-react';
-import { useStore, setUi, VIEW_MODES, renameSession, forkSession, archiveSession, deleteSession, confirmAction, call, insertIntoComposer, toast, openSession, setDialog, setCwd, getModel, repoFor } from '../lib/store';
+import { useStore, setUi, VIEW_MODES, renameSession, forkSession, archiveSession, deleteSession, confirmAction, call, insertIntoComposer, toast, openSession, openJob, setDialog, setCwd, getModel, repoFor } from '../lib/store';
 import { basename, cost, errText, plural, tildify } from '../lib/format';
 import { McpNotice } from './McpNotice';
 import { HelpersBar } from './HelpersBar';
@@ -203,6 +203,12 @@ export function SessionView({ session }: { session: SessionSummary }) {
               <button className="crumb crumb-btn wt" title="Open the lead session" onClick={() => openSession(rt.helper!.leadId)}>
                 <ArrowUpRight size={12} />
                 <span className="ellipsis">helper of {rt.helper.leadTitle || 'a lead session'}</span>
+              </button>
+            )}
+            {session.dispatch?.jobId && (
+              <button className="crumb crumb-btn wt" title="Open the job" onClick={() => openJob(session.dispatch!.jobId)}>
+                <ArrowUpRight size={12} />
+                <span className="ellipsis">run of {session.dispatch.name || 'a job'}</span>
               </button>
             )}
           </span>
