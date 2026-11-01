@@ -7,6 +7,7 @@ import { listSessions, getSessionMessages, getSubagentMessages, renameSession, d
 import { claudeConfigDir, log } from './util.js';
 
 const LIST_TTL_MS = 4000; // the list is asked for on every change; the SDK reads every transcript's head
+/** @type {{ at: number, data: import('@anthropic-ai/claude-agent-sdk').SDKSessionInfo[], pending: Promise<import('@anthropic-ai/claude-agent-sdk').SDKSessionInfo[]> | null }} */
 let listCache = { at: 0, data: [], pending: null };
 
 export async function listHistory({ force = false } = {}) {

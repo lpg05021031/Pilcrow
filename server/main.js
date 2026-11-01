@@ -147,7 +147,7 @@ function rpcMethods({ shell, quit, listChanged }) {
       };
     },
     'app.quit': () => {
-      setTimeout(quit, 50); // after the reply is out
+      setTimeout(() => quit?.(), 50); // after the reply is out
       return true;
     },
     'config.get': () => store.getConfig(),
@@ -182,11 +182,11 @@ function rpcMethods({ shell, quit, listChanged }) {
     },
     'session.archive': ({ id, archived }) => {
       store.setMeta(str(id, 'id'), { archived: archived || null });
-      listChanged();
+      listChanged?.();
     },
     'session.pin': ({ id, pinned }) => {
       store.setMeta(str(id, 'id'), { pinned: pinned || null });
-      listChanged();
+      listChanged?.();
     },
     'session.fork': ({ id, upToMessageId, title }) => sessions.fork(str(id, 'id'), { upToMessageId, title }),
     'session.close': async ({ id }) => sessions.find(id)?.close(),
@@ -562,7 +562,7 @@ export async function start({ shell = 'none', port, quiet = false, onQuit, heart
 
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD });
   server.on('upgrade', (req, socket, head) => {
-    const url = new URL(req.url, 'http://x');
+    const url = new URL(req.url || '/', 'http://x');
     if (url.pathname !== '/ws' || !originOk(req) || !hostOk(req) || !fetchSiteOk(req)) {
       socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); // as the HTTP refusals
       socket.destroy();
@@ -621,7 +621,7 @@ export async function start({ shell = 'none', port, quiet = false, onQuit, heart
       };
       const onOk = () => {
         server.off('error', onErr);
-        resolve();
+        resolve(undefined);
       };
       server.once('error', onErr);
       server.once('listening', onOk);

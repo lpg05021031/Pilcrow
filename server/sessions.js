@@ -17,12 +17,15 @@ import { applyAssistant, applyCompact, fromHistory } from './usage.js';
 export const bus = new EventEmitter();
 /** Where other modules (helpers.js) extend a session: in-process MCP servers to attach, permission
  *  decisions Pilcrow takes itself, fields added to `state()`, and a say on a decision as it is given. */
-export const extensions = {
-  mcpServers: [], // (session) => McpSdkServerConfigWithInstance | null
-  permission: [], // (session, toolName, input) => PermissionResult | null
-  state: [], // (session) => object merged into state()
-  respond: [], // (session, request, decision) => decision
-};
+/**
+ * @type {{
+ *   mcpServers: ((session: Session) => import('@anthropic-ai/claude-agent-sdk').McpSdkServerConfigWithInstance | null)[],
+ *   permission: ((session: Session, toolName: string, input: any) => import('@anthropic-ai/claude-agent-sdk').PermissionResult | null)[],
+ *   state: ((session: Session) => object | null)[],
+ *   respond: ((session: Session, request: any, decision: any) => any)[],
+ * }}
+ */
+export const extensions = { mcpServers: [], permission: [], state: [], respond: [] };
 function mcpOption(session) {
   /** @type {Record<string, import('@anthropic-ai/claude-agent-sdk').McpServerConfig>} */
   const servers = {};
@@ -35,6 +38,7 @@ function mcpOption(session) {
 
 /** Spend over the last few hours, per session, for the control room's burn chart. */
 export const costLog = {
+  /** @type {{ at: number, id: string, delta: number }[]} */
   entries: [],
   add(id, delta) {
     this.entries.push({ at: Date.now(), id, delta });
@@ -177,7 +181,7 @@ class Session {
     this.compacting = false;
     this.mcp = []; // last known MCP server statuses for this process
     this.mcpTimer = null;
-    this.mcpAuthTimer = null;
+    this.mcpAuthTimer = undefined;
     this._stateSoon = null;
     this.lastActivity = Date.now();
     this.outbox = [];
@@ -756,8 +760,14 @@ class Session {
     return true;
   }
 
+  /**
+   * @typedef {{ mediaType: string, data: string }} Image
+   * @typedef {{ name: string, text: string }} File
+   * @typedef {{ text?: string, images?: Image[], files?: File[], shouldQuery?: boolean, note?: string | null, from?: string | null }} Message
+   */
   /** `note` marks a message Pilcrow wrote (a helper's news to its lead); `from` says who sent it
-   *  when it was not the person ('lead'). Both ride on the record for the clients to draw it apart. */
+   *  when it was not the person ('lead'). Both ride on the record for the clients to draw it apart.
+   *  @param {Message & { clientUuid?: string, now?: boolean }} msg */
   async send({ text = '', images = [], files = [], clientUuid, shouldQuery, now = false, note = null, from = null }) {
     await this.ensureStarted();
     if (!text && !images.length && !files.length) return null;
@@ -778,8 +788,10 @@ class Session {
     return this.deliver({ uuid: u, text, images, files, shouldQuery, note, from });
   }
 
-  /** Push one message into the running Claude Code process. */
+  /** Push one message into the running Claude Code process. @param {Message & { uuid: string }} msg */
   deliver({ uuid: u, text = '', images = [], files = [], shouldQuery, note = null, from = null }) {
+    const input = this.input;
+    if (!input) throw new AppError('failed', 'Claude Code is not running for this session.');
     const content = [];
     for (const img of images) content.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType, data: img.data } });
     for (const f of files) content.push({ type: 'text', text: `<attached_file name="${f.name}">\n${f.text}\n</attached_file>` });
@@ -790,7 +802,7 @@ class Session {
     this.out(rec);
     const sdkMsg = { type: 'user', message: { role: 'user', content }, parent_tool_use_id: null, uuid: u, session_id: this.id };
     if (shouldQuery === false) sdkMsg.shouldQuery = false;
-    this.input.push(sdkMsg);
+    input.push(sdkMsg);
     if (!this.turnStartedAt) this.turnStartedAt = Date.now();
     this.recordTurn(); // a message steering a turn in progress: what was done so far comes first
     if (store.getConfig().timeline !== false) snapshots.record(this, { kind: 'message', uuid: u, label: text.replace(/\s+/g, ' ').trim().slice(0, 120) });
@@ -912,6 +924,7 @@ class Session {
   /** Restore files to their state before the given user message. `dryRun` only reports what would change. */
   async rewind(messageId, dryRun = true) {
     await this.ensureStarted();
+    if (!this.q) throw new AppError('failed', 'Claude Code is not running for this session.');
     const r = await this.q.rewindFiles(messageId, { dryRun });
     if (!dryRun && r.canRewind) log('rewound files', this.id, messageId, r.filesChanged?.length);
     return r;
@@ -968,7 +981,7 @@ class Session {
     clearTimeout(this.mcpAuthTimer);
     let tries = 0;
     const tick = () => {
-      this.mcpAuthTimer = null;
+      this.mcpAuthTimer = undefined;
       this.mcpStatus()
         .then((list) => {
           const s = (list || []).find((x) => x.name === name);
@@ -1009,7 +1022,7 @@ class Session {
     clearTimeout(this._stateSoon);
     clearTimeout(this.mcpTimer);
     clearTimeout(this.mcpAuthTimer);
-    this._stateSoon = this.mcpTimer = this.mcpAuthTimer = null;
+    this._stateSoon = this.mcpTimer = this.mcpAuthTimer = undefined;
     this.flushOut(); // what is batched for the clients goes now, not after the process is gone
     if (!this.q) return;
     closing.add(this.q);

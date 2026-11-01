@@ -126,6 +126,7 @@ export function groupHunks(diffs) {
 
 /** Local dependencies a manifest declares: package.json file:/link:/workspace:, go.mod replace, Cargo path. */
 export function manifestOf(dir) {
+  /** @type {{ name: string | null, kind: string | null, localDeps: string[], depNames: string[] }} */
   const out = { name: null, kind: null, localDeps: [], depNames: [] };
   const pkg = readJson(path.join(dir, 'package.json'), null);
   if (pkg && typeof pkg === 'object') {

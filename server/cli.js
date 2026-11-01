@@ -25,7 +25,7 @@ const BROWSERS = ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium
 
 /** Chrome first, then Edge (always present on Windows 10/11), then other Chromium browsers. */
 function findWindowsBrowser() {
-  const bases = [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.LOCALAPPDATA].filter(Boolean);
+  const bases = [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.LOCALAPPDATA].flatMap((b) => (b ? [b] : []));
   const rel = ['Google/Chrome/Application/chrome.exe', 'Microsoft/Edge/Application/msedge.exe', 'Chromium/Application/chrome.exe', 'BraveSoftware/Brave-Browser/Application/brave.exe'];
   for (const r of rel) {
     for (const b of bases) {
@@ -115,10 +115,10 @@ function snapOf(bin) {
 
 function openChromeWindow(chrome, url) {
   const snap = snapOf(chrome);
-  const common = snap ? path.join(HOME, 'snap', snap, 'common') : null;
+  const common = snap && path.join(HOME, 'snap', snap, 'common');
   // A snap browser cannot use a profile in a hidden folder; give it one inside its own snap folder.
   // On Windows the profile stays in %LOCALAPPDATA% so it never roams with the user profile.
-  const profile = snap ? (fs.existsSync(common) ? privateDir(path.join(common, 'pilcrow-profile')) : null) : privateDir(path.join(xdg(IS_WIN ? 'data' : 'config'), 'chrome-profile'));
+  const profile = common ? (fs.existsSync(common) ? privateDir(path.join(common, 'pilcrow-profile')) : null) : privateDir(path.join(xdg(IS_WIN ? 'data' : 'config'), 'chrome-profile'));
   const win = store.getConfig().window || {};
   const args = [`--app=${url}`, '--class=pilcrow', '--name=pilcrow', '--no-first-run', '--no-default-browser-check', '--disable-features=Translate,MediaRouter', `--window-size=${win.width || 1480},${win.height || 940}`];
   if (profile) args.push(`--user-data-dir=${profile}`);
@@ -138,7 +138,7 @@ function gitBash() {
   const git = which('git');
   const candidates = [
     git && path.join(path.dirname(path.dirname(git)), 'bin', 'bash.exe'),
-    ...[process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Programs')].filter(Boolean).map((b) => path.join(b, 'Git', 'bin', 'bash.exe')),
+    ...[process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Programs')].flatMap((b) => (b ? [path.join(b, 'Git', 'bin', 'bash.exe')] : [])),
   ].filter(Boolean);
   for (const c of candidates) if (fs.existsSync(c)) return slash(c);
   return null;

@@ -265,6 +265,7 @@ export function createRegistry(deps) {
     };
   }
   /** Re-read the scanned facts of some or all entries (throttled to once a minute each unless forced). */
+  /** @param {string[] | null} [ids] every entry when null */
   async function refresh(ids = null, { force = false } = {}) {
     const todo = all().filter((e) => (!ids || ids.includes(e.id)) && (force || now() - (refreshedAt.get(e.id) || 0) > REFRESH_MS));
     if (!todo.length) return list();

@@ -143,8 +143,9 @@ const indexCache = new Map(); // cwd -> { at, files }, oldest first
 async function walk(root, limit) {
   const out = [];
   const stack = [''];
-  while (stack.length && out.length < limit) {
+  while (out.length < limit) {
     const rel = stack.pop();
+    if (rel === undefined) break;
     let ents = [];
     try {
       ents = await fs.promises.readdir(path.join(root, rel), { withFileTypes: true });

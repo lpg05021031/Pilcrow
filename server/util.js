@@ -303,7 +303,7 @@ function openLog() {
   }
   const fd = fs.openSync(file, 'a', 0o600);
   fs.fchmodSync(fd, 0o600); // also tightens logs left by older versions
-  logStream = fs.createWriteStream(null, { fd });
+  logStream = fs.createWriteStream(file, { fd }); // the fd is used, the path only names it
 }
 
 export function log(...args) {
@@ -323,28 +323,35 @@ export function log(...args) {
   }
 }
 
-/** A push-based async iterable queue (used as the SDK's streaming prompt). */
+/** A push-based async iterable queue (used as the SDK's streaming prompt). @template T */
 export class AsyncQueue {
   constructor() {
+    /** @type {IteratorYieldResult<T>[]} pushed, not yet taken */
     this.items = [];
+    /** @type {((r: IteratorResult<T>) => void)[]} takers waiting for a push */
     this.waiters = [];
     this.closed = false;
   }
+  /** @param {T} item */
   push(item) {
     if (this.closed) return false;
+    /** @type {IteratorYieldResult<T>} */
+    const r = { value: item, done: false };
     const w = this.waiters.shift();
-    if (w) w({ value: item, done: false });
-    else this.items.push(item);
+    if (w) w(r);
+    else this.items.push(r);
     return true;
   }
   close() {
     this.closed = true;
     for (const w of this.waiters.splice(0)) w({ value: undefined, done: true });
   }
+  /** @returns {AsyncIterator<T>} */
   [Symbol.asyncIterator]() {
     return {
       next: () => {
-        if (this.items.length) return Promise.resolve({ value: this.items.shift(), done: false });
+        const r = this.items.shift();
+        if (r) return Promise.resolve(r);
         if (this.closed) return Promise.resolve({ value: undefined, done: true });
         return new Promise((resolve) => this.waiters.push(resolve));
       },

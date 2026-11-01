@@ -1,8 +1,9 @@
 {
   // The server and the Electron shell are plain JavaScript; tsc checks them from their JSDoc and the
   // types of Node and the libraries they call (`npm run check:server`). JSDoc sits at the boundaries
-  // (options objects, records other modules read); locals are inferred. Not strict: implicit `any`
-  // and nullable values are allowed, as plain JavaScript has them; every other strict check is on.
+  // (options objects, records other modules read); locals are inferred. strictNullChecks is on: a value
+  // that may be null or undefined is checked before it is used. Not on: noImplicitAny (untyped locals
+  // and parameters are plain JavaScript) and useUnknownInCatchVariables (handlers read e?.message).
   "compilerOptions": {
     "target": "ES2023",
     "lib": ["ES2023"],
@@ -14,6 +15,7 @@
     "skipLibCheck": true,
     "types": ["node"],
     "alwaysStrict": true,
+    "strictNullChecks": true,
     "noImplicitThis": true,
     "strictBindCallApply": true,
     "strictFunctionTypes": true,

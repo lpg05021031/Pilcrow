@@ -587,7 +587,13 @@ describe('the person and a restart', () => {
     expect(known.find((k: any) => k.path === web)).toMatchObject({ name: 'web', registered: true, allowed: true, about: 'storefront' });
     expect(known.find((k: any) => k.path === api)).toMatchObject({ registered: false, allowed: false });
     expect(known.find((k: any) => k.path === path.join(tmp, 'code', 'lead'))).toMatchObject({ allowed: true });
+    const after = await H.start('lead', { name: 'after-api', brief: 'x', cwd: api, after: ['api'] });
+    expect(after.state).toBe('queued');
     await sessions.remove(a.id);
+    await sleep(60);
+    // the one it waited for is gone: it is skipped with that reason, not left queued
+    expect(H.list('lead').helpers.find((h: any) => h.name === 'after-api')).toMatchObject({ state: 'skipped', reason: 'api is gone' });
+    await sessions.remove(after.id);
     await sleep(60);
     expect(H.list('lead').helpers.map((h: any) => h.name)).toEqual(['web']);
     expect(L.sent[0].text).toMatch(/state="removed">The person removed the helper api/);

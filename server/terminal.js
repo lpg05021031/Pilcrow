@@ -16,6 +16,11 @@ const KILL_GRACE_MS = 1500; // a shell that ignores SIGHUP this long gets SIGKIL
 const require = createRequire(import.meta.url);
 
 export const terminals = new EventEmitter();
+/**
+ * @typedef {{ id: string, cwd: string, io: any, resizable: boolean, chunks: string[], size: number, exited: { code: number | null, signal: string | null } | null,
+ *   title: string, cols: number, rows: number, typed: boolean }} Term
+ * @type {Map<string, Term>}
+ */
 const all = new Map();
 
 let nodePty;
@@ -162,6 +167,7 @@ export function open({ cwd, cols = 100, rows = 30, command }) {
   }
   const id = uuid();
   // The scrollback is a list of chunks: dropping whole old chunks keeps an append from copying it all.
+  /** @type {Term} */
   const term = { id, cwd: slash(dir), io, resizable: io.resizable, chunks: [], size: 0, exited: null, title: path.basename(dir) || dir, cols, rows, typed: false };
   all.set(id, term);
   const started = Date.now();
@@ -169,7 +175,9 @@ export function open({ cwd, cols = 100, rows = 30, command }) {
     if (!data) return;
     term.chunks.push(data);
     term.size += data.length;
-    while (term.size - term.chunks[0].length >= SCROLLBACK) term.size -= term.chunks.shift().length;
+    let drop = 0;
+    while (term.size - term.chunks[drop].length >= SCROLLBACK) term.size -= term.chunks[drop++].length;
+    if (drop) term.chunks.splice(0, drop);
     terminals.emit('data', { id, data });
   };
   const attach = (cur) => {

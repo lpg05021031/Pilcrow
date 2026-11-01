@@ -15,9 +15,17 @@ const FILE = path.join(xdg('config'), 'schedules.json');
 const MAX_PARALLEL = 2;
 const DEFAULT_MAX_MIN = 45;
 
-// Read in start(), not at import: importing this module must not touch the person's files.
+/**
+ * @typedef {{ id: string, kind: string, playbookId: string | null, playbookName: string | null, name: string, cwd: string, prompt: string,
+ *   cadence: Record<string, any>, model: string, effort: string, mode: string, worktree: boolean, maxMinutes: number, enabled: boolean,
+ *   createdAt: number, lastRunAt: number | null, lastStatus: string | null, runs: number }} Schedule
+ * @typedef {{ sessionId?: string, jobId?: string, startedAt: number, timer: ReturnType<typeof setTimeout> | null, stopping?: string | null, onState?: (st: any) => void }} Run
+ */
+
+/** @type {{ schedules: Schedule[] }} read in start(), not at import: importing this module must not touch the person's files */
 let data = { schedules: [] };
-const running = new Map(); // scheduleId -> { sessionId | jobId, startedAt, timer }
+/** @type {Map<string, Run>} scheduleId -> its run in progress */
+const running = new Map();
 /** How a schedule of kind 'dispatch' runs: (playbookId, { scheduleId, name, unattended }) → job summary. Set by main.js. */
 let dispatchRunner = null;
 export function setDispatchRunner(fn) {
@@ -234,6 +242,7 @@ export async function runNow(id, { manual = true } = {}) {
   store.setMeta(sessionId, { scheduled: { id: s.id, name: s.name, at: startedAt, manual } });
   const session = sessions.find(sessionId);
   session.unattended = true;
+  /** @type {Run} */
   const entry = { sessionId, startedAt, timer: null, stopping: null };
   running.set(id, entry);
   s.lastRunAt = startedAt;
@@ -293,8 +302,10 @@ function finishRun(s, session, entry, status, reason) {
   log('schedule done', s.name, status);
 }
 
-let ticker = null;
-let firstTick = null;
+/** @type {ReturnType<typeof setInterval> | undefined} */
+let ticker;
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let firstTick;
 export function start() {
   if (ticker) return;
   data = readJson(FILE, data);
@@ -329,7 +340,7 @@ export function start() {
 export function stop() {
   clearInterval(ticker);
   clearTimeout(firstTick);
-  ticker = firstTick = null;
+  ticker = firstTick = undefined;
 }
 
 /** A dispatch job started by a schedule ended: the schedule's record moves on (the report is the job's own inbox item). */

@@ -282,6 +282,12 @@ export function createDispatcher(deps) {
   async function describeRepo(dir, metaAll) {
     const info = await git.info(dir).catch(() => ({ isRepo: false }));
     const name = path.basename(dir);
+    let last = 0;
+    for (const m of Object.values(metaAll)) {
+      if ((m?.project === slash(dir) || m?.cwd === slash(dir)) && (m.touched || m.createdAt) > last) last = m.touched || m.createdAt;
+    }
+    const remote = info.isRepo ? await git.git(dir, ['config', '--get', 'remote.origin.url']).catch(() => ({ stdout: '' })) : null;
+    const man = manifestOf(dir);
     const out = {
       path: slash(dir),
       name,
@@ -291,32 +297,22 @@ export function createDispatcher(deps) {
       untracked: info.untracked || 0,
       ahead: info.ahead || 0,
       behind: info.behind || 0,
-      remote: null,
+      remote: remote && parseRemote((remote.stdout || '').trim()),
       hasClaudeMd: fs.existsSync(path.join(dir, 'CLAUDE.md')) || fs.existsSync(path.join(dir, '.claude', 'CLAUDE.md')),
       size: 'small',
       files: 0,
-      kind: null,
-      packageName: null,
-      lastSession: null,
+      kind: man.kind,
+      packageName: man.name,
+      lastSession: last || null,
       deps: [],
+      _localDeps: man.localDeps,
+      _depNames: man.depNames,
     };
     if (info.isRepo) {
-      const remote = await git.git(dir, ['config', '--get', 'remote.origin.url']).catch(() => ({ stdout: '' }));
-      out.remote = parseRemote((remote.stdout || '').trim());
       const ls = await git.git(dir, ['ls-files']).catch(() => ({ stdout: '' }));
       out.files = (ls.stdout || '').split('\n').filter(Boolean).length;
       out.size = out.files < 300 ? 'small' : out.files < 3000 ? 'medium' : 'large';
     }
-    const man = manifestOf(dir);
-    out.kind = man.kind;
-    out.packageName = man.name;
-    out._localDeps = man.localDeps;
-    out._depNames = man.depNames;
-    let last = 0;
-    for (const m of Object.values(metaAll)) {
-      if ((m?.project === out.path || m?.cwd === out.path) && (m.touched || m.createdAt) > last) last = m.touched || m.createdAt;
-    }
-    out.lastSession = last || null;
     return out;
   }
 
@@ -1037,7 +1033,7 @@ export function createDispatcher(deps) {
   }
 
   /** @param {string} id @param {{ runId?: string, action?: string, message?: string, pr?: boolean }} [opts] */
-  async function finish(id, { runId, action, message, pr } = {}) {
+  async function finish(id, { runId, action = '', message, pr } = {}) {
     const job = jobOf(id);
     if (!['commit', 'discard', 'keep'].includes(action)) throw new Error('Finish with commit, discard or keep.');
     const runs = runId ? [runOf(job, runId)] : job.runs.filter((r) => !r.superseded && TERMINAL.has(r.state) && !r.finished && (action === 'commit' ? r.state === 'done' : true));

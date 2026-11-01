@@ -146,14 +146,16 @@ export function parseUnifiedDiff(text) {
   let oldNo = 0;
   let newNo = 0;
   const stripPrefix = (p) => (p === '/dev/null' ? null : p.replace(/^[ab]\//, ''));
-  const startHunk = (line) => {
+  /** A hunk header starts a hunk of `f` (kept unless the file is past its line limit); null when it is not one. */
+  const startHunk = (f, line) => {
     const m = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@ ?(.*)$/);
-    if (!m) return false;
-    hunk = { oldStart: +m[1], oldLines: m[2] === undefined ? 1 : +m[2], newStart: +m[3], newLines: m[4] === undefined ? 1 : +m[4], header: m[5] || '', lines: [] };
-    [oldNo, newNo, remOld, remNew] = [hunk.oldStart, hunk.newStart, hunk.oldLines, hunk.newLines];
-    if (file.additions + file.deletions > MAX_LINES_PER_FILE) file.truncated = true;
-    else file.hunks.push(hunk);
-    return true;
+    if (!m) return null;
+    /** @type {Hunk} */
+    const h = { oldStart: +m[1], oldLines: m[2] === undefined ? 1 : +m[2], newStart: +m[3], newLines: m[4] === undefined ? 1 : +m[4], header: m[5] || '', lines: [] };
+    [oldNo, newNo, remOld, remNew] = [h.oldStart, h.newStart, h.oldLines, h.newLines];
+    if (f.additions + f.deletions > MAX_LINES_PER_FILE) f.truncated = true;
+    else f.hunks.push(h);
+    return h;
   };
   for (const line of text.split('\n')) {
     if (remOld <= 0 && remNew <= 0 && line.startsWith('diff --git ')) {
@@ -169,7 +171,7 @@ export function parseUnifiedDiff(text) {
     if (inHeader) {
       if (line.startsWith('@@')) {
         inHeader = false;
-        startHunk(line);
+        hunk = startHunk(file, line);
       } else if (line.startsWith('new file mode')) file.status = 'A';
       else if (line.startsWith('deleted file mode')) file.status = 'D';
       else if (line.startsWith('rename from ')) [file.status, file.oldPath] = ['R', line.slice(12)];
@@ -207,7 +209,7 @@ export function parseUnifiedDiff(text) {
       }
       continue;
     }
-    if (line.startsWith('@@')) startHunk(line);
+    if (line.startsWith('@@')) hunk = startHunk(file, line) || hunk;
     else if (line.startsWith('\\') && hunk) {
       const last = hunk.lines[hunk.lines.length - 1];
       if (last) last.eof = true;
@@ -223,6 +225,7 @@ export function parseUnifiedDiff(text) {
 
 async function untrackedAsDiff(root, rel) {
   const full = path.join(root, rel);
+  /** @type {DiffFile} */
   const f = { path: rel, oldPath: null, status: 'A', binary: false, additions: 0, deletions: 0, hunks: [], truncated: false, untracked: true };
   const st = await fs.promises.stat(full).catch(() => null);
   if (!st?.isFile()) return null;
@@ -295,7 +298,7 @@ export async function diff(cwd, { base } = {}) {
   const r = await git(i.root, args);
   const files = parseUnifiedDiff(r.stdout);
   for (const f of await Promise.all(untracked.map((rel) => untrackedAsDiff(i.root, rel)))) if (f) files.push(f);
-  files.sort((a, b) => a.path.localeCompare(b.path));
+  files.sort((a, b) => (a.path || '').localeCompare(b.path || ''));
   const truncated = withinBudget(files);
   return { isRepo: true, root: i.root, base: baseLabel, baseRef, branch: i.branch, files, truncated, error: r.code ? r.stderr : null };
 }
@@ -339,7 +342,12 @@ export async function listWorktrees(cwd) {
   return out;
 }
 
-/** A new worktree on a new branch; `worktree` is where it went (the names get -2, -3… when taken). */
+/**
+ * A new worktree on a new branch; `worktree` is where it went (the names get -2, -3… when taken).
+ * @typedef {{ path: string, branch: string, base: string, repoRoot: string }} Worktree
+ * @param {{ repo: string, base?: string, branch: string, dir: string }} spec
+ * @returns {Promise<{ ok: false, output: string, worktree?: undefined } | { ok: true, output: string, worktree: Worktree }>}
+ */
 export async function createWorktree({ repo, base, branch, dir }) {
   const { info: i } = await status(repo);
   if (!i.isRepo) return { ok: false, output: 'Not a git repository: ' + repo };

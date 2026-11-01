@@ -106,7 +106,10 @@ export async function gatewayModels(cwd, { force = false, version = '0' } = {}) 
   }
 }
 
-/** One list URL, following has_more pages. */
+/**
+ * One list URL, following has_more pages. `notHere`: the gateway has no list at this URL (try the next).
+ * @returns {Promise<{ ok: true, models: { id: string, displayName: string | null, created: number | null }[] } | { ok: false, error: string, notHere?: boolean, unsupported?: boolean }>}
+ */
 async function fetchList(listUrl, headers, env) {
   const models = [];
   const seen = new Set();

@@ -103,7 +103,7 @@ async function statsBetween(cwd, from, to) {
     if (p === undefined) continue;
     files.push({ path: p, status: status.get(p) || 'M', add: a === '-' ? 0 : +a, del: d === '-' ? 0 : +d, binary: a === '-' });
   }
-  files.sort((x, y) => x.path.localeCompare(y.path));
+  files.sort((x, y) => (x.path || '').localeCompare(y.path || ''));
   return files;
 }
 
@@ -224,7 +224,7 @@ export async function diff(session, { from, to }) {
     r = await sg(cwd, ['diff', '--no-ext-diff', '--find-renames', '-U3', a, b, '--']);
   }
   const files = parseUnifiedDiff(r.stdout);
-  files.sort((x, y) => x.path.localeCompare(y.path));
+  files.sort((x, y) => (x.path || '').localeCompare(y.path || ''));
   return { files, error: r.code ? r.stderr.trim() : null };
 }
 

@@ -117,7 +117,15 @@ export function createHelpers(deps) {
   } = deps;
 
   const events = new EventEmitter();
-  /** helperId -> H: the helper as the lead and the clients see it (persisted on the helper's meta). */
+  /**
+   * A helper as the lead and the clients see it (persisted on the helper's meta; HELPERS.md).
+   * @typedef {{ id: string, leadId: string, name: string, cwd: string, folder?: string, worktree: import('./git.js').Worktree | null, brief: string,
+   *   after: string[], maxMinutes: number, startedAt: number, launchedAt: number | null, endedAt: number | null, state: string, reason: string | null,
+   *   handoff: string, cost: number, files: number, add: number, del: number, pending: number, lastLine: string, rev: number, launched: boolean,
+   *   noted: boolean | number, stopping?: string | null, briefSent?: string, fileList?: { path: string, add: number, del: number }[],
+   *   finished?: string, commit?: string | null, pr?: string, prError?: string, finishError?: string, removed?: boolean, leadGone?: boolean, restartNote?: boolean, timer?: null }} Helper
+   */
+  /** @type {Map<string, Helper>} helperId -> the helper */
   const helpers = new Map();
   /** leadId -> { waits: Set<Wait>, noteBuf: string[], noteTimer } */
   const leads = new Map();
@@ -180,6 +188,7 @@ export function createHelpers(deps) {
     s?.emitState?.();
     events.emit('changed', { leadId, helpers: helpersOf(leadId).map(publicState) });
   }
+  /** @param {Helper} h @param {string} state @param {string | null} [reason] */
   function setState(h, state, reason = null) {
     if (h.state === state && h.reason === reason) return false;
     h.state = state;
@@ -273,6 +282,7 @@ export function createHelpers(deps) {
       effort: args.effort || lead?.effort || undefined,
       title: name,
     });
+    /** @type {Helper} */
     const h = {
       id: made.id,
       leadId,
@@ -350,13 +360,15 @@ export function createHelpers(deps) {
     for (const h of helpersOf(leadId)) {
       if (h.state !== 'queued') continue;
       const waitedFor = (h.after || []).map((a) => byName(leadId, a));
-      const bad = waitedFor.find((d) => !d || (TERMINAL.has(d.state) && d.state !== 'done'));
-      if (bad) {
-        setState(h, 'skipped', `${bad?.name || 'a helper it waited for'} ${bad ? bad.state : 'is gone'}`);
+      // one it waited for that ended badly, or is gone (removed), skips it
+      const i = waitedFor.findIndex((d) => !d || (TERMINAL.has(d.state) && d.state !== 'done'));
+      if (i !== -1) {
+        const bad = waitedFor[i];
+        setState(h, 'skipped', bad ? `${bad.name} ${bad.state}` : `${h.after[i]} is gone`);
         note(leadId, h, 'skipped');
         continue;
       }
-      if (!waitedFor.every((d) => d.state === 'done')) continue;
+      if (!waitedFor.every((d) => d?.state === 'done')) continue;
       if (helpersOf(leadId).filter((x) => ACTIVE.has(x.state)).length >= cp.parallel) continue;
       launch(h).catch((e) => log('helper launch failed', e?.message));
     }
@@ -560,11 +572,16 @@ export function createHelpers(deps) {
     const timeoutSec = Math.max(1, Math.min(Number(args.timeoutSec) || WAIT_DEFAULT_S, WAIT_MAX_S));
     const l = leadOf(leadId);
     return new Promise((resolve) => {
-      const w = { names: new Set(names), until, resolve, revs: new Map(all.map((h) => [h.name, h.rev || 0])), timer: null };
-      w.timer = setTimeout(() => {
-        l.waits.delete(w);
-        resolve({ timedOut: true, helpers: helpersOf(leadId).filter((h) => w.names.has(h.name)).map(publicState) });
-      }, timeoutSec * 1000);
+      const w = {
+        names: new Set(names),
+        until,
+        resolve,
+        revs: new Map(all.map((h) => [h.name, h.rev || 0])),
+        timer: setTimeout(() => {
+          l.waits.delete(w);
+          resolve({ timedOut: true, helpers: helpersOf(leadId).filter((h) => w.names.has(h.name)).map(publicState) });
+        }, timeoutSec * 1000),
+      };
       l.waits.add(w);
       settleWaits(leadId);
     });
@@ -698,7 +715,7 @@ export function createHelpers(deps) {
     return { id: leadId, ...(await reviewRuns(git, open.map((h) => ({ id: h.id, name: h.name, dir: h.worktree?.path, base: h.worktree?.base })))) };
   }
   /** @param {string} leadId @param {{ name?: string, action?: string, message?: string, pr?: boolean }} [opts] */
-  async function finish(leadId, { name, action, message, pr } = {}) {
+  async function finish(leadId, { name, action = '', message, pr } = {}) {
     if (!['commit', 'discard', 'keep', 'pr'].includes(action)) throw new Error('Finish with commit, pr, discard or keep.');
     const mine = helpersOf(leadId).filter((h) => (!name || h.name === name) && TERMINAL.has(h.state) && !h.finished);
     const title = leadMeta(leadId).title;
@@ -785,7 +802,8 @@ export function createHelpers(deps) {
   }
 
   // ---- the extension points sessions.js offers
-  /** Pilcrow's own decisions on the helpers tools: read-only ones never ask; a start in an allowed folder does not either. */
+  /** Pilcrow's own decisions on the helpers tools: read-only ones never ask; a start in an allowed folder does not either.
+   *  @returns {import('@anthropic-ai/claude-agent-sdk').PermissionResult | null} */
   function permission(session, toolName, input) {
     if (!toolName.startsWith(TOOL_PREFIX)) return null;
     if (toolName !== `${TOOL_PREFIX}start`) return { behavior: 'allow', updatedInput: input };
