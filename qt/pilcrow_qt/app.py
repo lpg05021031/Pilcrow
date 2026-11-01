@@ -266,7 +266,6 @@ def _crash_log() -> None:
         faulthandler.enable(file=f, all_threads=True)
 
         def hook(exc_type, exc, tb) -> None:
-
             traceback.print_exception(exc_type, exc, tb, file=f)
             f.flush()
             traceback.print_exception(exc_type, exc, tb)
@@ -284,7 +283,34 @@ def _app_icon() -> QIcon:
 
 
 def _system_reduced_motion() -> bool:
-    return os.environ.get("PILCROW_LITE") == "1"
+    """Whether the system asks for reduced motion, where that is cheap to read: Windows' "Show
+    animations" (SPI_GETCLIENTAREAANIMATION), macOS's Reduce motion, GNOME's enable-animations.
+    ``PILCROW_LITE=1`` asks for it whatever the system says."""
+    if os.environ.get("PILCROW_LITE") == "1":
+        return True
+    try:
+        if sys.platform == "win32":
+            import ctypes  # Windows only
+
+            on = ctypes.c_int(1)
+            if ctypes.windll.user32.SystemParametersInfoW(0x1042, 0, ctypes.byref(on), 0):
+                return not on.value
+            return False
+        if sys.platform == "darwin":
+            cmd = ["defaults", "read", "com.apple.universalaccess", "reduceMotion"]
+            return _setting(cmd) == "1"
+        return _setting(["gsettings", "get", "org.gnome.desktop.interface", "enable-animations"]) == "false"
+    except (OSError, AttributeError, ValueError):
+        return False
+
+
+def _setting(cmd: List[str]) -> str:
+    """What a settings command prints, or '' when it is missing, fails or takes more than a second."""
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=1)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return out.stdout.strip() if out.returncode == 0 else ""
 
 
 __all__ = ["run", "find_server", "wait_for_server", "ServerProcess"]

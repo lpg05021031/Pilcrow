@@ -214,7 +214,6 @@ class HoverRow(QWidget):
 
     def __init__(self, radius: int = theme.R1, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self._hover = False
         self.open = False
         self.radius = radius
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
@@ -225,18 +224,8 @@ class HoverRow(QWidget):
         self.open = open_
         self.update()
 
-    def enterEvent(self, e) -> None:
-        self._hover = True
-        self.update()
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:
-        self._hover = False
-        self.update()
-        super().leaveEvent(e)
-
     def paintEvent(self, _e) -> None:
-        if self._hover or self.open:
+        if self.underMouse() or self.open:
             t = theme.tokens()
             p = QPainter(self)
             p.setRenderHint(QPainter.RenderHint.Antialiasing)

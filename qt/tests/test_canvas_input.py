@@ -460,3 +460,203 @@ def test_hover_repaints_the_targets_and_a_drag_the_rows_it_changed(view):
     assert moves and max(moves) <= vp.width() * para.h, (moves, vp.width() * para.h)
     assert user.key not in painted, "an unselected row paints from its cached pixmap"
     v.clear_selection()
+
+
+def test_a_painter_that_raises_logs_once_and_the_rest_of_the_frame_paints(app, caplog):
+    """DESIGN §6.6: one row's painter raising neither blanks the frame nor floods the log."""
+    import logging
+
+    from pilcrow_qt.canvas.scene import Block, Scene
+    from pilcrow_qt.canvas.view import CanvasView
+
+    painted: List[str] = []
+
+    class Row(Block):
+        __slots__ = ()
+
+        def estimate(self, width, m):
+            return 40
+
+        @property
+        def static(self) -> bool:
+            return False  # painted every frame, not from a cached pixmap
+
+        def paint(self, p, x, y, w, st):
+            if self.key == "boom":
+                raise ValueError("a painter bug")
+            painted.append(self.key)
+
+    scene = Scene()
+    v = CanvasView(scene)
+    v.resize(600, 400)
+    v.begin()
+    try:
+        for k in ("above", "boom", "below"):
+            scene.root.append(Row(k))
+    finally:
+        v.end()
+    try:
+        with caplog.at_level(logging.WARNING, logger="pilcrow_qt.canvas.view"):
+            v.show()
+            pump(30)
+            painted.clear()
+            for _ in range(10):
+                v.viewport().repaint()
+        failed = [r for r in caplog.records if "could not paint" in r.getMessage()]
+        assert len(failed) == 1 and scene.block("boom").paint_failed, failed
+        assert painted.count("above") == 10 and painted.count("below") == 10, painted
+    finally:
+        v.close()
+
+
+def test_accessibility_exposes_the_targets_inside_a_row_and_announces_each(app, monkeypatch):
+    """A card with three buttons: three children with their own names, roles and Press actions, and
+    Tab across them announces each button, not the card three times."""
+    from PySide6.QtGui import QAccessible, QAccessibleActionInterface
+
+    from pilcrow_qt.canvas import nodes as nd
+    from pilcrow_qt.canvas.blocks.base import NodeBlock
+    from pilcrow_qt.canvas.scene import Scene
+    from pilcrow_qt.canvas.view import CanvasView
+
+    pressed: List[str] = []
+    card = NodeBlock(
+        "card",
+        lambda m: nd.vstack(
+            nd.Text("Allow the edit?", 13, 400, "text"),
+            nd.hstack(nd.Button("Allow", "allow"), nd.Button("Deny", "deny"), nd.Link("Open the plan", "plan")),
+        ),
+    )
+    for tid in ("allow", "deny", "plan"):
+        card.on(tid, lambda t, _v: pressed.append(t.id))
+    scene = Scene()
+    v = CanvasView(scene)
+    v.resize(600, 300)
+    v.begin()
+    try:
+        scene.root.append(card)
+    finally:
+        v.end()
+    v.show()
+    v.setFocus()
+    pump(40)
+    heard: list = []
+    monkeypatch.setattr(
+        QAccessible, "updateAccessibility", lambda ev: heard.append((ev.type(), ev.accessibleInterface()))
+    )
+    QAccessible.setActive(True)
+    try:
+        row = QAccessible.queryAccessibleInterface(v.viewport()).child(0)
+        assert row.text(QAccessible.Text.Name) == "Allow the edit?" and row.childCount() == 3
+        kids = [row.child(i) for i in range(3)]
+        assert [k.text(QAccessible.Text.Name) for k in kids] == ["Allow", "Deny", "Open the plan"]
+        assert [k.role() for k in kids] == [QAccessible.Role.Button] * 2 + [QAccessible.Role.Link]
+        assert all(k.parent() is row and row.indexOfChild(k) == i for i, k in enumerate(kids))
+        rr = row.rect()
+        assert all(rr.contains(k.rect()) and not k.rect().isEmpty() for k in kids)
+        assert row.childAt(kids[1].rect().center().x(), kids[1].rect().center().y()) is kids[1]
+        for _ in range(3):
+            assert v.focusNextPrevChild(True)
+        focused = [it.text(QAccessible.Text.Name) for kind, it in heard if kind == QAccessible.Event.Focus]
+        assert focused == ["Allow", "Deny", "Open the plan"], focused
+        assert kids[2].state().focused and not kids[0].state().focused
+        kids[1].actionInterface().doAction(QAccessibleActionInterface.pressAction())
+        assert pressed == ["deny"]
+    finally:
+        QAccessible.setActive(False)
+        v.close()
+
+
+def test_accessibility_announces_the_words_a_streamed_row_gains_once_a_second(app, monkeypatch):
+    from PySide6.QtGui import QAccessible
+
+    from pilcrow_qt.canvas import a11y
+    from pilcrow_qt.canvas.blocks.prose import TextGroup
+    from pilcrow_qt.canvas.scene import Scene
+    from pilcrow_qt.canvas.view import CanvasView
+
+    scene = Scene()
+    v = CanvasView(scene)
+    v.resize(600, 300)
+    item = TextItem(id="s1", text="The **answer**", streaming=True, ts=0)
+    g = TextGroup(item)
+    v.begin()
+    try:
+        scene.root.append(g)
+    finally:
+        v.end()
+    v.show()
+    pump(40)
+    said: list = []
+
+    def update(ev) -> None:
+        if ev.type() == QAccessible.Event.TextInserted:
+            said.append(ev.textInserted())
+
+    monkeypatch.setattr(QAccessible, "updateAccessibility", update)
+    QAccessible.setActive(True)
+    clock = [100.0]
+    monkeypatch.setattr(a11y.time, "monotonic", lambda: clock[0])
+
+    def grow(text: str, streaming: bool = True, dt: float = 0.25) -> None:
+        clock[0] += dt
+        item.text, item.streaming, item.rev = text, streaming, item.rev + 1
+        v.begin()
+        try:
+            for b in g.sync(item):
+                v.remeasure(b)
+        finally:
+            v.end()
+
+    try:
+        QAccessible.queryAccessibleInterface(v.viewport())
+        grow("The **answer**")
+        assert said == ["The answer"]  # the words, not the Markdown
+        grow("The **answer** is")
+        grow("The **answer** is forty")  # within the second: nothing yet
+        assert said == ["The answer"]
+        grow("The **answer** is forty-two", dt=1.0)
+        assert said == ["The answer", " is forty-two"]
+        grow("The **answer** is forty-two.", streaming=False)  # it finished: the rest at once
+        assert said[-1] == "." and "".join(said) == "The answer is forty-two."
+    finally:
+        QAccessible.setActive(False)
+        v.close()
+
+
+def test_a_hidden_view_leaves_the_theme_work_until_it_is_shown(app):
+    """DESIGN §8.8: a retained view behind another neither re-measures on a theme switch nor drains;
+    it is marked stale, and measures its screen when it is shown."""
+    from pilcrow_qt.canvas.blocks.prose import TextGroup
+    from pilcrow_qt.canvas.scene import Scene
+    from pilcrow_qt.canvas.view import CanvasView
+
+    scene = Scene()
+    v = CanvasView(scene)
+    v.resize(600, 400)
+    v.begin()
+    try:
+        for i in range(6):
+            scene.root.append(
+                TextGroup(TextItem(id=f"h{i}", text=f"Paragraph {i} of a retained view.", streaming=False, ts=0))
+            )
+    finally:
+        v.end()
+    v.show()
+    pump(60)
+    v.hide()
+    measured: List[str] = []
+    real = v._exact
+    v._exact = lambda b: (measured.append(b.key), real(b))[1]
+    try:
+        theme.theme.apply(False)
+        pump(60)
+        v._drain()
+        assert v.stale and measured == [], measured
+        v.show()
+        pump(60)
+        assert not v.stale and measured, "shown: the screen is measured again in the new theme"
+        assert all(b.warm for b in v.visible_blocks())
+    finally:
+        theme.theme.apply(True)
+        v.close()

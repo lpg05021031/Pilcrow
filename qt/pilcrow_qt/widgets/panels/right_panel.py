@@ -446,7 +446,6 @@ class TabButton(QAbstractButton):
         self._on = False
         self._narrow = False
         self._count = 0
-        self._hover = False
         self.setCheckable(False)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip(f"{spec['label']} (Alt+{spec['key']})")
@@ -494,25 +493,15 @@ class TabButton(QAbstractButton):
             w += 6 + max(16, QFontMetrics(theme.font_ui(10.5, 600)).horizontalAdvance(str(self._count)) + 8)
         return QSize(w, 30)
 
-    def enterEvent(self, e) -> None:
-        self._hover = True
-        self.update()
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:
-        self._hover = False
-        self.update()
-        super().leaveEvent(e)
-
     def paintEvent(self, _e: QPaintEvent) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        if self._hover and not self._on:
+        if self.underMouse() and not self._on:
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(theme.blend(t.fill_1, t.canvas))
             p.drawRoundedRect(QRectF(self.rect()), theme.R2, theme.R2)
-        color = QColor(t.text if (self._on or self._hover) else t.text_3)
+        color = QColor(t.text if (self._on or self.underMouse()) else t.text_3)
         pm = icons.pixmap(self.spec["icon"], color, 15)
         if not self._on:
             p.setOpacity(0.85)  # .panel-tab-ico opacity

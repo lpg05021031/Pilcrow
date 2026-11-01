@@ -2,37 +2,17 @@
 
 from __future__ import annotations
 
-from typing import List, Tuple
+from typing import List
 
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 from ... import theme
+from ...lib.shortcuts import SHORTCUTS
 from ..ui.bits import hairline
 from .parts import Keys
 from .sheet import Sheet
 
-SHORTCUTS: List[Tuple[str, str]] = [
-    ("Ctrl+K", "Command palette"),
-    ("Ctrl+N", "New session"),
-    ("Ctrl+Shift+N", "New session with options"),
-    ("Ctrl+F", "Find in the conversation"),
-    ("Ctrl+B", "Toggle sidebar"),
-    ("Ctrl+\\", "Toggle side panel"),
-    ("Ctrl+O", "Cycle view: Normal, Thinking, Verbose"),
-    ("Alt+1 … 7", "Changes, Files, Terminal, Preview, Tasks, Timeline, Session"),
-    ("Ctrl+Shift+O", "Control room"),
-    ("Ctrl+Alt+↑ / ↓", "Previous / next session"),
-    ("Enter", "Send (Shift+Enter for a new line)"),
-    ("Shift+Tab", "Cycle permission mode"),
-    ("Esc", "Stop Claude"),
-    ("↑ in an empty box", "Recall your previous message"),
-    ("@", "Mention a file or folder"),
-    ("/", "Run a slash command"),
-    ("1 · 2 · 3", "Answer a permission request"),
-    ("Ctrl+S", "Save the open file"),
-    ("Ctrl+,", "Settings"),
-]
-_WORDS = ("…", "·", "in", "an", "empty", "box")
+_WORDS = ("…", "·", "in", "an", "empty", "box")  # words between the keys, not keys
 
 
 class ShortcutRow(QWidget):
@@ -68,9 +48,9 @@ class ShortcutsDialog(Sheet):
         super().__init__(window, "shortcuts", False, width=480, title="Keyboard shortcuts")
         self.body_lay.setSpacing(0)
         self.rows: List[ShortcutRow] = []
-        for i, (k, v) in enumerate(SHORTCUTS):
+        for i, sc in enumerate(SHORTCUTS.values()):
             if i:
                 self.body_lay.addWidget(hairline())
-            row = ShortcutRow(k, v)
+            row = ShortcutRow(sc.keys, sc.label)
             self.rows.append(row)
             self.body_lay.addWidget(row)

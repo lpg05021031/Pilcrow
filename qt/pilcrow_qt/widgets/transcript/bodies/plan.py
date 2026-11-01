@@ -19,7 +19,6 @@ from ..permission import key_badge, perm_button, typing_elsewhere
 from .common import (
     Badge,
     Hairline,
-    IconLabel,
     Json,
     LinkLabel,
     NeedsDot,
@@ -66,7 +65,7 @@ class PlanBody(QWidget):
             head.add(Badge("Kept planning"))
         if self.file:
             link = Row(spacing=4)
-            link.add(IconLabel("file-text", "text_2", 13))
+            link.add(bits.IconLabel("file-text", "text_2", 13))
             fl = LinkLabel("Plan file")
             fl.setToolTip("Open the plan file")
             fl.clicked.connect(lambda: store.open_file(self.file))

@@ -131,3 +131,28 @@ def test_the_wait_says_when_the_server_exited(app, tmp_path, monkeypatch):
             s.check()
     finally:
         s.stop()
+
+
+def test_reduced_motion_follows_the_system_setting(monkeypatch):
+    """The OS's own preference, where it is cheap to read; PILCROW_LITE=1 asks for it regardless."""
+
+    from pilcrow_qt import app as app_mod
+
+    said: dict = {}
+    monkeypatch.delenv("PILCROW_LITE", raising=False)
+    monkeypatch.setattr(app_mod, "_setting", lambda cmd: said.get(cmd[0], ""))
+    monkeypatch.setattr(sys, "platform", "linux")
+    assert not app_mod._system_reduced_motion()  # no gsettings: motion
+    said["gsettings"] = "false"
+    assert app_mod._system_reduced_motion()  # GNOME: enable-animations false
+    said["gsettings"] = "true"
+    assert not app_mod._system_reduced_motion()
+    monkeypatch.setattr(sys, "platform", "darwin")
+    said["defaults"] = "1"
+    assert app_mod._system_reduced_motion()  # macOS: Reduce motion on
+    said["defaults"] = "0"
+    assert not app_mod._system_reduced_motion()
+    monkeypatch.setenv("PILCROW_LITE", "1")
+    assert app_mod._system_reduced_motion()
+    monkeypatch.undo()
+    assert app_mod._setting(["pilcrow-no-such-command-anywhere"]) == ""

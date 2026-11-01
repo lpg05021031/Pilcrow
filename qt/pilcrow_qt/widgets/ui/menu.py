@@ -198,11 +198,9 @@ class MenuRow(QWidget):
         return str(self.it.get("hint") or "")
 
     def _hint_font(self):
-
         return web_font(theme.font_mono(11.5) if self.it.get("mono") else theme.font_ui(theme.FS_SMALL))
 
     def _label_font(self):
-
         return web_font(theme.font_ui(theme.FS_UI))
 
     def _text_x(self) -> int:
@@ -247,7 +245,6 @@ class MenuRow(QWidget):
         super().resizeEvent(e)
 
     def sizeHint(self) -> QSize:
-
         fm = QFontMetrics(self._label_font())
         w = (
             self._text_x()
@@ -266,7 +263,6 @@ class MenuRow(QWidget):
             self.update()
 
     def paintEvent(self, _e) -> None:
-
         t = theme.tokens()
         it = self.it
         p = QPainter(self)

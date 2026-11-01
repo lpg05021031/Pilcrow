@@ -132,7 +132,9 @@ def test_file_cards_come_in_batches_in_order(app):
     v.set_files(files)
     first = len(v.rows())
     assert 0 < first < 30, "the first batch is on the page before the rest exist"
-    pump(200)
+    end = time.monotonic() + 5  # the batches follow on the event loop: on a busy machine, later
+    while len(v.rows()) < 30 and time.monotonic() < end:
+        QCoreApplication.processEvents()
     assert [r.path for r in v.rows()] == [f["path"] for f in files]
     v.close()
 

@@ -519,6 +519,7 @@ def stylesheet() -> str:
     QLineEdit, QPlainTextEdit, QTextEdit {{ background: palette(base); border: 1px solid palette(shadow); border-radius: {R2}px; padding: 5px 8px; selection-background-color: palette(highlight); selection-color: palette(highlighted-text); }}
     QLineEdit:focus, QPlainTextEdit:focus, QTextEdit:focus {{ border-color: palette(link-visited); }}
     QLineEdit[quiet="true"] {{ background: transparent; border: none; padding: 2px 4px; }}
+    QLineEdit[quiet="flush"] {{ background: transparent; border: none; padding: 0; }}
     QComboBox {{ background: palette(light); border: 1px solid palette(shadow); border-radius: {R2}px; padding: 0 8px 0 10px; min-height: 32px; max-height: 32px; combobox-popup: 0; }}
     QComboBox:hover, QComboBox:on {{ background: palette(midlight); border-color: palette(dark); }}
     QComboBox:focus {{ border-color: palette(dark); }}

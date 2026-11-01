@@ -19,8 +19,6 @@ from typing import Any, Callable, List, Optional
 
 from PySide6.QtCore import QEasingCurve, QObject, Qt, QTimer
 
-from ..store import store
-
 SLOW_MS = 50
 FAST_MS = 16
 
@@ -36,6 +34,9 @@ class Clock(QObject):
         # what holds the fast rate: weak, so a tween dropped (or torn down) mid-run gives it back
         self._fast: weakref.WeakSet = weakref.WeakSet()
         self._interval = 0
+        #: the person's (or the system's) wish for less motion: a tween lands at once. The store
+        #: reads and sets it as ``Store.reduced_motion``; the clock is where motion lives.
+        self.reduced_motion = False
 
     # ---- subscribers
     def subscribe(self, obj: Any) -> None:
@@ -95,7 +96,7 @@ class Tween:
 
     ``start(a, b, ms, curve)`` runs from ``a`` to ``b``. ``go(target)`` runs from where the value is
     to ``target`` with the tween's own ``ms`` and ``curve`` (a factory such as ``theme.spring_soft``),
-    and lands at once under reduced motion. Starting again retargets from the current value."""
+    and lands at once under reduced motion (``clock.reduced_motion``). Starting again retargets from the current value."""
 
     def __init__(
         self,
@@ -126,7 +127,7 @@ class Tween:
             clock.subscribe(self)
 
     def go(self, target: float) -> None:
-        if store.reduced_motion or abs(target - self.value) < 1e-6:
+        if clock.reduced_motion or abs(target - self.value) < 1e-6:
             self.jump(target)
             if self._on_done is not None:
                 self._on_done()

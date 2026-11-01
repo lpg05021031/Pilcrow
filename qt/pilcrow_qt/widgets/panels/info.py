@@ -7,7 +7,6 @@ and app.css (``.mem-peek``, ``.chip``)."""
 
 from __future__ import annotations
 
-import re
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QRect, QRectF, QSize, Qt
@@ -15,7 +14,8 @@ from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
 from ... import icons, theme
-from ...lib.fmt import cost, short_model, tildify, tokens
+from ...lib.fmt import cost, tildify, tokens
+from ...lib.models import model_label
 from ...store import ConfirmSpec, store
 from ..ui.bits import Box, ContextRing, Spinner, copy_text
 from ..ui.menu import show_menu_at
@@ -41,18 +41,6 @@ CAT_TONES = {
     "Custom agents": "think",
     "Skills": "warn",
 }
-
-
-def model_label(value: str, aliases: Optional[List[Json]] = None) -> str:
-    """A short name for a model value: the endpoint's display name, Claude Code's alias name, or a tidied ID."""
-    gw = store.gateway_models if isinstance(store.gateway_models, dict) else {}
-    for m in gw.get("models") or []:
-        if m.get("id") == value and m.get("displayName"):
-            return re.sub(r"^Claude\s+", "", str(m["displayName"]), flags=re.I)
-    for a in aliases or []:
-        if a.get("value") == value and a.get("displayName"):
-            return str(a["displayName"])
-    return short_model(value) if re.search(r"claude-", value, re.I) else value
 
 
 def cat_tone(c: Json) -> Optional[str]:
@@ -446,12 +434,21 @@ class InfoPanel(QWidget):
         info = store.info or {}
         init: Json = st.get("init") or {}
         usage: Json = st.get("usage") or {}
+        live = bool(st.get("live"))
+        self._context_section(usage, live)
+        self._claude_section(info, init, live, st)
+        self._memory_section()
+        self._mcp_section(init, live, st)
+        self._worktree_section(info, session)
+        self._endpoint_section(info)
+        for i, sec in enumerate(self._sections):
+            sec.set_last(i == len(self._sections) - 1)
+
+    def _context_section(self, usage: Json, live: bool) -> None:
+        """The context window: the gauge, its figures, the session's usage (``.gauge-row``)."""
         used, total = int(usage.get("contextTokens") or 0), int(usage.get("contextWindow") or 0)
         pct = used / total if total else 0.0
-        live = bool(st.get("live"))
         t = theme.tokens()
-
-        # context window (.gauge-row)
         s = Section("Context window")
         row = QWidget()
         rl = QHBoxLayout(row)
@@ -531,10 +528,12 @@ class InfoPanel(QWidget):
         )
         self._add(s)
 
-        # Claude Code (.kv)
+    def _claude_section(self, info: Json, init: Json, live: bool, st: Json) -> None:
+        """Claude Code: the model, the mode, the session ID, the tools it has (``.kv``)."""
         s = Section("Claude Code")
         model_id = str(st.get("activeModel") or st.get("model") or "")
-        name = model_label(model_id, st.get("models") or None) if model_id else "Default"
+        gw = store.gateway_models if isinstance(store.gateway_models, dict) else {}
+        name = model_label(model_id, gw.get("models") or [], st.get("models") or []) if model_id else "Default"
         model_w = QWidget()
         ml = QHBoxLayout(model_w)
         ml.setContentsMargins(0, 0, 0, 0)
@@ -590,7 +589,8 @@ class InfoPanel(QWidget):
                 s.add(ChipCloud(chips))
         self._add(s)
 
-        # memory (.mem-peek)
+    def _memory_section(self) -> None:
+        """The project's memory: its notes, and saving this session's (``.mem-peek``)."""
         s = Section("Project memory")
         notes = self.notes
         s.head_add(
@@ -639,7 +639,8 @@ class InfoPanel(QWidget):
         s.add(_row([save] + ([lbl(f"{mine} from this session", theme.FS_SMALL, tone="faint")] if mine else [])))
         self._add(s)
 
-        # MCP (.mcp-row)
+    def _mcp_section(self, init: Json, live: bool, st: Json) -> None:
+        """The MCP servers and their state (``.mcp-row``)."""
         s = Section("MCP servers")
         s.head_add(Btn("Manage", kind="link", on_click=lambda: store.set_dialog("settings", "mcp")))
         if live:
@@ -656,7 +657,8 @@ class InfoPanel(QWidget):
             s.add(empty_text("No MCP servers configured." if init else "Shown after Claude Code starts."))
         self._add(s)
 
-        # worktree
+    def _worktree_section(self, info: Json, session: Json) -> None:
+        """The worktree the session runs in, when it has one."""
         wt = session.get("worktree")
         if wt:
             s = Section("Worktree")
@@ -693,6 +695,8 @@ class InfoPanel(QWidget):
             )
             self._add(s)
 
+    def _endpoint_section(self, info: Json) -> None:
+        """The API endpoint, when one is configured."""
         gw = info.get("gateway") or {}
         if gw.get("baseUrl"):
             s = Section("API endpoint")
@@ -705,8 +709,6 @@ class InfoPanel(QWidget):
                 )
             )
             self._add(s)
-        for i, sec in enumerate(self._sections):
-            sec.set_last(i == len(self._sections) - 1)
 
     def _add(self, s: Section) -> None:
         self._lay.insertWidget(self._lay.count() - 1, s)

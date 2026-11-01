@@ -481,7 +481,7 @@ def bash_body(item: ToolItem, ctx: ToolCtx, block: ToolBodyBlock) -> nd.Node:
             mono=True,
             html=True,
         ),
-        nd.Button("", "copy-cmd", icon="copy", kind="ghost", size="xs", icon_px=12),
+        nd.Button("", "copy-cmd", icon="copy", kind="ghost", size="xs", icon_px=12, name="Copy command"),
         spacing=8,
         stretch=[1],
         pad=(12, 8, 6, 8),
@@ -828,7 +828,6 @@ def agent_top(item: ToolItem, ctx: ToolCtx, block: ToolBodyBlock) -> nd.Node:
 
         def load(_t: Target, view: Any) -> None:
             def ok(msgs: Any) -> None:
-
                 mdl = TranscriptModel()
                 mdl.push_all(msgs or [])
                 block.state["loaded"] = mdl

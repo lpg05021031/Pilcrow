@@ -321,10 +321,10 @@ class FTab(QWidget):
 
     def __init__(self, path: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)  # Qt repaints it on enter and leave
         self.path = path
         self.on = False
         self.dirty = False
-        self._hover = False
         self._x_hover = False
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -354,7 +354,7 @@ class FTab(QWidget):
             p.setPen(theme.blend(t.hair, t.chrome))
             p.setBrush(theme.qcolor(t.canvas))
             p.drawRoundedRect(self.rect().adjusted(0, 0, -1, 2), theme.R2, theme.R2)
-        p.setPen(theme.qcolor(t.text if (self.on or self._hover) else t.text_3))
+        p.setPen(theme.qcolor(t.text if (self.on or self.underMouse()) else t.text_3))
         p.setFont(self._font)
         fm = QFontMetrics(self._font)
         name = basename(self.path)
@@ -364,7 +364,7 @@ class FTab(QWidget):
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(theme.qcolor(t.text_2))
             p.drawEllipse(QRect(x, 12, 7, 7))
-        if self.on or self._hover:
+        if self.on or self.underMouse():
             xr = self._x_rect()
             if self._x_hover:
                 p.setPen(Qt.PenStyle.NoPen)
@@ -372,13 +372,10 @@ class FTab(QWidget):
                 p.drawRoundedRect(xr, 4, 4)
             p.drawPixmap(xr.left() + 4, xr.top() + 4, icons.pixmap("x", t.text if self._x_hover else t.text_3, 11))
 
-    def enterEvent(self, e) -> None:
-        self._hover = True
-        self.update()
-
     def leaveEvent(self, e) -> None:
-        self._hover = self._x_hover = False
+        self._x_hover = False
         self.update()
+        super().leaveEvent(e)
 
     def mouseMoveEvent(self, e: QMouseEvent) -> None:
         xh = self._x_rect().contains(e.position().toPoint())

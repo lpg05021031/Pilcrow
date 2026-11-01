@@ -791,7 +791,6 @@ class Measurer:
 
     # ---- estimation
     def estimate_markdown(self, src: str, width: int, compact: bool = False) -> int:
-
         return estimate_markdown(src, width, self.metrics_compact if compact else self.metrics)
 
 
@@ -858,6 +857,10 @@ class PaintState:
         st.clip = clip
         st.now = self.now
         return st
+
+    def lit(self, kind: str, id_: str) -> bool:
+        """The pointer or the keyboard focus is on this target (a button that shows only then)."""
+        return any(x is not None and x.kind == kind and x.id == id_ for x in (self.hover, self.focus))
 
 
 __all__ = [

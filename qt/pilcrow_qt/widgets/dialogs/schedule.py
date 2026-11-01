@@ -311,7 +311,27 @@ class ScheduleDialog(Sheet):
             or ""
         )
 
-        # ---- what runs: a prompt in a folder, or a dispatch playbook across its repositories
+        self._build_what()
+        self._build_name_folder(default_cwd)
+        self._build_prompt()
+        self._build_when()
+        self._build_mode(info)
+        self._build_more()
+        self._build_footer(editing)
+        self._mode = "acceptEdits"
+        self.set_mode(self._mode)
+        if self.spec.get("kind") == "dispatch":
+            self.what.setCurrentIndex(1)
+            if self.spec.get("playbookId"):
+                self._pick_playbook(str(self.spec["playbookId"]))
+        self._on_kind()
+        self._on_cadence()
+        self._summary()
+        if editing:
+            store.call("schedules.list", {}, quiet=True).then(self._got_schedules).catch(lambda _e: None)
+
+    def _build_what(self) -> None:
+        """What runs: a prompt in a folder, or a dispatch playbook across its repositories."""
         what = QWidget()
         wl0 = QHBoxLayout(what)
         wl0.setContentsMargins(0, 0, 0, 0)
@@ -330,7 +350,8 @@ class ScheduleDialog(Sheet):
         bind(store.playbooks_changed, self, lambda _p: self._fill_playbooks())
         self._fill_playbooks()
 
-        # ---- name, folder
+    def _build_name_folder(self, default_cwd: str) -> None:
+        """The name and the folder, side by side."""
         two = QWidget()
         tl = QGridLayout(two)
         tl.setContentsMargins(0, 0, 0, 0)
@@ -344,7 +365,8 @@ class ScheduleDialog(Sheet):
         tl.addWidget(self.cwd_field, 0, 1)
         self.body_lay.addWidget(two)
 
-        # ---- prompt
+    def _build_prompt(self) -> None:
+        """The prompt (a playbook brings its own: a note says so instead)."""
         self.prompt = text_area(
             "Run the test suite, fix any failing tests you can, and summarise what changed. Do not push.",
             rows=4,
@@ -373,7 +395,8 @@ class ScheduleDialog(Sheet):
         self.dispatch_note.hide()
         self.body_lay.addWidget(self.dispatch_note)
 
-        # ---- when
+    def _build_when(self) -> None:
+        """When it runs: the cadence and its fields, or a cron expression."""
         when = QWidget()
         wl = QHBoxLayout(when)
         wl.setContentsMargins(0, 0, 0, 0)
@@ -415,7 +438,8 @@ class ScheduleDialog(Sheet):
         wl.addStretch(1)
         self.body_lay.addWidget(_field("When", when))
 
-        # ---- mode
+    def _build_mode(self, info: Json) -> None:
+        """What Claude may do while it runs: the permission modes."""
         radios = Box(bg=well_bg, line=well_line, radius=theme.R3)
         radios.setObjectName("radio-list")
         rl = QVBoxLayout(radios)
@@ -432,7 +456,8 @@ class ScheduleDialog(Sheet):
         self.mode_field = _field("While it runs, Claude may", radios)
         self.body_lay.addWidget(self.mode_field)
 
-        # ---- more
+    def _build_more(self) -> None:
+        """More: the model, a time limit, a worktree, enabled."""
         self.more_btn = LayoutButton()
         self.more_btn.setObjectName("disclose")
         self.more_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -491,7 +516,8 @@ class ScheduleDialog(Sheet):
         self.more_box.hide()
         self.body_lay.addWidget(self.more_box)
 
-        # ---- footer
+    def _build_footer(self, editing: bool) -> None:
+        """The footer: the next runs, Cancel and Save."""
         self.preview_lb = Text("", theme.FS_SMALL, 400, "text_3", 1.5)
         self.preview_lb.set_max_width(300)
         self.foot_lay.addWidget(self.preview_lb, 1)
@@ -499,18 +525,6 @@ class ScheduleDialog(Sheet):
         self.save_btn = button("Save" if editing else "Create schedule", kind="primary", on_click=self.save)
         self.save_btn.setDefault(False)
         self.add_footer(self.cancel_btn, self.save_btn, stretch_before=False)
-
-        self._mode = "acceptEdits"
-        self.set_mode(self._mode)
-        if self.spec.get("kind") == "dispatch":
-            self.what.setCurrentIndex(1)
-            if self.spec.get("playbookId"):
-                self._pick_playbook(str(self.spec["playbookId"]))
-        self._on_kind()
-        self._on_cadence()
-        self._summary()
-        if editing:
-            store.call("schedules.list", {}, quiet=True).then(self._got_schedules).catch(lambda _e: None)
 
     # ---- loading an existing schedule
     # ---- what runs

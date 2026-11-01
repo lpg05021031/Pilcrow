@@ -437,8 +437,8 @@ class FoldGroup(Group):
     __slots__ = ("_second", "ctx", "inner", "sid", "state", "summary", "unit")
 
     def __init__(self, unit: WorkUnit, ctx: ToolCtx, sid: str, state: Dict[str, bool]) -> None:
+        self.unit = unit  # read by content_h() while Group.__init__ sets the first height
         super().__init__(unit.key, head_h=self.HEAD, pad_top=6, pad_bottom=4, open_=False)
-        self.unit = unit
         self.ctx = ctx
         self.sid = sid
         self.state = state  # the fold toggles the person made, per key
@@ -458,11 +458,8 @@ class FoldGroup(Group):
     def content_h(self) -> int:
         if self.shaped:
             return self.fen.total()
-        unit = getattr(self, "unit", None)  # not there yet while Group.__init__ runs
-        if unit is None:
-            return 0
         # a fair guess at the inside until it is built: a row per step
-        return sum(28 for it in unit.work if it.kind != "thinking") + 8
+        return sum(28 for it in self.unit.work if it.kind != "thinking") + 8
 
     @property
     def waiting(self) -> bool:

@@ -22,7 +22,7 @@ from ...store import store
 from ..ui import bits
 from ..ui.button import Btn
 from ..ui.signals import bind
-from .bodies.common import Hairline, IconLabel, NeedsDot, Row, caption, faint, mono_family, rich, vbox
+from .bodies.common import Hairline, NeedsDot, Row, caption, faint, mono_family, rich, vbox
 from .ctx import ToolCtx
 
 Json = Dict[str, Any]
@@ -245,7 +245,7 @@ class PermissionCard(QWidget):
         self.feedback.returnPressed.connect(lambda: self.deny() if self.feedback.text().strip() else None)
         self.feedback_row.add(self.feedback, 1)
         hint = Row(spacing=5)
-        hint.add(IconLabel("corner-down-left", "text_3", 12))
+        hint.add(bits.IconLabel("corner-down-left", "text_3", 12))
         hint.add(faint("sends it and declines this step", size="micro"))
         self.feedback_row.add(hint)
         self.feedback_row.setVisible(False)

@@ -15,7 +15,7 @@ from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QPainter, QPen
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget
 
-from .... import icons, markdown, theme
+from .... import markdown, theme
 from ...ui import bits
 from ...ui.signals import bind
 
@@ -210,27 +210,6 @@ class LinkLabel(QLabel):
             self.clicked.emit()
             return
         super().keyPressEvent(e)
-
-
-class IconLabel(QWidget):
-    """A tinted Lucide icon that repaints from the tokens when the theme changes."""
-
-    def __init__(self, name: str, color: str = "text_2", size: int = 14, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self._name, self._color, self._size = name, color, size
-        self.setFixedSize(size, size)
-        bind(theme.theme.changed, self, lambda _t: self.update())
-
-    def set(self, name: str, color: Optional[str] = None) -> None:
-        self._name = name
-        if color:
-            self._color = color
-        self.update()
-
-    def paintEvent(self, _e) -> None:
-        p = QPainter(self)
-        pm = icons.pixmap(self._name, getattr(theme.tokens(), self._color), self._size)
-        p.drawPixmap(0, 0, pm)
 
 
 #: a badge's tone: its ink and its wash

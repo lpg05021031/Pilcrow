@@ -45,9 +45,15 @@ ROWS: List[Tuple[str, str, Callable[[Json], Any], Callable[[Any], str]]] = [
     ("open_cold", "heavy: first paint", lambda s: g(s, "heavy", "first_paint_ms"), ms),
     ("open_cold", "heavy: longest turn while modelling", lambda s: g(s, "heavy", "modelling_stall_max_ms"), ms),
     ("open_cold", "heavy: RSS added", lambda s: g(s, "heavy", "rss_delta_mb"), lambda v: f"{v:g} MB"),
-    ("view_mode_cycle", "→ verbose: to first paint", lambda s: g(s, "verbose", "to_paint_ms"), ms),
-    ("view_mode_cycle", "→ verbose: widgets made", lambda s: g(s, "verbose", "widgets_made"), n),
-    ("theme_toggle", "→ light: to first paint", lambda s: g(s, "light", "to_paint_ms"), ms),
+    # the switches: the median of six (older runs timed one of each, read by name)
+    (
+        "view_mode_cycle",
+        "to first paint",
+        lambda s: g(s, "to_paint", "p50", default=g(s, "verbose", "to_paint_ms")),
+        ms,
+    ),
+    ("view_mode_cycle", "widgets made", lambda s: g(s, "widgets_made", default=g(s, "verbose", "widgets_made")), n),
+    ("theme_toggle", "to first paint", lambda s: g(s, "to_paint", "p50", default=g(s, "light", "to_paint_ms")), ms),
     ("fold_toggle", "layout passes per toggle", lambda s: g(s, "summary", "layout_per_toggle"), n),
     ("fold_toggle", "scroll sets per toggle", lambda s: g(s, "summary", "scroll_sets_per_toggle"), n),
     ("fold_toggle", "stall max", lambda s: g(s, "summary", "stall_max_ms"), ms),

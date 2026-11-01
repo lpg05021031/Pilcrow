@@ -89,6 +89,7 @@ class ToolBlock(Group):
     __slots__ = (
         "_loaded_items",
         "_meta_rects",
+        "_second",
         "_tsig",
         "body",
         "child_builder",
@@ -120,6 +121,8 @@ class ToolBlock(Group):
         self.perm_island: Optional[IslandBlock] = None
         self._loaded_items: Optional[List[Item]] = None
         self._meta_rects: Dict[str, QRect] = {}
+        self._second = -1  # the elapsed second the head last showed while it runs
+        self._tsig: Any = None  # the workflow task's progress the body last showed
         self.shaped = True
         self.append(self.body)
         self.sync(item, ctx, perm, first=True)
@@ -156,7 +159,7 @@ class ToolBlock(Group):
         changed: List[Block] = []
         # a workflow's body says how far the run is: it follows the task in session.state, not only the item
         tsig = self._task_sig() if item.name in ("Workflow", "RunWorkflow") else None
-        task_changed = tsig != getattr(self, "_tsig", None)
+        task_changed = tsig != self._tsig
         self._tsig = tsig
         if not (rev_changed or perm_changed or ctx_changed or first or task_changed):
             return changed
@@ -275,7 +278,7 @@ class ToolBlock(Group):
         )
         cx += chev_w
         if self.file:
-            on = st.hover is not None and st.hover.kind == "button" and st.hover.id == "open-file"
+            on = st.lit("button", "open-file")
             if hover or on:
                 if on:
                     rounded(
@@ -366,6 +369,14 @@ class ToolBlock(Group):
             return Target("button", "open-file", (r.x(), r.y(), r.width(), r.height()))
         return Target("head", "tool", (0, 0, self.h_width or 0, self.head_h))
 
+    def targets(self) -> List[Target]:
+        """The head, then Open in Files (where the head last painted it)."""
+        out = [Target("head", "tool", (0, 0, self.h_width or 0, self.head_h))]
+        r = self._meta_rects.get("open-file")
+        if self.file and r is not None:
+            out.append(Target("button", "open-file", (r.x(), r.y(), r.width(), r.height())))
+        return out
+
     def cursor_for(self, target: Target) -> Optional[Any]:
         return Qt.CursorShape.PointingHandCursor
 
@@ -386,10 +397,19 @@ class ToolBlock(Group):
         return f"{self.meta.verb} {self.meta.target}".strip()
 
     def live(self) -> bool:
-        return self.item.status in ("running", "streaming") or self.awaiting
+        """Running: its status mark turns on the clock (a card awaiting a decision does not move)."""
+        return self.item.status in ("running", "streaming")
 
     def tick(self, now: float) -> Optional[Tuple[int, int, int, int]]:
-        return (0, 0, 100000, self.head_h) if self.item.status in ("running", "streaming") else None
+        """The turning status mark each frame; the whole head when the elapsed figure moves on a second."""
+        it = self.item
+        if not self.live():
+            return None
+        s = int((time.time() * 1000 - it.start_ts) // 1000) if it.start_ts else 0
+        if s != self._second:
+            self._second = s
+            return (0, 0, 100000, self.head_h)
+        return (0, 0, 20, self.head_h)
 
     @property
     def static(self) -> bool:
@@ -428,7 +448,6 @@ class PermissionIsland(IslandBlock):
         super().__init__(f"perm:{item.id}", self._make)
 
     def _make(self):
-
         return PermissionCard(self.perm, self.ctx, self.item, stale=False)
 
     def update(self, perm: Json, ctx: ToolCtx, item: ToolItem) -> None:
@@ -451,7 +470,6 @@ class SpecialIsland(IslandBlock):
         self.rev = item.rev
 
     def _make(self):
-
         if self.item.name == "AskUserQuestion":
             return AskBody(self.item, self.ctx, self.perm)
         return PlanBody(self.item, self.ctx, self.perm)

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import time as _time
 from html import escape
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 
 from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen
@@ -54,6 +54,78 @@ def _fill(name: str) -> QColor:
     """A translucent fill token as the eye sees it on the chrome."""
     t = theme.tokens()
     return theme.blend(getattr(t, name), t.chrome)
+
+
+WARMTH = {"requires_action": 3, "running": 2, "starting": 2}
+
+
+class Listing(NamedTuple):
+    """What the session list shows, before any widget: the sessions it lists, the ones that need you,
+    the pinned, the rest by project (newest first), a dispatch job's runs by job, a lead's helpers by
+    lead."""
+
+    sessions: List[Json]
+    attention: List[Json]
+    pinned: List[Json]
+    groups: List[Tuple[str, List[Json]]]
+    jobs: Dict[str, List[Json]]
+    helpers: Dict[str, List[Json]]
+
+    def with_warmth(self, s: Json) -> Json:
+        """A lead's dot takes the warmest state of itself and its helpers."""
+        hs = self.helpers.get(str(s.get("id")))
+        if not hs:
+            return s
+        best = max(hs, key=lambda x: WARMTH.get(str(x.get("status")), 0))
+        if WARMTH.get(str(best.get("status")), 0) > WARMTH.get(str(s.get("status")), 0):
+            return {
+                **s,
+                "status": best.get("status"),
+                "pending": max(int(s.get("pending") or 0), int(best.get("pending") or 0)),
+            }
+        return s
+
+
+def listing(sessions: List[Json], active: Optional[str], show_archived: bool, q: str) -> Listing:
+    """Sort the sessions into what the list shows (Sidebar.tsx)."""
+    lst = [s for s in sessions if (s.get("archived") if show_archived else not s.get("archived"))]
+    if not q:
+        # Runs started by a schedule live in the inbox; the active one still shows so its row can be found.
+        lst = [s for s in lst if not s.get("scheduled") or s.get("id") == active]
+    else:
+        lst = [
+            s for s in lst if fuzzy_score(q, f"{s.get('title', '')} {basename(s.get('project') or s.get('cwd') or '')}")
+        ]
+    # A dispatch job's runs sit under their job, collapsed, not among the projects.
+    jobs: Dict[str, List[Json]] = {}
+    for s in lst:
+        d = s.get("dispatch")
+        if isinstance(d, dict) and d.get("jobId") and s.get("id") != active:
+            jobs.setdefault(str(d["jobId"]), []).append(s)
+    lst = [s for s in lst if not (isinstance(s.get("dispatch"), dict) and s.get("id") != active)]
+    # A lead's helpers sit under it, indented, not among the projects (HELPERS.md §6.3); a helper
+    # whose lead is not listed stays where its folder puts it.
+    listed = {str(s.get("id")) for s in lst}
+    helpers: Dict[str, List[Json]] = {}
+    for s in lst:
+        h = s.get("helper")
+        if isinstance(h, dict) and str(h.get("leadId")) in listed and s.get("id") != active:
+            helpers.setdefault(str(h["leadId"]), []).append(s)
+    nested = {str(s.get("id")) for hs in helpers.values() for s in hs}
+    lst = [s for s in lst if str(s.get("id")) not in nested]
+    # The conversation on screen never jumps into "Needs you": you are already looking at it.
+    attention = [
+        s
+        for s in lst
+        if s.get("id") != active and (s.get("status") == "requires_action" or (s.get("pending") or 0) > 0)
+    ]
+    pinned = [s for s in lst if s.get("pinned") and s not in attention]
+    groups: Dict[str, List[Json]] = {}
+    for s in lst:
+        if s not in attention and s not in pinned:
+            groups.setdefault(str(s.get("project") or s.get("cwd") or ""), []).append(s)
+    ordered = sorted(groups.items(), key=lambda kv: -(kv[1][0].get("lastModified") or 0))
+    return Listing(lst, attention, pinned, ordered, jobs, helpers)
 
 
 class Sidebar(QWidget):
@@ -266,97 +338,10 @@ class Sidebar(QWidget):
     # ---- the list
     def rebuild(self) -> None:
         self._on_page()
-        sessions = store.sessions
-        active = store.active_id
-        show_archived = store.ui.show_archived
         q = self._q.strip()
-        lst = [s for s in sessions if (s.get("archived") if show_archived else not s.get("archived"))]
-        if not q:
-            # Runs started by a schedule live in the inbox; the active one still shows so its row can be found.
-            lst = [s for s in lst if not s.get("scheduled") or s.get("id") == active]
-        else:
-            lst = [
-                s
-                for s in lst
-                if fuzzy_score(q, f"{s.get('title', '')} {basename(s.get('project') or s.get('cwd') or '')}")
-            ]
-        # A dispatch job's runs sit under their job, collapsed, not among the projects.
-        job_sessions: Dict[str, List[Json]] = {}
-        for s in lst:
-            d = s.get("dispatch")
-            if isinstance(d, dict) and d.get("jobId") and s.get("id") != active:
-                job_sessions.setdefault(str(d["jobId"]), []).append(s)
-        lst = [s for s in lst if not (isinstance(s.get("dispatch"), dict) and s.get("id") != active)]
-        # A lead's helpers sit under it, indented, not among the projects (HELPERS.md §6.3); a helper
-        # whose lead is not listed stays where its folder puts it.
-        listed = {str(s.get("id")) for s in lst}
-        helper_sessions: Dict[str, List[Json]] = {}
-        for s in lst:
-            h = s.get("helper")
-            if isinstance(h, dict) and str(h.get("leadId")) in listed and s.get("id") != active:
-                helper_sessions.setdefault(str(h["leadId"]), []).append(s)
-        nested = {str(s.get("id")) for hs in helper_sessions.values() for s in hs}
-        lst = [s for s in lst if str(s.get("id")) not in nested]
-        warmth = {"requires_action": 3, "running": 2, "starting": 2}
-
-        def with_warmth(s: Json) -> Json:
-            """A lead's dot takes the warmest state of itself and its helpers."""
-            hs = helper_sessions.get(str(s.get("id")))
-            if not hs:
-                return s
-            best = max(hs, key=lambda x: warmth.get(str(x.get("status")), 0))
-            if warmth.get(str(best.get("status")), 0) > warmth.get(str(s.get("status")), 0):
-                return {
-                    **s,
-                    "status": best.get("status"),
-                    "pending": max(int(s.get("pending") or 0), int(best.get("pending") or 0)),
-                }
-            return s
-
-        # The conversation on screen never jumps into "Needs you": you are already looking at it.
-        attention = [
-            s
-            for s in lst
-            if s.get("id") != active and (s.get("status") == "requires_action" or (s.get("pending") or 0) > 0)
-        ]
-        pinned = [s for s in lst if s.get("pinned") and s not in attention]
-        rest = [s for s in lst if s not in attention and s not in pinned]
-        groups: Dict[str, List[Json]] = {}
-        for s in rest:
-            groups.setdefault(str(s.get("project") or s.get("cwd") or ""), []).append(s)
-        ordered = sorted(groups.items(), key=lambda kv: -(kv[1][0].get("lastModified") or 0))
-
-        # The rows and heads are kept across rebuilds; a row that is still listed is updated in place
-        # only when what it shows changed, and the layout is touched only where the order changed.
-        keep = {s.get("id") for s in lst}
-        for sid in list(self._rows):
-            if sid not in keep:
-                row = self._rows.pop(sid)
-                self.list.removeWidget(row)
-                row.hide()
-                row.setParent(None)
-                row.deleteLater()
-        keys = {k for k, _ in ordered} | {f"job:{jid}" for jid in job_sessions}
-        for key in list(self._heads):
-            if key not in keys:
-                head = self._heads.pop(key)
-                self.list.removeWidget(head)
-                head.hide()
-                head.setParent(None)
-                head.deleteLater()
-        wanted: List[QWidget] = []
-        if show_archived:
-            if self._archived_head is None:
-                self._archived_head = ListHead(
-                    "Archived", "Back to active sessions", lambda: store.set_ui(show_archived=False)
-                )
-            wanted.append(self._archived_head)
-
-        def label_for(key: str, text: str, tone: str = "") -> SectionLabel:
-            lb = self._labels.get(key)
-            if lb is None:
-                lb = self._labels[key] = SectionLabel(text, tone)
-            return lb
+        active = store.active_id
+        ls = listing(store.sessions, active, store.ui.show_archived, q)
+        self._forget_gone({s.get("id") for s in ls.sessions}, {k for k, _ in ls.groups} | {f"job:{j}" for j in ls.jobs})
 
         def row_for(s: Json, show_project: bool = False, indent: bool = False) -> SessionRow:
             sid = str(s.get("id"))
@@ -373,81 +358,121 @@ class Sidebar(QWidget):
             )
             return r
 
-        def rows_for(s: Json, show_project: bool = False) -> List[SessionRow]:
+        def rows_for(s: Json, show_project: bool = False) -> List[QWidget]:
             """A session's row, then its helpers' rows indented under it."""
-            out = [row_for(with_warmth(s), show_project)]
-            for h in helper_sessions.get(str(s.get("id")), []):
+            out: List[QWidget] = [row_for(ls.with_warmth(s), show_project)]
+            for h in ls.helpers.get(str(s.get("id")), []):
                 out.append(row_for(h, False, True))
             return out
 
-        if attention:
-            wanted.append(label_for("attention", "Needs you", "accent"))
-            for s in attention:
-                wanted.extend(rows_for(s, True))
-        if pinned:
-            wanted.append(label_for("pinned", "Pinned"))
-            for s in pinned:
-                wanted.extend(rows_for(s, True))
-        for key, items in ordered:
-            head = self._heads.get(key)
-            # a registered repository (REPOSITORIES.md) is called by the person's name for it
-            reg = store.repo_for(key)
-            label_text = (
-                str(reg.get("name"))
-                if reg and str(reg.get("path") or "").rstrip("/") == key.rstrip("/")
-                else basename(key)
-            )
-            if head is None:
-                head = self._heads[key] = GroupHead(label_text, key)
-                head.toggled.connect(lambda k=key: self._toggle_group(k))
-                head.add_clicked.connect(lambda k=key: self._new_in(k))
-            elif head.btn.text() != label_text:
-                head.btn.setText(label_text)
-            head.set_collapsed(self._collapsed.get(key, False))
-            wanted.append(head)
-            if self._collapsed.get(key):
-                continue
-            limit = len(items) if (self._show_all.get(key) or q) else 6
-            for s in items[:limit]:
-                wanted.extend(rows_for(s))
-            if len(items) > limit:
-                more = self._mores.get(key)
-                if more is None:
-                    more = self._mores[key] = MoreButton("")
-                    more.clicked.connect(lambda _c=False, k=key: self._show_more(k))
-                text = f"Show {len(items) - limit} more"
-                if more.text() != text:
-                    more.setText(text)
-                wanted.append(more)
-        for jid, items in sorted(job_sessions.items(), key=lambda kv: -(kv[1][0].get("lastModified") or 0)):
-            key = f"job:{jid}"
-            head = self._heads.get(key)
-            if head is None:
-                name = str(
-                    (store.jobs.get(jid) or {}).get("name") or (items[0].get("dispatch") or {}).get("name") or "Job"
+        wanted: List[QWidget] = []
+        if store.ui.show_archived:
+            if self._archived_head is None:
+                self._archived_head = ListHead(
+                    "Archived", "Back to active sessions", lambda: store.set_ui(show_archived=False)
                 )
-                head = self._heads[key] = GroupHead(name, name, icon="arrow-up-right", add_tip=f"Open the job {name}")
-                head.toggled.connect(lambda k=key: self._toggle_group(k))
-                head.add_clicked.connect(lambda j=jid: store.open_job(j))
-                self._collapsed.setdefault(key, True)
-            head.set_collapsed(self._collapsed.get(key, True))
-            wanted.append(head)
-            if self._collapsed.get(key, True):
-                continue
-            for s in items:
-                wanted.append(row_for(s))
-        note = ""
-        if store.sessions_loaded and not sessions:
-            note = "No sessions yet. Start one to see it here."
-        elif sessions and not ordered and not attention and not pinned:
-            note = "Nothing archived." if show_archived else "No matching sessions."
+            wanted.append(self._archived_head)
+        if ls.attention:
+            wanted.append(self._label("attention", "Needs you", "accent"))
+            for s in ls.attention:
+                wanted.extend(rows_for(s, True))
+        if ls.pinned:
+            wanted.append(self._label("pinned", "Pinned"))
+            for s in ls.pinned:
+                wanted.extend(rows_for(s, True))
+        for key, items in ls.groups:
+            wanted.extend(self._project_group(key, items, q, rows_for))
+        for jid, items in sorted(ls.jobs.items(), key=lambda kv: -(kv[1][0].get("lastModified") or 0)):
+            wanted.extend(self._job_group(jid, items, row_for))
+        note = self._empty_note(ls)
         if note:
-            if self._note is None:
-                self._note = SideEmpty(note)
-            elif self._note.text() != note:
-                self._note.setText(note)
-            wanted.append(self._note)
+            wanted.append(note)
         self._place(wanted)
+
+    def _forget_gone(self, keep: Set[Any], keys: Set[str]) -> None:
+        """The rows and heads are kept across rebuilds; those no longer listed go."""
+        for sid in [k for k in self._rows if k not in keep]:
+            row = self._rows.pop(sid)
+            self.list.removeWidget(row)
+            row.hide()
+            row.setParent(None)
+            row.deleteLater()
+        for key in [k for k in self._heads if k not in keys]:
+            head = self._heads.pop(key)
+            self.list.removeWidget(head)
+            head.hide()
+            head.setParent(None)
+            head.deleteLater()
+
+    def _label(self, key: str, text: str, tone: str = "") -> SectionLabel:
+        lb = self._labels.get(key)
+        if lb is None:
+            lb = self._labels[key] = SectionLabel(text, tone)
+        return lb
+
+    def _project_group(
+        self, key: str, items: List[Json], q: str, rows_for: Callable[[Json], List[QWidget]]
+    ) -> List[QWidget]:
+        """A project's head and, unless it is folded, its first six rows and "Show N more"."""
+        head = self._heads.get(key)
+        # a registered repository (REPOSITORIES.md) is called by the person's name for it
+        reg = store.repo_for(key)
+        label_text = (
+            str(reg.get("name")) if reg and str(reg.get("path") or "").rstrip("/") == key.rstrip("/") else basename(key)
+        )
+        if head is None:
+            head = self._heads[key] = GroupHead(label_text, key)
+            head.toggled.connect(lambda k=key: self._toggle_group(k))
+            head.add_clicked.connect(lambda k=key: self._new_in(k))
+        elif head.btn.text() != label_text:
+            head.btn.setText(label_text)
+        head.set_collapsed(self._collapsed.get(key, False))
+        out: List[QWidget] = [head]
+        if self._collapsed.get(key):
+            return out
+        limit = len(items) if (self._show_all.get(key) or q) else 6
+        for s in items[:limit]:
+            out.extend(rows_for(s))
+        if len(items) > limit:
+            more = self._mores.get(key)
+            if more is None:
+                more = self._mores[key] = MoreButton("")
+                more.clicked.connect(lambda _c=False, k=key: self._show_more(k))
+            text = f"Show {len(items) - limit} more"
+            if more.text() != text:
+                more.setText(text)
+            out.append(more)
+        return out
+
+    def _job_group(self, jid: str, items: List[Json], row_for: Callable[[Json], QWidget]) -> List[QWidget]:
+        """A dispatch job's head and, when it is opened, its runs (folded by default)."""
+        key = f"job:{jid}"
+        head = self._heads.get(key)
+        if head is None:
+            name = str((store.jobs.get(jid) or {}).get("name") or (items[0].get("dispatch") or {}).get("name") or "Job")
+            head = self._heads[key] = GroupHead(name, name, icon="arrow-up-right", add_tip=f"Open the job {name}")
+            head.toggled.connect(lambda k=key: self._toggle_group(k))
+            head.add_clicked.connect(lambda j=jid: store.open_job(j))
+            self._collapsed.setdefault(key, True)
+        head.set_collapsed(self._collapsed.get(key, True))
+        if self._collapsed.get(key, True):
+            return [head]
+        return [head] + [row_for(s) for s in items]
+
+    def _empty_note(self, ls: Listing) -> Optional[QWidget]:
+        """What an empty list says, if it is empty."""
+        note = ""
+        if store.sessions_loaded and not store.sessions:
+            note = "No sessions yet. Start one to see it here."
+        elif store.sessions and not ls.groups and not ls.attention and not ls.pinned:
+            note = "Nothing archived." if store.ui.show_archived else "No matching sessions."
+        if not note:
+            return None
+        if self._note is None:
+            self._note = SideEmpty(note)
+        elif self._note.text() != note:
+            self._note.setText(note)
+        return self._note
 
     def _place(self, wanted: List[QWidget]) -> None:
         """Make the list's layout show ``wanted`` in order, moving only what moved (the stretch at the
@@ -510,6 +535,7 @@ class NavButton(QAbstractButton):
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)  # Qt repaints it on enter and leave
         self._icon = icon_name
         self._text = text
         self._kbd = kbd
@@ -539,14 +565,6 @@ class NavButton(QAbstractButton):
     def mousePressEvent(self, e) -> None:
         self.last_modifiers = e.modifiers()
         super().mousePressEvent(e)
-
-    def enterEvent(self, e) -> None:
-        self.update()
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:
-        self.update()
-        super().leaveEvent(e)
 
     def set_on(self, on: bool) -> None:
         if on != self._on:
@@ -631,6 +649,7 @@ class SearchRow(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)  # Qt repaints it on enter and leave
         self.setFixedHeight(30)
         self.setCursor(Qt.CursorShape.IBeamCursor)
         lay = QHBoxLayout(self)
@@ -670,14 +689,6 @@ class SearchRow(QWidget):
     def mousePressEvent(self, e) -> None:
         self.edit.setFocus(Qt.FocusReason.MouseFocusReason)
         super().mousePressEvent(e)
-
-    def enterEvent(self, e) -> None:
-        self.update()
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:
-        self.update()
-        super().leaveEvent(e)
 
     def paintEvent(self, _e) -> None:
         fill = "fill_2" if self.edit.hasFocus() else "fill_1" if self.underMouse() else ""
@@ -814,6 +825,7 @@ class _GroupToggle(QAbstractButton):
 
     def __init__(self, text: str, collapsed: bool, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)  # Qt repaints it on enter and leave
         self.setText(text)
         self._collapsed = collapsed
         self._angle = 0.0 if collapsed else 90.0
@@ -841,14 +853,6 @@ class _GroupToggle(QAbstractButton):
     def _turn(self, v) -> None:
         self._angle = float(v)
         self.update()
-
-    def enterEvent(self, e) -> None:
-        self.update()
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:
-        self.update()
-        super().leaveEvent(e)
 
     def paintEvent(self, _e) -> None:
         t = theme.tokens()

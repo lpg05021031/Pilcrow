@@ -40,6 +40,8 @@ PREFETCH_BUDGET = 0.004
 FLING_BUDGET = 0.002
 OPEN_BUDGET = 0.014  # measuring a fold's children before it opens, so the reveal runs on true heights
 SCROLL_BUDGET = 0.008  # exact measuring on a person's scroll or a resize step; the rest follows in the drain
+BLIT_SIDE = 4  # px at each side of the viewport a seam's handle may lie over (4 of its 9)
+BLIT_FOOT = 48  # px at its bottom other widgets lie over: the composer's fade (44), the Latest pill (18 + 30)
 WARM_MAX = 600  # warm blocks kept before the far ones are cooled regardless of movement
 
 _measurer: Optional[Measurer] = None
@@ -149,6 +151,7 @@ class CanvasView(ViewInput, QAbstractScrollArea):
         self._last_user_scroll = 0.0
         self._grew = False
         self.cold_paints = 0  # placeholders painted where a block was not warm yet (a bench counter)
+        self.stale = False  # the theme or the text scale changed while hidden: re-measured when shown
         self.hover: Optional[Tuple[Block, Target]] = None
         self.pressed: Optional[Tuple[Block, Target]] = None
         self.focus: Optional[Tuple[str, Target]] = None
@@ -246,6 +249,12 @@ class CanvasView(ViewInput, QAbstractScrollArea):
             self._context_menu(e)
             return True
         return super().viewportEvent(e)
+
+    def showEvent(self, e) -> None:
+        super().showEvent(e)
+        if self.stale:
+            self.on_theme()
+        self._prefetch.start()  # what the drain left while the view was hidden
 
     def focusInEvent(self, e) -> None:
         super().focusInEvent(e)
@@ -418,8 +427,22 @@ class CanvasView(ViewInput, QAbstractScrollArea):
             self._rehover()
 
     def scrollContentsBy(self, dx: int, dy: int) -> None:
-        if not self._silent:
-            self.viewport().scroll(0, dy)
+        """Blit the picture by ``dy``. Qt blits only where no other widget lies over the scrolled rect
+        (else it repaints the whole viewport): the composer's fade and the Latest pill lie over the
+        view's bottom and a seam's handle over its sides, so the blit leaves those margins out and
+        they are repainted."""
+        if self._silent:
+            return
+        vp = self.viewport()
+        w, h = vp.width(), vp.height()
+        inner = QRect(BLIT_SIDE, 0, w - 2 * BLIT_SIDE, h - BLIT_FOOT)
+        if inner.width() <= 0 or inner.height() <= abs(dy):
+            vp.update()
+            return
+        vp.scroll(0, dy, inner)
+        vp.update(QRect(0, 0, BLIT_SIDE, h))
+        vp.update(QRect(w - BLIT_SIDE, 0, BLIT_SIDE, h))
+        vp.update(QRect(0, h - BLIT_FOOT, w, BLIT_FOOT))
 
     def scroll_to_bottom(self, animate: bool = True) -> None:
         self.follow.on_jump_to_end()
@@ -544,8 +567,8 @@ class CanvasView(ViewInput, QAbstractScrollArea):
     def _drain(self) -> None:
         """Between frames, in one commit: warm the blocks near the viewport, upgrade far estimates,
         cool the far warm. The anchor holds through it all, so nothing on screen moves."""
-        if not self.isVisible() and not self.scene.root.children:
-            return
+        if not self.isVisible():
+            return  # a hidden view warms nothing; it drains when shown
         vh = max(1, self.viewport().height())
         y0 = self.scene_y(0)
         state = (y0, vh, self.col_w, self.scene.structure_rev, self.scene.height_changes, self.m.theme_name)
@@ -719,12 +742,7 @@ class CanvasView(ViewInput, QAbstractScrollArea):
             if st.focus is not None and self.hasFocus():
                 self._paint_focus_ring(p, rect, st)
         except Exception:  # one row's painter must not blank the frame
-            if not getattr(b, "_paint_failed", False):
-                log.warning("%s could not paint", b.key, exc_info=True)
-                try:
-                    b._paint_failed = True  # type: ignore[attr-defined]
-                except AttributeError:
-                    pass
+            self._paint_failed(b)
             p.setPen(QColor(st.t.err))
             p.drawText(
                 rect.adjusted(4, 0, 0, 0),
@@ -732,6 +750,13 @@ class CanvasView(ViewInput, QAbstractScrollArea):
                 "could not draw this row",
             )
         p.restore()
+
+    @staticmethod
+    def _paint_failed(b: Block) -> None:
+        """A painter raised: log it the first time only (it would raise again on every frame)."""
+        if not b.paint_failed:
+            b.paint_failed = True
+            log.warning("%s could not paint", b.key, exc_info=True)
 
     def _paint_focus_ring(self, p: QPainter, rect: QRect, st: PaintState) -> None:
         """The keyboard focus: a ring around the target (``:focus-visible``), outside its box."""
@@ -758,7 +783,7 @@ class CanvasView(ViewInput, QAbstractScrollArea):
             try:
                 b.paint(pp, 0, 0, rect.width(), bst)
             except Exception:  # a painter that trips leaves the canvas colour, not a hole
-                log.warning("%s could not paint", b.key, exc_info=True)
+                self._paint_failed(b)
             pp.end()
             self.m.pixmaps.put(key, pm)
         p.drawPixmap(rect.topLeft(), pm)
@@ -869,6 +894,12 @@ class CanvasView(ViewInput, QAbstractScrollArea):
 
     # ---------------------------------------------------------------- theme
     def on_theme(self) -> None:
+        """New tokens or metrics: cool every warm block and measure the screen again (DESIGN §8.7). A
+        hidden view only notes it, and does this when it is shown (§8.8)."""
+        if not self.isVisible():
+            self.stale = True
+            return
+        self.stale = False
         self.m.refresh()
         for b in list(self._warm):
             b.cool()

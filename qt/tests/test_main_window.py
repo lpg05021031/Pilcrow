@@ -142,6 +142,74 @@ def test_drag_the_panel_seam(app_client):
     assert not pr.isVisible()
 
 
+def test_dragging_the_panel_seam_repaints_the_panes_that_moved_not_the_sidebar(app_client):
+    """The ground repaints the rims where the sheets' shadows fall, not the whole window; the sheets
+    paint their own pixels, so a repaint inside one does not paint the ground under it first."""
+    from PySide6.QtCore import QEvent, QObject
+
+    c = app_client
+    _ready(c)
+    c.open("sess-login")
+    c.store.set_ui(panel=True, panel_tab="tasks")
+    c.sleep(400)
+
+    class Paints(QObject):
+        def __init__(self) -> None:
+            super().__init__()
+            self.n: dict = {}
+
+        def eventFilter(self, o, e) -> bool:
+            if e.type() == QEvent.Type.Paint:
+                self.n[o] = self.n.get(o, 0) + 1
+            return False
+
+    paints = Paints()
+    watched = [c.win.sidebar, c.win.body, c.win.main, c.win.panel_host]
+    for w in watched:
+        w.installEventFilter(paints)
+    try:
+        for dx in (-12, -12, 12, 12):
+            c.win._drag_panel(dx)
+            QApplication.processEvents()
+    finally:
+        for w in watched:
+            w.removeEventFilter(paints)
+    assert paints.n.get(c.win.sidebar, 0) == 0, paints.n
+    assert paints.n.get(c.win.main, 0) >= 4 and paints.n.get(c.win.panel_host, 0) >= 4, paints.n
+    assert c.win.main.testAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent)
+    c.store.set_ui(panel=False, panel_w=560)
+
+
+def test_warming_the_closed_panel_leaves_the_conversation_alone(app_client):
+    """The closed panel is laid out and painted off screen once the window is idle; a grab lays a
+    hidden widget out as if shown, and the window's row used to make room for it: the conversation
+    narrowed and widened again, two reflows and two whole repaints after each session opened."""
+    from PySide6.QtCore import QEvent, QObject
+
+    c = app_client
+    _ready(c)
+    c.open("sess-login")
+    c.wait_until(lambda: c.win.panel is not None, 5, "the panel prebuilt")
+    c.sleep(200)
+    view = c.win.session_view.transcript.view
+    sizes: list = []
+
+    class Resizes(QObject):
+        def eventFilter(self, obj, e) -> bool:
+            if e.type() == QEvent.Type.Resize:
+                sizes.append(e.size().width())
+            return False
+
+    f = Resizes()
+    view.installEventFilter(f)
+    try:
+        c.win._warm_panel()
+        c.sleep(100)
+    finally:
+        view.removeEventFilter(f)
+    assert sizes == [] and not c.win.panel_host.isVisible(), sizes
+
+
 def test_handle_shows_on_rest_and_turns_accent_while_dragging(app_client):
     c = app_client
     _ready(c)

@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QEvent, QObject, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QKeyEvent, QPainter
+from PySide6.QtGui import QColor, QKeyEvent, QPainter
 from PySide6.QtWidgets import (
     QButtonGroup,
     QDialog,
@@ -31,10 +31,11 @@ from PySide6.QtWidgets import (
 )
 
 from ... import icons, theme
+from ...lib.models import model_options
 from ...store import store
-from ..ui.bits import Box, IconButton, Pill, hairline, label, paint_box
-from ..ui.button import Btn
-from ..ui.menu import Menu, Popover, host_for
+from ..ui.bits import Box, IconButton, IconLabel, Pill, hairline, label, paint_box
+from ..ui.button import Btn, chip_button
+from ..ui.menu import MenuPopover, host_for
 from ..ui.signals import bind
 from .parts import Backdrop, ElideLabel, Text, sheet_bg, sheet_line, well_bg, well_line
 from .parts import Switch as _Switch
@@ -237,7 +238,7 @@ class Select(QPushButton):
         self._index = -1
         self._popup_width = popup_width
         self._ghost = ghost
-        self._popover: Optional[Popover] = None
+        self._popover: Optional[MenuPopover] = None
         self.setObjectName("select")
         self.setAutoDefault(False)
         self.setAccessibleName(name)
@@ -380,23 +381,11 @@ class Select(QPushButton):
                     "on_select": (lambda k=i: self.setCurrentIndex(k)),
                 }
             )
-        pop = Popover(host, self._popup_width or self.width())
-        menu = Menu(items)
-        menu.picked.connect(self._picked)
-        pop.set_content(menu)
-        pop.menu = menu  # type: ignore[attr-defined]
+        pop = MenuPopover(host, items, self._popup_width or self.width())
         pop.closed.connect(self._popup_closed)
         self._popover = pop
         pop.open_at(self, "bottom-start")
         set_prop(self, "open", "true")
-
-    def _picked(self, it: Json) -> None:
-        pop = self._popover
-        fn = it.get("on_select")
-        if pop is not None:
-            pop.dismiss()
-        if callable(fn):
-            fn()
 
     def _popup_closed(self) -> None:
         self._popover = None
@@ -413,22 +402,14 @@ class Select(QPushButton):
             self.showPopup()
 
     @property
-    def popup(self) -> Optional[Popover]:
+    def popup(self) -> Optional[MenuPopover]:
         return self._popover if self._popover is not None and self._popover.is_open else None
 
     def keyPressEvent(self, e: QKeyEvent) -> None:
         pop = self.popup
         if pop is not None:
-            m = getattr(pop, "menu", None)
-            if e.key() == Qt.Key.Key_Down and m is not None:
-                m.step(1)
-                return
-            if e.key() == Qt.Key.Key_Up and m is not None:
-                m.step(-1)
-                return
-            if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and m is not None:
-                if not m.choose_active():
-                    pop.dismiss()
+            if e.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up, Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                pop.keyPressEvent(e)  # the list's own keys, while the focus stays on the button
                 return
         elif e.key() in (Qt.Key.Key_Down, Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter):
             self.showPopup()
@@ -486,7 +467,6 @@ def field(label_text: str, w: QWidget, icon: str = "") -> QWidget:
     hl.addStretch(1)
     lay.addWidget(head)
     lay.addWidget(w)
-    box.field_label = lb  # type: ignore[attr-defined]
     return box
 
 
@@ -571,18 +551,6 @@ def icon_box(name: str, size: int = 36) -> QLabel:
 
     def paint(t: theme.Tokens) -> None:
         lb.setPixmap(icons.pixmap(name, t.text_2, 16))
-
-    paint(theme.tokens())
-    bind(theme.theme.changed, lb, paint)
-    return lb
-
-
-def icon_label(name: str, color_of: Callable[[theme.Tokens], str], size: int = 14) -> QLabel:
-    lb = QLabel()
-    lb.setFixedSize(size, size)
-
-    def paint(t: theme.Tokens) -> None:
-        lb.setPixmap(icons.pixmap(name, color_of(t), size))
 
     paint(theme.tokens())
     bind(theme.theme.changed, lb, paint)
@@ -800,36 +768,9 @@ class RadioList(Box):
         self.changed.emit(mid)
 
 
-class FolderChip(QPushButton):
-    """``.folder-chip``: a recent folder as a pill; ``on`` marks the chosen one."""
-
-    def __init__(self, text: str, tooltip: str = "", parent: Optional[QWidget] = None) -> None:
-        super().__init__(text, parent)
-        self.setAutoDefault(False)
-        self.setObjectName("fchip")
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip(tooltip)
-        self.setAccessibleName(text)
-        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
-        self.setFixedHeight(24)
-        self._font = theme.font_ui(theme.FS_SMALL)
-        bind(theme.theme.changed, self, lambda _t: self.update())
-
-    def sizeHint(self) -> QSize:
-        return QSize(QFontMetrics(self._font).horizontalAdvance(self.text()) + 20, 24)
-
-    def paintEvent(self, _e) -> None:
-        t = theme.tokens()
-        surface = sheet_bg(t)
-        on = self.property("on") == "true"
-        lit = on or self.underMouse()
-        bg = theme.over(theme.qcolor(t.fill_2 if lit else t.fill_1), surface)
-        line = theme.over(theme.qcolor(t.hair_3), surface) if on else theme.over(theme.qcolor(t.hair), bg)
-        p = QPainter(self)
-        paint_box(p, QRectF(self.rect()), bg, line, 13)
-        p.setFont(self._font)
-        p.setPen(QColor(t.text if lit else t.text_2))
-        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.text())
+def folder_chip(text: str, tooltip: str = "") -> Btn:
+    """``.folder-chip``: a recent folder as a pill on the sheet."""
+    return chip_button(text, tooltip, over=sheet_bg)
 
 
 class Flow(QWidget):
@@ -894,17 +835,6 @@ def gateway_state() -> Tuple[List[Json], bool, Optional[str]]:
     return [], False, None if g.get("noCredential") else str(g.get("error") or "Could not list the models")
 
 
-def model_options(models: List[Json]) -> List[Tuple[str, str, str]]:
-    """(value, label, hint) for the pickers: Default, then every model the gateway lists."""
-    out = [("", "Default", "Claude Code's configured model")]
-    for m in models:
-        mid = str(m.get("id") or "")
-        name = str(m.get("displayName") or "")
-        name = name[7:] if name.lower().startswith("claude ") else name
-        out.append((mid, name or mid, mid if name else ""))
-    return out
-
-
 class ModelSelect(QWidget):
     """``ModelSelect``: Default, the gateway's models, or a typed model ID. ``changed(value, typing)``
     fires on every change; ``committed`` when a typed ID is left."""
@@ -942,11 +872,11 @@ class ModelSelect(QWidget):
             else "Any model ID the endpoint accepts"
         )
         opts = model_options(models)
-        known = any(v == self._value for v, _l, _h in opts)
+        known = any(o["value"] == self._value for o in opts)
         self.box.blockSignals(True)
         self.box.clear()
-        for v, text, h in opts:
-            self.box.addItem(text, v, hint=h, mono=bool(v))
+        for o in opts:
+            self.box.addItem(o["label"], o["value"], hint=o["hint"], mono=o["mono"])
         self.box.addItem("Custom model ID…", CUSTOM, hint=note)
         if known:
             select_value(self.box, self._value)
@@ -1058,7 +988,7 @@ class Sheet(QDialog):
         hl.setContentsMargins(22, 18, 16, 6)
         hl.setSpacing(10)
         if title_icon:
-            hl.addWidget(icon_label(title_icon, lambda t: t.text_2, 15))
+            hl.addWidget(IconLabel(title_icon, "text_2", 15))
         self.title_lb = Text(title, theme.FS_H, 600, wrap=False)
         hl.addWidget(self.title_lb, 1)
         self.close_btn = IconButton("x", "Close (Esc)", 15)

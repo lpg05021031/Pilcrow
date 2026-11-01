@@ -1,11 +1,13 @@
 """The performance budgets of qt/PERF.md §5, asserted on a run of the bench (120 heavy turns, 200 mixed).
 
-Each budget is the §5 target with headroom for a busy machine: costs at 1.5× the target, a frame-rate
-floor of 45 fps for the 55 fps target, counts that must be zero at zero.
-
-The normal ``pytest`` pass runs the quick set (about a minute offscreen): opening, a fold, a streamed
-turn, a window resize, switching, the theme, find and a pointer sweep. ``PILCROW_PERF=1`` adds the rest
-(``npm run release`` sets it). ``python qt/tests/bench/run.py`` prints every number.
+The normal ``pytest`` pass asserts what does not move with the machine's load: the counts that must
+be zero at zero (layout passes, flashes, unexpected shift, widgets made, scroll corrections) and the
+medians of the client's own work — the main thread's CPU time in a turn of the event loop, a step
+of a drag or a resize, a switch to its first paint — each at 1.5× its target. Wall-clock stalls, a
+p95 or a longest turn are a property of the machine as much as of the client (another process on
+the machine lengthens them), so those budgets run in the full set (``PILCROW_PERF=1``, which
+``npm run release`` sets) with the scenarios that take longer.
+``python qt/tests/bench/run.py`` prints every number.
 """
 
 from __future__ import annotations
@@ -30,39 +32,45 @@ QUICK = (
     "switch_session",
     "find",
     "theme_toggle",
+    "view_mode_cycle",
+    "scroll_wheel",
+    "scroll_drag",
 )
 MORE = (
     "tool_toggle",
     "typing",
     "streaming_scrolled_up",
-    "scroll_wheel",
-    "scroll_drag",
     "select_drag",
-    "view_mode_cycle",
     "panel_tabs",
     "tasks_fold_toggle",
     "idle",
 )
 
-# the budgets, against the targets of PERF.md §5
+# medians of the main thread's CPU time, in every run (1.5× the target)
+TURN_CPU_P50_MS = 6  # target 4: half the turns of the loop while something moves
+TO_PAINT_CPU_P50_MS = 150  # target 100: the median of six view mode and six theme switches
+RESIZE_STEP_CPU_P50_MS = 25  # target 16: one frame a step
+DRAG_STEP_CPU_P50_MS = 25  # scrollbar drag, a screen a step, target 16: every row on screen is new
+# single timings far inside their budgets, in every run
+SWITCH_P50_MS = 45  # target 30 (measured ≈ 16)
+FIRST_PAINT_MS = 150  # target 150 after the snapshot is modelled (measured ≈ 6)
+FIND_MS = 150  # target 100 over the whole conversation (measured ≈ 19)
+TO_PAINT_P50_MS = 150  # target 100, wall clock: the full set
+# maxima and p95s, in the full set
 STALL_P95_MS = 12  # target 8
-STALL_MAX_MS = 36  # target 24 while streaming (measured 15-29 on a shared machine)
+STALL_MAX_MS = 36  # target 24 while streaming
 TOGGLE_STALL_MAX_MS = 15  # target 10 for a fold or a card
 FPS_MIN = 45  # target 55
-TO_PAINT_MS = 150  # target 100: view mode cycle, theme switch
-SWITCH_P50_MS = 45  # target 30
-FIRST_PAINT_MS = 150  # target 150 after the snapshot is modelled (measured ≈ 4)
 MODELLING_STALL_MS = 75  # target 50: no long task while a snapshot is modelled
 RESIZE_STEP_P95_MS = 50  # target 33, two frames a step; none over 50
-FIND_MS = 150  # target 100 over the whole conversation
-DRAG_STEP_P95_MS = 50  # scrollbar drag, a screen a step, target 33 (measured 30-34)
-DRAG_STEP_MAX_MS = 150  # target 100: one heavy row measured past the step's deadline (measured 51-124)
-DRAG_COLD_PAINTS = 30  # placeholders over the 81 steps, target 20 (measured 12-19)
-SEAM_STEP_P95_MS = 70  # the panel seam dragged 12px a step, target 45 (measured 39-43)
-TAB_FIRST_TURN_MS = 100  # the slowest tab's first show, target 66 (measured 15-22 here, 66 on a slower run)
-SELECT_PX_PER_MOVE = 60_000  # a selection drag repaints the rows it changed (measured 24-26k; the viewport is 460k)
-FOLD_STALL_MAX_MS = 25  # a Collapse in the Tasks tab, target 16 (measured 8-10)
-IDLE_BUSY_CPU_PCT = 4.5  # target 3: a busy-looking conversation, the clock at 20 Hz (measured 2.3-3.2)
+DRAG_STEP_P95_MS = 50  # target 33: every row on screen is new each step (measured 24-36 on a quiet machine)
+DRAG_STEP_MAX_MS = 150  # target 100: one heavy row measured past the step's deadline
+DRAG_COLD_PAINTS = 30  # placeholders over the 81 steps, target 20
+SEAM_STEP_P95_MS = 70  # the panel seam dragged 12px a step, target 45: both panes reflow (measured 33-38)
+TAB_FIRST_TURN_MS = 100  # the slowest tab's first show, target 66
+SELECT_PX_PER_MOVE = 60_000  # a selection drag repaints the rows it changed (the viewport is 460k)
+FOLD_STALL_MAX_MS = 25  # a Collapse in the Tasks tab, target 16
+IDLE_BUSY_CPU_PCT = 4.5  # target 3: a busy-looking conversation, the clock at 20 Hz
 
 
 @pytest.fixture(scope="module")
@@ -84,45 +92,43 @@ def results(tmp_path_factory):
 full_only = pytest.mark.skipif(not FULL, reason="set PILCROW_PERF=1 for the full budgets")
 
 
-def test_opening_paints_at_once_and_never_blocks(results):
+# ---------------------------------------------------------------- counts and medians: every run
+
+
+def test_opening_paints_at_once_and_makes_no_widgets(results):
     for name in ("heavy", "mixed"):
         r = results["open_cold"][name]
         assert r["first_paint_ms"] <= FIRST_PAINT_MS, (name, r)
-        assert r["modelling_stall_max_ms"] <= MODELLING_STALL_MS, (name, r)
         assert r["widgets"] == 0, (name, r)
 
 
-def test_toggles_make_no_layouts_and_do_not_flash(results):
-    for name in ("fold_toggle", "tool_toggle"):
-        if name not in results:
-            continue
-        s = results[name]["summary"]
-        assert s["layout_per_toggle"] <= 1, (name, s)
-        assert s["flashes"] == 0, (name, s)
-        assert s["stall_max_ms"] <= TOGGLE_STALL_MAX_MS, (name, s)
-        assert s["fps_min_animated"] >= FPS_MIN, (name, s)
+def test_a_fold_toggle_makes_no_layouts_does_not_flash_and_moves_only_what_it_animates(results):
+    s = results["fold_toggle"]["summary"]
+    assert s["layout_per_toggle"] <= 1 and s["flashes"] == 0, s
+    # once its body is built: off the live end no scroll correction, and the row below moves by
+    # what the fold grew (at the end the view follows the growing fold, the easing)
+    assert s["scroll_sets_off_end"] == 0 and s["below_unexplained_px"] == 0, s
+    assert s["turn_cpu_p50_ms"] <= TURN_CPU_P50_MS, s
 
 
 def test_streaming_while_following_costs_the_paragraph(results):
     r = results["streaming_follow"]
-    assert r["stall"]["p95"] <= STALL_P95_MS, r["stall"]
-    assert r["stall"]["max"] <= STALL_MAX_MS, r["stall"]
     assert r["layout_per_s"] == 0, r
     assert r["transcript"]["widgets_made"] == 0, r["transcript"]
     assert r["filmed"]["flashes"] == 0, r["filmed"]
+    assert r["stall"]["cpu_p50"] <= TURN_CPU_P50_MS, r["stall"]
 
 
 def test_hover_moves_nothing(results):
     r = results["hover_sweep"]
     assert r["layout"] == 0 and r["widgets_made"] == 0, r
-    assert r["stall"]["p95"] <= STALL_P95_MS, r["stall"]
+    assert r["stall"]["cpu_p50"] <= TURN_CPU_P50_MS, r["stall"]
 
 
-def test_resizing_the_window_reflows_without_long_tasks(results):
+def test_resizing_the_window_reflows_the_conversation_in_place(results):
     r = results["resize_window"]
-    assert r["over_50ms"] == 0, r
-    assert r["step"]["p95"] <= RESIZE_STEP_P95_MS, r["step"]
     assert r["flashes"] == 0 and r["layout"] == 0 and r["widgets_made"] == 0, r
+    assert r["step_cpu"]["p50"] <= RESIZE_STEP_CPU_P50_MS, r["step_cpu"]
 
 
 def test_switching_makes_nothing_and_is_quick(results):
@@ -132,13 +138,55 @@ def test_switching_makes_nothing_and_is_quick(results):
     assert r["rss_growth_mb"] <= 2, r
 
 
-def test_find_and_the_theme_are_quick(results):
+def test_find_is_quick(results):
     f = results["find"]
     assert f["search_ms"] <= FIND_MS and f["widgets"] == 0, f
-    for name, r in results["theme_toggle"].items():
-        if isinstance(r, dict):
-            assert r["to_paint_ms"] <= TO_PAINT_MS, (name, r)
-            assert r["window"]["widgets_made"] == 0, (name, r)
+
+
+def test_the_theme_and_the_view_mode_switch_make_nothing_and_are_quick(results):
+    for name in ("theme_toggle", "view_mode_cycle"):
+        r = results[name]
+        assert r["widgets_made"] == 0, (name, r["switches"])
+        assert r["to_paint_cpu"]["p50"] <= TO_PAINT_CPU_P50_MS, (name, r["to_paint_cpu"])
+    assert results["theme_toggle"]["retained"] >= 5, results["theme_toggle"]["retained"]
+
+
+def test_a_fling_paints_what_it_shows(results):
+    w = results["scroll_wheel"]["up_filmed"]
+    assert w["flashes"] == 0 and w["shift"]["unexpected_px"] == 0, w
+    assert w["stall"]["cpu_p50"] <= TURN_CPU_P50_MS, w["stall"]
+
+
+def test_dragging_the_scrollbar_makes_nothing(results):
+    d = results["scroll_drag"]
+    assert d["widgets_made"] == 0, d
+    assert d["step_cpu"]["p50"] <= DRAG_STEP_CPU_P50_MS, d["step_cpu"]
+
+
+# ---------------------------------------------------------------- maxima, p95s and the long scenarios
+
+
+@full_only
+def test_no_long_turns_while_opening_toggling_or_streaming(results):
+    for name in ("heavy", "mixed"):
+        r = results["open_cold"][name]
+        assert r["modelling_stall_max_ms"] <= MODELLING_STALL_MS, (name, r)
+    for name in ("fold_toggle", "tool_toggle"):
+        s = results[name]["summary"]
+        assert s["layout_per_toggle"] <= 1 and s["flashes"] == 0, (name, s)
+        assert s["scroll_sets_off_end"] == 0 and s["below_unexplained_px"] == 0, (name, s)
+        assert s["stall_max_ms"] <= TOGGLE_STALL_MAX_MS, (name, s)
+        assert s["fps_min_animated"] >= FPS_MIN, (name, s)
+    r = results["streaming_follow"]
+    assert r["stall"]["p95"] <= STALL_P95_MS and r["stall"]["max"] <= STALL_MAX_MS, r["stall"]
+    h = results["hover_sweep"]
+    assert h["stall"]["p95"] <= STALL_P95_MS, h["stall"]
+
+
+@full_only
+def test_resize_steps_stay_under_two_frames(results):
+    r = results["resize_window"]
+    assert r["over_50ms"] == 0 and r["step"]["p95"] <= RESIZE_STEP_P95_MS, r
 
 
 @full_only
@@ -152,27 +200,26 @@ def test_scrolled_up_streaming_and_typing_move_nothing(results):
 
 
 @full_only
-def test_fling_paints_what_it_shows(results):
+def test_a_fling_and_a_scrollbar_drag_stay_under_their_frames(results):
     w = results["scroll_wheel"]["up_filmed"]
-    assert w["flashes"] == 0 and w["shift"]["unexpected_px"] == 0, w
     assert w["stall"]["p95"] <= STALL_P95_MS, w["stall"]
     assert w["stall"]["over_16ms"] <= max(1, w["stall"]["n"] // 100), w["stall"]  # ≤ 1 frame in 100
     assert w["cold_paints"] <= w["stall"]["n"] // 10, w  # placeholders in at most a tenth of the frames
-
-
-@full_only
-def test_view_mode_cycle_is_quick(results):
-    for mode, r in results["view_mode_cycle"].items():
-        if isinstance(r, dict):
-            assert r["to_paint_ms"] <= TO_PAINT_MS, (mode, r)
-            assert r["widgets_made"] == 0, (mode, r)
-
-
-@full_only
-def test_dragging_the_scrollbar_and_the_seam_and_showing_a_tab_stay_under_their_budgets(results):
     d = results["scroll_drag"]
     assert d["step"]["p95"] <= DRAG_STEP_P95_MS and d["step"]["max"] <= DRAG_STEP_MAX_MS, d["step"]
-    assert d["cold_paints"] <= DRAG_COLD_PAINTS and d["widgets_made"] == 0, d
+    assert d["cold_paints"] <= DRAG_COLD_PAINTS, d
+
+
+@full_only
+def test_the_switches_have_no_slow_one(results):
+    for name in ("theme_toggle", "view_mode_cycle"):
+        r = results[name]
+        assert r["to_paint"]["p50"] <= TO_PAINT_P50_MS, (name, r["to_paint"])
+        assert r["to_paint"]["max"] <= 1.5 * TO_PAINT_P50_MS, (name, r["to_paint"])
+
+
+@full_only
+def test_the_seam_and_a_tab_stay_under_their_budgets(results):
     tabs = results["panel_tabs"]
     assert tabs["drag"]["step"]["p95"] <= SEAM_STEP_P95_MS and tabs["drag"]["layout"] == 0, tabs["drag"]
     slowest = max(t["first_turn_ms"] for t in tabs["tabs"].values())

@@ -97,7 +97,8 @@ class NodeBlock(Block):
         return self.root is not None and self.root.live()
 
     def tick(self, now: float) -> Optional[Tuple[int, int, int, int]]:
-        return (0, 0, 100000, self.h) if self.live() else None
+        """The live nodes' rectangle (a spinner), not the block."""
+        return self.root.live_rect() if self.root is not None else None
 
 
 # ---------------------------------------------------------------- heads

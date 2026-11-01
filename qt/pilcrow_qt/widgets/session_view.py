@@ -34,7 +34,7 @@ from .composer import Composer, LayoutButton
 from .folder_picker import FolderPicker
 from .mcp_notice import McpNotice
 from .ui.bits import Box, IconButton, Indicator, Mark, button, copy_text, hairline, label, paint_box
-from .ui.button import Btn
+from .ui.button import Btn, chip_button
 from .ui.menu import Popover, host_for, show_menu
 from .ui.signals import bind
 
@@ -1070,7 +1070,6 @@ class ErrorBar(QWidget):
         self.host = host
 
     def set_error(self, error: str) -> None:
-
         self._error = error
         self.text.setText(error.split("\n")[0])
         if re.search(r"Settings|not found|No Claude Code", error, re.I):
@@ -1086,37 +1085,6 @@ class ErrorBar(QWidget):
             store.set_dialog("settings", "claude")
         else:
             store.insert_into_composer(self.sid, "continue")
-
-
-class _Example(QPushButton):
-    """An example prompt (``.example``): a 32px pill on a quiet fill with a hairline, lit under the pointer."""
-
-    def __init__(self, text: str, parent: Optional[QWidget] = None) -> None:
-        super().__init__(text, parent)
-        self.setFlat(True)
-        self.setFixedHeight(32)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
-        self.setAccessibleName(text)
-        bind(theme.theme.changed, self, lambda _t: self.update())
-
-    def sizeHint(self) -> QSize:
-        return QSize(QFontMetrics(theme.font_ui(theme.FS_UI)).horizontalAdvance(self.text()) + 28, 32)
-
-    def paintEvent(self, _e) -> None:
-        t = theme.tokens()
-        hover = self.underMouse() and self.isEnabled()
-        p = QPainter(self)
-        paint_box(
-            p,
-            QRectF(self.rect()),
-            theme.blend(t.fill_2 if hover else t.fill_1, t.canvas),
-            theme.blend(t.hair, t.canvas),
-            16,
-        )
-        p.setFont(theme.font_ui(theme.FS_UI))
-        p.setPen(QColor(t.text if hover else t.text_2))
-        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.text())
 
 
 class SessionEmpty(QWidget):
@@ -1169,7 +1137,7 @@ class SessionEmpty(QWidget):
         el = _Flow(self.examples)
         self.example_buttons: List[QPushButton] = []
         for e in EXAMPLES:
-            b = _Example(e)
+            b = chip_button(e, h=32, px=14, fs=theme.FS_UI)
             b.clicked.connect(lambda _c=False, text=e: store.insert_into_composer(self.sid, text, True))
             el.add(b)
             self.example_buttons.append(b)

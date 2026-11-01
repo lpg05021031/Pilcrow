@@ -35,6 +35,7 @@ idle. The rig records, per scenario:
 | **flashes** | frames in which a band of ≥24 scanlines went blank and came back: flicker |
 | **shift** (unexpected px, max jump) | the Qt analogue of cumulative layout shift, read off scanline hashes of consecutive grabs |
 | **cpu_pct**, **rss** | CPU share of one core, resident memory |
+| **cpu_p50**, **step_cpu**, **to_paint_cpu** | the main thread's own CPU time in a turn, a step or a switch (`time.thread_time`): the client's work, which another process on the machine does not lengthen, so the budgets every test run asserts read these |
 
 Input is paced by the clock (120 wheel notches a second, a pointer at 720 px/s, 40 keys a second),
 so a slower client receives the same input as a faster one and the stall numbers stay comparable.
@@ -302,8 +303,12 @@ moves on a second; nothing is relaid out.
   (bench `tasks_fold_toggle`), under a frame; the conversation's folds are one number instead (§4.4).
 - The sidebar diffs its ordered list of rows and moves only the rows that moved; it no longer
   reparents every row on every `sessions.changed`.
-- Nothing calls `setStyleSheet` or `setVisible` from a hover or a refresh. Colours and fonts are set
-  with the painter, `setFont` and `setPalette`.
+- Nothing calls `setStyleSheet` from a hover or a refresh. A hover repaints (`WA_Hover`); what a
+  card reveals keeps its place: the inbox cards' Dismiss and a changed file's actions paint nothing
+  until then (`ui.bits.reveal_on_hover`, the web's `opacity: 0`), a queued message's actions keep
+  their size while hidden. One hover still shows and hides in a layout: a sidebar row's time steps
+  aside for its menu (that row's own layout). Colours and fonts are set with the painter, `setFont`
+  and `setPalette`.
 
 ### 4.13 What stays
 
@@ -323,35 +328,43 @@ run to run, the medians and counts do not):
 
 | scenario | target | measured |
 |---|---|---|
-| fold / thinking / tool toggle | 0 layout passes; ≤ 1 scroll adjustment; ≥ 55 fps; no flash; the row below moves only by the animated amount | 0–0.5 layouts; 58–62 fps; 0 flashes; stall max 10 ms. Scroll sets 0 (thinking) to 12 (a card at the live end: the view keeps the end in sight as the card grows, which is the easing, not a correction); the row below moves ≤ 23 px beyond the animation on heavy cards whose children exceed the 14 ms pre-measure budget |
+| fold / thinking / tool toggle | 0 layout passes; ≥ 55 fps; no flash; once the body is built, off the live end no scroll correction and the row below moves only by what the toggled row grew (at the live end the view follows the growing row: the easing) | 0–0.5 layouts; 58–62 fps; 0 flashes; stall max 10 ms; 0 corrections off the end and 0 px beyond the growth once built (asserted in every run); at the live end 11–31 scroll sets a toggle, the follow easing. A row's first open builds and measures its body: when its children pass the 14 ms pre-measure budget the row below moves up to 19 px beyond the growth on that one toggle |
 | streaming (follow and scrolled up) | stall p95 ≤ 8 ms, max ≤ 24 ms; 0 layout passes; scrolled up: 0 px of unexpected shift | 120 turns: follow p95 3.5 ms, max 15–24 ms (one turn over 16 ms in a 3,700-turn run; 34–39 ms when the bench opens a conversation cold just before), 0 layouts, CPU 20 %; scrolled up: 0 px, p95 1.3 ms. 600 turns (2.10.0): p95 4.6 ms, max 21 ms |
-| wheel fling | stall p95 ≤ 8 ms; ≤ 1 frame in 100 over 16 ms; blank fraction ≤ 0.05 | 120 turns: p95 6.7–8.6 ms, max 11–35 ms, 0 px unexpected shift (the blank fraction of 0.27 is the gaps between rows, which the canvas paints in the exact canvas colour; the widget transcript's rows were never exactly it) |
-| scrollbar drag (a screen a step, 81 steps) | step p95 ≤ 33 ms; max ≤ 100 ms; ≤ 20 placeholder paints | p95 30–34 ms, max 51–124 ms (the one heavy row measured past the step's 8 ms deadline), 12–19 placeholder paints filled by the drain, 0 widgets. Every row is new on each step, so a step is a frame and a half or two; the budget is what it is |
-| hover sweep, selection drag, typing | 0 layout passes in the conversation; 0 px of shift; a hover repaints its targets, a drag the rows it changed | 0 and 0; hover 7.4 kpx per pointer move (was 8.6 kpx with whole blocks), selection drag 24–26 kpx per move and p95 1 ms (was 203 kpx, the whole viewport, and 4.4 ms); typing stall p95 1.2 ms |
+| wheel fling | stall p95 ≤ 8 ms; ≤ 1 frame in 100 over 16 ms; 0 px unexpected shift | 120 turns, the filmed fling (one notch a frame), two runs: p50 2.9–3.2 ms, p95 7.2–7.7 ms, max 12–13 ms, 0 frames over 16 ms, 0 px unexpected shift. In the window a step repaints the strip it uncovers and the margins other widgets lie over, no longer the whole viewport (REVIEW §3b). The blank fraction (0.27) is the gaps between rows, painted in the exact canvas colour |
+| scrollbar drag (a screen a step, 81 steps) | step p50 ≤ 16 ms (one frame: the main thread's CPU time, asserted in every run); p95 ≤ 33 ms; max ≤ 100 ms; ≤ 20 placeholder paints | two runs: p50 15.1–17.3 ms (CPU 15.0–17.0), p95 25.8–29.4 ms, max 29–30 ms, 28–44 of 81 steps over 16 ms, 12–17 placeholder paints filled by the drain, 0 widgets. Every row is new on each step, so a step is about a frame; the p95 budget is the measure, not a frame |
+| hover sweep, selection drag, typing | 0 layout passes in the conversation; 0 px of shift; a hover repaints its targets, a drag the rows it changed | 0 and 0; hover 7.4 kpx per pointer move (was 8.6 kpx with whole blocks), selection drag 8.2 kpx per move at the top of the heavy conversation (the scenario starts there; mid-conversation 24–26 kpx; was 203 kpx, the whole viewport); typing stall p95 1.1 ms |
 | open (120 heavy / 200 mixed; 600 / 2,000) | first paint ≤ 150 ms after the snapshot is modelled; the longest turn while modelling ≤ 50 ms at 120 / 200 turns, ≤ 75 ms at 600 / 2,000 (the snapshot is one message and its parse is the floor: 38 ms for 600 heavy turns with the standard library) | 120 / 200: longest turn 43–60 ms / 26–31 ms, first paint 7–11 ms; 600 / 2,000: 60 ms / 69 ms, first rows 126 / 424 ms, first paint 7 / 13 ms |
 | switch session | ≤ 30 ms to first paint; 0 widgets made for a retained session | 57 ms (the sidebar's rows move, nothing is made or re-parented), 1 widget, 0 MB growth over 10 switches. 2.12: 16 ms, 0 widgets at 120/200 turns — the one widget was the closed side panel's tab, rebuilt for each session switched to; a closed panel now follows the session when the window is idle |
 | window resize (1480 → 1000 → 1480 px in 26 steps) | step p95 ≤ 33 ms (two frames); no step over 50 ms; 0 layout passes in the conversation, 0 flashes | — (guarded since 2.12: p95 29 ms, max 29 ms, 0 / 0 / 0 at 120 turns) |
 | find over the whole conversation | ≤ 100 ms to count the matches; 0 widgets | — (guarded since 2.12: 16 ms at 200 turns) |
-| view mode cycle, theme switch | ≤ 100 ms to first paint | view mode 106 ms; theme 124–146 ms with the Changes panel open (was 3.5–4 s): the theme is a palette now, not a stylesheet — the switch swaps the application palette, re-applies the widgets' tints, polishes the ~100 native fields and scrollbars again and repaints; what remains is the Changes tab's hundred file rows laying out once each, and the conversation's own repaint (7 ms) |
+| view mode cycle, theme switch | ≤ 100 ms to first paint (the median of six switches) | two runs: view mode 27–31 ms (slowest 39–48); theme 61–68 ms (slowest 74–81) with five sessions retained and the Changes panel open (was 3.5–4 s): the theme is a palette, not a stylesheet — the switch swaps the application palette, re-applies the widgets' tints, polishes the ~100 native fields and scrollbars again and repaints; a retained conversation behind the one on screen re-measures when it is shown, not on the switch (the theme scenario alone: 55–56 ms, against 70–76 ms when every retained view re-measured) |
 | panel open on any tab while streaming | widgets made per second = 0 on hidden tabs; ≤ 1 refresh a second on the visible one | 0 widgets/s on every tab, stall p95 4–5 ms (the Tasks tab updates its rows in place; the Changes tab rebuilds a diff only when an edit landed) |
-| idle with a busy-looking session (a real event loop) | ≤ 3 % of one core | 2.3–3.2 % (5.2 % before the indicators moved onto the clock, each on its own 40–60 ms timer); quiet 0.0–0.6 % |
-| the side panel | a seam drag step p95 ≤ 45 ms; a tab's first show ≤ 66 ms; a Tasks fold's longest turn ≤ 16 ms | seam p95 39–43 ms, 0 layout passes in the conversation; tabs' first show 13–22 ms (the terminal 15 ms); the workflow card's `Collapse` 77 layout requests, 1,520 paints and a longest turn of 8–10 ms per toggle |
+| idle with a busy-looking session (a real event loop) | ≤ 3 % of one core | 2.3–3.2 % (5.2 % before the indicators moved onto the clock, each on its own 40–60 ms timer); quiet 0.0–0.6 %. Only marks tick: a running card's status mark, a body's spinner (three running Bash and three running Agent cards: 4.0 M px/s repainted before, 0.18 M px/s now) |
+| the side panel | a seam drag step p95 ≤ 45 ms; a tab's first show ≤ 66 ms; a Tasks fold's longest turn ≤ 16 ms | seam p50 10–14 ms, p95 31–36 ms (both panes reflow each step; 51 ms in one full bench run), 253 M px painted in the window over the 32 steps (was 394 M when the ground was repainted whole: `Shell.place()` now repaints the lines of shadow that moved) in some 8,700 paint events (8,847; a changed file's head actions now keep their place, painting nothing, so they take paint events of their own), 0 layout passes in the conversation; tabs' first show 2–26 ms; the workflow card's `Collapse` 77 layout requests, 1,520 paints and a longest turn of 8–10 ms per toggle |
 | Timeline with 300 steps | — | first turn 14 ms, stall max 21 ms, 1 widget (was 1,749 ms and 301 widgets): a list on the engine |
 | a lead's helpers ticking (HELPERS.md: eight helpers, their state ten times a second) | the bar repaints alone: 0 paints of the conversation, the sidebar, the composer and the header; 0 layout passes outside the bar; ≤ 3 ms per update | lead idle: 1.9 ms per update (max 2.8), 0 / 0 / 0 / 0 paints, layout requests on the bar only, 0 stalls; the same while a reply streams: 1.8 ms per update, 0 stalls over 20 ms; the Changes tab in front updates its helper sections, behind another tab it does nothing. The bar has no QLayout and paints its own background; the store re-emits the sessions list only when a field the list shows changed (`tests/stress/s_helpers.py`; guarded by `tests/test_helpers.py`) |
 | a workflow of 60 agents reporting ten times a second, the Tasks tab in front | the panel follows in place: no card rebuilt for a progress tick; ≤ 3 ms per update on the main thread; a hidden tab does nothing | 1.4 ms per update (max 7); 118 widgets made over the run (the 60 rows as their agents start, nothing else); stalls only when a batch of agents arrives (≤ 120 ms, the new rows laid out); the Files tab in front or the panel closed: 1.3 ms, 0 paints, 0 layouts (`tests/stress/s_workflow.py`; before: every tick rebuilt every card, 244 ms max, stalls to 369 ms) |
 | a dispatch job of 40 repositories, its runs reporting ten times a second (DISPATCH.md) | the hidden page does nothing; the board touches its one card and no layout; the job view patches the rows that changed; the sidebar does not rebuild for a run's progress | board in front: 3.3 ms per update (was 5.0; paints halved, no card re-laid for a progress tick), the sidebar paints its badge when it changes (was 6 paints per update); the job view in front: 9.4 ms per update (was 11; some 19 rows rebuilt and painted per tick under this load); another page in front: 0.8 ms (was 10.3: both views refreshed while hidden). Found on the way: a rebuilt row kept the pixmap cached of its old state and asked for no repaint, so the table showed states long gone, and none of the engine's lists followed a theme switch (`tests/stress/s_dispatch.py`; guarded by `tests/test_dispatch.py`) |
 | a lead's conversation: 960 messages with 60 helper notes and 180 helpers cards | fling with 0 stalls over 20 ms and no cold placeholders; a note measured under 1 ms | open 108 ms; fling top to bottom in 297 wheel steps, 0 stalls, 0 cold placeholders; a note measures in 0.5 ms; a pointer sweep over notes and cards 0 stalls |
 
-**What is enforced.** `qt/tests/test_perf_budget.py` asserts these targets on every `pytest` run,
-on a 120-turn heavy and a 200-turn mixed conversation, with headroom for a busy machine: costs at 1.5×
-the target (stall p95 12 ms, stall max 36 ms streaming and 15 ms for a toggle, to-paint 150 ms, a
-long task while modelling 75 ms, a resize step p95 50 ms, a switch 45 ms, find 150 ms), a 45 fps
-floor for the 55 fps target, and every count that must be zero at zero (layout passes, flashes,
-unexpected shift, widgets made). The bench runs in a process of its own. The normal run takes the quick set (opening, a fold, a streamed turn, a resize, the
-switch, find, the theme, a pointer sweep; under a minute offscreen); `PILCROW_PERF=1` adds the card
-toggle, typing, streaming while scrolled up, the fling, the scrollbar drag (p95 50 ms, max 150 ms,
-30 placeholders), a selection drag (60 kpx a move), the view-mode cycle, the panel's tabs and seam
-(a first show 100 ms, a seam step p95 70 ms), a Tasks fold (25 ms) and the idle busy look (4.5 %).
+**What is enforced.** `qt/tests/test_perf_budget.py` asserts these targets on a 120-turn heavy and
+a 200-turn mixed conversation, in a process of its own. Every `pytest` run asserts what a busy
+machine does not move: the counts that must be zero at zero (layout passes, flashes, unexpected
+shift, widgets made; a fold toggle's scroll corrections off the live end and the row below's
+movement beyond what the fold grew, once its body is built) and medians of the main thread's own CPU
+time, each at 1.5× its target (a turn of the event loop while something moves 6 ms, a resize or a
+scrollbar-drag step 25 ms, a view-mode or theme switch to its first paint 150 ms), with three
+single timings that sit far inside their budgets (first paint 150 ms, a session switch's median 45
+ms, find 150 ms). That run covers opening, a fold, a pointer sweep, a streamed turn, a resize, the
+switch, find, the theme (five sessions retained), the view-mode cycle, the fling and the scrollbar
+drag: about a minute and a half offscreen, and it passes with another process busy on a core.
+`PILCROW_PERF=1` (set by `npm run release`) adds the wall-clock budgets — stall p95 12 ms, stall
+max 36 ms streaming and 15 ms for a toggle, a 45 fps floor, a long task while modelling 75 ms, a
+resize step p95 50 ms with none over 50, the fling's p95 and ≤ 1 frame in 100 over 16 ms, the
+scrollbar drag's p95 50 ms and max 150 ms with ≤ 30 placeholders, a switch's slowest 225 ms — and
+the scenarios that take longer: the card toggle, typing, streaming while scrolled up, a selection
+drag (60 kpx a move), the panel's tabs and seam (a first show 100 ms, a seam step p95 70 ms), a
+Tasks fold (25 ms) and the idle busy look (4.5 %).
 
 ## 6. Running the benchmarks
 

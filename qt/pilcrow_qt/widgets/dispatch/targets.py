@@ -39,6 +39,8 @@ def dep_names(repo: Json) -> List[str]:
 class TargetBlock(NodeBlock):
     """One repository (a row): the check, the name, the branch, the chips and the notes pencil."""
 
+    __slots__ = ("checked", "notes", "path", "picker", "repo", "verdict")
+
     KIND = "target"
     MT = 0
     MB = 0

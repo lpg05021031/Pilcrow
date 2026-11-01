@@ -574,10 +574,10 @@ class TTab(QWidget):
 
     def __init__(self, ref: TermRef, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)  # Qt repaints it on enter and leave
         self.ref = ref
         self.on = False
         self.text = ref.title
-        self._hover = False
         self._x_hover = False
         self.setMouseTracking(True)
         self.setFixedHeight(26)
@@ -609,7 +609,7 @@ class TTab(QWidget):
             p.setBrush(theme.qcolor(t.fill_2))
             p.drawRoundedRect(self.rect(), theme.R2, theme.R2)
         p.setFont(self._font)
-        p.setPen(theme.qcolor(t.text if (self.on or self._hover) else t.text_3))
+        p.setPen(theme.qcolor(t.text if (self.on or self.underMouse()) else t.text_3))
         p.drawText(QRect(9, 0, self.width() - 9 - 22, 26), Qt.AlignmentFlag.AlignVCenter, self.text)
         xr = self._x_rect()
         if self._x_hover:
@@ -618,13 +618,10 @@ class TTab(QWidget):
             p.drawRoundedRect(xr, 4, 4)
         p.drawPixmap(xr.left() + 3, xr.top() + 3, icons.pixmap("x", t.text if self._x_hover else t.text_3, 11))
 
-    def enterEvent(self, e) -> None:
-        self._hover = True
-        self.update()
-
     def leaveEvent(self, e) -> None:
-        self._hover = self._x_hover = False
+        self._x_hover = False
         self.update()
+        super().leaveEvent(e)
 
     def mouseMoveEvent(self, e: QMouseEvent) -> None:
         xh = self._x_rect().contains(e.position().toPoint())

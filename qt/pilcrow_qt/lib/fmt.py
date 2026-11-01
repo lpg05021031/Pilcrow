@@ -179,6 +179,11 @@ def first_line(s: Optional[str]) -> str:
     return (s or "").split("\n")[0]
 
 
+def clock(ms: float, seconds: bool = False) -> str:
+    """A 24-hour time of day, "14:05", or "14:05:09" with ``seconds``."""
+    return datetime.fromtimestamp(ms / 1000).strftime("%H:%M:%S" if seconds else "%H:%M")
+
+
 def plural(n: float, one: str, many: Optional[str] = None) -> str:
     if many is None:
         many = one + "s"

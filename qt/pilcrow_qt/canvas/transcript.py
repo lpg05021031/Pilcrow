@@ -16,18 +16,17 @@ from collections import OrderedDict
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import shiboken6
-from PySide6.QtCore import QRect, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QPainter
-from PySide6.QtWidgets import QPushButton, QVBoxLayout, QWidget
+from PySide6.QtCore import QTimer, Signal
+from PySide6.QtWidgets import QVBoxLayout, QWidget
 
-from .. import icons, theme
+from .. import theme
 from ..lib.tools_meta import tool_meta
 from ..lib.transcript_model import Item, NoticeItem, TranscriptModel
 from ..lib.units import Unit, group_turns, live_turn_folds
 from ..store import store
 from ..widgets.transcript.ctx import ToolCtx
 from ..widgets.transcript.permission import PermissionCard
-from ..widgets.ui.bits import paint_box
+from ..widgets.ui.button import Btn
 from ..widgets.ui.signals import bind
 from .blocks.fold import reconcile, sync_unit_group, unit_group, unit_group_key
 from .blocks.island import IslandBlock
@@ -60,7 +59,6 @@ class OrphanIsland(IslandBlock):
         super().__init__(f"orphan:{perm.get('requestId')}", self._make)
 
     def _make(self) -> QWidget:
-
         return PermissionCard(self.perm, self.ctx, None, stale=False)
 
 
@@ -306,30 +304,12 @@ def forget_scenes() -> None:
 # ---------------------------------------------------------------- the widget
 
 
-class Jump(QPushButton):
+def latest_pill(parent: QWidget) -> Btn:
     """The "Latest" pill over the bottom of the view while the reader is up in the history."""
-
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(" Latest", parent)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setAccessibleName("Latest")
-        self.setFixedHeight(30)
-        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
-        self._font = theme.font_ui(theme.FS_SMALL, 550)
-        self.setFixedWidth(10 + 14 + 4 + QFontMetrics(self._font).horizontalAdvance(self.text().strip()) + 12)
-        bind(theme.theme.changed, self, lambda _t: self.update())
-
-    def paintEvent(self, _e) -> None:
-        t = theme.tokens()
-        p = QPainter(self)
-        bg = QColor(t.raised_2 if self.underMouse() else t.raised)
-        paint_box(p, QRectF(self.rect()), bg, theme.blend(t.hair_2, t.raised), 15)
-        p.drawPixmap(10, (self.height() - 14) // 2, icons.pixmap("arrow-down", t.text, 14))
-        p.setFont(self._font)
-        p.setPen(QColor(t.text))
-        p.drawText(
-            QRect(28, 0, self.width() - 28 - 12, self.height()), Qt.AlignmentFlag.AlignVCenter, self.text().strip()
-        )
+    b = Btn("Latest", icon="arrow-down", icon_size=14, parent=parent)
+    b.override.update(h=30, px=12, pl=10, gap=4, fs=theme.FS_SMALL, fw=550, r=15)
+    b.set_look("text", bg="raised", hover_bg="raised_2", line="hair_2/raised")
+    return b
 
 
 class Transcript(QWidget):
@@ -347,7 +327,7 @@ class Transcript(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
         lay.addWidget(self.view)
-        self.jump = Jump(self)
+        self.jump = latest_pill(self)
         self.jump.hide()
         self.jump.clicked.connect(self.scroll_to_bottom)
         self.find_bar: Optional[QWidget] = None

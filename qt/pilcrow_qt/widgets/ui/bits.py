@@ -19,7 +19,6 @@ from ... import icons, theme
 from ...canvas.clock import clock
 from ...canvas.pixels import hline, pen_width, snap, vline
 from ...lib.fmt import tokens as fmt_tokens
-from ...store import store
 from .button import Btn
 from .signals import bind
 
@@ -52,6 +51,27 @@ class Hairline(QWidget):
 
 def hairline(vertical: bool = False, over: theme.Fill = "canvas") -> Hairline:
     return Hairline(vertical, over)
+
+
+class IconLabel(QWidget):
+    """A tinted Lucide icon that repaints from the tokens when the theme changes."""
+
+    def __init__(self, name: str, color: str = "text_2", size: int = 14, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._name, self._color, self._size = name, color, size
+        self.setFixedSize(size, size)
+        bind(theme.theme.changed, self, lambda _t: self.update())
+
+    def set(self, name: str, color: Optional[str] = None) -> None:
+        self._name = name
+        if color:
+            self._color = color
+        self.update()
+
+    def paintEvent(self, _e) -> None:
+        p = QPainter(self)
+        pm = icons.pixmap(self._name, getattr(theme.tokens(), self._color), self._size)
+        p.drawPixmap(0, 0, pm)
 
 
 def tone(lb: QWidget, name: str) -> QWidget:
@@ -121,7 +141,6 @@ class IconButton(QPushButton):
         self._name, self._size, self._color, self._over, self._reveal = name, size, color, over, reveal
         self._shown = not reveal
         self._active = False
-        self._hover = False
         self.last_modifiers = Qt.KeyboardModifier.NoModifier
         self.setFlat(True)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
@@ -156,21 +175,11 @@ class IconButton(QPushButton):
             self._active = on
             self.update()
 
-    def enterEvent(self, e) -> None:
-        self._hover = True
-        self.update()
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:
-        self._hover = False
-        self.update()
-        super().leaveEvent(e)
-
     def paintEvent(self, _e) -> None:
         if not self._shown:
             return
         t = theme.tokens()
-        lit = (self._hover and self.isEnabled()) or self._active
+        lit = (self.underMouse() and self.isEnabled()) or self._active
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         if lit:
@@ -370,7 +379,6 @@ class Box(QFrame):
     ) -> None:
         super().__init__(parent)
         self.bg, self.line, self.radius, self.hover, self.line_w = bg, line, radius, hover, line_w
-        self._hover = False
         if hover is not None:
             self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         bind(theme.theme.changed, self, lambda _t: self.update())
@@ -380,19 +388,9 @@ class Box(QFrame):
             setattr(self, k, v)
         self.update()
 
-    def enterEvent(self, e) -> None:
-        self._hover = True
-        self.update()
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:
-        self._hover = False
-        self.update()
-        super().leaveEvent(e)
-
     def paintEvent(self, _e) -> None:
         t = theme.tokens()
-        bg = theme.resolve(self.hover if (self._hover and self.hover is not None) else self.bg, t)
+        bg = theme.resolve(self.hover if (self.underMouse() and self.hover is not None) else self.bg, t)
         p = QPainter(self)
         paint_box(p, QRectF(self.rect()), bg, theme.resolve(self.line, t), self.radius, self.line_w)
 
@@ -475,7 +473,7 @@ class Indicator(QWidget):
 
     @property
     def moving(self) -> bool:
-        return self._live and not store.reduced_motion
+        return self._live and not clock.reduced_motion
 
     def set_live(self, on: bool) -> None:
         if on != self._live:
@@ -604,7 +602,6 @@ class ContextRing(QWidget):
 
 
 def context_label(used: int, total: int) -> str:
-
     return f"{fmt_tokens(used)} of {fmt_tokens(total)}"
 
 
@@ -641,6 +638,38 @@ class Clickable(QObject):
             self.clicked.emit()
             return True
         return False
+
+
+class _Reveal(QObject):
+    """Shows its widgets while the pointer is on the widget it watches (:func:`reveal_on_hover`)."""
+
+    def __init__(self, owner: QWidget, widgets: List[QWidget]) -> None:
+        super().__init__(owner)
+        self.widgets = widgets
+        owner.installEventFilter(self)
+
+    def eventFilter(self, _obj: QObject, e: QEvent) -> bool:
+        if e.type() in (QEvent.Type.Enter, QEvent.Type.Leave):
+            for w in self.widgets:
+                _reveal(w, e.type() == QEvent.Type.Enter)
+        return False
+
+
+def _reveal(w: QWidget, on: bool) -> None:
+    # an IconButton keeps its place and paints nothing (``opacity: 0``): no layout pass on a hover
+    if isinstance(w, IconButton):
+        w.set_shown(on)
+    else:
+        w.setVisible(on)
+
+
+def reveal_on_hover(owner: QWidget, widgets: List[QWidget]) -> None:
+    """Show ``widgets`` only while the pointer is on ``owner`` (``opacity: 0`` until the row or the
+    card is hovered): an IconButton keeps its place and paints nothing, anything else (placed by
+    hand, outside a layout) is hidden. The list may grow later; it is read at each enter."""
+    for w in widgets:
+        _reveal(w, False)
+    _Reveal(owner, widgets)
 
 
 def copy_text(text: str) -> None:

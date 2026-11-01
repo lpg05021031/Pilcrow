@@ -17,8 +17,9 @@ qt/
     rpc.py             WebSocket JSON-RPC client (QWebSocket), reconnect, events as signals
     store.py           app state + session actions (port of web/src/lib/store.ts)
     lib/               pure Python ports of web/src/lib (no Qt): transcript_model, units,
-                       tools_meta, fmt, partial_json, ansi, fuzzy, workflow, folds (what a
-                       stretch of work is called, quiet steps)
+                       tools_meta, fmt, partial_json, ansi, fuzzy, workflow, models, shortcuts
+                       (the one table of keys), folds (labels.ts: what a stretch of work is
+                       called, quiet steps)
     theme.py           tokens for dark/light (port of styles/tokens.css); the palette they map onto,
                        tint() for a widget's own roles, a static QSS on palette roles
     icons.py           icon(name, color, size) from assets/icons/*.svg (Lucide, currentColor)
@@ -77,8 +78,15 @@ qt/
   (`canvas/clock.Tween`, never a QPropertyAnimation / QVariantAnimation of their own) with the
   spring curves from `theme.py` (`spring_soft`, `spring_snappy`, `spring_bouncy`, `ease`);
   `Tween.go` lands at once under `Store.reduced_motion`.
-- **`lib/` is pure.** Nothing in `qt/pilcrow_qt/lib` imports Qt. It mirrors `web/src/lib` function
-  for function; the TypeScript tests in `test/unit` are ported to `qt/tests/test_lib_*.py`.
+- **`lib/` is pure.** Nothing in `qt/pilcrow_qt/lib` imports Qt. It ports the pure modules of
+  `web/src/lib` under the same function names (`format` → `fmt`, `tools` → `tools_meta`,
+  `partialJson` → `partial_json`, `transcript` → `transcript_model`, `labels` → `folds`; `units`,
+  `workflow`, `fuzzy`, `ansi`, `models`; `shortcuts` is the table, its key matching is Qt's
+  `QShortcut`), and the TypeScript tests in `test/unit` are ported to `qt/tests/test_lib_*.py`.
+  What the web keeps there for React and the browser has a Qt home of its own: `rpc.py`,
+  `store.py`, `markdown.py` (and highlighting), `theme.py` (motion), the canvas (find in the
+  conversation: `Transcript.find_entries`; `units.extendTurns`, a render memo, has no counterpart:
+  `canvas/transcript.py` reconciles the scene from the model itself).
 - **State flows one way.** Widgets read from `Store` and call its actions; they never call `rpc`
   directly except through a Store action. `Store` emits Qt signals; widgets connect and re-render
   the part that changed. Transcript items are mutable objects with a `rev` counter, exactly like the

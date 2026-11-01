@@ -28,11 +28,13 @@ class RpcError(Exception):
     """What the server said when a call failed (its ``e.message``)."""
 
 
-class Call(QObject):
-    """A pending call. ``then(fn)`` gets the result, ``catch(fn)`` the RpcError; both optional."""
+class Call:
+    """A pending call. ``then(fn)`` gets the result, ``catch(fn)`` the RpcError; both optional. A
+    plain object: the socket's handler resolves it on the Qt thread, so it needs no Qt of its own."""
+
+    __slots__ = ("method", "_ok", "_err", "_done", "_value", "_error")
 
     def __init__(self, method: str) -> None:
-        super().__init__()
         self.method = method
         self._ok: List[Callable[[Any], None]] = []
         self._err: List[Callable[[RpcError], None]] = []

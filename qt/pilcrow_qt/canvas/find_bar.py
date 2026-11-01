@@ -42,10 +42,8 @@ class FindBar(QWidget):
         lay.addWidget(self.ico)
         lay.addSpacing(6)
         self.field = QLineEdit()
-        self.field.setProperty("quiet", "true")
-        self.field.setStyleSheet(
-            f"QLineEdit {{ font-size: {int(theme.FS_UI + 0.5)}px; background: transparent; border: none; padding: 0; }}"
-        )
+        self.field.setProperty("quiet", "flush")  # the application stylesheet's borderless field, no padding
+        self.field.setFont(theme.font_ui(theme.FS_UI))
         theme.tint(self.field, fg="text", highlight=lambda t: theme.over(theme.qcolor(t.selection), _glass(t)))
         self.field.setPlaceholderText("Find in conversation")
         self.field.setClearButtonEnabled(False)

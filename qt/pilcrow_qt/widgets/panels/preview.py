@@ -11,14 +11,15 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import QRectF, Qt, QUrl
-from PySide6.QtGui import QColor, QDesktopServices, QFontMetricsF, QPainter, QPen
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
-from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QVBoxLayout, QWidget
 
 from ... import theme
 from ...store import store
 from ..ui.bits import Row
+from ..ui.button import chip_button
 from ..ui.signals import bind
 from .right_panel import Btn, EmptyState, Hairline, icon_btn, lbl
 
@@ -46,39 +47,6 @@ def find_urls(session_id: str) -> List[str]:
     return list(found)[-6:][::-1]
 
 
-class Chip(QPushButton):
-    """A detected address as a shortcut (``.chip.mono``): a 24px pill, 11.5px mono, lit when chosen."""
-
-    def __init__(self, url: str, parent: Optional[QWidget] = None) -> None:
-        super().__init__(re.sub(r"^https?://", "", url), parent)
-        self.url = url
-        self.on = False
-        self.setFlat(True)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setAccessibleName(url)
-        self.setToolTip(url)
-        self.setFixedHeight(24)
-        self.setFixedWidth(9 + int(QFontMetricsF(theme.font_mono(11.5)).horizontalAdvance(self.text())) + 9 + 1)
-        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
-        bind(theme.theme.changed, self, lambda _t: self.update())
-
-    def set_on(self, on: bool) -> None:
-        self.on = on
-        self.update()
-
-    def paintEvent(self, _e) -> None:
-        t = theme.tokens()
-        hover = self.underMouse()
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(QPen(theme.blend(t.hair_3 if self.on else t.hair, t.canvas), 1))
-        p.setBrush(theme.blend(t.fill_2 if (self.on or hover) else t.fill_1, t.canvas))
-        p.drawRoundedRect(QRectF(0.5, 0.5, self.width() - 1, self.height() - 1), 12, 12)
-        p.setFont(theme.font_mono(11.5))
-        p.setPen(QColor(t.text if (self.on or hover) else t.text_2))
-        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.text())
-
-
 class PreviewPanel(QWidget):
     """The Preview tab of the side panel for one session."""
 
@@ -88,7 +56,7 @@ class PreviewPanel(QWidget):
         self.cwd = cwd
         self.url = _urls.get(session_id, "")
         self.detected: List[str] = []
-        self._chips: List[Chip] = []
+        self._chips: List[Btn] = []
         self._net = QNetworkAccessManager(self)
         self._reply: Optional[QNetworkReply] = None
 
@@ -244,7 +212,8 @@ class PreviewPanel(QWidget):
             c.deleteLater()
         self._chips = []
         for i, u in enumerate(self.detected):
-            c = Chip(u)
+            c = chip_button(re.sub(r"^https?://", "", u), u, h=24, px=9.5, fs=11.5, mono=True)
+            c.setAccessibleName(u)
             c.set_on(u == self.url)
             c.clicked.connect(lambda _c=False, u=u: self.go(u))
             self.chips_box.insertWidget(i, c)
