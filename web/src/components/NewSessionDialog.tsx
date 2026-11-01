@@ -5,6 +5,7 @@ import type { GitInfo, PermissionMode, Effort } from '../lib/types';
 import { basename, tildify, plural } from '../lib/format';
 import { Dialog } from './ui/Dialog';
 import { Switch, Spinner, Field } from './ui/bits';
+import { useEvent } from './ui/hooks';
 import { Collapse } from './ui/Collapse';
 import { Select } from './ui/Select';
 import { MODES } from './composer/Menus';
@@ -47,11 +48,12 @@ export function NewSessionDialog({ spec }: { spec: { cwd?: string; prompt?: stri
     return [...set].filter(Boolean).slice(0, 8);
   }, [config?.recentProjects, sessions]);
 
+  // The folder is listed once as the browser opens; later moves browse on their own. One that cannot
+  // be listed leaves the browser as it was; the path field still works.
+  const list = useEvent(() => call<Browse>('fs.browse', { dir: browse?.dir || cwd || info?.home }, { quiet: true }).then(setBrowse, () => {}));
   useEffect(() => {
-    if (!showBrowser) return;
-    // A folder that cannot be listed leaves the browser as it was; the path field still works.
-    call<Browse>('fs.browse', { dir: browse?.dir || cwd || info?.home }, { quiet: true }).then(setBrowse, () => {});
-  }, [showBrowser]); // eslint-disable-line react-hooks/exhaustive-deps -- lists the folder once, when the browser opens; later moves browse on their own
+    if (showBrowser) list();
+  }, [showBrowser, list]);
 
   useEffect(() => {
     setError('');

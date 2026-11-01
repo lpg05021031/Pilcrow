@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { RotateCw, ExternalLink, AppWindow, ArrowRight } from 'lucide-react';
 import { useStore, models, call, memo } from '../../lib/store';
 import type { SessionSummary } from '../../lib/types';
@@ -28,12 +28,13 @@ function findUrls(sessionId: string): string[] {
 }
 
 export function PreviewPanel({ session }: { session: SessionSummary }) {
-  const rev = useStore((s) => s.rt[session.id]?.rev);
+  // Read again as the model changes (its rev); the panel draws only while its tab is shown.
+  useStore((s) => s.rt[session.id]?.rev);
   const [url, setUrl] = useState(() => memo(session.id).preview);
   const [draft, setDraft] = useState(url || 'http://localhost:3000');
   const [nonce, setNonce] = useState(0);
   const frame = useRef<HTMLIFrameElement>(null);
-  const detected = useMemo(() => findUrls(session.id), [session.id, rev]); // eslint-disable-line react-hooks/exhaustive-deps -- the model mutates in place; rev marks a change
+  const detected = findUrls(session.id);
 
   const go = (u: string) => {
     let v = u.trim();

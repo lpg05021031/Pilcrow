@@ -2,8 +2,9 @@
 // and are referenced by a `rev` counter so streaming updates re-render cheaply.
 //
 // Where state lives, the one rule for components:
-//   - what is drawn from lives in this store; one component asks another to do something by setting
-//     a field with a fresh nonce (fileOpen, composerInsert) that the other acts on once;
+//   - what is drawn from lives in this store; one component asks another to do something by putting
+//     a request in a field (fileOpen, composerInsert) that the other takes: it acts on it once and
+//     clears it, so a request is never answered twice;
 //   - what a session remembers without drawing from it (a draft, open folds, where it was scrolled,
 //     its terminals) lives in its memo below, which goes with its transcript model;
 //   - what is cached about a folder (listings, file history, the @ index) lives in lib/cache.ts, with
@@ -103,8 +104,10 @@ interface State {
   /** Bumped when files change outside Claude's own tool calls (restore, discard, commit, save). */
   fsRev: number;
   unread: Record<string, boolean>;
-  fileOpen: { path: string; line?: number; nonce: number } | null;
-  composerInsert: { id: string; text: string; nonce: number; replace?: boolean } | null;
+  /** A file to open in the Files tab (openFile), until the tab takes it (takeFileOpen). */
+  fileOpen: { path: string; line?: number } | null;
+  /** Text for a session's composer (insertIntoComposer), until that composer takes it (takeComposerInsert). */
+  composerInsert: { id: string; text: string; replace?: boolean } | null;
   theme: 'dark' | 'light';
   /** The endpoint's own model list; null until asked, 'loading' while asking. */
   gatewayModels: GatewayModels | 'loading' | null;
@@ -929,9 +932,10 @@ export async function forkSession(id: string, upToMessageId?: string, sendAfter?
 }
 
 export function openFile(path: string, line?: number) {
-  set({ fileOpen: { path, line, nonce: Date.now() } });
+  set({ fileOpen: { path, line } });
   setUi({ panel: true, panelTab: 'files' });
 }
+export const takeFileOpen = () => set({ fileOpen: null });
 
 export function showPage(page: 'session' | 'overview' | 'inbox' | 'dispatch') {
   set({ page });
@@ -1046,8 +1050,9 @@ export function bumpFs() {
 }
 
 export function insertIntoComposer(id: string, text: string, replace = false) {
-  set({ composerInsert: { id, text, nonce: Date.now(), replace } });
+  set({ composerInsert: { id, text, replace } });
 }
+export const takeComposerInsert = () => set({ composerInsert: null });
 
 /** The registered repository (REPOSITORIES.md) whose folder holds `path` (the deepest one), or null. */
 export function repoFor(path: string | undefined | null, repos: RepoEntry[] | undefined = useStore.getState().config?.repos): RepoEntry | null {

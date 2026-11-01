@@ -71,23 +71,23 @@ export function ChangesPanel({ session, cwd }: { session: SessionSummary; cwd: s
     }
   }, [cwd, base]);
 
+  // Again when files change outside Claude's own tool calls (a restore, a discard, a commit, a save).
+  const fsRev = useStore((s) => s.fsRev);
   useEffect(() => {
     load();
-  }, [load]);
+  }, [load, fsRev]);
 
   // Refresh when Claude finishes a step that may have touched files.
   useEffect(() => {
     if (status === 'idle') load();
   }, [status, load]);
-  const fsRev = useStore((s) => s.fsRev);
-  useEffect(() => {
-    if (fsRev) load();
-  }, [fsRev]); // eslint-disable-line react-hooks/exhaustive-deps -- files changed outside Claude: reload, with the load of the moment
+  // A step under way may be writing files: again a moment after it, unless a load has just run (a new
+  // cwd or base loads through the effect above, which makes this one a no-op).
   useEffect(() => {
     if (Date.now() - lastLoad.current < 2500) return;
     const t = setTimeout(load, 1200);
     return () => clearTimeout(t);
-  }, [revStep]); // eslint-disable-line react-hooks/exhaustive-deps -- a new cwd or base loads through the effect above
+  }, [revStep, load]);
 
   const files = useMemo(() => data?.files || [], [data]);
   const totals = useMemo(() => files.reduce((a, f) => ({ add: a.add + f.additions, del: a.del + f.deletions }), { add: 0, del: 0 }), [files]);
@@ -324,18 +324,15 @@ const editsSeen = new WeakMap<ToolItem, { rev: number; edit: Edit | null }>();
 
 /** Fallback for folders that are not git repositories: show what this session's tools changed. */
 function SessionEdits({ sessionId, cwd }: { sessionId: string; cwd: string }) {
-  const rev = useStore((s) => s.rt[sessionId]?.rev);
-  const model = models.get(sessionId);
-  const edits = useMemo(() => {
-    const out: Edit[] = [];
-    for (const t of model?.tools.values() || []) {
-      if (!['Edit', 'Write', 'MultiEdit'].includes(t.name) || t.status !== 'done') continue;
-      let e = editsSeen.get(t);
-      if (e === undefined || e.rev !== t.rev) editsSeen.set(t, (e = { rev: t.rev, edit: editOf(t) }));
-      if (e.edit) out.push(e.edit);
-    }
-    return out;
-  }, [model, rev]); // eslint-disable-line react-hooks/exhaustive-deps -- the model mutates in place; rev marks a change
+  // Drawn again as the model changes (its rev), from a cache of each step's edit: a pass over the steps.
+  useStore((s) => s.rt[sessionId]?.rev);
+  const edits: Edit[] = [];
+  for (const t of models.get(sessionId)?.tools.values() || []) {
+    if (!['Edit', 'Write', 'MultiEdit'].includes(t.name) || t.status !== 'done') continue;
+    let e = editsSeen.get(t);
+    if (e === undefined || e.rev !== t.rev) editsSeen.set(t, (e = { rev: t.rev, edit: editOf(t) }));
+    if (e.edit) edits.push(e.edit);
+  }
   return (
     <div className="changes">
       <div className="changes-summary">

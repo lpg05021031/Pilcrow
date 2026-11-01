@@ -37,7 +37,9 @@ export function Sidebar() {
   const [showAll, setShowAll] = useState<Record<string, boolean>>({});
   const now = useNow(30_000);
   const list = useRef<HTMLElement>(null);
-  useFlip(list, sessions, [q, collapsed, showAll, showArchived, activeId]);
+  // What can move the rows besides the list itself: a search, a group folded, the archive shown, the selection.
+  const layout = useMemo(() => [q, collapsed, showAll, showArchived, activeId], [q, collapsed, showAll, showArchived, activeId]);
+  useFlip(list, sessions, layout);
 
   const { attention, pinned, groups, archivedCount, helpers } = useMemo(() => {
     let list = sessions.filter((s) => (showArchived ? s.archived : !s.archived));
@@ -322,7 +324,7 @@ function Highlighted({ text, q }: { text: string; q: string }) {
  * rows glide to their new places instead of jumping (FLIP). Only data changes animate; typing in the
  * search box or collapsing a group just re-measures.
  */
-function useFlip(list: React.RefObject<HTMLElement | null>, data: unknown, layoutDeps: unknown[]) {
+function useFlip(list: React.RefObject<HTMLElement | null>, data: unknown, layout: unknown) {
   const last = useRef<Map<string, number>>(new Map());
   const lastData = useRef<unknown>(null);
   const lastShape = useRef('');
@@ -398,6 +400,6 @@ function useFlip(list: React.RefObject<HTMLElement | null>, data: unknown, layou
       }
     }
     last.current = next;
-  }, [data, ...layoutDeps]); // eslint-disable-line react-hooks/exhaustive-deps -- the deps are the layout inputs, spread; the measure reads the DOM itself
+  }, [list, data, layout]);
 }
 

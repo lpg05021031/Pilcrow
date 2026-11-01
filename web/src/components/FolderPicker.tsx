@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Folder, FolderGit2, Home, CornerLeftUp, ChevronRight, Check, Search } from 'lucide-react';
 import { useStore, call } from '../lib/store';
 import { basename, tildify } from '../lib/format';
+import { useEvent } from './ui/hooks';
 
 interface Browse {
   dir: string;
@@ -37,9 +38,13 @@ export function FolderPicker({ value, onPick }: { value: string; onPick: (dir: s
     const r = await call<Browse>('fs.browse', { dir }, { quiet: true }).catch(() => null);
     if (r) setBrowse(r);
   };
+  // Browsing starts where the value points, once; later moves browse on their own.
+  const start = useEvent(() => {
+    if (!browse) nav(value || info?.home || '/');
+  });
   useEffect(() => {
-    if (browsing && !browse) nav(value || info?.home || '/');
-  }, [browsing]); // eslint-disable-line react-hooks/exhaustive-deps -- starts browsing once, where the value points; later moves browse on their own
+    if (browsing) start();
+  }, [browsing, start]);
 
   return (
     <div className="fpick">

@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { spring, EASE, takeLaunch } from '../lib/motion';
 import type { TranscriptModel } from '../lib/transcript';
 import { useStore, memo } from '../lib/store';
+import { useEvent } from './ui/hooks';
 
 // Where each conversation was scrolled to, so switching away and back keeps your place: the box at
 // the top of the view and how far it was from the edge (a scroll offset would drift, since boxes far
@@ -304,19 +305,19 @@ export function useFollow({ sessionId, model, loaded, rev, extra, onScrolled }: 
     });
   };
 
-  const jump = () => {
+  const jump = useEvent(() => {
     atBottom.current = true;
     setShowJump(false);
     markReading(false);
     follow();
-  };
+  });
   // Your own message goes to the end of the conversation, and so do you.
   useEffect(
     () =>
       useStore.subscribe((s, prev) => {
         if (s.sent !== prev.sent && s.sent?.id === sessionId) jump();
       }),
-    [sessionId], // eslint-disable-line react-hooks/exhaustive-deps -- jump reads refs only; one subscription per conversation
+    [sessionId, jump],
   );
   return { scroller, inner, onScroll, jump, showJump, settling, reading };
 }

@@ -38,9 +38,10 @@ export function App() {
   const session = sessions.find((s) => s.id === activeId) || null;
   const waiting = sessions.filter((s) => s.status === 'requires_action').length;
 
+  const title = `${waiting ? `(${waiting}) ` : ''}${page === 'overview' ? 'Control room — ' : page === 'inbox' ? 'Inbox — ' : page === 'dispatch' ? 'Dispatch — ' : session ? `${session.title} — ` : ''}Pilcrow`;
   useEffect(() => {
-    document.title = `${waiting ? `(${waiting}) ` : ''}${page === 'overview' ? 'Control room — ' : page === 'inbox' ? 'Inbox — ' : page === 'dispatch' ? 'Dispatch — ' : session ? `${session.title} — ` : ''}Pilcrow`;
-  }, [waiting, session?.title, page]); // eslint-disable-line react-hooks/exhaustive-deps -- only the title is read
+    document.title = title;
+  }, [title]);
 
   useWindowKey((e) => {
     const hit = shortcutFor(e);

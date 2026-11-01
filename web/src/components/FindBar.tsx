@@ -4,6 +4,7 @@ import { useExitGhost } from '../lib/motion';
 import { useStore, setFindQuery, models } from '../lib/store';
 import { findInItems, type FindHit } from '../lib/transcript';
 import { revealItem } from './Transcript';
+import { useEvent } from './ui/hooks';
 
 const supported = typeof CSS !== 'undefined' && 'highlights' in CSS;
 
@@ -51,7 +52,7 @@ export function FindBar({ sessionId, onClose }: { sessionId: string; onClose: ()
   at.current = { hits, index, needle };
 
   /** Paint the matches that are drawn, and the current one; with `reveal`, bring the current one into view first. */
-  const paint = async (reveal: boolean) => {
+  const paint = useEvent(async (reveal: boolean) => {
     const { hits, index, needle } = at.current;
     const hl = CSS.highlights;
     const cur = hits[index];
@@ -76,7 +77,7 @@ export function FindBar({ sessionId, onClose }: { sessionId: string; onClose: ()
     if (current) hl.set('find-current', new Highlight(current));
     else hl.delete('find-current');
     if (reveal && el) bringIntoView(el, current);
-  };
+  });
 
   // Search as you type: from the match nearest the top of the view.
   useEffect(() => {
@@ -86,7 +87,7 @@ export function FindBar({ sessionId, onClose }: { sessionId: string; onClose: ()
     setHits(found);
     setIndex(at.current.index);
     paint(true);
-  }, [q]); // eslint-disable-line react-hooks/exhaustive-deps -- a new query searches afresh; paint reads the latest through `at`
+  }, [q, needle, sessionId, paint]);
 
   // Again as the conversation grows (at most every AGAIN_MS, however fast it streams), keeping the place.
   const timer = useRef<number | undefined>(undefined);

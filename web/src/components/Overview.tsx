@@ -33,9 +33,10 @@ export function Overview() {
   const [fleet, setFleet] = useState<Fleet | null>(null);
   const now = useNow(1000, true);
   // Every session's runtime changes with each streamed frame of every session at work; the cards read
-  // only what session.state carries. So they read a snapshot taken on the clock's tick, and at once
-  // when a row's status or waiting count changes (the session list only changes then).
-  const rt = useMemo(() => useStore.getState().rt, [now, sessions, fleet]); // eslint-disable-line react-hooks/exhaustive-deps -- the deps are when to take the snapshot
+  // only what session.state carries. So the page does not subscribe to it: it reads it as it draws,
+  // which is on the clock's tick, and at once when a row's status or waiting count changes (the
+  // session list only changes then).
+  const rt = useStore.getState().rt;
   const [focus, setFocus] = useState(-1); // keyboard focus; none until the keys are used
   const box = useRef<HTMLDivElement>(null);
 
@@ -85,9 +86,11 @@ export function Overview() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [ordered, focus]);
+  // When the keyboard focus moves, to the card it moved to.
+  const focused = ordered[focus]?.id;
   useEffect(() => {
-    box.current?.querySelector<HTMLElement>(`[data-card="${ordered[focus]?.id}"]`)?.scrollIntoView({ block: 'nearest' });
-  }, [focus]); // eslint-disable-line react-hooks/exhaustive-deps -- scrolls when the keyboard focus moves, to the card it moved to
+    if (focused) box.current?.querySelector<HTMLElement>(`[data-card="${focused}"]`)?.scrollIntoView({ block: 'nearest' });
+  }, [focused]);
 
   const totalCost = fleet?.today.cost || 0;
   const median = useMemo(() => {
@@ -435,17 +438,19 @@ function FinishedRow({ s, st, unread, focused, now }: { s: SessionSummary; st?: 
 
 /** Spend in the last hour, five-minute bars (the current one in Claude's colour), and the sessions that cost the most today. */
 function Spend({ fleet, byId, now }: { fleet: Fleet; byId: Record<string, SessionSummary>; now: number }) {
+  // The bars move with the spend and once a minute, not every second: they end at the next whole minute.
+  const end = Math.ceil(now / 60e3) * 60e3;
   const buckets = useMemo(() => {
     const n = 12;
     const w = 5 * 60e3;
-    const start = now - n * w;
+    const start = end - n * w;
     const out = new Array(n).fill(0);
     for (const e of fleet.spend) {
       const i = Math.floor((e.at - start) / w);
       if (i >= 0 && i < n) out[i] += e.delta;
     }
     return out;
-  }, [fleet.spend, Math.floor(now / 60e3)]); // eslint-disable-line react-hooks/exhaustive-deps -- buckets move with the spend and once a minute, not every second
+  }, [fleet.spend, end]);
   const hour = buckets.reduce((a, b) => a + b, 0);
   const max = Math.max(...buckets, 0.0001);
   const top = fleet.today.perSession.slice(0, 5);

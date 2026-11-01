@@ -43,13 +43,13 @@ export function useExitGhost(ref: RefObject<HTMLElement | null>, opts: { duratio
   const o = useRef(opts);
   o.current = opts;
   useLayoutEffect(() => {
-    // The element is read at unmount on purpose: that is the last frame to copy.
+    // The element the ref holds for the component's life (each caller's root): copied as it is at unmount.
+    const el = ref.current;
     return () => {
-      const el = ref.current; // eslint-disable-line react-hooks/exhaustive-deps -- read at unmount on purpose: the last frame to copy
       if (!el || !el.isConnected || reducedMotion() || document.hidden) return;
       ghost(el, o.current);
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- subscribe once; the options are read through a ref
+  }, [ref]);
 }
 
 /** Make the still copy of an element and play its exit on it. See useExitGhost. */
@@ -181,7 +181,7 @@ export function useFlipRows(ref: RefObject<HTMLElement | null>, selector: string
       }
     }
     last.current = next;
-  }, [deps]); // eslint-disable-line react-hooks/exhaustive-deps -- the caller says when to measure; the root and selector are fixed
+  }, [ref, selector, deps]);
 }
 
 const LATIN = /[A-Za-z0-9_'’-]/;

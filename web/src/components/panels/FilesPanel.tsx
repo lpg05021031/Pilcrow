@@ -1,6 +1,6 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, createContext, useContext } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, createContext, useContext } from 'react';
 import { ChevronRight, File as FileIcon, Folder, FolderOpen, RefreshCw, X, Save, PanelLeft, Eye, EyeOff, ExternalLink, AtSign, BookOpen, PencilLine, Columns2, RotateCw } from 'lucide-react';
-import { useStore, call, toast, confirmAction, insertIntoComposer, bumpFs, toasted, memo, type FilesState, type FileTab } from '../../lib/store';
+import { useStore, call, toast, confirmAction, insertIntoComposer, bumpFs, toasted, memo, takeFileOpen, type FilesState, type FileTab } from '../../lib/store';
 import { folders, type DirEntry } from '../../lib/cache';
 import { FileTouches, useFileHistory } from '../FileTouches';
 import { Markdown } from '../Markdown';
@@ -10,6 +10,7 @@ import { Spinner, Seg } from '../ui/bits';
 import type { FileRead, FileWrite } from '../../lib/types';
 import { errText } from '../../lib/format';
 import { Empty, Loading } from '../ui/Empty';
+import { useEvent } from '../ui/hooks';
 
 // CodeMirror is most of a megabyte and only an open file needs it: it loads with the first one.
 const Editor = lazy(() => import('./Editor').then((m) => ({ default: m.Editor })));
@@ -23,35 +24,37 @@ export function FilesPanel({ session, cwd, visible }: { session: SessionSummary;
   // Kept mounted while another tab is shown (RightPanel): hidden, it does not follow the stream at all.
   const rev = useStore((s) => (visible ? s.rt[session.id]?.rev || 0 : 0));
   const [st, setSt] = useState<FilesState>(() => memo(session.id).files || { tabs: [], active: null, expanded: { [cwd]: true }, showTree: true, showHidden: false });
-  const [line, setLine] = useState<{ line?: number; nonce: number }>({ nonce: 0 });
+  // Where the editor goes once the file is shown: a fresh object for each request, the same line or not.
+  const [jump, setJump] = useState<{ line?: number } | null>(null);
   const [treeNonce, setTreeNonce] = useState(0);
-  const update = (fn: (s: FilesState) => FilesState) =>
+  const update = useEvent((fn: (s: FilesState) => FilesState) =>
     setSt((s) => {
       const n = fn(s);
       memo(session.id).files = n;
       return n;
-    });
-
-  const openTab = useCallback(
-    async (path: string, ln?: number) => {
-      update((s) => (s.tabs.some((t) => t.path === path) ? { ...s, active: path } : { ...s, active: path, tabs: [...s.tabs, { path, doc: '', saved: '', loading: true }] }));
-      setLine({ line: ln, nonce: Date.now() });
-      const existing = (memo(session.id).files || st).tabs.find((t) => t.path === path);
-      if (existing && !existing.loading && !existing.error) return;
-      try {
-        const r = await call<FileRead>('fs.read', { path }, { quiet: true });
-        update((s) => ({ ...s, tabs: s.tabs.map((t) => (t.path === path ? { path, doc: r.text ?? '', saved: r.text ?? '', mtime: r.mtime, binary: r.binary, dataUrl: r.dataUrl, tooLarge: r.tooLarge, size: r.size } : t)) }));
-        setLine({ line: ln, nonce: Date.now() });
-      } catch (e) {
-        update((s) => ({ ...s, tabs: s.tabs.map((t) => (t.path === path ? { ...t, loading: false, error: errText(e) } : t)) }));
-      }
-    },
-    [cwd], // eslint-disable-line react-hooks/exhaustive-deps -- update() is a fresh closure each render over the same memo entry
+    }),
   );
 
+  const openTab = useEvent(async (path: string, ln?: number) => {
+    update((s) => (s.tabs.some((t) => t.path === path) ? { ...s, active: path } : { ...s, active: path, tabs: [...s.tabs, { path, doc: '', saved: '', loading: true }] }));
+    setJump({ line: ln });
+    const existing = (memo(session.id).files || st).tabs.find((t) => t.path === path);
+    if (existing && !existing.loading && !existing.error) return;
+    try {
+      const r = await call<FileRead>('fs.read', { path }, { quiet: true });
+      update((s) => ({ ...s, tabs: s.tabs.map((t) => (t.path === path ? { path, doc: r.text ?? '', saved: r.text ?? '', mtime: r.mtime, binary: r.binary, dataUrl: r.dataUrl, tooLarge: r.tooLarge, size: r.size } : t)) }));
+      setJump({ line: ln });
+    } catch (e) {
+      update((s) => ({ ...s, tabs: s.tabs.map((t) => (t.path === path ? { ...t, loading: false, error: errText(e) } : t)) }));
+    }
+  });
+
+  // A file asked for from elsewhere (a path in the conversation, a step's "Open in Files"): taken once.
   useEffect(() => {
-    if (fileOpen) openTab(fileOpen.path, fileOpen.line);
-  }, [fileOpen?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps -- each request to open a file (a new nonce) opens it once
+    if (!fileOpen) return;
+    takeFileOpen();
+    openTab(fileOpen.path, fileOpen.line);
+  }, [fileOpen, openTab]);
 
   // Pick up edits Claude makes to open files (only when there are no unsaved local edits). The tab
   // stays mounted when another one is chosen; hidden, it does nothing, and catches up once when shown.
@@ -75,7 +78,7 @@ export function FilesPanel({ session, cwd, visible }: { session: SessionSummary;
       setTreeNonce((n) => n + 1);
     }, 900);
     return () => clearTimeout(timer);
-  }, [rev, cwd, visible]); // eslint-disable-line react-hooks/exhaustive-deps -- update() is a fresh closure each render over the same memo entry
+  }, [rev, cwd, visible, session.id, update]);
 
   const active = st.tabs.find((t) => t.path === st.active) || null;
 
@@ -204,8 +207,7 @@ export function FilesPanel({ session, cwd, visible }: { session: SessionSummary;
                       key={active.path}
                       path={active.path}
                       doc={active.doc === active.saved ? active.saved : active.doc}
-                      line={line.line}
-                      nonce={line.nonce}
+                      jump={jump}
                       onChange={(text) => update((s) => ({ ...s, tabs: s.tabs.map((t) => (t.path === active.path ? { ...t, doc: text } : t)) }))}
                       onSave={() => {
                         const cur = memo(session.id).files?.tabs.find((t) => t.path === active.path);

@@ -1,5 +1,19 @@
-// Small hooks shared across components: where a chosen item sits, and a clock.
-import { useEffect, useLayoutEffect, useState, type RefObject } from 'react';
+// Small hooks shared across components: a handler that keeps its identity, where a chosen item sits, and a clock.
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+
+/**
+ * A function with one identity for the component's life that always runs the latest `fn`. An effect
+ * that calls a handler lists it, and is not run again because the handler is a new closure each
+ * render; the handler reads the props and state of the render that last committed, never stale ones.
+ * Not for calling during render.
+ */
+export function useEvent<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) => R {
+  const latest = useRef(fn);
+  useLayoutEffect(() => {
+    latest.current = fn;
+  });
+  return useCallback((...args: A) => latest.current(...args), []);
+}
 
 type Ink = { left: number; top: number; width: number; height: number };
 

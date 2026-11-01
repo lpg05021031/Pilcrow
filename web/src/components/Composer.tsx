@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArrowUp, Square, Plus, CornerDownLeft } from 'lucide-react';
-import { useStore, sendMessage, interrupt, setMode, setUi, removeHeld, memo, toasted } from '../lib/store';
+import { useStore, sendMessage, interrupt, setMode, setUi, removeHeld, memo, toasted, takeComposerInsert } from '../lib/store';
 import { isBusy, type PermissionMode, type HeldMsg } from '../lib/types';
 import { ContextRing, contextLabel, Num } from './ui/bits';
 import { focusIfFree } from './ui/keys';
+import { useEvent } from './ui/hooks';
 import { markLaunch, reducedMotion, spring } from '../lib/motion';
 import { useSuggest } from './composer/Suggest';
 import { useAttachments } from './composer/Attachments';
@@ -37,14 +38,15 @@ export function Composer({ sessionId, cwd }: { sessionId: string; cwd: string })
   const busy = isBusy(status);
   const mode = (rtMode || defaultMode || 'default') as PermissionMode;
 
-  // Each session keeps its own draft.
-  useEffect(() => {
+  // Each session keeps its own draft: another session resets the field to it.
+  const reset = useEvent(() => {
     setText(memo(sessionId).draft);
     attach.clear();
     suggest.close();
     setHistPos(-1);
     requestAnimationFrame(() => focusIfFree(ta.current));
-  }, [sessionId]); // eslint-disable-line react-hooks/exhaustive-deps -- a new session resets the field; clear and close are fresh each render
+  });
+  useEffect(() => reset(), [sessionId, reset]);
   useEffect(() => {
     memo(sessionId).draft = text;
   }, [sessionId, text]);
@@ -52,6 +54,7 @@ export function Composer({ sessionId, cwd }: { sessionId: string; cwd: string })
   // Text inserted from elsewhere (diff notes, edit & resend, example prompts).
   useEffect(() => {
     if (!insert || insert.id !== sessionId) return;
+    takeComposerInsert();
     setText((t) => (insert.replace || !t.trim() ? insert.text : `${t.replace(/\s+$/, '')}\n\n${insert.text}`));
     requestAnimationFrame(() => {
       const el = ta.current;
@@ -82,7 +85,7 @@ export function Composer({ sessionId, cwd }: { sessionId: string; cwd: string })
       const { soft, softT } = spring();
       el.animate([{ height: `${prev}px` }, { height: `${next}px` }], { duration: softT, easing: soft });
     }
-  }, [text]); // eslint-disable-line react-hooks/exhaustive-deps -- the height follows the text; `sent` is read, not watched
+  }, [text, sent]);
 
   const submit = async (now = false) => {
     const body = text.trim();

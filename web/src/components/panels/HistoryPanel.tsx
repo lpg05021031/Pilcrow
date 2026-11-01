@@ -169,8 +169,10 @@ function Scrubber({ steps, sel, onPick, now }: { steps: TimelineStep[]; sel: num
   const span = Math.max(1, now - t0);
   // Long pauses (Claude waiting on you, or you away) are squeezed so the busy stretches keep their
   // shape: each gap counts at most a few times the typical gap. The ends stay exact.
+  // They move with the steps and every 15 s of the clock, not every second.
+  const upTo = Math.max(Math.floor(now / 15_000) * 15_000, steps[n - 1]?.at || 0);
   const pos = useMemo(() => {
-    const times = [...steps.map((s) => s.at), now];
+    const times = [...steps.map((s) => s.at), upTo];
     const gaps = times.slice(1).map((t, i) => Math.max(0, t - times[i]));
     const sorted = [...gaps].sort((a, b) => a - b);
     const median = sorted[Math.floor(sorted.length / 2)] || 1000;
@@ -188,7 +190,7 @@ function Scrubber({ steps, sel, onPick, now }: { steps: TimelineStep[]; sel: num
     const over = raw[raw.length - 1] - 96;
     if (over > 0) for (let i = 0; i < raw.length; i++) raw[i] = Math.max(0, raw[i] - over * (i / Math.max(1, raw.length - 1)));
     return raw;
-  }, [steps, Math.floor(now / 15_000)]); // eslint-disable-line react-hooks/exhaustive-deps -- positions move with the steps and every 15 s of the clock, not every second
+  }, [steps, upTo]);
   const xAt = (i: number) => (i >= n ? 100 : pos[i] ?? 0);
   const nearest = (clientX: number) => {
     const r = ref.current?.getBoundingClientRect();

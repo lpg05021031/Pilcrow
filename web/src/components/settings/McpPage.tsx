@@ -10,6 +10,7 @@ import { MenuButton } from '../ui/Popover';
 import { Dialog } from '../ui/Dialog';
 import { Select } from '../ui/Select';
 import { Spinner, Field } from '../ui/bits';
+import { useEvent } from '../ui/hooks';
 import { errText } from '../../lib/format';
 
 type Scope = 'user' | 'project' | 'local';
@@ -56,7 +57,7 @@ export function McpPage() {
   const live = useMemo(() => rt?.mcp || [], [rt?.mcp]);
   const liveByName = useMemo(() => new Map(live.map((s) => [s.name, s])), [live]);
 
-  const load = async () => {
+  const load = useEvent(async () => {
     setLoading(true);
     try {
       setData(await call<McpList>('mcp.list', { cwd }, { quiet: true }));
@@ -67,10 +68,11 @@ export function McpPage() {
     } finally {
       setLoading(false);
     }
-  };
+  });
+  // Per folder; the session's state is read as it is at the time.
   useEffect(() => {
     load();
-  }, [cwd]); // eslint-disable-line react-hooks/exhaustive-deps -- loads per folder; load() reads the session state of the moment
+  }, [cwd, load]);
 
   const servers = useMemo(() => {
     const n = q.trim().toLowerCase();

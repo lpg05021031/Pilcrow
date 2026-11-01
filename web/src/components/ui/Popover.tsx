@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Check, type LucideIcon } from 'lucide-react';
 import { reducedMotion } from '../../lib/motion';
 import { useEscape } from './keys';
+import { useEvent } from './hooks';
 
 type Placement = 'bottom-start' | 'bottom-end' | 'top-start' | 'top-end';
 
@@ -40,7 +41,7 @@ export function Popover({ anchor, open, onClose, children, placement = 'bottom-s
     }
     const t = setTimeout(() => setShown(false), EXIT_MS + 20);
     return () => clearTimeout(t);
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps -- runs as it opens and closes; `shown` is what it sets
+  }, [open, shown, anchor]);
 
   useLayoutEffect(() => {
     if (!open || !anchor) return;
@@ -127,10 +128,11 @@ export function Menu({ items, onClose, id, label }: { items: MenuItem[]; onClose
   const selectable = items.flatMap((it, i) => (it.separator || it.heading || it.disabled ? [] : [i]));
   const focusAt = (i: number | undefined) => ref.current?.querySelector<HTMLElement>(`[data-i="${i}"]`)?.focus();
   // A frame later: the popover is hidden until it has been placed, and a hidden row cannot take focus.
+  const focusFirst = useEvent(() => focusAt(selectable.find((i) => items[i].checked) ?? selectable[0]));
   useEffect(() => {
-    const t = requestAnimationFrame(() => focusAt(selectable.find((i) => items[i].checked) ?? selectable[0]));
+    const t = requestAnimationFrame(focusFirst);
     return () => cancelAnimationFrame(t);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- once, as the menu opens
+  }, [focusFirst]);
   const onKeyDown = (e: React.KeyboardEvent) => {
     const at = selectable.indexOf(active);
     const to = e.key === 'ArrowDown' ? selectable[(at + 1) % selectable.length] : e.key === 'ArrowUp' ? selectable[(at - 1 + selectable.length) % selectable.length] : e.key === 'Home' ? selectable[0] : e.key === 'End' ? selectable[selectable.length - 1] : undefined;
