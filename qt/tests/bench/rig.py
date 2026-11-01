@@ -314,11 +314,15 @@ class Pump:
     """One run of the event loop under observation."""
 
     stalls: List[float] = field(default_factory=list)
+    #: the main thread's CPU time in each turn: the client's own work, which other processes on the
+    #: machine do not lengthen (a stall is wall time, and a busy machine lengthens it)
+    turn_cpu: List[float] = field(default_factory=list)
     wall: float = 0.0
     cpu: float = 0.0
 
     def report(self) -> Dict[str, Any]:
         s = summary(self.stalls)
+        s["cpu_p50"] = round(pct(self.turn_cpu, 0.5) * 1000, 2) if self.turn_cpu else 0.0
         s["over_16ms"] = sum(1 for x in self.stalls if x * 1000 > FRAME_MS)
         s["over_50ms"] = sum(1 for x in self.stalls if x * 1000 > 50)
         s["wall_s"] = round(self.wall, 2)
@@ -340,10 +344,11 @@ def pump(
     end = time.monotonic() + seconds
     cpu0, wall0 = time.process_time(), time.perf_counter()
     while True:
-        t0 = time.perf_counter()
+        t0, c0 = time.perf_counter(), time.thread_time()
         app.processEvents()
         QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
         out.stalls.append(time.perf_counter() - t0)
+        out.turn_cpu.append(time.thread_time() - c0)
         if film is not None:
             film.grab()
         if on_frame is not None:
