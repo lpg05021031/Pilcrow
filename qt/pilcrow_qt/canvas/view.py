@@ -16,7 +16,7 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QGuiApplication, QKeySequence, QPainter, QPixmap, QTextCursor
+from PySide6.QtGui import QAccessible, QColor, QGuiApplication, QKeySequence, QPainter, QPixmap, QTextCursor
 from PySide6.QtWidgets import QAbstractScrollArea, QToolTip, QWidget
 
 from .. import theme
@@ -377,6 +377,7 @@ class CanvasView(QAbstractScrollArea):
                 vp.update(QRect(0, max(0, top), vp.width(), vp.height() - max(0, top)))
         for x, y, w, h in rects:
             vp.update(QRect(self.col_x + x, self.view_y(y), w, h))
+        a11y.blocks_changed(self)
         self._prefetch.start()
 
     def mutate(self, fn: Callable[[], Any]) -> Any:
@@ -1053,11 +1054,16 @@ class CanvasView(QAbstractScrollArea):
         for b in self.visible_blocks():
             ts = [t for t in b.targets() if t.kind in FOCUS_KINDS]
             if not ts:
-                t = b.hit(2, 2)
-                if t is not None and t.kind in FOCUS_KINDS:
-                    ts = [t]
+                head = self.head_target(b)
+                ts = [head] if head is not None else []
             out.extend((b, t) for t in ts)
         return out
+
+    @staticmethod
+    def head_target(b: Block) -> Optional[Target]:
+        """What a press on the block's first line does (its head, a toggle), if anything."""
+        t = b.hit(2, 2)
+        return t if t is not None and t.kind in FOCUS_KINDS else None
 
     def _focus_step(self, d: int) -> bool:
         """Move the focus to the next (d=1) or previous (d=-1) target on screen; False at the ends."""
@@ -1090,6 +1096,8 @@ class CanvasView(QAbstractScrollArea):
             return
         self.focus = f
         self._update_focus_rect(old)
+        if f is not None:
+            a11y.announce(self, f[0], QAccessible.Event.Focus)
 
     def _update_focus_rect(self, *keys: Optional[Tuple[str, Target]]) -> None:
         vp = self.viewport()
@@ -1103,6 +1111,7 @@ class CanvasView(QAbstractScrollArea):
     # ---------------------------------------------------------------- groups
     def toggle_group(self, g: Group, open_: bool, animate: bool = True) -> None:
         g.open = open_
+        a11y.announce(self, g.key, QAccessible.Event.StateChanged)
         tw = self._tweens.get(g.key)
         if tw is not None:
             tw.stop()
