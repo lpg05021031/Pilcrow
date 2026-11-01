@@ -662,8 +662,10 @@ def tasks_fold_toggle(ctx: Ctx) -> Json:
     ctx.c.call("mock.pace", {"ms": 0})
     ctx.c.call("session.send", {"id": sid, "text": "run the review workflow"})
     ctx.c.wait_until(
-        lambda: ctx.store.rt[sid].status == "idle"
-        and any(t.get("type") == "local_workflow" for t in ctx.store.rt[sid].st.get("tasks") or []),
+        lambda: (
+            ctx.store.rt[sid].status == "idle"
+            and any(t.get("type") == "local_workflow" for t in ctx.store.rt[sid].st.get("tasks") or [])
+        ),
         30,
         "the mock's workflow",
     )
