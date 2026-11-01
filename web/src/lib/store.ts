@@ -17,7 +17,7 @@ import { TranscriptModel } from './transcript';
 import { setHome, plural, errText } from './format';
 import { EASE_EXIT, reducedMotion, yieldToEvents } from './motion';
 import { isBusy } from './types';
-import type { AppInfo, Config, SessionState, SessionSummary, PermissionMode, Effort, RawMsg, GatewayModels, TimelineStep, PermissionDecision, DispatchJob, DispatchRun, DispatchDelta, Playbook } from './types';
+import type { AppInfo, Config, SessionState, SessionSummary, PermissionMode, Effort, RawMsg, GatewayModels, TimelineStep, PermissionDecision, PermissionRequest, DispatchJob, DispatchRun, DispatchDelta, Playbook } from './types';
 import type { RepoEntry } from './types';
 import type { PilcrowNative } from './globals';
 
@@ -486,9 +486,18 @@ function onMsgs({ id, msgs }: { id: string; msgs: RawMsg[] }) {
   markDirty(id);
 }
 
+/**
+ * The requests waiting in a fresh state are the ones already held when they have the same ids: the
+ * server sends a new list with every state, which is often, and the conversation keys what it draws
+ * on this list (Transcript), so a list that says nothing new keeps the identity of the one held.
+ */
+export function samePending(held: PermissionRequest[] | undefined, next: PermissionRequest[] | undefined) {
+  return Boolean(held && next && held.length === next.length && held.every((p, i) => p.requestId === next[i].requestId && p.toolUseId === next[i].toolUseId));
+}
+
 function onState(st: SessionState) {
   const prev = get().rt[st.id];
-  patchRt(st.id, st);
+  patchRt(st.id, samePending(prev?.pending, st.pending) ? { ...st, pending: prev?.pending } : st);
   // The list (and every row) keeps its identity unless what a row shows changed: state arrives often.
   const sessions = get().sessions;
   const i = sessions.findIndex((s) => s.id === st.id);
