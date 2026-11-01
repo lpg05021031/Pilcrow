@@ -24,23 +24,11 @@
   gap: 18px;
   color: var(--text-3);
   background: var(--canvas);
-  animation: boot-in var(--t-med) var(--ease);
 }
 .boot.leaving {
-  animation: boot-out 320ms var(--ease-exit) forwards;
   pointer-events: none;
 }
-@keyframes boot-in {
-  from {
-    opacity: 0.999;
-  }
-}
-@keyframes boot-out {
-  to {
-    opacity: 0;
-    transform: scale(1.02);
-  }
-}
+
 .boot-stage {
   display: grid;
   justify-items: center;
@@ -53,73 +41,27 @@
 .boot-bowl {
   fill: var(--accent);
   transform-origin: 10.6px 9.2px;
-  animation: boot-bowl 640ms var(--spring) both, boot-breathe 2.4s var(--ease-io) 900ms infinite;
 }
 .boot-bar,
 .boot-stem {
   fill: currentColor;
   transform-origin: 12.4px 5.1px;
-  animation: boot-set 520ms var(--ease) both;
 }
 .boot-bar {
   transform-origin: 10.6px 6px;
-  animation-name: boot-bar;
-  animation-delay: 160ms;
 }
-.boot-stem.s1 {
-  animation-delay: 240ms;
-}
+
 .boot-stem.s2 {
   transform-origin: 15.3px 5.1px;
-  animation-delay: 320ms;
 }
-.boot.linked .boot-bowl {
-  animation: boot-bowl 640ms var(--spring) both, boot-settle 400ms var(--ease) forwards;
-}
-@keyframes boot-bowl {
-  from {
-    transform: scale(0.4);
-    opacity: 0;
-  }
-}
-@keyframes boot-bar {
-  from {
-    transform: scaleX(0);
-    opacity: 0;
-  }
-}
-@keyframes boot-set {
-  from {
-    transform: scaleY(0);
-    opacity: 0;
-  }
-}
-@keyframes boot-breathe {
-  50% {
-    transform: scale(0.86);
-    opacity: 0.7;
-  }
-}
-@keyframes boot-settle {
-  to {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
+
 .boot-name {
   font-size: var(--fs-title);
   font-weight: 600;
   letter-spacing: -0.012em;
   color: var(--text);
-  animation: boot-name 600ms var(--ease) 420ms both;
 }
-@keyframes boot-name {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-    letter-spacing: 0.04em;
-  }
-}
+
 .boot-line {
   min-height: 18px;
   max-width: 340px;
@@ -127,16 +69,11 @@
   font-size: var(--fs-small);
   line-height: 1.5;
   color: var(--text-3);
-  animation: fade var(--t-slow) var(--ease) 700ms both;
 }
 .boot-line.long {
   color: var(--text-3);
 }
-@keyframes breathe {
-  50% {
-    opacity: 0.4;
-  }
-}
+
 .quit-note {
   height: 100vh;
   display: grid;
@@ -169,7 +106,6 @@
   color: var(--text-2);
   background: var(--fill-1);
   box-shadow: inset 0 -1px 0 var(--hair);
-  animation: fade var(--t-med) var(--ease);
 }
 
 /* Drag handles: invisible until hovered, then a hairline that thickens. */
@@ -194,12 +130,10 @@
   background: var(--hair-3);
   opacity: 0;
   transform: scaleY(0.6);
-  transition: opacity var(--t-med) var(--ease), transform var(--t-med) var(--ease), background var(--t-fast);
 }
 .resizer:hover::after {
   opacity: 1;
   transform: none;
-  transition-delay: 120ms;
 }
 .resizer.active::after {
   opacity: 1;

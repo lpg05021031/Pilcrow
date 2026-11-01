@@ -24,47 +24,25 @@
 }
 .welcome-icon {
   margin-bottom: 22px;
-  animation: icon-in 520ms var(--ease) both;
 }
 .welcome-icon .app-icon-bowl,
 .session-empty-icon .app-icon-bowl {
   transform-box: view-box;
   transform-origin: 105px 98px;
-  animation: bowl-in 600ms 160ms var(--spring) both;
 }
-@keyframes icon-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px) scale(0.96);
-  }
-}
-@keyframes bowl-in {
-  from {
-    transform: scale(0.55);
-    opacity: 0;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .welcome-icon,
-  .welcome-icon .app-icon-bowl,
-  .session-empty-icon .app-icon-bowl {
-    animation: none;
-  }
-}
+
 .welcome-title {
   margin: 0;
   font-size: 26px;
   font-weight: 560;
   letter-spacing: -0.024em;
   text-align: center;
-  animation: rise var(--t-panel) 120ms var(--ease) both;
 }
 .welcome-sub {
   margin: var(--sp-2) 0 26px;
   color: var(--text-3);
   font-size: var(--fs-body);
   text-align: center;
-  animation: rise var(--t-panel) 180ms var(--ease) both;
 }
 .welcome-sub b {
   color: var(--text-2);
@@ -72,7 +50,6 @@
 }
 .welcome-composer {
   width: 100%;
-  animation: rise var(--t-panel) 240ms var(--ease) both;
 }
 .welcome-composer .composer-input {
   min-height: 74px;
@@ -83,7 +60,6 @@
   justify-content: center;
   gap: var(--sp-1_5);
   margin-top: var(--sp-3_5);
-  animation: fade var(--t-panel) 320ms var(--ease) both;
 }
 .welcome-keys {
   display: flex;
@@ -91,7 +67,6 @@
   margin-top: 30px;
   font-size: var(--fs-small);
   color: var(--text-3);
-  animation: fade var(--t-panel) 380ms var(--ease) both;
 }
 .welcome-keys span {
   display: inline-flex;
@@ -118,7 +93,6 @@
   background: var(--card-ask);
   box-shadow: inset 0 0 0 1.5px var(--accent-ring);
   text-align: left;
-  animation: rise var(--t-panel) 200ms var(--ease) both;
 }
 .setup-head {
   display: flex;

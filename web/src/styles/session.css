@@ -25,7 +25,6 @@
   background: color-mix(in srgb, var(--canvas) 74%, transparent);
   -webkit-backdrop-filter: blur(22px) saturate(160%);
   backdrop-filter: blur(22px) saturate(160%);
-  transition: box-shadow var(--t-med);
 }
 .session-head.scrolled {
   box-shadow: 0 1px 0 var(--hair);
@@ -90,7 +89,6 @@
   font-size: var(--fs-small);
   font-weight: 500;
   color: var(--text-3);
-  animation: fade var(--t-med) var(--ease);
 }
 .status-dot {
   width: 6px;
@@ -98,10 +96,7 @@
   border-radius: 50%;
   background: currentColor;
 }
-.status-pill.running .status-dot,
-.status-pill.starting .status-dot {
-  animation: breathe 1.2s ease-in-out infinite;
-}
+
 .status-pill.requires_action {
   color: var(--accent-text);
   font-weight: 550;
@@ -126,7 +121,6 @@
   border-radius: var(--r-pill);
   background: var(--fill-1);
   box-shadow: inset 0 0 0 1px var(--hair);
-  animation: pop var(--t-med) var(--ease);
 }
 .diffstat:hover,
 .diffstat.on {
@@ -143,7 +137,6 @@
   font-size: var(--fs-small);
   background: var(--err-wash);
   color: var(--err);
-  animation: rise var(--t-med) var(--ease);
 }
 
 .session-empty {
@@ -152,7 +145,6 @@
   gap: var(--sp-2);
   padding: 12vh 0 var(--sp-6);
   text-align: center;
-  animation: rise var(--t-panel) var(--ease);
 }
 .session-empty-icon {
   margin-bottom: var(--sp-2);
@@ -223,12 +215,7 @@
   backdrop-filter: var(--glass-blur);
   box-shadow: var(--shadow-glass);
 }
-@keyframes find-in {
-  from {
-    opacity: 0;
-    transform: translateY(-6px) scale(0.98);
-  }
-}
+
 .findbar-ico {
   color: var(--text-3);
   margin-right: var(--sp-1_5);
@@ -270,7 +257,6 @@
   border-radius: var(--r-2);
   color: var(--text-2);
   cursor: pointer;
-  transition: background var(--t-fast), color var(--t-fast);
 }
 .crumb-btn:hover,
 .crumb-btn.on {
@@ -397,7 +383,6 @@
   color: var(--text-2);
   background: var(--inset);
   box-shadow: inset 0 -0.5px 0 var(--hair);
-  animation: fade var(--t-med) var(--ease);
 }
 .mcp-notice .btn {
   height: 26px;

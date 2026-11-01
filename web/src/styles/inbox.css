@@ -37,7 +37,6 @@
   display: grid;
   gap: var(--sp-6);
   align-content: start;
-  animation: page-in 320ms var(--ease) both;
 }
 .inbox-filter {
   display: flex;
@@ -77,8 +76,6 @@
 .inbox-day {
   display: grid;
   gap: var(--sp-2);
-  animation: page-in 320ms var(--ease) both;
-  animation-delay: calc(var(--i, 0) * 70ms);
 }
 /* day headings stay at the top while their runs scroll under them */
 .inbox-day-h {
@@ -108,7 +105,6 @@
   border-radius: var(--r-6);
   background: var(--card);
   box-shadow: var(--card-shadow);
-  animation: rise var(--t-panel) var(--ease) both;
 }
 .run:hover {
   box-shadow: var(--card-shadow-hover);
@@ -210,7 +206,6 @@
   align-content: start;
   position: sticky;
   top: 0;
-  animation: page-in 320ms var(--ease) 80ms both;
 }
 .inbox-rail-h {
   display: flex;
@@ -233,7 +228,6 @@
   background: var(--card);
   box-shadow: var(--card-shadow);
   overflow: hidden;
-  animation: rise var(--t-panel) var(--ease) both;
 }
 .sched:hover {
   box-shadow: var(--card-shadow-hover);
@@ -300,20 +294,11 @@
   height: 100%;
   border-radius: var(--r-pill);
   background: var(--text-3);
-  transition: width var(--spring-soft-t) var(--spring-soft);
 }
 .sched.running .sched-bar > span {
   background: var(--accent);
-  animation: sched-sweep 1.4s var(--ease-io) infinite;
 }
-@keyframes sched-sweep {
-  from {
-    transform: translateX(-100%);
-  }
-  to {
-    transform: translateX(250%);
-  }
-}
+
 .sched.off .sched-bar {
   opacity: 0.4;
 }
@@ -358,7 +343,6 @@
 .sd-more {
   display: grid;
   gap: var(--sp-3_5);
-  animation: rise var(--t-med) var(--ease);
 }
 .sd-preview {
   max-width: 55%;

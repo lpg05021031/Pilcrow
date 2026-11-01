@@ -61,7 +61,6 @@
   font-size: var(--fs-micro);
   color: var(--text-3);
   opacity: 0;
-  transition: opacity var(--t-fast);
 }
 .side-new:hover .side-kbd {
   opacity: 1;
@@ -152,7 +151,6 @@
   font-weight: 600;
   color: var(--text-3);
   text-align: left;
-  transition: color var(--t-fast);
 }
 .side-group-toggle:hover {
   color: var(--text-2);
@@ -178,7 +176,6 @@
   align-items: center;
   min-height: 30px;
   border-radius: var(--r-2);
-  animation: fade var(--t-med) var(--ease);
 }
 .side-row:hover,
 .side-row.menu-open {
@@ -208,7 +205,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--text-2);
-  transition: color var(--t-fast);
 }
 .side-row:hover .side-row-title,
 .side-row.active .side-row-title {
@@ -252,7 +248,6 @@
   align-items: center;
   gap: var(--sp-1_5);
   padding-right: var(--sp-1);
-  transition: opacity var(--t-fast);
 }
 .side-time {
   font-size: var(--fs-micro);
@@ -276,7 +271,6 @@
   top: 0;
   opacity: 0;
   pointer-events: none;
-  transition: opacity var(--t-fast);
 }
 .side-row:hover .side-row-menu,
 .side-row-menu[aria-expanded='true'] {
@@ -349,19 +343,13 @@
 .glyph.needs {
   background: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-wash);
-  animation: halo 2.4s var(--ease-io) 3;
 }
-@keyframes halo {
-  50% {
-    box-shadow: 0 0 0 5px transparent;
-  }
-}
+
 .glyph.running {
   width: 11px;
   height: 11px;
   border: 1.5px solid var(--fill-3);
   border-top-color: var(--text-2);
-  animation: spin 0.9s linear infinite;
 }
 
 /* ================================================================ one-click new session */
@@ -399,7 +387,6 @@
 /* sidebar collapse / expand */
 .side-collapse {
   color: var(--text-3);
-  transition: opacity var(--t-fast), background var(--t-fast), color var(--t-fast);
 }
 .side-collapse:hover,
 .side-collapse:focus-visible {
@@ -407,7 +394,6 @@
 }
 .head-sidebar {
   margin-right: var(--sp-1);
-  animation: fade var(--t-med) var(--ease);
 }
 .welcome {
   position: relative;

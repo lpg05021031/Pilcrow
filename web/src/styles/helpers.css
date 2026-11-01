@@ -51,9 +51,7 @@
 .status-pill.leading {
   color: var(--accent-text);
 }
-.status-pill.leading .status-dot {
-  animation: breathe 1.2s ease-in-out infinite;
-}
+
 .side-row.sub {
   margin-left: 18px;
 }

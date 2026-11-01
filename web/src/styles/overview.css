@@ -42,11 +42,6 @@
   box-sizing: border-box;
   margin: 0 auto;
 }
-/* the page assembles top to bottom, each block a beat after the one above */
-.ov-body > * {
-  animation: page-in 220ms var(--ease) both;
-  animation-delay: calc(var(--i, 0) * 40ms);
-}
 
 /* ---- the four tiles */
 .ov-stats {
@@ -69,7 +64,6 @@
   background: var(--card);
   box-shadow: var(--card-shadow);
   text-align: left;
-  transition: box-shadow var(--t-fast), transform var(--spring-snappy-t) var(--spring-snappy);
 }
 .ov-tile:hover {
   box-shadow: var(--card-shadow-hover);
@@ -77,7 +71,6 @@
 }
 .ov-tile:active {
   transform: scale(0.98);
-  transition-duration: var(--t-fast), 70ms;
 }
 .ov-tile-ico {
   flex: none;
@@ -205,7 +198,6 @@
   box-shadow: var(--card-shadow);
   text-align: left;
   cursor: pointer;
-  animation: rise var(--t-panel) var(--ease) both;
 }
 .ovc:hover {
   box-shadow: var(--card-shadow-hover);
@@ -226,12 +218,10 @@
   width: 3px;
   border-radius: 0 3px 3px 0;
   background: var(--accent);
-  transition: background var(--t-slow) var(--ease);
 }
 .ovc.needs.decided {
   background: var(--card);
   opacity: 0.7;
-  transition: opacity var(--t-slow) var(--ease), background var(--t-slow) var(--ease);
 }
 .ovc.needs.decided .ovc-rail {
   background: var(--ok);
@@ -267,10 +257,7 @@
   margin-top: 1px;
   color: var(--text-3);
 }
-.ovc.stale .ovc-live .wm-bowl,
-.ovc.stale .ovc-live .wm-stems {
-  animation-duration: 4s;
-}
+
 .ovc-wait {
   font-size: var(--fs-micro);
   color: var(--accent-text);
@@ -454,7 +441,6 @@
 }
 .spend-bars rect {
   fill: var(--fill-2);
-  transition: y var(--spring-soft-t) var(--spring-soft), height var(--spring-soft-t) var(--spring-soft);
 }
 .spend-bars rect.on {
   fill: var(--text-3);

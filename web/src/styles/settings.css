@@ -24,7 +24,6 @@
   border-radius: var(--r-2);
   text-align: left;
   color: var(--text-2);
-  transition: background var(--t-fast), color var(--t-fast);
 }
 .settings-nav button:hover {
   background: var(--fill-1);
@@ -48,7 +47,6 @@
   align-items: center;
   gap: var(--sp-5);
   padding: 13px 0;
-  animation: fade var(--t-med) var(--ease);
 }
 .set-row + .set-row {
   box-shadow: 0 -1px 0 var(--hair);

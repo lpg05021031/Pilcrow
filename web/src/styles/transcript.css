@@ -153,12 +153,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   box-shadow: var(--shadow-glass);
   z-index: var(--z-float);
 }
-@keyframes jump-in {
-  from {
-    opacity: 0;
-    transform: translateX(-50%) translateY(6px);
-  }
-}
+
 .jump:hover {
   background: var(--raised-2);
 }
@@ -227,7 +222,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   gap: var(--sp-0_5);
   margin-top: var(--sp-1);
   opacity: 0;
-  transition: opacity var(--t-fast);
 }
 .msg-user:hover .msg-actions,
 .msg-actions:focus-within {
@@ -309,15 +303,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  animation: shimmer 2s linear infinite;
-}
-@keyframes shimmer {
-  from {
-    background-position: 100% 0;
-  }
-  to {
-    background-position: -150% 0;
-  }
 }
 
 /* ---------------------------------------------------------------- notices, dividers, footers */
@@ -435,7 +420,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 }
 .turn-detail {
   opacity: 0;
-  transition: opacity var(--t-fast);
 }
 .turn-foot:hover .turn-detail {
   opacity: 1;
@@ -444,7 +428,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   font-size: var(--fs-micro);
   color: var(--text-3);
   opacity: 0;
-  transition: opacity var(--t-fast), color var(--t-fast);
 }
 .turn-foot:hover .turn-fork,
 .turn-fork:focus-visible {
@@ -479,7 +462,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   margin: var(--sp-2_5) 0 var(--sp-1);
   font-size: var(--fs-ui);
   color: var(--text-3);
-  animation: fade var(--t-med) var(--ease);
 }
 /* The working mark is the app's pilcrow, focusing: a slowly turning crosshair ring around the safelight. */
 .working-mark {
@@ -491,31 +473,8 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 .wm-bowl {
   fill: var(--accent);
   transform-origin: 10.6px 9.2px;
-  animation: wm-breathe 1.8s var(--ease-io) infinite;
 }
-.wm-stems {
-  animation: wm-ink 1.8s var(--ease-io) infinite;
-}
-@keyframes wm-breathe {
-  0%,
-  100% {
-    transform: scale(0.72);
-    opacity: 0.55;
-  }
-  50% {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
-@keyframes wm-ink {
-  0%,
-  100% {
-    opacity: 0.55;
-  }
-  50% {
-    opacity: 0.95;
-  }
-}
+
 .working-verb {
   font-weight: 500;
 }
@@ -686,7 +645,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   border-radius: var(--r-1);
   cursor: pointer;
   opacity: 0;
-  transition: opacity var(--t-fast), background var(--t-fast), color var(--t-fast);
 }
 .md-code:hover .md-copy,
 .md-copy:focus-visible {
@@ -750,43 +708,14 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 
 .tool {
   position: relative;
-  animation: tool-in var(--t-panel) var(--ease) both;
 }
-@keyframes tool-in {
-  from {
-    opacity: 0;
-    transform: translateY(3px);
-  }
-}
-/* the status mark crossfades when a step finishes; the right-hand figures settle in after it */
+
+/* the status mark, which crossfades when a step finishes (motion.css) */
 .tool-ico-swap {
   display: grid;
   place-items: center;
 }
-.tool-meta {
-  animation: fade var(--t-med) var(--ease);
-}
-.tool.streaming .tool-target {
-  animation: fade var(--t-med) var(--ease);
-}
-.msg-assistant {
-  animation: fade var(--t-panel) var(--ease);
-}
-.thinking {
-  animation: fade var(--t-panel) var(--ease);
-}
-/* Rows arriving in the live pages ease in; rows of history pages being drawn as the reader scrolls
-   up must not — a page of paragraphs fading in during a scroll reads as the page flickering. */
-.page:not(.live) .msg-assistant,
-.page:not(.live) .thinking,
-.page:not(.live) .tool,
-.page:not(.live) .tool-ico-swap,
-.page:not(.live) .tool-meta {
-  animation: none;
-}
-.thinking-text.peek {
-  transition: opacity var(--t-med);
-}
+
 .tool.special {
   margin: var(--sp-3) 0;
 }
@@ -895,7 +824,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   height: 22px;
   margin: -2px 0;
   opacity: 0;
-  transition: opacity var(--t-fast), background var(--t-fast);
 }
 .tool-head:hover .tool-open,
 .tool-open:focus-visible {
@@ -954,7 +882,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 }
 .tool-note.shimmer-soft {
   color: var(--text-3);
-  animation: breathe 1.6s ease-in-out infinite;
 }
 .tool-wait {
   font-size: var(--fs-small);
@@ -1162,7 +1089,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   height: 5px;
   border-radius: 50%;
   background: var(--text);
-  animation: breathe 1.4s ease-in-out infinite;
 }
 
 /* ---------------------------------------------------------------- code and diffs */
@@ -1345,7 +1271,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   color: var(--canvas);
   background: var(--text);
   opacity: 0;
-  transition: opacity var(--t-fast);
 }
 .diff-grid > span:hover .diff-add-comment,
 .diff-grid > span:hover + span .diff-add-comment,
@@ -1389,14 +1314,8 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   border-radius: var(--r-5);
   background: var(--card-ask);
   box-shadow: var(--shadow-ask);
-  animation: perm-in var(--t-panel) var(--ease);
 }
-@keyframes perm-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-}
+
 /* one soft ping when something starts waiting on you, then stillness */
 .perm::after,
 .askcard.live::after,
@@ -1409,19 +1328,8 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   opacity: 0;
   /* the border brightens once to full amber and settles; no glow spilling outside the card */
   box-shadow: inset 0 0 0 1.5px var(--accent), 0 0 12px -2px var(--accent-wash);
-  animation: ping 1100ms 300ms var(--ease-io) both;
 }
-@keyframes ping {
-  0% {
-    opacity: 0;
-  }
-  35% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-  }
-}
+
 .tool.orphan .perm {
   margin-left: 0;
 }
@@ -1494,7 +1402,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   align-items: center;
   gap: var(--sp-2_5);
   margin-top: var(--sp-2_5);
-  animation: rise var(--t-med) var(--ease);
 }
 .perm-feedback .input {
   flex: 1;
@@ -1520,7 +1427,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 .askcard.live,
 .plancard.live {
   box-shadow: var(--shadow-ask-live);
-  animation: perm-in var(--t-panel) var(--ease);
 }
 .askcard {
   padding: var(--sp-3_5) var(--sp-4) var(--sp-3_5);
@@ -1606,7 +1512,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   border-radius: 50%;
   box-shadow: inset 0 0 0 1.5px var(--hair-3);
   color: var(--canvas);
-  transition: background var(--t-fast), box-shadow var(--t-fast);
 }
 .ask-mark.box {
   border-radius: var(--r-1);
@@ -1647,9 +1552,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   font-size: var(--fs-small);
   color: var(--text-3);
 }
-.ask-notes {
-  animation: rise var(--t-med) var(--ease);
-}
+
 .ask-preview {
   border-radius: var(--r-4);
   background: var(--inset);
@@ -1737,7 +1640,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 .plan-feedback {
   display: grid;
   gap: var(--sp-2);
-  animation: rise var(--t-med) var(--ease);
 }
 
 /* ---------------------------------------------------------------- subagents */
@@ -1775,7 +1677,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   white-space: pre-wrap;
   max-height: 220px;
   overflow: auto;
-  animation: rise var(--t-med) var(--ease);
 }
 .agent-children {
   margin-left: 1px;
@@ -1806,8 +1707,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
     var(--inset);
 }
 
-
-
 /* ================================================================ reading the transcript
    Three voices. Speech: full-contrast prose at the column edge. Action: rows with an icon column
    and a rail, set in secondary text. Thought: one lilac line that opens on request. */
@@ -1837,9 +1736,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   place-items: center;
   color: var(--think);
 }
-.thinking.live .thinking-ico {
-  animation: breathe 1.4s ease-in-out infinite;
-}
+
 .thinking-text {
   margin-left: var(--sp-2);
   box-shadow: inset 1px 0 0 color-mix(in srgb, var(--think) 55%, transparent);
@@ -1877,7 +1774,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   border-radius: var(--r-1);
   font-size: var(--fs-small);
   color: var(--text-3);
-  transition: color var(--t-fast), background var(--t-fast);
 }
 .tool-error-more:hover {
   color: var(--text);
@@ -1885,7 +1781,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 }
 .tool-error-more .tool-chev {
   opacity: 0.8;
-  transition: transform var(--t-med) var(--ease);
 }
 .tool-error-more .tool-chev.open {
   transform: rotate(90deg);
@@ -1899,7 +1794,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   color: var(--text-2);
 }
 
-
 /* ================================================================ asking for permission
    One card, not two: the tool row and its command sit on a raised sheet and the answer bar is the
    sheet's footer. Nothing orange around it; the dot in the row and the chip in the header already
@@ -1910,7 +1804,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   border-radius: var(--r-5);
   background: var(--raised);
   box-shadow: inset 0 0 0 1.5px var(--accent-ring), var(--shadow-await);
-  animation: perm-in var(--t-panel) var(--ease);
 }
 .tool.awaiting > .tool-head {
   width: calc(100% + 8px);
@@ -1937,7 +1830,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   border-radius: 0 0 var(--r-5) var(--r-5);
   background: transparent;
   box-shadow: inset 0 0.5px 0 var(--hair-2);
-  animation: none;
 }
 .tool.awaiting .perm::after {
   display: none;
@@ -1998,7 +1890,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   border-radius: var(--r-1);
   font-size: var(--fs-small);
   color: var(--text-3);
-  transition: color var(--t-fast), background var(--t-fast);
 }
 .perm-note-link:hover {
   color: var(--text);
@@ -2128,9 +2019,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   gap: var(--sp-1);
   color: var(--text-3);
 }
-.wfd-end .tool-chev {
-  transition: transform var(--t-med) var(--ease);
-}
+
 .wfd-end .tool-chev.open {
   transform: rotate(90deg);
 }
@@ -2195,7 +2084,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   color: var(--text-3);
   background: var(--raised);
   box-shadow: inset 0 0 0 1px var(--hair-3);
-  transition: background var(--t-med), color var(--t-med), box-shadow var(--t-med);
 }
 .wfd-phase.running .wfd-node {
   color: var(--accent-text);
@@ -2447,7 +2335,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   color: var(--err);
 }
 
-
 /* footer: log, tokens, stop */
 .wfd-foot {
   display: flex;
@@ -2467,7 +2354,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   border-radius: var(--r-1);
   font-size: var(--fs-small);
   color: var(--text-3);
-  transition: color var(--t-fast), background var(--t-fast);
 }
 .wf-foot-btn:hover {
   color: var(--text);
@@ -2475,7 +2361,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 }
 .wf-foot-btn .tool-chev {
   opacity: 0.8;
-  transition: transform var(--t-med) var(--ease);
 }
 .wf-foot-btn .tool-chev.open {
   transform: rotate(90deg);
@@ -2500,7 +2385,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 .wf-result {
   padding: var(--sp-0_5) 0 var(--sp-1);
 }
-
 
 .status-sub {
   color: var(--text-3);
@@ -2547,7 +2431,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   flex: none;
   margin-left: 0;
   opacity: 0.7;
-  transition: transform var(--t-med) var(--ease), opacity var(--t-fast);
 }
 .work-head:hover .tool-chev {
   opacity: 1;
@@ -2579,17 +2462,13 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   width: 16px;
   margin-right: var(--sp-1);
   overflow: hidden;
-  transition: width var(--t-med) var(--ease), margin var(--t-med) var(--ease), opacity var(--t-fast);
 }
 .work-mark.gone {
   width: 0;
   margin-right: -6px; /* swallows the row gap so the words sit on the answer's left edge */
   opacity: 0;
 }
-.work-mark.gone .wm-bowl,
-.work-mark.gone .wm-stems {
-  animation: none;
-}
+
 .work.live .work-sum {
   font-weight: 500;
 }

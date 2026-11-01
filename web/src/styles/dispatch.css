@@ -69,7 +69,6 @@
 .dp-seg.running,
 .dp-seg.preparing {
   background: var(--accent);
-  animation: dp-breathe 1.6s ease-in-out infinite;
 }
 .dp-seg.needs_action {
   background: var(--warn);
@@ -79,21 +78,6 @@
 }
 .dp-seg.stopped {
   background: var(--text-3);
-}
-@keyframes dp-breathe {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.45;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .dp-seg.running,
-  .dp-seg.preparing {
-    animation: none;
-  }
 }
 
 /* ---- a request waiting, the canary waiting: on the board, wells inside the job's card (the control
@@ -283,7 +267,6 @@
 .dp-glyph.running,
 .dp-glyph.preparing {
   background: var(--accent);
-  animation: dp-breathe 1.6s ease-in-out infinite;
 }
 .dp-glyph.needs_action {
   background: var(--warn);

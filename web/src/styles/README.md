@@ -7,7 +7,7 @@ order is the cascade's:
 |---|---|
 | `fonts.css` | The bundled Inter and JetBrains Mono faces (Latin only; CJK uses the system font). |
 | `tokens.css` | Every design token, then the dark (`:root, [data-theme='dark']`) and light (`[data-theme='light']`) values. No other stylesheet holds a colour (the `#000` in a mask gradient is an alpha, not a colour); the app icon's own artwork (`ui/bits.tsx` AppIcon) is the one drawing with fixed hexes. |
-| `base.css` | Elements and the shared controls: buttons, inputs, switches, badges, scrollbars, the reduced-motion switch, `.render-fault`. |
+| `base.css` | Elements and the shared controls: buttons, inputs, switches, badges, scrollbars, `.render-fault`. |
 | `shell.css` | The window: the opening, the shell's columns, the offline and update bars, resizers, the sheets on the ground, per-platform type tuning. |
 | `sidebar.css` | The sidebar: brand, page rows, sessions by folder, one-click new session, collapse and expand. |
 | `session.css` | Around the conversation: the header and crumbs, the folder picker, the fresh session, MCP notices, the find bar. |
@@ -22,12 +22,13 @@ order is the cascade's:
 | `transcript.css` | The conversation: messages, Markdown, tool cards, permission and question cards, workflows. |
 | `panels.css` | The side panel's tabs: changes, files, terminal, preview, tasks, timeline, info; the file-history mark. |
 | `dispatch.css` | The dispatch page (`dp-`). |
-| `motion.css` | How things move: `animation` and `transition` for the selectors it names, the parts that exist only to move (segmented thumb, settings ink, sidebar selection), the lightbox, and the dark theme's two cross-cutting finishes (lit top edges, sheet wells). |
+| `motion.css` | How things move: every `animation`, `transition` and `@keyframes` (each component's own, under the file that owns the component, then the choreography across them and the less-motion switch), the parts that exist only to move (segmented thumb, settings ink, sidebar selection), the lightbox, and the dark theme's two cross-cutting finishes (lit top edges, sheet wells). |
 
 **One property, one file.** No selector sets the same property, or a shorthand and one of its
-longhands, in two files, and no `@keyframes` name is defined twice; `scripts/css-overlap.mjs` checks
-it as part of `npm run lint`. A component's motion goes in `motion.css`; everything else about it
-goes in the file that owns the component.
+longhands, in two files, and no `@keyframes` name is defined twice. A component's motion goes in
+`motion.css`, and only there; everything else about it goes in the file that owns the component.
+`scripts/css-overlap.mjs` checks all three as part of `npm run lint`, and that every `@keyframes`
+is played by something.
 
 ## Names
 

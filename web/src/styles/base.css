@@ -31,10 +31,10 @@ body {
 }
 
 /* Theme switches are View Transitions animated from script (store.ts flipTheme): a circle growing
-   from the click in Settings, a fade when the system's theme changes; no default cross-fade. */
+   from the click in Settings, a fade when the system's theme changes; the default cross-fade is off
+   (motion.css). */
 ::view-transition-old(root),
 ::view-transition-new(root) {
-  animation: none;
   mix-blend-mode: normal;
 }
 ::view-transition-old(root) {
@@ -305,7 +305,6 @@ kbd {
   gap: var(--sp-1);
   color: var(--text-2);
   font-size: inherit;
-  transition: color var(--t-fast);
 }
 .link:hover {
   color: var(--text);
@@ -393,7 +392,6 @@ kbd {
   transform: translateX(14px);
 }
 
-
 .badge {
   display: inline-flex;
   align-items: center;
@@ -445,34 +443,6 @@ kbd {
   color: var(--text-3);
 }
 
-.spin {
-  animation: spin 0.8s linear infinite;
-}
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-/* Appear: used by things that mount in response to the user (rows, cards, panels). */
-@keyframes rise {
-  from {
-    opacity: 0;
-    transform: translateY(5px);
-  }
-}
-@keyframes fade {
-  from {
-    opacity: 0;
-  }
-}
-@keyframes pop {
-  from {
-    opacity: 0;
-    transform: scale(0.96);
-  }
-}
-
 .empty {
   display: grid;
   place-items: center;
@@ -488,7 +458,6 @@ kbd {
   display: grid;
   gap: 22px;
   padding: var(--sp-4) var(--sp-3_5);
-  animation: fade var(--t-med) var(--ease) 120ms both;
 }
 .sk-row {
   display: grid;
@@ -502,29 +471,9 @@ kbd {
   border-radius: var(--r-pill);
   background: linear-gradient(90deg, var(--fill-1), var(--fill-2), var(--fill-1));
   background-size: 200% 100%;
-  animation: sheen 1.4s linear infinite;
 }
 .sk.short {
   width: 60%;
-}
-@keyframes sheen {
-  to {
-    background-position: -200% 0;
-  }
-}
-
-/* Less motion, by request: everything lands at once. The delays go too, inline staggers included
-   (an !important here outranks a style attribute), or a list would still appear row by row. */
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001ms !important;
-    animation-delay: 0s !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
-    transition-delay: 0s !important;
-  }
 }
 
 /* A part of the page that failed to render (ui/ErrorBoundary.tsx): says so in place, offers a retry. */
