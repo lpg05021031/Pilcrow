@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { cachedHtml, CHUNK_OPEN, highlightHtml, highlightTokens, MAX_HIGHLIGHT, PAINT_LINES } from '../../web/src/lib/highlight';
+import { cachedHtml, CHUNK_OPEN, highlightHtml, highlightTokens, LANGS, MAX_HIGHLIGHT, PAINT_LINES } from '../../web/src/lib/highlight';
 
 // Real TSX with JSX, template literals and comments spanning lines: the grammar's state matters.
 const code = readFileSync(new URL('../../web/src/components/Markdown.tsx', import.meta.url), 'utf8').trimEnd();
@@ -50,6 +50,12 @@ describe('highlighting in slices', () => {
     expect(gone).toBeNull();
     expect(lines).toBeLessThan(10);
     expect(await highlightTokens(big + '\n// another', 'tsx')).toHaveLength(n + 1); // a dropped block is not cached
+  }, 30_000);
+
+  it('every language listed is coloured: the raw engine runs only grammars that come precompiled', async () => {
+    const plain: string[] = [];
+    for (const lang of Object.keys(LANGS)) if (!(await highlightTokens('x = "a" // b', lang))) plain.push(lang);
+    expect(plain).toEqual([]);
   }, 30_000);
 
   it('past the cap, a block stays plain', async () => {

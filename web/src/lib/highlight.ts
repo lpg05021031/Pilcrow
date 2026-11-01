@@ -1,73 +1,75 @@
-// Syntax highlighting with Shiki (JavaScript regex engine, no WASM), lazy-loaded: the highlighter
-// with the first code block, each language with its first block. Two hand-tuned themes are emitted
-// as CSS variables so dark/light switch without re-highlighting.
+// Syntax highlighting with Shiki, lazy-loaded: the highlighter with the first code block, each
+// language with its first block. The grammars come precompiled to JavaScript regular expressions and
+// run on Shiki's raw JavaScript engine: no WASM, and no translating a grammar's Oniguruma patterns
+// the first time each is hit, which made the first block of a language one task of 110–270 ms. Two
+// hand-tuned themes are emitted as CSS variables so dark/light switch without re-highlighting.
 import type { GrammarState, HighlighterCore, ThemeRegistration } from 'shiki/core';
 import { LruBytes } from './cache';
 import { yieldToEvents } from './motion';
 
-const LANGS: Record<string, () => Promise<unknown>> = {
-  javascript: () => import('shiki/langs/javascript.mjs'),
-  jsx: () => import('shiki/langs/jsx.mjs'),
-  typescript: () => import('shiki/langs/typescript.mjs'),
-  tsx: () => import('shiki/langs/tsx.mjs'),
-  json: () => import('shiki/langs/json.mjs'),
-  jsonc: () => import('shiki/langs/jsonc.mjs'),
-  markdown: () => import('shiki/langs/markdown.mjs'),
-  python: () => import('shiki/langs/python.mjs'),
-  bash: () => import('shiki/langs/bash.mjs'),
-  fish: () => import('shiki/langs/fish.mjs'),
-  powershell: () => import('shiki/langs/powershell.mjs'),
-  rust: () => import('shiki/langs/rust.mjs'),
-  go: () => import('shiki/langs/go.mjs'),
-  java: () => import('shiki/langs/java.mjs'),
-  kotlin: () => import('shiki/langs/kotlin.mjs'),
-  swift: () => import('shiki/langs/swift.mjs'),
-  c: () => import('shiki/langs/c.mjs'),
-  cpp: () => import('shiki/langs/cpp.mjs'),
+export const LANGS: Record<string, () => Promise<unknown>> = {
+  javascript: () => import('@shikijs/langs-precompiled/javascript'),
+  jsx: () => import('@shikijs/langs-precompiled/jsx'),
+  typescript: () => import('@shikijs/langs-precompiled/typescript'),
+  tsx: () => import('@shikijs/langs-precompiled/tsx'),
+  json: () => import('@shikijs/langs-precompiled/json'),
+  jsonc: () => import('@shikijs/langs-precompiled/jsonc'),
+  markdown: () => import('@shikijs/langs-precompiled/markdown'),
+  python: () => import('@shikijs/langs-precompiled/python'),
+  bash: () => import('@shikijs/langs-precompiled/bash'),
+  fish: () => import('@shikijs/langs-precompiled/fish'),
+  powershell: () => import('@shikijs/langs-precompiled/powershell'),
+  rust: () => import('@shikijs/langs-precompiled/rust'),
+  go: () => import('@shikijs/langs-precompiled/go'),
+  java: () => import('@shikijs/langs-precompiled/java'),
+  kotlin: () => import('@shikijs/langs-precompiled/kotlin'),
+  swift: () => import('@shikijs/langs-precompiled/swift'),
+  c: () => import('@shikijs/langs-precompiled/c'),
+  cpp: () => import('@shikijs/langs-precompiled/cpp'),
   // Listed so the bundler gives the C++ macro grammar a chunk of its own: folded into C++, which is
-  // the only grammar using it, the two make one 640 kB chunk. They still load together.
-  'cpp-macro': () => import('shiki/langs/cpp-macro.mjs'),
-  csharp: () => import('shiki/langs/csharp.mjs'),
-  ruby: () => import('shiki/langs/ruby.mjs'),
-  php: () => import('shiki/langs/php.mjs'),
-  html: () => import('shiki/langs/html.mjs'),
-  vue: () => import('shiki/langs/vue.mjs'),
-  svelte: () => import('shiki/langs/svelte.mjs'),
-  css: () => import('shiki/langs/css.mjs'),
-  scss: () => import('shiki/langs/scss.mjs'),
-  less: () => import('shiki/langs/less.mjs'),
-  sql: () => import('shiki/langs/sql.mjs'),
-  yaml: () => import('shiki/langs/yaml.mjs'),
-  toml: () => import('shiki/langs/toml.mjs'),
-  ini: () => import('shiki/langs/ini.mjs'),
-  xml: () => import('shiki/langs/xml.mjs'),
-  diff: () => import('shiki/langs/diff.mjs'),
-  dockerfile: () => import('shiki/langs/dockerfile.mjs'),
-  make: () => import('shiki/langs/make.mjs'),
-  cmake: () => import('shiki/langs/cmake.mjs'),
-  verilog: () => import('shiki/langs/verilog.mjs'),
-  'system-verilog': () => import('shiki/langs/system-verilog.mjs'),
-  vhdl: () => import('shiki/langs/vhdl.mjs'),
-  tcl: () => import('shiki/langs/tcl.mjs'),
-  perl: () => import('shiki/langs/perl.mjs'),
-  lua: () => import('shiki/langs/lua.mjs'),
-  r: () => import('shiki/langs/r.mjs'),
-  matlab: () => import('shiki/langs/matlab.mjs'),
-  scala: () => import('shiki/langs/scala.mjs'),
-  dart: () => import('shiki/langs/dart.mjs'),
-  elixir: () => import('shiki/langs/elixir.mjs'),
-  haskell: () => import('shiki/langs/haskell.mjs'),
-  graphql: () => import('shiki/langs/graphql.mjs'),
-  proto: () => import('shiki/langs/proto.mjs'),
-  hcl: () => import('shiki/langs/hcl.mjs'),
-  nix: () => import('shiki/langs/nix.mjs'),
-  zig: () => import('shiki/langs/zig.mjs'),
-  julia: () => import('shiki/langs/julia.mjs'),
-  latex: () => import('shiki/langs/latex.mjs'),
-  'fortran-free-form': () => import('shiki/langs/fortran-free-form.mjs'),
-  asm: () => import('shiki/langs/asm.mjs'),
-  csv: () => import('shiki/langs/csv.mjs'),
-  log: () => import('shiki/langs/log.mjs'),
+  // the only grammar using it, the two make one 840 kB chunk. They still load together.
+  'cpp-macro': () => import('@shikijs/langs-precompiled/cpp-macro'),
+  csharp: () => import('@shikijs/langs-precompiled/csharp'),
+  ruby: () => import('@shikijs/langs-precompiled/ruby'),
+  php: () => import('@shikijs/langs-precompiled/php'),
+  html: () => import('@shikijs/langs-precompiled/html'),
+  vue: () => import('@shikijs/langs-precompiled/vue'),
+  svelte: () => import('@shikijs/langs-precompiled/svelte'),
+  css: () => import('@shikijs/langs-precompiled/css'),
+  scss: () => import('@shikijs/langs-precompiled/scss'),
+  less: () => import('@shikijs/langs-precompiled/less'),
+  sql: () => import('@shikijs/langs-precompiled/sql'),
+  yaml: () => import('@shikijs/langs-precompiled/yaml'),
+  toml: () => import('@shikijs/langs-precompiled/toml'),
+  ini: () => import('@shikijs/langs-precompiled/ini'),
+  xml: () => import('@shikijs/langs-precompiled/xml'),
+  diff: () => import('@shikijs/langs-precompiled/diff'),
+  dockerfile: () => import('@shikijs/langs-precompiled/dockerfile'),
+  make: () => import('@shikijs/langs-precompiled/make'),
+  cmake: () => import('@shikijs/langs-precompiled/cmake'),
+  verilog: () => import('@shikijs/langs-precompiled/verilog'),
+  'system-verilog': () => import('@shikijs/langs-precompiled/system-verilog'),
+  vhdl: () => import('@shikijs/langs-precompiled/vhdl'),
+  tcl: () => import('@shikijs/langs-precompiled/tcl'),
+  perl: () => import('@shikijs/langs-precompiled/perl'),
+  lua: () => import('@shikijs/langs-precompiled/lua'),
+  r: () => import('@shikijs/langs-precompiled/r'),
+  matlab: () => import('@shikijs/langs-precompiled/matlab'),
+  scala: () => import('@shikijs/langs-precompiled/scala'),
+  dart: () => import('@shikijs/langs-precompiled/dart'),
+  elixir: () => import('@shikijs/langs-precompiled/elixir'),
+  haskell: () => import('@shikijs/langs-precompiled/haskell'),
+  graphql: () => import('@shikijs/langs-precompiled/graphql'),
+  proto: () => import('@shikijs/langs-precompiled/proto'),
+  hcl: () => import('@shikijs/langs-precompiled/hcl'),
+  nix: () => import('@shikijs/langs-precompiled/nix'),
+  zig: () => import('@shikijs/langs-precompiled/zig'),
+  julia: () => import('@shikijs/langs-precompiled/julia'),
+  latex: () => import('@shikijs/langs-precompiled/latex'),
+  'fortran-free-form': () => import('@shikijs/langs-precompiled/fortran-free-form'),
+  asm: () => import('@shikijs/langs-precompiled/asm'),
+  csv: () => import('@shikijs/langs-precompiled/csv'),
+  log: () => import('@shikijs/langs-precompiled/log'),
 };
 
 const ALIASES: Record<string, string> = {
@@ -134,7 +136,7 @@ const loaded = new Set<string>();
 const loading = new Map<string, Promise<void>>();
 
 function highlighter() {
-  hlPromise ||= Promise.all([import('shiki/core'), import('shiki/engine/javascript')]).then(([{ createHighlighterCore }, { createJavaScriptRegexEngine }]) => createHighlighterCore({ themes: [theme], langs: [], engine: createJavaScriptRegexEngine() }));
+  hlPromise ||= Promise.all([import('shiki/core'), import('@shikijs/engine-javascript/raw')]).then(([{ createHighlighterCore }, { createJavaScriptRawEngine }]) => createHighlighterCore({ themes: [theme], langs: [], engine: createJavaScriptRawEngine() }));
   return hlPromise;
 }
 

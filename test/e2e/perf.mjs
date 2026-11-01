@@ -23,7 +23,8 @@
 //                       drawn whole: frame intervals, script time per second, long tasks once it is whole
 //   write               a 60 kB Write streamed with its card open (CPU ×4): frame intervals and long tasks
 //   memory              ten 300-turn conversations opened one after another: the heap after a collection
-//   code                a 60 kB TSX block coloured on screen (three of them): no task over 50 ms
+//   code                a 60 kB TSX block coloured on screen (three of them): no task over 50 ms; and the
+//                       first TSX block of the window, the grammar loaded with it: its longest task
 //
 // Budgets. Every scenario that takes time is measured three times in a row and its medians are what is
 // checked (thrice); find, history and memory once (their figures hold still from run to run).
@@ -73,6 +74,7 @@ const BASELINE = {
   write: { p50: 16.7, p95: 33.3, scriptPerSec: 211, longTotal: 64 },
   memory: { heapMB: 32 },
   code: { ms: 1227 },
+  codeCold: { longMax: 66 },
 };
 // Where a baseline is near nothing a margin means nothing: a frame interval comes in steps of 16.7 ms,
 // a long task is 50 ms or more by definition, and a GC pause can land on any step. These budgets are
@@ -490,9 +492,10 @@ async function measureReply(page, cdp, sid, text) {
 }
 
 /**
- * Compile the TSX grammar before a streaming scenario, with a block shown first: Shiki compiles a
- * grammar's patterns the first time each is needed, a one-off per window (measureCode reports it),
- * which would otherwise land on whatever is coloured first.
+ * Load the TSX grammar before a streaming scenario, with a block shown first: the first block of a
+ * language loads its grammar and runs each of its patterns for the first time (Chrome compiles a
+ * regular expression when it is first used), a one-off per window (measureCode budgets it), which
+ * would otherwise land on whatever is coloured first.
  */
 async function warmTsx(page, sid) {
   const warm = tsx('Markdown', 'RightPanel', 'SessionView', 'Inbox');
@@ -602,23 +605,27 @@ async function colour(page, id, minLength) {
 
 /**
  * A 60 kB TSX block (this app's own components) in a reply: how it is coloured once it is on screen.
- * The window first shows other TSX (48 kB of other components): Shiki compiles a grammar's patterns
- * the first time each is needed, 50–350 ms at a time here, a one-off per pattern and window that
- * slicing cannot split. That first block is reported apart, without a budget.
+ * The window first shows other TSX (48 kB of other components), which loads the grammar and runs its
+ * patterns for the first time: a one-off per window, measured apart in three windows of its own, with
+ * a budget of its own (the grammars come precompiled, lib/highlight; translated from Oniguruma on
+ * first use, as they were, it was one task of 110–270 ms).
  */
-async function measureCode(page, warm, codes) {
-  const cold = await colour(page, 'perf-warm', warm.length - 1);
-  let i = 0;
-  const out = await thrice(async () => {
-    const code = codes[i];
-    const c = await colour(page, `perf-code-${i++}`, code.length - 1);
-    const drawn = await page.evaluate(() => {
-      const pre = [...document.querySelectorAll('pre[data-hl="1"]')].at(-1);
-      return { coloured: pre.querySelectorAll('.line').length, styled: pre.querySelectorAll('.line span[style*="--shiki"]').length };
+async function measureCode(warm, codes) {
+  const cold = await thrice(() => onPage(({ page }) => colour(page, 'perf-warm', warm.length - 1)));
+  return onPage(async ({ page }) => {
+    await colour(page, 'perf-warm', warm.length - 1);
+    let i = 0;
+    const out = await thrice(async () => {
+      const code = codes[i];
+      const c = await colour(page, `perf-code-${i++}`, code.length - 1);
+      const drawn = await page.evaluate(() => {
+        const pre = [...document.querySelectorAll('pre[data-hl="1"]')].at(-1);
+        return { coloured: pre.querySelectorAll('.line').length, styled: pre.querySelectorAll('.line span[style*="--shiki"]').length };
+      });
+      return { ...c, ...drawn, lines: code.split('\n').length };
     });
-    return { ...c, ...drawn, lines: code.split('\n').length };
+    return { ...out, kB: Math.round(codes[0].length / 1024), cold: { kB: Math.round(warm.length / 1024), ...cold } };
   });
-  return { ...out, kB: Math.round(codes[0].length / 1024), cold: { kB: Math.round(warm.length / 1024), ...cold } };
 }
 
 // ---------------------------------------------------------------- the run
@@ -864,15 +871,14 @@ await scenario('code', async () => {
   }
   // To the top of the sidebar, which shows only the most recent rows of a folder.
   for (const id of ['perf-warm', 'perf-code-0', 'perf-code-1', 'perf-code-2']) await ctl.call('mock.touch', { id });
-  await onPage(async ({ page }) => {
-    const c = await measureCode(page, warm, codes);
-    results.code = c;
-    console.log(`  first TSX block in the window (${c.cold.kB} kB, the grammar compiling): coloured in ${c.cold.ms} ms · long tasks ${c.cold.long.n}, max ${c.cold.long.max} ms`);
-    console.log(`  a ${c.kB} kB TSX block: every line coloured in ${c.ms} ms (${c.coloured} of ${c.lines} lines, ${c.styled} coloured tokens) · long tasks ${c.long.n}, max ${c.long.max} ms`);
-    check('code: lines coloured short of the whole block', c.lines - c.coloured, 0);
-    check('code: longest task while it is coloured (ms)', c.long.max, RULES.codeLongMax);
-    check('code: every line coloured (ms)', c.ms, budget('code', 'ms'));
-  });
+  const c = await measureCode(warm, codes);
+  results.code = c;
+  console.log(`  first TSX block in a window (${c.cold.kB} kB, the grammar loading): coloured in ${c.cold.ms} ms · long tasks ${c.cold.long.n}, max ${c.cold.long.max} ms`);
+  console.log(`  a ${c.kB} kB TSX block: every line coloured in ${c.ms} ms (${c.coloured} of ${c.lines} lines, ${c.styled} coloured tokens) · long tasks ${c.long.n}, max ${c.long.max} ms`);
+  check('code: lines coloured short of the whole block', c.lines - c.coloured, 0);
+  check('code: longest task while it is coloured (ms)', c.long.max, RULES.codeLongMax);
+  check('code: longest task while the first block of a window is coloured (ms)', c.cold.long.max, budget('codeCold', 'longMax'));
+  check('code: every line coloured (ms)', c.ms, budget('code', 'ms'));
 });
 
 await browser.close();
