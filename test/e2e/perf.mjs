@@ -2,7 +2,8 @@
 // Performance budgets for the conversation view: the built interface, served by the mock server,
 // measured in headless Chrome on generated conversations.
 //
-//   MOCK_PORT=5321 node test/e2e/perf.mjs [--headed] [--json] [--only name,name]   (npm run test:perf; needs a build)
+//   MOCK_PORT=5321 [PILCROW_PERF=1] node test/e2e/perf.mjs [--headed] [--json] [--only name,name]
+//                                                                  (npm run test:perf; needs a build)
 //
 // The scenarios, each with what it measures:
 //   open400 / open2000  open a heavy conversation: modelled and first rows (the app's own performance.measure
@@ -37,6 +38,13 @@
 // a doubling inside it. Long tasks in all while something streams move by two or three times from
 // run to run and are reported, not budgeted; the frame intervals, longest task and script time per
 // second are. Two budgets are rules rather than measurements (RULES).
+//
+// What fails the run. The counts, sizes and distances (DOM nodes, heap, pages drawn, px from the live
+// end and moved, lines left uncoloured, JavaScript before the first rows) come out the same on any
+// machine, busy or not, and fail every run. The times (ms, frame intervals, long tasks, script per
+// second) are the machine's as much as the app's: another process on the cores pushes them over
+// budget with the same code, so they fail the run only under PILCROW_PERF=1 and are otherwise
+// reported with their budgets. The Qt client splits its budgets the same way (qt/PERF.md §5).
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -55,6 +63,9 @@ const only = args.includes('--only') ? args[args.indexOf('--only') + 1].split(',
 const runs = (name) => !only || only.includes(name);
 
 const MARGIN = 1.6;
+const FULL = process.env.PILCROW_PERF === '1';
+// The baseline figures that are counts, not times (see "What fails the run" above).
+const COUNTS = new Set(['nodes', 'heapMB', 'drawn']);
 // The median of three runs (each figure itself the median of thrice where measured so): headless Chrome,
 // 1400×900, the development container, 2026-11-01, with other work on the machine now and then.
 const BASELINE = {
@@ -97,7 +108,7 @@ const RULES = {
 const FRAME = 1000 / 60;
 const budget = (scenario, key) => {
   const b = Math.max(BASELINE[scenario][key] * MARGIN, FLOOR[key] || 0);
-  return Math.round((/^p\d+$/.test(key) ? Math.ceil(b / FRAME - 0.01) * FRAME + 0.1 : b) * 10) / 10;
+  return { max: Math.round((/^p\d+$/.test(key) ? Math.ceil(b / FRAME - 0.01) * FRAME + 0.1 : b) * 10) / 10, timed: !COUNTS.has(key) };
 };
 
 if (!existsSync(join(ROOT, 'web', 'dist', 'index.html'))) {
@@ -645,8 +656,11 @@ async function thrice(fn) {
 }
 
 const failures = [];
-const check = (what, value, max) => {
-  if (value == null || value > max) failures.push(`${what}: ${value} (budget ${max})`);
+const timesOver = [];
+/** A figure against its budget: a plain number (a rule or a distance) or budget()'s, which says whether it is a time. */
+const check = (what, value, b) => {
+  const { max, timed } = typeof b === 'number' ? { max: b, timed: false } : b;
+  if (value == null || value > max) (timed && !FULL ? timesOver : failures).push(`${what}: ${value} (budget ${max})`);
 };
 const results = {};
 let current = null;
@@ -876,7 +890,7 @@ await scenario('code', async () => {
   console.log(`  first TSX block in a window (${c.cold.kB} kB, the grammar loading): coloured in ${c.cold.ms} ms · long tasks ${c.cold.long.n}, max ${c.cold.long.max} ms`);
   console.log(`  a ${c.kB} kB TSX block: every line coloured in ${c.ms} ms (${c.coloured} of ${c.lines} lines, ${c.styled} coloured tokens) · long tasks ${c.long.n}, max ${c.long.max} ms`);
   check('code: lines coloured short of the whole block', c.lines - c.coloured, 0);
-  check('code: longest task while it is coloured (ms)', c.long.max, RULES.codeLongMax);
+  check('code: longest task while it is coloured (ms)', c.long.max, { max: RULES.codeLongMax, timed: true });
   check('code: longest task while the first block of a window is coloured (ms)', c.cold.long.max, budget('codeCold', 'longMax'));
   check('code: every line coloured (ms)', c.ms, budget('code', 'ms'));
 });
@@ -885,8 +899,9 @@ await browser.close();
 ctl.close();
 mock.kill();
 if (args.includes('--json')) console.log(JSON.stringify(results));
+if (timesOver.length) console.log(`\ntimes over budget, reported (PILCROW_PERF=1 fails on them):\n  ${timesOver.join('\n  ')}`);
 if (failures.length) {
   console.log(`\nover budget or failed:\n  ${failures.join('\n  ')}`);
   process.exit(1);
 }
-console.log('\nall within budget');
+console.log(FULL ? '\nall within budget' : `\ncounts within budget; ${timesOver.length} timing figure${timesOver.length === 1 ? '' : 's'} reported over budget (PILCROW_PERF=1 enforces the times)`);
