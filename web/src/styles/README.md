@@ -8,9 +8,19 @@ order is the cascade's:
 | `fonts.css` | The bundled Inter and JetBrains Mono faces (Latin only; CJK uses the system font). |
 | `tokens.css` | Every design token, then the dark (`:root, [data-theme='dark']`) and light (`[data-theme='light']`) values. Nothing else reads a raw colour. |
 | `base.css` | Elements and the shared controls: buttons, inputs, switches, badges, scrollbars, the reduced-motion switch, `.render-fault`. |
-| `app.css` | The shell and app-wide components: sidebar, session header, composer, menus, dialogs, settings, toasts, find bar, tooltip, control room, inbox. |
+| `shell.css` | The window: the opening, the shell's columns, the offline and update bars, resizers, the sheets on the ground, per-platform type tuning. |
+| `sidebar.css` | The sidebar: brand, page rows, sessions by folder, one-click new session, collapse and expand. |
+| `session.css` | Around the conversation: the header and crumbs, the folder picker, the fresh session, MCP notices, the find bar. |
+| `composer.css` | The composer, its suggestions, and the queue of held messages. |
+| `menus.css` | Popovers, menus, the themed select, tooltips. |
+| `dialogs.css` | Dialogs, the new-session dialog, the segmented control, the palette, the shortcuts sheet, toasts. |
+| `settings.css` | Settings: layout and rows, the model picker, skills and MCP servers, memory, repositories. |
+| `welcome.css` | The welcome page and the first run. |
+| `overview.css` | The control room. |
+| `inbox.css` | The inbox and schedules. |
+| `helpers.css` | Helpers (HELPERS.md). |
 | `transcript.css` | The conversation: messages, Markdown, tool cards, permission and question cards, workflows. |
-| `panels.css` | The side panel's tabs: changes, files, terminal, preview, tasks, timeline, info. |
+| `panels.css` | The side panel's tabs: changes, files, terminal, preview, tasks, timeline, info; the file-history mark. |
 | `dispatch.css` | The dispatch page (`dp-`). |
 | `motion.css` | How things move: `animation` and `transition` for the selectors it names, the parts that exist only to move (segmented thumb, settings ink, sidebar selection), the lightbox, and the dark theme's two cross-cutting finishes (lit top edges, sheet wells). |
 
@@ -60,7 +70,7 @@ They key off attributes set on `<html>` before anything renders, and each says w
 
 - `data-engine='webkit'` (`public/theme.js`): WebKitGTK skips off-screen boxes unreliably inside a
   scrolling pane, so `content-visibility` paging in `transcript.css` is for Blink only.
-- `data-os='win'` (`main.tsx`): ClearType draws light weights thin, so `app.css` ("platform tuning")
+- `data-os='win'` (`main.tsx`): ClearType draws light weights thin, so `shell.css` ("platform tuning")
   nudges weights and the two smallest sizes.
 - Scrollbars use only the `-webkit-scrollbar` rules (`base.css`): setting `scrollbar-color` would make
   Chromium fall back to the platform scrollbar.

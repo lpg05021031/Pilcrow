@@ -1,0 +1,565 @@
+/* ================================================================ dialogs
+   Dialogs: the sheet and its parts, the new-session dialog, the segmented control, the palette,
+   the shortcuts sheet, and toasts. */
+
+/* ================================================================ dialogs */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-dialog);
+  display: grid;
+  place-items: start center;
+  padding: 9vh var(--sp-5) var(--sp-5);
+  background: var(--scrim);
+  -webkit-backdrop-filter: var(--scrim-blur);
+  backdrop-filter: var(--scrim-blur);
+  overflow-y: auto;
+}
+.dialog {
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  max-height: min(88vh, 860px);
+  border-radius: var(--r-4);
+  background: var(--glass-2);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-sheet);
+}
+/* A sheet with no field takes the focus itself, for a screen reader to read it from the title; it needs no ring. */
+.dialog:focus-visible {
+  outline: none;
+}
+.dialog-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2_5);
+  padding: 18px var(--sp-4) var(--sp-1_5) 22px;
+}
+.dialog-title {
+  flex: 1;
+  font-size: var(--fs-h);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+.dialog-body {
+  padding: var(--sp-2_5) 22px var(--sp-5);
+  overflow-y: auto;
+  display: grid;
+  gap: 18px;
+  align-content: start;
+}
+.dialog-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3_5) 18px var(--sp-4) 22px;
+  box-shadow: 0 -1px 0 var(--hair);
+}
+.err-text {
+  font-size: var(--fs-small);
+  color: var(--err);
+  line-height: 1.45;
+}
+.confirm-body {
+  margin: 0;
+  color: var(--text-2);
+  line-height: 1.6;
+}
+.confirm-list {
+  margin: -6px 0 0;
+  padding: var(--sp-2) var(--sp-3);
+  list-style: none;
+  border-radius: var(--r-2);
+  background: var(--inset);
+  font-size: var(--fs-small);
+  line-height: 1.75;
+  max-height: 220px;
+  overflow: auto;
+}
+.check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: var(--fs-ui);
+  color: var(--text-2);
+  cursor: pointer;
+}
+.check input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--text);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1_5);
+}
+.chips-label {
+  margin-right: var(--sp-0_5);
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+}
+.folder-chip,
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  height: 26px;
+  padding: 0 11px;
+  border-radius: 13px;
+  font-size: var(--fs-small);
+  color: var(--text-2);
+  background: var(--fill-1);
+  box-shadow: inset 0 0 0 1px var(--hair);
+}
+.chip {
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 12px;
+  font-size: var(--fs-micro-plus);
+}
+.folder-chip:hover,
+button.chip:hover {
+  background: var(--fill-2);
+  color: var(--text);
+}
+.folder-chip.on,
+.chip.on {
+  color: var(--text);
+  background: var(--fill-2);
+  box-shadow: inset 0 0 0 1px var(--hair-3);
+}
+
+.browser {
+  border-radius: var(--r-3);
+  background: var(--inset);
+  box-shadow: inset 0 0 0 1px var(--hair);
+  overflow: hidden;
+  animation: rise var(--t-med) var(--ease);
+}
+.browser-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1_5) var(--sp-2_5) var(--sp-1_5) var(--sp-1_5);
+  font-size: var(--fs-small);
+  color: var(--text-2);
+  box-shadow: 0 1px 0 var(--hair);
+}
+.browser-list {
+  max-height: 220px;
+  overflow-y: auto;
+  padding: var(--sp-1);
+}
+.browser-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  height: 30px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-2);
+  text-align: left;
+  color: var(--text-2);
+}
+.browser-item:hover {
+  background: var(--fill-2);
+  color: var(--text);
+}
+.browser-item svg:first-child {
+  color: var(--text-3);
+}
+.browser-empty {
+  padding: var(--sp-2_5);
+  font-size: var(--fs-small);
+}
+
+/* new session */
+.newsession .dialog-body {
+  gap: 18px;
+}
+.ns-section {
+  display: grid;
+  gap: var(--sp-2);
+}
+.ns-prompt {
+  min-height: 64px;
+}
+.ns-label {
+  font-size: var(--fs-small);
+  font-weight: 600;
+  color: var(--text-2);
+}
+.ns-folder {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 40px;
+  padding: 0 5px 0 var(--sp-3);
+  border-radius: var(--r-3);
+  background: var(--fill-1);
+  box-shadow: inset 0 0 0 1px var(--hair);
+}
+.ns-folder:focus-within {
+  background: var(--canvas);
+  box-shadow: inset 0 0 0 1px var(--hair-3), 0 0 0 3px var(--fill-1);
+}
+.ns-folder-ico {
+  color: var(--text-3);
+  margin-right: var(--sp-1);
+}
+.ns-folder-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: var(--fs-small-plus);
+}
+.ns-folder .btn.on {
+  background: var(--fill-2);
+  color: var(--text);
+}
+.ns-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+.ns-row-title {
+  font-weight: 550;
+  margin-bottom: var(--sp-0_5);
+}
+.ns-two {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: start;
+  gap: var(--sp-3);
+  animation: rise var(--t-med) var(--ease);
+}
+.ns-two .field > label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.ns-prompt {
+  min-height: 76px;
+}
+
+.radio-list {
+  display: grid;
+  border-radius: var(--r-3);
+  background: var(--fill-1);
+  box-shadow: inset 0 0 0 1px var(--hair);
+  overflow: hidden;
+}
+.radio-row {
+  display: grid;
+  grid-template-columns: 18px auto 1fr 16px;
+  align-items: center;
+  gap: var(--sp-2_5);
+  min-height: 35px;
+  padding: 0 var(--sp-3);
+  text-align: left;
+  color: var(--text-2);
+}
+.radio-row + .radio-row {
+  box-shadow: 0 -1px 0 var(--hair);
+}
+.radio-row:hover {
+  background: var(--fill-1);
+  color: var(--text);
+}
+.radio-row.on {
+  background: var(--fill-2);
+  color: var(--text);
+}
+.radio-ico {
+  color: var(--text-3);
+}
+.radio-row.on .radio-ico {
+  color: var(--text);
+}
+.radio-row.danger .radio-label,
+.radio-row.danger .radio-ico {
+  color: var(--err);
+}
+.radio-label {
+  font-weight: 550;
+  white-space: nowrap;
+}
+.radio-hint {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-small);
+  color: var(--text-3);
+}
+.radio-check {
+  color: var(--text);
+  display: grid;
+  place-items: center;
+}
+
+/* segmented control */
+.seg {
+  display: inline-flex;
+  padding: var(--sp-0_5);
+  border-radius: 8px;
+  background: var(--fill-1);
+  box-shadow: inset 0 0 0 1px var(--hair);
+}
+.seg button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 24px;
+  padding: 0 var(--sp-2_5);
+  border-radius: var(--r-2);
+  font-size: var(--fs-small);
+  font-weight: 500;
+  color: var(--text-2);
+}
+.seg button:hover:not(:disabled) {
+  color: var(--text);
+}
+.seg button.on {
+  background: transparent;
+  color: var(--text);
+  box-shadow: none;
+}
+.seg button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.seg.sm button {
+  height: 22px;
+  padding: 0 7px;
+}
+
+/* palette: Raycast-like sheet */
+.palette {
+  overflow: hidden;
+}
+.palette .dialog-body {
+  padding: 0;
+  gap: 0;
+}
+.pal-input {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: 54px;
+  padding: 0 18px;
+  color: var(--text-3);
+  box-shadow: 0 1px 0 var(--hair);
+}
+.pal-input input {
+  flex: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: 15.5px;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.pal-input input::placeholder {
+  color: var(--text-3);
+}
+.pal-list {
+  max-height: min(56vh, 460px);
+  overflow-y: auto;
+  padding: var(--sp-1_5) var(--sp-2) var(--sp-2_5);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent);
+}
+.pal-group {
+  padding: var(--sp-2_5) var(--sp-2_5) 5px;
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  color: var(--text-3);
+}
+.pal-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  height: 36px;
+  padding: 0 var(--sp-2_5);
+  border-radius: var(--r-2);
+  text-align: left;
+  color: var(--text-2);
+}
+.pal-item svg {
+  color: var(--text-3);
+}
+.pal-item.active {
+  background: var(--fill-2);
+  color: var(--text);
+}
+.pal-item.active svg,
+.pal-item.active .pal-hint,
+.pal-item.active kbd {
+  color: var(--text);
+}
+.pal-label {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.pal-hint {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-small);
+  color: var(--text-3);
+}
+.pal-keys {
+  margin-left: auto;
+}
+.pal-keys kbd {
+  height: 18px;
+  min-width: 18px;
+  font-size: var(--fs-tiny-plus);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--hair-2);
+}
+
+/* shortcuts */
+.shortcuts {
+  display: grid;
+}
+.shortcut {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  padding: 9px 0;
+}
+.shortcut + .shortcut {
+  box-shadow: 0 -1px 0 var(--hair);
+}
+.keys {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+/* toasts */
+/* Toasts drop in at the top centre, clear of the composer and its send button. */
+.toasts {
+  position: absolute; /* the corner of the conversation, out of the way of what you are reading */
+  right: 16px;
+  bottom: calc(var(--composer-h, 0px) + 12px);
+  z-index: var(--z-toast);
+  transition: bottom var(--t-med) var(--ease);
+  display: grid;
+  justify-items: end;
+  gap: var(--sp-2);
+  width: min(380px, calc(100vw - 36px));
+  pointer-events: none;
+}
+.toasts > * {
+  pointer-events: auto;
+}
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2_5);
+  max-width: 100%;
+  min-height: 40px;
+  padding: 9px var(--sp-1_5) 9px 13px;
+  border-radius: 12px;
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-glass);
+  font-size: var(--fs-small);
+  line-height: 1.45;
+}
+.toast > .grow {
+  padding-top: 1px;
+  overflow-wrap: anywhere;
+}
+.toast > .btn,
+.toast > .icon-btn {
+  margin-top: -2px;
+}
+.toast-n {
+  flex: none;
+  align-self: center;
+  padding: 0 var(--sp-1_5);
+  border-radius: var(--r-5);
+  font-size: var(--fs-tiny-plus);
+  color: var(--text-3);
+  background: var(--fill-2);
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+}
+.toast > svg {
+  flex: none;
+  margin-top: var(--sp-0_5);
+}
+.toast.success > svg {
+  color: var(--ok);
+}
+.toast.error > svg {
+  color: var(--err);
+}
+.toast.warning > svg {
+  color: var(--accent-text);
+}
+.toast.info > svg {
+  color: var(--text-3);
+}
+
+/* new-session dialog: options folded behind a one-line summary */
+.ns-disclose {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  height: 36px;
+  margin: var(--sp-0_5) 0 0;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-2);
+  color: var(--text-2);
+  font-size: var(--fs-ui);
+  text-align: left;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.ns-disclose:hover {
+  background: var(--fill-1);
+  color: var(--text);
+}
+.ns-disclose-chev {
+  color: var(--text-3);
+  transform: rotate(-90deg);
+}
+.ns-disclose.open .ns-disclose-chev {
+  transform: none;
+}
+.ns-disclose-title {
+  font-weight: 550;
+}
+.ns-disclose-summary {
+  flex: 1;
+  min-width: 0;
+  color: var(--text-3);
+  font-size: var(--fs-small);
+}
+.ns-options {
+  display: grid;
+  gap: 18px;
+  padding: var(--sp-1_5) 0 var(--sp-0_5);
+}

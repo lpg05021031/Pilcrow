@@ -1,0 +1,167 @@
+/* ================================================================ helpers
+   Helpers (HELPERS.md): the bar, the cards, the review in Changes. */
+
+/* ================================================================ helpers (HELPERS.md)
+   A lead's bar under its header, the chips, a helper's note in the conversation, the lead's tools as
+   cards, the Changes panel's sections, the sidebar's nesting. */
+.helpers-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 34px;
+  padding: var(--sp-1) 18px var(--sp-1) var(--sp-5);
+  border-bottom: 1px solid var(--hair);
+  background: var(--chrome);
+  font-size: var(--fs-small);
+}
+.helpers-chips {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1_5);
+  min-width: 0;
+  overflow: hidden;
+}
+.helper-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 22px;
+  padding: 0 9px 0 var(--sp-2);
+  border: 0;
+  border-radius: 11px;
+  background: var(--fill-1);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-small);
+  font-weight: 500;
+  white-space: nowrap;
+  max-width: 280px;
+  cursor: pointer;
+}
+.helper-chip:hover {
+  background: var(--fill-2);
+}
+.helper-chip.warm {
+  background: var(--warn-wash);
+}
+.helper-chip .dp-glyph {
+  width: 8px;
+  height: 8px;
+}
+.status-pill.leading {
+  color: var(--accent-text);
+}
+.status-pill.leading .status-dot {
+  animation: breathe 1.2s ease-in-out infinite;
+}
+.side-row.sub {
+  margin-left: 18px;
+}
+.msg-user .msg-from {
+  align-self: flex-end;
+  margin: 0 var(--sp-1_5) 3px 0;
+  padding: 0 7px;
+  border-radius: 9px;
+  background: var(--plan-wash);
+  color: var(--plan);
+  font-size: var(--fs-tiny-plus);
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.msg-notes {
+  display: grid;
+  gap: var(--sp-0_5);
+  margin: var(--sp-3) 0;
+}
+.session-card .tool-ico .dp-glyph {
+  width: 9px;
+  height: 9px;
+}
+.tool-well {
+  padding: var(--sp-2_5) var(--sp-3);
+  border-radius: var(--r-3);
+  background: var(--inset);
+  color: var(--text-2);
+  font-size: var(--fs-small);
+  line-height: 1.5;
+  box-shadow: var(--inset-ring);
+}
+.hb {
+  display: grid;
+  gap: var(--sp-2);
+}
+.hb-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.hb-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 24px;
+  font-size: var(--fs-small-plus);
+}
+.hb-row .dp-word {
+  font-weight: 500;
+}
+.hb-name {
+  font-weight: 600;
+}
+.hb-last {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.hb-fold {
+  display: grid;
+  gap: var(--sp-1);
+}
+.hb-fold-body {
+  padding-top: var(--sp-0_5);
+}
+.hc {
+  border-top: 1px solid var(--hair);
+}
+.hc-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1_5);
+  padding: var(--sp-2) var(--sp-3);
+}
+.hc-sec {
+  border-top: 1px solid var(--hair);
+}
+.hc-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1_5) var(--sp-2_5) var(--sp-1_5) var(--sp-2);
+  font-size: var(--fs-small);
+  min-width: 0;
+}
+.hc-name {
+  font-weight: 600;
+}
+.hc-body {
+  display: grid;
+  gap: var(--sp-2);
+  padding: 0 var(--sp-3) var(--sp-2_5) 36px;
+}
+.hc-note {
+  padding: var(--sp-0_5) 0 var(--sp-1);
+}
+.hc-file-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-micro);
+  padding: var(--sp-0_5) 0 var(--sp-1);
+}
+.hc-file-head .mono {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

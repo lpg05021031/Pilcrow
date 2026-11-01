@@ -1,0 +1,468 @@
+/* ================================================================ sidebar
+   The sidebar: the brand, the page rows, sessions by folder, one-click new session, and the
+   buttons that collapse and expand it wherever they sit. */
+
+/* ================================================================ sidebar */
+
+.sidebar {
+  flex: 0 1 auto; /* in a small window the sidebar gives up width too, down to its minimum */
+  display: flex;
+  flex-direction: column;
+  background: var(--chrome);
+  min-width: 210px;
+}
+
+.side-top {
+  padding: var(--sp-3) var(--sp-2_5) var(--sp-1_5);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr); /* the search field may not push its clear button past the edge */
+  gap: var(--sp-0_5);
+}
+
+/* the mark takes the same 15px slot as the row icons under it, so the name lines up with their labels */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 30px;
+  padding: 0 var(--sp-2) var(--sp-1_5);
+  color: var(--text);
+}
+.brand .mark {
+  flex: none;
+  width: 15px;
+}
+.brand-name {
+  font-weight: 600;
+  font-size: var(--fs-ui-plus);
+  letter-spacing: -0.01em;
+}
+
+.side-new,
+.side-search {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 30px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-2);
+  color: var(--text-2);
+  font-size: var(--fs-ui);
+  text-align: left;
+}
+.side-new:hover {
+  background: var(--fill-2);
+  color: var(--text);
+}
+.side-new:active {
+  background: var(--fill-3);
+}
+.side-kbd {
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+  opacity: 0;
+  transition: opacity var(--t-fast);
+}
+.side-new:hover .side-kbd {
+  opacity: 1;
+}
+.side-search {
+  cursor: text;
+  color: var(--text-3);
+}
+.side-search:hover {
+  background: var(--fill-1);
+}
+.side-search:focus-within {
+  background: var(--fill-2);
+  color: var(--text-2);
+}
+.side-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: var(--fs-ui);
+}
+.side-search input::placeholder {
+  color: var(--text-3);
+}
+.side-match {
+  background: none;
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+}
+.side-search button {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  color: var(--text-3);
+}
+.side-search button:hover {
+  background: var(--fill-2);
+}
+
+.side-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--sp-0_5) var(--sp-2_5) var(--sp-3_5);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 8px, #000 calc(100% - 16px), transparent);
+}
+
+.side-group {
+  margin-top: var(--sp-3_5);
+}
+.side-section-label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1_5);
+  height: 24px;
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  color: var(--text-3);
+}
+.section.accent .side-section-label {
+  color: var(--accent-text);
+}
+.side-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 var(--sp-1);
+  border-radius: 8px;
+  font-size: var(--fs-tiny-plus);
+  font-weight: 650;
+  color: var(--accent-ink);
+  background: var(--accent);
+}
+
+.side-group-head {
+  display: flex;
+  align-items: center;
+  height: 24px;
+  border-radius: var(--r-2);
+}
+.side-group-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 24px;
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  color: var(--text-3);
+  text-align: left;
+  transition: color var(--t-fast);
+}
+.side-group-toggle:hover {
+  color: var(--text-2);
+}
+.side-group-chev {
+  opacity: 0;
+}
+.side-group-head:hover .side-group-chev {
+  opacity: 1;
+}
+.side-group-add {
+  opacity: 0;
+  width: 22px;
+  height: 22px;
+}
+.side-group-head:hover .side-group-add {
+  opacity: 1;
+}
+
+.side-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 30px;
+  border-radius: var(--r-2);
+  animation: fade var(--t-med) var(--ease);
+}
+.side-row:hover,
+.side-row.menu-open {
+  background: var(--fill-1);
+}
+.side-row.active {
+  background: var(--fill-2);
+}
+.side-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  padding: 5px var(--sp-1) 5px var(--sp-2);
+  text-align: left;
+}
+.side-row-text {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 1px;
+}
+.side-row-title {
+  min-width: 0;
+  font-size: var(--fs-ui);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-2);
+  transition: color var(--t-fast);
+}
+.side-row:hover .side-row-title,
+.side-row.active .side-row-title {
+  color: var(--text);
+}
+.side-row.unread .side-row-title {
+  color: var(--text);
+  font-weight: 560;
+}
+.side-row-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1_5);
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+  min-width: 0;
+  white-space: nowrap;
+}
+.side-wt {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.side-wt svg {
+  flex: none;
+}
+
+/* Time and the row menu share one spot and cross-fade. */
+.side-row-end {
+  position: relative;
+  display: grid;
+  place-items: center end;
+  min-width: 30px;
+  height: 24px;
+  margin-right: var(--sp-1);
+  flex: none;
+}
+.side-row-status {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1_5);
+  padding-right: var(--sp-1);
+  transition: opacity var(--t-fast);
+}
+.side-time {
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+.side-row-menu {
+  position: absolute;
+  right: 0;
+  top: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--t-fast);
+}
+.side-row:hover .side-row-menu,
+.side-row-menu[aria-expanded='true'] {
+  opacity: 1;
+  pointer-events: auto;
+}
+.side-row:hover .side-row-status:not(:has(.glyph)),
+.side-row:has(.side-row-menu[aria-expanded='true']) .side-row-status {
+  opacity: 0;
+}
+.side-rename {
+  height: 24px;
+  font-size: var(--fs-small-plus);
+}
+.side-more {
+  height: 26px;
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-small);
+  color: var(--text-3);
+}
+.side-more:hover {
+  color: var(--text);
+}
+.side-empty {
+  padding: 28px var(--sp-3);
+  color: var(--text-3);
+  font-size: var(--fs-small);
+  line-height: 1.55;
+  text-align: center;
+}
+
+.side-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-0_5);
+  padding: var(--sp-2) var(--sp-2_5) var(--sp-2_5);
+}
+.side-foot-btn {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 28px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-2);
+  color: var(--text-3);
+  font-size: var(--fs-ui);
+}
+.side-foot-btn:hover {
+  background: var(--fill-2);
+  color: var(--text);
+}
+
+/* status marks: running = rotating arc, needs = amber dot with a halo, unread = small neutral dot */
+.glyph {
+  flex: none;
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  position: relative;
+}
+.glyph.unread {
+  width: 6px;
+  height: 6px;
+  background: var(--text-2);
+}
+.glyph.error {
+  background: var(--err);
+}
+.glyph.needs {
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+  animation: halo 2.4s var(--ease-io) 3;
+}
+@keyframes halo {
+  50% {
+    box-shadow: 0 0 0 5px transparent;
+  }
+}
+.glyph.running {
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--fill-3);
+  border-top-color: var(--text-2);
+  animation: spin 0.9s linear infinite;
+}
+
+/* ================================================================ one-click new session */
+
+.side-new-wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-0_5);
+}
+.side-new-wrap .side-new {
+  flex: 1;
+  min-width: 0;
+}
+.side-new-opts {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--r-2);
+  color: var(--text-3);
+  opacity: 0;
+}
+.side-new-wrap:hover .side-new-opts,
+.side-new-opts:focus-visible,
+.side-new-opts[aria-expanded='true'] {
+  opacity: 1;
+}
+.side-new-opts:hover {
+  background: var(--fill-2);
+  color: var(--text);
+}
+
+/* sidebar collapse / expand */
+.side-collapse {
+  color: var(--text-3);
+  transition: opacity var(--t-fast), background var(--t-fast), color var(--t-fast);
+}
+.side-collapse:hover,
+.side-collapse:focus-visible {
+  color: var(--text);
+}
+.head-sidebar {
+  margin-right: var(--sp-1);
+  animation: fade var(--t-med) var(--ease);
+}
+.welcome {
+  position: relative;
+}
+.welcome-sidebar {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+}
+
+/* ================================================================ sidebar pages (control room, inbox) */
+.side-pages {
+  display: grid;
+  gap: 1px;
+  margin-top: var(--sp-1);
+  padding-top: var(--sp-1_5);
+  box-shadow: inset 0 1px 0 var(--hair);
+}
+.side-page {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 30px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-2);
+  color: var(--text-2);
+  font-size: var(--fs-ui);
+  text-align: left;
+}
+.side-page:hover {
+  background: var(--fill-1);
+  color: var(--text);
+}
+.side-page.on {
+  background: var(--fill-2);
+  color: var(--text);
+}
+.side-page-n {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+  background: var(--fill-2);
+}
+.side-page-n.needs {
+  color: var(--accent-ink);
+  background: var(--accent);
+}
+.side-page-n.unread {
+  color: var(--text);
+  background: var(--fill-3);
+}

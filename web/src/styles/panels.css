@@ -1256,3 +1256,70 @@
   letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
 }
+
+/* ================================================================ file touches (which sessions changed a file) */
+.touches {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex: none;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--r-5);
+  font-size: var(--fs-tiny);
+  color: var(--text-3);
+}
+.touches:hover,
+.touches.on {
+  color: var(--text-2);
+  background: var(--fill-2);
+}
+.cfile-head .touches {
+  margin-right: var(--sp-1);
+}
+.touches-pop {
+  padding: var(--sp-1_5);
+  display: grid;
+  gap: var(--sp-0_5);
+}
+.touches-h {
+  padding: var(--sp-1) var(--sp-2) var(--sp-1_5);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  color: var(--text-3);
+}
+.touches-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 14px;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1_5) var(--sp-2);
+  border-radius: var(--r-2);
+  text-align: left;
+}
+.touches-row:hover {
+  background: var(--fill-1);
+}
+.touches-row.cur .touches-title {
+  color: var(--text-2);
+}
+.touches-main {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.touches-title {
+  font-size: var(--fs-small);
+  font-weight: 550;
+}
+.touches-about {
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+}
+.touches-sub {
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+}
+.touches-go {
+  color: var(--text-3);
+}
