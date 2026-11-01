@@ -137,7 +137,7 @@ export function SessionView({ session }: { session: SessionSummary }) {
         )}
         <div className="session-title-wrap">
           {editing ? (
-            <input
+            <input aria-label="Session title"
               className="input title-input"
               autoFocus
               value={title}
@@ -224,7 +224,7 @@ export function SessionView({ session }: { session: SessionSummary }) {
               <span className={`num-del${git.deletions ? '' : ' zero'}`}>−{git.deletions ?? 0}</span>
             </button>
           )}
-          <button className={`icon-btn${ui.panel ? ' active' : ''}`} title="Side panel (Ctrl+\)" onClick={() => setUi({ panel: !ui.panel })}>
+          <button className={`icon-btn${ui.panel ? ' active' : ''}`} title="Side panel (Ctrl+\)" aria-label="Side panel" onClick={() => setUi({ panel: !ui.panel })}>
             <PanelRight size={16} />
           </button>
           <MenuButton items={menu} title="Session actions" width={250}>

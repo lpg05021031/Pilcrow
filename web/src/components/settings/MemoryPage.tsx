@@ -108,7 +108,7 @@ export function MemoryPage() {
             <span className="hint">A smaller model is plenty here.</span>
           </span>
           <div style={{ width: 240 }}>
-            <ModelSelect value={config.memoryModel || ''} onChange={(v, typing) => !typing && setConfig({ memoryModel: v })} onCommit={() => {}} />
+            <ModelSelect label="Model for note-taking" value={config.memoryModel || ''} onChange={(v, typing) => !typing && setConfig({ memoryModel: v })} onCommit={() => {}} />
           </div>
         </div>
       </div>
@@ -116,7 +116,7 @@ export function MemoryPage() {
       <div className="cust-bar">
         <div className="mem-proj">
           <Folder size={14} className="faint" />
-          <Select value={cwd} onChange={setCwd} options={projects.map((p) => ({ value: p, label: basename(p), hint: tildify(p, info?.home) }))} width={360} />
+          <Select label="Project" value={cwd} onChange={setCwd} options={projects.map((p) => ({ value: p, label: basename(p), hint: tildify(p, info?.home) }))} width={360} />
         </div>
         <div className="grow" />
         <button className="btn sm ghost" onClick={distill} disabled={busy} title="Write notes from the session that is open now">
@@ -129,7 +129,7 @@ export function MemoryPage() {
 
       {adding && (
         <div className="mem-add">
-          <textarea className="textarea" rows={2} autoFocus placeholder="One durable fact about this project — e.g. “Tests must run from the repo root; the fixtures use relative paths.”" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => (e.key === 'Enter' && (e.metaKey || e.ctrlKey) ? add() : e.key === 'Escape' ? setAdding(false) : null)} />
+          <textarea aria-label="New note" className="textarea" rows={2} autoFocus placeholder="One durable fact about this project — e.g. “Tests must run from the repo root; the fixtures use relative paths.”" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => (e.key === 'Enter' && (e.metaKey || e.ctrlKey) ? add() : e.key === 'Escape' ? setAdding(false) : null)} />
           <div className="row">
             <span className="hint">Ctrl+Enter saves</span>
             <div className="grow" />
@@ -200,12 +200,12 @@ function NoteRow({ n, now, onPatch, onRemove }: { n: MemoryNote; now: number; on
     <div className={`mem-note${n.pinned ? ' pinned' : ''}`}>
       {editing ? (
         <div className="mem-edit">
-          <textarea className="textarea" rows={2} autoFocus value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => (e.key === 'Enter' && (e.metaKey || e.ctrlKey) ? commit() : e.key === 'Escape' ? (setText(n.text), setEditing(false)) : null)} />
+          <textarea aria-label="Note" className="textarea" rows={2} autoFocus value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => (e.key === 'Enter' && (e.metaKey || e.ctrlKey) ? commit() : e.key === 'Escape' ? (setText(n.text), setEditing(false)) : null)} />
           <div className="row">
-            <button className="icon-btn sm" onClick={() => (setText(n.text), setEditing(false))} title="Cancel">
+            <button className="icon-btn sm" onClick={() => (setText(n.text), setEditing(false))} title="Cancel" aria-label="Cancel">
               <X size={13} />
             </button>
-            <button className="icon-btn sm" onClick={commit} title="Save (Ctrl+Enter)">
+            <button className="icon-btn sm" onClick={commit} title="Save (Ctrl+Enter)" aria-label="Save">
               <Check size={13} />
             </button>
           </div>
@@ -220,10 +220,10 @@ function NoteRow({ n, now, onPatch, onRemove }: { n: MemoryNote; now: number; on
           {n.kind === 'manual' ? 'You' : n.sessionTitle || 'A session'} · {timeAgo(n.at, now)}
         </span>
         <span className="grow" />
-        <button className="icon-btn sm" onClick={() => onPatch({ pinned: !n.pinned })} title={n.pinned ? 'Unpin' : 'Pin — never forgotten'}>
+        <button className="icon-btn sm" onClick={() => onPatch({ pinned: !n.pinned })} title={n.pinned ? 'Unpin' : 'Pin — never forgotten'} aria-label={n.pinned ? 'Unpin' : 'Pin — never forgotten'}>
           {n.pinned ? <PinOff size={12} /> : <Pin size={12} />}
         </button>
-        <button className="icon-btn sm" onClick={onRemove} title="Forget this note">
+        <button className="icon-btn sm" onClick={onRemove} title="Forget this note" aria-label="Forget this note">
           <Trash size={12} />
         </button>
       </div>

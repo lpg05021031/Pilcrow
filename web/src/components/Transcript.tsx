@@ -7,7 +7,7 @@ import { duration, tokens, cost, truncate, relPath } from '../lib/format';
 import { Markdown } from './Markdown';
 import { ToolCard, type ToolCtx } from './tools/ToolCard';
 import { PermissionCard } from './tools/Permission';
-import { useNow, CopyButton, WorkingMark } from './ui/bits';
+import { useNow, CopyButton, WorkingMark, onActivate } from './ui/bits';
 import { useSmoothText, useThrottled, useExitGhost } from '../lib/motion';
 import { Collapse } from './ui/Collapse';
 import { ErrorBoundary } from './ui/ErrorBoundary';
@@ -551,11 +551,11 @@ function UserMessage({ item, ctx }: { item: UserItem; ctx: ToolCtx }) {
       ) : (
         <div className="msg-actions">
           <CopyButton text={item.text} />
-          <button className="icon-btn sm" title="Edit and resend in a new branch of this conversation" onClick={edit}>
+          <button className="icon-btn sm" title="Edit and resend in a new branch of this conversation" aria-label="Edit and resend in a new branch of this conversation" onClick={edit}>
             <PencilLine size={13} />
           </button>
           {item.uuid && !busy && (
-            <button className="icon-btn sm" title="Restore files to how they were before this message" onClick={rewind}>
+            <button className="icon-btn sm" title="Restore files to how they were before this message" aria-label="Restore files to how they were before this message" onClick={rewind}>
               <History size={13} />
             </button>
           )}
@@ -834,7 +834,7 @@ function SessionCard({ id, glyph, verb, target, meta, openTip, onOpen, children 
   const foldable = Boolean(children);
   return (
     <div className={`tool session-card${open && foldable ? ' open' : ''}`} id={id}>
-      <div className="tool-head" role="button" tabIndex={0} onClick={() => foldable && setOpen(!open)} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && foldable && (e.preventDefault(), setOpen(!open))} aria-expanded={foldable ? open : undefined}>
+      <div className="tool-head" role="button" tabIndex={0} onClick={() => foldable && setOpen(!open)} onKeyDown={onActivate(() => foldable && setOpen(!open))} aria-expanded={foldable ? open : undefined}>
         <span className="tool-ico">{glyph}</span>
         <span className="tool-line">
           <span className="tool-verb">{verb}</span>
@@ -843,7 +843,7 @@ function SessionCard({ id, glyph, verb, target, meta, openTip, onOpen, children 
           {onOpen && (
             <button
               className="icon-btn sm tool-open"
-              title={openTip}
+              title={openTip} aria-label={openTip}
               onClick={(e) => {
                 e.stopPropagation();
                 onOpen();

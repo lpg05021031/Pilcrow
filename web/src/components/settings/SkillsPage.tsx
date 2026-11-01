@@ -5,7 +5,7 @@ import type { SkillInfo, SkillsList } from '../../lib/types';
 import { tildify, timeAgo } from '../../lib/format';
 import { MenuButton } from '../ui/Popover';
 import { Dialog } from '../ui/Dialog';
-import { Spinner, Seg } from '../ui/bits';
+import { Spinner, Seg, Field } from '../ui/bits';
 import { FolderPicker } from '../FolderPicker';
 import { errText } from '../../lib/format';
 
@@ -98,10 +98,10 @@ export function SkillsPage() {
       <div className="cust-bar">
         <label className="cust-search">
           <Search size={13} />
-          <input placeholder="Search skills" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input aria-label="Search skills" placeholder="Search skills" value={q} onChange={(e) => setQ(e.target.value)} />
         </label>
         <div className="grow" />
-        <button className="icon-btn sm" title="Reload skills in running sessions" onClick={reload}>
+        <button className="icon-btn sm" title="Reload skills in running sessions" aria-label="Reload skills in running sessions" onClick={reload}>
           {loading ? <Spinner size={13} /> : <RefreshCw size={13} />}
         </button>
         <MenuButton
@@ -165,6 +165,7 @@ export function SkillsPage() {
                 </span>
                 <MenuButton
                   className="icon-btn sm cust-more"
+                  title={`More for ${s.name}`}
                   placement="bottom-end"
                   items={[
                     { label: g.editable ? 'Edit SKILL.md' : 'Open SKILL.md', icon: Pencil, onSelect: () => edit(s) },
@@ -242,23 +243,29 @@ function NewSkillDialog({ scope, cwd, onClose, onCreated }: { scope: Scope; cwd:
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn primary" disabled={!slug || busy} onClick={submit}>
+          <button className="btn primary" disabled={!slug || busy} onClick={submit} aria-label="Create and edit">
             {busy ? <Spinner size={13} /> : 'Create and edit'}
           </button>
         </>
       }
     >
       <div className="cust-form">
-        <div className="field">
-          <label>Name</label>
-          <input className="input" autoFocus placeholder="release-checklist" value={name} onChange={(e) => setName(e.target.value)} />
-          {slug && slug !== name.trim() && <div className="hint mono">Saved as {slug}</div>}
-        </div>
-        <div className="field">
-          <label>When should Claude use it?</label>
-          <textarea className="textarea" rows={3} placeholder="Use when preparing a release: bump the version, update the changelog and tag the commit." value={desc} onChange={(e) => setDesc(e.target.value)} />
-          <div className="hint">This sentence is what Claude reads to decide whether to open the skill. Be specific.</div>
-        </div>
+        <Field label="Name">
+          {(id) => (
+            <>
+              <input id={id} className="input" autoFocus placeholder="release-checklist" value={name} onChange={(e) => setName(e.target.value)} />
+              {slug && slug !== name.trim() && <div className="hint mono">Saved as {slug}</div>}
+            </>
+          )}
+        </Field>
+        <Field label="When should Claude use it?">
+          {(id) => (
+            <>
+              <textarea id={id} className="textarea" rows={3} placeholder="Use when preparing a release: bump the version, update the changelog and tag the commit." value={desc} onChange={(e) => setDesc(e.target.value)} />
+              <div className="hint">This sentence is what Claude reads to decide whether to open the skill. Be specific.</div>
+            </>
+          )}
+        </Field>
       </div>
     </Dialog>
   );
@@ -300,7 +307,7 @@ function ImportSkillDialog({ scope: initial, cwd, hasProject, onClose, onDone }:
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn primary" disabled={!from.trim() || busy} onClick={submit}>
+          <button className="btn primary" disabled={!from.trim() || busy} onClick={submit} aria-label="Import">
             {busy ? <Spinner size={13} /> : 'Import'}
           </button>
         </>

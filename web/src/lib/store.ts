@@ -505,7 +505,7 @@ export function initApp() {
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
 }
 
-const PANEL_TABS: PanelTab[] = ['changes', 'files', 'terminal', 'preview', 'tasks', 'history', 'info'];
+export const PANEL_TABS: PanelTab[] = ['changes', 'files', 'terminal', 'preview', 'tasks', 'history', 'info'];
 
 /** The saved window layout, taken field by field: the file on disk is loose JSON that an older version may have written. */
 function applyConfigUi(config: Config) {

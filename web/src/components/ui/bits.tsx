@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { LoaderCircle, Copy, Check } from 'lucide-react';
 import type { SessionStatus } from '../../lib/types';
 import { tokens } from '../../lib/format';
@@ -83,6 +83,22 @@ export function Seg<T extends string>({ value, options, onChange, size, classNam
           {o.label}
         </button>
       ))}
+    </div>
+  );
+}
+
+/**
+ * A labelled form row: the label names the control that takes the `id` it is handed (a <Select> also
+ * keeps its current value in its name). Rows with several controls name each one with aria-label.
+ */
+export function Field({ label, children, style }: { label: ReactNode; children: (id: string) => ReactNode; style?: CSSProperties }) {
+  const id = useId();
+  return (
+    <div className="field" style={style}>
+      <label htmlFor={id} id={`${id}-label`}>
+        {label}
+      </label>
+      {children(id)}
     </div>
   );
 }
@@ -239,6 +255,16 @@ export function useEscape(onEscape: () => void, active = true) {
   }, [active]);
 }
 
+/** Keyboard activation for a card that is a role="button": Enter or Space on the card itself, not on a control inside it. */
+export function onActivate(run: () => void) {
+  return (e: React.KeyboardEvent) => {
+    if ((e.key !== 'Enter' && e.key !== ' ') || e.target !== e.currentTarget) return;
+    e.preventDefault();
+    e.stopPropagation();
+    run();
+  };
+}
+
 /** Focus an element unless the user is busy elsewhere (a dialog, the palette, another text field). */
 export function focusIfFree(el: HTMLElement | null | undefined) {
   if (!el) return;
@@ -277,7 +303,7 @@ export function CopyButton({ text, title = 'Copy', size = 13 }: { text: string; 
   return (
     <button
       className={`icon-btn sm copy-btn${done ? ' done' : ''}`}
-      title={done ? 'Copied' : title}
+      title={done ? 'Copied' : title} aria-label={done ? 'Copied' : title}
       onClick={() =>
         copyText(text).then(
           () => {

@@ -107,7 +107,7 @@ export function Sidebar() {
         </div>
         <label className="side-search">
           <Search size={15} />
-          <input placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && setQ('')} />
+          <input aria-label="Search sessions" placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Escape' && setQ('')} />
           {q && (
             <button onClick={() => setQ('')} aria-label="Clear search">
               <X size={12} />
@@ -156,7 +156,7 @@ export function Sidebar() {
                   <span className="ellipsis">{g.label}</span>
                   <ChevronRight size={12} className={`side-group-chev${isCollapsed ? '' : ' rot'}`} />
                 </button>
-                <button className="icon-btn sm side-group-add" title={`New session in ${g.label} · Shift+click for options`} onClick={(e) => (e.shiftKey || e.altKey ? setDialog('newSession', { cwd: g.path }) : quickNewSession(g.path))}>
+                <button className="icon-btn sm side-group-add" title={`New session in ${g.label} · Shift+click for options`} aria-label={`New session in ${g.label} · Shift+click for options`} onClick={(e) => (e.shiftKey || e.altKey ? setDialog('newSession', { cwd: g.path }) : quickNewSession(g.path))}>
                   <Plus size={13} />
                 </button>
               </div>
@@ -185,10 +185,10 @@ export function Sidebar() {
           <span>Settings</span>
         </button>
         <div className="grow" />
-        <button className={`icon-btn${ui.showArchived ? ' active' : ''}`} title={ui.showArchived ? 'Back to active sessions' : `Archived sessions (${archivedCount})`} onClick={() => setUi({ showArchived: !ui.showArchived })}>
+        <button className={`icon-btn${ui.showArchived ? ' active' : ''}`} title={ui.showArchived ? 'Back to active sessions' : `Archived sessions (${archivedCount})`} aria-label={ui.showArchived ? 'Back to active sessions' : `Archived sessions (${archivedCount})`} onClick={() => setUi({ showArchived: !ui.showArchived })}>
           <Archive size={15} />
         </button>
-        <button className="icon-btn" title={`Appearance: ${theme} — click for ${nextTheme}`} onClick={(e) => setTheme(nextTheme, { x: e.clientX, y: e.clientY })}>
+        <button className="icon-btn" title={`Appearance: ${theme} — click for ${nextTheme}`} aria-label={`Appearance: ${theme} — click for ${nextTheme}`} onClick={(e) => setTheme(nextTheme, { x: e.clientX, y: e.clientY })}>
           <ThemeIcon size={15} />
         </button>
       </div>
@@ -247,7 +247,7 @@ const Row = memo(function Row({ s, active, unread, now, showProject, q, indent }
       <button className="side-row-main" onClick={() => openSession(s.id)}>
         <span className="side-row-text">
           {renaming ? (
-            <input
+            <input aria-label="Session title"
               className="input side-rename"
               autoFocus
               value={title}

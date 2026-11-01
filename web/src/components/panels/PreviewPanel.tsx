@@ -56,15 +56,15 @@ export function PreviewPanel({ session }: { session: SessionSummary }) {
             go(draft);
           }}
         >
-          <input className="input mono" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="http://localhost:3000" spellCheck={false} />
-          <button className="icon-btn sm" type="submit" title="Open">
+          <input aria-label="Address" className="input mono" value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="http://localhost:3000" spellCheck={false} />
+          <button className="icon-btn sm" type="submit" title="Open" aria-label="Open">
             <ArrowRight size={14} />
           </button>
         </form>
-        <button className="icon-btn sm" title="Reload" disabled={!url} onClick={() => setNonce((n) => n + 1)}>
+        <button className="icon-btn sm" title="Reload" aria-label="Reload" disabled={!url} onClick={() => setNonce((n) => n + 1)}>
           <RotateCw size={13} />
         </button>
-        <button className="icon-btn sm" title="Open in your browser" disabled={!url} onClick={() => call('shell.openExternal', { url })}>
+        <button className="icon-btn sm" title="Open in your browser" aria-label="Open in your browser" disabled={!url} onClick={() => call('shell.openExternal', { url })}>
           <ExternalLink size={13} />
         </button>
       </div>

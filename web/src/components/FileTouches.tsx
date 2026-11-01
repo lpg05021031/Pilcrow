@@ -70,7 +70,7 @@ export function FileTouches({ touches, compact = false }: { touches: FileTouch[]
       <button
         ref={ref}
         className={`touches${open ? ' on' : ''}`}
-        title={`Changed in ${plural(n, 'session')}`}
+        title={`Changed in ${plural(n, 'session')}`} aria-label={`Changed in ${plural(n, 'session')}`}
         onClick={(e) => {
           e.stopPropagation();
           setOpen(!open);

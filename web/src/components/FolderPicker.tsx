@@ -45,7 +45,7 @@ export function FolderPicker({ value, onPick }: { value: string; onPick: (dir: s
     <div className="fpick">
       <label className="fpick-search">
         <Search size={13} />
-        <input autoFocus placeholder="Recent folders, or type a path" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && q.trim().startsWith('/') && onPick(q.trim())} spellCheck={false} />
+        <input aria-label="Folder" autoFocus placeholder="Recent folders, or type a path" value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && q.trim().startsWith('/') && onPick(q.trim())} spellCheck={false} />
       </label>
       {!browsing && (
         <div className="fpick-list">
@@ -69,10 +69,10 @@ export function FolderPicker({ value, onPick }: { value: string; onPick: (dir: s
       {browsing && browse && (
         <div className="browser fpick-browser">
           <div className="browser-head">
-            <button className="icon-btn sm" title="Home" onClick={() => nav(info?.home || '/')}>
+            <button className="icon-btn sm" title="Home" aria-label="Home" onClick={() => nav(info?.home || '/')}>
               <Home size={13} />
             </button>
-            <button className="icon-btn sm" title="Up one level" disabled={!browse.parent} onClick={() => browse.parent && nav(browse.parent)}>
+            <button className="icon-btn sm" title="Up one level" aria-label="Up one level" disabled={!browse.parent} onClick={() => browse.parent && nav(browse.parent)}>
               <CornerLeftUp size={13} />
             </button>
             <span className="mono ellipsis grow">{browse.display}</span>

@@ -3,7 +3,7 @@ import { ArrowUpRight, Bot, Brain, Wrench, MessageSquareQuote, Workflow, PanelLe
 import { useStore, call, openSession, respond, setUi, mergeLive } from '../lib/store';
 import type { PermissionRequest, SessionState, SessionSummary, TaskInfo } from '../lib/types';
 import { basename, cost, duration, timeAgo, relPath, plural } from '../lib/format';
-import { ContextRing, Spinner, useNow, Num, WorkingMark, Mark, useWindowKey } from './ui/bits';
+import { ContextRing, Spinner, useNow, Num, WorkingMark, Mark, useWindowKey, onActivate } from './ui/bits';
 import { suggestionLabel, typingElsewhere } from './tools/Permission';
 import { workflowCounts } from '../lib/workflow';
 import { str } from '../lib/tools';
@@ -236,7 +236,7 @@ function WorkingCard({ s, st, focused, now, hot, index }: { s: SessionSummary; s
   const u = st?.usage;
   const stale = st?.lastActivity ? now - st.lastActivity > 45_000 : false;
   return (
-    <article className={`ovc busy${focused ? ' focused' : ''}${stale ? ' stale' : ''}`} data-card={s.id} onClick={() => openSession(s.id)} role="button" tabIndex={0} style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}>
+    <article className={`ovc busy${focused ? ' focused' : ''}${stale ? ' stale' : ''}`} data-card={s.id} onClick={() => openSession(s.id)} onKeyDown={onActivate(() => openSession(s.id))} role="button" tabIndex={0} style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}>
       <div className="ovc-row">
         <CardHead s={s} st={st} />
         <span className="ovc-live" title={stale ? 'Quiet for a while' : 'Working'}>
@@ -335,7 +335,7 @@ function NeedsCard({ s, st, first, focused, now }: { s: SessionSummary; st?: Par
       <div className="ovc-row">
         <CardHead s={s} st={st} />
         <span className="ovc-wait tnum">{perm ? `waiting ${duration(now - perm.at)}` : ''}</span>
-        <button className="icon-btn sm" title="Open the session" onClick={() => openSession(s.id)}>
+        <button className="icon-btn sm" title="Open the session" aria-label="Open the session" onClick={() => openSession(s.id)}>
           <ArrowUpRight size={14} />
         </button>
       </div>

@@ -1,6 +1,6 @@
 // The keyboard shortcuts, in one table: the window's key handler (App) runs the ones with `run`, the
 // command palette shows their keys, and the Keyboard shortcuts sheet lists every entry in this order.
-import { useStore, setUi, setDialog, openSession, interrupt, native, quickNewSession, cycleView, showPage, showDispatch, openFind, toasted, quitApp, type PanelTab } from './store';
+import { useStore, setUi, setDialog, openSession, interrupt, native, quickNewSession, cycleView, showPage, showDispatch, openFind, toasted, quitApp, PANEL_TABS } from './store';
 
 export interface Shortcut {
   /** As shown: modifiers first, then the key ("Ctrl+Shift+N"). Ctrl also means ⌘ on a Mac. */
@@ -14,7 +14,6 @@ export interface Shortcut {
   when?: (e: KeyboardEvent) => boolean;
 }
 
-export const PANEL_TABS: PanelTab[] = ['changes', 'files', 'terminal', 'preview', 'tasks', 'history', 'info'];
 const st = () => useStore.getState();
 const inSession = () => Boolean(st().activeId);
 const typing = (e: KeyboardEvent) => {

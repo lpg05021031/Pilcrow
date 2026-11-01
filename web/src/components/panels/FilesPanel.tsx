@@ -140,14 +140,14 @@ export function FilesPanel({ session, cwd, visible }: { session: SessionSummary;
   return (
     <div className="files">
       <div className="panel-toolbar">
-        <button className={`icon-btn sm${st.showTree ? ' active' : ''}`} title="Toggle file tree" onClick={() => update((s) => ({ ...s, showTree: !s.showTree }))}>
+        <button className={`icon-btn sm${st.showTree ? ' active' : ''}`} title="Toggle file tree" aria-label="Toggle file tree" onClick={() => update((s) => ({ ...s, showTree: !s.showTree }))}>
           <PanelLeft size={14} />
         </button>
         <span className="mono faint ellipsis grow" title={cwd}>
           {active ? relPath(active.path, cwd) : basename(cwd)}
         </span>
         {active && (
-          <button className="icon-btn sm" title="Mention this file in the message" onClick={() => insertIntoComposer(session.id, `@${relPath(active.path, cwd)} `)}>
+          <button className="icon-btn sm" title="Mention this file in the message" aria-label="Mention this file in the message" onClick={() => insertIntoComposer(session.id, `@${relPath(active.path, cwd)} `)}>
             <AtSign size={13} />
           </button>
         )}
@@ -166,16 +166,16 @@ export function FilesPanel({ session, cwd, visible }: { session: SessionSummary;
           />
         )}
         {active && !active.binary && (
-          <button className="icon-btn sm" title="Save (Ctrl+S)" disabled={active.doc === active.saved} onClick={() => save(active)}>
+          <button className="icon-btn sm" title="Save (Ctrl+S)" aria-label="Save" disabled={active.doc === active.saved} onClick={() => save(active)}>
             <Save size={14} />
           </button>
         )}
-        <button className="icon-btn sm" title={st.showHidden ? 'Hide dotfiles' : 'Show dotfiles'} onClick={() => update((s) => ({ ...s, showHidden: !s.showHidden }))}>
+        <button className="icon-btn sm" title={st.showHidden ? 'Hide dotfiles' : 'Show dotfiles'} aria-label={st.showHidden ? 'Hide dotfiles' : 'Show dotfiles'} onClick={() => update((s) => ({ ...s, showHidden: !s.showHidden }))}>
           {st.showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
         </button>
         <button
           className="icon-btn sm"
-          title="Refresh"
+          title="Refresh" aria-label="Refresh"
           onClick={() => {
             dirCache.clear();
             setTreeNonce((n) => n + 1);
@@ -373,10 +373,10 @@ function HtmlPreview({ path, saved, dirty, onSave }: { path: string; saved: stri
             <Save size={11} /> Save to refresh
           </button>
         )}
-        <button className="icon-btn sm" title="Reload" onClick={() => setNonce((n) => n + 1)}>
+        <button className="icon-btn sm" title="Reload" aria-label="Reload" onClick={() => setNonce((n) => n + 1)}>
           <RotateCw size={12} />
         </button>
-        <button className="icon-btn sm" title="Open in your browser" onClick={() => call('shell.openPath', { path })}>
+        <button className="icon-btn sm" title="Open in your browser" aria-label="Open in your browser" onClick={() => call('shell.openPath', { path })}>
           <ExternalLink size={12} />
         </button>
       </div>

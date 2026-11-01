@@ -116,7 +116,7 @@ export function TerminalPanel({ session, cwd, visible }: { session: SessionSumma
             </button>
           </div>
         ))}
-        <button className="icon-btn sm" title="New terminal" onClick={create}>
+        <button className="icon-btn sm" title="New terminal" aria-label="New terminal" onClick={create}>
           <Plus size={14} />
         </button>
       </div>

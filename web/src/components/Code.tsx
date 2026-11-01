@@ -283,10 +283,10 @@ export const DiffView = memo(function DiffView({
         ) : (
           <div className="diff-comment">
             <span className="grow">{existing}</span>
-            <button className="icon-btn sm" title="Edit comment" onClick={() => setEditing(key)}>
+            <button className="icon-btn sm" title="Edit comment" aria-label="Edit comment" onClick={() => setEditing(key)}>
               <MessageSquarePlus size={13} />
             </button>
-            <button className="icon-btn sm" title="Delete comment" onClick={() => onComment?.(key, null, l)}>
+            <button className="icon-btn sm" title="Delete comment" aria-label="Delete comment" onClick={() => onComment?.(key, null, l)}>
               <Trash size={13} />
             </button>
           </div>
@@ -297,7 +297,7 @@ export const DiffView = memo(function DiffView({
 
   const gutterBtn = (l: DiffLine) =>
     onComment ? (
-      <button className="diff-add-comment" title="Comment on this line" onClick={() => setEditing(keyOf(l))}>
+      <button className="diff-add-comment" title="Comment on this line" aria-label="Comment on this line" onClick={() => setEditing(keyOf(l))}>
         <MessageSquarePlus size={12} />
       </button>
     ) : null;
@@ -374,7 +374,7 @@ function CommentEditor({ initial, onSave, onCancel }: { initial: string; onSave:
   const [text, setText] = useState(initial);
   return (
     <div className="comment-editor">
-      <textarea
+      <textarea aria-label="Note for Claude about this line"
         className="textarea"
         autoFocus
         rows={2}

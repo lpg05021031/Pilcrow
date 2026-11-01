@@ -151,7 +151,7 @@ export function ChangesPanel({ session, cwd }: { session: SessionSummary; cwd: s
     <div className="changes" ref={box}>
       <div className="panel-toolbar changes-bar">
         {session.worktree ? (
-          <Select
+          <Select label="Compare with"
             className="ghost-select"
             value={base}
             onChange={setBase}
@@ -205,14 +205,14 @@ export function ChangesPanel({ session, cwd }: { session: SessionSummary; cwd: s
             { value: 'split', label: <Columns2 size={13} />, title: narrow ? 'Side by side (widen the panel to use it)' : 'Side by side', disabled: narrow },
           ]}
         />
-        <button className="icon-btn sm" title="Refresh" onClick={load}>
+        <button className="icon-btn sm" title="Refresh" aria-label="Refresh" onClick={load}>
           {loading ? <Spinner size={13} /> : <RefreshCw size={13} />}
         </button>
       </div>
 
       {commitOpen && (
         <div className="commit-box">
-          <textarea className="textarea" rows={3} autoFocus placeholder="Commit message" value={message} onChange={(e) => setMessage(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.metaKey || e.ctrlKey) && commit()} />
+          <textarea aria-label="Commit message" className="textarea" rows={3} autoFocus placeholder="Commit message" value={message} onChange={(e) => setMessage(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.metaKey || e.ctrlKey) && commit()} />
           <div className="row">
             <button className="btn sm ghost" onClick={() => sendMessage(session.id, { text: 'Commit the current changes with a clear, conventional commit message. Do not push.' }).then(() => setCommitOpen(false))}>
               Let Claude write it
@@ -252,10 +252,10 @@ export function ChangesPanel({ session, cwd }: { session: SessionSummary; cwd: s
                 )}
                 <span className={`num-add${f.additions ? '' : ' zero'}`}>+{f.additions}</span>
                 <span className={`num-del${f.deletions ? '' : ' zero'}`}>−{f.deletions}</span>
-                <button className="icon-btn sm" title="Open file" onClick={() => openFile(`${data!.root}/${f.path}`)}>
+                <button className="icon-btn sm" title="Open file" aria-label="Open file" onClick={() => openFile(`${data!.root}/${f.path}`)}>
                   <FileText size={13} />
                 </button>
-                <button className="icon-btn sm" title={f.untracked ? 'Delete new file' : 'Discard changes'} onClick={() => discard(f)}>
+                <button className="icon-btn sm" title={f.untracked ? 'Delete new file' : 'Discard changes'} aria-label={f.untracked ? 'Delete new file' : 'Discard changes'} onClick={() => discard(f)}>
                   <Undo2 size={13} />
                 </button>
               </div>

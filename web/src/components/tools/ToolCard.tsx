@@ -7,7 +7,7 @@ import type { PermissionRequest } from '../../lib/types';
 import { toolMeta, isFileTool, filePathOf } from '../../lib/tools';
 import { duration, relPath, plural, truncate } from '../../lib/format';
 import { openFile, setDialog, call, toast, useStore, openLightbox } from '../../lib/store';
-import { Spinner, CopyButton } from '../ui/bits';
+import { Spinner, CopyButton, onActivate } from '../ui/bits';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { CodeView, DiffView, AnsiText, hunksFromPatch } from '../Code';
 import { Markdown } from '../Markdown';
@@ -107,7 +107,7 @@ export const ToolCard = memo(function ToolCard({ item, ctx }: { item: ToolItem; 
 
   return (
     <div className={`tool ${item.status}${isOpen ? ' open' : ''}${perm ? ' awaiting' : ''}`} data-tool={item.name} id={`tool-${item.id}`}>
-      <div className="tool-head" role="button" tabIndex={0} onClick={() => setOpen(!isOpen)} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), setOpen(!isOpen))} aria-expanded={isOpen}>
+      <div className="tool-head" role="button" tabIndex={0} onClick={() => setOpen(!isOpen)} onKeyDown={onActivate(() => setOpen(!isOpen))} aria-expanded={isOpen}>
         <span className="tool-ico">
           <span key={perm ? 'wait' : item.status} className="tool-ico-swap">
             <StatusIcon item={item} waiting={!!perm} />
@@ -120,7 +120,7 @@ export const ToolCard = memo(function ToolCard({ item, ctx }: { item: ToolItem; 
           {file && (
             <button
               className="icon-btn sm tool-open"
-              title="Open in Files"
+              title="Open in Files" aria-label="Open in Files"
               onClick={(e) => {
                 e.stopPropagation();
                 openFile(file);

@@ -124,7 +124,7 @@ export function McpAuthDialog() {
                 : 'When the provider sends you back, Claude Code finishes the sign-in. If the browser ends on a page it cannot open, paste that page’s address below.'}
             </div>
             <div className="mcp-auth-paste">
-              <input className="input mono" placeholder="http://localhost:…/callback?code=…" value={pasted} onChange={(e) => setPasted(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submitPasted()} />
+              <input aria-label="Address the browser ended on" className="input mono" placeholder="http://localhost:…/callback?code=…" value={pasted} onChange={(e) => setPasted(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submitPasted()} />
               <button className="btn sm" disabled={!pasted.trim() || busy} onClick={submitPasted}>
                 {busy ? <Spinner size={12} /> : <ClipboardPaste size={13} />} Use
               </button>

@@ -155,7 +155,7 @@ export function HistoryPanel({ session, cwd }: { session: SessionSummary; cwd: s
             {list.map((s, i) => (
               <StepRow key={s.n} step={s} sessionId={id} cwd={cwd} selected={sel === s.n} isLast={i === list.length - 1} onPick={() => pick(sel === s.n ? null : s.n)} />
             ))}
-            <div className={`tl-row tl-now${sel === null ? ' on' : ''}`} onClick={() => pick(null)} role="button">
+            <button className={`tl-row tl-now${sel === null ? ' on' : ''}`} onClick={() => pick(null)}>
               <span className="tl-rail" aria-hidden="true">
                 <Mark size={14} className="tl-now-mark" />
               </span>
@@ -163,7 +163,7 @@ export function HistoryPanel({ session, cwd }: { session: SessionSummary; cwd: s
                 <span className="tl-title">Now</span>
                 <span className="tl-sub">{rt?.status === 'running' || rt?.status === 'requires_action' ? 'Claude is working — new steps appear as they happen' : 'The folder as it is right now'}</span>
               </span>
-            </div>
+            </button>
           </div>
           {selected && <SinceBar step={selected} sessionId={id} />}
         </>
@@ -266,8 +266,8 @@ function Scrubber({ steps, sel, onPick, now }: { steps: TimelineStep[]; sel: num
 
 function StepRow({ step, sessionId, cwd, selected, isLast, onPick }: { step: TimelineStep; sessionId: string; cwd: string; selected: boolean; isLast: boolean; onPick: () => void }) {
   const sub = step.kind === 'tool' ? step.tool : step.kind === 'external' ? plural(step.files.length, 'file') + ' changed between turns' : step.kind === 'message' ? 'You' : step.kind === 'start' ? 'Claude Code' : 'Timeline';
-  const jump = async (e: React.MouseEvent) => {
-    e.stopPropagation();
+  const jump = async (e?: React.MouseEvent) => {
+    e?.stopPropagation();
     const el = step.toolUseId ? await revealItem(sessionId, `tool-${step.toolUseId}`, step.toolUseId) : step.uuid ? await revealItem(sessionId, `msg-${step.uuid}`, step.uuid) : null;
     if (!el) return toast('That step is not in the conversation view.', 'info');
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -297,17 +297,18 @@ function StepRow({ step, sessionId, cwd, selected, isLast, onPick }: { step: Tim
           <span className="tl-stat faint">—</span>
         )}
         {(step.toolUseId || step.uuid) && (
-          <span className="icon-btn sm tl-jump" title="Show in the conversation" onClick={jump} role="button">
+          // A shortcut for the pointer; the keyboard has the same action in the step's details.
+          <span className="icon-btn sm tl-jump" title="Show in the conversation" onClick={jump} aria-hidden="true">
             <ArrowUpRight size={13} />
           </span>
         )}
       </button>
-      <Collapse open={selected}>{() => <StepDetail step={step} sessionId={sessionId} cwd={cwd} />}</Collapse>
+      <Collapse open={selected}>{() => <StepDetail step={step} sessionId={sessionId} cwd={cwd} onJump={step.toolUseId || step.uuid ? () => jump() : undefined} />}</Collapse>
     </div>
   );
 }
 
-function StepDetail({ step, sessionId, cwd }: { step: TimelineStep; sessionId: string; cwd: string }) {
+function StepDetail({ step, sessionId, cwd, onJump }: { step: TimelineStep; sessionId: string; cwd: string; onJump?: () => void }) {
   const [files, setFiles] = useState<DiffFile[] | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>({});
   useEffect(() => {
@@ -336,6 +337,7 @@ function StepDetail({ step, sessionId, cwd }: { step: TimelineStep; sessionId: s
     return (
       <div className="tl-detail">
         <div className="tl-note faint">{step.kind === 'message' ? 'Nothing had changed on disk when this message went out.' : step.kind === 'start' ? 'This is where the timeline begins.' : 'No files changed in this step.'}</div>
+        {onJump && <JumpButton onJump={onJump} />}
         <RestoreAll step={step} sessionId={sessionId} />
       </div>
     );
@@ -343,6 +345,7 @@ function StepDetail({ step, sessionId, cwd }: { step: TimelineStep; sessionId: s
     <div className="tl-detail">
       <div className="tl-detail-head">
         <span className="tool-label">Changed in this step</span>
+        {onJump && <JumpButton onJump={onJump} />}
         <RestoreAll step={step} sessionId={sessionId} />
       </div>
       {!files && (
@@ -363,10 +366,10 @@ function StepDetail({ step, sessionId, cwd }: { step: TimelineStep; sessionId: s
               </button>
               <span className={`num-add${f.additions ? '' : ' zero'}`}>+{f.additions}</span>
               <span className={`num-del${f.deletions ? '' : ' zero'}`}>−{f.deletions}</span>
-              <button className="icon-btn sm" title="Open the file as it is now" onClick={() => openFile(`${cwd}/${f.path}`)}>
+              <button className="icon-btn sm" title="Open the file as it is now" aria-label="Open the file as it is now" onClick={() => openFile(`${cwd}/${f.path}`)}>
                 <ArrowUpRight size={13} />
               </button>
-              <button className="icon-btn sm" title="Put this file back to how it was after this step" onClick={() => restoreFile(f.path)}>
+              <button className="icon-btn sm" title="Put this file back to how it was after this step" aria-label="Put this file back to how it was after this step" onClick={() => restoreFile(f.path)}>
                 <Undo2 size={13} />
               </button>
             </div>
@@ -381,6 +384,14 @@ function StepDetail({ step, sessionId, cwd }: { step: TimelineStep; sessionId: s
         );
       })}
     </div>
+  );
+}
+
+function JumpButton({ onJump }: { onJump: () => void }) {
+  return (
+    <button className="btn xs ghost" onClick={onJump}>
+      <ArrowUpRight size={12} aria-hidden="true" /> Show in the conversation
+    </button>
   );
 }
 

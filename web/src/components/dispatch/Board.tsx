@@ -3,7 +3,7 @@ import { Plus, PanelLeftOpen, Play } from 'lucide-react';
 import { useStore, call, openSession, respond, setUi, showDispatch, openJob, runsOf, runsIn } from '../../lib/store';
 import type { DispatchJob } from '../../lib/types';
 import { cost, duration, plural } from '../../lib/format';
-import { Mark, useNow } from '../ui/bits';
+import { Mark, useNow, onActivate } from '../ui/bits';
 import { SegmentBar, askedBy, countsText, elapsedText, groupRequests, jobCostText, jobStateText, type RequestGroup } from './common';
 
 /**
@@ -164,7 +164,7 @@ function JobCard({ job, now, detail }: { job: DispatchJob; now: number; detail: 
   const myRuns = useStore((s) => s.jobRuns[job.id]);
   const groups = detail ? groupRequests(runsIn(myRuns)).slice(0, 4) : [];
   return (
-    <article className={`ovc dp-card${detail ? ' needs' : ''}`} data-card={job.id} onClick={() => openJob(job.id)} role="button" tabIndex={0}>
+    <article className={`ovc dp-card${detail ? ' needs' : ''}`} data-card={job.id} onClick={() => openJob(job.id)} onKeyDown={onActivate(() => openJob(job.id))} role="button" tabIndex={0}>
       {detail && <span className="ovc-rail" aria-hidden="true" />}
       <div className="dp-line">
         <span className="dp-name ellipsis">{job.name || 'Untitled job'}</span>

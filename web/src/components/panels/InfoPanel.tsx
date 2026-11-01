@@ -139,7 +139,7 @@ export function InfoPanel({ session, cwd }: { session: SessionSummary; cwd: stri
           <span>Session ID</span>
           <span className="mono row">
             <span className="ellipsis">{session.id.slice(0, 13)}…</span>
-            <button className="icon-btn sm" onClick={() => copyText(session.id).then(() => toast('Copied', 'success'), () => toast('Could not copy to the clipboard', 'error'))} title="Copy session ID">
+            <button className="icon-btn sm" onClick={() => copyText(session.id).then(() => toast('Copied', 'success'), () => toast('Could not copy to the clipboard', 'error'))} title="Copy session ID" aria-label="Copy session ID">
               <Copy size={12} />
             </button>
           </span>
@@ -186,7 +186,7 @@ export function InfoPanel({ session, cwd }: { session: SessionSummary; cwd: stri
             Manage
           </button>
           {rt?.live && (
-            <button className="icon-btn sm" title="Refresh" onClick={refreshMcp}>
+            <button className="icon-btn sm" title="Refresh" aria-label="Refresh" onClick={refreshMcp}>
               {loading === 'mcp' ? <Spinner size={12} /> : <RefreshCw size={12} />}
             </button>
           )}

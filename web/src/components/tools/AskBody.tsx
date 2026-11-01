@@ -127,7 +127,7 @@ export function AskBody({ item, perm, ctx }: { item: ToolItem; perm?: Permission
                 })}
                 <label className={`ask-opt ask-other${(other[qi] || '').trim() ? ' on' : ''}`}>
                   <span className={`ask-mark${q.multiSelect ? ' box' : ''}`}>{(other[qi] || '').trim() && <Check size={11} strokeWidth={3} />}</span>
-                  <input
+                  <input aria-label="Something else"
                     placeholder="Something else…"
                     value={other[qi] || ''}
                     onChange={(e) => {
@@ -140,7 +140,7 @@ export function AskBody({ item, perm, ctx }: { item: ToolItem; perm?: Permission
                 </label>
               </div>
               {noteOpen[qi] ? (
-                <input className="input ask-notes" autoFocus placeholder="A note for Claude about this answer" value={notes[qi] || ''} onChange={(e) => setNotes((s) => ({ ...s, [qi]: e.target.value }))} />
+                <input aria-label="Note for Claude about this answer" className="input ask-notes" autoFocus placeholder="A note for Claude about this answer" value={notes[qi] || ''} onChange={(e) => setNotes((s) => ({ ...s, [qi]: e.target.value }))} />
               ) : (
                 <button className="link ask-note-link" onClick={() => setNoteOpen((s) => ({ ...s, [qi]: true }))}>
                   Add a note

@@ -209,7 +209,7 @@ function RepoRow({ e, all, home }: { e: RepoEntry; all: RepoEntry[]; home?: stri
   return (
     <div className={`rp-row${e.missing ? ' missing' : ''}`}>
       <div className="rp-head">
-        <button className="icon-btn sm" title={open ? 'Hide the rest of the entry' : 'Show the rest of the entry'} onClick={() => setOpen(!open)}>
+        <button className="icon-btn sm" title={open ? 'Hide the rest of the entry' : 'Show the rest of the entry'} aria-label={open ? 'Hide the rest of the entry' : 'Show the rest of the entry'} onClick={() => setOpen(!open)}>
           {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </button>
         {renaming ? (
@@ -229,13 +229,13 @@ function RepoRow({ e, all, home }: { e: RepoEntry; all: RepoEntry[]; home?: stri
           </button>
         )}
         <Seg<RepoPolicy> size="sm" value={e.policy || 'ask'} options={POLICIES} label={`Policy for ${e.name}`} onChange={(v) => save(e.id, { policy: v }).catch(() => {})} />
-        <button className="icon-btn sm" title="Remove from the registry" onClick={remove}>
+        <button className="icon-btn sm" title="Remove from the registry" aria-label="Remove from the registry" onClick={remove}>
           <Trash size={13} />
         </button>
       </div>
       <div className="rp-aliases">
         {(e.aliases || []).map((a) => (
-          <button key={a} className="chip tiny rp-alias" title={`Remove “${a}”`} onClick={() => save(e.id, { aliases: (e.aliases || []).filter((x) => x !== a) }).catch(() => {})}>
+          <button key={a} className="chip tiny rp-alias" title={`Remove “${a}”`} aria-label={`Remove “${a}”`} onClick={() => save(e.id, { aliases: (e.aliases || []).filter((x) => x !== a) }).catch(() => {})}>
             {a} <X size={10} />
           </button>
         ))}
@@ -250,25 +250,25 @@ function RepoRow({ e, all, home }: { e: RepoEntry; all: RepoEntry[]; home?: stri
       {open && (
         <div className="rp-detail">
           <Field label="About" hint="Read by the lead when it decides where a task belongs.">
-            <input className="input" value={draft.about} placeholder="One line: what it is, what it talks to" onChange={(ev) => setDraft({ ...draft, about: ev.target.value })} onBlur={() => draft.about.trim() !== (e.about || '') && save(e.id, { about: draft.about.trim() }).catch(() => {})} />
+            <input aria-label="About" className="input" value={draft.about} placeholder="One line: what it is, what it talks to" onChange={(ev) => setDraft({ ...draft, about: ev.target.value })} onBlur={() => draft.about.trim() !== (e.about || '') && save(e.id, { about: draft.about.trim() }).catch(() => {})} />
           </Field>
           <Field label="Mode" hint="How a helper or a run here may act, unless the lead or the job says otherwise.">
-            <Select value={d.mode || ''} options={MODES} onChange={(v) => setDefault('mode', v)} />
+            <Select label="Mode" value={d.mode || ''} options={MODES} onChange={(v) => setDefault('mode', v)} />
           </Field>
           <Field label="Worktree" hint="Work on a branch in a worktree of its own, never in the checkout you use.">
             <Switch on={d.worktree !== false} onChange={(v) => setDefault('worktree', v)} label={`Worktree for ${e.name}`} />
           </Field>
           <Field label="Base branch" hint="What a worktree starts from.">
-            <input className="input" value={draft.base} placeholder="the checkout's branch" onChange={(ev) => setDraft({ ...draft, base: ev.target.value })} onBlur={() => setDefault('base', draft.base.trim())} />
+            <input aria-label="Base branch" className="input" value={draft.base} placeholder="the checkout's branch" onChange={(ev) => setDraft({ ...draft, base: ev.target.value })} onBlur={() => setDefault('base', draft.base.trim())} />
           </Field>
           <Field label="Prepare" hint="Runs in a fresh worktree before the agent starts.">
-            <input className="input mono" value={draft.prepare} placeholder="npm ci · cp ../.env ." onChange={(ev) => setDraft({ ...draft, prepare: ev.target.value })} onBlur={() => setDefault('prepare', draft.prepare.trim())} />
+            <input aria-label="Prepare" className="input mono" value={draft.prepare} placeholder="npm ci · cp ../.env ." onChange={(ev) => setDraft({ ...draft, prepare: ev.target.value })} onBlur={() => setDefault('prepare', draft.prepare.trim())} />
           </Field>
           <Field label="Verify" hint="Runs after the agent finishes; its exit code is part of the result.">
-            <input className="input mono" value={draft.verify} placeholder="npm test" onChange={(ev) => setDraft({ ...draft, verify: ev.target.value })} onBlur={() => setDefault('verify', draft.verify.trim())} />
+            <input aria-label="Verify" className="input mono" value={draft.verify} placeholder="npm test" onChange={(ev) => setDraft({ ...draft, verify: ev.target.value })} onBlur={() => setDefault('verify', draft.verify.trim())} />
           </Field>
           <Field label="Notes" hint="Appended to every helper brief and Dispatch brief for this repository." top>
-            <textarea className="textarea" rows={3} value={draft.notes} placeholder="What every agent sent here should know — “pnpm, not npm”, “the ESLint config lives in config/eslint.cjs”." onChange={(ev) => setDraft({ ...draft, notes: ev.target.value })} onBlur={() => draft.notes.trim() !== (e.notes || '') && save(e.id, { notes: draft.notes.trim() }).catch(() => {})} />
+            <textarea aria-label="Notes" className="textarea" rows={3} value={draft.notes} placeholder="What every agent sent here should know — “pnpm, not npm”, “the ESLint config lives in config/eslint.cjs”." onChange={(ev) => setDraft({ ...draft, notes: ev.target.value })} onBlur={() => draft.notes.trim() !== (e.notes || '') && save(e.id, { notes: draft.notes.trim() }).catch(() => {})} />
           </Field>
           <Field label="Depends on" hint="Runs after these in a job; a helper that waits for them is told what they did.">
             <div className="rp-deps">
@@ -277,7 +277,7 @@ function RepoRow({ e, all, home }: { e: RepoEntry; all: RepoEntry[]; home?: stri
                   {byId[id]?.name || basename(id)} <X size={10} />
                 </button>
               ))}
-              <Select value="" options={depOptions} width={200} onChange={(v) => v && save(e.id, { deps: [...(e.deps || []), v] }).catch(() => {})} />
+              <Select label="Add a dependency" value="" options={depOptions} width={200} onChange={(v) => v && save(e.id, { deps: [...(e.deps || []), v] }).catch(() => {})} />
             </div>
           </Field>
           <Field label="Scanned" hint="">
@@ -285,7 +285,7 @@ function RepoRow({ e, all, home }: { e: RepoEntry; all: RepoEntry[]; home?: stri
               <span className="mono faint ellipsis grow" title={facts(e)}>
                 {facts(e)}
               </span>
-              <button className="icon-btn sm" title="Read the folder again" onClick={() => call('repos.refresh', { ids: [e.id], force: true }, { quiet: true }).catch(() => {})}>
+              <button className="icon-btn sm" title="Read the folder again" aria-label="Read the folder again" onClick={() => call('repos.refresh', { ids: [e.id], force: true }, { quiet: true }).catch(() => {})}>
                 <RefreshCw size={12} />
               </button>
             </div>

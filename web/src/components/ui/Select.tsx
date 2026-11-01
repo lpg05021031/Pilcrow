@@ -13,7 +13,7 @@ export interface SelectOption<T extends string> {
 
 /**
  * A themed replacement for <select>: a button that opens a menu of choices (menuitemradio), the
- * chosen one focused. Name it with a <label htmlFor={id}> (ui/Field) or `label`.
+ * chosen one focused. Named by `label`, or inside a ui/Field by the row's label and its own value.
  */
 export function Select<T extends string>({ value, options, onChange, className = '', width, title, placeholder, id, label }: { value: T; options: SelectOption<T>[]; onChange: (v: T) => void; className?: string; width?: number; title?: string; placeholder?: string; id?: string; label?: string }) {
   const [open, setOpen] = useState(false);
@@ -24,7 +24,7 @@ export function Select<T extends string>({ value, options, onChange, className =
   const Icon = current?.icon;
   return (
     <>
-      <button ref={setAnchor} id={id} type="button" className={`select-btn ${className}`} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined} aria-label={label} title={title} onClick={() => setOpen((o) => !o)}>
+      <button ref={setAnchor} id={id} type="button" className={`select-btn ${className}`} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? menuId : undefined} aria-label={label} aria-labelledby={id && !label ? `${id}-label ${id}` : undefined} title={title} onClick={() => setOpen((o) => !o)}>
         {Icon && <Icon size={14} className="select-ico" />}
         <span className={`ellipsis grow${current ? '' : ' faint'}`}>{current?.label || placeholder || 'Choose…'}</span>
         <ChevronsUpDown size={13} className="select-chev" />

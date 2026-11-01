@@ -305,7 +305,7 @@ function HelpersCard({ it, index, onRead, onRemove }: { it: InboxItem; index: nu
               <ArrowUpRight size={11} /> Open the lead
             </button>
           )}
-          <button className="icon-btn sm run-x" title="Dismiss" onClick={(e) => (e.stopPropagation(), onRemove())}>
+          <button className="icon-btn sm run-x" title="Dismiss" aria-label="Dismiss" onClick={(e) => (e.stopPropagation(), onRemove())}>
             <X size={13} />
           </button>
         </div>
@@ -458,7 +458,7 @@ function ScheduleCard({ s, now, index, active, onFilter }: { s: Schedule; now: n
       </button>
       <div className="sched-end">
         <Switch on={s.enabled} onChange={toggle} label={s.enabled ? 'Pause' : 'Resume'} />
-        <button className="icon-btn sm" title="Run now" onClick={run} disabled={busy || Boolean(s.running)}>
+        <button className="icon-btn sm" title="Run now" aria-label="Run now" onClick={run} disabled={busy || Boolean(s.running)}>
           {busy ? <Spinner size={12} /> : <Play size={13} />}
         </button>
         <MenuButton items={menu} title="Schedule actions" width={200}>

@@ -185,7 +185,7 @@ export function PermissionCard({ perm, item, ctx, stale = false }: { perm: Permi
       )}
       {showNote && (
         <div className="perm-feedback">
-          <input
+          <input aria-label="What should Claude do instead?"
             className="input"
             autoFocus
             value={feedback}

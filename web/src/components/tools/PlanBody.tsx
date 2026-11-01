@@ -72,7 +72,7 @@ export function PlanBody({ item, perm, ctx }: { item: ToolItem; perm?: Permissio
         <div className="plan-actions">
           {revising ? (
             <div className="plan-feedback">
-              <textarea className="textarea" rows={2} autoFocus placeholder="What should change in the plan?" value={feedback} onChange={(e) => setFeedback(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.metaKey || e.ctrlKey) && keepPlanning()} />
+              <textarea aria-label="What should change in the plan?" className="textarea" rows={2} autoFocus placeholder="What should change in the plan?" value={feedback} onChange={(e) => setFeedback(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.metaKey || e.ctrlKey) && keepPlanning()} />
               <div className="row">
                 <span className="hint grow">Ctrl+Enter sends</span>
                 <button className="btn ghost" onClick={() => setRevising(false)} disabled={busy}>

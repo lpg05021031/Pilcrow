@@ -203,7 +203,7 @@ export function JobView({ id }: { id: string }) {
               </button>
             )}
           </div>
-          {editing ? <textarea className="textarea" rows={5} value={draft} onChange={(e) => setDraft(e.target.value)} /> : <p className="dp-brief">{job.brief}</p>}
+          {editing ? <textarea aria-label="Brief" className="textarea" rows={5} value={draft} onChange={(e) => setDraft(e.target.value)} /> : <p className="dp-brief">{job.brief}</p>}
           {rules.length > 0 && <div className="dp-rules faint">Allowed for every repository: {rules.map((r) => r.label || r.key).join('; ')}</div>}
         </div>
         {rep && (rep.prose || rep.proseState === 'writing' || rep.proseState === 'failed') && (
