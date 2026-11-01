@@ -4,7 +4,7 @@ import { useStore, setUi, VIEW_MODES, renameSession, forkSession, archiveSession
 import { basename, cost, errText, plural, tildify } from '../lib/format';
 import { McpNotice } from './McpNotice';
 import { HelpersBar } from './HelpersBar';
-import type { GitInfo, RepoEntry, SessionSummary } from '../lib/types';
+import type { GitInfo, HelperState, RepoEntry, SessionSummary } from '../lib/types';
 import { Transcript } from './Transcript';
 import { FindBar } from './FindBar';
 import { Composer } from './Composer';
@@ -52,19 +52,30 @@ const STATUS_TEXT: Record<string, string> = {
   error: 'Stopped with an error',
 };
 
+const NO_HELPERS: HelperState[] = [];
+
 export function SessionView({ session }: { session: SessionSummary }) {
   const id = session.id;
-  const rt = useStore((s) => s.rt[id]);
+  // Narrow reads: the runtime record changes with every streamed frame; the header shows a few of its fields.
+  const rtCwd = useStore((s) => s.rt[id]?.cwd);
+  const rtStatus = useStore((s) => s.rt[id]?.status);
+  const revStep = useStore((s) => Math.floor((s.rt[id]?.rev || 0) / 40));
+  const loaded = useStore((s) => s.rt[id]?.loaded);
+  const live = useStore((s) => s.rt[id]?.live);
+  const spent = useStore((s) => s.rt[id]?.usage?.costUsd) || 0;
+  const helper = useStore((s) => s.rt[id]?.helper);
+  const workflow = useStore((s) => runningWorkflow(s.rt[id]?.tasks));
+  const error = useStore((s) => s.rt[id]?.error);
   const ui = useStore((s) => s.ui);
   const info = useStore((s) => s.info);
-  const cwd = rt?.cwd || session.cwd;
-  const status = rt?.status || session.status;
+  const cwd = rtCwd || session.cwd;
+  const status = rtStatus || session.status;
   // a lead that is quiet while its helpers work is live work too (HELPERS.md §6.1)
-  const helpers = rt?.helpers || [];
+  const helpers = useStore((s) => s.rt[id]?.helpers) || NO_HELPERS;
   const activeHelpers = helpers.filter((h) => ['queued', 'preparing', 'running', 'needs_action'].includes(h.state));
   const shownStatus = (!status || status === 'idle' || status === 'stopped') && activeHelpers.length ? 'leading' : status;
   const fsRev = useStore((s) => s.fsRev);
-  const git = useGitInfo(cwd, `${status === 'running' ? Math.floor((rt?.rev || 0) / 40) : status}:${fsRev}`);
+  const git = useGitInfo(cwd, `${status === 'running' ? revStep : status}:${fsRev}`);
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(session.title);
   const [scrolled, setScrolled] = useState(false);
@@ -75,7 +86,7 @@ export function SessionView({ session }: { session: SessionSummary }) {
   const [folderBtn, setFolderBtn] = useState<HTMLButtonElement | null>(null);
   const root = useRef<HTMLDivElement>(null);
   // Until the first message goes out, the folder is still a choice, not a fact.
-  const fresh = Boolean(rt?.loaded) && !rt?.live && getModel(id).items.length === 0 && !session.worktree && (rt?.status === 'idle' || rt?.status === 'stopped' || !rt?.status);
+  const fresh = Boolean(loaded) && !live && getModel(id).items.length === 0 && !session.worktree && (rtStatus === 'idle' || rtStatus === 'stopped' || !rtStatus);
 
   useEffect(() => setTitle(session.title), [session.title]);
 
@@ -108,10 +119,10 @@ export function SessionView({ session }: { session: SessionSummary }) {
     ...VIEW_MODES.map((v) => ({ label: `${v.label} view`, hint: v.hint, checked: v.id === ui.view, onSelect: () => setUi({ view: v.id }) })),
     { separator: true },
     { label: 'Copy session ID', icon: Copy, onSelect: () => copyText(id).then(() => toast('Session ID copied', 'success'), () => toast('Could not copy to the clipboard', 'error')) },
-    ...((rt?.usage?.costUsd || 0) > 0 ? [{ label: `Cost so far ${cost(rt!.usage!.costUsd)}`, icon: CircleDollarSign, onSelect: () => setUi({ panel: true, panelTab: 'info' }) }] : []),
+    ...(spent > 0 ? [{ label: `Cost so far ${cost(spent)}`, icon: CircleDollarSign, onSelect: () => setUi({ panel: true, panelTab: 'info' }) }] : []),
     { separator: true },
-    ...(rt?.live ? [{ label: 'Stop Claude Code process', hint: 'It restarts on your next message', icon: Power, onSelect: () => call('session.close', { id }) }] : []),
-    ...(rt?.helper ? [{ label: 'Detach from lead', hint: 'An ordinary session from now on; the lead is told', icon: GitBranch, onSelect: () => call('helpers.detach', { id }) }] : []),
+    ...(live ? [{ label: 'Stop Claude Code process', hint: 'It restarts on your next message', icon: Power, onSelect: () => call('session.close', { id }) }] : []),
+    ...(helper ? [{ label: 'Detach from lead', hint: 'An ordinary session from now on; the lead is told', icon: GitBranch, onSelect: () => call('helpers.detach', { id }) }] : []),
     { label: session.archived ? 'Unarchive' : 'Archive', icon: Archive, onSelect: () => archiveSession(id, !session.archived) },
     {
       label: 'Delete…',
@@ -190,10 +201,10 @@ export function SessionView({ session }: { session: SessionSummary }) {
                 <span className="ellipsis">{git.branch}</span>
               </span>
             )}
-            {rt?.helper && (
-              <button className="crumb crumb-btn wt" title="Open the lead session" onClick={() => openSession(rt.helper!.leadId)}>
+            {helper && (
+              <button className="crumb crumb-btn wt" title="Open the lead session" onClick={() => openSession(helper.leadId)}>
                 <ArrowUpRight size={12} />
-                <span className="ellipsis">helper of {rt.helper.leadTitle || 'a lead session'}</span>
+                <span className="ellipsis">helper of {helper.leadTitle || 'a lead session'}</span>
               </button>
             )}
             {session.dispatch?.jobId && (
@@ -212,9 +223,9 @@ export function SessionView({ session }: { session: SessionSummary }) {
                   · {activeHelpers.length} of {plural(helpers.length, 'helper')}
                 </span>
               )}
-              {status === 'running' && runningWorkflow(rt?.tasks) && (
+              {status === 'running' && workflow && (
                 <button className="status-sub status-link" title="Show the workflow in the Tasks panel" onClick={() => setUi({ panel: true, panelTab: 'tasks' })}>
-                  · {runningWorkflow(rt?.tasks)}
+                  · {workflow}
                 </button>
               )}
             </span>
@@ -237,10 +248,10 @@ export function SessionView({ session }: { session: SessionSummary }) {
       </header>
       <McpNotice sessionId={id} />
       <HelpersBar sessionId={id} />
-      {status === 'error' && rt?.error && (
+      {status === 'error' && error && (
         <Leave className="session-error">
-          <span className="grow">{rt.error.split('\n')[0]}</span>
-          {/Settings|not found|No Claude Code/i.test(rt.error) ? (
+          <span className="grow">{error.split('\n')[0]}</span>
+          {/Settings|not found|No Claude Code/i.test(error) ? (
             <button className="btn sm" onClick={() => setDialog('settings', 'claude')}>
               <Settings2 size={13} /> Settings
             </button>

@@ -7,6 +7,7 @@ import { modelLabel, useGatewayModels } from '../../lib/models';
 import { contextLabel, copyText, Spinner, Num, RingGauge } from '../ui/bits';
 import { MODES } from '../composer/Menus';
 import type { McpStatus } from '../../lib/types';
+import { useShallow } from 'zustand/react/shallow';
 
 interface Usage {
   categories: { name: string; tokens: number; color: string; kind: string }[];
@@ -16,7 +17,13 @@ interface Usage {
 }
 
 export function InfoPanel({ session, cwd }: { session: SessionSummary; cwd: string }) {
-  const rt = useStore((s) => s.rt[session.id]);
+  // The fields shown here, compared one by one: the runtime record itself is new on every streamed frame.
+  const rt = useStore(
+    useShallow((s) => {
+      const r = s.rt[session.id];
+      return { activeModel: r?.activeModel, model: r?.model, init: r?.init, usage: r?.usage, mcp: r?.mcp, mode: r?.mode, live: r?.live, models: r?.models, effort: r?.effort };
+    }),
+  );
   const gw = useGatewayModels();
   const modelId = rt?.activeModel || rt?.model || '';
   const info = useStore((s) => s.info);

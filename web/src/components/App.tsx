@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { WifiOff, RefreshCw } from 'lucide-react';
 import { useStore, setUi, setDialog, native, quickNewSession } from '../lib/store';
 import { shortcutFor } from '../lib/shortcuts';
@@ -6,16 +6,19 @@ import { Sidebar } from './Sidebar';
 import { SessionView } from './SessionView';
 import { RightPanel } from './RightPanel';
 import { Welcome } from './Welcome';
-import { Overview } from './Overview';
-import { InboxPage } from './Inbox';
-import { DispatchPage } from './dispatch/Page';
 import { NewSessionDialog } from './NewSessionDialog';
-import { SettingsDialog } from './SettingsDialog';
 import { McpAuthDialog } from './McpAuthDialog';
 import { CommandPalette, ShortcutsDialog, ConfirmDialog, Toasts, Lightbox } from './Overlays';
 import { Resizer, useWindowKey } from './ui/bits';
 import { Slot } from './ui/Slot';
 import { ErrorBoundary } from './ui/ErrorBoundary';
+
+// The pages and the settings sheet a window may never open load on first use, each a chunk of its own,
+// so a window parses only what the conversation needs before its first rows.
+const Overview = lazy(() => import('./Overview').then((m) => ({ default: m.Overview })));
+const InboxPage = lazy(() => import('./Inbox').then((m) => ({ default: m.InboxPage })));
+const DispatchPage = lazy(() => import('./dispatch/Page').then((m) => ({ default: m.DispatchPage })));
+const SettingsDialog = lazy(() => import('./SettingsDialog').then((m) => ({ default: m.SettingsDialog })));
 
 const PAGE_NAMES = { session: 'The conversation', overview: 'The control room', inbox: 'The inbox', dispatch: 'Dispatch' };
 
@@ -92,7 +95,7 @@ export function App() {
         <UpdateNotice />
         {/* A page that fails to draw says so in place; the sidebar and the rest of the window keep working. */}
         <ErrorBoundary key={page === 'session' ? session?.id : page} label={PAGE_NAMES[page]}>
-          {page === 'overview' ? <Overview /> : page === 'inbox' ? <InboxPage /> : page === 'dispatch' ? <DispatchPage /> : session ? <SessionView key={session.id} session={session} /> : <Welcome />}
+          <Suspense fallback={null}>{page === 'overview' ? <Overview /> : page === 'inbox' ? <InboxPage /> : page === 'dispatch' ? <DispatchPage /> : session ? <SessionView key={session.id} session={session} /> : <Welcome />}</Suspense>
         </ErrorBoundary>
         <Toasts />
       </main>
@@ -105,7 +108,11 @@ export function App() {
         )}
       </Slot>
       {dialogs.newSession && <NewSessionDialog />}
-      {dialogs.settings && config && <SettingsDialog />}
+      {dialogs.settings && config && (
+        <Suspense fallback={null}>
+          <SettingsDialog />
+        </Suspense>
+      )}
       {dialogs.palette && <CommandPalette />}
       {dialogs.shortcuts && <ShortcutsDialog />}
       {dialogs.confirm && <ConfirmDialog />}

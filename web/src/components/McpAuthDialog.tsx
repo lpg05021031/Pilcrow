@@ -20,8 +20,7 @@ interface AuthStart {
  */
 export function McpAuthDialog() {
   const spec = useStore((s) => s.dialogs.mcpAuth)!;
-  const rt = useStore((s) => s.rt[spec.sessionId]);
-  const status = rt?.mcp?.find((m) => m.name === spec.name)?.status;
+  const status = useStore((s) => s.rt[spec.sessionId]?.mcp?.find((m) => m.name === spec.name)?.status);
   const [start, setStart] = useState<AuthStart | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pasted, setPasted] = useState('');

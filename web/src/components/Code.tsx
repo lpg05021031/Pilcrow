@@ -1,7 +1,7 @@
 import { Fragment, memo, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { diffWordsWithSpace } from 'diff';
 import { MessageSquarePlus, Trash, Check } from 'lucide-react';
-import { highlightTokens, cachedTokens, type Tok } from '../lib/highlight';
+import { highlightTokens, cachedTokens, PAINT_LINES, type Tok } from '../lib/highlight';
 import { parseAnsi } from '../lib/ansi';
 import { langFromPath, plural } from '../lib/format';
 import type { DiffHunk, DiffLine } from '../lib/types';
@@ -75,14 +75,20 @@ export const CodeView = memo(function CodeView({ text, path, lang, startLine = 1
   }, [text]);
   const shown = all ? lines : lines.slice(0, maxLines);
   const toks = useTokens(text, language);
+  // Colour goes on PAINT_LINES lines per frame (as in Markdown's paintCode): all of a long file's at
+  // once, after "Show all", was a 240 ms frame for 1,300 lines here. Coloured that way it arrives
+  // gradually, so a long grid goes without the fade-in.
+  const [painted, setPainted] = useState(PAINT_LINES);
+  useEffect(() => {
+    if (!toks || painted >= shown.length) return;
+    const t = requestAnimationFrame(() => setPainted((p) => p + PAINT_LINES));
+    return () => cancelAnimationFrame(t);
+  }, [toks, painted, shown.length]);
   return (
     <div className={`code-view${wrap ? ' wrap' : ''}${lines.length > shown.length ? ' clipped' : ''}`}>
-      <div className="code-grid" data-hl={toks ? '1' : '0'}>
+      <div className="code-grid" data-hl={toks ? (shown.length > PAINT_LINES ? 'sliced' : '1') : '0'}>
         {shown.map((l, i) => (
-          <Fragment key={i}>
-            <span className={`ln${highlightLine === startLine + i ? ' hit' : ''}`}>{startLine + i}</span>
-            <span className={`hl-line${highlightLine === startLine + i ? ' hit' : ''}`}>{renderContent(l, toks?.[i])}</span>
-          </Fragment>
+          <CodeLine key={i} n={startLine + i} text={l} toks={i < painted ? toks?.[i] : null} hit={highlightLine === startLine + i} />
         ))}
       </div>
       {lines.length > shown.length && (
@@ -91,6 +97,16 @@ export const CodeView = memo(function CodeView({ text, path, lang, startLine = 1
         </button>
       )}
     </div>
+  );
+});
+
+/** One numbered line; unchanged lines are skipped while the colour spreads down the grid. */
+const CodeLine = memo(function CodeLine({ n, text, toks, hit }: { n: number; text: string; toks?: Tok[] | null; hit: boolean }) {
+  return (
+    <>
+      <span className={`ln${hit ? ' hit' : ''}`}>{n}</span>
+      <span className={`hl-line${hit ? ' hit' : ''}`}>{renderContent(text, toks)}</span>
+    </>
   );
 });
 

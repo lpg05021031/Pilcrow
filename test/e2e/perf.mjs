@@ -34,8 +34,9 @@ const BUDGET = {
   // 58 long tasks adding up to 4.1 s, 414 ms of script per second.
   stream: { p95: 100, longMax: 300, longTotal: 3000, scriptPerSec: 350 },
   // JavaScript parsed before a conversation's first rows: 1,664 kB before the editor, the terminal and
-  // the highlighter loaded on first use. vite.config.mjs warns past the same figure.
-  eagerKB: 900,
+  // the highlighter loaded on first use, 780 kB before the control room, inbox, dispatch and settings
+  // did, 662 kB now. vite.config.mjs warns past the same figure.
+  eagerKB: 720,
   // Coloured a slice at a time and painted a block per frame (lib/highlight, Markdown): with the TSX
   // grammar compiled (by an earlier block), no task over 50 ms, so no long task at all.
   code: { longMax: 50, ms: 15000 },

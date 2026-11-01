@@ -33,7 +33,7 @@ function stepTitle(s: TimelineStep) {
 export function HistoryPanel({ session, cwd }: { session: SessionSummary; cwd: string }) {
   const id = session.id;
   const steps = useStore((s) => s.timeline[id]);
-  const rt = useStore((s) => s.rt[id]);
+  const working = useStore((s) => s.rt[id]?.status === 'running' || s.rt[id]?.status === 'requires_action');
   const [meta, setMeta] = useState<{ enabled: boolean; reason: string | null } | null>(null);
   const [sel, setSel] = useState<number | null>(null); // step n; null = now
   const [follow, setFollow] = useState(true);
@@ -145,7 +145,7 @@ export function HistoryPanel({ session, cwd }: { session: SessionSummary; cwd: s
               </span>
               <span className="tl-main">
                 <span className="tl-title">Now</span>
-                <span className="tl-sub">{rt?.status === 'running' || rt?.status === 'requires_action' ? 'Claude is working — new steps appear as they happen' : 'The folder as it is right now'}</span>
+                <span className="tl-sub">{working ? 'Claude is working — new steps appear as they happen' : 'The folder as it is right now'}</span>
               </span>
             </button>
           </div>
