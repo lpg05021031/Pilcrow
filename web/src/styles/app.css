@@ -1306,6 +1306,10 @@ body.resizing iframe {
   backdrop-filter: var(--glass-blur);
   box-shadow: var(--shadow-sheet);
 }
+/* A sheet with no field takes the focus itself, for a screen reader to read it from the title; it needs no ring. */
+.dialog:focus-visible {
+  outline: none;
+}
 .dialog-head {
   display: flex;
   align-items: center;

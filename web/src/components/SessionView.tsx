@@ -186,7 +186,7 @@ export function SessionView({ session }: { session: SessionSummary }) {
                 <span className="ellipsis">{basename(session.worktree?.repoRoot || session.project || cwd)}</span>
               </span>
             )}
-            <Popover anchor={folderBtn} open={pickingFolder} onClose={() => setPickingFolder(false)} placement="bottom-start" width={380}>
+            <Popover anchor={folderBtn} open={pickingFolder} onClose={() => setPickingFolder(false)} placement="bottom-start" width={380} role="dialog" label="Choose a folder">
               <FolderPicker
                 value={cwd}
                 onPick={(dir) => {

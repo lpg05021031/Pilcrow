@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { CalendarClock, Folder, ChevronDown, FilePen, ShieldOff, Map as MapIcon, ShieldCheck, Check } from 'lucide-react';
 import { useStore, call, toast, setDialog } from '../lib/store';
 import type { Cadence, Schedule, PermissionMode } from '../lib/types';
@@ -51,7 +51,7 @@ export function ScheduleDialog({ spec, schedule }: { spec: { id?: string; cwd?: 
   const [more, setMore] = useState(false);
   const [preview, setPreview] = useState<{ nextRunAt: number | null; label: string; error?: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  const folderBtn = useRef<HTMLButtonElement>(null);
+  const [folderBtn, setFolderBtn] = useState<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -117,14 +117,14 @@ export function ScheduleDialog({ spec, schedule }: { spec: { id?: string; cwd?: 
           <Field label="Folder" style={kind === 'dispatch' ? { display: 'none' } : undefined}>
             {(id) => (
               <>
-                <button id={id} ref={folderBtn} className={`ns-folder sd-folder${picking ? ' on' : ''}`} onClick={() => setPicking(!picking)} title={tildify(cwd, info?.home)}>
+                <button id={id} ref={setFolderBtn} className={`ns-folder sd-folder${picking ? ' on' : ''}`} onClick={() => setPicking(!picking)} title={tildify(cwd, info?.home)}>
                   <Folder size={14} className="ns-folder-ico" />
                   <span className="ellipsis grow" style={{ textAlign: 'left' }}>
                     {basename(cwd) || 'Pick a folder'}
                   </span>
                   <ChevronDown size={13} className="faint" />
                 </button>
-                <Popover anchor={folderBtn.current} open={picking} onClose={() => setPicking(false)} placement="bottom-start" width={380}>
+                <Popover anchor={folderBtn} open={picking} onClose={() => setPicking(false)} placement="bottom-start" width={380} role="dialog" label="Choose a folder">
                   <FolderPicker
                     value={cwd}
                     onPick={(d) => {

@@ -35,7 +35,7 @@ export function Composer() {
   const [playbookId, setPlaybookId] = useState('');
   const [starting, setStarting] = useState(false);
   const [showOptions, setShowOptions] = useState(false);
-  const folderBtn = useRef<HTMLButtonElement>(null);
+  const [folderBtn, setFolderBtn] = useState<HTMLButtonElement | null>(null);
   const planSeq = useRef(0);
 
   // the workspace
@@ -218,14 +218,14 @@ export function Composer() {
             <span className="faint tnum">{planSummary}</span>
           </label>
           <div className="dp-targets-top">
-            <button ref={folderBtn} className={`ns-folder sd-folder dp-folder${picking ? ' on' : ''}`} onClick={() => setPicking(!picking)} title={tildify(root, info?.home)}>
+            <button ref={setFolderBtn} className={`ns-folder sd-folder dp-folder${picking ? ' on' : ''}`} onClick={() => setPicking(!picking)} title={tildify(root, info?.home)}>
               <Folder size={14} className="ns-folder-ico" />
               <span className="ellipsis grow" style={{ textAlign: 'left' }}>
                 {basename(root) || 'Pick a folder'}
               </span>
               <ChevronDown size={13} className="faint" />
             </button>
-            <Popover anchor={folderBtn.current} open={picking} onClose={() => setPicking(false)} placement="bottom-start" width={380}>
+            <Popover anchor={folderBtn} open={picking} onClose={() => setPicking(false)} placement="bottom-start" width={380} role="dialog" label="Choose a folder">
               <FolderPicker
                 value={root}
                 onPick={(d) => {
