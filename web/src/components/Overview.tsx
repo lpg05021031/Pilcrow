@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowUpRight, Bot, Brain, Wrench, MessageSquareQuote, Workflow, PanelLeftOpen, Hourglass, CircleCheck, CircleAlert, Activity, CircleDollarSign } from 'lucide-react';
-import { useStore, call, openSession, respond, setUi, mergeLive, ALLOW_ONCE, DECLINE } from '../lib/store';
+import { ArrowUpRight, Bot, Brain, Wrench, MessageSquareQuote, Workflow, Hourglass, CircleCheck, CircleAlert, Activity, CircleDollarSign } from 'lucide-react';
+import { useStore, call, openSession, respond, mergeLive, ALLOW_ONCE, DECLINE } from '../lib/store';
 import { isWorking, type PermissionRequest, type SessionState, type SessionSummary, type TaskInfo } from '../lib/types';
 import { basename, cost, duration, timeAgo, relPath, plural } from '../lib/format';
-import { ContextRing, Spinner, Num } from './ui/bits';
+import { ContextRing, ShowSidebarButton, Spinner, Num } from './ui/bits';
 import { useNow } from './ui/hooks';
 import { WorkingMark, Mark } from './ui/brand';
 import { useWindowKey, onActivate } from './ui/keys';
@@ -29,7 +29,6 @@ interface Fleet {
 export function Overview() {
   const sessions = useStore((s) => s.sessions);
   const unread = useStore((s) => s.unread);
-  const sidebar = useStore((s) => s.ui.sidebar);
   const [fleet, setFleet] = useState<Fleet | null>(null);
   const now = useNow(1000, true);
   // Every session's runtime changes with each streamed frame of every session at work; the cards read
@@ -103,11 +102,7 @@ export function Overview() {
   return (
     <div className="overview" ref={box}>
       <header className="ov-head">
-        {!sidebar && (
-          <button className="icon-btn head-sidebar" title="Show sidebar (Ctrl+B)" aria-label="Show sidebar" onClick={() => setUi({ sidebar: true })}>
-            <PanelLeftOpen size={16} />
-          </button>
-        )}
+        <ShowSidebarButton />
         <h1 className="ov-title">Control room</h1>
         <span className="ov-sum tnum">
           {working.length ? `${working.length} working` : 'Nothing running'}

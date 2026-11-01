@@ -1,8 +1,9 @@
 import { useMemo } from 'react';
-import { Plus, PanelLeftOpen, Play } from 'lucide-react';
-import { useStore, call, openSession, setUi, showDispatch, openJob, runsOf, runsIn, toasted } from '../../lib/store';
+import { Plus, Play } from 'lucide-react';
+import { useStore, call, openSession, showDispatch, openJob, runsOf, runsIn, toasted } from '../../lib/store';
 import type { DispatchJob } from '../../lib/types';
 import { cost, duration, plural } from '../../lib/format';
+import { ShowSidebarButton } from '../ui/bits';
 import { Mark } from '../ui/brand';
 import { useNow } from '../ui/hooks';
 import { onActivate } from '../ui/keys';
@@ -17,7 +18,6 @@ export function Board() {
   const jobs = useStore((s) => s.jobs);
   const jobRuns = useStore((s) => s.jobRuns);
   const loaded = useStore((s) => s.jobsLoaded);
-  const sidebar = useStore((s) => s.ui.sidebar);
   const now = useNow(1000, true);
   const buckets = useMemo(() => {
     const out = { needs: [] as DispatchJob[], running: [] as DispatchJob[], review: [] as DispatchJob[], drafts: [] as DispatchJob[], finished: [] as DispatchJob[] };
@@ -36,11 +36,7 @@ export function Board() {
   return (
     <div className="dispatch">
       <header className="ov-head">
-        {!sidebar && (
-          <button className="icon-btn head-sidebar" title="Show sidebar (Ctrl+B)" aria-label="Show sidebar" onClick={() => setUi({ sidebar: true })}>
-            <PanelLeftOpen size={16} />
-          </button>
-        )}
+        <ShowSidebarButton />
         <h1 className="ov-title">Dispatch</h1>
         <span className="ov-sum tnum">
           {total ? plural(total, 'job') : ''}

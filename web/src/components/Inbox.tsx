@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Play, Ellipsis, Pencil, Trash, CircleCheck, CircleAlert, CircleStop, ArrowUpRight, RotateCw, X, PanelLeftOpen, Check, MailOpen, Pause, Send, ClipboardPaste } from 'lucide-react';
-import { useStore, call, openSession, setUi, toast, confirmAction, openJob, setDialog, toasted } from '../lib/store';
+import { Plus, Play, Ellipsis, Pencil, Trash, CircleCheck, CircleAlert, CircleStop, ArrowUpRight, RotateCw, X, Check, MailOpen, Pause, Send, ClipboardPaste } from 'lucide-react';
+import { useStore, call, openSession, toast, confirmAction, openJob, setDialog, toasted } from '../lib/store';
 import { copy } from './ui/clipboard';
 import type { InboxItem, Schedule } from '../lib/types';
 import { basename, clock, cost, duration, timeAgo, plural, tildify } from '../lib/format';
 import { MenuButton } from './ui/Popover';
-import { Switch, Spinner } from './ui/bits';
+import { ShowSidebarButton, Switch, Spinner } from './ui/bits';
 import { useNow } from './ui/hooks';
 import { Mark } from './ui/brand';
 import { ScheduleDialog } from './ScheduleDialog';
@@ -40,7 +40,6 @@ function until(ms: number, now: number) {
  */
 export function InboxPage() {
   const rev = useStore((s) => s.schedRev);
-  const sidebar = useStore((s) => s.ui.sidebar);
   const dialog = useStore((s) => s.dialogs.schedule);
   const [items, setItems] = useState<InboxItem[] | null>(null);
   const [schedules, setSchedules] = useState<Schedule[] | null>(null);
@@ -88,11 +87,7 @@ export function InboxPage() {
   return (
     <div className="inbox" ref={root}>
       <header className="ov-head">
-        {!sidebar && (
-          <button className="icon-btn head-sidebar" title="Show sidebar (Ctrl+B)" aria-label="Show sidebar" onClick={() => setUi({ sidebar: true })}>
-            <PanelLeftOpen size={16} />
-          </button>
-        )}
+        <ShowSidebarButton />
         <h1 className="ov-title">Inbox</h1>
         <span className="ov-sum tnum">{items ? (unread ? `${unread} unread` : items.length ? 'All read' : '') : ''}</span>
         <div className="grow" />

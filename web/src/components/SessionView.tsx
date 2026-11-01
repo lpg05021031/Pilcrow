@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { GitBranch, PanelRight, PanelLeftOpen, Ellipsis, Pencil, GitFork, FolderOpen, Archive, Trash, Copy, SquareTerminal, RotateCcw, Power, FolderGit2, Folder, Settings2, CircleDollarSign, ChevronDown, BookMarked, ArrowUpRight } from 'lucide-react';
+import { GitBranch, PanelRight, Ellipsis, Pencil, GitFork, FolderOpen, Archive, Trash, Copy, SquareTerminal, RotateCcw, Power, FolderGit2, Folder, Settings2, CircleDollarSign, ChevronDown, BookMarked, ArrowUpRight } from 'lucide-react';
 import { useStore, setUi, VIEW_MODES, renameSession, forkSession, archiveSession, deleteSession, confirmAction, call, insertIntoComposer, toast, openSession, openJob, setDialog, setCwd, getModel, repoFor, closeFind, toasted } from '../lib/store';
 import { basename, cost, errText, plural, tildify } from '../lib/format';
 import { McpNotice } from './McpNotice';
@@ -12,7 +12,7 @@ import { MenuButton, Popover, useAnchor } from './ui/Popover';
 import { FolderPicker } from './FolderPicker';
 import { copy } from './ui/clipboard';
 import { AppIcon } from './ui/brand';
-import { Leave } from './ui/bits';
+import { Leave, ShowSidebarButton } from './ui/bits';
 import { ErrorBoundary } from './ui/ErrorBoundary';
 
 function useGitInfo(cwd: string | undefined, tick: unknown) {
@@ -69,7 +69,6 @@ export function SessionView({ session }: { session: SessionSummary }) {
   const workflow = useStore((s) => runningWorkflow(s.rt[id]?.tasks));
   const error = useStore((s) => s.rt[id]?.error);
   const view = useStore((s) => s.ui.view);
-  const sidebar = useStore((s) => s.ui.sidebar);
   const panel = useStore((s) => s.ui.panel);
   const panelTab = useStore((s) => s.ui.panelTab);
   const info = useStore((s) => s.info);
@@ -148,11 +147,7 @@ export function SessionView({ session }: { session: SessionSummary }) {
   return (
     <div className="session" ref={root}>
       <header className={`session-head${scrolled ? ' scrolled' : ''}`}>
-        {!sidebar && (
-          <button className="icon-btn head-sidebar" title="Show sidebar (Ctrl+B)" aria-label="Show sidebar" onClick={() => setUi({ sidebar: true })}>
-            <PanelLeftOpen size={16} />
-          </button>
-        )}
+        <ShowSidebarButton />
         <div className="session-title-wrap">
           {editing ? (
             <input aria-label="Session title"

@@ -400,7 +400,7 @@
 .welcome {
   position: relative;
 }
-.welcome-sidebar {
+.welcome > .head-sidebar {
   position: absolute;
   top: 10px;
   left: 12px;

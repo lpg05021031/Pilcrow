@@ -1,10 +1,21 @@
 // Small controls and indicators shared across the app.
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { LoaderCircle } from 'lucide-react';
+import { LoaderCircle, PanelLeftOpen } from 'lucide-react';
+import { setUi, useStore } from '../../lib/store';
 import { isWorking, type SessionStatus } from '../../lib/types';
 import { tokens } from '../../lib/format';
 import { useExitGhost, useCountUp } from '../../lib/motion';
 import { useInk } from './hooks';
+
+/** A page header's way back to the sidebar while it is hidden (Ctrl+B does the same). */
+export function ShowSidebarButton() {
+  const sidebar = useStore((s) => s.ui.sidebar);
+  return sidebar ? null : (
+    <button className="icon-btn head-sidebar" title="Show sidebar (Ctrl+B)" aria-label="Show sidebar" onClick={() => setUi({ sidebar: true })}>
+      <PanelLeftOpen size={16} />
+    </button>
+  );
+}
 
 export function Spinner({ size = 14 }: { size?: number }) {
   return <LoaderCircle size={size} className="spin" />;

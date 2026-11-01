@@ -1,8 +1,8 @@
 import { useMemo, useRef, useState } from 'react';
-import { ArrowUp, Folder, CircleAlert, ChevronDown, KeyRound, RefreshCw, PanelLeftOpen } from 'lucide-react';
-import { useStore, setDialog, createSession, refreshInfo, toast, setUi } from '../lib/store';
+import { ArrowUp, Folder, CircleAlert, ChevronDown, KeyRound, RefreshCw } from 'lucide-react';
+import { useStore, setDialog, createSession, refreshInfo, toast } from '../lib/store';
 import { basename, tildify } from '../lib/format';
-import { Spinner } from './ui/bits';
+import { ShowSidebarButton, Spinner } from './ui/bits';
 import { CopyButton } from './ui/clipboard';
 import { AppIcon } from './ui/brand';
 
@@ -44,15 +44,10 @@ export function Welcome() {
     }
   };
 
-  const sidebar = useStore((s) => s.ui.sidebar);
   const root = useRef<HTMLDivElement>(null);
   return (
     <div className="welcome" ref={root}>
-      {!sidebar && (
-        <button className="icon-btn head-sidebar welcome-sidebar" title="Show sidebar (Ctrl+B)" aria-label="Show sidebar" onClick={() => setUi({ sidebar: true })}>
-          <PanelLeftOpen size={16} />
-        </button>
-      )}
+      <ShowSidebarButton />
       <div className="welcome-inner">
         <AppIcon size={72} className="welcome-icon" />
         <h1 className="welcome-title">{greeting(info?.displayName || info?.user)}</h1>
