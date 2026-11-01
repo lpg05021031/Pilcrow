@@ -216,6 +216,7 @@ export function createHelpers(deps) {
   const under = (dir, p) => Boolean(dir) && (p === dir || p.startsWith(dir.endsWith('/') ? dir : dir + '/'));
 
   /** The folder a start names, from `repo` (a registered name or alias, or a path) or `cwd`. */
+  /** @param {{ repo?: string, cwd?: string }} where */
   function resolveFolder({ repo, cwd }) {
     if (repo) {
       const hit = registry?.resolve(repo);
@@ -719,6 +720,7 @@ export function createHelpers(deps) {
     }
     return { id: leadId, ...groupHunks(diffs) };
   }
+  /** @param {string} leadId @param {{ name?: string, action?: string, message?: string, pr?: boolean }} [opts] */
   async function finish(leadId, { name, action, message, pr } = {}) {
     if (!['commit', 'discard', 'keep', 'pr'].includes(action)) throw new Error('Finish with commit, pr, discard or keep.');
     const mine = helpersOf(leadId).filter((h) => (!name || h.name === name) && TERMINAL.has(h.state) && !h.finished);

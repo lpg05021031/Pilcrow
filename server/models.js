@@ -224,7 +224,7 @@ function request(url, headers, env) {
     const pmod = proxy.protocol === 'https:' ? https : http;
     const connect = pmod.request({ host: proxy.hostname, port: proxy.port || (proxy.protocol === 'https:' ? 443 : 80), method: 'CONNECT', path: `${url.hostname}:${port}`, headers: { host: `${url.hostname}:${port}`, ...auth(proxy) }, timeout: TIMEOUT });
     connect.on('timeout', () => connect.destroy(new Error('timeout')));
-    connect.on('error', (e) => {
+    connect.on('error', (/** @type {Error & { proxy?: string }} */ e) => {
       e.proxy = proxy.host;
       fail(e);
     });

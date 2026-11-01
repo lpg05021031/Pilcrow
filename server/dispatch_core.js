@@ -40,7 +40,11 @@ const COALESCE_MS = 16;
 
 // ---------------------------------------------------------------- pure helpers
 
-/** `{{repo.name}}`, `{{repo.path}}`, `{{repo.branch}}`, `{{job.name}}`, `{{notes}}`; unknown variables stay. */
+/**
+ * `{{repo.name}}`, `{{repo.path}}`, `{{repo.branch}}`, `{{job.name}}`, `{{notes}}`; unknown variables stay.
+ * @param {string} brief
+ * @param {{ job?: { name?: string }, target?: { name?: string, path?: string, base?: string, notes?: string }, learned?: { name: string, summary?: string }[], deps?: { name: string, summary?: string }[] }} [ctx]
+ */
 export function renderBrief(brief, { job, target, learned = [], deps = [] } = {}) {
   const vars = {
     'repo.name': target?.name || '',
@@ -394,6 +398,7 @@ export function createDispatcher(deps) {
   }
 
   // ---- the workspace
+  /** @param {{ root?: string, depth?: number, force?: boolean }} [opts] */
   async function scan({ root, depth = 3, force = false } = {}) {
     if (!root || !fs.existsSync(root)) throw new Error('Pick a folder that exists.');
     const hit = scanCache.get(root);
@@ -574,6 +579,7 @@ export function createDispatcher(deps) {
     return true;
   }
   /** A job from a playbook, started at once: what a schedule fires, and what "Run again" does. */
+  /** @param {string} id @param {{ name?: string, wave?: string, unattended?: boolean, scheduleId?: string | null, targets?: object[], manual?: boolean }} [opts] */
   async function startFromPlaybook(id, { name, wave, unattended = false, scheduleId = null, targets } = {}) {
     const pb = data.playbooks.find((p) => p.id === id);
     if (!pb) throw new Error('No such playbook.');
@@ -695,6 +701,7 @@ export function createDispatcher(deps) {
     return m === 'acceptEdits' ? 'acceptEdits' : 'default';
   }
 
+  /** @param {string} id @param {{ wave?: string }} [opts] */
   async function start(id, { wave } = {}) {
     const job = jobOf(id);
     if (job.state === 'running') throw new Error('This job is already running.');
@@ -1109,6 +1116,7 @@ export function createDispatcher(deps) {
   }
 
   // ---- steering
+  /** @param {string} id @param {{ brief?: string, learn?: boolean }} [opts] */
   function continueJob(id, { brief, learn } = {}) {
     const job = jobOf(id);
     if (!(job.state === 'reviewing' && job.wave === 'canary')) throw new Error('The job is not waiting after a canary.');
@@ -1151,6 +1159,7 @@ export function createDispatcher(deps) {
     job.stoppedReason = reason;
     touch(job);
   }
+  /** @param {string} id @param {{ runId?: string }} [opts] */
   function stop(id, { runId } = {}) {
     const job = jobOf(id);
     if (runId) {
@@ -1171,6 +1180,7 @@ export function createDispatcher(deps) {
     stopJob(job, 'Stopped by you');
     return summary(job);
   }
+  /** @param {string} id @param {string} runId @param {{ brief?: string }} [opts] */
   function retry(id, runId, { brief } = {}) {
     const job = jobOf(id);
     const old = runOf(job, runId);
@@ -1236,6 +1246,7 @@ export function createDispatcher(deps) {
     return { id, ...groupHunks(diffs) };
   }
 
+  /** @param {string} id @param {{ runId?: string, action?: string, message?: string, pr?: boolean }} [opts] */
   async function finish(id, { runId, action, message, pr } = {}) {
     const job = jobOf(id);
     if (!['commit', 'discard', 'keep'].includes(action)) throw new Error('Finish with commit, discard or keep.');

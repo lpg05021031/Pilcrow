@@ -117,7 +117,7 @@ function openUnix({ caps, argv, cwd, env, cols, rows }) {
     write: (d) => proc.stdin.write(d),
     resize: (c, r) => {
       try {
-        proc.stdio[3].write(JSON.stringify({ cols: c, rows: r }) + '\n');
+        /** @type {import('node:stream').Writable} */ (proc.stdio[3]).write(JSON.stringify({ cols: c, rows: r }) + '\n');
       } catch {
         /* bridge gone */
       }

@@ -155,6 +155,7 @@ function confirmQuit() {
 }
 
 function contextMenu(params) {
+  /** @type {Electron.MenuItemConstructorOptions[]} */
   const items = [];
   const { editFlags, isEditable, selectionText, linkURL } = params;
   if (linkURL && /^(https?|mailto):/i.test(linkURL)) {

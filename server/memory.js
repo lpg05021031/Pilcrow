@@ -44,6 +44,7 @@ export function list(cwd) {
   return { cwd: slash(cwd), notes, lastDistillAt: Math.max(0, ...Object.values(d.distills || {}).map((x) => x.at || 0)) || null };
 }
 
+/** @param {string} cwd @param {{ text: string, sessionId?: string, sessionTitle?: string, kind?: string }} note */
 export function add(cwd, { text, sessionId, sessionTitle, kind = 'manual' }) {
   const t = String(text || '').trim();
   if (!t) throw new Error('The note is empty.');
@@ -184,6 +185,7 @@ ${existing || '(none)'}
 Session digest:
 ${digest}`;
     const meta = store.getMeta(session.id) || {};
+    /** @type {import('@anthropic-ai/claude-agent-sdk').Options} */
     const opts = {
       cwd: session.cwd,
       pathToClaudeCodeExecutable: claude.path,
@@ -199,7 +201,7 @@ ${digest}`;
     let text = '';
     for await (const msg of query({ prompt, options: opts })) {
       if (msg.type === 'assistant' && !msg.parent_tool_use_id) text += textOfContent(msg.message?.content) || '';
-      else if (msg.type === 'result' && typeof msg.result === 'string' && !text) text = msg.result;
+      else if (msg.type === 'result' && msg.subtype === 'success' && !text) text = msg.result;
     }
     const added = [];
     if (!/^\s*NONE\s*$/i.test(text)) {

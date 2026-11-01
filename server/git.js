@@ -75,10 +75,23 @@ export async function branches(cwd) {
   };
 }
 
-/** Parse `git diff` unified output into files and hunks with line numbers. */
+/**
+ * @typedef {{ t: '+' | '-' | ' ', s: string, o?: number, n?: number, eof?: boolean }} DiffLine
+ * @typedef {{ oldStart: number, oldLines: number, newStart: number, newLines: number, header: string, lines: DiffLine[] }} Hunk
+ * @typedef {{ path: string | null, oldPath: string | null, status: string, binary: boolean, additions: number, deletions: number, hunks: Hunk[], truncated: boolean, untracked?: boolean }} DiffFile
+ */
+
+/**
+ * Parse `git diff` unified output into files and hunks with line numbers.
+ * @param {string} text
+ * @returns {DiffFile[]}
+ */
 export function parseUnifiedDiff(text) {
+  /** @type {DiffFile[]} */
   const files = [];
+  /** @type {DiffFile | null} */
   let file = null;
+  /** @type {Hunk | null} */
   let hunk = null;
   let inHeader = false;
   let remOld = 0;
@@ -198,6 +211,7 @@ async function untrackedAsDiff(root, rel) {
 }
 
 /** Working tree vs `base` (default HEAD), including untracked files. */
+/** @param {string} cwd @param {{ base?: string }} [opts] */
 export async function diff(cwd, { base } = {}) {
   const i = await info(cwd);
   if (!i.isRepo) return { isRepo: false, files: [] };

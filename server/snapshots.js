@@ -105,9 +105,14 @@ async function statsBetween(cwd, from, to) {
 }
 
 /**
+ * @typedef {{ kind: 'start' | 'message' | 'tool' | 'restore', tool?: string, toolUseId?: string, label?: string, uuid?: string, onlyIfChanged?: boolean }} StepInput
+ */
+
+/**
  * Record the working tree as it is now. Returns the new step, or null when nothing changed (for a
  * message or the start of a session a marker step is still recorded, pointing at the same tree).
- * kind: 'start' | 'message' | 'tool' | 'restore'
+ * @param {{ id: string, cwd: string }} session
+ * @param {StepInput} what
  */
 export function record(session, { kind, tool, toolUseId, label, uuid: msgUuid, onlyIfChanged }) {
   const cwd = session.cwd;
@@ -122,6 +127,7 @@ export function record(session, { kind, tool, toolUseId, label, uuid: msgUuid, o
   return p;
 }
 
+/** @param {{ id: string, cwd: string }} session @param {StepInput} what */
 async function take(session, { kind, tool, toolUseId, label, uuid: msgUuid, onlyIfChanged }) {
   const cwd = session.cwd;
   const sid = session.id;
@@ -186,7 +192,7 @@ async function take(session, { kind, tool, toolUseId, label, uuid: msgUuid, only
 }
 
 function publicStep(s) {
-  const { tree, ...rest } = s;
+  const { tree: _tree, ...rest } = s;
   return rest;
 }
 

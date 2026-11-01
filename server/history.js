@@ -165,6 +165,7 @@ async function withEarlierMessages(msgs, file, sessionId) {
 
 export async function loadSubagent(sessionId, agentId, dir) {
   try {
+    /** @type {Record<string, any>[]} transcript records, marked as read from disk */
     const msgs = await getSubagentMessages(sessionId, agentId, { dir });
     for (const m of msgs) m._history = true;
     return msgs;
@@ -203,6 +204,7 @@ export async function remove(sessionId, dir) {
   invalidateList();
 }
 
+/** @param {string} sessionId @param {{ dir?: string, upToMessageId?: string, title?: string }} [opts] */
 export async function fork(sessionId, { dir, upToMessageId, title } = {}) {
   const r = await forkSession(sessionId, { dir, upToMessageId, title });
   invalidateList();

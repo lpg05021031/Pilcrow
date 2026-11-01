@@ -24,6 +24,7 @@ export const extensions = {
   respond: [], // (session, request, decision) => decision
 };
 function mcpOption(session) {
+  /** @type {Record<string, import('@anthropic-ai/claude-agent-sdk').McpServerConfig>} */
   const servers = {};
   for (const fn of extensions.mcpServers) {
     const s = fn(session);
@@ -55,6 +56,20 @@ const REAP_EVERY_MS = 60_000;
 const STDERR_TAIL = 8000; // characters of Claude Code's stderr kept for an error report
 const TASK_PROMPT_MAX = 4000;
 const MAX_TOOL_USES = 400;
+
+/** Processes Pilcrow is shutting down on purpose (idle, settings change): their end is not an error.
+ *  Kept per process, so a later crash of the session's next process is still reported. */
+const closing = new WeakSet();
+
+/**
+ * MCP sign-in calls that newer Claude Code builds have and the SDK's types do not list yet; each is
+ * checked before use.
+ * @typedef {import('@anthropic-ai/claude-agent-sdk').Query & {
+ *   mcpAuthenticate?: (name: string) => Promise<any>,
+ *   mcpSubmitOAuthCallbackUrl?: (name: string, url: string) => Promise<any>,
+ *   mcpClearAuth?: (name: string) => Promise<any>,
+ * }} Query
+ */
 
 function childEnv() {
   return cleanEnv({ CLAUDE_AGENT_SDK_CLIENT_APP: `pilcrow/${VERSION}` });
@@ -130,6 +145,7 @@ class Session {
     this.id = id;
     this.cwd = slash(cwd);
     this.persisted = persisted; // a transcript exists on disk, so start with `resume`
+    /** @type {Query | null} the running Claude Code process */
     this.q = null;
     this.input = null;
     this.status = persisted ? 'stopped' : 'idle';
@@ -170,6 +186,9 @@ class Session {
     this.processStartedAt = null;
     /** The last thing Claude said in a finished turn, for overviews. */
     this.lastReply = null;
+    /** A scheduled run with nobody watching: permissions are declined with a reason (schedules.js). */
+    this.unattended = false;
+    this.unattendedDenials = 0;
   }
 
   get meta() {
@@ -201,8 +220,8 @@ class Session {
       turnStartedAt: this.turnStartedAt,
       processStartedAt: this.processStartedAt,
       lastReply: this.lastReply,
-      unattended: Boolean(this.unattended),
-      unattendedDenials: this.unattendedDenials || 0,
+      unattended: this.unattended,
+      unattendedDenials: this.unattendedDenials,
       pending: [...this.pending.values()].map((p) => p.req),
       tasks: [...this.tasks.values()],
       bgTasks: this.bgTasks,
@@ -245,7 +264,7 @@ class Session {
     this._stateSoon = setTimeout(() => {
       this._stateSoon = null;
       this.emitState();
-    }, 120);
+    }, STATE_SOON_MS);
   }
 
   out(msg) {
@@ -288,14 +307,14 @@ class Session {
 
   /** Start Claude Code for this session once, even when several requests arrive together. */
   ensureStarted() {
-    if (this.q && !this.q.pilcrowClosing) return Promise.resolve();
+    if (this.q && !closing.has(this.q)) return Promise.resolve();
     if (!this.starting) {
       this.starting = (async () => {
         // A process that is shutting down (idle timeout, settings change) cannot take new messages:
         // let it finish, then start a fresh one.
-        if (this.q?.pilcrowClosing) {
+        if (this.q && closing.has(this.q)) {
           await Promise.race([this.consumed, new Promise((r) => setTimeout(r, 5000))]);
-          if (this.q?.pilcrowClosing) this.q = null; // gave up waiting; its consume() will see it was replaced
+          if (this.q && closing.has(this.q)) this.q = null; // gave up waiting; its consume() will see it was replaced
         }
         if (!this.q) await this.startProcess();
       })().finally(() => (this.starting = null));
@@ -332,6 +351,7 @@ class Session {
     const memoryText = cfg.memoryInject === false ? '' : memory.promptFor(memory.projectOf(this));
     // …and the repositories the person registered, so their own names for them land in the right folders.
     const appendText = memoryText + repos.promptFor();
+    /** @type {import('@anthropic-ai/claude-agent-sdk').Options} */
     const options = {
       cwd: this.cwd,
       pathToClaudeCodeExecutable: claude.path,
@@ -400,7 +420,7 @@ class Session {
     for (const t of this.tasks.values()) {
       if (t.status === 'running' || t.status === 'pending') Object.assign(t, { status: 'stopped', endedAt: Date.now() });
     }
-    if (err && !q.pilcrowClosing) {
+    if (err && !closing.has(q)) {
       const detail = (this.stderrTail || '').trim().split('\n').slice(-12).join('\n');
       this.error = [err.message, detail].filter(Boolean).join('\n');
       this.status = 'error';
@@ -618,7 +638,7 @@ class Session {
     if (this.unattended) {
       // A scheduled run has nobody to ask. Say so, so Claude works around it instead of waiting.
       const why = toolName === 'AskUserQuestion' ? 'This session runs on a schedule with nobody watching, so questions cannot be answered. Decide yourself and say what you assumed.' : 'This session runs on a schedule with nobody watching, so this action cannot be approved. Do what you can without it and report what you skipped.';
-      this.unattendedDenials = (this.unattendedDenials || 0) + 1;
+      this.unattendedDenials++;
       return Promise.resolve({ behavior: 'deny', message: why });
     }
     return new Promise((resolve) => {
@@ -916,7 +936,7 @@ class Session {
 
   close() {
     if (!this.q) return;
-    this.q.pilcrowClosing = true; // per process, so a later crash of a new process is still reported
+    closing.add(this.q);
     try {
       this.input?.close();
       this.q.close();
@@ -1088,6 +1108,7 @@ class SessionManager {
     bus.emit('list-changed');
   }
 
+  /** @param {string} id @param {{ upToMessageId?: string, title?: string }} [opts] */
   async fork(id, { upToMessageId, title } = {}) {
     const s = await this.get(id);
     const meta = store.getMeta(id) || {};

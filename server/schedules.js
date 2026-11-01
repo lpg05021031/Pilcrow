@@ -73,6 +73,12 @@ function cronMatchers(expr) {
   });
 }
 
+/** The same time of day, a day later (setHours again: a day is not 24 hours across a DST change). */
+function nextDay(d, h, m) {
+  d.setTime(d.getTime() + DAY);
+  d.setHours(h, m, 0, 0);
+}
+
 /** When a schedule fires next, after `from`. */
 export function nextRun(cadence, from = Date.now()) {
   const c = cadence || {};
@@ -93,14 +99,14 @@ export function nextRun(cadence, from = Date.now()) {
     case 'weekdays': {
       const d = new Date(base);
       d.setHours(h, m, 0, 0);
-      while (d.getTime() <= from || d.getDay() === 0 || d.getDay() === 6) d.setTime(d.getTime() + DAY), d.setHours(h, m, 0, 0);
+      while (d.getTime() <= from || d.getDay() === 0 || d.getDay() === 6) nextDay(d, h, m);
       return d.getTime();
     }
     case 'weekly': {
       const wd = Number.isInteger(c.weekday) ? c.weekday : 1;
       const d = new Date(base);
       d.setHours(h, m, 0, 0);
-      while (d.getTime() <= from || d.getDay() !== wd) d.setTime(d.getTime() + DAY), d.setHours(h, m, 0, 0);
+      while (d.getTime() <= from || d.getDay() !== wd) nextDay(d, h, m);
       return d.getTime();
     }
     case 'cron': {
@@ -117,7 +123,7 @@ export function nextRun(cadence, from = Date.now()) {
     default: {
       const d = new Date(base);
       d.setHours(h, m, 0, 0);
-      while (d.getTime() <= from) d.setTime(d.getTime() + DAY), d.setHours(h, m, 0, 0);
+      while (d.getTime() <= from) nextDay(d, h, m);
       return d.getTime();
     }
   }

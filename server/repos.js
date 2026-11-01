@@ -28,7 +28,7 @@ export function normalizeWord(w) {
     .normalize('NFKC')
     .toLowerCase()
     .replace(/^@/, '')
-    .replace(/[\s_\-]+/g, '');
+    .replace(/[\s_-]+/g, '');
 }
 
 function distance(a, b) {

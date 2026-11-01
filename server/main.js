@@ -87,6 +87,10 @@ function openExternal(target) {
   return true;
 }
 
+/**
+ * Start the server (the Electron shell calls this in-process; `cli()` for the other shells).
+ * @param {{ shell?: string, port?: number | string | boolean, quiet?: boolean, onQuit?: () => void }} [opts]
+ */
 export async function start({ shell = 'none', port, quiet = false, onQuit } = {}) {
   migrateLegacyDirs();
   privateDir(xdg('config'));
@@ -403,9 +407,11 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
     serveStatic(url.pathname, res);
   });
 
+  /** The port we listen on (set once listening; nothing is served before). */
+  let boundPort = 0;
   function originOk(req) {
     const origin = req.headers.origin || '';
-    const p = server.address()?.port;
+    const p = boundPort;
     return !origin || origin === `http://127.0.0.1:${p}` || origin === `http://localhost:${p}`;
   }
 
@@ -417,7 +423,7 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
 
   function hostOk(req) {
     const host = (req.headers.host || '').toLowerCase();
-    const p = server.address()?.port;
+    const p = boundPort;
     return host === `127.0.0.1:${p}` || host === `localhost:${p}`;
   }
 
@@ -508,7 +514,7 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
     if (explicit) throw new Error(`Port ${port} is already in use. Pick another one with --port=N.`);
     await listenOn(0);
   }
-  const actualPort = server.address().port;
+  const actualPort = (boundPort = /** @type {import('node:net').AddressInfo} */ (server.address()).port);
   const url = `http://127.0.0.1:${actualPort}/`;
   writeJson(LOCK, { pid: process.pid, port: actualPort, shell, startedAt: Date.now() });
   log(`Pilcrow ${VERSION} listening on 127.0.0.1:${actualPort} (shell=${shell})`);
@@ -576,7 +582,7 @@ async function existingInstance() {
   }
   try {
     const r = await fetch(`http://127.0.0.1:${lock.port}/api/hello`, { signal: AbortSignal.timeout(1500) });
-    const j = await r.json();
+    const j = /** @type {{ app?: string, pid?: number, version?: string, busy?: number }} */ (await r.json());
     if (j.app === 'pilcrow' && j.pid === lock.pid) return { ...lock, version: j.version || '?', busy: typeof j.busy === 'number' ? j.busy : null, url: `http://127.0.0.1:${lock.port}/` };
   } catch {
     /* stale lock */
@@ -669,14 +675,17 @@ async function doctor() {
   const paint = (c, s) => (tty ? `\x1b[${c}m${s}\x1b[0m` : s);
   const ok = (label, detail = '') => console.log(`  ${paint('32', '✓')} ${label}${detail ? paint('2', '  ' + detail) : ''}`);
   const warn = (label, detail = '') => console.log(`  ${paint('33', '!')} ${label}${detail ? paint('2', '  ' + detail) : ''}`);
-  const bad = (label, detail = '') => console.log(`  ${paint('31', '✗')} ${label}${detail ? paint('2', '  ' + detail) : ''}`);
   let failures = 0;
+  const bad = (label, detail = '') => {
+    failures++;
+    console.log(`  ${paint('31', '✗')} ${label}${detail ? paint('2', '  ' + detail) : ''}`);
+  };
   console.log(paint('1', `Pilcrow ${VERSION} doctor`) + paint('2', `  (${ROOT})`));
 
   console.log(paint('1', '\nRuntime'));
   const major = Number(process.versions.node.split('.')[0]);
-  (major >= 20 ? ok : (failures++, bad))(`Node ${process.version}`, process.execPath);
-  fs.existsSync(path.join(DIST, 'index.html')) ? ok('Interface', path.join('web', 'dist')) : (failures++, bad('Interface missing', 'run the installer again (it ships the built interface)'));
+  (major >= 20 ? ok : bad)(`Node ${process.version}`, process.execPath);
+  fs.existsSync(path.join(DIST, 'index.html')) ? ok('Interface', path.join('web', 'dist')) : bad('Interface missing', 'run the installer again (it ships the built interface)');
   which('git') ? ok('git', which('git')) : warn('git not found', 'Changes, worktrees and commits are disabled');
   const caps = term.capabilities();
   if (IS_WIN) caps.conpty ? ok('Terminal', 'ConPTY (node-pty)') : warn('Terminal is basic (line mode)', 'node-pty was not installed; full-screen programs will not work');
@@ -686,7 +695,7 @@ async function doctor() {
   const cfg = store.getConfig();
   const claude = await resolveClaude(cfg.claudeBinary);
   if (claude.path) ok(`Claude Code ${claude.version || '(version unknown)'}`, `${claude.source}: ${claude.path}`);
-  else (failures++, bad('Claude Code not found', 'reinstall Pilcrow, or install `claude` on PATH'));
+  else bad('Claude Code not found', 'reinstall Pilcrow, or install `claude` on PATH');
   if (claude.system && claude.source === 'bundled') ok(`Also on PATH: Claude Code ${claude.system.version || ''}`.trim(), `${claude.system.path} (switch in Settings → Claude Code)`);
   if (IS_WIN) {
     const bash = gitBash();

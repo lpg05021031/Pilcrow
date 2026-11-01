@@ -68,6 +68,7 @@ export function readFile(p) {
   return { path: p, size: st.size, mtime: st.mtimeMs, text: buf.toString('utf8') };
 }
 
+/** @param {string} p @param {string} text @param {{ expectedMtime?: number, force?: boolean }} [opts] */
 export function writeFile(p, text, { expectedMtime, force } = {}) {
   if (!force && expectedMtime && fs.existsSync(p)) {
     const cur = fs.statSync(p).mtimeMs;

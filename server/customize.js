@@ -128,6 +128,7 @@ function pluginSkills() {
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+/** @param {{ cwd?: string }} [opts] */
 export function listSkills({ cwd } = {}) {
   const roots = skillRoots(cwd);
   return {
@@ -210,6 +211,7 @@ function summarizeConfig(cfg = {}) {
   return { type, url: cfg.url || '', headers: cfg.headers || {} };
 }
 
+/** @param {{ cwd?: string }} [opts] */
 export function listMcp({ cwd } = {}) {
   const out = [];
   const file = CLAUDE_JSON();
