@@ -225,7 +225,6 @@ export function useSmoothText(text: string, live: boolean): string {
       setShown(text.length);
       return;
     }
-    let frame = 0;
     const tick = () => {
       const full = textRef.current.length;
       let cur = shownRef.current;
@@ -233,15 +232,10 @@ export function useSmoothText(text: string, live: boolean): string {
         raf.current = null;
         return;
       }
-      // Each reveal re-renders the block being written; for a long reply that is real work, so a
-      // long one advances every other frame (in bigger steps) and reads the same.
-      const long = full > 6000;
-      if (long && frame++ % 2) {
-        raf.current = requestAnimationFrame(tick);
-        return;
-      }
+      // Each reveal re-renders only the block being written (Markdown), so it costs the same early
+      // in a reply as late in a long one, and every frame can advance.
       const backlog = full - cur;
-      const step = Math.max(1, Math.ceil((backlog * (long ? 2 : 1)) / (liveRef.current ? 9 : 3)));
+      const step = Math.max(1, Math.ceil(backlog / (liveRef.current ? 9 : 3)));
       let next = Math.min(full, cur + step);
       // Do not stop in the middle of a Latin word; CJK text can break after any character.
       const s = textRef.current;
