@@ -60,7 +60,7 @@ def test_header_shows_title_and_crumbs(app_client):
     assert v.title.text() == "Fix the login redirect bug"
     assert v.folder_crumb.isVisible() and v.folder_crumb.text() == "pilcrow"
     assert v.branch_crumb.isVisible() and v.branch_crumb.text() == "main"
-    assert v.diffstat.isVisible() and v.diffstat.add.text() == "+14" and v.diffstat.dele.text() == "−3"
+    assert v.diffstat.isVisible() and v.diffstat.add.text() == "+3" and v.diffstat.dele.text() == "−1"
     assert not v.pill.isVisible()
     assert v.composer.mode_btn.text_lb.text() == "Ask before edits"
     assert v.composer.model_btn.text_lb.text() == "Mock 1"

@@ -237,7 +237,7 @@ def test_new_session_options_screenshot(app_client):
     QTest.mouseClick(s.wt_switch, Qt.MouseButton.LeftButton)
     c.sleep(200)
     assert s.use_worktree and s.wt_fields.isVisible()
-    assert [s.base.itemText(i) for i in range(s.base.count())] == ["main"]
+    assert [s.base.itemText(i) for i in range(s.base.count())] == ["main", "pilcrow/lexer-fix"]
     assert c.shot("new-session-options").exists()
     QTest.mouseClick(s.disclose, Qt.MouseButton.LeftButton)
     c.sleep(150)
