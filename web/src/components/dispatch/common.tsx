@@ -1,11 +1,11 @@
-import type { DispatchJob, DispatchPending, DispatchRun, RunState } from '../../lib/types';
+import type { DispatchJob, DispatchPending, DispatchRun, PermissionDecision, RunState } from '../../lib/types';
+import { ALLOW_ONCE, DECLINE, call, openSession, respond } from '../../lib/store';
 import { cost, duration, plural } from '../../lib/format';
 
 /** The word of each run state, and the order the bar paints them in. */
 export const STATE_WORD: Record<RunState, string> = { queued: 'queued', preparing: 'preparing', running: 'running', needs_action: 'needs action', done: 'done', failed: 'failed', stopped: 'stopped', skipped: 'skipped' };
-export const BAR_ORDER: RunState[] = ['done', 'needs_action', 'running', 'preparing', 'queued', 'failed', 'stopped', 'skipped'];
+const BAR_ORDER: RunState[] = ['done', 'needs_action', 'running', 'preparing', 'queued', 'failed', 'stopped', 'skipped'];
 export const ACTIVE: RunState[] = ['preparing', 'running', 'needs_action'];
-export const TERMINAL: RunState[] = ['done', 'failed', 'stopped', 'skipped'];
 
 export function clockMmss(ms: number) {
   const s = Math.max(0, Math.floor(ms / 1000));
@@ -93,6 +93,31 @@ export function askedBy(names: string[]) {
   if (names.length === 1) return `asked by ${names[0]}`;
   if (names.length === 2) return `asked by ${names[0]} and ${names[1]}`;
   return `asked by ${names[0]}, ${names[1]} and ${names.length - 2} more`;
+}
+
+/** A request's answers, on the board and in the job: a question is opened; anything else is allowed for this run, for every run that asks the same, or denied. */
+export function RequestAnswers({ jobId, group }: { jobId: string; group: RequestGroup }) {
+  const first = group.asks[0];
+  const answer = (decision: PermissionDecision) => first && respond(first.run.sessionId || '', first.pending.requestId, decision);
+  if (group.interactive)
+    return (
+      <button className="btn sm primary" onClick={() => first?.run.sessionId && openSession(first.run.sessionId)}>
+        Open to respond
+      </button>
+    );
+  return (
+    <>
+      <button className="btn sm primary" onClick={() => answer(ALLOW_ONCE)}>
+        Allow
+      </button>
+      <button className="btn sm" onClick={() => call('dispatch.allow', { id: jobId, key: group.key })} title="Answer every run of this job that asks the same thing, now and later">
+        Allow for all{group.asks.length > 1 ? ` · ${group.asks.length}` : ''}
+      </button>
+      <button className="btn sm ghost" onClick={() => answer(DECLINE)}>
+        Deny
+      </button>
+    </>
+  );
 }
 
 /** The job's progress: one segment per run, in the colour of its state. */

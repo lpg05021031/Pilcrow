@@ -51,7 +51,7 @@ export function McpNotice({ sessionId }: { sessionId: string }) {
               {busy === m.name ? <Spinner size={11} /> : <RefreshCw size={12} />} Retry
             </button>
           )}
-          <button className="icon-btn sm" title="Dismiss" onClick={() => setDismissed({ ...dismissed, [`${m.name}:${m.status}`]: true })}>
+          <button className="icon-btn sm" title="Dismiss" aria-label="Dismiss" onClick={() => setDismissed({ ...dismissed, [`${m.name}:${m.status}`]: true })}>
             <X size={13} />
           </button>
         </Leave>

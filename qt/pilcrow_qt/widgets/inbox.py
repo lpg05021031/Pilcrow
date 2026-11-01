@@ -4,12 +4,11 @@ sessions, so a result can be continued by hand."""
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
 
 from PySide6.QtCore import QEvent, QRectF, QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QColor, QGuiApplication, QPainter, QRadialGradient
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -22,22 +21,14 @@ from PySide6.QtWidgets import (
 )
 
 from .. import icons, theme
-from ..lib.fmt import basename, cost, duration, plural, tildify, time_ago
+from ..lib.fmt import basename, clock, cost, duration, now_ms, plural, tildify, time_ago
 from ..store import ConfirmSpec, store
-from .dialogs.parts import Badge, Card, ElideLabel, LayoutButton, Switch, Text, hint, page_column
-from .ui.bits import Box, IconButton, Mark, Pill, Spinner, button
+from .dialogs.parts import Badge, Card, ElideLabel, LayoutButton, Switch, Text, hint
+from .ui.bits import Box, IconButton, Mark, Pill, Spinner, button, reveal_on_hover
 from .ui.menu import show_menu
 from .ui.signals import bind
 
 Json = Dict[str, Any]
-
-
-def now_ms() -> float:
-    return time.time() * 1000
-
-
-def clock(ms: float) -> str:
-    return datetime.fromtimestamp(ms / 1000).strftime("%H:%M")
 
 
 def day_label(ms: float, now: float) -> str:
@@ -203,15 +194,7 @@ class RunCard(Card):
         main.addLayout(foot)
         lay.addLayout(main, 1)
         self._render()
-        self.x_btn.setVisible(False)  # ``.run-x { opacity: 0 }`` until the card is hovered
-
-    def enterEvent(self, e) -> None:  # noqa: N802
-        self.x_btn.setVisible(True)
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:  # noqa: N802
-        self.x_btn.setVisible(False)
-        super().leaveEvent(e)
+        reveal_on_hover(self, [self.x_btn])  # ``.run-x { opacity: 0 }`` until the card is hovered
 
     def _render(self) -> None:
         self.sum.setText(self.summary if self._open or not self.long else self.summary[:280] + "…")
@@ -227,7 +210,7 @@ class RunCard(Card):
             lambda _r: store.toast(f"Running {name} now", "info")
         )
 
-    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, e) -> None:
         if e.button() == Qt.MouseButton.LeftButton:
             self._on_read()
         super().mouseReleaseEvent(e)
@@ -375,19 +358,9 @@ class HelpersCard(Card):
         foot.addWidget(self.x_btn)
         main.addLayout(foot)
         lay.addLayout(main, 1)
-        self.x_btn.setVisible(False)
-
-    def enterEvent(self, e) -> None:  # noqa: N802
-        self.x_btn.setVisible(True)
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:  # noqa: N802
-        self.x_btn.setVisible(False)
-        super().leaveEvent(e)
+        reveal_on_hover(self, [self.x_btn])  # ``.run-x { opacity: 0 }`` until the card is hovered
 
     def copy_md(self) -> None:
-        from PySide6.QtGui import QGuiApplication
-
         def got(md: Any) -> None:
             QGuiApplication.clipboard().setText(str(md or ""))
             store.toast("Markdown copied", "success")
@@ -545,26 +518,16 @@ class DispatchCard(Card):
         foot.addWidget(self.x_btn)
         main.addLayout(foot)
         lay.addLayout(main, 1)
-        self.x_btn.setVisible(False)
-
-    def enterEvent(self, e) -> None:  # noqa: N802
-        self.x_btn.setVisible(True)
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:  # noqa: N802
-        self.x_btn.setVisible(False)
-        super().leaveEvent(e)
+        reveal_on_hover(self, [self.x_btn])  # ``.run-x { opacity: 0 }`` until the card is hovered
 
     def copy_md(self) -> None:
-        from PySide6.QtGui import QGuiApplication
-
         def got(md: Any) -> None:
             QGuiApplication.clipboard().setText(str(md or ""))
             store.toast("Report copied as Markdown.", "info")
 
         store.call("dispatch.export", {"id": self.it.get("jobId")}).then(got)
 
-    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, e) -> None:
         if e.button() == Qt.MouseButton.LeftButton:
             self._on_read()
         super().mouseReleaseEvent(e)
@@ -671,7 +634,7 @@ class ScheduleCard(Card):
             )
         return None
 
-    def paintEvent(self, e) -> None:  # noqa: N802
+    def paintEvent(self, e) -> None:
         super().paintEvent(e)
         pr = self.progress()
         running = bool(self.s.get("running"))
@@ -747,11 +710,10 @@ class EmptyHero(QWidget):
 
     mark: Optional[QWidget] = None
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         if not t.dark or self.mark is None:
             return
-        from PySide6.QtGui import QRadialGradient
 
         c = self.mark.geometry().center()
         cx, cy = c.x() + 0.5, c.y() + 12.5
@@ -864,18 +826,18 @@ class InboxPage(QWidget):
         self.load()
 
     # ---- lifecycle
-    def showEvent(self, e) -> None:  # noqa: N802
+    def showEvent(self, e) -> None:
         super().showEvent(e)
         self._clock.start()
 
-    def hideEvent(self, e) -> None:  # noqa: N802
+    def hideEvent(self, e) -> None:
         self._clock.stop()
         super().hideEvent(e)
 
-    def eventFilter(self, obj, e) -> bool:  # noqa: N802
+    def eventFilter(self, obj, e) -> bool:
         if obj is self.scroll.viewport() and e.type() == QEvent.Type.Resize:
             vw = self.scroll.viewport().width()
-            self.body.setFixedWidth(max(320, min(page_column(vw), vw)))
+            self.body.setFixedWidth(max(320, min(theme.column_width(vw), vw)))
             self._place(1 if self.body.width() - 40 <= 760 else 2)
         return False
 

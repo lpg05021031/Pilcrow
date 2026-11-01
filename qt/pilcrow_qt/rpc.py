@@ -8,10 +8,18 @@ when the answer arrives; ``on()`` subscribes to an event by name.
 from __future__ import annotations
 
 import json
+import logging
 from typing import Any, Callable, Dict, List, Optional
 
 from PySide6.QtCore import QObject, QTimer, QUrl, Signal
 from PySide6.QtWebSockets import QWebSocket
+
+log = logging.getLogger(__name__)
+
+try:  # a history snapshot is megabytes of JSON parsed on the GUI thread; orjson does it several times faster
+    from orjson import loads as _loads
+except ImportError:  # in requirements.txt; an install without it parses with the standard library
+    _loads = json.loads
 
 Params = Dict[str, Any]
 
@@ -20,11 +28,13 @@ class RpcError(Exception):
     """What the server said when a call failed (its ``e.message``)."""
 
 
-class Call(QObject):
-    """A pending call. ``then(fn)`` gets the result, ``catch(fn)`` the RpcError; both optional."""
+class Call:
+    """A pending call. ``then(fn)`` gets the result, ``catch(fn)`` the RpcError; both optional. A
+    plain object: the socket's handler resolves it on the Qt thread, so it needs no Qt of its own."""
+
+    __slots__ = ("method", "_ok", "_err", "_done", "_value", "_error")
 
     def __init__(self, method: str) -> None:
-        super().__init__()
         self.method = method
         self._ok: List[Callable[[Any], None]] = []
         self._err: List[Callable[[RpcError], None]] = []
@@ -54,7 +64,7 @@ class Call(QObject):
     def _reject(self, error: RpcError) -> None:
         self._done, self._error = True, error
         if not self._err:
-            print(f"[rpc] {self.method} failed: {error}")
+            log.warning("%s failed: %s", self.method, error)
         for fn in self._err:
             _safely(fn, error)
 
@@ -62,8 +72,8 @@ class Call(QObject):
 def _safely(fn: Callable, arg: Any) -> None:
     try:
         fn(arg)
-    except Exception as e:  # noqa: BLE001 — a handler must never take the socket down
-        print(f"[rpc] handler failed: {e!r}")
+    except Exception:  # a handler must never take the socket down
+        log.warning("an rpc handler failed", exc_info=True)
 
 
 class Rpc(QObject):
@@ -147,7 +157,7 @@ class Rpc(QObject):
 
     def _on_message(self, text: str) -> None:
         try:
-            msg = json.loads(text)
+            msg = _loads(text)
         except ValueError:
             return
         t = msg.get("t")
@@ -191,13 +201,6 @@ class Rpc(QObject):
         for fn in list(self._handlers.get(name, [])):
             _safely(fn, data)
         self.event.emit(name, data)
-
-    def raw_url(self, path: str) -> str:
-        """The HTTP address of a file the server will stream (``/api/raw``)."""
-        from urllib.parse import quote
-
-        base = self.url.replace("ws://", "http://").replace("wss://", "https://").replace("/ws", "")
-        return f"{base}/api/raw?path={quote(path, safe='')}"
 
 
 rpc = Rpc()

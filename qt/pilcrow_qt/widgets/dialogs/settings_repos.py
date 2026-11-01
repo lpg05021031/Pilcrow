@@ -5,6 +5,7 @@ edited in place. Facts are scanned, never typed."""
 
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QEvent, Qt
@@ -15,6 +16,7 @@ from ...lib.fmt import basename, err_text, tildify
 from ...store import ConfirmSpec, store
 from ..folder_picker import FolderPicker
 from ..ui.bits import Box, Check, IconButton, button, label
+from ..ui.button import Btn, text_button
 from ..ui.signals import bind
 from .parts import ElideLabel, Text
 from .settings_ui import (
@@ -31,7 +33,6 @@ from .settings_ui import (
     home,
     line_edit,
     select_value,
-    styled,
     text_area,
     vbox,
 )
@@ -348,17 +349,10 @@ class RepoRow(Panel):
         self.chev = IconButton("chevron-right", "Show the rest of the entry", 14)
         self.chev.clicked.connect(lambda: self.set_open(not self.open))
         hl.addWidget(self.chev)
-        self.name_btn = QPushButton()
+        self.name_btn = text_button("", theme.FS_UI, 600)
         self.name_btn.setAutoDefault(False)
         self.name_btn.setToolTip("Click to rename")
         self.name_btn.setAccessibleName("Rename repository")
-        self.name_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        styled(
-            self.name_btn,
-            lambda t: (
-                f"QPushButton {{ border: none; background: transparent; text-align: left; padding: 0; font-size: {theme.FS_UI}px; font-weight: 600; color: {t.text}; }} QPushButton:hover {{ color: {t.text_2}; }}"
-            ),
-        )
         self.name_btn.clicked.connect(self.start_rename)
         hl.addWidget(self.name_btn)
         self.name_edit = line_edit("Name", name="Repository name")
@@ -483,8 +477,6 @@ class RepoRow(Panel):
 
     # ---- data in
     def sync(self, e: Json, force: bool = False) -> None:
-        import json
-
         snap = json.dumps(e, sort_keys=True, default=str)
         if snap == self._snapshot and not force:
             return
@@ -627,7 +619,7 @@ class RepoRow(Panel):
             )
         )
 
-    def eventFilter(self, obj, ev) -> bool:  # noqa: N802
+    def eventFilter(self, obj, ev) -> bool:
         if obj is self.name_edit and ev.type() == QEvent.Type.KeyPress and ev.key() == Qt.Key.Key_Escape:
             self.name_edit.setText(str(self.e.get("name") or ""))
             self.name_edit.hide()
@@ -661,16 +653,10 @@ def _field(title: str, control: QWidget, hint_text: str, top: bool = False) -> Q
 
 def _alias_chip(text: str, on_remove: Any) -> QPushButton:
     """``.chip``: one of the person's names, removed by a click."""
-    b = QPushButton(text)
+    b = Btn(text, tooltip=f"Remove “{text}”")
+    b.override.update(h=20, px=8, fs=11, fw=600, r=9)
+    b.set_look("text_2", "err", bg="fill_1/raised", hover_bg="err_wash/raised")
     b.setAutoDefault(False)
-    b.setCursor(Qt.CursorShape.PointingHandCursor)
-    b.setToolTip(f"Remove “{text}”")
     b.setAccessibleName(f"Remove alias {text}")
-    styled(
-        b,
-        lambda t: (
-            f"QPushButton {{ border: 1px solid transparent; border-radius: 9px; padding: 1px 8px; background: {theme.blend(t.fill_1, t.raised).name()}; color: {t.text_2}; font-size: 11px; font-weight: 600; }} QPushButton:hover {{ color: {t.err}; background: {theme.blend(t.err_wash, t.raised).name() if hasattr(t, 'err_wash') else theme.blend(t.fill_2, t.raised).name()}; }}"
-        ),
-    )
     b.clicked.connect(lambda _checked=False, fn=on_remove: fn())  # clicked carries a bool the callback must not get
     return b

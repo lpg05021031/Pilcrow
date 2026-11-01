@@ -19,7 +19,6 @@ from PySide6.QtWidgets import QLabel, QWidget
 from .... import markdown, theme
 from ....lib.ansi import parse_ansi
 from ....lib.fmt import lang_from_path
-from ...ui.signals import bind
 from .common import Surface, code_more, rich, vbox
 
 Range = Tuple[int, int]
@@ -436,10 +435,3 @@ def ansi_html(text: str) -> str:
             styles.append(f"color:{t.text_3}")
         out.append(f'<span style="{";".join(styles)}">{esc}</span>' if styles else esc)
     return f'<div style="white-space:pre-wrap;line-height:{int(12 * 1.55 + 0.5)}px">{"".join(out) or "&nbsp;"}</div>'
-
-
-def ansi_label(text: str, color: str = "text_2") -> QLabel:
-    """A mono label holding :func:`ansi_html` of a text; re-rendered when the theme changes."""
-    lb = rich(ansi_html(text), mono=True, size=12, color=color)
-    bind(theme.theme.changed, lb, lambda _t: lb.setText(ansi_html(text)))
-    return lb

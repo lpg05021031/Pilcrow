@@ -1,10 +1,13 @@
 import { useMemo } from 'react';
-import { Plus, PanelLeftOpen, Play } from 'lucide-react';
-import { useStore, call, openSession, respond, setUi, showDispatch, openJob, runsOf, runsIn } from '../../lib/store';
+import { Plus, Play } from 'lucide-react';
+import { useStore, call, openSession, showDispatch, openJob, runsOf, runsIn, toasted } from '../../lib/store';
 import type { DispatchJob } from '../../lib/types';
 import { cost, duration, plural } from '../../lib/format';
-import { Mark, useNow } from '../ui/bits';
-import { SegmentBar, askedBy, countsText, elapsedText, groupRequests, jobCostText, jobStateText, type RequestGroup } from './common';
+import { ShowSidebarButton } from '../ui/bits';
+import { Mark } from '../ui/brand';
+import { useNow } from '../ui/hooks';
+import { onActivate } from '../ui/keys';
+import { RequestAnswers, SegmentBar, askedBy, countsText, elapsedText, groupRequests, jobCostText, jobStateText, type RequestGroup } from './common';
 
 /**
  * The board: every job at a glance. The control room's discipline: sections appear only when they
@@ -15,7 +18,6 @@ export function Board() {
   const jobs = useStore((s) => s.jobs);
   const jobRuns = useStore((s) => s.jobRuns);
   const loaded = useStore((s) => s.jobsLoaded);
-  const sidebar = useStore((s) => s.ui.sidebar);
   const now = useNow(1000, true);
   const buckets = useMemo(() => {
     const out = { needs: [] as DispatchJob[], running: [] as DispatchJob[], review: [] as DispatchJob[], drafts: [] as DispatchJob[], finished: [] as DispatchJob[] };
@@ -34,11 +36,7 @@ export function Board() {
   return (
     <div className="dispatch">
       <header className="ov-head">
-        {!sidebar && (
-          <button className="icon-btn head-sidebar" title="Show sidebar (Ctrl+B)" aria-label="Show sidebar" onClick={() => setUi({ sidebar: true })}>
-            <PanelLeftOpen size={16} />
-          </button>
-        )}
+        <ShowSidebarButton />
         <h1 className="ov-title">Dispatch</h1>
         <span className="ov-sum tnum">
           {total ? plural(total, 'job') : ''}
@@ -95,43 +93,22 @@ export function Board() {
 }
 
 /** A request waiting on a job, as one line in a well (`.ovc-well`): the tool, what it asks, who asked, the answers. */
-export function RequestRow({ jobId, group }: { jobId: string; group: RequestGroup }) {
-  const first = group.asks[0];
+function RequestRow({ jobId, group }: { jobId: string; group: RequestGroup }) {
   const [tool, ...rest] = group.label.split(': ');
   const what = rest.join(': ');
-  const allowOne = () => first && respond(first.run.sessionId || '', first.pending.requestId, { behavior: 'allow', decisionClassification: 'user_temporary' });
-  const allowAll = () => call('dispatch.allow', { id: jobId, key: group.key });
-  const denyOne = () => first && respond(first.run.sessionId || '', first.pending.requestId, { behavior: 'deny', message: 'The user declined this action.', decisionClassification: 'user_reject' });
-  const open = () => first?.run.sessionId && openSession(first.run.sessionId);
   return (
     <div className="ovc-well dp-ask" onClick={(e) => e.stopPropagation()}>
       <span className="ovc-perm-tool">{what ? tool : group.label}</span>
       {what && <span className="ovc-perm-what mono ellipsis">{what}</span>}
       <span className="dp-ask-who faint">{askedBy(group.names)}</span>
       <span className="grow" />
-      {group.interactive ? (
-        <button className="btn sm primary" onClick={open}>
-          Open to respond
-        </button>
-      ) : (
-        <>
-          <button className="btn sm primary" onClick={allowOne}>
-            Allow
-          </button>
-          <button className="btn sm" onClick={allowAll} title="Answer every run of this job that asks the same thing, now and later">
-            Allow for all{group.asks.length > 1 ? ` · ${group.asks.length}` : ''}
-          </button>
-          <button className="btn sm ghost" onClick={denyOne}>
-            Deny
-          </button>
-        </>
-      )}
+      <RequestAnswers jobId={jobId} group={group} />
     </div>
   );
 }
 
 /** The canary finished: read it and continue, with the forecast for the rest. */
-export function CanaryRow({ job }: { job: DispatchJob }) {
+function CanaryRow({ job }: { job: DispatchJob }) {
   const myRuns = useStore((s) => s.jobRuns[job.id]);
   const names = job.learned.map((l) => l.name).join(', ') || 'the canary';
   const f = job.forecast;
@@ -153,7 +130,7 @@ export function CanaryRow({ job }: { job: DispatchJob }) {
       <button className="btn sm ghost" onClick={openCanary}>
         Open canary
       </button>
-      <button className="btn sm primary" onClick={() => call('dispatch.continue', { id: job.id }).catch(() => {})}>
+      <button className="btn sm primary" onClick={() => call('dispatch.continue', { id: job.id }).catch(toasted)}>
         <Play size={12} /> Continue
       </button>
     </div>
@@ -164,7 +141,7 @@ function JobCard({ job, now, detail }: { job: DispatchJob; now: number; detail: 
   const myRuns = useStore((s) => s.jobRuns[job.id]);
   const groups = detail ? groupRequests(runsIn(myRuns)).slice(0, 4) : [];
   return (
-    <article className={`ovc dp-card${detail ? ' needs' : ''}`} data-card={job.id} onClick={() => openJob(job.id)} role="button" tabIndex={0}>
+    <article className={`ovc dp-card${detail ? ' needs' : ''}`} data-card={job.id} onClick={() => openJob(job.id)} onKeyDown={onActivate(() => openJob(job.id))} role="button" tabIndex={0}>
       {detail && <span className="ovc-rail" aria-hidden="true" />}
       <div className="dp-line">
         <span className="dp-name ellipsis">{job.name || 'Untitled job'}</span>

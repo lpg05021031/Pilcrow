@@ -1,36 +1,42 @@
-// Scheduled sessions: a prompt that runs in a folder on a cadence while nobody is watching, and an
-// inbox that collects what each run produced. The server is always on, so this needs no cron.
+// Scheduled sessions: a prompt that runs in a folder on a cadence while nobody is watching; what each
+// run produced lands in the inbox (inbox.js). The server is always on, so this needs no cron.
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { store } from './config.js';
-import { sessions, bus, textOfContent } from './sessions.js';
+import { sessions, bus } from './sessions.js';
 import * as snapshots from './snapshots.js';
-import { xdg, readJson, writeJson, uuid, log, slash } from './util.js';
+import * as inbox from './inbox.js';
+import { CLOSE_AFTER_MS, MAX_FILES, SUMMARY_MAX, capRun, changesOf } from './runs.js';
+import { xdg, readJson, jsonFile, uuid, log, slash, lastAssistantText } from './util.js';
 
 export const events = new EventEmitter();
 
 const FILE = path.join(xdg('config'), 'schedules.json');
-const INBOX = path.join(xdg('state'), 'inbox.json');
-const MAX_INBOX = 400;
 const MAX_PARALLEL = 2;
 const DEFAULT_MAX_MIN = 45;
 
-let data = readJson(FILE, { schedules: [] });
-let inbox = readJson(INBOX, { items: [] });
-const running = new Map(); // scheduleId -> { sessionId | jobId, startedAt, timer }
+/**
+ * @typedef {{ id: string, kind: string, playbookId: string | null, playbookName: string | null, name: string, cwd: string, prompt: string,
+ *   cadence: Record<string, any>, model: string, effort: string, mode: string, worktree: boolean, maxMinutes: number, enabled: boolean,
+ *   createdAt: number, lastRunAt: number | null, lastStatus: string | null, runs: number }} Schedule
+ * @typedef {{ sessionId?: string, jobId?: string, startedAt: number, timer: ReturnType<typeof setTimeout> | null, stopping?: string | null, onState?: (st: any) => void }} Run
+ */
+
+/** @type {{ schedules: Schedule[] }} read in start(), not at import: importing this module must not touch the person's files */
+let data = { schedules: [] };
+/** @type {Map<string, Run>} scheduleId -> its run in progress */
+const running = new Map();
 /** How a schedule of kind 'dispatch' runs: (playbookId, { scheduleId, name, unattended }) → job summary. Set by main.js. */
 let dispatchRunner = null;
 export function setDispatchRunner(fn) {
   dispatchRunner = fn;
 }
 
+const file = jsonFile(FILE, () => data);
+
 function persist() {
-  writeJson(FILE, data);
+  file.save();
   events.emit('schedules');
-}
-function saveInbox() {
-  writeJson(INBOX, inbox);
-  events.emit('inbox');
 }
 
 // ---------------------------------------------------------------- cadence
@@ -72,6 +78,12 @@ function cronMatchers(expr) {
   });
 }
 
+/** The same time of day, a day later (setHours again: a day is not 24 hours across a DST change). */
+function nextDay(d, h, m) {
+  d.setTime(d.getTime() + DAY);
+  d.setHours(h, m, 0, 0);
+}
+
 /** When a schedule fires next, after `from`. */
 export function nextRun(cadence, from = Date.now()) {
   const c = cadence || {};
@@ -92,14 +104,14 @@ export function nextRun(cadence, from = Date.now()) {
     case 'weekdays': {
       const d = new Date(base);
       d.setHours(h, m, 0, 0);
-      while (d.getTime() <= from || d.getDay() === 0 || d.getDay() === 6) d.setTime(d.getTime() + DAY), d.setHours(h, m, 0, 0);
+      while (d.getTime() <= from || d.getDay() === 0 || d.getDay() === 6) nextDay(d, h, m);
       return d.getTime();
     }
     case 'weekly': {
       const wd = Number.isInteger(c.weekday) ? c.weekday : 1;
       const d = new Date(base);
       d.setHours(h, m, 0, 0);
-      while (d.getTime() <= from || d.getDay() !== wd) d.setTime(d.getTime() + DAY), d.setHours(h, m, 0, 0);
+      while (d.getTime() <= from || d.getDay() !== wd) nextDay(d, h, m);
       return d.getTime();
     }
     case 'cron': {
@@ -116,7 +128,7 @@ export function nextRun(cadence, from = Date.now()) {
     default: {
       const d = new Date(base);
       d.setHours(h, m, 0, 0);
-      while (d.getTime() <= from) d.setTime(d.getTime() + DAY), d.setHours(h, m, 0, 0);
+      while (d.getTime() <= from) nextDay(d, h, m);
       return d.getTime();
     }
   }
@@ -232,21 +244,18 @@ export async function runNow(id, { manual = true } = {}) {
   store.setMeta(sessionId, { scheduled: { id: s.id, name: s.name, at: startedAt, manual } });
   const session = sessions.find(sessionId);
   session.unattended = true;
-  const entry = { sessionId, startedAt, timer: null };
+  /** @type {Run} */
+  const entry = { sessionId, startedAt, timer: null, stopping: null };
   running.set(id, entry);
   s.lastRunAt = startedAt;
   s.runs = (s.runs || 0) + 1;
   persist();
   log('schedule run', s.name, sessionId);
   const finish = (status, reason) => finishRun(s, session, entry, status, reason);
-  entry.timer = setTimeout(() => {
-    log('schedule timeout', s.name);
-    session.interrupt().catch(() => {});
-    setTimeout(() => finish('stopped', `Stopped after ${s.maxMinutes} minutes`), 3000);
-  }, s.maxMinutes * 60e3);
+  entry.timer = capRun(entry, s.maxMinutes, () => session, (why) => finish('stopped', why));
   const onState = (st) => {
     if (st.id !== sessionId || !running.has(id) || running.get(id) !== entry) return;
-    if (st.status === 'idle') finish('completed');
+    if (st.status === 'idle') finish(entry.stopping ? 'stopped' : 'completed', entry.stopping);
     else if (st.status === 'error') finish('failed', st.error);
     else if (st.status === 'stopped') finish(session.lastReply ? 'completed' : 'failed', 'Claude Code exited');
   };
@@ -267,17 +276,8 @@ function finishRun(s, session, entry, status, reason) {
   clearTimeout(entry.timer);
   bus.off('state', entry.onState);
   const endedAt = Date.now();
-  const files = new Map();
-  for (const st of snapshots.steps(session).steps) {
-    if (st.at < entry.startedAt) continue;
-    for (const f of st.files) {
-      const cur = files.get(f.path) || { path: f.path, add: 0, del: 0 };
-      cur.add += f.add;
-      cur.del += f.del;
-      files.set(f.path, cur);
-    }
-  }
-  const lastText = session.lastReply?.text || lastAssistantText(session) || '';
+  const { files } = changesOf({ steps: snapshots.steps(session).steps, since: entry.startedAt });
+  const lastText = session.lastReply?.text || lastAssistantText(session.messages);
   const item = {
     id: uuid(),
     scheduleId: s.id,
@@ -289,37 +289,28 @@ function finishRun(s, session, entry, status, reason) {
     durationMs: endedAt - entry.startedAt,
     status,
     reason: reason || null,
-    summary: lastText.slice(0, 1200),
+    summary: lastText.slice(0, SUMMARY_MAX),
     cost: session.usage?.costUsd || 0,
-    files: [...files.values()].slice(0, 60),
+    files: files.slice(0, MAX_FILES),
     read: false,
     manual: Boolean(store.getMeta(session.id)?.scheduled?.manual),
   };
-  inbox.items.unshift(item);
-  if (inbox.items.length > MAX_INBOX) inbox.items.length = MAX_INBOX;
-  saveInbox();
+  inbox.push(item);
   s.lastStatus = status;
   persist();
   bus.emit('list-changed');
   // The process is not needed any more; the transcript stays and the session reopens on demand.
-  setTimeout(() => session.close(), 1500);
+  setTimeout(() => session.close(), CLOSE_AFTER_MS);
   log('schedule done', s.name, status);
 }
 
-function lastAssistantText(session) {
-  for (let i = session.messages.length - 1; i >= 0; i--) {
-    const m = session.messages[i];
-    if (m.type === 'assistant' && !m.parent_tool_use_id) {
-      const t = textOfContent(m.message?.content);
-      if (t) return t.replace(/\s+/g, ' ').trim();
-    }
-  }
-  return '';
-}
-
-let ticker = null;
+/** @type {ReturnType<typeof setInterval> | undefined} */
+let ticker;
+/** @type {ReturnType<typeof setTimeout> | undefined} */
+let firstTick;
 export function start() {
   if (ticker) return;
+  data = readJson(FILE, data);
   const tick = async () => {
     const now = Date.now();
     for (const s of data.schedules) {
@@ -338,38 +329,20 @@ export function start() {
           log('schedule failed to start', s.name, e?.message);
           s.lastRunAt = now;
           s.lastStatus = 'failed';
-          inbox.items.unshift({ id: uuid(), scheduleId: s.id, scheduleName: s.name, sessionId: null, cwd: s.cwd, startedAt: now, endedAt: now, durationMs: 0, status: 'failed', reason: e?.message || 'Could not start', summary: '', cost: 0, files: [], read: false });
-          saveInbox();
+          inbox.push({ scheduleId: s.id, scheduleName: s.name, sessionId: null, cwd: s.cwd, startedAt: now, endedAt: now, durationMs: 0, status: 'failed', reason: e?.message || 'Could not start', summary: '', cost: 0, files: [] });
           persist();
         }
       }
     }
   };
   ticker = setInterval(tick, 30_000);
-  setTimeout(tick, 5000);
+  firstTick = setTimeout(tick, 5000);
 }
 
 export function stop() {
   clearInterval(ticker);
-  ticker = null;
-}
-
-// ---------------------------------------------------------------- inbox
-
-export function inboxList() {
-  return { items: inbox.items, unread: inbox.items.filter((i) => !i.read).length };
-}
-
-export function markRead(ids) {
-  for (const i of inbox.items) if (!ids || ids.includes(i.id)) i.read = true;
-  saveInbox();
-  return inboxList().unread;
-}
-
-export function removeItem(id) {
-  inbox.items = inbox.items.filter((i) => i.id !== id);
-  saveInbox();
-  return true;
+  clearTimeout(firstTick);
+  ticker = firstTick = undefined;
 }
 
 /** A dispatch job started by a schedule ended: the schedule's record moves on (the report is the job's own inbox item). */
@@ -379,21 +352,4 @@ export function noteDispatchFinished(scheduleId, status) {
   if (!s) return;
   s.lastStatus = status;
   persist();
-}
-
-/** A later change to an item that is already in the inbox (a report's prose arriving). */
-export function updateInbox(id, patch) {
-  const it = inbox.items.find((i) => i.id === id);
-  if (!it) return false;
-  for (const [k, v] of Object.entries(patch || {})) if (v !== undefined) it[k] = v;
-  saveInbox();
-  return true;
-}
-
-/** Another module's result (a dispatch job's report) lands in the same inbox. */
-export function pushInbox(item) {
-  inbox.items.unshift({ read: false, ...item, id: item.id || uuid() });
-  if (inbox.items.length > MAX_INBOX) inbox.items.length = MAX_INBOX;
-  saveInbox();
-  return item.id;
 }

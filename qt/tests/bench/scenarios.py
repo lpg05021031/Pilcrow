@@ -10,14 +10,15 @@ replaces it (an adapter per implementation lives in ``ctx``).
 
 from __future__ import annotations
 
+import statistics
 import time
 from typing import Any, Callable, Dict, List, Optional
 
 from PySide6.QtCore import QPoint, Qt
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QWidget
 
 from . import rig
-from .rig import Film, Paced, click, move, pump, rss_mb, settle, type_text, wheel, y_in
+from .rig import Film, Paced, click, idle_cpu, move, pump, rss_mb, settle, type_text, wheel, y_in
 
 Json = Dict[str, Any]
 
@@ -102,32 +103,40 @@ class Ctx:
     def open(self, sid: str, timeout: float = 60.0) -> Dict[str, float]:
         """Open a conversation and time the stages: the first rows on screen (the snapshot is modelled
         in slices, so rows show before it is whole), the whole of it modelled, the first paint."""
+
+        def rows() -> bool:
+            tv = self.transcript()
+            return bool(sid in self.store.rt and tv is not None and getattr(tv, "sid", sid) == sid and tv.units())
+
+        def loaded() -> bool:
+            return sid in self.store.rt and self.store.rt[sid].loaded
+
         t0 = time.perf_counter()
         self.store.open_session(sid)
-        self.c.wait_until(
-            lambda: (
-                sid in self.store.rt
-                and self.transcript() is not None
-                and getattr(self.transcript(), "sid", sid) == sid
-                and self.transcript().units()
-            ),
-            timeout,
-            "rows",
-        )
+        # the event loop is timed while the snapshot is modelled: no turn of it may block for long
+        p_rows = pump(timeout, until=rows)
+        assert rows(), f"no rows of {sid} within {timeout}s"
         t_rows = time.perf_counter() - t0
-        self.c.wait_until(lambda: sid in self.store.rt and self.store.rt[sid].loaded, timeout, f"load {sid}")
+        p_load = pump(timeout, until=loaded)
+        assert loaded(), f"{sid} not loaded within {timeout}s"
         t_loaded = time.perf_counter() - t0
+        modelling = p_rows.stalls + p_load.stalls
         tv = self.transcript()
         self.c.app.processEvents()
         p0 = time.perf_counter()
         tv.viewport().grab()
         t_paint = time.perf_counter() - p0
         settle(400)
+        # what the window defers to its first idle moment (the closed panel built for the session)
+        # happens here, not inside the scenario that runs next: no scenario depends on the one before
+        pump(2.0, until=lambda: not self.win._idle_panel.isActive())
+        settle(100)
         return {
             "loaded_ms": round(t_loaded * 1000),
             "rows_ms": round(t_rows * 1000),
             "first_paint_ms": round(t_paint * 1000, 1),
             "total_ms": round((time.perf_counter() - t0) * 1000),
+            "modelling_stall_max_ms": round(max(modelling, default=0.0) * 1000, 1),
         }
 
     def scope(self, name: str, root: QWidget):
@@ -247,15 +256,17 @@ def scroll_wheel(ctx: Ctx) -> Json:
     bar = tv.verticalScrollBar()
 
     def fling(direction: int, seconds: float, filmed: bool) -> Json:
-        """Notches at 120 a second (a fast wheel) for ``seconds``; the film is optional because grabbing
-        slows the loop and would understate what the client manages on its own."""
+        """Notches at 120 a second (a fast wheel) for ``seconds``. The film is optional because grabbing
+        slows the loop and would understate what the client manages on its own; filmed, the wheel
+        turns one notch a frame, so each frame's shift stays within what the film can match however
+        slow the machine is (it checks what is painted, not how fast)."""
         ctx.counters.reset()
         film = Film(vp, ctx.canvas_color()) if filmed else None
         positions: List[int] = [bar.value()]
         paced = Paced(120, int(120 * seconds))
 
         def frame() -> None:
-            for _ in range(paced.due()):
+            for _ in range(min(1, paced.due()) if filmed else paced.due()):
                 wheel(vp, direction)
             positions.append(bar.value())
 
@@ -291,15 +302,22 @@ def scroll_drag(ctx: Ctx) -> Json:
     bar = tv.verticalScrollBar()
     ctx.counters.reset()
     steps: List[float] = []
+    steps_cpu: List[float] = []
     top = bar.maximum()
     for k in range(80, -1, -1):
-        t0 = time.perf_counter()
+        t0, c0 = time.perf_counter(), time.thread_time()
         bar.setValue(top * k // 80)
         ctx.c.app.processEvents()
         tv.viewport().repaint()
         steps.append(time.perf_counter() - t0)
+        steps_cpu.append(time.thread_time() - c0)
     ctx.counters.drop("transcript")
-    return {"step": rig.summary(steps), "over_16ms": sum(1 for s in steps if s > 0.0167), **sc.snapshot()}
+    return {
+        "step": rig.summary(steps),
+        "step_cpu": rig.summary(steps_cpu),  # the main thread's own time a step (see Pump.turn_cpu)
+        "over_16ms": sum(1 for s in steps if s > 0.0167),
+        **sc.snapshot(),
+    }
 
 
 def _toggle_rows(ctx: Ctx, cls_name: str, n: int, label: str) -> Json:
@@ -325,23 +343,27 @@ def _toggle_rows(ctx: Ctx, cls_name: str, n: int, label: str) -> Json:
             below = None
         # The first open of a fold is not animated by design (its body is built then), so each row is
         # toggled twice: the second pair runs with the film on, for flashes and the frames the eye sees.
-        for action, filmed in (("open", False), ("close", False), ("open", True), ("close", True)):
+        for k, (action, filmed) in enumerate((("open", False), ("close", False), ("open", True), ("close", True))):
             ctx.counters.reset()
             sets: List[int] = []
             conn = bar.valueChanged.connect(lambda v, sets=sets: sets.append(v))
             film = Film(vp, ctx.canvas_color()) if filmed else None
             heights: List[int] = []
             below_y: List[int] = []
+            values: List[int] = []
             stamps: List[float] = []
+            follow = getattr(getattr(tv, "view", None), "follow", None)
+            following = bool(getattr(follow, "following", False))
 
-            def frame(grow=grow, below=below, heights=heights, below_y=below_y, stamps=stamps) -> None:
+            def frame(grow=grow, below=below, heights=heights, below_y=below_y, values=values, stamps=stamps) -> None:
                 try:
-                    heights.append(grow.height())
-                    stamps.append(time.perf_counter())
-                    if below is not None:
-                        below_y.append(below.y())
+                    h, v, by = grow.height(), bar.value(), below.y() if below is not None else 0
                 except RuntimeError:
-                    pass
+                    return
+                heights.append(h)
+                values.append(v)
+                below_y.append(by)
+                stamps.append(time.perf_counter())
 
             t0 = time.perf_counter()
             ctx.click_row(row)
@@ -350,9 +372,17 @@ def _toggle_rows(ctx: Ctx, cls_name: str, n: int, label: str) -> Json:
             bar.valueChanged.disconnect(conn)
             changes = [i for i in range(1, len(heights)) if heights[i] != heights[i - 1]]
             anim_ms = (stamps[changes[-1]] - stamps[changes[0]]) * 1000 if len(changes) > 1 else 0
-            jumps = [abs(below_y[i] - below_y[i - 1]) for i in range(1, len(below_y))]
+            jumps = [abs(below_y[i] - below_y[i - 1]) for i in range(1, len(below_y))] if below is not None else []
+            # the row below moves by what the toggled row grew, less what the view scrolled (following
+            # the live end); anything more is a shift nobody asked for
+            unexplained = [
+                abs((below_y[i] - below_y[i - 1]) - (heights[i] - heights[i - 1]) + (values[i] - values[i - 1]))
+                for i in range(1, len(below_y))
+                if below is not None
+            ]
             r: Json = {
                 "action": action,
+                "first": k == 0,  # the first open builds and measures the body
                 "filmed": filmed,
                 "sync_ms": round(sync * 1000, 1),
                 "stall": p.report(),
@@ -361,10 +391,12 @@ def _toggle_rows(ctx: Ctx, cls_name: str, n: int, label: str) -> Json:
                 "move": sc.move,
                 "paint": sc.paint,
                 "scroll_sets": len(sets),
+                "following": following,
                 "height_frames": len(changes),
                 "anim_ms": round(anim_ms),
                 "fps": round(len(changes) / (anim_ms / 1000), 1) if anim_ms > 0 else 0,
                 "below_max_jump_px": max(jumps, default=0),
+                "below_unexplained_px": max(unexplained, default=0),
             }
             if film is not None:
                 r["flashes"] = film.flashes()
@@ -378,16 +410,24 @@ def _toggle_summary(results: List[Json]) -> Json:
     if not results:
         return {}
     plain = [r for r in results if not r["filmed"]] or results
+    again = [r for r in results if not r["first"]]
     return {
         "toggles": len(results),
         "layout_per_toggle": round(sum(r["layout"] for r in plain) / len(plain), 1),
         "paint_per_toggle": round(sum(r["paint"] for r in plain) / len(plain), 1),
         "scroll_sets_per_toggle": round(sum(r["scroll_sets"] for r in plain) / len(plain), 1),
+        # once a body is built, a toggle away from the live end holds the anchor without moving the
+        # scroll, and the row below moves by what the toggled row grew; at the live end the view
+        # follows the growing row, which is the easing, not a correction
+        "scroll_sets_off_end": sum(r["scroll_sets"] for r in again if not r["following"]),
         "sync_max_ms": max(r["sync_ms"] for r in plain),
+        "turn_cpu_p50_ms": round(statistics.median(r["stall"]["cpu_p50"] for r in plain), 2),
         "stall_p95_ms": max(r["stall"]["p95"] for r in plain),
         "stall_max_ms": max(r["stall"]["max"] for r in plain),
         "fps_min_animated": min((r["fps"] for r in plain if r["fps"]), default=0),
         "below_max_jump_px": max(r["below_max_jump_px"] for r in results),
+        "below_unexplained_px": max((r["below_unexplained_px"] for r in again), default=0),
+        "first_open_unexplained_px": max(r["below_unexplained_px"] for r in results if r["first"]),
         "flashes": sum(r.get("flashes", 0) for r in results),
     }
 
@@ -441,7 +481,39 @@ def hover_sweep(ctx: Ctx) -> Json:
 
     p = pump(30, until=lambda: paced.done, on_frame=frame)
     ctx.counters.drop("transcript")
-    return {"moves": len(ys), "stall": p.report(), **sc.snapshot()}
+    snap = sc.snapshot()
+    return {"moves": len(ys), "stall": p.report(), "paint_px_per_move": round(snap["paint_px"] / len(ys)), **snap}
+
+
+def select_drag(ctx: Ctx) -> Json:
+    """Press at the top of the screen and drag a selection down over the rows in 6px steps, at the
+    top of the conversation (the same rows whatever ran before)."""
+    from PySide6.QtTest import QTest
+
+    ctx.open(ctx.heavy)
+    tv = ctx.transcript()
+    vp = tv.viewport()
+    ctx.scroll_to(0)
+    settle(300)
+    sc = ctx.scope("transcript", tv)
+    x = vp.width() // 3
+    QTest.mousePress(vp, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(x, 40))
+    settle(50)
+    ctx.counters.reset()
+    ys = list(range(46, vp.height() - 40, 6))
+    paced = Paced(120, len(ys))
+
+    def frame() -> None:
+        for _ in range(paced.due()):
+            move(vp, QPoint(x, ys[paced.sent - 1]))
+
+    p = pump(30, until=lambda: paced.done, on_frame=frame)
+    snap = sc.snapshot()
+    ctx.counters.drop("transcript")
+    QTest.mouseRelease(vp, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(x, ys[-1]))
+    tv.view.clear_selection()
+    settle(100)
+    return {"moves": len(ys), "stall": p.report(), "paint_px_per_move": round(snap["paint_px"] / len(ys)), **snap}
 
 
 def streaming_follow(ctx: Ctx) -> Json:
@@ -562,17 +634,20 @@ def resize_window(ctx: Ctx) -> Json:
     widths = list(range(1480, 999, -40)) + list(range(1000, 1481, 40))
     film = Film(vp, ctx.canvas_color(), region=(0, 0, 640, min(600, vp.height())))
     steps: List[float] = []
+    steps_cpu: List[float] = []
     for w in widths:
-        t0 = time.perf_counter()
+        t0, c0 = time.perf_counter(), time.thread_time()
         ctx.win.resize(w, 940)
         ctx.c.app.processEvents()
         steps.append(time.perf_counter() - t0)
+        steps_cpu.append(time.thread_time() - c0)
         film.grab()
     settle(300)
     ctx.counters.drop("transcript")
     return {
         "steps": len(widths),
         "step": rig.summary(steps),
+        "step_cpu": rig.summary(steps_cpu),  # the main thread's own time a step (see Pump.turn_cpu)
         "over_50ms": sum(1 for s in steps if s > 0.05),
         "flashes": film.flashes(),
         **sc.snapshot(),
@@ -608,14 +683,66 @@ def panel_tabs(ctx: Ctx) -> Json:
     settle(300)
     ctx.counters.reset()
     steps: List[float] = []
+    steps_cpu: List[float] = []
     for dx in [-12] * 16 + [12] * 16:
-        t0 = time.perf_counter()
+        t0, c0 = time.perf_counter(), time.thread_time()
         ctx.win._drag_panel(dx)
         ctx.c.app.processEvents()
         steps.append(time.perf_counter() - t0)
-    out["drag"] = {"step": rig.summary(steps), "layout": sc.layout, "paint": sc.paint}
+        steps_cpu.append(time.thread_time() - c0)
+    win = ctx.counters.scopes["window"]
+    out["drag"] = {
+        "step": rig.summary(steps),
+        "step_cpu": rig.summary(steps_cpu),
+        "layout": sc.layout,
+        "paint": sc.paint,
+        "window_paint": win.paint,  # paint events in the whole window, the panel's among them
+        "window_paint_px": win.paint_area,
+    }
     ctx.counters.drop("panel")
     return out
+
+
+def tasks_fold_toggle(ctx: Ctx) -> Json:
+    """Open and close the Tasks tab's workflow card (a ``Collapse``: its height animates by
+    ``maximumHeight``, so the panel's layout runs each frame), three times."""
+    from pilcrow_qt.widgets.panels.tasks import WorkflowDetail
+
+    sid = "sess-tests"
+    ctx.c.open(sid)
+    ctx.c.call("mock.pace", {"ms": 0})
+    ctx.c.call("session.send", {"id": sid, "text": "run the review workflow"})
+    ctx.c.wait_until(
+        lambda: (
+            ctx.store.rt[sid].status == "idle"
+            and any(t.get("type") == "local_workflow" for t in ctx.store.rt[sid].st.get("tasks") or [])
+        ),
+        30,
+        "the mock's workflow",
+    )
+    ctx.store.set_ui(panel=True, panel_tab="tasks")
+    settle(800)
+    panel = ctx.win.panel_host
+    cards = [r for r in ctx.c.find(WorkflowDetail, panel) if r.isVisible()]
+    assert cards, "no workflow card in the Tasks tab"
+    row = cards[0]
+    sc = ctx.scope("panel", panel)
+    frames: List[Json] = []
+    for _ in range(3):
+        for _open in (True, False):
+            ctx.counters.reset()
+            row._toggle()
+            p = pump(0.6)
+            frames.append({"stall_max_ms": p.report()["max"], "layout": sc.layout, "paint": sc.paint})
+    ctx.counters.drop("panel")
+    ctx.store.set_ui(panel=False)
+    settle(300)
+    return {
+        "toggles": len(frames),
+        "layout_per_toggle": round(sum(f["layout"] for f in frames) / len(frames), 1),
+        "paint_per_toggle": round(sum(f["paint"] for f in frames) / len(frames), 1),
+        "stall_max_ms": max(f["stall_max_ms"] for f in frames),
+    }
 
 
 def panel_while_streaming(ctx: Ctx) -> Json:
@@ -760,47 +887,69 @@ def switch_session(ctx: Ctx) -> Json:
 
 
 def view_mode_cycle(ctx: Ctx) -> Json:
-    """Cycle Normal → Thinking → Verbose → Normal (every row is drawn again)."""
+    """Cycle Normal → Thinking → Verbose → Normal twice (every row is drawn again each time)."""
     ctx.open(ctx.heavy)
-    out: Json = {}
-    for mode in ("thinking", "verbose", "normal"):
+    out: Json = {"switches": []}
+    for mode in ("thinking", "verbose", "normal") * 2:
         ctx.counters.reset()
-        t0 = time.perf_counter()
+        t0, c0 = time.perf_counter(), time.thread_time()
         ctx.store.set_ui(view=mode)
         ctx.c.app.processEvents()
         ctx.transcript().viewport().grab()
-        to_paint = time.perf_counter() - t0
+        to_paint, to_paint_cpu = time.perf_counter() - t0, time.thread_time() - c0
         p = pump(1.0)
-        out[mode] = {
-            "to_paint_ms": round(to_paint * 1000),
-            "stall_max_ms": p.report()["max"],
-            "widgets_made": ctx.counters.scopes["window"].children_added,
-        }
-    return out
+        out["switches"].append(
+            {
+                "mode": mode,
+                "to_paint_ms": round(to_paint * 1000),
+                "to_paint_cpu_ms": round(to_paint_cpu * 1000),
+                "stall_max_ms": p.report()["max"],
+                "widgets_made": ctx.counters.scopes["window"].children_added,
+            }
+        )
+    return {**out, **_switch_summary(out["switches"])}
+
+
+def _switch_summary(switches: List[Json]) -> Json:
+    return {
+        "to_paint": rig.summary([s["to_paint_ms"] / 1000 for s in switches]),
+        "to_paint_cpu": rig.summary([s["to_paint_cpu_ms"] / 1000 for s in switches]),
+        "widgets_made": sum(s["widgets_made"] for s in switches),
+    }
 
 
 def theme_toggle(ctx: Ctx) -> Json:
-    """Dark → light → dark with a long conversation and the panel open. The panel's first build is
-    given time to finish so that only the switch itself is timed."""
+    """Dark → light → dark three times with a long conversation on screen, four more retained behind
+    it (the views a person has opened) and the panel open. The panel's first build is given time to
+    finish so that only the switch itself is timed."""
+    for sid in ("sess-login", "sess-tests", "sess-site", ctx.mixed):
+        if ctx.store.session(sid) is not None:
+            ctx.open(sid)
     ctx.open(ctx.heavy)
     ctx.store.set_ui(panel=True, panel_tab="changes")
     settle(1500)
-    out: Json = {}
-    for dark in (False, True):
+    out: Json = {"retained": len(getattr(ctx.win, "_session_views", {})), "switches": []}
+    for dark in (False, True) * 3:
         ctx.counters.reset()
-        t0 = time.perf_counter()
+        t0, c0 = time.perf_counter(), time.thread_time()
         ctx.theme.theme.apply(dark)
         ctx.c.app.processEvents()
         ctx.transcript().viewport().grab()
-        to_paint = time.perf_counter() - t0
+        to_paint, to_paint_cpu = time.perf_counter() - t0, time.thread_time() - c0
         p = pump(0.6)
-        out["light" if not dark else "dark"] = {
-            "to_paint_ms": round(to_paint * 1000),
-            "stall_max_ms": p.report()["max"],
-            "window": ctx.counters.scopes["window"].snapshot(),
-        }
+        win = ctx.counters.scopes["window"].snapshot()
+        out["switches"].append(
+            {
+                "to": "dark" if dark else "light",
+                "to_paint_ms": round(to_paint * 1000),
+                "to_paint_cpu_ms": round(to_paint_cpu * 1000),
+                "stall_max_ms": p.report()["max"],
+                "widgets_made": win["widgets_made"],
+                "window": win,
+            }
+        )
     ctx.store.set_ui(panel=False)
-    return out
+    return {**out, **_switch_summary(out["switches"])}
 
 
 def find(ctx: Ctx) -> Json:
@@ -839,16 +988,17 @@ def find(ctx: Ctx) -> Json:
 
 
 def idle(ctx: Ctx) -> Json:
-    """CPU while nothing happens: a finished conversation, then one that looks busy (timers run)."""
+    """CPU while nothing happens, in a real event loop: a finished conversation, then one that looks
+    busy (the working marks breathe, the elapsed counters count)."""
     ctx.open(ctx.heavy)
     settle(500)
-    p_quiet = pump(3.0)
+    quiet = idle_cpu(3.0)
     ctx.c.call("mock.patch", {"id": ctx.heavy, "state": {"status": "running", "turnStartedAt": time.time() * 1000}})
     settle(500)
-    p_busy = pump(3.0)
+    busy = idle_cpu(3.0)
     ctx.c.call("mock.patch", {"id": ctx.heavy, "state": {"status": "idle", "turnStartedAt": None}})
     settle(300)
-    return {"quiet_cpu_pct": p_quiet.report()["cpu_pct"], "busy_look_cpu_pct": p_busy.report()["cpu_pct"]}
+    return {"quiet_cpu_pct": quiet, "busy_look_cpu_pct": busy}
 
 
 SCENARIOS: Dict[str, Callable[[Ctx], Json]] = {
@@ -861,6 +1011,7 @@ SCENARIOS: Dict[str, Callable[[Ctx], Json]] = {
     "thinking_toggle": thinking_toggle,
     "tool_toggle": tool_toggle,
     "hover_sweep": hover_sweep,
+    "select_drag": select_drag,
     "streaming_follow": streaming_follow,
     "streaming_scrolled_up": streaming_scrolled_up,
     "typing": typing,
@@ -868,10 +1019,9 @@ SCENARIOS: Dict[str, Callable[[Ctx], Json]] = {
     "switch_session": switch_session,
     "panel_tabs": panel_tabs,
     "panel_while_streaming": panel_while_streaming,
+    "tasks_fold_toggle": tasks_fold_toggle,
     "scroll_wheel": scroll_wheel,
     "scroll_drag": scroll_drag,
     "find": find,
     "idle": idle,
 }
-
-_ = (Optional, QApplication, Qt)

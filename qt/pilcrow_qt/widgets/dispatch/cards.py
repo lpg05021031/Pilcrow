@@ -221,7 +221,7 @@ class AskCard(Card):
         self.lay.addLayout(row)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, e) -> None:  # noqa: N802
+    def paintEvent(self, e) -> None:
         super().paintEvent(e)
         t = theme.tokens()
         p = QPainter(self)

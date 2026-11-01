@@ -218,7 +218,7 @@ class PygmentsHighlighter(QSyntaxHighlighter):
                     col += len(part)
         return lines
 
-    def highlightBlock(self, text: str) -> None:  # noqa: N802
+    def highlightBlock(self, text: str) -> None:
         if self._lexer is None:
             return
         if self._stale:
@@ -250,10 +250,10 @@ class LineNumberArea(QWidget):
         super().__init__(editor)
         self._editor = editor
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         return QSize(self._editor.gutter_width(), 0)
 
-    def paintEvent(self, e) -> None:  # noqa: N802
+    def paintEvent(self, e) -> None:
         self._editor.paint_gutter(e)
 
 
@@ -307,7 +307,7 @@ class CodeEditor(QTextEdit):
         self.setTextCursor(cur)
         self.highlighter.rehighlight()
 
-    def setPlainText(self, text: str) -> None:  # noqa: N802
+    def setPlainText(self, text: str) -> None:
         super().setPlainText(text)
         self._apply_line_height()
 
@@ -326,7 +326,7 @@ class CodeEditor(QTextEdit):
             block = block.next()
         cur.endEditBlock()
 
-    def blockCount(self) -> int:  # noqa: N802
+    def blockCount(self) -> int:
         return self.document().blockCount()
 
     def goto_line(self, line: int) -> None:
@@ -351,7 +351,7 @@ class CodeEditor(QTextEdit):
         return out
 
     # ---------------------------------------------------------------- keys
-    def keyPressEvent(self, e: QKeyEvent) -> None:  # noqa: N802
+    def keyPressEvent(self, e: QKeyEvent) -> None:
         key, mods = e.key(), e.modifiers()
         ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier)
         if ctrl and key == Qt.Key.Key_S:
@@ -420,7 +420,7 @@ class CodeEditor(QTextEdit):
             return False
         return len(nxt.text()) - len(nxt.text().lstrip()) > indent
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         cr = self.contentsRect()
         self.gutter.setGeometry(QRect(cr.left(), cr.top(), self.gutter_width(), cr.height()))

@@ -15,7 +15,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 
 from core import Probe, pump, timed  # noqa: E402
-from harness import Client, start_mock  # noqa: E402
+from harness import Client, free_port, start_mock  # noqa: E402
 from PySide6.QtCore import Qt  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 
@@ -46,7 +46,7 @@ class Counter:
 
 
 def main() -> None:
-    port = 5641
+    port = free_port()
     mock = start_mock(port, 400)
     try:
         c = Client(port)

@@ -1,7 +1,8 @@
 // App-wide tooltips. Any element with a `title` gets a styled tooltip instead of the browser's:
 // it appears after a short pause, or at once while the pointer moves between controls ("warm"),
 // shows keyboard shortcuts as keycaps, and never covers the thing you are pointing at.
-// Components keep using plain `title=…`; nothing else needs to change.
+// Components keep using plain `title=…`. Taken over, the title would stop being heard: where it was a
+// control's only name (no aria-label, no text), it stays its name as aria-label.
 
 const SHOW_DELAY = 480;
 const WARM_FOR = 450;
@@ -17,16 +18,17 @@ let suppressed: HTMLElement | null = null;
 function text(el: HTMLElement) {
   const t = el.getAttribute('title');
   if (t !== null) {
-    // Keep the accessible name the title used to provide, then take the title over.
-    if (!el.getAttribute('aria-label') && !(el.textContent || '').trim()) el.setAttribute('aria-label', t);
     el.dataset.tip = t;
     el.removeAttribute('title');
+    if (el.dataset.tipNamed !== undefined || (!el.hasAttribute('aria-label') && !el.hasAttribute('aria-labelledby') && !el.textContent?.trim())) {
+      el.setAttribute('aria-label', t);
+      el.dataset.tipNamed = '';
+    }
   }
   return el.dataset.tip || '';
 }
 
-function render(content: string) {
-  const el = tip!;
+function render(el: HTMLElement, content: string) {
   el.textContent = '';
   const m = content.match(SHORTCUT);
   const label = document.createElement('span');
@@ -53,8 +55,7 @@ function render(content: string) {
   }
 }
 
-function place(anchor: HTMLElement) {
-  const el = tip!;
+function place(el: HTMLElement, anchor: HTMLElement) {
   const a = anchor.getBoundingClientRect();
   const w = el.offsetWidth;
   const h = el.offsetHeight;
@@ -69,12 +70,14 @@ function place(anchor: HTMLElement) {
 function show(anchor: HTMLElement) {
   const content = text(anchor);
   if (!content || !anchor.isConnected) return;
-  render(content);
-  tip!.classList.remove('show');
-  tip!.style.visibility = 'hidden';
-  tip!.hidden = false;
-  place(anchor);
-  tip!.style.visibility = '';
+  const el = tip;
+  if (!el) return; // not installed (installTooltips)
+  render(el, content);
+  el.classList.remove('show');
+  el.style.visibility = 'hidden';
+  el.hidden = false;
+  place(el, anchor);
+  el.style.visibility = '';
   requestAnimationFrame(() => tip?.classList.add('show'));
 }
 

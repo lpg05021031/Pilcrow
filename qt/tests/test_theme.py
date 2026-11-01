@@ -127,3 +127,65 @@ def test_button_kinds_and_labels_paint_from_the_tokens(app):
     assert button("Remove", kind="danger")._colors()[1].name() == "#ffffff"
     lb = label("hint", tone="faint")
     assert _fg(lb) == theme.tokens().text_3
+
+
+def test_a_field_on_a_sheet_paints_its_box_from_the_tokens(app):
+    """A sheet's field paints its own box from the tokens (fill-1 over the sheet), so it follows a
+    switch with no colour in its stylesheet."""
+    from pilcrow_qt.widgets.dialogs.parts import sheet_bg
+    from pilcrow_qt.widgets.dialogs.settings_ui import line_edit
+
+    host = QWidget()
+    lay = QVBoxLayout(host)
+    field = line_edit("Name")
+    lay.addWidget(field)
+    host.resize(300, 60)
+    host.show()
+    QCoreApplication.processEvents()
+    field.clearFocus()  # the only field takes the focus, which paints the page colour
+    QCoreApplication.processEvents()
+
+    def fill(t) -> str:
+        return theme.blend(t.fill_1, sheet_bg(t).name()).name()
+
+    def seen() -> str:
+        return host.grab().toImage().pixelColor(field.x() + field.width() // 2, field.y() + 4).name()
+
+    assert seen() == fill(theme.DARK)
+    theme.theme.apply(False)
+    try:
+        QCoreApplication.processEvents()
+        assert seen() == fill(theme.LIGHT)
+    finally:
+        theme.theme.apply(True)
+    host.close()
+
+
+def test_no_stylesheet_names_a_colour():
+    """ARCHITECTURE: a per-widget stylesheet carries geometry, fonts and ``palette(role)`` only. Every
+    ``setStyleSheet`` argument in the package, and the names it is built from, is read for a literal
+    colour or a token interpolated into it."""
+    import ast
+    import re
+
+    colour = re.compile(r"#[0-9a-fA-F]{3,8}\b|rgba?\(|\.name\(\)|\{\s*(t|tk|tokens?)\.\w|theme\.(blend|qcolor)")
+    bad = []
+    for path in (ROOT / "qt" / "pilcrow_qt").rglob("*.py"):
+        src = path.read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        assigned = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Assign):
+                for tgt in node.targets:
+                    if isinstance(tgt, ast.Name):
+                        assigned.setdefault(tgt.id, []).append(ast.get_source_segment(src, node.value) or "")
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and getattr(node.func, "attr", "") == "setStyleSheet" and node.args:
+                arg = node.args[0]
+                parts = [ast.get_source_segment(src, arg) or ""]
+                for name in ast.walk(arg):
+                    if isinstance(name, ast.Name):
+                        parts += assigned.get(name.id, [])
+                if any(colour.search(p) for p in parts):
+                    bad.append(f"{path.name}:{node.lineno}")
+    assert not bad, bad

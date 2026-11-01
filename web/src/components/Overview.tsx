@@ -1,13 +1,17 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { ArrowUpRight, Bot, Brain, Wrench, MessageSquareQuote, Workflow, PanelLeftOpen, Hourglass, CircleCheck, CircleAlert, Activity, CircleDollarSign } from 'lucide-react';
-import { useStore, call, openSession, respond, setUi } from '../lib/store';
-import type { PermissionRequest, SessionState, SessionSummary, TaskInfo } from '../lib/types';
+import { ArrowUpRight, Bot, Brain, Wrench, MessageSquareQuote, Workflow, Hourglass, CircleCheck, CircleAlert, Activity, CircleDollarSign } from 'lucide-react';
+import { useStore, call, openSession, respond, mergeLive, ALLOW_ONCE, DECLINE } from '../lib/store';
+import { isWorking, type PermissionRequest, type SessionState, type SessionSummary, type TaskInfo } from '../lib/types';
 import { basename, cost, duration, timeAgo, relPath, plural } from '../lib/format';
-import { ContextRing, Spinner, useNow, Num, WorkingMark, Mark } from './ui/bits';
+import { ContextRing, ShowSidebarButton, Spinner, Num } from './ui/bits';
+import { useNow } from './ui/hooks';
+import { WorkingMark, Mark } from './ui/brand';
+import { useWindowKey, onActivate } from './ui/keys';
 import { suggestionLabel, typingElsewhere } from './tools/Permission';
 import { workflowCounts } from '../lib/workflow';
 import { str } from '../lib/tools';
 import type { PermissionDecision } from '../lib/types';
+import { stagger } from '../lib/motion';
 
 interface Fleet {
   live: Record<string, SessionState>;
@@ -15,7 +19,6 @@ interface Fleet {
   spend: { at: number; id: string; delta: number }[];
 }
 
-const order = (i: number) => ({ '--i': i }) as React.CSSProperties;
 
 /**
  * The control room: every session that is working or waiting, at a glance, with the things that need
@@ -25,11 +28,14 @@ const order = (i: number) => ({ '--i': i }) as React.CSSProperties;
  */
 export function Overview() {
   const sessions = useStore((s) => s.sessions);
-  const rt = useStore((s) => s.rt);
   const unread = useStore((s) => s.unread);
-  const sidebar = useStore((s) => s.ui.sidebar);
   const [fleet, setFleet] = useState<Fleet | null>(null);
   const now = useNow(1000, true);
+  // Every session's runtime changes with each streamed frame of every session at work; the cards read
+  // only what session.state carries. So the page does not subscribe to it: it reads it as it draws,
+  // which is on the clock's tick, and at once when a row's status or waiting count changes (the
+  // session list only changes then).
+  const rt = useStore.getState().rt;
   const [focus, setFocus] = useState(-1); // keyboard focus; none until the keys are used
   const box = useRef<HTMLDivElement>(null);
 
@@ -37,16 +43,14 @@ export function Overview() {
   useEffect(() => {
     let alive = true;
     const load = () =>
-      call<Fleet>('fleet.state', {}, { quiet: true })
-        .then((f) => {
+      call<Fleet>('fleet.state', {}, { quiet: true }).then(
+        (f) => {
           if (!alive) return;
           setFleet(f);
-          const cur = useStore.getState().rt;
-          const next = { ...cur };
-          for (const [id, st] of Object.entries(f.live)) next[id] = { ...(cur[id] || { rev: 0, loaded: false, loading: false }), ...st };
-          useStore.setState({ rt: next });
-        })
-        .catch(() => {});
+          mergeLive(f.live);
+        },
+        () => {}, // the cards keep what they show; the next tick asks again
+      );
     load();
     const t = setInterval(load, 20_000);
     return () => {
@@ -58,7 +62,7 @@ export function Overview() {
   const byId = useMemo(() => Object.fromEntries(sessions.map((s) => [s.id, s])), [sessions]);
   const st = (id: string) => rt[id] || fleet?.live[id];
   const needs = sessions.filter((s) => (st(s.id)?.pending?.length || 0) > 0 || s.status === 'requires_action');
-  const working = sessions.filter((s) => !needs.includes(s) && (s.status === 'running' || s.status === 'starting'));
+  const working = sessions.filter((s) => !needs.includes(s) && isWorking(s.status));
   const dayStart = new Date(now);
   dayStart.setHours(0, 0, 0, 0);
   const finished = sessions
@@ -81,9 +85,11 @@ export function Overview() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [ordered, focus]);
+  // When the keyboard focus moves, to the card it moved to.
+  const focused = ordered[focus]?.id;
   useEffect(() => {
-    box.current?.querySelector<HTMLElement>(`[data-card="${ordered[focus]?.id}"]`)?.scrollIntoView({ block: 'nearest' });
-  }, [focus]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (focused) box.current?.querySelector<HTMLElement>(`[data-card="${focused}"]`)?.scrollIntoView({ block: 'nearest' });
+  }, [focused]);
 
   const totalCost = fleet?.today.cost || 0;
   const median = useMemo(() => {
@@ -96,11 +102,7 @@ export function Overview() {
   return (
     <div className="overview" ref={box}>
       <header className="ov-head">
-        {!sidebar && (
-          <button className="icon-btn head-sidebar" title="Show sidebar (Ctrl+B)" aria-label="Show sidebar" onClick={() => setUi({ sidebar: true })}>
-            <PanelLeftOpen size={16} />
-          </button>
-        )}
+        <ShowSidebarButton />
         <h1 className="ov-title">Control room</h1>
         <span className="ov-sum tnum">
           {working.length ? `${working.length} working` : 'Nothing running'}
@@ -109,7 +111,7 @@ export function Overview() {
       </header>
 
       <div className="ov-body">
-        <div className="ov-stats" style={order(k++)}>
+        <div className="ov-stats" style={stagger(k++)}>
           <Tile icon={working.length ? <WorkingMark size={18} /> : <Activity size={16} />} label="Working" value={working.length} tone={working.length ? 'live' : ''} onClick={jump('ov-working')} />
           <Tile icon={<Hourglass size={16} />} label="Needs you" value={needs.length} tone={needs.length ? 'accent' : ''} onClick={jump(needs.length ? 'ov-needs' : 'ov-working')} />
           <Tile icon={<CircleCheck size={16} />} label="Finished today" value={finished.length} onClick={jump('ov-finished')} />
@@ -117,7 +119,7 @@ export function Overview() {
         </div>
 
         {needs.length > 0 && (
-          <section id="ov-needs" className="ov-sec" style={order(k++)}>
+          <section id="ov-needs" className="ov-sec" style={stagger(k++)}>
             <h2 className="ov-h">
               <span className="glyph needs" aria-hidden="true" /> Needs you <span className="ov-count">{needs.length}</span>
               <span className="ov-h-end faint">Press 1, 2 or 3 to answer the first</span>
@@ -130,7 +132,7 @@ export function Overview() {
           </section>
         )}
 
-        <section id="ov-working" className="ov-sec" style={order(k++)}>
+        <section id="ov-working" className="ov-sec" style={stagger(k++)}>
           <h2 className="ov-h">
             Working <span className="ov-count">{working.length}</span>
           </h2>
@@ -148,7 +150,7 @@ export function Overview() {
           )}
         </section>
 
-        <div className="ov-two" style={order(k++)}>
+        <div className="ov-two" style={stagger(k++)}>
           <section id="ov-finished" className="ov-sec">
             <h2 className="ov-h">
               Finished today <span className="ov-count">{finished.length}</span>
@@ -235,7 +237,7 @@ function WorkingCard({ s, st, focused, now, hot, index }: { s: SessionSummary; s
   const u = st?.usage;
   const stale = st?.lastActivity ? now - st.lastActivity > 45_000 : false;
   return (
-    <article className={`ovc busy${focused ? ' focused' : ''}${stale ? ' stale' : ''}`} data-card={s.id} onClick={() => openSession(s.id)} role="button" tabIndex={0} style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}>
+    <article className={`ovc busy${focused ? ' focused' : ''}${stale ? ' stale' : ''}`} data-card={s.id} onClick={() => openSession(s.id)} onKeyDown={onActivate(() => openSession(s.id))} role="button" tabIndex={0} style={stagger(Math.min(index, 8))}>
       <div className="ovc-row">
         <CardHead s={s} st={st} />
         <span className="ovc-live" title={stale ? 'Quiet for a while' : 'Working'}>
@@ -302,9 +304,9 @@ function NeedsCard({ s, st, first, focused, now }: { s: SessionSummary; st?: Par
       setBusy(false);
     }
   };
-  const allow = () => decide({ behavior: 'allow', decisionClassification: 'user_temporary' });
-  const always = () => decide({ behavior: 'allow', updatedPermissions: perm!.suggestions, decisionClassification: 'user_permanent' });
-  const deny = () => decide({ behavior: 'deny', message: 'The user declined this action.', decisionClassification: 'user_reject' });
+  const allow = () => decide(ALLOW_ONCE);
+  const always = () => decide({ behavior: 'allow', updatedPermissions: perm?.suggestions, decisionClassification: 'user_permanent' });
+  const deny = () => decide(DECLINE);
   // a helper's request can be answered for every helper of its lead at once (HELPERS.md §5.6)
   const helperOf = s.helper || null;
   const allowAllHelpers = async () => {
@@ -318,19 +320,14 @@ function NeedsCard({ s, st, first, focused, now }: { s: SessionSummary; st?: Par
       setBusy(false);
     }
   };
-  useEffect(() => {
-    if (!first || !perm || perm.interactive) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (typingElsewhere(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === '1' && !perm.defaultToNo) allow();
-      else if (e.key === '2' && allowAlways) always();
-      else if (e.key === (allowAlways ? '3' : '2')) deny();
-      else return;
-      e.preventDefault();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  });
+  useWindowKey((e) => {
+    if (!perm || typingElsewhere(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === '1' && !perm.defaultToNo) allow();
+    else if (e.key === '2' && allowAlways) always();
+    else if (e.key === (allowAlways ? '3' : '2')) deny();
+    else return;
+    e.preventDefault();
+  }, Boolean(first && perm && !perm.interactive));
   const what = perm ? permSummary(perm, s.cwd) : null;
   const key = (n: number) => (first && perm && !perm.interactive ? <span className="key">{n}</span> : null);
   return (
@@ -339,7 +336,7 @@ function NeedsCard({ s, st, first, focused, now }: { s: SessionSummary; st?: Par
       <div className="ovc-row">
         <CardHead s={s} st={st} />
         <span className="ovc-wait tnum">{perm ? `waiting ${duration(now - perm.at)}` : ''}</span>
-        <button className="icon-btn sm" title="Open the session" onClick={() => openSession(s.id)}>
+        <button className="icon-btn sm" title="Open the session" aria-label="Open the session" onClick={() => openSession(s.id)}>
           <ArrowUpRight size={14} />
         </button>
       </div>
@@ -408,7 +405,7 @@ function permSummary(p: PermissionRequest, cwd: string): { text: string; mono: b
     case 'WebFetch':
       return { text: str(i, 'url'), mono: true };
     case 'AskUserQuestion':
-      return { text: i.questions?.[0]?.question || 'Claude has a question', mono: false };
+      return { text: (Array.isArray(i.questions) ? (i.questions as { question?: string }[]) : [])[0]?.question || 'Claude has a question', mono: false };
     case 'ExitPlanMode':
       return { text: 'A plan is ready for review', mono: false };
     default:
@@ -436,17 +433,19 @@ function FinishedRow({ s, st, unread, focused, now }: { s: SessionSummary; st?: 
 
 /** Spend in the last hour, five-minute bars (the current one in Claude's colour), and the sessions that cost the most today. */
 function Spend({ fleet, byId, now }: { fleet: Fleet; byId: Record<string, SessionSummary>; now: number }) {
+  // The bars move with the spend and once a minute, not every second: they end at the next whole minute.
+  const end = Math.ceil(now / 60e3) * 60e3;
   const buckets = useMemo(() => {
     const n = 12;
     const w = 5 * 60e3;
-    const start = now - n * w;
+    const start = end - n * w;
     const out = new Array(n).fill(0);
     for (const e of fleet.spend) {
       const i = Math.floor((e.at - start) / w);
       if (i >= 0 && i < n) out[i] += e.delta;
     }
     return out;
-  }, [fleet.spend, Math.floor(now / 60e3)]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fleet.spend, end]);
   const hour = buckets.reduce((a, b) => a + b, 0);
   const max = Math.max(...buckets, 0.0001);
   const top = fleet.today.perSession.slice(0, 5);

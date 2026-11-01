@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { Plus, Search, ScrollText, FolderOpen, Pencil, Trash, Copy, RefreshCw, Puzzle, FolderInput, Ellipsis } from 'lucide-react';
 import { useStore, call, openFile, confirmAction, toast, setDialog } from '../../lib/store';
 import type { SkillInfo, SkillsList } from '../../lib/types';
-import { tildify, timeAgo } from '../../lib/format';
+import { tildify, timeAgo, plural, moment } from '../../lib/format';
 import { MenuButton } from '../ui/Popover';
 import { Dialog } from '../ui/Dialog';
-import { Spinner, Seg } from '../ui/bits';
+import { Spinner, Seg, Field } from '../ui/bits';
+import { useEvent } from '../ui/hooks';
 import { FolderPicker } from '../FolderPicker';
 import { errText } from '../../lib/format';
 
@@ -19,6 +20,12 @@ function useActiveCwd() {
   return rt?.cwd || session?.cwd || '';
 }
 
+/** The skills whose name or description holds what was typed. */
+function matching(list: SkillInfo[], q: string) {
+  const n = q.trim().toLowerCase();
+  return n ? list.filter((s) => s.name.toLowerCase().includes(n) || s.description.toLowerCase().includes(n)) : list;
+}
+
 export function SkillsPage() {
   const cwd = useActiveCwd();
   const info = useStore((s) => s.info);
@@ -28,7 +35,7 @@ export function SkillsPage() {
   const [creating, setCreating] = useState<null | Scope>(null);
   const [importing, setImporting] = useState<null | Scope>(null);
 
-  const load = async () => {
+  const load = useEvent(async () => {
     setLoading(true);
     try {
       setData(await call<SkillsList>('skills.list', { cwd }, { quiet: true }));
@@ -37,32 +44,28 @@ export function SkillsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  });
   useEffect(() => {
     load();
-  }, [cwd]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cwd, load]);
 
-  const filter = (list: SkillInfo[]) => {
-    const n = q.trim().toLowerCase();
-    return n ? list.filter((s) => s.name.toLowerCase().includes(n) || s.description.toLowerCase().includes(n)) : list;
-  };
   const groups = useMemo(
     () =>
       data
         ? [
-            { id: 'user', title: 'Personal', hint: tildify(data.roots.user, info?.home), items: filter(data.user), editable: true },
-            { id: 'project', title: 'This project', hint: data.roots.project ? tildify(data.roots.project, info?.home) : 'Open a session to see project skills', items: filter(data.project), editable: Boolean(data.roots.project) },
-            { id: 'plugin', title: 'From plugins', hint: 'Installed with a plugin; edit them there', items: filter(data.plugin), editable: false },
+            { id: 'user', title: 'Personal', hint: tildify(data.roots.user, info?.home), items: matching(data.user, q), editable: true },
+            { id: 'project', title: 'This project', hint: data.roots.project ? tildify(data.roots.project, info?.home) : 'Open a session to see project skills', items: matching(data.project, q), editable: Boolean(data.roots.project) },
+            { id: 'plugin', title: 'From plugins', hint: 'Installed with a plugin; edit them there', items: matching(data.plugin, q), editable: false },
           ]
         : [],
-    [data, q, info?.home], // eslint-disable-line react-hooks/exhaustive-deps
+    [data, q, info?.home],
   );
   const total = data ? data.user.length + data.project.length + data.plugin.length : 0;
 
   const reload = async () => {
     await load();
     const n = await call<number>('skills.reloadAll', {}, { quiet: true }).catch(() => 0);
-    if (n) toast(`Skills reloaded in ${n} running session${n > 1 ? 's' : ''}`, 'success');
+    if (n) toast(`Skills reloaded in ${plural(n, 'running session')}`, 'success');
   };
 
   const remove = (s: SkillInfo) =>
@@ -98,10 +101,10 @@ export function SkillsPage() {
       <div className="cust-bar">
         <label className="cust-search">
           <Search size={13} />
-          <input placeholder="Search skills" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input aria-label="Search skills" placeholder="Search skills" value={q} onChange={(e) => setQ(e.target.value)} />
         </label>
         <div className="grow" />
-        <button className="icon-btn sm" title="Reload skills in running sessions" onClick={reload}>
+        <button className="icon-btn sm" title="Reload skills in running sessions" aria-label="Reload skills in running sessions" onClick={reload}>
           {loading ? <Spinner size={13} /> : <RefreshCw size={13} />}
         </button>
         <MenuButton
@@ -160,11 +163,12 @@ export function SkillsPage() {
                     {s.description || <span className="faint">No description — Claude will rarely pick this skill</span>}
                   </span>
                 </span>
-                <span className="cust-time faint" title={new Date(s.mtime).toLocaleString()}>
+                <span className="cust-time faint" title={moment(s.mtime)}>
                   {timeAgo(s.mtime)}
                 </span>
                 <MenuButton
                   className="icon-btn sm cust-more"
+                  title={`More for ${s.name}`}
                   placement="bottom-end"
                   items={[
                     { label: g.editable ? 'Edit SKILL.md' : 'Open SKILL.md', icon: Pencil, onSelect: () => edit(s) },
@@ -242,23 +246,29 @@ function NewSkillDialog({ scope, cwd, onClose, onCreated }: { scope: Scope; cwd:
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn primary" disabled={!slug || busy} onClick={submit}>
+          <button className="btn primary" disabled={!slug || busy} onClick={submit} aria-label="Create and edit">
             {busy ? <Spinner size={13} /> : 'Create and edit'}
           </button>
         </>
       }
     >
       <div className="cust-form">
-        <div className="field">
-          <label>Name</label>
-          <input className="input" autoFocus placeholder="release-checklist" value={name} onChange={(e) => setName(e.target.value)} />
-          {slug && slug !== name.trim() && <div className="hint mono">Saved as {slug}</div>}
-        </div>
-        <div className="field">
-          <label>When should Claude use it?</label>
-          <textarea className="textarea" rows={3} placeholder="Use when preparing a release: bump the version, update the changelog and tag the commit." value={desc} onChange={(e) => setDesc(e.target.value)} />
-          <div className="hint">This sentence is what Claude reads to decide whether to open the skill. Be specific.</div>
-        </div>
+        <Field label="Name">
+          {(id) => (
+            <>
+              <input id={id} className="input" autoFocus placeholder="release-checklist" value={name} onChange={(e) => setName(e.target.value)} />
+              {slug && slug !== name.trim() && <div className="hint mono">Saved as {slug}</div>}
+            </>
+          )}
+        </Field>
+        <Field label="When should Claude use it?">
+          {(id) => (
+            <>
+              <textarea id={id} className="textarea" rows={3} placeholder="Use when preparing a release: bump the version, update the changelog and tag the commit." value={desc} onChange={(e) => setDesc(e.target.value)} />
+              <div className="hint">This sentence is what Claude reads to decide whether to open the skill. Be specific.</div>
+            </>
+          )}
+        </Field>
       </div>
     </Dialog>
   );
@@ -300,7 +310,7 @@ function ImportSkillDialog({ scope: initial, cwd, hasProject, onClose, onDone }:
           <button className="btn" onClick={onClose}>
             Cancel
           </button>
-          <button className="btn primary" disabled={!from.trim() || busy} onClick={submit}>
+          <button className="btn primary" disabled={!from.trim() || busy} onClick={submit} aria-label="Import">
             {busy ? <Spinner size={13} /> : 'Import'}
           </button>
         </>

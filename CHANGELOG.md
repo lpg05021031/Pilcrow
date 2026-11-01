@@ -3,6 +3,36 @@
 最新版在最上面。`npm run release -- X.Y.Z` 會檢查這裡有沒有該版的說明。
 
 
+- **2.13.0**：**五輪「審查→修正→再審查」的品質版**。不加功能：三個 client 的效能、UX 與無障礙、程式品質、測試閘門全面
+  整理。每一輪由獨立審查以 file:line 與量測為證據，修正以「最乾淨的做法」為準——根因、最小完整改動、先刪再加、不為小事
+  加機制；審查發現的 medium 以上問題全部修掉，low 列在審查報告裡。
+  Web 效能：對話分頁（八個 turn 一頁、就近先畫、滑動中不畫、回到原處只畫附近幾頁）；串流時每幀的工作只跟著正在寫的那一塊
+  走（清單、表格、段落一塊一塊長，程式碼圍欄接在最後一段）；程式碼上色一條切片隊列、離開頁面就停、grammar 改用預編譯
+  （`@shikijs/langs-precompiled`，一個視窗第一個區塊的最長任務 130–150 ms → 60 ms）；模型依大小淘汰、每個快取有位元組
+  上限；主題切換是一個 view transition 而不是每個元素的 transition；state 事件保留相同內容的 request 陣列；頁面、編輯器、
+  終端機、上色器與每種 grammar 都在第一次用到才載入；`session.open` 分片建模。
+  Web UX 與無障礙：對話框 inert、焦點圈、回到開啟處；選單、`/` 與 `@` 列表、命令面板的 roving focus 與 combobox 語法；
+  側欄分頁是真的 tab set；每個圖示按鈕與欄位有名字，工具提示不吃掉名字；lit 與 hover 列的次要文字一律 `--text`（含
+  時間軸選中的步、控制室、檔案歷史、資料夾挑選器、工具卡頭等十四列）；程式碼註解色兩個主題都達 4.5:1；減少動態跟系統
+  設定；淺色主題無遺漏的暗面；每個區塊有 ErrorBoundary 並能重試；CodeMirror 的文字框以檔名命名。
+  Web 程式品質：設計 token 一套（間距、字級、圓角、層級；顏色只在 `tokens.css`）、每個屬性只在一個檔宣告、動態只在
+  `motion.css`（`scripts/css-overlap.mjs` 隨 lint 守著）；TypeScript 無隱含 any、`exhaustive-deps` 是錯誤、`rpc.on`
+  一張事件表讓每個訂閱者的 payload 有型別；重複的拒絕決策、複製 toast、Show sidebar、資料夾瀏覽、收件匣列各合而為一。
+  Web 測試：`npm run test:perf` 效能閘門（計數每次強制，時間數字在 `PILCROW_PERF=1` 時強制，與 Qt 同一套切分）、
+  `npm run test:ux`（鍵盤流程、無障礙樹的名字、淺色主題、減少動態）、頁面錯誤與畫出的 fault 讓測試失敗、對比測試涵蓋
+  半透明填色與每一列 lit 的疊層。
+  Server：RPC 參數檢查與錯誤碼；Pilcrow 自己的 JSON 檔非同步原子寫入、離開時立刻寫完；資料夾掃描每 4 ms 讓出事件迴圈；
+  每幀一批訊息，state 只送有變的部分；記憶體有上限、git 行程數固定並以測試釘住；時間軸在刪除 session 時回收它的 ref 與
+  物件；WebSocket 心跳與落後視窗的處理；離開時的順序、不再起任何行程；`/api/fs` 頁面以 sandbox CSP 與 nosniff 送出；
+  `tsc` strictNullChecks 與 ESLint 涵蓋 server 與 Electron shell；每個模組都有測試；CI 跑所有閘門。
+  Qt：canvas 捲動用 blit、tick 只重畫標記、hover 與選取只重畫動到的列、自然寬度量一次、改字的區塊 `redraw()` 讓 pixmap
+  快取失效、附件縮圖解碼一次、單一時鐘且只在顯示時跑、減少動態讀系統設定；無障礙：列以其文字命名、fold 與卡片是 Button、
+  prose 與 Markdown 內的連結是 Tab 可到的 Link、島狀 widget（權限卡、提問、計畫）在對話的無障礙樹裡；效能預算預設跑計數
+  與 CPU 時間中位數，`PILCROW_PERF=1` 加 wall-clock；DESIGN、PERF、REVIEW 與程式碼一致。
+  依賴：Electron 44.7.2 → 44.10.1、Vite 6.4.5、Vitest 4.1，與 `npm audit` 指出的過渡依賴（body-parser、fast-uri）
+  更新到修正版，執行期依賴 0 個已知弱點；開發工具這邊剩 eslint 鏈底下的 minimatch（moderate，上游連最新的 eslint 都
+  還沒換到修正版，不隨安裝檔出貨）；`pip-audit` 對 `qt/requirements.txt` 無已知弱點。
+
 - **2.12.0**：**Helpers：一個 session 帶領其他 session**（設計與現況見 `HELPERS.md`）與 **Repositories 註冊表**（見
   `REPOSITORIES.md`）。Dispatch 是「一份 brief 派給一組 repo」；Helpers 是「一件事拆成幾份，各在自己的 repo 做」，怎麼拆
   由模型在對話裡逐回合決定。

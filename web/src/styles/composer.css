@@ -1,0 +1,520 @@
+/* ================================================================ composer
+   The composer: the field, its chips and send button, key hints, @ and / suggestions, and the
+   queue of messages held for Claude. */
+
+/* ================================================================ composer */
+
+.composer-wrap {
+  flex: none;
+  position: relative;
+  padding: 0 var(--sp-5) var(--sp-2_5);
+  background: var(--canvas);
+}
+/* soft fade where the conversation slides under the composer */
+.composer-wrap::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -44px;
+  height: 44px;
+  background: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--canvas) 88%, transparent));
+  -webkit-backdrop-filter: blur(7px);
+  backdrop-filter: blur(7px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 75%);
+  mask-image: linear-gradient(to bottom, transparent, #000 75%);
+  pointer-events: none;
+}
+.composer {
+  position: relative;
+  container-type: inline-size;
+  max-width: var(--col);
+  margin: 0 auto;
+  border-radius: var(--r-7);
+  background: var(--raised);
+  box-shadow: 0 0 0 1px var(--hair-2), var(--shadow-composer);
+  cursor: text;
+}
+.composer:focus-within {
+  box-shadow: 0 0 0 1px var(--hair-3), 0 0 0 5px color-mix(in srgb, var(--accent) 7%, transparent), var(--shadow-composer-focus);
+}
+
+.composer-field {
+  position: relative;
+}
+.composer-input {
+  display: block;
+  width: 100%;
+  min-height: 50px;
+  padding: var(--sp-3_5) var(--sp-4) var(--sp-1_5);
+  border: none;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--text);
+  font-size: var(--font-size);
+  line-height: 1.55;
+}
+.composer-input::placeholder {
+  color: var(--text-3);
+}
+.composer-ghost {
+  position: absolute;
+  inset: 14px 16px auto;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font-size: var(--font-size);
+  line-height: 1.55;
+  color: var(--text-3);
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.composer-ghost span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.composer-ghost kbd {
+  flex: none;
+  position: relative;
+  top: -1px;
+}
+
+.composer-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-0_5);
+  padding: var(--sp-1) var(--sp-2) var(--sp-2);
+  cursor: default;
+}
+.cbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1_5);
+  height: 30px;
+  padding: 0 var(--sp-2_25);
+  border-radius: var(--r-2);
+  font-size: var(--fs-small);
+  font-weight: 500;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.cbtn:hover,
+.cbtn[aria-expanded='true'] {
+  background: var(--fill-2);
+  color: var(--text);
+}
+.cbtn.icon {
+  width: 30px;
+  padding: 0;
+  justify-content: center;
+}
+.cbtn-chev {
+  opacity: 0.55;
+  margin-left: -2px;
+}
+.cbtn-sub {
+  color: var(--text-3);
+  font-weight: 450;
+}
+.cbtn.mode.accent {
+  color: var(--accent-text);
+}
+.cbtn.mode.plan {
+  color: var(--plan);
+}
+.cbtn.mode.err {
+  color: var(--err);
+}
+.cbtn.mode.info {
+  color: var(--info);
+}
+
+.ctx-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1_25);
+  height: 30px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-2);
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+}
+.ctx-btn:hover {
+  background: var(--fill-1);
+  color: var(--text);
+}
+.ctx-btn:not(.with-num) {
+  padding: 0 var(--sp-1_25);
+}
+.ctx-btn.hot {
+  color: var(--err);
+}
+
+/* Send ↔ stop: one button that morphs. Empty = quiet outline, typed = amber, working = stop. */
+.send {
+  flex: none;
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin-left: var(--sp-1);
+  border-radius: 50%;
+  color: var(--text-3);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--hair-2);
+}
+.send > * {
+  grid-area: 1 / 1;
+}
+.send-stop {
+  opacity: 0;
+  transform: scale(0.5);
+}
+.send.ready {
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: var(--shadow-solid);
+}
+.send.ready:hover {
+  background: var(--accent-2);
+}
+.send.stop {
+  background: var(--text);
+  color: var(--canvas);
+  box-shadow: none;
+}
+.send.stop .send-arrow {
+  opacity: 0;
+  transform: scale(0.5) translateY(4px);
+}
+.send.stop .send-stop {
+  opacity: 1;
+  transform: none;
+}
+.send:disabled {
+  cursor: default;
+}
+
+.composer-foot {
+  max-width: var(--col);
+  margin: var(--sp-1_5) auto 0;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+  opacity: 0;
+}
+.composer-foot span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.composer-foot b {
+  font-weight: 600;
+  color: var(--text-3);
+}
+.composer-foot kbd {
+  height: 16px;
+  min-width: 16px;
+  font-size: var(--fs-tiny);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--hair-2);
+}
+/* Key hints appear only on a focused, empty composer (and Esc while Claude works); typing clears them. */
+.composer-wrap.is-empty:focus-within .composer-foot,
+.composer.busy ~ .composer-foot {
+  opacity: 1;
+}
+
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-3_5) 0;
+}
+.attach-img {
+  position: relative;
+  width: 60px;
+  height: 60px;
+  border-radius: var(--r-4);
+  overflow: hidden;
+  box-shadow: 0 0 0 1px var(--hair-2);
+}
+.attach-img img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.attach-x {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--veil);
+  color: var(--veil-ink);
+  opacity: 0;
+}
+.attach-img:hover .attach-x {
+  opacity: 1;
+}
+.attach-file {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1_5);
+  max-width: 260px;
+  height: 30px;
+  padding: 0 var(--sp-1_5) 0 var(--sp-2_5);
+  border-radius: var(--r-2);
+  background: var(--fill-2);
+  font-size: var(--fs-small);
+}
+.attach-file button {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  color: var(--text-3);
+}
+.attach-file button:hover {
+  background: var(--fill-3);
+  color: var(--text);
+}
+
+/* @ and / suggestions */
+.suggest {
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  bottom: calc(100% + 2px);
+  max-width: var(--col);
+  margin: 0 auto;
+  padding: var(--sp-1_5);
+  border-radius: var(--r-4);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: var(--shadow-glass);
+  z-index: var(--z-float);
+  transform-origin: bottom center;
+}
+.suggest-head {
+  padding: var(--sp-1) var(--sp-2) var(--sp-1_5);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  color: var(--text-3);
+}
+.suggest-list {
+  max-height: min(320px, 40vh);
+  overflow-y: auto;
+}
+.suggest-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2_5);
+  width: 100%;
+  height: 32px;
+  padding: 0 var(--sp-2_5);
+  border-radius: var(--r-2);
+  text-align: left;
+  color: var(--text-2);
+}
+.suggest-item svg {
+  color: var(--text-3);
+}
+.suggest-item.active {
+  background: var(--fill-2);
+  color: var(--text);
+}
+.suggest-item svg {
+  flex: none;
+}
+.suggest-slash {
+  color: var(--text-3);
+}
+.suggest-label {
+  flex: none;
+  min-width: 0;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--fs-small-plus);
+  color: var(--text);
+}
+/* Every command name gets the width of the longest one shown, so descriptions form one column. */
+.suggest-label.cmd {
+  min-width: calc(var(--name-ch, 12ch) + 1ch);
+  max-width: none;
+}
+.suggest-hint {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-small);
+  color: var(--text-3);
+}
+/* on the lit row's fill the faint inks fall short of 4.5:1 (tokens.css) */
+.suggest-item.active svg,
+.suggest-item.active .suggest-slash,
+.suggest-item.active .suggest-hint {
+  color: var(--text);
+}
+
+.composer-wrap.dragging .composer {
+  box-shadow: 0 0 0 2px var(--accent-line), 0 0 0 6px var(--accent-wash);
+}
+.drop-hint {
+  position: absolute;
+  inset: 0 20px 6px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--r-7);
+  font-size: var(--fs-ui);
+  font-weight: 500;
+  color: var(--text);
+  background: color-mix(in srgb, var(--raised) 88%, transparent);
+  backdrop-filter: blur(3px);
+  pointer-events: none;
+}
+
+/* ================================================================ queued messages */
+
+.queue {
+  max-width: var(--col);
+  margin: 0 auto var(--sp-2);
+  padding: var(--sp-1_5) var(--sp-1_5) var(--sp-1);
+  border-radius: var(--r-4);
+  background: color-mix(in srgb, var(--raised) 70%, var(--canvas));
+  box-shadow: 0 0 0 1px var(--hair);
+}
+
+.queue-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1_5);
+  padding: var(--sp-0_5) var(--sp-2) var(--sp-1_5);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text-3);
+}
+.queue-head svg {
+  color: var(--accent-text);
+}
+.queue-item {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: var(--sp-2);
+  padding: var(--sp-1_25) var(--sp-1_5) var(--sp-1_25) var(--sp-2);
+  border-radius: var(--r-2);
+}
+.queue-item:hover,
+.queue-item.editing {
+  background: var(--fill-1);
+}
+.queue-n {
+  margin-top: var(--sp-0_75);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  color: var(--text-3);
+  text-align: center;
+}
+.queue-text {
+  min-width: 0;
+  padding: var(--sp-0_5) 0;
+  text-align: left;
+  color: var(--text-2);
+  font-size: var(--fs-ui);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  cursor: text;
+}
+/* on the hovered row's fill --text-3 falls short of 4.5:1 (tokens.css) */
+.queue-item:hover .queue-text,
+.queue-item:hover .queue-n,
+.queue-item.editing .queue-n {
+  color: var(--text);
+}
+.queue-attach {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-0_75);
+  margin-left: var(--sp-1_5);
+  padding: 0 var(--sp-1_5);
+  height: 18px;
+  border-radius: var(--r-pill);
+  background: var(--fill-2);
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+  vertical-align: 1px;
+}
+.queue-edit {
+  width: 100%;
+  min-height: 24px;
+  padding: var(--sp-0_5) var(--sp-1_5);
+  margin: 0 -6px;
+  border-radius: var(--r-1);
+  background: var(--inset);
+  box-shadow: 0 0 0 1px var(--hair-2);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-ui);
+  line-height: 1.5;
+  resize: none;
+  outline: 0;
+}
+.queue-edit:focus {
+  box-shadow: 0 0 0 1px var(--accent-line), 0 0 0 3px var(--accent-wash);
+}
+.queue-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-0_5);
+  opacity: 0;
+}
+.queue-item:hover .queue-actions,
+.queue-item:focus-within .queue-actions {
+  opacity: 1;
+}
+.queue-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 24px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-2);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  color: var(--text-3);
+}
+.queue-btn.icon {
+  width: 24px;
+  padding: 0;
+  justify-content: center;
+}
+.queue-btn:hover {
+  background: var(--fill-2);
+  color: var(--text);
+}
+.queue-btn:first-child:hover {
+  color: var(--accent-text);
+}

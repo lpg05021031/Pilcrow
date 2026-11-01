@@ -9,19 +9,40 @@ targets back to its handlers. A tree is built when its block warms and dropped w
 
 from __future__ import annotations
 
+import html as _html
 import math
+import re
 from typing import Any, Callable, Iterator, List, Optional, Sequence, Tuple
 
 from PySide6.QtCore import QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPixmap, QTextDocument
 
 from .. import theme
-from .paint import FULL, Measurer, PaintState, doc_height, draw_doc, find_ranges, paint_decor, rounded, selection
+from ..lib.fmt import truncate
+from .paint import (
+    Measurer,
+    PaintState,
+    doc_height,
+    doc_links,
+    draw_doc,
+    find_selections,
+    paint_decor,
+    rounded,
+    set_line_height,
+)
 from .pixels import hline
 from .scene import Target
 
 Pad = Tuple[int, int, int, int]  # left, top, right, bottom
 NO_PAD: Pad = (0, 0, 0, 0)
+
+
+_TAG = re.compile(r"<[^>]+>")  # the markup of a node's HTML text, for its words
+
+
+def _union(a: Tuple[int, int, int, int], b: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
+    x, y = min(a[0], b[0]), min(a[1], b[1])
+    return (x, y, max(a[0] + a[2], b[0] + b[2]) - x, max(a[1] + a[3], b[1] + b[3]) - y)
 
 
 class Node:
@@ -67,7 +88,11 @@ class Node:
         pass
 
     def live(self) -> bool:
-        return False
+        return self.live_rect() is not None
+
+    def live_rect(self) -> Optional[Tuple[int, int, int, int]]:
+        """What changes on a clock tick (a turning spinner), in block coordinates; None when nothing does."""
+        return None
 
 
 class Container(Node):
@@ -118,8 +143,13 @@ class Container(Node):
         for c in self.children:
             c.cool()
 
-    def live(self) -> bool:
-        return any(c.live() for c in self.children if not c.hidden)
+    def live_rect(self) -> Optional[Tuple[int, int, int, int]]:
+        out: Optional[Tuple[int, int, int, int]] = None
+        for c in self.children:
+            r = None if c.hidden else c.live_rect()
+            if r is not None:
+                out = r if out is None else _union(out, r)
+        return out
 
 
 class Column(Container):
@@ -142,7 +172,6 @@ class Column(Container):
             h = c.layout(x + pl, cy, inner, m)
             if h <= 0 and not c.hidden:
                 cy -= 0 if first else self.spacing  # an empty child takes no gap
-                first = first  # noqa: PLW0127 - keep "first" as it was
                 continue
             cy += h
             first = False
@@ -255,6 +284,7 @@ class Text(Node):
         "strike",
         "max_h",
         "align",
+        "_nat",
     )
 
     def __init__(
@@ -280,6 +310,7 @@ class Text(Node):
         self.align = align
         self._doc: Optional[QTextDocument] = None
         self._font: Optional[QFont] = None
+        self._nat = -1  # the natural width, once asked (it depends on the words and the font alone)
 
     def font(self, m: Measurer) -> QFont:
         if self._font is None:
@@ -290,12 +321,14 @@ class Text(Node):
         return self._font
 
     def natural_w(self, m: Measurer) -> int:
-        if not self._text:
-            return 0
-        if self.html and self.wrap:
-            doc = m.html_doc(self._text, 100000, self.font(m))
-            return int(math.ceil(doc.idealWidth())) + 2
-        return int(math.ceil(m.text_w(self._text, self.font(m)))) + 2
+        if self._nat < 0:
+            if not self._text:
+                self._nat = 0
+            elif self.html and self.wrap:
+                self._nat = int(math.ceil(m.html_doc(self._text, 100000, self.font(m)).idealWidth())) + 2
+            else:
+                self._nat = int(math.ceil(m.text_w(self._text, self.font(m)))) + 2
+        return self._nat
 
     def layout(self, x: int, y: int, w: int, m: Measurer) -> int:
         self.x, self.y, self.w = x, y, w
@@ -311,13 +344,7 @@ class Text(Node):
                 else:
                     self._doc = m.plain_doc(self._text, w, f)
                     if self.line_h:
-                        from PySide6.QtGui import QTextBlockFormat, QTextCursor
-
-                        cur = QTextCursor(self._doc)
-                        cur.select(QTextCursor.SelectionType.Document)
-                        bf = QTextBlockFormat()
-                        bf.setLineHeight(self.line_h, QTextBlockFormat.LineHeightTypes.FixedHeight.value)
-                        cur.mergeBlockFormat(bf)
+                        set_line_height(self._doc, self.line_h)
             self.h = doc_height(self._doc)
             if self.max_h and self.h > self.max_h:
                 self.h = self.max_h
@@ -334,7 +361,7 @@ class Text(Node):
             clip = QRect(ox + self.x, oy + self.y, self.w, self.h)
             if st.clip is not None:
                 clip = clip.intersected(st.clip)
-            sels = _find_selections(self._doc, st)
+            sels = find_selections(self._doc, st)
             draw_doc(p, self._doc, ox + self.x, oy + self.y, clip, color, sels or None)
             return
         shown = st.m.elide(self._text, f, self.w)
@@ -349,43 +376,24 @@ class Text(Node):
 
     def text(self) -> str:
         if self.html:
-            import re
-
-            return re.sub(r"<[^>]+>", "", self._text)
+            return _TAG.sub("", self._text)
         return self._text
 
     def set_text(self, text: str) -> None:
         self._text = text
         self._doc = None
+        self._nat = -1
 
     def cool(self) -> None:
         self._doc = None
         self._font = None
-
-
-def _find_selections(doc: QTextDocument, st: PaintState) -> List[Any]:
-    sels: List[Any] = []
-    t = st.t
-    if st.needle:
-        for k, (a, b) in enumerate(find_ranges(doc, st.needle)):
-            if k == st.needle_current:
-                sels.append(selection(doc, a, b, QColor(t.accent), QColor("#ffffff")))
-            else:
-                sels.append(selection(doc, a, b, theme.blend("rgba(217, 119, 87, 0.28)", t.canvas)))
-    if st.selection is not None:
-        bg = theme.blend(t.selection, t.canvas)
-        if st.selection == FULL:
-            sels.append(selection(doc, 0, doc.characterCount(), bg))
-        else:
-            a, b = st.selection
-            sels.append(selection(doc, a, b, bg))
-    return sels
+        self._nat = -1
 
 
 class Markdown(Node):
     """A Markdown text as a document with its decorations (code wells, pills, quotes, tables)."""
 
-    __slots__ = ("src", "compact", "quiet", "cwd", "streaming", "line_h", "_doc", "color")
+    __slots__ = ("src", "compact", "quiet", "cwd", "streaming", "line_h", "_doc", "color", "_nat", "_links")
 
     def __init__(
         self,
@@ -408,17 +416,22 @@ class Markdown(Node):
         )
         self.color = color
         self._doc: Optional[QTextDocument] = None
+        self._nat = -1  # the natural width, once asked
+        self._links: Optional[List[Target]] = None  # its links where it was last laid out
 
     @property
     def doc(self) -> Optional[QTextDocument]:
         return self._doc
 
     def natural_w(self, m: Measurer) -> int:
-        doc = m.markdown_doc(self.src, 100000, self.compact, self.quiet, self.streaming, self.cwd, self.line_h)
-        return int(math.ceil(doc.idealWidth())) + 2
+        if self._nat < 0:
+            doc = m.markdown_doc(self.src, 100000, self.compact, self.quiet, self.streaming, self.cwd, self.line_h)
+            self._nat = int(math.ceil(doc.idealWidth())) + 2
+        return self._nat
 
     def layout(self, x: int, y: int, w: int, m: Measurer) -> int:
         self.x, self.y, self.w = x, y, w
+        self._links = None
         if not self.src:
             self.h = 0
             return 0
@@ -435,14 +448,27 @@ class Markdown(Node):
             clip = clip.intersected(st.clip)
         paint_decor(p, self._doc, ox + self.x, oy + self.y, clip, st.t)
         color = st.m.color(self.color) if self.color is not None else QColor(st.t.text_2 if self.quiet else st.t.text)
-        sels = _find_selections(self._doc, st)
+        sels = find_selections(self._doc, st)
         draw_doc(p, self._doc, ox + self.x, oy + self.y, clip, color, sels or None)
+
+    def targets(self) -> Iterator[Target]:
+        """Its links, each with (href, cwd) for ``NodeBlock.activate`` to open. A link's id is this
+        node and the link's place in its text, so a reflow that moves the node keeps it."""
+        if self._doc is None:
+            return
+        if self._links is None:  # a screen reader asks once per child: the document is read once
+            self._links = [
+                Target("link", f"{id(self)}:{at}", (self.x + x, self.y + y, w, h), (href, self.cwd), words)
+                for at, href, words, (x, y, w, h) in doc_links(self._doc)
+            ]
+        yield from self._links
 
     def text(self) -> str:
         return self.src
 
     def cool(self) -> None:
-        self._doc = None
+        self._doc = self._links = None
+        self._nat = -1
 
 
 class Surface(Node):
@@ -504,8 +530,8 @@ class Surface(Node):
     def cool(self) -> None:
         self.child.cool()
 
-    def live(self) -> bool:
-        return self.child.live()
+    def live_rect(self) -> Optional[Tuple[int, int, int, int]]:
+        return self.child.live_rect()
 
 
 class Icon(Node):
@@ -578,7 +604,7 @@ BUTTON_METRICS = {
 class Button(Node):
     """A painted button: kinds '' (quiet fill), 'primary', 'ghost', 'danger', 'link', 'more'."""
 
-    __slots__ = ("label", "icon", "kind", "size", "tid", "enabled", "icon_px")
+    __slots__ = ("label", "icon", "kind", "size", "tid", "enabled", "icon_px", "name")
 
     def __init__(
         self,
@@ -589,6 +615,7 @@ class Button(Node):
         size: str = "sm",
         enabled: bool = True,
         icon_px: int = 13,
+        name: str = "",
     ) -> None:
         super().__init__()
         self.label, self.tid, self.icon, self.kind, self.size, self.enabled, self.icon_px = (
@@ -600,6 +627,7 @@ class Button(Node):
             enabled,
             icon_px,
         )
+        self.name = name or label  # what an icon-only button is read as
 
     def _m(self) -> dict:
         if self.kind in ("link", "more"):
@@ -631,7 +659,7 @@ class Button(Node):
         return self.h
 
     def target(self) -> Target:
-        return Target("button", self.tid, (self.x, self.y, self.w, self.h))
+        return Target("button", self.tid, (self.x, self.y, self.w, self.h), name=self.name)
 
     def hit(self, x: int, y: int) -> Optional[Target]:
         return self.target() if self.enabled else None
@@ -705,7 +733,7 @@ class Link(Node):
         return self.h
 
     def target(self) -> Target:
-        return Target("link", self.tid, (self.x, self.y, self.w, self.h), self.data)
+        return Target("link", self.tid, (self.x, self.y, self.w, self.h), self.data, self.label)
 
     def hit(self, x: int, y: int) -> Optional[Target]:
         return self.target()
@@ -754,7 +782,7 @@ class Image(Node):
             p.drawPixmap(ox + self.x, oy + self.y, self._scaled)
 
     def hit(self, x: int, y: int) -> Optional[Target]:
-        return Target("image", self.tid, (self.x, self.y, self.w, self.h))
+        return Target("image", self.tid, (self.x, self.y, self.w, self.h), name="Image")
 
     def cool(self) -> None:
         self._scaled = None
@@ -790,7 +818,7 @@ class Toggle(Node):
         self.child.shift(dx, dy)
 
     def head_target(self) -> Target:
-        return Target("toggle", self.tid, (self.x, self.y, self.w, 22))
+        return Target("toggle", self.tid, (self.x, self.y, self.w, 22), name=self.label)
 
     def hit(self, x: int, y: int) -> Optional[Target]:
         if y < self.y + 22:
@@ -852,8 +880,8 @@ class Spinner(Node):
         ang = int((st.now % 1.0) * 360)
         p.drawArc(QRectF(ox + self.x + 1.5, oy + self.y + 1.5, self.size - 3, self.size - 3), -ang * 16, 270 * 16)
 
-    def live(self) -> bool:
-        return True
+    def live_rect(self) -> Optional[Tuple[int, int, int, int]]:
+        return (self.x, self.y, self.size, self.size)
 
 
 class Painted(Node):
@@ -896,9 +924,6 @@ def label(text: str) -> Text:
 
 def pre(text: str, err: bool = False, limit: int = 60000, size: int = 12) -> Surface:
     """Preformatted mono text on an inset well."""
-    import html as _html
-
-    from ..lib.fmt import truncate
 
     lh = int(size * 1.55 + 0.5)
     body = (

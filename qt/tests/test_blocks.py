@@ -144,6 +144,17 @@ def test_find_lights_matches_and_the_current_one(app):
     b = prose("next and next again")
     ranges = find_ranges(b.doc, "next")
     assert len(ranges) == 2 and all(b.doc.toPlainText()[a:z] == "next" for a, z in ranges)
+    # remembered for the next paint, asked again when the needle or the document changes
+    assert find_ranges(b.doc, "next") is ranges
+    assert find_ranges(b.doc, "again") == [(14, 19)]
+    edited = prose("next")
+    first = find_ranges(edited.doc, "next")
+    from PySide6.QtGui import QTextCursor
+
+    cur = QTextCursor(edited.doc)
+    cur.movePosition(QTextCursor.MoveOperation.End)
+    cur.insertText(" next")
+    assert len(find_ranges(edited.doc, "next")) == 2 and len(first) == 1
     # painted: the current match in the accent, the other in the wash
     m = measurer()
     img = QImage(700, b.h, QImage.Format.Format_ARGB32_Premultiplied)
@@ -158,7 +169,7 @@ def test_find_lights_matches_and_the_current_one(app):
     p.end()
     seen = {img.pixelColor(x, 12).name() for x in range(0, 200)}
     assert theme.tokens().accent in seen
-    assert theme.blend("rgba(217, 119, 87, 0.28)", theme.tokens().canvas).name() in seen
+    assert theme.blend(theme.tokens().find_mark, theme.tokens().canvas).name() in seen
 
 
 def test_user_bubble_is_the_webs_size(app):
@@ -179,8 +190,90 @@ def test_user_bubble_is_the_webs_size(app):
     assert abs(long.estimate(742, m) - long.h) <= 22 * 2
 
 
+def test_an_attached_image_is_decoded_once_across_resizes_and_rewarms(app, monkeypatch):
+    """The thumbnail does not depend on the width: a resize step or a re-warm re-measures the
+    bubble without decoding and scaling the image again."""
+    from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+
+    from pilcrow_qt.canvas.blocks import user
+
+    img = QImage(1280, 800, QImage.Format.Format_RGB32)
+    img.fill(QColor("#1e1e1e"))
+    ba = QByteArray()
+    buf = QBuffer(ba)
+    buf.open(QIODevice.OpenModeFlag.WriteOnly)
+    img.save(buf, "PNG")
+    src = "data:image/png;base64," + bytes(ba.toBase64()).decode()
+    decoded = []
+    pixmap_of = user._pixmap_of
+    monkeypatch.setattr(user, "_pixmap_of", lambda s: decoded.append(len(s)) or pixmap_of(s))
+    user._thumb.cache_clear()
+    m = measurer()
+    b = user.UserBlock(UserItem(id="u3", uuid="uu3", text="This one", images=[src]), "sess", "/proj")
+    for w in (742, 700, 742):
+        b.measure(w, m)
+    b.cool()
+    b.measure(742, m)
+    assert len(decoded) == 1
+    ((r, pm, _s),) = b.thumbs
+    assert (pm.width(), pm.height()) == (user.THUMB_W, 137) == (r.width(), r.height())  # 1280×800 in 220×160
+
+
+def test_a_line_whose_words_change_is_painted_again(app, monkeypatch):
+    """The "N earlier steps" line of an open fold and a compaction's divider change their words with
+    their rev and sig as they were: the commit repaints them from the new words, not from the pixmap
+    cached of the old ones."""
+    from PySide6.QtTest import QTest
+
+    from pilcrow_qt.canvas.blocks.fold import MoreBlock, Steps, sync_row
+    from pilcrow_qt.canvas.blocks.misc import DividerBlock, compact_label
+    from pilcrow_qt.canvas.scene import Group, Scene
+    from pilcrow_qt.canvas.view import CanvasView
+    from pilcrow_qt.lib.transcript_model import CompactItem
+
+    def bash(i: int) -> ToolItem:
+        return ToolItem(id=f"t{i}", name="Bash", input={"command": f"echo {i}"}, input_done=True, status="done")
+
+    ctx = ToolCtx("sess", "/proj", view="verbose")
+    items = [bash(i) for i in range(12)]
+    steps = Steps(items, ctx, "sess", "steps:1")
+    compact = CompactItem(id="c1", trigger="auto")
+    divider = DividerBlock("compact:c1", compact_label(compact))
+    scene = Scene()
+    v = CanvasView(scene)
+    v.resize(760, 900)  # all of it on screen
+    v.show()
+    v.mutate(lambda: (scene.root.append(divider), scene.root.append(steps)))
+    QTest.qWait(80)  # measured
+    v.viewport().repaint()  # both lines go into the pixmap cache
+    more = next(c for c in steps.children if isinstance(c, MoreBlock))
+    assert more.label == "6 earlier steps"
+    painted = []
+    for cls in (MoreBlock, DividerBlock):
+        monkeypatch.setattr(
+            cls, "paint", lambda self, *a, real=cls.paint: (painted.append(self.label), real(self, *a))[1]
+        )
+    # the compaction's figures arrive: nothing else changes, so nothing else would repaint
+    compact.pre_tokens = 120_000
+    assert v.mutate(lambda: sync_row(divider, compact, ctx)) == [divider]
+    QTest.qWait(40)
+    assert compact_label(compact) in painted, painted
+    # a 13th step: one more hidden
+    v.begin()
+    changed = steps.sync(items + [bash(12)], ctx, live=True)
+    for b in changed:
+        if isinstance(b, Group):
+            v.estimate(b)
+        elif b.warm:
+            v._exact(b)
+    v.end()
+    QTest.qWait(40)
+    assert more in changed and "7 earlier steps" in painted, painted
+    v.close()
+
+
 def test_column_width_is_the_golden_section_of_the_pane():
-    from pilcrow_qt.canvas.view import column_width
+    from pilcrow_qt.theme import column_width
 
     assert column_width(1212) == 749
     assert column_width(1202) == 742  # the web's pane at 1480 wide: text from x=499 to 1241
@@ -278,7 +371,7 @@ def test_code_well_carries_a_copy_at_its_corner(app):
     v = View()
     b.activate(t, v)
     assert v.copied == "const a = 1;"
-    assert b._copied[0] == 0  # noqa: SLF001 - the corner says "Copied" for a moment
+    assert b._copied[0] == 0  # the corner says "Copied" for a moment
 
 
 def test_a_written_thought_is_quiet_markdown(app):
@@ -290,12 +383,12 @@ def test_a_written_thought_is_quiet_markdown(app):
     blk = ThinkingBlock(done)
     body = blk.children[0]
     body.measure(700, m)
-    assert body._md and "`" not in body.doc.toPlainText()  # noqa: SLF001
+    assert body._md and "`" not in body.doc.toPlainText()
     assert body.selected_text(None, None).startswith("Plan:\nread a.ts")
     live = ThinkingItem(id="th2", text="still `thinking`", streaming=True, start_ts=0)
     blk2 = ThinkingBlock(live)
     blk2.children[0].measure(700, m)
-    assert not blk2.children[0]._md and "`" in blk2.children[0].doc.toPlainText()  # noqa: SLF001
+    assert not blk2.children[0]._md and "`" in blk2.children[0].doc.toPlainText()
 
 
 def test_a_node_body_lays_out_from_its_own_edge(app):
@@ -306,6 +399,28 @@ def test_a_node_body_lays_out_from_its_own_edge(app):
     nb.indent = 28  # nested two levels deep: the view paints it 28px in and 28px narrower
     nb.measure(600, measurer())
     assert nb.root.x == 4 and nb.root.w == 596
+
+
+def test_a_markdown_body_finds_its_links_once_and_keeps_their_ids_through_a_reflow(app, monkeypatch):
+    """A screen reader asks a row for its targets once per child: a Markdown body reads its links
+    from the document once per layout, and a link keeps its id when a reflow moves the body, so the
+    focus stays on it."""
+    from pilcrow_qt.canvas import nodes as nd
+    from pilcrow_qt.canvas.blocks.base import NodeBlock
+
+    calls = []
+    doc_links = nd.doc_links
+    monkeypatch.setattr(nd, "doc_links", lambda doc: calls.append(1) or doc_links(doc))
+    note = "The prompt the fetch was given, long enough to wrap onto another line when the body narrows. "
+    nb = NodeBlock(
+        "nb", lambda m: nd.vstack(nd.note(note * 2), nd.Markdown("See [a](https://a.b) and [c](https://c.d)."))
+    )
+    nb.measure(742, measurer())
+    first = nb.targets()
+    assert [t.name for t in first] == ["a", "c"] and nb.targets() == first and len(calls) == 1
+    nb.measure(400, measurer())  # the note wraps once more: the body moves down
+    moved = nb.targets()
+    assert moved == first and moved[0].rect[1] > first[0].rect[1] and len(calls) == 2
 
 
 def test_number_gutters_fit_their_widest_number(app):

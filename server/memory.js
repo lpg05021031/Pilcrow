@@ -2,13 +2,11 @@
 // kept as short notes and handed to every new session in that folder. Notes are distilled by a
 // small one-shot run at the end of a turn, or written by hand.
 import path from 'node:path';
-import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { store } from './config.js';
 import { resolveClaude } from './claude.js';
-import { xdg, readJson, writeJson, uuid, log, slash, cleanEnv } from './util.js';
-import { textOfContent } from './sessions.js';
+import { xdg, readJson, jsonFile, uuid, log, slash, cleanEnv, textOfContent, folderKey } from './util.js';
 
 export const events = new EventEmitter();
 
@@ -17,18 +15,22 @@ const MAX_NOTES = 80;
 const MAX_INJECT_CHARS = 2600;
 const MIN_GAP_MS = 10 * 60e3;
 
-const keyOf = (cwd) => crypto.createHash('sha1').update(slash(cwd)).digest('hex').slice(0, 16);
-const fileOf = (cwd) => path.join(ROOT, `${keyOf(cwd)}.json`);
-const cache = new Map();
+/** folderKey -> { data, file }: a project's notes, read once, and their file (written off the event loop) */
+const projects = new Map();
 
-function load(cwd) {
-  const k = keyOf(cwd);
-  if (!cache.has(k)) cache.set(k, readJson(fileOf(cwd), { cwd: slash(cwd), notes: [], distills: {} }));
-  return cache.get(k);
+function projectFile(cwd) {
+  const k = folderKey(cwd);
+  let p = projects.get(k);
+  if (!p) {
+    const file = path.join(ROOT, `${k}.json`);
+    const entry = { data: readJson(file, { cwd: slash(cwd), notes: [], distills: {} }), file: jsonFile(file, () => entry.data) };
+    projects.set(k, (p = entry));
+  }
+  return p;
 }
-function save(cwd, data) {
-  cache.set(keyOf(cwd), data);
-  writeJson(fileOf(cwd), data);
+const load = (cwd) => projectFile(cwd).data;
+function save(cwd) {
+  projectFile(cwd).file.save();
   events.emit('changed', { cwd: slash(cwd) });
 }
 
@@ -44,6 +46,7 @@ export function list(cwd) {
   return { cwd: slash(cwd), notes, lastDistillAt: Math.max(0, ...Object.values(d.distills || {}).map((x) => x.at || 0)) || null };
 }
 
+/** @param {string} cwd @param {{ text: string, sessionId?: string, sessionTitle?: string, kind?: string }} note */
 export function add(cwd, { text, sessionId, sessionTitle, kind = 'manual' }) {
   const t = String(text || '').trim();
   if (!t) throw new Error('The note is empty.');
@@ -51,7 +54,7 @@ export function add(cwd, { text, sessionId, sessionTitle, kind = 'manual' }) {
   const note = { id: uuid(), at: Date.now(), text: t.slice(0, 600), kind, sessionId: sessionId || null, sessionTitle: sessionTitle || null, pinned: false };
   d.notes.push(note);
   trim(d);
-  save(cwd, d);
+  save(cwd);
   return note;
 }
 
@@ -62,21 +65,21 @@ export function update(cwd, id, patch) {
   if (typeof patch.text === 'string') n.text = patch.text.trim().slice(0, 600);
   if (typeof patch.pinned === 'boolean') n.pinned = patch.pinned;
   n.editedAt = Date.now();
-  save(cwd, d);
+  save(cwd);
   return n;
 }
 
 export function remove(cwd, id) {
   const d = load(cwd);
   d.notes = d.notes.filter((x) => x.id !== id);
-  save(cwd, d);
+  save(cwd);
   return true;
 }
 
 export function clear(cwd) {
   const d = load(cwd);
   d.notes = d.notes.filter((x) => x.pinned);
-  save(cwd, d);
+  save(cwd);
   return true;
 }
 
@@ -184,6 +187,7 @@ ${existing || '(none)'}
 Session digest:
 ${digest}`;
     const meta = store.getMeta(session.id) || {};
+    /** @type {import('@anthropic-ai/claude-agent-sdk').Options} */
     const opts = {
       cwd: session.cwd,
       pathToClaudeCodeExecutable: claude.path,
@@ -199,7 +203,7 @@ ${digest}`;
     let text = '';
     for await (const msg of query({ prompt, options: opts })) {
       if (msg.type === 'assistant' && !msg.parent_tool_use_id) text += textOfContent(msg.message?.content) || '';
-      else if (msg.type === 'result' && typeof msg.result === 'string' && !text) text = msg.result;
+      else if (msg.type === 'result' && msg.subtype === 'success' && !text) text = msg.result;
     }
     const added = [];
     if (!/^\s*NONE\s*$/i.test(text)) {
@@ -218,7 +222,7 @@ ${digest}`;
     d.distills = d.distills || {};
     d.distills[session.id] = { at: Date.now(), added: added.length };
     trim(d);
-    save(cwd, d);
+    save(cwd);
     log('memory distilled', session.id, added.length, 'notes');
     return { added };
   })().finally(() => inflight.delete(session.id));

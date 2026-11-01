@@ -1,13 +1,13 @@
 // Dispatch wired to the real server: sessions through the Agent SDK, git worktrees, the config store,
-// snapshots for the files a run touched, the scheduler's inbox for the report. The state machine lives
+// snapshots for the files a run touched, the inbox for the report. The state machine lives
 // in dispatch_core.js so the tests can drive it with fakes.
 import path from 'node:path';
 import { store } from './config.js';
-import { sessions, bus, textOfContent } from './sessions.js';
+import { sessions, bus } from './sessions.js';
 import * as git from './git.js';
 import * as snapshots from './snapshots.js';
-import { pushInbox, updateInbox } from './schedules.js';
-import { xdg, readJson, writeJson, uuid, log, slash, slugify, run, which, IS_WIN } from './util.js';
+import * as inbox from './inbox.js';
+import { xdg, uuid, log, slash, slugify, run, which, IS_WIN } from './util.js';
 import { createDispatcher } from './dispatch_core.js';
 import { repos } from './repos.js';
 
@@ -26,8 +26,8 @@ export const dispatch = createDispatcher({
   store,
   git,
   snapshots,
-  pushInbox,
-  updateInbox,
+  pushInbox: inbox.push,
+  updateInbox: inbox.update,
   shell,
   run,
   which,
@@ -35,10 +35,7 @@ export const dispatch = createDispatcher({
   uuid,
   slugify,
   slash,
-  textOfContent,
   registry: repos,
-  readJson,
-  writeJson,
 });
 
 export const events = dispatch.events;

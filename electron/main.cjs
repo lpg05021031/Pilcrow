@@ -5,11 +5,6 @@ const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
 
 const ROOT = path.join(__dirname, '..');
-// Same folder the server uses for its state (server/util.js xdg('state')).
-const STATE_DIR =
-  process.platform === 'win32'
-    ? path.join(process.env.LOCALAPPDATA || path.join(app.getPath('home'), 'AppData', 'Local'), 'Pilcrow', 'state')
-    : path.join(process.env.XDG_STATE_HOME || path.join(app.getPath('home'), '.local', 'state'), 'pilcrow');
 
 app.setName('Pilcrow');
 if (process.platform === 'linux') {
@@ -23,12 +18,13 @@ if (process.env.PILCROW_DISABLE_GPU === '1') app.disableHardwareAcceleration();
 let win = null;
 let server = null;
 let store = null;
+let util = null; // the server's own helpers (server/util.js): its folders, debounce
 let quitting = false;
 
 // After an update the previous version may still be running; replace it (when idle) instead of focusing it.
 (async () => {
   try {
-    const mod = await import(pathToFileURL(path.join(ROOT, 'server', 'main.js')).href);
+    const mod = await import(pathToFileURL(path.join(ROOT, 'server', 'cli.js')).href);
     const existing = await mod.existingInstance();
     if (existing) await mod.retireOutdated(existing);
   } catch {
@@ -53,6 +49,7 @@ let quitting = false;
 async function boot() {
   const mod = await import(pathToFileURL(path.join(ROOT, 'server', 'main.js')).href);
   store = (await import(pathToFileURL(path.join(ROOT, 'server', 'config.js')).href)).store;
+  util = await import(pathToFileURL(path.join(ROOT, 'server', 'util.js')).href);
   server = await mod.start({ shell: 'electron', quiet: true, onQuit: () => app.quit() });
   Menu.setApplicationMenu(buildMenu());
   createWindow();
@@ -123,8 +120,8 @@ function createWindow() {
     const bounds = maximized ? win.getNormalBounds() : win.getBounds();
     store.setConfig({ window: { ...bounds, maximized } });
   };
-  win.on('resize', debounce(save, 400));
-  win.on('move', debounce(save, 400));
+  win.on('resize', util.debounce(save, 400));
+  win.on('move', util.debounce(save, 400));
   win.on('focus', () => win?.flashFrame(false));
   win.on('close', (e) => {
     save();
@@ -155,6 +152,7 @@ function confirmQuit() {
 }
 
 function contextMenu(params) {
+  /** @type {Electron.MenuItemConstructorOptions[]} */
   const items = [];
   const { editFlags, isEditable, selectionText, linkURL } = params;
   if (linkURL && /^(https?|mailto):/i.test(linkURL)) {
@@ -227,7 +225,7 @@ function buildMenu() {
       submenu: [
         { label: 'Keyboard Shortcuts', ...shown('CmdOrCtrl+/'), click: sendMenu('shortcuts') },
         { label: 'Diagnostics', click: sendMenu('diagnostics') },
-        { label: 'Open Logs Folder', click: () => shell.openPath(fs.existsSync(STATE_DIR) ? STATE_DIR : app.getPath('home')) },
+        { label: 'Open Logs Folder', click: () => shell.openPath(fs.existsSync(util.xdg('state')) ? util.xdg('state') : app.getPath('home')) },
         { type: 'separator' },
         {
           label: 'About Pilcrow',
@@ -247,19 +245,15 @@ function buildMenu() {
   ]);
 }
 
-function debounce(fn, ms) {
-  let t;
-  return (...a) => {
-    clearTimeout(t);
-    t = setTimeout(() => fn(...a), ms);
-  };
-}
-
 app.on('before-quit', (e) => {
   if (!quitting && !confirmQuit()) e.preventDefault();
 });
-app.on('window-all-closed', () => {
-  server?.stop();
-  app.quit();
+app.on('window-all-closed', () => app.quit());
+// The server saves what is pending and ends the terminals before the app exits: hold the quit until it has.
+let stopped = false;
+app.on('will-quit', (e) => {
+  if (stopped || !server) return;
+  stopped = true;
+  e.preventDefault();
+  server.stop().finally(() => app.exit(0));
 });
-app.on('will-quit', () => server?.stop());

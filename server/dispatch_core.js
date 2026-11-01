@@ -1,16 +1,17 @@
 // Dispatch: one job, many repositories. A job has a brief and targets; it plans before it runs, runs
 // each target as a real session in a worktree of its own, lets a canary go first, answers a permission
 // once for every repository that asks the same thing, reviews the result across repositories and
-// finishes with commits or pull requests and a report. This module is the state machine and the pure
-// helpers; it takes its collaborators (sessions, git, the store, the inbox…) as `deps`, so the tests can
+// finishes with commits or pull requests and a report. This module is the state machine and the helpers
+// only it uses (workspace.js has the ones others share); it takes its collaborators (sessions, git, the store, the inbox…) as `deps`, so the tests can
 // drive it with fakes, and dispatch.js wires it to the real ones.
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { readJson, jsonFile, lastAssistantText, fmtCost, roundUsd } from './util.js';
+import { findRepos, joinNotes, manifestOf, ruleKey, ruleLabel } from './workspace.js';
+import { ACTIVE, CLOSE_AFTER_MS, MAX_FILES, SUMMARY_MAX, TERMINAL, capRun, changesIn, land, review as reviewRuns, tally } from './runs.js';
 
-export const TERMINAL = new Set(['done', 'failed', 'stopped', 'skipped']);
-export const ACTIVE = new Set(['preparing', 'running', 'needs_action']);
 export const DEFAULTS = Object.freeze({
   mode: 'acceptEdits', // 'ask' | 'acceptEdits' | 'allowlist'
   allowedTools: [],
@@ -32,15 +33,23 @@ export const DEFAULTS = Object.freeze({
 });
 export const REPORT_MAX_MIN = 6;
 export const MAX_BRIEF = 60_000;
-export const MAX_FILES = 60;
 export const SIZE_UNITS = { small: 1, medium: 2, large: 4 };
-const SKIP_DIRS = new Set(['node_modules', 'vendor', 'target', 'dist', 'build', '.git', '.hg', '.svn', '__pycache__', '.venv', 'venv']);
 const RATE_LIMIT = /rate.?limit|429|overloaded|too many requests/i;
 const COALESCE_MS = 16;
+// The file is saved at most this often: a running job changes many times a second (what each run is
+// doing now), and every save rewrites the whole file. end() writes what is left.
+const SAVE_MS = 1000;
+const SCAN_TTL_MS = 60_000; // a workspace scan walks folders; the picker asks again on every open
+const MAX_BACKOFF_MS = 60_000; // a rate-limited run waits twice as long each time, up to this
+const MAX_FINISHED = 40; // finished jobs kept, the newest; each one's report stays in the inbox
 
 // ---------------------------------------------------------------- pure helpers
 
-/** `{{repo.name}}`, `{{repo.path}}`, `{{repo.branch}}`, `{{job.name}}`, `{{notes}}`; unknown variables stay. */
+/**
+ * `{{repo.name}}`, `{{repo.path}}`, `{{repo.branch}}`, `{{job.name}}`, `{{notes}}`; unknown variables stay.
+ * @param {string} brief
+ * @param {{ job?: { name?: string }, target?: { name?: string, path?: string, base?: string, notes?: string }, learned?: { name: string, summary?: string }[], deps?: { name: string, summary?: string }[] }} [ctx]
+ */
 export function renderBrief(brief, { job, target, learned = [], deps = [] } = {}) {
   const vars = {
     'repo.name': target?.name || '',
@@ -57,50 +66,6 @@ export function renderBrief(brief, { job, target, learned = [], deps = [] } = {}
     out += '\n\nThe same work was already done in ' + (learned.length === 1 ? 'one repository' : `${learned.length} repositories`) + '. Follow the same approach where it fits:\n' + learned.map((l) => `- ${l.name}: ${l.summary || 'no summary'}`).join('\n');
   }
   return out.replace(/\n{3,}/g, '\n\n').trim();
-}
-
-/** Registry notes and a target's own, as one `{{notes}}` for a brief. */
-export function joinNotes(...parts) {
-  const clean = parts.map((p) => String(p || '').trim()).filter(Boolean);
-  // a target's notes that begin as the registry's (the picker prefills them) are not said twice
-  const kept = clean.filter((p, i) => !clean.some((q, j) => j !== i && q !== p && q.includes(p)));
-  return [...new Set(kept)].join('\n\n');
-}
-
-/** The key two requests share when one answer should serve both: the tool and its normalized input. */
-export function ruleKey(req, worktreePath = '') {
-  const tool = String(req?.toolName || '');
-  const input = req?.input || {};
-  const rel = (p) => {
-    let s = String(p || '').replace(/\\/g, '/');
-    const root = String(worktreePath || '').replace(/\\/g, '/').replace(/\/$/, '');
-    if (root && s.startsWith(root + '/')) s = s.slice(root.length + 1);
-    return s;
-  };
-  if (tool === 'Bash' || tool === 'PowerShell') return `${tool}:${String(input.command || '').replace(/\s+/g, ' ').trim()}`;
-  if (['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Read'].includes(tool)) return `${tool}:${rel(input.file_path || input.notebook_path)}`;
-  if (tool === 'WebFetch') {
-    try {
-      return `${tool}:${new URL(String(input.url)).host}`;
-    } catch {
-      return `${tool}:${String(input.url || '')}`;
-    }
-  }
-  const norm = (v) => {
-    if (typeof v === 'string') return rel(v);
-    if (Array.isArray(v)) return v.map(norm);
-    if (v && typeof v === 'object') return Object.fromEntries(Object.keys(v).sort().map((k) => [k, norm(v[k])]));
-    return v;
-  };
-  return `${tool}:${JSON.stringify(norm(input))}`;
-}
-
-export function ruleLabel(req, worktreePath = '') {
-  const key = ruleKey(req, worktreePath);
-  const [tool, ...rest] = key.split(':');
-  const what = rest.join(':');
-  const short = what.length > 72 ? what.slice(0, 69) + '…' : what;
-  return `${req?.displayName || tool}${short ? ': ' + short : ''}`;
 }
 
 /** Dependency levels among targets (Kahn): a target waits for the targets it depends on. Edges to
@@ -134,45 +99,6 @@ export function levelsOf(targets) {
   return { level, levels: cyclic.length ? n + 1 : n, cyclic };
 }
 
-/** Changes across runs: the same hunk in several repositories is one item with a count. */
-export function groupHunks(diffs) {
-  // diffs: [{ runId, name, files: [{ path, add, del, hunks: [{ lines: [{t, s}] }] }] }]
-  const groups = new Map();
-  const runs = [];
-  for (const d of diffs) {
-    let add = 0;
-    let del = 0;
-    const files = [];
-    for (const f of d.files || []) {
-      const fa = Number(f.additions ?? f.add ?? 0);
-      const fd = Number(f.deletions ?? f.del ?? 0);
-      add += fa;
-      del += fd;
-      files.push({ path: f.path, add: fa, del: fd });
-      const body = (f.hunks || [])
-        .flatMap((h) => h.lines || [])
-        .filter((l) => l.t === '+' || l.t === '-')
-        .map((l) => l.t + l.s)
-        .join('\n');
-      const sig = crypto.createHash('sha1').update(f.path + '\n' + body).digest('hex').slice(0, 16);
-      const g = groups.get(sig) || { sig, path: f.path, runs: [], add: fa, del: fd, preview: body.split('\n').slice(0, 8) };
-      g.runs.push(d.name);
-      groups.set(sig, g);
-    }
-    runs.push({ runId: d.runId, name: d.name, files, add, del });
-  }
-  const all = [...groups.values()];
-  const same = all.filter((g) => g.runs.length > 1).sort((a, b) => b.runs.length - a.runs.length || a.path.localeCompare(b.path));
-  const onlyOne = all.filter((g) => g.runs.length === 1);
-  const differ = [];
-  for (const g of onlyOne) {
-    let e = differ.find((x) => x.name === g.runs[0]);
-    if (!e) differ.push((e = { name: g.runs[0], files: [] }));
-    e.files.push({ path: g.path, add: g.add, del: g.del });
-  }
-  return { runs, same, differ, files: runs.reduce((n, r) => n + r.files.length, 0) };
-}
-
 /** What the main wave is likely to cost and take, from the canary's runs and the targets' size classes. */
 export function forecastFrom(canaryRuns, remaining, parallel) {
   const done = canaryRuns.filter((r) => r.state === 'done' || r.state === 'failed');
@@ -185,88 +111,9 @@ export function forecastFrom(canaryRuns, remaining, parallel) {
   return { cost: Math.round(costPer * ru * 100) / 100, minutes: Math.max(1, Math.round((msPer * ru) / Math.max(1, parallel) / 60e3)), from: done.map((r) => r.name), runs: remaining.length };
 }
 
-function readJsonFile(p) {
-  try {
-    return JSON.parse(fs.readFileSync(p, 'utf8'));
-  } catch {
-    return null;
-  }
-}
-
-/** Local dependencies a manifest declares: package.json file:/link:/workspace:, go.mod replace, Cargo path. */
-export function manifestOf(dir) {
-  const out = { name: null, kind: null, localDeps: [], depNames: [] };
-  const pkg = readJsonFile(path.join(dir, 'package.json'));
-  if (pkg && typeof pkg === 'object') {
-    out.kind = 'node';
-    out.name = typeof pkg.name === 'string' ? pkg.name : null;
-    for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
-      for (const [name, spec] of Object.entries(pkg[field] || {})) {
-        out.depNames.push(name);
-        const m = /^(?:file|link):(.+)$/.exec(String(spec));
-        if (m) out.localDeps.push(path.resolve(dir, m[1]));
-      }
-    }
-  }
-  const gomod = path.join(dir, 'go.mod');
-  if (fs.existsSync(gomod)) {
-    out.kind = out.kind || 'go';
-    const text = fs.readFileSync(gomod, 'utf8');
-    const mod = /^module\s+(\S+)/m.exec(text);
-    if (mod && !out.name) out.name = mod[1];
-    for (const m of text.matchAll(/^\s*(?:replace\s+)?(\S+)(?:\s+\S+)?\s*=>\s*(\.{1,2}\/\S*|\/\S+)/gm)) {
-      out.depNames.push(m[1]);
-      out.localDeps.push(path.resolve(dir, m[2]));
-    }
-    for (const m of text.matchAll(/^\s+(\S+)\s+v[\d.]+/gm)) out.depNames.push(m[1]);
-  }
-  const cargo = path.join(dir, 'Cargo.toml');
-  if (fs.existsSync(cargo)) {
-    out.kind = out.kind || 'rust';
-    const text = fs.readFileSync(cargo, 'utf8');
-    const nm = /^\s*name\s*=\s*"([^"]+)"/m.exec(text);
-    if (nm && !out.name) out.name = nm[1];
-    for (const m of text.matchAll(/^\s*([A-Za-z0-9_-]+)\s*=\s*\{[^}\n]*path\s*=\s*"([^"]+)"/gm)) {
-      out.depNames.push(m[1]);
-      out.localDeps.push(path.resolve(dir, m[2]));
-    }
-  }
-  if (!out.kind && fs.existsSync(path.join(dir, 'pyproject.toml'))) out.kind = 'python';
-  return out;
-}
-
 function parseRemote(url) {
   const m = /github\.com[:/]([^/]+)\/([^/.]+)(?:\.git)?/.exec(String(url || ''));
   return m ? { host: 'github', owner: m[1], repo: m[2], url } : url ? { host: 'other', url } : null;
-}
-
-/** Walk a folder for repositories: stop at the first `.git` on a path; skip build and dependency dirs. */
-export function findRepos(root, depth = 3) {
-  const out = [];
-  const seen = new Set();
-  const walk = (dir, d) => {
-    let entries;
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    if (entries.some((e) => e.name === '.git')) {
-      const real = fs.realpathSync.native ? fs.realpathSync.native(dir) : dir;
-      if (!seen.has(real)) {
-        seen.add(real);
-        out.push(dir);
-      }
-      return;
-    }
-    if (d >= depth) return;
-    for (const e of entries) {
-      if (!e.isDirectory() || e.name.startsWith('.') || SKIP_DIRS.has(e.name)) continue;
-      walk(path.join(dir, e.name), d + 1);
-    }
-  };
-  walk(root, 0);
-  return out.sort();
 }
 
 function tail(s, n = 2000) {
@@ -298,36 +145,24 @@ export function createDispatcher(deps) {
     uuid = () => crypto.randomUUID(),
     slugify = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40),
     slash = (p) => p,
-    textOfContent = () => '',
     registry = null, // the repositories registry (REPOSITORIES.md): policy, defaults and notes per folder
-    readJson = (p, fb) => readJsonFile(p) ?? fb,
-    writeJson = (p, d) => {
-      fs.mkdirSync(path.dirname(p), { recursive: true });
-      fs.writeFileSync(p, JSON.stringify(d, null, 2));
-    },
   } = deps;
 
   const events = new EventEmitter();
   const data = file ? readJson(file, { jobs: [], playbooks: [] }) : { jobs: [], playbooks: [] };
   if (!Array.isArray(data.jobs)) data.jobs = [];
   if (!Array.isArray(data.playbooks)) data.playbooks = [];
+  for (const j of data.jobs) for (const r of j.runs || []) delete r.brief; // older versions kept each run's brief too
   const timers = new Map(); // runId -> timeout
   const backoffTimers = new Map(); // jobId -> timeout
   const scanCache = new Map(); // root -> { at, result }
-  let saveTimer = null;
+  const saver = file ? jsonFile(file, () => data, SAVE_MS) : null;
   const dirty = new Map(); // jobId -> Set(runId) | 'all'
   let flushTimer = null;
   let started = false;
 
   // ---- persistence and events
-  function persist() {
-    if (!file) return;
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => writeJson(file, data), 150);
-  }
-  function flushNow() {
-    if (file) writeJson(file, data);
-  }
+  const persist = () => saver?.save();
   function summary(job) {
     const counts = { queued: 0, preparing: 0, running: 0, needs_action: 0, done: 0, failed: 0, stopped: 0, skipped: 0 };
     let cost = 0;
@@ -340,7 +175,7 @@ export function createDispatcher(deps) {
       files += (r.files || []).length;
     }
     const { runs, ...rest } = job;
-    return { ...rest, counts, total: runs.length, cost: Math.round(cost * 10000) / 10000, needsAction: needs, files, canaryWaiting: job.state === 'reviewing' && job.wave === 'canary' };
+    return { ...rest, counts, total: runs.length, cost: roundUsd(cost), needsAction: needs, files, canaryWaiting: job.state === 'reviewing' && job.wave === 'canary' };
   }
   function touch(job, runOrRuns) {
     job.updatedAt = now();
@@ -394,11 +229,12 @@ export function createDispatcher(deps) {
   }
 
   // ---- the workspace
+  /** @param {{ root?: string, depth?: number, force?: boolean }} [opts] */
   async function scan({ root, depth = 3, force = false } = {}) {
     if (!root || !fs.existsSync(root)) throw new Error('Pick a folder that exists.');
     const hit = scanCache.get(root);
-    if (hit && !force && now() - hit.at < 60_000) return hit.result;
-    const dirs = findRepos(root, depth);
+    if (hit && !force && now() - hit.at < SCAN_TTL_MS) return hit.result;
+    const dirs = await findRepos(root, depth);
     const repos = [];
     const metaAll = store.meta || {};
     let i = 0;
@@ -436,6 +272,12 @@ export function createDispatcher(deps) {
   async function describeRepo(dir, metaAll) {
     const info = await git.info(dir).catch(() => ({ isRepo: false }));
     const name = path.basename(dir);
+    let last = 0;
+    for (const m of Object.values(metaAll)) {
+      if ((m?.project === slash(dir) || m?.cwd === slash(dir)) && (m.touched || m.createdAt) > last) last = m.touched || m.createdAt;
+    }
+    const remote = info.isRepo ? await git.git(dir, ['config', '--get', 'remote.origin.url']).catch(() => ({ stdout: '' })) : null;
+    const man = manifestOf(dir);
     const out = {
       path: slash(dir),
       name,
@@ -445,32 +287,22 @@ export function createDispatcher(deps) {
       untracked: info.untracked || 0,
       ahead: info.ahead || 0,
       behind: info.behind || 0,
-      remote: null,
+      remote: remote && parseRemote((remote.stdout || '').trim()),
       hasClaudeMd: fs.existsSync(path.join(dir, 'CLAUDE.md')) || fs.existsSync(path.join(dir, '.claude', 'CLAUDE.md')),
       size: 'small',
       files: 0,
-      kind: null,
-      packageName: null,
-      lastSession: null,
+      kind: man.kind,
+      packageName: man.name,
+      lastSession: last || null,
       deps: [],
+      _localDeps: man.localDeps,
+      _depNames: man.depNames,
     };
     if (info.isRepo) {
-      const remote = await git.git(dir, ['config', '--get', 'remote.origin.url']).catch(() => ({ stdout: '' }));
-      out.remote = parseRemote((remote.stdout || '').trim());
       const ls = await git.git(dir, ['ls-files']).catch(() => ({ stdout: '' }));
       out.files = (ls.stdout || '').split('\n').filter(Boolean).length;
       out.size = out.files < 300 ? 'small' : out.files < 3000 ? 'medium' : 'large';
     }
-    const man = manifestOf(dir);
-    out.kind = man.kind;
-    out.packageName = man.name;
-    out._localDeps = man.localDeps;
-    out._depNames = man.depNames;
-    let last = 0;
-    for (const m of Object.values(metaAll)) {
-      if ((m?.project === out.path || m?.cwd === out.path) && (m.touched || m.createdAt) > last) last = m.touched || m.createdAt;
-    }
-    out.lastSession = last || null;
     return out;
   }
 
@@ -574,6 +406,7 @@ export function createDispatcher(deps) {
     return true;
   }
   /** A job from a playbook, started at once: what a schedule fires, and what "Run again" does. */
+  /** @param {string} id @param {{ name?: string, wave?: string, unattended?: boolean, scheduleId?: string | null, targets?: object[], manual?: boolean }} [opts] */
   async function startFromPlaybook(id, { name, wave, unattended = false, scheduleId = null, targets } = {}) {
     const pb = data.playbooks.find((p) => p.id === id);
     if (!pb) throw new Error('No such playbook.');
@@ -624,6 +457,15 @@ export function createDispatcher(deps) {
     persist();
     if (!flushTimer) flushTimer = setTimeout(flush, COALESCE_MS);
     return Promise.all(work).then(() => true);
+  }
+
+  /** Let the oldest finished jobs go past MAX_FINISHED: every save writes the whole file. */
+  function prune() {
+    const finished = data.jobs.filter((j) => j.state === 'finished').sort((a, b) => (b.finishedAt || 0) - (a.finishedAt || 0));
+    for (const j of finished.slice(MAX_FINISHED)) {
+      data.jobs.splice(data.jobs.indexOf(j), 1);
+      dirty.set(j.id, 'all'); // flush() tells the windows it is gone
+    }
   }
 
   // ---- the plan
@@ -695,6 +537,7 @@ export function createDispatcher(deps) {
     return m === 'acceptEdits' ? 'acceptEdits' : 'default';
   }
 
+  /** @param {string} id @param {{ wave?: string }} [opts] */
   async function start(id, { wave } = {}) {
     const job = jobOf(id);
     if (job.state === 'running') throw new Error('This job is already running.');
@@ -735,7 +578,6 @@ export function createDispatcher(deps) {
       commit: null,
       pr: null,
       finished: null,
-      brief: t.brief,
     }));
     job.state = 'running';
     job.wave = canaryPaths.size ? 'canary' : 'main';
@@ -840,10 +682,7 @@ export function createDispatcher(deps) {
       run.worktree = made.worktree;
       store.setMeta(made.id, { dispatch: { jobId: job.id, runId: run.id, name: job.name, target: run.name } });
       session = sessions.find(made.id);
-      if (session) {
-        session.dispatch = { jobId: job.id, runId: run.id };
-        if (job.settings.unattended) session.unattended = true; // nobody will answer: Claude is told so
-      }
+      if (session && job.settings.unattended) session.unattended = true; // nobody will answer: Claude is told so
       touch(job, run);
       // the worktree isolates files only: copies and the prepare command bring what the agent needs
       for (const rel of job.settings.copy || []) {
@@ -870,23 +709,24 @@ export function createDispatcher(deps) {
       run.state = 'running';
       run.now = 'starting';
       touch(job, run);
-      timers.set(
-        run.id,
-        setTimeout(() => {
-          const s = sessions.find(run.sessionId);
-          s?.interrupt?.().catch?.(() => null);
-          setTimeout(() => {
-            if (ACTIVE.has(run.state)) endRun(job, run, 'stopped', `Stopped after ${job.settings.maxMinutes} minutes`, s);
-          }, 3000);
-        }, job.settings.maxMinutes * 60e3),
-      );
+      armCap(job, run);
       const extras = { learned: job.wave === 'main' && job.settings.learn ? job.learned : [], deps: run.dependsOn.map((d) => job.runs.find((x) => x.path === d && x.state === 'done')).filter(Boolean).map((d) => ({ name: d.name, summary: d.summary })) };
       const tgt = job.targets.find((x) => x.path === run.path);
-      run.brief = renderBrief(job.brief, { job, target: { ...run, notes: joinNotes(registry?.notesFor(run.path), tgt?.notes) }, ...extras });
-      await (session || (await sessions.get(made.id))).send({ text: run.brief });
+      // Rendered now, with what the canary and the dependencies learned; not kept: the plan has the brief.
+      const brief = renderBrief(job.brief, { job, target: { ...run, notes: joinNotes(registry?.notesFor(run.path), tgt?.notes) }, ...extras });
+      await (session || (await sessions.get(made.id))).send({ text: brief });
     } catch (e) {
       if (ACTIVE.has(run.state)) endRun(job, run, 'failed', e?.message || 'Could not start', session);
     }
+  }
+
+  /** The run's minute cap (runs.js); `ms` is what is left of it for a run picked up after a restart. */
+  function armCap(job, run, ms) {
+    const session = () => sessions.find(run.sessionId);
+    timers.set(
+      run.id,
+      capRun(run, job.settings.maxMinutes, session, (why) => ACTIVE.has(run.state) && endRun(job, run, 'stopped', why, session()), ms),
+    );
   }
 
   function clearRunTimer(run) {
@@ -925,65 +765,24 @@ export function createDispatcher(deps) {
     endRun(job, run, 'done', null, session);
   }
 
+  /** What the run changed (its steps and its worktree's diff), what it cost and what it said last. */
   async function collect(job, run, session) {
-    const files = new Map();
-    if (session) {
-      try {
-        for (const st of snapshots.steps(session).steps || []) {
-          if (st.at < (run.startedAt || 0)) continue;
-          for (const f of st.files || []) {
-            const cur = files.get(f.path) || { path: f.path, add: 0, del: 0 };
-            cur.add += f.add || 0;
-            cur.del += f.del || 0;
-            files.set(f.path, cur);
-          }
-        }
-      } catch {
-        /* no snapshots */
-      }
+    if (!started) return; // quitting (end()): no git process starts after it
+    let steps = [];
+    try {
+      if (session) steps = snapshots.steps(session).steps || [];
+    } catch {
+      /* no snapshots */
     }
-    let add = 0;
-    let del = 0;
-    if (run.worktree?.path) {
-      try {
-        const d = await git.diff(run.worktree.path, { base: run.worktree.base });
-        for (const f of d.files || []) {
-          const fa = Number(f.additions ?? f.add ?? 0);
-          const fd = Number(f.deletions ?? f.del ?? 0);
-          add += fa;
-          del += fd;
-          if (!files.has(f.path)) files.set(f.path, { path: f.path, add: fa, del: fd });
-        }
-      } catch {
-        /* the worktree may be gone */
-      }
-    }
-    if (!add && !del) {
-      for (const f of files.values()) {
-        add += f.add;
-        del += f.del;
-      }
-    }
-    run.files = [...files.values()].slice(0, MAX_FILES);
-    run.add = add;
-    run.del = del;
+    const ch = await changesIn(git, run.worktree?.path, run.worktree?.base, { steps, since: run.startedAt || 0 });
+    run.files = ch.files.slice(0, MAX_FILES);
+    run.add = ch.add;
+    run.del = ch.del;
     if (session) {
       run.cost = session.usage?.costUsd || run.cost || 0;
-      const text = session.lastReply?.text || lastAssistantText(session) || '';
-      if (text) run.summary = text.slice(0, 1200);
+      const text = session.lastReply?.text || lastAssistantText(session.messages);
+      if (text) run.summary = text.slice(0, SUMMARY_MAX);
     }
-  }
-
-  function lastAssistantText(session) {
-    const msgs = session?.messages || [];
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      const m = msgs[i];
-      if (m.type === 'assistant' && !m.parent_tool_use_id) {
-        const t = textOfContent(m.message?.content);
-        if (t) return t.replace(/\s+/g, ' ').trim();
-      }
-    }
-    return '';
   }
 
   function endRun(job, run, state, reason, session) {
@@ -1001,8 +800,7 @@ export function createDispatcher(deps) {
       .catch(() => null)
       .then(() => {
         touch(job, run);
-        if (s && state !== 'failed') setTimeout(() => s.close?.(), 1500);
-        else if (s) setTimeout(() => s.close?.(), 1500);
+        if (s) setTimeout(() => s.close?.(), CLOSE_AFTER_MS);
         log('dispatch run', job.name, run.name, state, reason || '');
         pump();
       });
@@ -1032,13 +830,14 @@ export function createDispatcher(deps) {
       changed = true;
     }
     if (st.status === 'idle' && (run.state === 'running' || run.state === 'needs_action')) {
-      onIdle(job, run, session).catch((e) => log('dispatch idle failed', e?.message));
+      if (run.stopping) endRun(job, run, 'stopped', run.stopping, session);
+      else onIdle(job, run, session).catch((e) => log('dispatch idle failed', e?.message));
       return;
     }
     if (st.status === 'error') {
       if (RATE_LIMIT.test(String(st.error || '')) && run.attempt < 4) {
         clearRunTimer(run);
-        job.backoffMs = Math.min(60_000, (job.backoffMs || 2000) * 2);
+        job.backoffMs = Math.min(MAX_BACKOFF_MS, (job.backoffMs || 2000) * 2);
         job.backoffUntil = now() + job.backoffMs;
         run.state = 'queued';
         run.attempt += 1;
@@ -1109,6 +908,7 @@ export function createDispatcher(deps) {
   }
 
   // ---- steering
+  /** @param {string} id @param {{ brief?: string, learn?: boolean }} [opts] */
   function continueJob(id, { brief, learn } = {}) {
     const job = jobOf(id);
     if (!(job.state === 'reviewing' && job.wave === 'canary')) throw new Error('The job is not waiting after a canary.');
@@ -1151,6 +951,7 @@ export function createDispatcher(deps) {
     job.stoppedReason = reason;
     touch(job);
   }
+  /** @param {string} id @param {{ runId?: string }} [opts] */
   function stop(id, { runId } = {}) {
     const job = jobOf(id);
     if (runId) {
@@ -1171,13 +972,13 @@ export function createDispatcher(deps) {
     stopJob(job, 'Stopped by you');
     return summary(job);
   }
+  /** @param {string} id @param {string} runId @param {{ brief?: string }} [opts] */
   function retry(id, runId, { brief } = {}) {
     const job = jobOf(id);
     const old = runOf(job, runId);
     if (!TERMINAL.has(old.state)) throw new Error('That run is still going.');
     if (typeof brief === 'string' && brief.trim()) job.brief = brief;
-    const t = job.plan?.targets.find((x) => x.path === old.path);
-    const run = { ...old, id: uuid(), state: 'queued', attempt: (old.attempt || 1) + 1, sessionId: null, worktree: null, startedAt: null, endedAt: null, durationMs: 0, cost: 0, summary: '', files: [], add: 0, del: 0, reason: null, verify: null, prepare: null, now: null, pending: [], retried: false, commit: null, pr: null, finished: null, wave: 'main', brief: t?.brief || old.brief };
+    const run = { ...old, id: uuid(), state: 'queued', attempt: (old.attempt || 1) + 1, sessionId: null, worktree: null, startedAt: null, endedAt: null, durationMs: 0, cost: 0, summary: '', files: [], add: 0, del: 0, reason: null, verify: null, prepare: null, now: null, pending: [], retried: false, commit: null, pr: null, prError: null, finished: null, finishError: null, stopping: null, wave: 'main' };
     old.superseded = run.id;
     job.runs.push(run);
     if (job.state !== 'running') {
@@ -1222,82 +1023,33 @@ export function createDispatcher(deps) {
   // ---- review and finish
   async function review(id) {
     const job = jobOf(id);
-    const diffs = [];
-    for (const r of job.runs) {
-      if (!r.worktree?.path || r.superseded) continue;
-      if (!fs.existsSync(r.worktree.path)) continue;
-      try {
-        const d = await git.diff(r.worktree.path, { base: r.worktree.base });
-        diffs.push({ runId: r.id, name: r.name, files: d.files || [] });
-      } catch {
-        /* skip */
-      }
-    }
-    return { id, ...groupHunks(diffs) };
+    const live = job.runs.filter((r) => !r.superseded);
+    return { id, ...(await reviewRuns(git, live.map((r) => ({ id: r.id, name: r.name, dir: r.worktree?.path, base: r.worktree?.base })))) };
   }
 
-  async function finish(id, { runId, action, message, pr } = {}) {
+  /** @param {string} id @param {{ runId?: string, action?: string, message?: string, pr?: boolean }} [opts] */
+  async function finish(id, { runId, action = '', message, pr } = {}) {
     const job = jobOf(id);
     if (!['commit', 'discard', 'keep'].includes(action)) throw new Error('Finish with commit, discard or keep.');
     const runs = runId ? [runOf(job, runId)] : job.runs.filter((r) => !r.superseded && TERMINAL.has(r.state) && !r.finished && (action === 'commit' ? r.state === 'done' : true));
     const results = [];
     for (const run of runs) {
       if (!TERMINAL.has(run.state)) throw new Error(`${run.name} is still going.`);
-      const res = { runId: run.id, name: run.name, ok: true, output: '' };
-      try {
-        if (action === 'keep') run.finished = 'keep';
-        else if (!run.worktree?.path || !fs.existsSync(run.worktree.path)) {
-          run.finished = action;
-          res.output = 'No worktree.';
-        } else if (action === 'discard') {
-          const r = await git.removeWorktree({ repoRoot: run.worktree.repoRoot, dir: run.worktree.path, branch: run.worktree.branch, deleteBranch: true });
-          res.ok = r.ok !== false;
-          res.output = r.output || '';
-          run.finished = 'discard';
-        } else {
-          const msg = renderBrief(message || job.settings.commitMessage || `${job.name}`, { job, target: run });
-          const c = await git.commit(run.worktree.path, { message: msg });
-          if (!c.ok && !/nothing to commit|nothing added/i.test(c.output || '')) throw new Error(c.output || 'commit failed');
-          const head = await git.git(run.worktree.path, ['rev-parse', '--short', 'HEAD']);
-          run.commit = (head.stdout || '').trim() || null;
-          if (pr ?? job.settings.pr) {
-            const url = await openPr(job, run).catch((e) => {
-              run.prError = e?.message || 'Could not open a pull request';
-              return null;
-            });
-            if (url) run.pr = url;
-          }
-          const r = await git.removeWorktree({ repoRoot: run.worktree.repoRoot, dir: run.worktree.path, branch: run.worktree.branch, deleteBranch: false });
-          res.output = r.output || '';
-          run.finished = 'commit';
-        }
-        const s = run.sessionId ? sessions.find(run.sessionId) : null;
-        if (action !== 'keep') s?.close?.();
-      } catch (e) {
-        res.ok = false;
-        res.output = e?.message || String(e);
-        run.finishError = res.output;
-      }
-      results.push(res);
+      const how = {
+        git,
+        which,
+        exec,
+        message: renderBrief(message || job.settings.commitMessage || `${job.name}`, { job, target: run }),
+        pr: (pr ?? job.settings.pr) ? { title: job.name, body: `${job.brief}\n\n---\n${run.summary || ''}\n\nOpened by Pilcrow Dispatch (job “${job.name}”).` } : null,
+      };
+      const res = await land(run, action, how);
+      if (res.ok && action !== 'keep') (run.sessionId ? sessions.find(run.sessionId) : null)?.close?.();
+      results.push({ runId: run.id, name: run.name, ...res });
       touch(job, run);
     }
     maybeFinish(job);
     return { job: summary(job), results };
   }
-
-  async function openPr(job, run) {
-    const gh = which('gh');
-    if (!gh) throw new Error('gh is not on the path.');
-    const wt = run.worktree;
-    const push = await run_(['push', '-u', 'origin', wt.branch], wt.path);
-    if (push.code) throw new Error((push.stderr || push.stdout || 'push failed').trim());
-    const body = `${job.brief}\n\n---\n${run.summary || ''}\n\nOpened by Pilcrow Dispatch (job “${job.name}”).`;
-    const r = await exec(gh, ['pr', 'create', '--head', wt.branch, '--title', `${job.name}`, '--body', body], { cwd: wt.repoRoot, timeout: 60_000 });
-    if (r.code) throw new Error((r.stderr || r.stdout || 'gh pr create failed').trim());
-    const url = (r.stdout || '').trim().split('\n').pop();
-    return url || null;
-  }
-  const run_ = (args, cwd) => git.git(cwd, args);
 
   function maybeFinish(job) {
     if (job.state !== 'reviewing' || job.wave === 'canary') return;
@@ -1306,6 +1058,7 @@ export function createDispatcher(deps) {
     if (!live.every((r) => r.finished || r.state !== 'done' || !r.worktree)) return;
     job.state = 'finished';
     job.finishedAt = now();
+    prune();
     job.report = buildReport(job);
     const item = inboxItem(job);
     job.inboxId = item.id;
@@ -1366,7 +1119,7 @@ export function createDispatcher(deps) {
     if (!rep || rep.proseState !== 'writing') return;
     clearTimeout(timers.get(`report:${job.id}`));
     timers.delete(`report:${job.id}`);
-    const text = error ? '' : session?.lastReply?.text || lastAssistantText(session) || '';
+    const text = error ? '' : session?.lastReply?.text || lastAssistantText(session?.messages);
     rep.proseState = text ? 'done' : 'failed';
     rep.prose = text || null;
     rep.proseError = text ? null : error || 'The report session wrote nothing';
@@ -1374,13 +1127,13 @@ export function createDispatcher(deps) {
     rep.cost = (rep.cost || 0) + rep.proseCost;
     if (job.inboxId) {
       try {
-        updateInbox(job.inboxId, { dispatch: rep, summary: text ? text.slice(0, 1200) : undefined });
+        updateInbox(job.inboxId, { dispatch: rep, summary: text ? text.slice(0, SUMMARY_MAX) : undefined });
       } catch (e) {
         log('dispatch inbox update failed', e?.message);
       }
     }
     touch(job);
-    setTimeout(() => session?.close?.(), 1500);
+    setTimeout(() => session?.close?.(), CLOSE_AFTER_MS);
   }
 
   function buildReport(job) {
@@ -1397,12 +1150,8 @@ export function createDispatcher(deps) {
 
   function inboxItem(job) {
     const rep = job.report || buildReport(job);
-    const done = rep.targets.filter((t) => t.state === 'done').length;
-    const failed = rep.targets.filter((t) => t.state === 'failed' || t.state === 'stopped').length;
     const prs = rep.targets.filter((t) => t.pr).length;
-    const files = [];
-    for (const r of job.runs) for (const f of r.files || []) if (files.length < MAX_FILES) files.push({ ...f, repo: r.name });
-    const lines = rep.targets.map((t) => `- ${t.name}: ${t.state}${t.reason ? ` (${t.reason})` : ''}${t.summary ? ` — ${t.summary.slice(0, 160)}` : ''}`);
+    const files = job.runs.flatMap((r) => (r.files || []).map((f) => ({ ...f, repo: r.name }))).slice(0, MAX_FILES);
     return {
       id: uuid(),
       kind: 'dispatch',
@@ -1414,9 +1163,10 @@ export function createDispatcher(deps) {
       startedAt: job.startedAt,
       endedAt: job.finishedAt || now(),
       durationMs: rep.durationMs,
-      status: failed && !done ? 'failed' : 'completed',
-      reason: failed ? `${failed} of ${rep.targets.length} did not finish` : null,
-      summary: `${done} of ${rep.targets.length} repositories done${prs ? `, ${prs} pull request${prs === 1 ? '' : 's'}` : ''}.\n${lines.join('\n')}`.slice(0, 1200),
+      ...tally(
+        rep.targets.map((t) => ({ ...t, gist: t.summary })),
+        `repositories done${prs ? `, ${prs} pull request${prs === 1 ? '' : 's'}` : ''}`,
+      ),
       cost: rep.cost,
       files,
       read: false,
@@ -1428,7 +1178,6 @@ export function createDispatcher(deps) {
   function exportMarkdown(id) {
     const job = jobOf(id);
     const rep = job.report || buildReport(job);
-    const fmtCost = (c) => `$${(c || 0).toFixed(2)}`;
     const fmtMin = (ms) => `${Math.round((ms || 0) / 60e3)} min`;
     const rows = rep.targets.map((t) => `| ${t.name} | ${t.state}${t.reason ? ` · ${t.reason}` : ''} | ${t.files || 0} (+${t.add || 0} −${t.del || 0}) | ${fmtCost(t.cost)} | ${fmtMin(t.durationMs)} | ${t.commit ? `\`${t.commit}\`` : t.finished || ''}${t.pr ? ` [PR](${t.pr})` : ''} |`);
     const rules = rep.rules?.length ? `\n\n## Allowed for every repository\n\n${rep.rules.map((r) => `- ${r.label || r.key}`).join('\n')}` : '';
@@ -1437,7 +1186,7 @@ export function createDispatcher(deps) {
   }
 
   // ---- lifecycle
-  function start_() {
+  function begin() {
     if (started) return;
     started = true;
     bus.on('state', onState);
@@ -1450,12 +1199,8 @@ export function createDispatcher(deps) {
       for (const r of job.runs) {
         if (!ACTIVE.has(r.state)) continue;
         const s = r.sessionId ? sessions.find(r.sessionId) : null;
-        if (s && s.q) {
-          timers.set(
-            r.id,
-            setTimeout(() => endRun(job, r, 'stopped', `Stopped after ${job.settings.maxMinutes} minutes`, s), Math.max(1000, job.settings.maxMinutes * 60e3 - (now() - (r.startedAt || now())))),
-          );
-        } else {
+        if (s && s.q) armCap(job, r, Math.max(1000, job.settings.maxMinutes * 60e3 - (now() - (r.startedAt || now()))));
+        else {
           r.state = 'stopped';
           r.reason = 'The server restarted';
           r.endedAt = now();
@@ -1468,7 +1213,7 @@ export function createDispatcher(deps) {
     }
     pump();
   }
-  function stop_() {
+  function end() {
     if (!started) return;
     started = false;
     bus.off('state', onState);
@@ -1481,8 +1226,7 @@ export function createDispatcher(deps) {
     backoffTimers.clear();
     clearTimeout(flushTimer);
     flushTimer = null;
-    clearTimeout(saveTimer);
-    flushNow();
+    saver?.flush(); // what changed since the last save
   }
 
   return {
@@ -1512,8 +1256,8 @@ export function createDispatcher(deps) {
     pump,
     flush,
     summary,
-    begin: start_,
-    end: stop_,
+    begin,
+    end,
     _data: data,
   };
 }

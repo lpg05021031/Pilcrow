@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 from ... import icons, theme
 from ...lib.fmt import tildify
@@ -274,6 +274,3 @@ class SetupCard(Box):
             store.toast("Claude Code is connected" if ok else "Still no API key found", "success" if ok else "warning")
 
         store.refresh_info().then(done).catch(lambda _e: self.check.setEnabled(True))
-
-
-_ = QSizePolicy

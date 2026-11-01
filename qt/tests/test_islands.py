@@ -3,9 +3,7 @@ grammar (the accent dot in the caption, the ring, the key boxes), and the number
 
 from __future__ import annotations
 
-from harness import app_client, mock_server  # noqa: F401
-
-MOCK_PORT = 5434
+from harness import app_client, mock_server
 
 
 def _send(c, sid: str, text: str) -> None:

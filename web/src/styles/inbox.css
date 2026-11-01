@@ -1,0 +1,352 @@
+/* ================================================================ inbox
+   The inbox and schedules, with the schedule dialog. */
+
+/* ================================================================ inbox & schedules
+   What each scheduled run produced, newest first, under day headings that stay put as you scroll;
+   the schedules themselves in a rail on the right, each with a thin bar filling toward its next run. */
+.inbox {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.inbox-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  container-type: inline-size;
+  width: min(var(--col), 100%);
+  margin: 0 auto;
+  padding: var(--sp-1) var(--sp-5) var(--sp-12);
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: var(--sp-7);
+  align-items: start;
+}
+@container (max-width: 760px) {
+  .inbox-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .inbox-rail {
+    order: -1;
+    position: static;
+  }
+}
+.inbox-main {
+  display: grid;
+  gap: var(--sp-6);
+  align-content: start;
+}
+.inbox-filter {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1_5);
+  padding: var(--sp-1_5) var(--sp-1_5) var(--sp-1_5) var(--sp-3);
+  border-radius: var(--r-pill);
+  background: var(--fill-1);
+  font-size: var(--fs-small);
+  color: var(--text-2);
+  width: fit-content;
+}
+.inbox-empty {
+  display: grid;
+  justify-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-14) var(--sp-6);
+  text-align: center;
+  color: var(--text-3);
+  max-width: 440px;
+  margin: 0 auto;
+}
+.inbox-empty-title {
+  color: var(--text);
+  font-weight: 560;
+}
+.inbox-empty .btn {
+  margin-top: var(--sp-1_5);
+}
+.inbox-empty-mark {
+  color: var(--text-3);
+  margin-bottom: var(--sp-1_5);
+}
+.inbox-empty-mark {
+  filter: drop-shadow(0 12px 30px var(--mark-glow));
+}
+.inbox-day {
+  display: grid;
+  gap: var(--sp-2);
+}
+/* day headings stay at the top while their runs scroll under them */
+.inbox-day-h {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: -4px -8px 0;
+  padding: var(--sp-2) var(--sp-2) var(--sp-1_5);
+  font-size: var(--fs-h);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  background: color-mix(in srgb, var(--canvas) 80%, transparent);
+  -webkit-backdrop-filter: blur(16px) saturate(150%);
+  backdrop-filter: blur(16px) saturate(150%);
+}
+
+.run {
+  position: relative;
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: var(--sp-3);
+  padding: var(--sp-3_25) var(--sp-3_5) var(--sp-2_75);
+  border-radius: var(--r-6);
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+}
+.run:hover {
+  box-shadow: var(--card-shadow-hover);
+}
+.run-badge {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--fill-1);
+  color: var(--text-3);
+}
+.run-badge.completed {
+  background: var(--ok-wash);
+  color: var(--ok);
+}
+.run-badge.failed {
+  background: var(--err-wash);
+  color: var(--err);
+}
+.run-badge.stopped {
+  background: var(--warn-wash);
+  color: var(--warn);
+}
+.run-main {
+  display: grid;
+  gap: var(--sp-1_5);
+  min-width: 0;
+}
+.run-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.run-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-wash);
+}
+.run-name {
+  font-weight: 560;
+  min-width: 0;
+}
+.run.unread .run-name {
+  color: var(--text);
+  font-weight: 600;
+}
+.run-when {
+  margin-left: auto;
+  flex: none;
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+.run-sum {
+  margin: 0;
+  font-size: var(--fs-small);
+  line-height: 1.55;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+.run-reason {
+  font-size: var(--fs-micro);
+  color: var(--err);
+}
+.run-more {
+  justify-self: start;
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+}
+.run-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-top: var(--sp-0_5);
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+  min-width: 0;
+}
+.run-foot .btn.xs {
+  font-size: var(--fs-micro);
+}
+.run-x {
+  opacity: 0;
+}
+.run:hover .run-x,
+.run-x:focus-visible {
+  opacity: 1;
+}
+
+.inbox-rail {
+  display: grid;
+  gap: var(--sp-2);
+  align-content: start;
+  position: sticky;
+  top: 0;
+}
+.inbox-rail-h {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-h);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  padding: var(--sp-1) 0 var(--sp-0_5);
+}
+.sched {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-1_5);
+  padding: var(--sp-2_5) var(--sp-2) var(--sp-3) var(--sp-3);
+  border-radius: var(--r-5);
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+  overflow: hidden;
+}
+.sched:hover {
+  box-shadow: var(--card-shadow-hover);
+}
+.sched.on {
+  box-shadow: 0 0 0 1.5px var(--accent-line);
+}
+.sched.off .sched-name,
+.sched.off .sched-sub {
+  color: var(--text-3);
+}
+.sched-main {
+  display: grid;
+  gap: var(--sp-0_5);
+  min-width: 0;
+  text-align: left;
+}
+.sched-name {
+  font-size: var(--fs-small);
+  font-weight: 560;
+}
+.sched-sub {
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+}
+.sched-next {
+  display: block;
+  font-size: var(--fs-micro);
+  color: var(--text-2);
+  margin-top: var(--sp-0_5);
+  line-height: 1.4;
+}
+.sched-next .spinner {
+  vertical-align: -2px;
+  margin-right: var(--sp-1);
+}
+.sched-next.err {
+  color: var(--err);
+}
+.sched-end {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-0_5);
+}
+.sched-end .switch {
+  margin-right: var(--sp-1);
+}
+.sched-check {
+  display: none;
+}
+/* the wait until the next run, as a bar along the bottom edge; a running one sweeps */
+.sched-bar {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 0;
+  height: 2px;
+  border-radius: var(--r-pill);
+  background: var(--fill-2);
+  overflow: hidden;
+}
+.sched-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-pill);
+  background: var(--text-3);
+}
+.sched.running .sched-bar > span {
+  background: var(--accent);
+}
+
+.sched.off .sched-bar {
+  opacity: 0.4;
+}
+
+/* schedule dialog */
+.sd {
+  display: grid;
+  gap: var(--sp-4);
+}
+.sd-folder {
+  width: 100%;
+  height: 36px;
+  cursor: pointer;
+}
+.sd-folder > .grow {
+  text-align: left;
+}
+.sd-when {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.sd-when .select-btn {
+  width: auto;
+  min-width: 170px;
+}
+.sd-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-small);
+  color: var(--text-2);
+}
+.sd-num {
+  width: 64px;
+  text-align: center;
+}
+.sd-time {
+  width: 112px;
+}
+.sd-cron {
+  width: 180px;
+}
+.sd-more {
+  display: grid;
+  gap: var(--sp-3_5);
+}
+.sd-preview {
+  max-width: 55%;
+}

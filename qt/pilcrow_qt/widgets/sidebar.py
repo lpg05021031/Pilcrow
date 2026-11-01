@@ -14,9 +14,9 @@ from __future__ import annotations
 
 import time as _time
 from html import escape
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
+from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractButton,
@@ -32,10 +32,11 @@ from PySide6.QtWidgets import (
 )
 
 from .. import icons, theme
+from ..canvas.clock import Tween
 from ..lib.fmt import basename, tildify, time_ago
 from ..lib.fuzzy import fuzzy_score
 from ..store import ConfirmSpec, store
-from .ui.bits import Mark
+from .ui.bits import IconButton, Indicator, Mark
 from .ui.menu import show_menu, show_menu_at
 from .ui.signals import bind
 
@@ -55,6 +56,78 @@ def _fill(name: str) -> QColor:
     return theme.blend(getattr(t, name), t.chrome)
 
 
+WARMTH = {"requires_action": 3, "running": 2, "starting": 2}
+
+
+class Listing(NamedTuple):
+    """What the session list shows, before any widget: the sessions it lists, the ones that need you,
+    the pinned, the rest by project (newest first), a dispatch job's runs by job, a lead's helpers by
+    lead."""
+
+    sessions: List[Json]
+    attention: List[Json]
+    pinned: List[Json]
+    groups: List[Tuple[str, List[Json]]]
+    jobs: Dict[str, List[Json]]
+    helpers: Dict[str, List[Json]]
+
+    def with_warmth(self, s: Json) -> Json:
+        """A lead's dot takes the warmest state of itself and its helpers."""
+        hs = self.helpers.get(str(s.get("id")))
+        if not hs:
+            return s
+        best = max(hs, key=lambda x: WARMTH.get(str(x.get("status")), 0))
+        if WARMTH.get(str(best.get("status")), 0) > WARMTH.get(str(s.get("status")), 0):
+            return {
+                **s,
+                "status": best.get("status"),
+                "pending": max(int(s.get("pending") or 0), int(best.get("pending") or 0)),
+            }
+        return s
+
+
+def listing(sessions: List[Json], active: Optional[str], show_archived: bool, q: str) -> Listing:
+    """Sort the sessions into what the list shows (Sidebar.tsx)."""
+    lst = [s for s in sessions if (s.get("archived") if show_archived else not s.get("archived"))]
+    if not q:
+        # Runs started by a schedule live in the inbox; the active one still shows so its row can be found.
+        lst = [s for s in lst if not s.get("scheduled") or s.get("id") == active]
+    else:
+        lst = [
+            s for s in lst if fuzzy_score(q, f"{s.get('title', '')} {basename(s.get('project') or s.get('cwd') or '')}")
+        ]
+    # A dispatch job's runs sit under their job, collapsed, not among the projects.
+    jobs: Dict[str, List[Json]] = {}
+    for s in lst:
+        d = s.get("dispatch")
+        if isinstance(d, dict) and d.get("jobId") and s.get("id") != active:
+            jobs.setdefault(str(d["jobId"]), []).append(s)
+    lst = [s for s in lst if not (isinstance(s.get("dispatch"), dict) and s.get("id") != active)]
+    # A lead's helpers sit under it, indented, not among the projects (HELPERS.md §6.3); a helper
+    # whose lead is not listed stays where its folder puts it.
+    listed = {str(s.get("id")) for s in lst}
+    helpers: Dict[str, List[Json]] = {}
+    for s in lst:
+        h = s.get("helper")
+        if isinstance(h, dict) and str(h.get("leadId")) in listed and s.get("id") != active:
+            helpers.setdefault(str(h["leadId"]), []).append(s)
+    nested = {str(s.get("id")) for hs in helpers.values() for s in hs}
+    lst = [s for s in lst if str(s.get("id")) not in nested]
+    # The conversation on screen never jumps into "Needs you": you are already looking at it.
+    attention = [
+        s
+        for s in lst
+        if s.get("id") != active and (s.get("status") == "requires_action" or (s.get("pending") or 0) > 0)
+    ]
+    pinned = [s for s in lst if s.get("pinned") and s not in attention]
+    groups: Dict[str, List[Json]] = {}
+    for s in lst:
+        if s not in attention and s not in pinned:
+            groups.setdefault(str(s.get("project") or s.get("cwd") or ""), []).append(s)
+    ordered = sorted(groups.items(), key=lambda kv: -(kv[1][0].get("lastModified") or 0))
+    return Listing(lst, attention, pinned, ordered, jobs, helpers)
+
+
 class Sidebar(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -69,7 +142,7 @@ class Sidebar(QWidget):
         self._heads: Dict[str, GroupHead] = {}
         self._labels: Dict[str, SectionLabel] = {}
         self._mores: Dict[str, MoreButton] = {}
-        self._note: Optional[EmptyNote] = None
+        self._note: Optional[SideEmpty] = None
         self._archived_view = store.ui.show_archived
         self._archived_head: Optional[ListHead] = None
         self._now_timer = QTimer(self)
@@ -95,7 +168,7 @@ class Sidebar(QWidget):
         self.brand_name = QLabel("Pilcrow")
         self.brand_name.setFont(theme.font_ui(14, 600))  # .brand-name: 13.5px at 600, a touch tighter
         bl.addWidget(self.brand_name, 1)
-        self.collapse_btn = IconBtn("panel-left-close", "Hide sidebar (Ctrl+B)", 15, 24)
+        self.collapse_btn = IconButton("panel-left-close", "Hide sidebar (Ctrl+B)", 15, "text_3", box=24, over="chrome")
         self.collapse_btn.clicked.connect(lambda: store.set_ui(sidebar=False))
         bl.addWidget(self.collapse_btn)
         tl.addWidget(brand)
@@ -108,8 +181,14 @@ class Sidebar(QWidget):
         self.new_btn.setToolTip("New session in the current folder (Ctrl+N) · Shift+click for options")
         self.new_btn.clicked.connect(self._new_session)
         nl.addWidget(self.new_btn, 1)
-        self.new_opts = IconBtn(
-            "sliders-horizontal", "New session with options… (Ctrl+Shift+N)", 13, 26, "text_4", True
+        self.new_opts = IconButton(
+            "sliders-horizontal",
+            "New session with options… (Ctrl+Shift+N)",
+            13,
+            "text_4",
+            box=26,
+            over="chrome",
+            reveal=True,
         )
         self.new_opts.clicked.connect(lambda: store.set_dialog("newSession", {}))
         nl.addWidget(self.new_opts)
@@ -170,10 +249,10 @@ class Sidebar(QWidget):
         self.settings_btn.clicked.connect(lambda: store.set_dialog("settings", True))
         fl.addWidget(self.settings_btn)
         fl.addStretch(1)
-        self.archive_btn = IconBtn("archive", "Archived sessions", 15, 28)
+        self.archive_btn = IconButton("archive", "Archived sessions", 15, "text_3", box=28, over="chrome")
         self.archive_btn.clicked.connect(lambda: store.set_ui(show_archived=not store.ui.show_archived))
         fl.addWidget(self.archive_btn)
-        self.theme_btn = IconBtn("monitor", "Appearance", 15, 28)
+        self.theme_btn = IconButton("monitor", "Appearance", 15, "text_3", box=28, over="chrome")
         self.theme_btn.clicked.connect(self._cycle_theme)
         fl.addWidget(self.theme_btn)
         root.addWidget(foot)
@@ -259,97 +338,10 @@ class Sidebar(QWidget):
     # ---- the list
     def rebuild(self) -> None:
         self._on_page()
-        sessions = store.sessions
-        active = store.active_id
-        show_archived = store.ui.show_archived
         q = self._q.strip()
-        lst = [s for s in sessions if (s.get("archived") if show_archived else not s.get("archived"))]
-        if not q:
-            # Runs started by a schedule live in the inbox; the active one still shows so its row can be found.
-            lst = [s for s in lst if not s.get("scheduled") or s.get("id") == active]
-        else:
-            lst = [
-                s
-                for s in lst
-                if fuzzy_score(q, f"{s.get('title', '')} {basename(s.get('project') or s.get('cwd') or '')}")
-            ]
-        # A dispatch job's runs sit under their job, collapsed, not among the projects.
-        job_sessions: Dict[str, List[Json]] = {}
-        for s in lst:
-            d = s.get("dispatch")
-            if isinstance(d, dict) and d.get("jobId") and s.get("id") != active:
-                job_sessions.setdefault(str(d["jobId"]), []).append(s)
-        lst = [s for s in lst if not (isinstance(s.get("dispatch"), dict) and s.get("id") != active)]
-        # A lead's helpers sit under it, indented, not among the projects (HELPERS.md §6.3); a helper
-        # whose lead is not listed stays where its folder puts it.
-        listed = {str(s.get("id")) for s in lst}
-        helper_sessions: Dict[str, List[Json]] = {}
-        for s in lst:
-            h = s.get("helper")
-            if isinstance(h, dict) and str(h.get("leadId")) in listed and s.get("id") != active:
-                helper_sessions.setdefault(str(h["leadId"]), []).append(s)
-        nested = {str(s.get("id")) for hs in helper_sessions.values() for s in hs}
-        lst = [s for s in lst if str(s.get("id")) not in nested]
-        warmth = {"requires_action": 3, "running": 2, "starting": 2}
-
-        def with_warmth(s: Json) -> Json:
-            """A lead's dot takes the warmest state of itself and its helpers."""
-            hs = helper_sessions.get(str(s.get("id")))
-            if not hs:
-                return s
-            best = max(hs, key=lambda x: warmth.get(str(x.get("status")), 0))
-            if warmth.get(str(best.get("status")), 0) > warmth.get(str(s.get("status")), 0):
-                return {
-                    **s,
-                    "status": best.get("status"),
-                    "pending": max(int(s.get("pending") or 0), int(best.get("pending") or 0)),
-                }
-            return s
-
-        # The conversation on screen never jumps into "Needs you": you are already looking at it.
-        attention = [
-            s
-            for s in lst
-            if s.get("id") != active and (s.get("status") == "requires_action" or (s.get("pending") or 0) > 0)
-        ]
-        pinned = [s for s in lst if s.get("pinned") and s not in attention]
-        rest = [s for s in lst if s not in attention and s not in pinned]
-        groups: Dict[str, List[Json]] = {}
-        for s in rest:
-            groups.setdefault(str(s.get("project") or s.get("cwd") or ""), []).append(s)
-        ordered = sorted(groups.items(), key=lambda kv: -(kv[1][0].get("lastModified") or 0))
-
-        # The rows and heads are kept across rebuilds; a row that is still listed is updated in place
-        # only when what it shows changed, and the layout is touched only where the order changed.
-        keep = {s.get("id") for s in lst}
-        for sid in list(self._rows):
-            if sid not in keep:
-                row = self._rows.pop(sid)
-                self.list.removeWidget(row)
-                row.hide()
-                row.setParent(None)
-                row.deleteLater()
-        keys = {k for k, _ in ordered} | {f"job:{jid}" for jid in job_sessions}
-        for key in list(self._heads):
-            if key not in keys:
-                head = self._heads.pop(key)
-                self.list.removeWidget(head)
-                head.hide()
-                head.setParent(None)
-                head.deleteLater()
-        wanted: List[QWidget] = []
-        if show_archived:
-            if self._archived_head is None:
-                self._archived_head = ListHead(
-                    "Archived", "Back to active sessions", lambda: store.set_ui(show_archived=False)
-                )
-            wanted.append(self._archived_head)
-
-        def label_for(key: str, text: str, tone: str = "") -> SectionLabel:
-            lb = self._labels.get(key)
-            if lb is None:
-                lb = self._labels[key] = SectionLabel(text, tone)
-            return lb
+        active = store.active_id
+        ls = listing(store.sessions, active, store.ui.show_archived, q)
+        self._forget_gone({s.get("id") for s in ls.sessions}, {k for k, _ in ls.groups} | {f"job:{j}" for j in ls.jobs})
 
         def row_for(s: Json, show_project: bool = False, indent: bool = False) -> SessionRow:
             sid = str(s.get("id"))
@@ -366,81 +358,121 @@ class Sidebar(QWidget):
             )
             return r
 
-        def rows_for(s: Json, show_project: bool = False) -> List[SessionRow]:
+        def rows_for(s: Json, show_project: bool = False) -> List[QWidget]:
             """A session's row, then its helpers' rows indented under it."""
-            out = [row_for(with_warmth(s), show_project)]
-            for h in helper_sessions.get(str(s.get("id")), []):
+            out: List[QWidget] = [row_for(ls.with_warmth(s), show_project)]
+            for h in ls.helpers.get(str(s.get("id")), []):
                 out.append(row_for(h, False, True))
             return out
 
-        if attention:
-            wanted.append(label_for("attention", "Needs you", "accent"))
-            for s in attention:
-                wanted.extend(rows_for(s, True))
-        if pinned:
-            wanted.append(label_for("pinned", "Pinned"))
-            for s in pinned:
-                wanted.extend(rows_for(s, True))
-        for key, items in ordered:
-            head = self._heads.get(key)
-            # a registered repository (REPOSITORIES.md) is called by the person's name for it
-            reg = store.repo_for(key)
-            label_text = (
-                str(reg.get("name"))
-                if reg and str(reg.get("path") or "").rstrip("/") == key.rstrip("/")
-                else basename(key)
-            )
-            if head is None:
-                head = self._heads[key] = GroupHead(label_text, key)
-                head.toggled.connect(lambda k=key: self._toggle_group(k))
-                head.add_clicked.connect(lambda k=key: self._new_in(k))
-            elif head.btn.text() != label_text:
-                head.btn.setText(label_text)
-            head.set_collapsed(self._collapsed.get(key, False))
-            wanted.append(head)
-            if self._collapsed.get(key):
-                continue
-            limit = len(items) if (self._show_all.get(key) or q) else 6
-            for s in items[:limit]:
-                wanted.extend(rows_for(s))
-            if len(items) > limit:
-                more = self._mores.get(key)
-                if more is None:
-                    more = self._mores[key] = MoreButton("")
-                    more.clicked.connect(lambda _c=False, k=key: self._show_more(k))
-                text = f"Show {len(items) - limit} more"
-                if more.text() != text:
-                    more.setText(text)
-                wanted.append(more)
-        for jid, items in sorted(job_sessions.items(), key=lambda kv: -(kv[1][0].get("lastModified") or 0)):
-            key = f"job:{jid}"
-            head = self._heads.get(key)
-            if head is None:
-                name = str(
-                    (store.jobs.get(jid) or {}).get("name") or (items[0].get("dispatch") or {}).get("name") or "Job"
+        wanted: List[QWidget] = []
+        if store.ui.show_archived:
+            if self._archived_head is None:
+                self._archived_head = ListHead(
+                    "Archived", "Back to active sessions", lambda: store.set_ui(show_archived=False)
                 )
-                head = self._heads[key] = GroupHead(name, name, icon="arrow-up-right", add_tip=f"Open the job {name}")
-                head.toggled.connect(lambda k=key: self._toggle_group(k))
-                head.add_clicked.connect(lambda j=jid: store.open_job(j))
-                self._collapsed.setdefault(key, True)
-            head.set_collapsed(self._collapsed.get(key, True))
-            wanted.append(head)
-            if self._collapsed.get(key, True):
-                continue
-            for s in items:
-                wanted.append(row_for(s))
-        note = ""
-        if store.sessions_loaded and not sessions:
-            note = "No sessions yet. Start one to see it here."
-        elif sessions and not ordered and not attention and not pinned:
-            note = "Nothing archived." if show_archived else "No matching sessions."
+            wanted.append(self._archived_head)
+        if ls.attention:
+            wanted.append(self._label("attention", "Needs you", "accent"))
+            for s in ls.attention:
+                wanted.extend(rows_for(s, True))
+        if ls.pinned:
+            wanted.append(self._label("pinned", "Pinned"))
+            for s in ls.pinned:
+                wanted.extend(rows_for(s, True))
+        for key, items in ls.groups:
+            wanted.extend(self._project_group(key, items, q, rows_for))
+        for jid, items in sorted(ls.jobs.items(), key=lambda kv: -(kv[1][0].get("lastModified") or 0)):
+            wanted.extend(self._job_group(jid, items, row_for))
+        note = self._empty_note(ls)
         if note:
-            if self._note is None:
-                self._note = EmptyNote(note)
-            elif self._note.text() != note:
-                self._note.setText(note)
-            wanted.append(self._note)
+            wanted.append(note)
         self._place(wanted)
+
+    def _forget_gone(self, keep: Set[Any], keys: Set[str]) -> None:
+        """The rows and heads are kept across rebuilds; those no longer listed go."""
+        for sid in [k for k in self._rows if k not in keep]:
+            row = self._rows.pop(sid)
+            self.list.removeWidget(row)
+            row.hide()
+            row.setParent(None)
+            row.deleteLater()
+        for key in [k for k in self._heads if k not in keys]:
+            head = self._heads.pop(key)
+            self.list.removeWidget(head)
+            head.hide()
+            head.setParent(None)
+            head.deleteLater()
+
+    def _label(self, key: str, text: str, tone: str = "") -> SectionLabel:
+        lb = self._labels.get(key)
+        if lb is None:
+            lb = self._labels[key] = SectionLabel(text, tone)
+        return lb
+
+    def _project_group(
+        self, key: str, items: List[Json], q: str, rows_for: Callable[[Json], List[QWidget]]
+    ) -> List[QWidget]:
+        """A project's head and, unless it is folded, its first six rows and "Show N more"."""
+        head = self._heads.get(key)
+        # a registered repository (REPOSITORIES.md) is called by the person's name for it
+        reg = store.repo_for(key)
+        label_text = (
+            str(reg.get("name")) if reg and str(reg.get("path") or "").rstrip("/") == key.rstrip("/") else basename(key)
+        )
+        if head is None:
+            head = self._heads[key] = GroupHead(label_text, key)
+            head.toggled.connect(lambda k=key: self._toggle_group(k))
+            head.add_clicked.connect(lambda k=key: self._new_in(k))
+        elif head.btn.text() != label_text:
+            head.btn.setText(label_text)
+        head.set_collapsed(self._collapsed.get(key, False))
+        out: List[QWidget] = [head]
+        if self._collapsed.get(key):
+            return out
+        limit = len(items) if (self._show_all.get(key) or q) else 6
+        for s in items[:limit]:
+            out.extend(rows_for(s))
+        if len(items) > limit:
+            more = self._mores.get(key)
+            if more is None:
+                more = self._mores[key] = MoreButton("")
+                more.clicked.connect(lambda _c=False, k=key: self._show_more(k))
+            text = f"Show {len(items) - limit} more"
+            if more.text() != text:
+                more.setText(text)
+            out.append(more)
+        return out
+
+    def _job_group(self, jid: str, items: List[Json], row_for: Callable[[Json], QWidget]) -> List[QWidget]:
+        """A dispatch job's head and, when it is opened, its runs (folded by default)."""
+        key = f"job:{jid}"
+        head = self._heads.get(key)
+        if head is None:
+            name = str((store.jobs.get(jid) or {}).get("name") or (items[0].get("dispatch") or {}).get("name") or "Job")
+            head = self._heads[key] = GroupHead(name, name, icon="arrow-up-right", add_tip=f"Open the job {name}")
+            head.toggled.connect(lambda k=key: self._toggle_group(k))
+            head.add_clicked.connect(lambda j=jid: store.open_job(j))
+            self._collapsed.setdefault(key, True)
+        head.set_collapsed(self._collapsed.get(key, True))
+        if self._collapsed.get(key, True):
+            return [head]
+        return [head] + [row_for(s) for s in items]
+
+    def _empty_note(self, ls: Listing) -> Optional[QWidget]:
+        """What an empty list says, if it is empty."""
+        note = ""
+        if store.sessions_loaded and not store.sessions:
+            note = "No sessions yet. Start one to see it here."
+        elif store.sessions and not ls.groups and not ls.attention and not ls.pinned:
+            note = "Nothing archived." if store.ui.show_archived else "No matching sessions."
+        if not note:
+            return None
+        if self._note is None:
+            self._note = SideEmpty(note)
+        elif self._note.text() != note:
+            self._note.setText(note)
+        return self._note
 
     def _place(self, wanted: List[QWidget]) -> None:
         """Make the list's layout show ``wanted`` in order, moving only what moved (the stretch at the
@@ -503,6 +535,7 @@ class NavButton(QAbstractButton):
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)  # Qt repaints it on enter and leave
         self._icon = icon_name
         self._text = text
         self._kbd = kbd
@@ -521,25 +554,17 @@ class NavButton(QAbstractButton):
         self.setAccessibleName(text)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         fm = QFontMetrics(theme.font_ui(theme.FS_UI))
         # +2: a fitted button elides on Linux when the room equals the advance exactly (rounding)
         return QSize(PAD + 15 + self._gap + fm.horizontalAdvance(self._text) + 2 + PAD, self.height())
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         return self.sizeHint() if self._fit else QSize(PAD + 15 + PAD, self.height())
 
-    def mousePressEvent(self, e) -> None:  # noqa: N802
+    def mousePressEvent(self, e) -> None:
         self.last_modifiers = e.modifiers()
         super().mousePressEvent(e)
-
-    def enterEvent(self, e) -> None:  # noqa: N802
-        self.update()
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:  # noqa: N802
-        self.update()
-        super().leaveEvent(e)
 
     def set_on(self, on: bool) -> None:
         if on != self._on:
@@ -551,7 +576,7 @@ class NavButton(QAbstractButton):
             self._count, self._count_tone = n, tone
             self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         hover = self.underMouse()
         h = self.height()
@@ -604,90 +629,16 @@ class NavButton(QAbstractButton):
         p.drawText(QRectF(x, 0, max(0, right - x), h), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
 
 
-class IconBtn(QAbstractButton):
-    """``.icon-btn`` (28px) and ``.icon-btn.sm`` (24px): a square with only an icon in it. With
-    ``reveal`` it keeps its place but shows nothing until ``set_shown(True)`` (the buttons that
-    appear when the row around them is hovered)."""
-
-    def __init__(
-        self,
-        name: str,
-        tooltip: str = "",
-        icon_size: int = 15,
-        size: int = 28,
-        tone: str = "text_3",
-        reveal: bool = False,
-        parent: Optional[QWidget] = None,
-        width: int = 0,
-    ) -> None:
-        super().__init__(parent)
-        self._name, self._icon_size, self._tone, self._reveal = name, icon_size, tone, reveal
-        self._shown = not reveal
-        self._active = False
-        self.last_modifiers = Qt.KeyboardModifier.NoModifier
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedSize(width or size, size)
-        if tooltip:
-            self.setToolTip(tooltip)
-            self.setAccessibleName(tooltip)
-        bind(theme.theme.changed, self, lambda _t: self.update())
-
-    @property
-    def shown(self) -> bool:
-        return self._shown
-
-    def set_shown(self, on: bool) -> None:
-        if self._shown != on:
-            self._shown = on
-            self.update()
-
-    def set_active(self, on: bool) -> None:
-        self._active = on
-        self.update()
-
-    def set_icon_name(self, name: str) -> None:
-        self._name = name
-        self.update()
-
-    def mousePressEvent(self, e) -> None:  # noqa: N802
-        self.last_modifiers = e.modifiers()
-        super().mousePressEvent(e)
-
-    def enterEvent(self, e) -> None:  # noqa: N802
-        self.update()
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:  # noqa: N802
-        self.update()
-        super().leaveEvent(e)
-
-    def paintEvent(self, _e) -> None:  # noqa: N802
-        if self._reveal and not self._shown:
-            return
-        t = theme.tokens()
-        hover = self.underMouse()
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        if hover or self._active:
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(_fill("fill_2"))
-            r = min(theme.R2, self.width() / 2)
-            p.drawRoundedRect(QRectF(self.rect()), r, r)
-        colour = t.text if (hover or self._active) else getattr(t, self._tone)
-        s = self._icon_size
-        p.drawPixmap((self.width() - s) // 2, (self.height() - s) // 2, icons.pixmap(self._name, colour, s))
-
-
 class _HoverWrap(QWidget):
     """``.side-new-wrap``: tells its options button when the pointer is over the pair."""
 
     revealed = Signal(bool)
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         self.revealed.emit(True)
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self.revealed.emit(False)
         super().leaveEvent(e)
 
@@ -698,6 +649,7 @@ class SearchRow(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)  # Qt repaints it on enter and leave
         self.setFixedHeight(30)
         self.setCursor(Qt.CursorShape.IBeamCursor)
         lay = QHBoxLayout(self)
@@ -715,7 +667,7 @@ class SearchRow(QWidget):
         self.edit.setAccessibleName("Search sessions")
         self.edit.installEventFilter(self)
         lay.addWidget(self.edit, 1)
-        self.clear_btn = IconBtn("x", "Clear search", 12, 18)
+        self.clear_btn = IconButton("x", "Clear search", 12, "text_3", box=18, over="chrome")
         self.clear_btn.hide()
         self.clear_btn.clicked.connect(self.edit.clear)
         lay.addWidget(self.clear_btn)
@@ -729,24 +681,16 @@ class SearchRow(QWidget):
         theme.tint(self.edit, fg="text_2" if self.edit.hasFocus() else "text_3", placeholder="text_3")
         self.update()
 
-    def eventFilter(self, obj, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj, e: QEvent) -> bool:
         if obj is self.edit and e.type() in (QEvent.Type.FocusIn, QEvent.Type.FocusOut):
             self._paint()
         return False
 
-    def mousePressEvent(self, e) -> None:  # noqa: N802
+    def mousePressEvent(self, e) -> None:
         self.edit.setFocus(Qt.FocusReason.MouseFocusReason)
         super().mousePressEvent(e)
 
-    def enterEvent(self, e) -> None:  # noqa: N802
-        self.update()
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:  # noqa: N802
-        self.update()
-        super().leaveEvent(e)
-
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         fill = "fill_2" if self.edit.hasFocus() else "fill_1" if self.underMouse() else ""
         if not fill:
             return
@@ -765,7 +709,7 @@ class _SearchEdit(QLineEdit):
             return True
         return super().event(e)
 
-    def keyPressEvent(self, e) -> None:  # noqa: N802
+    def keyPressEvent(self, e) -> None:
         if e.key() == Qt.Key.Key_Escape:
             self.clear()
             e.accept()
@@ -780,7 +724,7 @@ class _Pages(QWidget):
         super().__init__(parent)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.fillRect(0, 4, self.width(), 1, theme.blend(t.hair, t.chrome))
@@ -799,7 +743,7 @@ class ListHead(QWidget):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(PAD - 4, GROUP_GAP, PAD, 0)
         lay.setSpacing(4)
-        self.back = IconBtn("arrow-left", back_tip, 14, 24)
+        self.back = IconButton("arrow-left", back_tip, 14, "text_3", box=24, over="chrome")
         self.back.clicked.connect(on_back)
         lay.addWidget(self.back)
         self.label = QLabel(text)
@@ -846,8 +790,14 @@ class GroupHead(QWidget):
         self.btn.setToolTip(tildify(path, (store.info or {}).get("home")))
         self.btn.clicked.connect(self.toggled.emit)
         lay.addWidget(self.btn, 1)
-        self.add = IconBtn(
-            icon, add_tip or f"New session in {label_text} · Shift+click for options", 13, 22, "text_3", True
+        self.add = IconButton(
+            icon,
+            add_tip or f"New session in {label_text} · Shift+click for options",
+            13,
+            "text_3",
+            box=22,
+            over="chrome",
+            reveal=True,
         )
         self.add.clicked.connect(self._add)
         lay.addWidget(self.add)
@@ -859,12 +809,12 @@ class GroupHead(QWidget):
     def set_collapsed(self, collapsed: bool) -> None:
         self.btn.set_collapsed(collapsed)
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         self.btn.set_revealed(True)
         self.add.set_shown(True)
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self.btn.set_revealed(False)
         self.add.set_shown(False)
         super().leaveEvent(e)
@@ -875,17 +825,19 @@ class _GroupToggle(QAbstractButton):
 
     def __init__(self, text: str, collapsed: bool, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)  # Qt repaints it on enter and leave
         self.setText(text)
         self._collapsed = collapsed
         self._angle = 0.0 if collapsed else 90.0
         self._revealed = False
-        self._anim: Optional[QVariantAnimation] = None
+        self.turn_t = Tween(self._turn, ms=theme.T_MED, curve=theme.ease)
+        self.turn_t.value = self._angle
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedHeight(HEAD_H)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         return QSize(PAD * 2 + 16, HEAD_H)
 
     def set_revealed(self, on: bool) -> None:
@@ -896,36 +848,13 @@ class _GroupToggle(QAbstractButton):
         if collapsed == self._collapsed:
             return
         self._collapsed = collapsed
-        target = 0.0 if collapsed else 90.0
-        if self._anim is not None:
-            self._anim.stop()
-            self._anim = None
-        if store.reduced_motion:
-            self._angle = target
-            self.update()
-            return
-        a = QVariantAnimation(self)
-        a.setDuration(theme.T_MED)
-        a.setStartValue(self._angle)
-        a.setEndValue(target)
-        a.setEasingCurve(theme.ease())
-        a.valueChanged.connect(self._turn)
-        a.start()
-        self._anim = a
+        self.turn_t.go(0.0 if collapsed else 90.0)
 
     def _turn(self, v) -> None:
         self._angle = float(v)
         self.update()
 
-    def enterEvent(self, e) -> None:  # noqa: N802
-        self.update()
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:  # noqa: N802
-        self.update()
-        super().leaveEvent(e)
-
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -965,17 +894,18 @@ class MoreButton(QPushButton):
         )
         theme.tint(self, fg="text_3")
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         theme.tint(self, fg="text")
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         theme.tint(self, fg="text_3")
         super().leaveEvent(e)
 
 
-class EmptyNote(QLabel):
-    """``.side-empty``."""
+class SideEmpty(QLabel):
+    """``.side-empty``: the centred sentence of an empty list (the control room's boxed note is
+    ``overview.EmptyNote``, another rule)."""
 
     def __init__(self, text: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(text, parent)
@@ -1083,7 +1013,7 @@ class SessionRow(QWidget):
         self.title.refresh()
         QWidget.update(self)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         fill = "fill_2" if self._active else "fill_1" if (self._hover or self._menu_open) else ""
         if not fill:
             return
@@ -1094,20 +1024,20 @@ class SessionRow(QWidget):
         p.drawRoundedRect(QRectF(self.rect()), theme.R2, theme.R2)
 
     # ---- interaction
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         self._hover = True
         self.end.set_hover(True)
         self._paint()
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self._hover = False
         if not self._menu_open:
             self.end.set_hover(False)
         self._paint()
         super().leaveEvent(e)
 
-    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, e) -> None:
         if (
             e.button() == Qt.MouseButton.LeftButton
             and self.rename_edit is None
@@ -1116,7 +1046,7 @@ class SessionRow(QWidget):
             store.open_session(self.sid)
         super().mouseReleaseEvent(e)
 
-    def contextMenuEvent(self, e) -> None:  # noqa: N802
+    def contextMenuEvent(self, e) -> None:
         if self.rename_edit is not None:
             return
         self._menu_opened(show_menu_at(self._items(), e.globalPos(), self, 210))
@@ -1182,7 +1112,6 @@ class SessionRow(QWidget):
         edit.setFixedHeight(20)
         edit.setStyleSheet(f"font-size: {theme.FS_UI}px; padding: 0 2px;")  # .side-rename: 12.5px
         self.rename_edit = edit
-        lay = self.title.parentWidget().layout() if self.title.parentWidget() else None
         col = self.layout().itemAt(0).layout()
         col.replaceWidget(self.title, edit)
         self.title.hide()
@@ -1202,7 +1131,6 @@ class SessionRow(QWidget):
 
         edit.editingFinished.connect(done)
         edit.returnPressed.connect(edit.clearFocus)
-        _ = lay
 
 
 class _ElideLabel(QLabel):
@@ -1229,7 +1157,7 @@ class _ElideLabel(QLabel):
             self.setTextFormat(Qt.TextFormat.PlainText)
             self.setText(text)
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         self.refresh()
 
@@ -1295,7 +1223,7 @@ class _RowEnd(QWidget):
         self.time.setFont(theme.font_ui(theme.FS_MICRO))
         theme.tint(self.time, fg="text_4")
         lay.addWidget(self.time)
-        self.menu = IconBtn("ellipsis", "Session actions", 14, 24)
+        self.menu = IconButton("ellipsis", "Session actions", 14, "text_3", box=24, over="chrome")
         self.menu.setParent(self)
         self.menu.hide()
         self._quiet = True
@@ -1319,12 +1247,12 @@ class _RowEnd(QWidget):
         self.glyph.setVisible(not self._quiet and not self._hover)
         self.menu.setVisible(self._hover)
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         self.menu.move(self.width() - 24, 0)
 
 
-class _RowGlyph(QWidget):
+class _RowGlyph(Indicator):
     """``.glyph``: an 11px turning arc while working, the accent dot with its halo when a session
     needs you, red on error, a small neutral dot for unread activity."""
 
@@ -1334,31 +1262,12 @@ class _RowGlyph(QWidget):
         self._status = ""
         self._pending = 0
         self._unread = False
-        self._t0 = _time.monotonic()
-        self._timer = QTimer(self)
-        self._timer.setInterval(40)
-        self._timer.timeout.connect(self.update)
-        bind(theme.theme.changed, self, lambda _t: self.update())
 
     def set_state(self, status: str, pending: int = 0, unread: bool = False) -> None:
         self._status, self._pending, self._unread = status, pending, unread
-        live = status in ("running", "starting") and not store.reduced_motion
-        if live and not self._timer.isActive():
-            self._timer.start()
-        elif not live:
-            self._timer.stop()
-        self.update()
+        self.set_live(status in ("running", "starting"))
 
-    def hideEvent(self, e) -> None:  # noqa: N802
-        self._timer.stop()
-        super().hideEvent(e)
-
-    def showEvent(self, e) -> None:  # noqa: N802
-        if self._status in ("running", "starting") and not store.reduced_motion:
-            self._timer.start()
-        super().showEvent(e)
-
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -1375,7 +1284,7 @@ class _RowGlyph(QWidget):
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.setPen(QPen(theme.qcolor(t.fill_3), 1.5))
             p.drawEllipse(r)
-            ang = int(((_time.monotonic() - self._t0) % 0.9) / 0.9 * 360)
+            ang = int((_time.monotonic() % 0.9) / 0.9 * 360) if self.moving else 0
             p.setPen(QPen(QColor(t.text_2), 1.5))
             p.drawArc(r, (90 - ang) * 16, -90 * 16)
         elif self._status == "error":

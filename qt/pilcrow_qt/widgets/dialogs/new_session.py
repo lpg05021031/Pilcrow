@@ -8,13 +8,14 @@ import re
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QEvent, Qt, QTimer
-from PySide6.QtWidgets import QFileDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QWidget
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QLineEdit, QWidget
 
 from ... import icons, theme
 from ...lib.fmt import basename, err_text, tildify
 from ...store import store
 from ..folder_picker import Browser
-from ..ui.bits import Spinner, button, label
+from ..ui.bits import Box, LayoutButton, Spinner, button, label
 from ..ui.collapse import Collapse
 from ..ui.signals import bind
 from .parts import Keys, Text, sheet_bg
@@ -22,7 +23,6 @@ from .settings_ui import (
     EFFORTS,
     MODES,
     Flow,
-    FolderChip,
     ModelSelect,
     RadioList,
     Sheet,
@@ -30,11 +30,11 @@ from .settings_ui import (
     combo,
     combo_value,
     field,
+    folder_chip,
     home,
     modes_for,
     open_sheet,
     set_prop,
-    styled,
     text_area,
     two,
     vbox,
@@ -58,6 +58,15 @@ def recents() -> List[str]:
     return out[:8]
 
 
+def _field_bg(t: theme.Tokens) -> QColor:
+    """``.ns-folder``: fill-1 over the sheet."""
+    return theme.blend(t.fill_1, sheet_bg(t).name())
+
+
+def _field_line(t: theme.Tokens) -> QColor:
+    return theme.blend(t.hair, _field_bg(t).name())
+
+
 class NewSessionSheet(Sheet):
     def __init__(self, window: QWidget, opts: Json) -> None:
         super().__init__(window, "newSession", "New session", 580, on_submit=self.start)
@@ -76,21 +85,9 @@ class NewSessionSheet(Sheet):
         sec = QWidget()
         sl = vbox(sec, 8)
         sl.addWidget(_ns_label("Folder"))
-        box = QFrame()
-        box.setObjectName("nsfolder")
-        box.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        box = Box(bg=_field_bg, line=_field_line, radius=theme.R3)
         box.setFixedHeight(40)
         self.folder_box = box
-
-        def folder_css(t: theme.Tokens) -> str:
-            bg = theme.blend(t.fill_1, sheet_bg(t).name()).name()
-            return (
-                f"#nsfolder {{ background: {bg}; border: 1px solid {theme.blend(t.hair, bg).name()}; border-radius: {theme.R3}px; }}"
-                f' #nsfolder[focus="true"] {{ background: {t.canvas}; border-color: {theme.blend(t.hair_3, t.canvas).name()}; }}'
-                f" #nsfolder QLineEdit {{ background: transparent; border: none; padding: 0; font-size: 12.5px; color: {t.text}; }}"
-            )
-
-        styled(box, folder_css)
         bl = QHBoxLayout(box)
         bl.setContentsMargins(12, 0, 5, 0)
         bl.setSpacing(4)
@@ -99,9 +96,8 @@ class NewSessionSheet(Sheet):
         self.folder_ico.setFixedSize(16, 16)
         bl.addWidget(self.folder_ico)
         bl.addSpacing(4)
-        from PySide6.QtWidgets import QLineEdit
-
         self.path = QLineEdit(self.cwd)
+        self.path.setStyleSheet("QLineEdit { background: transparent; border: none; padding: 0; font-size: 12.5px; }")
         self.path.setPlaceholderText("/path/to/project")
         self.path.setFont(theme.font_mono())
         self.path.setAccessibleName("Folder")
@@ -130,20 +126,13 @@ class NewSessionSheet(Sheet):
         self.add(sec)
 
         # ---- options
-        self.disclose = QPushButton()
+        self.disclose = LayoutButton()
         self.disclose.setAutoDefault(False)
-        self.disclose.setObjectName("disclose")
+        self.disclose.setFlat(True)
         self.disclose.setAccessibleName("Options")
         self.disclose.setCursor(Qt.CursorShape.PointingHandCursor)
         self.disclose.setFixedHeight(36)
-        styled(
-            self.disclose,
-            lambda t: (
-                f"#disclose {{ border: none; background: transparent; border-radius: {theme.R2}px; text-align: left; padding: 0; min-height: 36px; max-height: 36px; }}"
-                f" #disclose:hover {{ background: {theme.blend(t.fill_1, sheet_bg(t).name()).name()}; }}"
-                f" #disclose QLabel {{ background: transparent; }}"
-            ),
-        )
+        self.disclose.set_look(hover=_field_bg, radius=theme.R2)
         dl = QHBoxLayout(self.disclose)
         dl.setContentsMargins(8, 0, 8, 0)
         dl.setSpacing(8)
@@ -205,9 +194,12 @@ class NewSessionSheet(Sheet):
         self._summary()
         self._git_timer.start()
 
-    def eventFilter(self, obj, e) -> bool:  # noqa: N802
+    def eventFilter(self, obj, e) -> bool:
         if obj is getattr(self, "path", None) and e.type() in (QEvent.Type.FocusIn, QEvent.Type.FocusOut):
-            set_prop(self.folder_box, "focus", "true" if e.type() == QEvent.Type.FocusIn else "false")
+            focus = e.type() == QEvent.Type.FocusIn
+            self.folder_box.set_look(
+                bg="canvas" if focus else _field_bg, line="hair_3/canvas" if focus else _field_line
+            )
         return super().eventFilter(obj, e)
 
     # ---- folder
@@ -270,9 +262,9 @@ class NewSessionSheet(Sheet):
             reg = store.repo_for(r)
             if reg and str(reg.get("path") or "").rstrip("/") == r.rstrip("/"):
                 tip = " · ".join(x for x in (str(reg.get("about") or ""), tildify(r, home())) if x)
-                ch = FolderChip(str(reg.get("name") or basename(r)), tip)
+                ch = folder_chip(str(reg.get("name") or basename(r)), tip)
             else:
-                ch = FolderChip(basename(r), tildify(r, home()))
+                ch = folder_chip(basename(r), tildify(r, home()))
             ch.clicked.connect(lambda _c=False, p=r: self.set_cwd(p))
             self.chips.add(ch)
         self.schedule_relayout()
@@ -337,7 +329,6 @@ class NewSessionSheet(Sheet):
         rl.addWidget(self.wt_switch)
         wl.addWidget(r)
         self.base = combo([(b, b) for b in self.branches], getattr(self, "base_v", ""), name="Start from")
-        from PySide6.QtWidgets import QLineEdit
 
         self.wt_name_edit = QLineEdit()
         self.wt_name_edit.setPlaceholderText("murphy-yield")
@@ -484,6 +475,3 @@ def open_new_session(window: QWidget, opts: Any) -> Optional[NewSessionSheet]:
     s = NewSessionSheet(window, opts if isinstance(opts, dict) else {})
     s.open()
     return s
-
-
-_ = QSizePolicy

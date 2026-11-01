@@ -60,6 +60,14 @@ def test_fenwick_matches_a_list():
         f.truncate(k)
         del vals[k:]
         assert f.values() == vals and f.total() == sum(vals)
+        assert f._tree == Fenwick(vals)._tree  # the cut tree is the one a rebuild would make
+        f.append(55)  # and grows on from there
+        vals.append(55)
+        f.remove(len(vals) - 1)  # the last one goes the same way as a truncate
+        vals.pop()
+        f.insert(len(vals), 66)  # one at the end is an append
+        vals.append(66)
+        assert f._tree == Fenwick(vals)._tree
         if vals:
             i = rnd.randrange(len(vals))
             f.insert(i, 77)
@@ -106,7 +114,7 @@ def test_group_heights_and_positions():
     # a child growing moves the group and what follows, through the Fenwick trees
     c.set_height(100, 2, 600)
     assert g.content_h() == 150 and d.y() == 100 + 30 + 4 + 150 + 6
-    assert s.dirty_from == c.y() and dict(s.take_dirty()[0]) == {c: 0}
+    assert dict(s.take_dirty()[0]) == {c: 0}
     # closing the group hides its content; the pads go too
     g.set_open(False)
     assert g.h == 30 and d.y() == 130

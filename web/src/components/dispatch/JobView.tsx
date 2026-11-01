@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Pause, Play, Square, Ellipsis, GitCommitHorizontal, GitPullRequestArrow, ExternalLink, RotateCw, BookMarked, CalendarClock, ClipboardPaste, Trash, CircleDollarSign } from 'lucide-react';
-import { useStore, call, openSession, respond, confirmAction, toast, showDispatch, openJob, runsIn, loadPlaybooks } from '../../lib/store';
-import type { DispatchJob, DispatchReview, DispatchRun, Playbook } from '../../lib/types';
+import { useStore, call, openSession, respond, ALLOW_ONCE, DECLINE, confirmAction, toast, showDispatch, openJob, runsIn, loadPlaybooks, setDialog, showPage, toasted } from '../../lib/store';
+import { TERMINAL, type DispatchJob, type DispatchReview, type DispatchRun, type Playbook } from '../../lib/types';
 import { cost, duration, plural } from '../../lib/format';
-import { Switch, useNow, copyText } from '../ui/bits';
+import { Switch } from '../ui/bits';
+import { useNow } from '../ui/hooks';
+import { copy } from '../ui/clipboard';
 import { MenuButton } from '../ui/Popover';
-import { ACTIVE, Glyph, STATE_WORD, TERMINAL, askedBy, clockMmss, elapsedText, groupRequests, jobCostText, type RequestGroup } from './common';
+import { ACTIVE, Glyph, RequestAnswers, STATE_WORD, askedBy, clockMmss, elapsedText, groupRequests, jobCostText, type RequestGroup } from './common';
 
 /**
  * A job's view: the header with its state and controls, the brief and the plan, the canary waiting
@@ -30,9 +32,11 @@ export function JobView({ id }: { id: string }) {
   useEffect(() => {
     if (!reviewing || st === 'finished') return;
     let alive = true;
-    call<DispatchReview>('dispatch.review', { id }, { quiet: true })
-      .then((r) => alive && setReview(r))
-      .catch(() => {});
+    // The review fills in once the job has one; until then the view shows the runs.
+    call<DispatchReview>('dispatch.review', { id }, { quiet: true }).then(
+      (r) => alive && setReview(r),
+      () => {},
+    );
     return () => {
       alive = false;
     };
@@ -50,26 +54,26 @@ export function JobView({ id }: { id: string }) {
     );
   }
   const groups = groupRequests(runs);
-  const openRuns = runs.filter((r) => TERMINAL.includes(r.state) && !r.finished && r.worktree);
+  const openRuns = runs.filter((r) => TERMINAL.has(r.state) && !r.finished && r.worktree);
   const doneOpen = openRuns.filter((r) => r.state === 'done');
   const rules = job.rules || [];
   const rep = job.report;
 
   const saveBrief = () => {
     setEditing(false);
-    if (draft.trim() && draft !== job.brief) call('dispatch.save', { id, brief: draft }).catch(() => {});
+    if (draft.trim() && draft !== job.brief) call('dispatch.save', { id, brief: draft }).catch(toasted);
   };
   const finish = (action: 'commit' | 'discard' | 'keep', pr = false) => {
     const list = action === 'commit' ? doneOpen : openRuns;
     if (!list.length) return;
-    if (action === 'keep') return void call('dispatch.finish', { id, action }).catch(() => {});
+    if (action === 'keep') return void call('dispatch.finish', { id, action }).catch(toasted);
     const branch = `pilcrow/${job.slug || 'job'}`;
     confirmAction({
       title: action === 'commit' ? `${pr ? 'Open pull requests for' : 'Commit'} ${plural(list.length, 'repository', 'repositories')}?` : `Discard the changes in ${plural(list.length, 'repository', 'repositories')}?`,
       body: action === 'commit' ? `Each run's changes are committed on its branch ${branch} with the message “${job.settings.commitMessage || job.name}”. ${pr ? 'The branches are pushed and a pull request opened with gh where the repository has a GitHub remote. ' : ''}The worktree directories are removed; the branches stay.` : `The worktrees and the branches ${branch} are removed. This cannot be undone.`,
       confirm: pr ? 'Open pull requests' : action === 'commit' ? 'Commit' : 'Discard',
       danger: action === 'discard',
-      onConfirm: () => call('dispatch.finish', { id, action, pr }).catch(() => {}),
+      onConfirm: () => call('dispatch.finish', { id, action, pr }).catch(toasted),
     });
   };
   const ensurePlaybook = async (): Promise<string | null> => {
@@ -105,7 +109,10 @@ export function JobView({ id }: { id: string }) {
       icon: CalendarClock,
       onSelect: async () => {
         const pid = await ensurePlaybook();
-        if (pid) useStore.setState({ scheduleDialog: { kind: 'dispatch', playbookId: pid }, page: 'inbox' });
+        if (pid) {
+          showPage('inbox');
+          setDialog('schedule', { kind: 'dispatch', playbookId: pid });
+        }
       },
     },
     { separator: true },
@@ -114,10 +121,7 @@ export function JobView({ id }: { id: string }) {
       icon: ClipboardPaste,
       onSelect: async () => {
         const md = await call<string>('dispatch.export', { id }).catch(() => null);
-        if (md) {
-          await copyText(md);
-          toast('Report copied as Markdown.', 'info');
-        }
+        if (md) await copy(md, 'Report');
       },
     },
     ...(job.state === 'running' && job.capReached
@@ -173,12 +177,12 @@ export function JobView({ id }: { id: string }) {
         </span>
         <div className="grow" />
         {st === 'running' && (
-          <button className="btn sm ghost" onClick={() => call(job.paused ? 'dispatch.resume' : 'dispatch.pause', { id }).catch(() => {})}>
+          <button className="btn sm ghost" onClick={() => call(job.paused ? 'dispatch.resume' : 'dispatch.pause', { id }).catch(toasted)}>
             {job.paused ? <Play size={13} /> : <Pause size={13} />} {job.paused ? 'Resume' : 'Pause'}
           </button>
         )}
         {(st === 'running' || st === 'reviewing') && (
-          <button className="btn sm ghost" onClick={() => confirmAction({ title: `Stop ${job.name}?`, body: 'Runs under way are interrupted and kept as they are; queued ones are skipped. Nothing is discarded.', confirm: 'Stop the job', danger: true, onConfirm: () => call('dispatch.stop', { id }).catch(() => {}) })}>
+          <button className="btn sm ghost" onClick={() => confirmAction({ title: `Stop ${job.name}?`, body: 'Runs under way are interrupted and kept as they are; queued ones are skipped. Nothing is discarded.', confirm: 'Stop the job', danger: true, onConfirm: () => call('dispatch.stop', { id }).catch(toasted) })}>
             <Square size={12} /> Stop
           </button>
         )}
@@ -200,7 +204,7 @@ export function JobView({ id }: { id: string }) {
               </button>
             )}
           </div>
-          {editing ? <textarea className="textarea" rows={5} value={draft} onChange={(e) => setDraft(e.target.value)} /> : <p className="dp-brief">{job.brief}</p>}
+          {editing ? <textarea aria-label="Brief" className="textarea" rows={5} value={draft} onChange={(e) => setDraft(e.target.value)} /> : <p className="dp-brief">{job.brief}</p>}
           {rules.length > 0 && <div className="dp-rules faint">Allowed for every repository: {rules.map((r) => r.label || r.key).join('; ')}</div>}
         </div>
         {rep && (rep.prose || rep.proseState === 'writing' || rep.proseState === 'failed') && (
@@ -314,7 +318,7 @@ function CanaryCard({ job, runs }: { job: DispatchJob; runs: DispatchRun[] }) {
         </div>
       )}
       <div className="ovc-actions">
-        <button className="btn sm primary" onClick={() => call('dispatch.continue', { id: job.id }).catch(() => {})}>
+        <button className="btn sm primary" onClick={() => call('dispatch.continue', { id: job.id }).catch(toasted)}>
           <Play size={12} /> Continue
         </button>
         <button className="btn sm ghost" onClick={openCanary}>
@@ -327,7 +331,7 @@ function CanaryCard({ job, runs }: { job: DispatchJob; runs: DispatchRun[] }) {
         )}
       </div>
       <div className="dp-learn">
-        <Switch on={job.settings.learn !== false} onChange={(on) => call('dispatch.save', { id: job.id, settings: { learn: on } }, { quiet: true }).catch(() => {})} label="the rest learn from its summary" />
+        <Switch on={job.settings.learn !== false} onChange={(on) => call('dispatch.save', { id: job.id, settings: { learn: on } }).catch(toasted)} label="the rest learn from its summary" />
         <span className="faint">the rest learn from its summary</span>
       </div>
     </article>
@@ -336,13 +340,8 @@ function CanaryCard({ job, runs }: { job: DispatchJob; runs: DispatchRun[] }) {
 
 /** A request group (`.ovc.needs`): the tool as the title, who asked under it, how long it has waited, what it asks in the well, the answers. */
 function RequestCard({ jobId, group, now }: { jobId: string; group: RequestGroup; now: number }) {
-  const first = group.asks[0];
   const [tool, ...rest] = group.label.split(': ');
   const what = rest.join(': ');
-  const allowOne = () => first && respond(first.run.sessionId || '', first.pending.requestId, { behavior: 'allow', decisionClassification: 'user_temporary' });
-  const allowAll = () => call('dispatch.allow', { id: jobId, key: group.key });
-  const denyOne = () => first && respond(first.run.sessionId || '', first.pending.requestId, { behavior: 'deny', message: 'The user declined this action.', decisionClassification: 'user_reject' });
-  const open = () => first?.run.sessionId && openSession(first.run.sessionId);
   return (
     <article className="ovc needs dp-ask">
       <span className="ovc-rail" aria-hidden="true" />
@@ -357,23 +356,7 @@ function RequestCard({ jobId, group, now }: { jobId: string; group: RequestGroup
         <span className="ovc-perm-what mono">{what || group.label}</span>
       </div>
       <div className="ovc-actions">
-        {group.interactive ? (
-          <button className="btn sm primary" onClick={open}>
-            Open to respond
-          </button>
-        ) : (
-          <>
-            <button className="btn sm primary" onClick={allowOne}>
-              Allow
-            </button>
-            <button className="btn sm" onClick={allowAll} title="Answer every run of this job that asks the same thing, now and later">
-              Allow for all{group.asks.length > 1 ? ` · ${group.asks.length}` : ''}
-            </button>
-            <button className="btn sm ghost" onClick={denyOne}>
-              Deny
-            </button>
-          </>
-        )}
+        <RequestAnswers jobId={jobId} group={group} />
       </div>
     </article>
   );
@@ -382,7 +365,7 @@ function RequestCard({ jobId, group, now }: { jobId: string; group: RequestGroup
 function RunRow({ run, jobId, now, runs }: { run: DispatchRun; jobId: string; now: number; runs: DispatchRun[] }) {
   const open = () => (run.sessionId ? openSession(run.sessionId) : toast('This run has no session yet.', 'info'));
   const pending = run.pending?.[0];
-  const answer = (allow: boolean) => pending && run.sessionId && respond(run.sessionId, pending.requestId, allow ? { behavior: 'allow', decisionClassification: 'user_temporary' } : { behavior: 'deny', message: 'The user declined this action.', decisionClassification: 'user_reject' });
+  const answer = (allow: boolean) => pending && run.sessionId && respond(run.sessionId, pending.requestId, allow ? ALLOW_ONCE : DECLINE);
   const elapsed = run.startedAt ? clockMmss((run.endedAt || now) - run.startedAt) : '—';
   let nowText = '';
   let nowClass = '';
@@ -402,9 +385,9 @@ function RunRow({ run, jobId, now, runs }: { run: DispatchRun; jobId: string; no
     nowText = deps.length ? `after ${deps.join(', ')}` : 'waiting for a slot';
     nowClass = 'faint';
   } else nowText = run.now || STATE_WORD[run.state];
-  const stop = (e: React.MouseEvent) => (e.stopPropagation(), call('dispatch.stop', { id: jobId, runId: run.id }).catch(() => {}));
-  const retry = (e: React.MouseEvent) => (e.stopPropagation(), call('dispatch.retry', { id: jobId, runId: run.id }).catch(() => {}));
-  const skip = (e: React.MouseEvent) => (e.stopPropagation(), call('dispatch.skip', { id: jobId, runId: run.id }).catch(() => {}));
+  const stop = (e: React.MouseEvent) => (e.stopPropagation(), call('dispatch.stop', { id: jobId, runId: run.id }).catch(toasted));
+  const retry = (e: React.MouseEvent) => (e.stopPropagation(), call('dispatch.retry', { id: jobId, runId: run.id }).catch(toasted));
+  const skip = (e: React.MouseEvent) => (e.stopPropagation(), call('dispatch.skip', { id: jobId, runId: run.id }).catch(toasted));
   return (
     <tr className={`dp-row ${run.state}`} onClick={open}>
       <td className="dp-state">

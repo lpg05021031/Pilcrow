@@ -75,7 +75,7 @@ export function Slot({ open, side, className = '', children }: { open: boolean; 
         }
       } else setMounted(false);
     };
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, side]);
 
   if (!mounted) return null;
   return (

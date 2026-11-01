@@ -12,9 +12,13 @@ from the document's layout (ported from widgets/transcript/items.py MarkdownView
 from __future__ import annotations
 
 import html
+import logging
 import math
+import re
+import weakref
 from collections import OrderedDict
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote
 
 from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt, QUrl
 from PySide6.QtGui import (
@@ -28,6 +32,7 @@ from PySide6.QtGui import (
     QPen,
     QPixmap,
     QStaticText,
+    QTextBlockFormat,
     QTextCharFormat,
     QTextCursor,
     QTextDocument,
@@ -40,8 +45,12 @@ from PySide6.QtGui import (
 )
 
 from .. import icons, markdown, theme
-from .estimate import Calibration, Metrics
+from . import build
+from .build import trim_margins
+from .estimate import Calibration, Metrics, estimate_markdown
 from .pixels import hline, pen_width, snap
+
+log = logging.getLogger(__name__)
 
 Rect = Tuple[int, int, int, int]
 FULL = "full"
@@ -54,20 +63,20 @@ def rect_of(r: Rect) -> QRect:
 # ---------------------------------------------------------------- documents
 
 
+def set_line_height(doc: QTextDocument, px: int) -> None:
+    """Every line of a plain document on a fixed pitch (``line-height`` in px)."""
+    cur = QTextCursor(doc)
+    cur.select(QTextCursor.SelectionType.Document)
+    bf = QTextBlockFormat()
+    bf.setLineHeight(px, QTextBlockFormat.LineHeightTypes.FixedHeight.value)
+    cur.mergeBlockFormat(bf)
+
+
 def tidy_doc(doc: QTextDocument) -> None:
     """No margin above the first block or under the last; the empty paragraph QTextDocument leaves
     after a code block's table takes no room."""
-    first, last = doc.firstBlock(), doc.lastBlock()
-    if first.blockFormat().topMargin():
-        cur = QTextCursor(first)
-        bf = cur.blockFormat()
-        bf.setTopMargin(0)
-        cur.setBlockFormat(bf)
-    if last.blockFormat().bottomMargin():
-        cur = QTextCursor(last)
-        bf = cur.blockFormat()
-        bf.setBottomMargin(0)
-        cur.setBlockFormat(bf)
+    trim_margins(doc)
+    last = doc.lastBlock()
     for frame in doc.rootFrame().childFrames():
         b = doc.findBlock(frame.lastPosition() + 1)
         if b.isValid() and not b.text() and b != last and b.charFormat().fontPointSize() != 1:
@@ -164,6 +173,37 @@ def doc_pos_at(doc: QTextDocument, x: float, y: float) -> Optional[int]:
     return pos
 
 
+def doc_links(doc: QTextDocument) -> List[Tuple[int, str, str, Rect]]:
+    """Each link of a laid-out document in reading order: where it starts, its href, its words
+    (the pill pads and word joiners left out) and the rectangle of its first line, in document
+    coordinates. A link whose words change format midway (``[a **b**](…)``) is one link."""
+    out: List[Tuple[int, str, str, Rect]] = []
+    blk = doc.begin()
+    while blk.isValid():
+        runs: List[List[Any]] = []  # [start, end, href] within the block
+        for fr in blk.textFormats():
+            href = fr.format.anchorHref() if fr.format.isAnchor() else ""
+            if not href:
+                continue
+            if runs and runs[-1][2] == href and runs[-1][1] == fr.start:
+                runs[-1][1] = fr.start + fr.length
+            else:
+                runs.append([fr.start, fr.start + fr.length, href])
+        lay = blk.layout()
+        for a, z, href in runs:
+            line = lay.lineForTextPosition(a)
+            if not line.isValid():
+                continue
+            x0 = line.cursorToX(a)[0]
+            x1 = line.cursorToX(min(z, line.textStart() + line.textLength()))[0]
+            o = lay.position()
+            words = blk.text()[a:z].replace(" ", "").replace("⁠", "").strip()
+            rect = (int(o.x() + x0), int(o.y() + line.y()), max(1, math.ceil(x1 - x0)), math.ceil(line.height()))
+            out.append((blk.position() + a, href, words or href, rect))
+        blk = blk.next()
+    return out
+
+
 def draw_doc(
     p: QPainter,
     doc: QTextDocument,
@@ -210,13 +250,21 @@ def selection(doc: QTextDocument, a: int, b: int, bg: QColor, fg: Optional[QColo
     return sel
 
 
+_found: weakref.WeakKeyDictionary[QTextDocument, Tuple[int, str, List[Tuple[int, int]]]] = weakref.WeakKeyDictionary()
+
+
 def find_ranges(doc: QTextDocument, needle: str, limit: int = 2000) -> List[Tuple[int, int]]:
     """Document positions of every occurrence of ``needle`` (case-insensitive), skipping the word
-    joiners inline code carries so that a match may span them."""
+    joiners inline code carries so that a match may span them. Remembered per document revision and
+    needle: with the find bar open every frame of a scroll paints the matches again."""
     if not needle:
         return []
+    rev = doc.revision()
+    hit = _found.get(doc)
+    if hit is not None and hit[0] == rev and hit[1] == needle:
+        return hit[2]
     raw = doc.toPlainText()
-    pos = [i for i, ch in enumerate(raw) if ch != "⁠"]
+    pos = [i for i, ch in enumerate(raw) if ch != "\u2060"]  # WORD JOINER
     text = "".join(raw[i] for i in pos).lower()
     n = needle.lower()
     out: List[Tuple[int, int]] = []
@@ -224,7 +272,28 @@ def find_ranges(doc: QTextDocument, needle: str, limit: int = 2000) -> List[Tupl
     while i >= 0 and len(out) < limit:
         out.append((pos[i], pos[i + len(n) - 1] + 1))
         i = text.find(n, i + len(n))
+    _found[doc] = (rev, needle, out)
     return out
+
+
+def find_selections(doc: QTextDocument, st: PaintState) -> List[Any]:
+    """The find matches (the current one in full) and the text selection of a document, to paint."""
+    sels: List[Any] = []
+    t = st.t
+    if st.needle:
+        for k, (a, b) in enumerate(find_ranges(doc, st.needle)):
+            if k == st.needle_current:
+                sels.append(selection(doc, a, b, QColor(t.accent), QColor(t.accent_ink)))
+            else:
+                sels.append(selection(doc, a, b, theme.blend(t.find_mark, t.canvas)))
+    if st.selection is not None:
+        bg = theme.blend(t.selection, t.canvas)
+        if st.selection == FULL:
+            sels.append(selection(doc, 0, doc.characterCount(), bg))
+        else:
+            a, b = st.selection
+            sels.append(selection(doc, a, b, bg))
+    return sels
 
 
 # ---------------------------------------------------------------- decorations (items.py MarkdownView)
@@ -489,13 +558,22 @@ class Measurer:
         self._fms: Dict[Tuple, QFontMetricsF] = {}
         self._static: OrderedDict[Tuple, QStaticText] = OrderedDict()
         self._checks: Dict[Tuple, QPixmap] = {}
+        self._stamp: Optional[Tuple[str, float]] = None
         self.refresh()
 
     def refresh(self) -> None:
-        """After a theme change or a font-scale change: new fonts, new metrics, empty caches."""
+        """After a theme change or a font-scale change: new fonts, new metrics, empty caches (the
+        pixmaps among them, which is why their keys need not name the scale). Every live view calls it
+        on the switch; the first does the work and the others find it done."""
+        stamp = (theme.tokens().name, theme.scale)
+        if stamp == self._stamp:
+            return
+        self._stamp = stamp
         self.tokens = theme.tokens()
         self.theme_name = self.tokens.name
         app = QGuiApplication.instance()
+        # The documents are shared by every view, so the images inside them (task boxes) are drawn
+        # at the highest ratio of any screen (what this returns): sharp wherever the window goes.
         self.dpr = float(app.devicePixelRatio()) if app is not None else 1.0
         self._fonts.clear()
         self._fms.clear()
@@ -613,8 +691,6 @@ class Measurer:
         """A laid-out document for one Markdown source (a top-level block or a whole text). ``size``
         picks a style of its own (a thought at 13.5px) over the prose and compact ones. Built from
         the token stream with a cursor (canvas/build.py); the HTML renderer stands in if that fails."""
-        from . import build
-
         m = markdown.metrics_for(size) if size else markdown.metrics(compact or quiet)
         doc = self._doc(self.font(m.base), width, tab_font=self.code_font())
         doc.setIndentWidth(m.list_indent)
@@ -622,11 +698,11 @@ class Measurer:
             tokens = markdown.parse_tokens(src, streaming) if src else []
             b = build.Builder(doc, m, self.tokens, self, width, cwd, streaming, line_height)
             b.run(tokens)
-        except Exception as ex:  # noqa: BLE001 - a builder failure must not take the row down
+        except Exception:  # a builder failure must not take the row down
             global _build_failed
             if not _build_failed:
                 _build_failed = True
-                print(f"[canvas] document builder failed, HTML renderer used: {ex!r}")
+                log.warning("the document builder failed; the HTML renderer is used", exc_info=True)
             return self.markdown_doc_html(src, width, compact, quiet, streaming, cwd, line_height, size)
         if b.used_checks:
             for name, on in ((markdown.CHECK_ON, True), (markdown.CHECK_OFF, False)):
@@ -659,7 +735,7 @@ class Measurer:
             body = markdown.render_html(
                 src, streaming=streaming, base_dir=cwd or None, compact=compact or quiet, width=width, m=m
             )
-        except Exception:  # noqa: BLE001 - a Markdown failure must not take the row down
+        except Exception:  # a Markdown failure must not take the row down
             body = f"<p>{html.escape(src)}</p>"
         body = link_paths(body)
         doc = self._doc(self.font(m.base), width, tab_font=self.code_font())
@@ -724,7 +800,7 @@ class Measurer:
         if pm is None:
             size = markdown.CHECK_SIZE
             dpr = self.dpr
-            pm = QPixmap(int(width * dpr), int(size * dpr))
+            pm = QPixmap(math.ceil(width * dpr), math.ceil(size * dpr))
             pm.setDevicePixelRatio(dpr)
             pm.fill(Qt.GlobalColor.transparent)
             t = self.tokens
@@ -746,17 +822,14 @@ class Measurer:
 
     # ---- estimation
     def estimate_markdown(self, src: str, width: int, compact: bool = False) -> int:
-        from .estimate import estimate_markdown
-
         return estimate_markdown(src, width, self.metrics_compact if compact else self.metrics)
+
+
+_CODE_SPAN = re.compile(r"<code( style=\"[^\"]*\")>([^<]*)</code>")
 
 
 def link_paths(body: str) -> str:
     """Inline code spans that look like file paths become links (``pilcrow-path://``)."""
-    import re
-    from urllib.parse import quote
-
-    code_re = re.compile(r"<code( style=\"[^\"]*\")>([^<]*)</code>")
 
     def repl(m: re.Match[str]) -> str:
         ref = markdown.as_path_ref(html.unescape(m.group(2)))
@@ -768,7 +841,7 @@ def link_paths(body: str) -> str:
             f"{m.group(0)}</a>"
         )
 
-    return code_re.sub(repl, body)
+    return _CODE_SPAN.sub(repl, body)
 
 
 # ---------------------------------------------------------------- paint state
@@ -816,6 +889,10 @@ class PaintState:
         st.now = self.now
         return st
 
+    def lit(self, kind: str, id_: str) -> bool:
+        """The pointer or the keyboard focus is on this target (a button that shows only then)."""
+        return any(x is not None and x.kind == kind and x.id == id_ for x in (self.hover, self.focus))
+
 
 __all__ = [
     "FULL",
@@ -833,8 +910,7 @@ __all__ = [
     "rounded",
     "selection",
     "table_rect",
+    "set_line_height",
     "tidy_doc",
     "well_rects",
 ]
-
-_ = (Iterable,)

@@ -6,17 +6,18 @@ from __future__ import annotations
 
 import html
 import re
+from functools import lru_cache
 from typing import Any, List, Optional, Tuple
 
 from PySide6.QtCore import QByteArray, QRect, Qt
-from PySide6.QtGui import QColor, QPainter, QPixmap, QTextDocument
+from PySide6.QtGui import QColor, QPainter, QPixmap, QTextCursor, QTextDocument
 
 from ... import markdown, theme
 from ...lib.fmt import rel_path
 from ...lib.transcript_model import UserItem
 from ...store import ConfirmSpec, store
-from ..paint import Measurer, PaintState, doc_height, doc_pos_at, draw_doc, rounded
-from ..scene import GRADE_EXACT, Block, Target
+from ..paint import FULL, Measurer, PaintState, doc_height, doc_pos_at, draw_doc, rounded, selection
+from ..scene import Block, Target
 
 BUBBLE_LINE = markdown.px(theme.FS_BODY * 1.55)
 
@@ -57,6 +58,16 @@ def _pixmap_of(src: str) -> QPixmap:
     else:
         pm.load(src)
     return pm
+
+
+@lru_cache(maxsize=32)  # 32 thumbnails of 220×160 are under 5 MB
+def _thumb(src: str) -> QPixmap:
+    """An attachment's thumbnail (null when it cannot be read). It does not depend on the width, so
+    a resize, a re-warm or a theme switch re-measures the bubble without decoding the image again."""
+    pm = _pixmap_of(src)
+    if pm.isNull():
+        return pm
+    return pm.scaled(THUMB_W, THUMB_H, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
 
 
 class UserBlock(Block):
@@ -138,12 +149,9 @@ class UserBlock(Block):
             x = 0
             row_h = 0
             for src in it.images:
-                pm = _pixmap_of(src)
+                pm = _thumb(src)
                 if pm.isNull():
                     continue
-                pm = pm.scaled(
-                    THUMB_W, THUMB_H, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
-                )
                 self.thumbs.append((QRect(x, 0, pm.width(), pm.height()), pm, src))
                 x += pm.width() + 6
                 row_h = max(row_h, pm.height())
@@ -226,8 +234,6 @@ class UserBlock(Block):
             color = QColor(t.text_3 if self.queued else t.text)
             sels = None
             if st.selection is not None:
-                from ..paint import FULL, selection
-
                 sbg = theme.blend(t.selection, bg_s)
                 a, b = (0, self.doc.characterCount()) if st.selection == FULL else st.selection
                 sels = [selection(self.doc, a, b, sbg)]
@@ -278,6 +284,9 @@ class UserBlock(Block):
             )
         return Target("row", "row", (0, 0, self.h_width or 0, self.h))
 
+    def hover_rect(self, target: Target) -> Tuple[int, int, int, int]:
+        return (0, 0, self.h_width or 0, self.h)  # the actions under the bubble show on any hover
+
     def cursor_for(self, target: Target) -> Optional[Any]:
         if target.kind in ("button", "image"):
             return Qt.CursorShape.PointingHandCursor
@@ -320,7 +329,6 @@ class UserBlock(Block):
     def selected_text(self, a: Optional[int], b: Optional[int]) -> str:
         if self.doc is None or a is None or b is None:
             return self.item.text
-        from PySide6.QtGui import QTextCursor
 
         cur = QTextCursor(self.doc)
         cur.setPosition(min(a, b))
@@ -388,6 +396,3 @@ class UserBlock(Block):
             )
 
         store.call("session.rewind", {"id": sid, "messageId": item.uuid, "dryRun": True}).then(dry)
-
-
-_ = GRADE_EXACT

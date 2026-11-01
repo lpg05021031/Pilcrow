@@ -5,9 +5,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Tuple
 
-from harness import ROOT, app_client, mock_server  # noqa: F401
-
-MOCK_PORT = 5401
+from harness import ROOT, app_client, mock_server
 
 TREE: Dict[str, List[dict]] = {
     "/proj": [
@@ -339,7 +337,7 @@ def test_preview_finds_localhost_urls(app_client):
     panel.resize(560, 420)
     panel.show()
     c.sleep(20)
-    assert [ch.url for ch in panel._chips] == ["http://localhost:8080", "http://127.0.0.1:5173/"]
+    assert [ch.toolTip() for ch in panel._chips] == ["http://localhost:8080", "http://127.0.0.1:5173/"]
     assert panel.chips.isVisible()
     assert "Preview a local web app" in panel.title.text()
     panel._chips[1].click()

@@ -245,7 +245,7 @@ def test_thought_lists_and_boxes_and_a_screenshot(transcript):
     tr = transcript
     th = next(b for b in tr.scene.root.walk() if isinstance(b, ThinkingBlock))
     body = th.children[0]
-    assert body.doc is not None and body._md  # noqa: SLF001
+    assert body.doc is not None and body._md
     assert "`" not in body.doc.toPlainText() and "Read src/parser.ts" in body.selected_text(None, None).replace(
         "\n", " "
     )

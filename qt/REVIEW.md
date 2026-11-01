@@ -161,6 +161,10 @@ token; inside a fold the trees are small.
 suffix of `_vals` and of `_tree` is the whole operation. `insert`/`remove` at `i` need the tree
 rebuilt from `i` on only (nodes below `i` cover nothing at or after it).
 
+**Done (truncate).** `truncate(k)` drops the tails of `_vals` and `_tree`; an insert at the end is an
+append and a removal of the last value a truncate, so the live end never rebuilds. An insert or a
+removal in the middle still rebuilds (rare, small trees).
+
 ### R6 · Find re-searches every visible document on every paint — low
 
 **Evidence/cause.** While the find bar holds a needle, `ProseBlock.paint` calls
@@ -171,6 +175,10 @@ work done 60 times for an answer that changes once.
 
 **Fix.** Cache the ranges per `(doc revision, needle)` on the block; paint the highlight over the
 cached pixmap instead of bypassing the cache.
+
+**Done (the search).** `find_ranges` remembers its answer per document (weakly), revision and needle,
+so a scroll with the bar open searches nothing; one `find_selections` paints the matches for prose
+and card bodies alike. Blocks with a needle still paint from their documents rather than the cache.
 
 ### R7 · Select all over a long conversation builds documents for the cold blocks it crosses — low
 
@@ -215,8 +223,7 @@ the budget as *k* screens at the current ratio.
 - `item.text += delta` and `item.input_json += delta` copy the string each token: a 50 KB reply is
   ~25 ms of copying over its whole life. Fine.
 - `TranscriptModel._seen` (message uuids) grows without bound: ~100 bytes a message. Fine.
-- `Scene.dirty_from` and `_commit` call `Block.y()` (O(depth · log n)) per dirty block: dirty blocks
-  are few. Fine.
+- `_commit` calls `Block.y()` (O(depth · log n)) per dirty block: dirty blocks are few. Fine.
 - `_selection_for` is evaluated per visible block per paint while a selection exists, three `y()`
   each: 19 blocks, microseconds. Fine.
 
@@ -250,17 +257,22 @@ than 25 ms after the one before.
 | The same fold closed | 11 frames over 160 ms | median 15.9, worst 16.9, 0 late |
 | Zoom in / out (Ctrl+= / Ctrl+-) | one frame each | the call 7–10 ms, the frame 10 ms after it; the block under the top edge stays at the same pixel |
 | Theme switch | one frame | 15 ms |
-| The real window: a reply streaming (~100 words) | 13 viewport paints | 6 of them the streaming block's line only; **7 are the whole viewport, and those flushes also repaint the whole shell** (sidebar, panel, cards): see below |
+| The real window: a reply streaming (~96 words) | 13–14 viewport paints | the streaming block's lines, and for a following step the strip it uncovers and the margins other widgets lie over (90–150 k px of 467 k); the shell is not repainted: see below |
 
-**Open, found by the probe.** While a reply streams with the view following it, every flush that
-moves the scroll repaints the whole viewport, not the strip that moved (the view's pixel scrolling
-blits only for a person's scroll), and the same flushes repaint the whole shell: `Shell.place()`
-ends with `self.update()` (the ground's shadow) and `place()` runs from `_on_ui`, which the stream
-reaches; a full repaint of the shell is a paint event for every card, tab and file row under it,
-166 under the panel during one short reply. Neither shows as flicker (Qt double-buffers), but both
-are work the conversation does to widgets that did not change, and the standard here is that it
-does none. Next: blit on a following scroll as on a person's; have `place()` repaint only the ground
-around the cards, and only when a seam moved.
+**Found by the probe, since fixed.** While a reply streamed with the view following it, every
+flush that moved the scroll repainted the whole viewport, and the same flushes repainted the whole
+shell (`Shell.place()` ended with `self.update()`, a paint event for every card, tab and file row
+under it). The first had a cause the view did not show: Qt blits a scroll only where no other
+widget lies over the scrolled rect, and the card's frame lay over all of the conversation (as did
+the composer's fade and, up in the history, the Latest pill over its bottom, and the sidebar
+seam's handle over its left edge). Now the
+frame is masked to what it draws, the view blits all but those two margins and repaints them
+(`CanvasView.scrollContentsBy`), and `place()` repaints only the lines of a sheet's shadow that
+moved, the sheets being opaque. Measured with `s_smooth.py window` (a reply of ~96 words, the
+panel open): the conversation 13–14 paints, a following step 90–150 k px of the 467 k px viewport
+(each was all of it); the window 0; the panel 58 (was 234: the tab strip at the turn's start and
+end); the composer 20 (was 93: Send turning to Stop and back); the sidebar 42 (was 52: the row's
+state and time).
 
 ## 4. On threads, and why the answer is still "no"
 

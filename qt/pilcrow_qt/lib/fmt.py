@@ -27,6 +27,11 @@ def _js_num(n: Any) -> str:
     return str(n)
 
 
+def now_ms() -> float:
+    """The wall clock in milliseconds, the unit of every timestamp the server sends (``Date.now()``)."""
+    return time.time() * 1000
+
+
 def time_ago(ms: Optional[float], now: Optional[float] = None, short: bool = False) -> str:
     """Relative time. `short` gives the compact form used in lists ("now", "4m", "3h", "2d")."""
     if not ms:
@@ -172,6 +177,11 @@ def truncate(s: Optional[str], n: int) -> str:
 
 def first_line(s: Optional[str]) -> str:
     return (s or "").split("\n")[0]
+
+
+def clock(ms: float, seconds: bool = False) -> str:
+    """A 24-hour time of day, "14:05", or "14:05:09" with ``seconds``."""
+    return datetime.fromtimestamp(ms / 1000).strftime("%H:%M:%S" if seconds else "%H:%M")
 
 
 def plural(n: float, one: str, many: Optional[str] = None) -> str:

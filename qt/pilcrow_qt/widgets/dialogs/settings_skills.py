@@ -7,11 +7,12 @@ import re
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLineEdit, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QWidget
 
 from ... import icons, theme
 from ...lib.fmt import err_text, tildify, time_ago
 from ...store import ConfirmSpec, store
+from ..folder_picker import FolderPicker
 from ..ui.bits import IconButton, Spinner, button, hairline, label
 from ..ui.menu import show_menu
 from ..ui.signals import bind
@@ -24,7 +25,6 @@ from .settings_ui import (
     count_chip,
     elide,
     field,
-    folder_picker,
     hint,
     home,
     icon_box,
@@ -450,20 +450,7 @@ class ImportSkillSheet(Sheet):
         form = QWidget()
         fl = vbox(form, 14)
         fl.addWidget(hint("Pick the folder that contains SKILL.md. It is copied, so the original stays where it is."))
-        picker = folder_picker("", self._pick)
-        if picker is not None:
-            fl.addWidget(picker)
-        else:
-            self.path = line_edit("/path/to/skill", mono=True, name="Folder")
-            self.path.textChanged.connect(self._pick)
-            browse = button("Browse…", size="sm", on_click=self._browse)
-            r = QWidget()
-            rl = QHBoxLayout(r)
-            rl.setContentsMargins(0, 0, 0, 0)
-            rl.setSpacing(8)
-            rl.addWidget(self.path, 1)
-            rl.addWidget(browse)
-            fl.addWidget(r)
+        fl.addWidget(FolderPicker("", self._pick))
         self.chosen = mono_label("")
         self.chosen.setProperty("fs", "small")
         self.chosen.hide()
@@ -478,11 +465,6 @@ class ImportSkillSheet(Sheet):
         self.import_btn = button("Import", kind="primary", on_click=self.submit)
         self.import_btn.setEnabled(False)
         self.add_foot(self.import_btn)
-
-    def _browse(self) -> None:
-        d = QFileDialog.getExistingDirectory(self, "Pick the folder that contains SKILL.md", self.from_path or home())
-        if d:
-            self.path.setText(d)
 
     def _pick(self, path: str) -> None:
         self.from_path = path.strip()

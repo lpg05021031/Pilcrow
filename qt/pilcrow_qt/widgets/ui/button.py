@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Callable, Dict, Optional, Tuple
 
 from PySide6.QtCore import QRect, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QFontMetrics, QIcon, QPainter, QPaintEvent, QPen
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QIcon, QPainter, QPaintEvent, QPen
 from PySide6.QtWidgets import QPushButton, QSizePolicy, QWidget
 
 from ... import icons, theme
@@ -42,11 +42,11 @@ class Btn(QPushButton):
         super().__init__(text, parent)
         self.kind, self.size_, self.icon_name, self.icon_px = kind, size, icon, icon_size
         self.setProperty("kind", kind)  # readable by callers; nothing in the stylesheet keys on it
-        self._hover = False
         self._icon_end = False
         self._on = False
         self.pad_left: Optional[int] = None  # overrides the variant's left padding (a negative CSS margin)
-        self.override: Dict[str, float] = {}  # per-instance geometry (h, px, gap, fs, fw, r) over the variant's
+        self.override: Dict[str, float] = {}  # per-instance geometry (h, px, gap, fs, fw, r, mono) over the variant's
+        self.look: Dict[str, theme.Fill] = {}  # per-instance colours over the variant's (``set_look``)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         self.setFlat(True)
@@ -84,6 +84,10 @@ class Btn(QPushButton):
             return {"h": 36, "px": 16, "gap": 6, "fs": 13.5, "fw": 500, "r": theme.R3}
         return {"h": 30, "px": 12, "gap": 6, "fs": theme.FS_UI, "fw": 500, "r": theme.R2}
 
+    @staticmethod
+    def _font(m: Dict[str, float]) -> QFont:
+        return theme.font_mono(m["fs"]) if m.get("mono") else theme.font_ui(m["fs"], int(m["fw"]))
+
     def set_kind(self, kind: str) -> None:
         if kind != self.kind:
             self.kind = kind
@@ -100,17 +104,42 @@ class Btn(QPushButton):
         self._icon_end = end
         self.update()
 
+    def set_look(
+        self,
+        fg: theme.Fill,
+        hover_fg: theme.Fill = None,
+        bg: theme.Fill = None,
+        hover_bg: theme.Fill = None,
+        on_fg: theme.Fill = None,
+        on_bg: theme.Fill = None,
+        line: theme.Fill = None,
+        on_line: theme.Fill = None,
+    ) -> None:
+        """Colours of its own (token specs, see ``theme.Fill``) in place of the kind's: the ink and the
+        fill at rest, under the pointer, and on (``set_on`` or checked); a hairline at rest and on."""
+        self.look = {
+            "fg": fg,
+            "hover_fg": hover_fg,
+            "bg": bg,
+            "hover_bg": hover_bg,
+            "on_fg": on_fg,
+            "on_bg": on_bg,
+            "line": line,
+            "on_line": on_line,
+        }
+        self.update()
+
     def set_on(self, on: bool) -> None:
         """Pressed in (``.btn.on``): the fill of a hovered button, kept."""
         self._on = on
         self.update()
 
-    def setIconSize(self, size: QSize) -> None:  # noqa: N802
+    def setIconSize(self, size: QSize) -> None:
         super().setIconSize(size)
         self.icon_px = size.width()
         self.updateGeometry()
 
-    def setIcon(self, icon: QIcon) -> None:  # noqa: N802
+    def setIcon(self, icon: QIcon) -> None:
         super().setIcon(icon)
         self.updateGeometry()
         self.update()
@@ -118,9 +147,9 @@ class Btn(QPushButton):
     def _has_icon(self) -> bool:
         return bool(self.icon_name) or not self.icon().isNull()
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         m = self._metrics()
-        fm = QFontMetrics(theme.font_ui(m["fs"], int(m["fw"])))
+        fm = QFontMetrics(self._font(m))
         w = m.get("pl", m["px"]) + m["px"]
         if self._has_icon():
             w += self.icon_px
@@ -129,29 +158,32 @@ class Btn(QPushButton):
         w += fm.horizontalAdvance(self.text()) if self.text() else 0
         return QSize(int(w), int(m["h"]))
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         return self.sizeHint()
 
-    def setText(self, text: str) -> None:  # noqa: N802
+    def setText(self, text: str) -> None:
         super().setText(text)
         self.updateGeometry()
         self.update()
-
-    def enterEvent(self, e) -> None:  # noqa: N802
-        self._hover = True
-        self.update()
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:  # noqa: N802
-        self._hover = False
-        self.update()
-        super().leaveEvent(e)
 
     def _colors(self) -> Look:
         """(background, ink, icon opacity, border) for the current state."""
         t = theme.tokens()
         k = self.kind
-        hover = self._hover and self.isEnabled()
+        hover = self.underMouse() and self.isEnabled()
+        if self.look:
+            lk = self.look
+            on = self._on or self.isChecked()
+
+            def pick(state: str) -> Optional[QColor]:
+                spec = lk.get(f"on_{state}") if on else None
+                if spec is None and hover:
+                    spec = lk.get(f"hover_{state}")
+                return theme.resolve(spec if spec is not None else lk.get(state), t)
+
+            fg = pick("fg") if self.isEnabled() else QColor(t.text_4)
+            line = theme.resolve(lk.get("on_line") if on and lk.get("on_line") is not None else lk.get("line"), t)
+            return pick("bg"), fg or QColor(t.text), 1.0, line
         if k == "primary":
             if not self.isEnabled():
                 return theme.blend(t.fill_2, t.canvas), QColor(t.text_4), 1.0, None
@@ -163,7 +195,7 @@ class Btn(QPushButton):
             bg = theme.blend(t.fill_1, t.canvas) if hover else None
             return bg, QColor(t.text), 0.85, theme.blend(t.hair_2, t.raised)
         if k == "danger":
-            return QColor(t.err), QColor("#ffffff"), 1.0, None
+            return QColor(t.err), QColor(t.accent_ink), 1.0, None
         if k == "danger-text":
             return (theme.blend(t.err_wash, t.canvas) if hover else None), QColor(t.err), 0.85, None
         if k in ("link", "toggle"):
@@ -186,7 +218,7 @@ class Btn(QPushButton):
             return theme.blend(t.fill_1, t.canvas), QColor(t.text_4), 1.0, None
         return theme.blend(t.fill_3 if (hover or self._on) else t.fill_2, t.canvas), QColor(t.text), 0.85, None
 
-    def paintEvent(self, _e: QPaintEvent) -> None:  # noqa: N802
+    def paintEvent(self, _e: QPaintEvent) -> None:
         m = self._metrics()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -208,7 +240,7 @@ class Btn(QPushButton):
             p.setPen(QPen(line, 1))
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawRoundedRect(QRectF(0.5, 0.5, self.width() - 1, self.height() - 1), m["r"], m["r"])
-        font = theme.font_ui(m["fs"], int(m["fw"]))
+        font = self._font(m)
         p.setFont(font)
         fm = QFontMetrics(font)
         tw = fm.horizontalAdvance(self.text()) if self.text() else 0
@@ -242,3 +274,47 @@ class Btn(QPushButton):
                 Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
                 self.text(),
             )
+
+
+def text_button(text: str, fs: float, fw: int = 400, fg: theme.Fill = "text", hover_fg: theme.Fill = "text_2") -> Btn:
+    """A line of words that is a button (``border: none; background: transparent; text-align:
+    left; padding: 0``): ``fg`` at rest, ``hover_fg`` under the pointer."""
+    b = Btn(text, kind="link")
+    b.pad_left = 0
+    b.override.update(fs=fs, fw=fw, px=0, h=18 if fs <= theme.FS_SMALL else 20)
+    b.set_look(fg, hover_fg)
+    return b
+
+
+def chip_button(
+    text: str,
+    tooltip: str = "",
+    over: theme.Fill = "canvas",
+    h: int = 24,
+    px: float = 10,
+    fs: float = theme.FS_SMALL,
+    mono: bool = False,
+) -> Btn:
+    """``.chip`` / ``.folder-chip`` / ``.example``: words in a pill on a quiet fill with a hairline,
+    lit under the pointer and while on (``set_on``). ``over`` is the surface it lies on: a token name,
+    or a function of the tokens."""
+
+    def on_surface(name: str) -> theme.Fill:
+        if isinstance(over, str):
+            return f"{name}/{over}"
+        return lambda t: theme.over(theme.qcolor(getattr(t, name)), theme.resolve(over, t))
+
+    b = Btn(text, kind="", size="", tooltip=tooltip)
+    b.setAccessibleName(text)
+    b.override.update(h=h, px=px, fs=fs, fw=400, r=h / 2, mono=1.0 if mono else 0.0)
+    b.set_look(
+        "text_2",
+        hover_fg="text",
+        bg=on_surface("fill_1"),
+        hover_bg=on_surface("fill_2"),
+        on_fg="text",
+        on_bg=on_surface("fill_2"),
+        line=on_surface("hair"),
+        on_line=on_surface("hair_3"),
+    )
+    return b

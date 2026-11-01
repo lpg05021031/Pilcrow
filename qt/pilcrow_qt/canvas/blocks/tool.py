@@ -8,7 +8,7 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QRect, QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPen
+from PySide6.QtGui import QColor, QFont, QPainter, QPen
 
 from ... import theme
 from ...lib.fmt import duration
@@ -16,11 +16,15 @@ from ...lib.tools_meta import ToolMeta, file_path_of, is_file_tool, str_, tool_m
 from ...lib.transcript_model import Item, ToolItem
 from ...lib.workflow import workflow_counts
 from ...store import store
+from ...widgets.transcript.bodies.ask import AskBody
+from ...widgets.transcript.bodies.code import compute_hunks
+from ...widgets.transcript.bodies.plan import PlanBody
 from ...widgets.transcript.ctx import ToolCtx
+from ...widgets.transcript.permission import PermissionCard
 from ..paint import Measurer, PaintState, rounded
 from ..pixels import vline
 from ..scene import Block, Group, Target
-from .base import chevron, paint_head_tint, paint_needs_frame
+from .base import MetaPart, chevron, meta_width, paint_head_tint, paint_meta, paint_needs_frame
 from .bodies import ToolBodyBlock
 from .island import IslandBlock
 
@@ -59,8 +63,6 @@ def diff_stats(item: ToolItem) -> Optional[Dict[str, int]]:
         return {"add": add, "del": dele}
     i = item.input or {}
     if item.name == "Edit" and "old_string" in i and item.input_done:
-        from ...widgets.transcript.bodies.code import compute_hunks
-
         for h in compute_hunks(str(i.get("old_string") or ""), str(i.get("new_string") or "")):
             for ln in h.lines:
                 if ln.t == "+":
@@ -84,6 +86,23 @@ class ToolBlock(Group):
 
     KIND = "tool"
     CHILD_INDENT = 28
+    __slots__ = (
+        "_loaded_items",
+        "_meta_rects",
+        "_second",
+        "_tsig",
+        "body",
+        "child_builder",
+        "children_group",
+        "ctx",
+        "file",
+        "item",
+        "meta",
+        "perm",
+        "perm_island",
+        "reports",
+        "user_open",
+    )
 
     def __init__(
         self, item: ToolItem, ctx: ToolCtx, perm: Optional[Json], child_builder: Optional[ChildBuilder] = None
@@ -102,6 +121,8 @@ class ToolBlock(Group):
         self.perm_island: Optional[IslandBlock] = None
         self._loaded_items: Optional[List[Item]] = None
         self._meta_rects: Dict[str, QRect] = {}
+        self._second = -1  # the elapsed second the head last showed while it runs
+        self._tsig: Any = None  # the workflow task's progress the body last showed
         self.shaped = True
         self.append(self.body)
         self.sync(item, ctx, perm, first=True)
@@ -138,7 +159,7 @@ class ToolBlock(Group):
         changed: List[Block] = []
         # a workflow's body says how far the run is: it follows the task in session.state, not only the item
         tsig = self._task_sig() if item.name in ("Workflow", "RunWorkflow") else None
-        task_changed = tsig != getattr(self, "_tsig", None)
+        task_changed = tsig != self._tsig
         self._tsig = tsig
         if not (rev_changed or perm_changed or ctx_changed or first or task_changed):
             return changed
@@ -235,11 +256,9 @@ class ToolBlock(Group):
         struck = it.status in ("denied", "interrupted")
         ft = st.m.font(12.5 if meta.mono else theme.FS_UI, 400, meta.mono)
         if struck:
-            from PySide6.QtGui import QFont
-
             ft = QFont(ft)
             ft.setStrikeOut(True)
-        meta_w = self._meta_width(st)
+        meta_w = meta_width(st, self._meta_parts(st))
         chev_w = 13 + 7
         open_w = (13 + 7) if self.file else 0
         avail = max(40, (x + w) - cx - meta_w - chev_w - open_w - 8)
@@ -259,8 +278,7 @@ class ToolBlock(Group):
         )
         cx += chev_w
         if self.file:
-            on = st.hover is not None and st.hover.kind == "button" and st.hover.id == "open-file"
-            p.setOpacity(1.0 if (hover or on) else 0.0 if st.caching else 0.0)
+            on = st.lit("button", "open-file")
             if hover or on:
                 if on:
                     rounded(
@@ -273,12 +291,10 @@ class ToolBlock(Group):
                 p.drawPixmap(
                     int(cx), y + (head_h - 13) // 2, st.m.icon("arrow-up-right", QColor(t.text if on else t.text_3), 13)
                 )
-            p.setOpacity(1.0)
             self._meta_rects["open-file"] = QRect(int(cx) - x - 4, (head_h - 22) // 2, 22, 22)
         # meta, right-aligned
-        self._paint_meta(p, x + w, y, head_h, st)
+        paint_meta(p, x + w, y, head_h, st, self._meta_parts(st))
         # the rule down the left of an open body (the agent children get their own rail)
-        _ = x
 
     def _paint_status(self, p: QPainter, x: int, y: int, st: PaintState) -> None:
         t = st.t
@@ -309,18 +325,18 @@ class ToolBlock(Group):
         }.get(stt, (self.meta.icon_name, t.text_2))
         p.drawPixmap(x, y, st.m.icon(name, QColor(color), 14))
 
-    def _meta_parts(self, st: PaintState) -> List[Tuple[str, str, str]]:
+    def _meta_parts(self, st: PaintState) -> List[MetaPart]:
         """(kind, text, tone): badges and figures at the right of the head."""
         it = self.item
         t = st.t
-        out: List[Tuple[str, str, str]] = []
+        out: List[MetaPart] = []
         stt = it.status
         if stt == "background":
             out.append(("badge", "background", "info"))
         if stt == "denied":
             out.append(("badge", "declined", "err"))
         if stt == "error":
-            out.append(("text", "Failed", t.err))
+            out.append(("strong", "Failed", t.err))
         if stt == "interrupted":
             out.append(("badge", "stopped", ""))
         if it.name in ("Workflow", "RunWorkflow"):
@@ -344,42 +360,6 @@ class ToolBlock(Group):
             out.append(("micro", duration(ms), t.text_3))
         return out
 
-    def _meta_width(self, st: PaintState) -> int:
-        w = 0
-        for kind, text, _tone in self._meta_parts(st):
-            if kind == "badge":
-                w += int(st.m.text_w(text, st.m.font(11, 600))) + 14 + 8
-            elif kind == "mono":
-                w += int(st.m.text_w(text, st.m.font(11.5, 400, True))) + 5
-            else:
-                w += int(st.m.text_w(text, st.m.font(theme.FS_MICRO, 600 if text == "Failed" else 400))) + 8
-        return w
-
-    def _paint_meta(self, p: QPainter, right: int, y: int, head_h: int, st: PaintState) -> None:
-        x = right
-        for kind, text, tone in reversed(self._meta_parts(st)):
-            if kind == "badge":
-                f = st.m.font(11, 600)
-                bw = int(st.m.text_w(text, f)) + 14
-                x -= bw
-                t = st.t
-                fg, bg = {"err": (t.err, t.err_wash), "info": (t.info, t.info_wash)}.get(tone, (t.text_2, t.fill_2))
-                rounded(p, QRect(x, y + (head_h - 19) // 2, bw, 19), theme.blend(bg, t.canvas), None, 9)
-                st.m.draw_text(p, x + 7, y + (head_h - st.m.line_h(f)) / 2, text, f, QColor(fg))
-                x -= 8
-            elif kind == "mono":
-                f = st.m.font(11.5, 400, True)
-                tw = st.m.text_w(text, f)
-                x -= tw
-                st.m.draw_text(p, x, y + (head_h - st.m.line_h(f)) / 2, text, f, QColor(tone))
-                x -= 5
-            else:
-                f = st.m.font(theme.FS_MICRO, 600 if text == "Failed" else 400)
-                tw = st.m.text_w(text, f)
-                x -= tw
-                st.m.draw_text(p, x, y + (head_h - st.m.line_h(f)) / 2, text, f, QColor(tone))
-                x -= 8
-
     # ---- interaction
     def hit(self, x: int, y: int) -> Optional[Target]:
         if y >= self.head_h:
@@ -388,6 +368,14 @@ class ToolBlock(Group):
         if self.file and r is not None and r.contains(x, y):
             return Target("button", "open-file", (r.x(), r.y(), r.width(), r.height()))
         return Target("head", "tool", (0, 0, self.h_width or 0, self.head_h))
+
+    def targets(self) -> List[Target]:
+        """The head, then Open in Files (where the head last painted it)."""
+        out = [Target("head", "tool", (0, 0, self.h_width or 0, self.head_h))]
+        r = self._meta_rects.get("open-file")
+        if self.file and r is not None:
+            out.append(Target("button", "open-file", (r.x(), r.y(), r.width(), r.height())))
+        return out
 
     def cursor_for(self, target: Target) -> Optional[Any]:
         return Qt.CursorShape.PointingHandCursor
@@ -409,10 +397,19 @@ class ToolBlock(Group):
         return f"{self.meta.verb} {self.meta.target}".strip()
 
     def live(self) -> bool:
-        return self.item.status in ("running", "streaming") or self.awaiting
+        """Running: its status mark turns on the clock (a card awaiting a decision does not move)."""
+        return self.item.status in ("running", "streaming")
 
     def tick(self, now: float) -> Optional[Tuple[int, int, int, int]]:
-        return (0, 0, 100000, self.head_h) if self.item.status in ("running", "streaming") else None
+        """The turning status mark each frame; the whole head when the elapsed figure moves on a second."""
+        it = self.item
+        if not self.live():
+            return None
+        s = int((time.time() * 1000 - it.start_ts) // 1000) if it.start_ts else 0
+        if s != self._second:
+            self._second = s
+            return (0, 0, 100000, self.head_h)
+        return (0, 0, 20, self.head_h)
 
     @property
     def static(self) -> bool:
@@ -424,6 +421,7 @@ class AgentChildren(Group):
 
     KIND = "agent-children"
     CHILD_INDENT = 15
+    __slots__ = ("builder", "inner")
 
     def __init__(self, builder: ChildBuilder, items: List[Item], ctx: ToolCtx) -> None:
         super().__init__(f"agent-children:{id(self)}", head_h=0, pad_top=0, pad_bottom=0, open_=True)
@@ -443,13 +441,13 @@ class AgentChildren(Group):
 class PermissionIsland(IslandBlock):
     """The permission prompt as a real widget under the tool row."""
 
+    __slots__ = ("ctx", "item", "perm")
+
     def __init__(self, perm: Json, ctx: ToolCtx, item: ToolItem) -> None:
         self.perm, self.ctx, self.item = perm, ctx, item
         super().__init__(f"perm:{item.id}", self._make)
 
     def _make(self):
-        from ...widgets.transcript.permission import PermissionCard
-
         return PermissionCard(self.perm, self.ctx, self.item, stale=False)
 
     def update(self, perm: Json, ctx: ToolCtx, item: ToolItem) -> None:
@@ -463,6 +461,7 @@ class SpecialIsland(IslandBlock):
 
     MT = 12
     MB = 12
+    __slots__ = ("ctx", "item", "perm")
 
     def __init__(self, item: ToolItem, ctx: ToolCtx, perm: Optional[Json]) -> None:
         self.item, self.ctx, self.perm = item, ctx, perm
@@ -471,9 +470,6 @@ class SpecialIsland(IslandBlock):
         self.rev = item.rev
 
     def _make(self):
-        from ...widgets.transcript.bodies.ask import AskBody
-        from ...widgets.transcript.bodies.plan import PlanBody
-
         if self.item.name == "AskUserQuestion":
             return AskBody(self.item, self.ctx, self.perm)
         return PlanBody(self.item, self.ctx, self.perm)

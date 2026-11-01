@@ -19,7 +19,6 @@ from ..permission import key_badge, perm_button, typing_elsewhere
 from .common import (
     Badge,
     Hairline,
-    IconLabel,
     Json,
     NeedsDot,
     Row,
@@ -27,7 +26,6 @@ from .common import (
     caption,
     faint,
     markdown_label,
-    restyle,
     vbox,
 )
 
@@ -54,7 +52,7 @@ class Mark(QWidget):
         self.on = on
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -83,7 +81,6 @@ class OptionRow(QWidget):
         super().__init__(parent)
         self.label = label
         self.on = False
-        self._hover = False
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAccessibleName(label)
@@ -96,7 +93,7 @@ class OptionRow(QWidget):
         text = QWidget()
         tl = vbox(text, spacing=1)
         name = bits.label(label, wrap=True)
-        restyle(name, lambda t: f"QLabel {{ font-weight: 500; color: {t.text}; }}")
+        name.setFont(theme.font_ui(theme.FS_UI, 500))
         tl.addWidget(name)
         if description:
             tl.addWidget(bits.label(description, tone="faint", size="small", wrap=True))
@@ -110,35 +107,28 @@ class OptionRow(QWidget):
         self.mark.set_on(on)
         self.update()
 
-    def enterEvent(self, e) -> None:  # noqa: N802
-        self._hover = True
+    def enterEvent(self, e) -> None:
         self.hovered.emit()
-        self.update()
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
-        self._hover = False
-        self.update()
-        super().leaveEvent(e)
-
-    def focusInEvent(self, e) -> None:  # noqa: N802
+    def focusInEvent(self, e) -> None:
         self.hovered.emit()
         super().focusInEvent(e)
 
-    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, e) -> None:
         if e.button() == Qt.MouseButton.LeftButton:
             self.toggled.emit()
         super().mouseReleaseEvent(e)
 
-    def keyPressEvent(self, e) -> None:  # noqa: N802
+    def keyPressEvent(self, e) -> None:
         if e.key() in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter):
             self.toggled.emit()
             return
         super().keyPressEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
-        if self.on or self._hover:
+        if self.on or self.underMouse():
             p = QPainter(self)
             p.fillRect(self.rect(), t.color("fill_2" if self.on else "fill_1"))
 
@@ -196,11 +186,11 @@ class AskBody(QWidget):
             block = QWidget()
             bl = vbox(block, margins=(0, 8 if k else 0, 0, 0), spacing=2)
             ql = bits.label(qt, tone="muted", wrap=True)
-            restyle(ql, lambda t: f"QLabel {{ font-weight: 500; color: {t.text_2}; }}")
+            ql.setFont(theme.font_ui(theme.FS_UI, 500))
             bl.addWidget(ql)
             ans = Row(spacing=6)
             if answered.get(qt):
-                ans.add(IconLabel("check", "ok", 13))
+                ans.add(bits.IconLabel("check", "ok", 13))
                 ans.add(bits.label(answered[qt], wrap=True), 1)
                 self.answers.append(answered[qt])
             else:
@@ -256,11 +246,11 @@ class AskBody(QWidget):
         bl = vbox(box, spacing=9)
         line = Row(spacing=8)
         if q.get("header"):
-            tag = bits.label(str(q["header"]), size="micro")
-            restyle(tag, lambda t: f"QLabel {{ font-weight: 600; color: {t.text_3}; font-size: {theme.FS_MICRO}px; }}")
+            tag = bits.label(str(q["header"]), tone="faint")
+            tag.setFont(theme.font_ui(theme.FS_MICRO, 600))
             line.add(tag)
         qt = bits.label(str(q.get("question") or ""), wrap=True)
-        restyle(qt, lambda t: f"QLabel {{ font-size: {theme.FS_BODY}px; font-weight: 600; color: {t.text}; }}")
+        qt.setFont(theme.font_ui(theme.FS_BODY, 600))
         line.add(qt, 1)
         if multi:
             line.add(faint("Choose any"))
@@ -417,7 +407,7 @@ class AskBody(QWidget):
             },
         )
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)

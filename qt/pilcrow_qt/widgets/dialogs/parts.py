@@ -4,27 +4,18 @@ labels that elide. Everything paints from the theme tokens and follows a theme c
 from __future__ import annotations
 
 import math
+import time
 from typing import Dict, List, Optional
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QFontMetricsF, QPainter, QPalette
+from PySide6.QtCore import Qt as _Qt
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QFontMetricsF, QPainter, QPalette, QTextLayout, QTextOption
 from PySide6.QtWidgets import QAbstractButton, QFrame, QHBoxLayout, QLabel, QSizePolicy, QWidget
 
 from ... import theme
 from ...canvas.pixels import hline
 from ..ui.bits import Box, LayoutButton, Pill, paint_box  # noqa: F401 - LayoutButton is re-exported
 from ..ui.signals import bind
-
-
-def mix(a: str, b: str, weight: float) -> QColor:
-    """``color-mix(in srgb, a weight%, b)`` for two tokens (translucent ones are first laid on the canvas)."""
-    t = theme.tokens()
-    ca, cb = theme.blend(a, t.canvas), theme.blend(b, t.canvas)
-    return QColor(
-        int(round(ca.red() * weight + cb.red() * (1 - weight))),
-        int(round(ca.green() * weight + cb.green() * (1 - weight))),
-        int(round(ca.blue() * weight + cb.blue() * (1 - weight))),
-    )
 
 
 class Card(QFrame):
@@ -52,9 +43,13 @@ class Card(QFrame):
     def _paint(self) -> None:
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
-        bg = mix(t.accent_wash, t.raised, 0.3) if self._tone == "needs" else QColor(t.raised)
+        bg = (
+            theme.mix(theme.blend(t.accent_wash, t.canvas), 0.3, t.raised)
+            if self._tone == "needs"
+            else QColor(t.raised)
+        )
         if self._focused:
             line = QColor(t.text_3)
         else:
@@ -71,7 +66,7 @@ class Well(QFrame):
         self._radius = radius
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         paint_box(p, QRectF(self.rect()), QColor(t.inset), theme.blend(t.hair, t.inset), self._radius)
@@ -110,7 +105,7 @@ class Kbd(QLabel):
         theme.tint(self, fg="text_4" if bare else "text_3")
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, e) -> None:  # noqa: N802
+    def paintEvent(self, e) -> None:
         if not self._bare:
             t = theme.tokens()
             p = QPainter(self)
@@ -164,10 +159,10 @@ class Switch(QAbstractButton):
         self.toggled.connect(lambda _c: self.update())
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         return QSize(34, 20)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -182,13 +177,13 @@ class Switch(QAbstractButton):
         shadow = QColor(0, 0, 0, 77)  # 0 1px 3px rgba(0,0,0,.3), as two soft rings
         p.setBrush(shadow)
         p.drawEllipse(QRectF(x - 0.5, 2.5, 17, 17))
-        p.setBrush(QColor("#ffffff"))
+        p.setBrush(QColor(t.accent_ink))  # white on either track, like the web's knob
         p.drawEllipse(QRectF(x, 2, 16, 16))
 
 
 def switch_off(t: theme.Tokens) -> QColor:
-    """The off track: ``[data-theme='dark'] .switch:not(.on)`` is ``#3a3a3e``; light uses fill-3 over the page."""
-    return QColor("#3a3a3e") if t.dark else theme.blend(t.fill_3, t.canvas)
+    """The off track (``.switch:not(.on)``), laid on the page."""
+    return theme.blend(t.switch_off, t.canvas)
 
 
 # ---------------------------------------------------------------- the floating materials
@@ -217,11 +212,6 @@ def well_line(t: theme.Tokens) -> QColor:
     return theme.over(theme.qcolor(t.hair), well_bg(t))
 
 
-def popover_bg(t: theme.Tokens) -> QColor:
-    """``.popover``: glass over the blurred page (what the eye sees is close to glass over raised)."""
-    return theme.blend(t.glass, t.raised)
-
-
 def toast_bg(t: theme.Tokens) -> QColor:
     """``.toast``: glass over the page."""
     return theme.blend(t.glass, t.canvas)
@@ -243,10 +233,10 @@ class ElideLabel(QLabel):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.setMinimumWidth(24)
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         return QSize(24, super().minimumSizeHint().height())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         p = QPainter(self)
         p.setFont(self.font())
         p.setPen(self.palette().color(QPalette.ColorRole.WindowText))
@@ -257,13 +247,6 @@ class ElideLabel(QLabel):
             int(self.alignment()) | Qt.TextFlag.TextSingleLine,
             fm.elidedText(self.text(), Qt.TextElideMode.ElideRight, r.width()),
         )
-
-
-def page_column(width: int, padding: int = 0) -> int:
-    """``--col`` as the web resolves it inside a pane: clamp(640px, min(61.8%, 100% - 48px), 1080px) of
-    the pane less ``padding`` on each side (the welcome pads 24px; the control room and inbox none)."""
-    inner = width - 2 * padding
-    return max(640, min(int(round(inner * 0.618)), inner - 48, 1080))
 
 
 def half_hairline(surface: str) -> QWidget:
@@ -296,21 +279,6 @@ def field_label(text: str) -> QLabel:
     return lb
 
 
-def styled(lb: QLabel, color: str = "", size: float = 0, weight: int = 0, mono: bool = False) -> QLabel:
-    """Give a label an explicit colour (a token name or a literal), size and weight (for the handful of
-    one-off styles)."""
-    if color:
-        theme.tint(lb, fg=color)
-    f = theme.font_mono() if mono else lb.font()
-    if size:
-        f.setPixelSize(max(1, int(size + 0.5)))
-    if weight:
-        f.setWeight(theme._weight(weight))
-    if mono or size or weight:
-        lb.setFont(f)
-    return lb
-
-
 # ---------------------------------------------------------------- the scrim
 # The web dims the page under a sheet and blurs it (``.scrim``: the scrim colour over blur(10px)). On a
 # machine without a GPU a real blur of the whole window is too slow for an opening dialog, so the page
@@ -330,9 +298,6 @@ class Backdrop:
         self.ms = 0.0
         if host is None or _BLUR_OK is False or host.width() < 2 or host.height() < 2:
             return
-        import time
-
-        from PySide6.QtCore import Qt as _Qt
 
         t0 = time.perf_counter()
         try:
@@ -346,7 +311,7 @@ class Backdrop:
             self.pixmap = small.scaled(
                 pm.size(), _Qt.AspectRatioMode.IgnoreAspectRatio, _Qt.TransformationMode.SmoothTransformation
             )
-        except Exception:  # noqa: BLE001 — no snapshot, no blur
+        except Exception:  # no snapshot, no blur
             self.pixmap = None
         self.ms = (time.perf_counter() - t0) * 1000
         if _BLUR_OK is None:
@@ -359,11 +324,6 @@ class Backdrop:
         if self.pixmap is not None and not self.pixmap.isNull():
             p.drawPixmap(0, 0, self.pixmap)
         p.fillRect(w.rect(), theme.qcolor(t.scrim))
-
-
-def blur_enabled() -> Optional[bool]:
-    """Whether the blurred backdrop is on (None until the first sheet measured it)."""
-    return _BLUR_OK
 
 
 # ---------------------------------------------------------------- text laid out like the browser
@@ -435,7 +395,7 @@ class Text(QWidget):
     def text(self) -> str:
         return self._text
 
-    def setText(self, text: str) -> None:  # noqa: N802
+    def setText(self, text: str) -> None:
         if text != self._text:
             # one line as wide as before (a clock, a count): the layout need not run again
             same_box = not self._wrap and self._advance(text) == self._advance(self._text)
@@ -446,7 +406,7 @@ class Text(QWidget):
                 self.updateGeometry()
             self.update()
 
-    def setAlignment(self, a: Qt.AlignmentFlag) -> None:  # noqa: N802
+    def setAlignment(self, a: Qt.AlignmentFlag) -> None:
         self._align = a
         self.update()
 
@@ -489,7 +449,6 @@ class Text(QWidget):
         if known is not None:
             self._lines, self._laid_w = known, width
             return known
-        from PySide6.QtGui import QTextLayout, QTextOption
 
         lay = QTextLayout(self._text, self.qfont())
         opt = QTextOption()
@@ -510,24 +469,24 @@ class Text(QWidget):
         self._lines, self._laid_w = lines, width
         return lines
 
-    def hasHeightForWidth(self) -> bool:  # noqa: N802
+    def hasHeightForWidth(self) -> bool:
         return self._wrap
 
-    def heightForWidth(self, w: int) -> int:  # noqa: N802
+    def heightForWidth(self, w: int) -> int:
         n = max(1, len(self._layout(w))) if self._text else 0
         return int(round(n * self.line_px()))
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         fm = QFontMetricsF(self.qfont())
         w = int(math.ceil(fm.horizontalAdvance(self._text))) + 1
         return QSize(w, int(round(self.line_px())) if self._text or not self._wrap else 0)
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         if self._wrap:
             return QSize(24, int(round(self.line_px())) if self._text else 0)
         return self.sizeHint()
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         if self._wrap:
             self._layout(self.width())
             h = self.heightForWidth(self.width())
@@ -535,7 +494,7 @@ class Text(QWidget):
                 self.updateGeometry()
         super().resizeEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         if not self._text:
             return
         t = theme.tokens()

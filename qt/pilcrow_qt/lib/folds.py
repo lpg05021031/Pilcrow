@@ -1,17 +1,16 @@
 """How a turn's work reads: the pure helpers behind the folds (the functions at the top of
 web/src/components/Transcript.tsx). What a stretch of work is called, what Claude is doing right
-now, the chapters narration makes, the tally of a run of steps, which steps are quiet enough to fold
-into one "Explored" line, and how items group into runs. No Qt here."""
+now, which steps are quiet enough to fold into one "Explored" line, and how items group into runs.
+No Qt here."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, List, Optional, Set, Union
 
 from .fmt import basename, truncate
 from .tools_meta import str_
-from .transcript_model import Item, TextItem, ThinkingItem, ToolItem
-from .units import Unit, WorkUnit
+from .transcript_model import Item, ToolItem
 
 if TYPE_CHECKING:  # pragma: no cover
     from ..widgets.transcript.ctx import ToolCtx
@@ -168,96 +167,6 @@ def work_summary(work: List[Item]) -> Summary:
     return Summary(text[:1].upper() + text[1:], failed, len(tools))
 
 
-@dataclass
-class Chapter:
-    key: str
-    title: Optional[TextItem]
-    thought: Optional[ThinkingItem]
-    steps: List[Item] = field(default_factory=list)
-
-
-def chapters_of(items: List[Item]) -> List[Chapter]:
-    """Narration becomes a heading with its steps under it; a thought that led straight into the
-    narration is tucked onto the same heading."""
-    out: List[Chapter] = []
-    cur = Chapter("c0", None, None, [])
-    pending: Optional[ThinkingItem] = None
-
-    def push() -> None:
-        if cur.title or cur.thought or cur.steps:
-            out.append(cur)
-
-    for it in items:
-        if it.kind == "thinking":
-            if pending is not None:
-                cur.steps.append(pending)
-            pending = it
-            continue
-        if it.kind == "text":
-            push()
-            cur = Chapter("c-" + it.id, it, pending, [])
-            pending = None
-            continue
-        if pending is not None:
-            cur.steps.append(pending)
-            pending = None
-        cur.steps.append(it)
-    if pending is not None:
-        cur.steps.append(pending)
-    push()
-    return out
-
-
-@dataclass
-class Tally:
-    text: str
-    failed: int
-    ms: float
-    n: int
-
-
-def tally(steps: List[Item]) -> Tally:
-    tools = [it for it in steps if it.kind == "tool"]
-    counts = {
-        "edit": 0,
-        "command": 0,
-        "read": 0,
-        "search": 0,
-        "agent": 0,
-        "helper": 0,
-        "ask": 0,
-        "plan": 0,
-        "mcp": 0,
-        "other": 0,
-    }
-    failed = 0
-    for t in tools:
-        if t.status in ("error", "denied"):
-            failed += 1
-        counts[tool_word(t)] += 1
-    parts: List[str] = []
-    for key, one, many in (
-        ("edit", "edit", "edits"),
-        ("command", "command", "commands"),
-        ("read", "read", "reads"),
-        ("search", "search", "searches"),
-        ("agent", "agent", "agents"),
-        ("helper", "helper step", "helper steps"),
-        ("ask", "question", "questions"),
-        ("plan", "plan", "plans"),
-        ("mcp", "connector call", "connector calls"),
-    ):
-        n = counts[key]
-        if n:
-            parts.append(f"{n} {one if n == 1 else many}")
-    if counts["other"]:
-        parts.append(f"{counts['other']} other")
-    first = tools[0].start_ts if tools else 0
-    last = tools[-1] if tools else None
-    ms = ((last.end_ts or last.start_ts) - first) if first and last else 0
-    return Tally(" · ".join(parts), failed, ms, len(tools))
-
-
 def is_quiet(t: ToolItem, ctx: ToolCtx) -> bool:
     if t.id in ctx.pending or t.status != "done":
         return False
@@ -323,17 +232,6 @@ def group_items(items: List[Item]) -> List[Group]:
             out.append(ItemGroup(it.id, it))
     flush()
     return out
-
-
-def unit_sig(u: Unit, ctx: ToolCtx) -> str:
-    """What a unit looks like: its items and their revisions (and whether a permission sits on one)."""
-    items = u.work if isinstance(u, WorkUnit) else u.items
-    sig = ("W!" if u.live else "W") if isinstance(u, WorkUnit) else "P"
-    for it in items:
-        sig += f"|{it.id}:{it.rev}"
-        if it.kind == "tool" and it.id in ctx.pending:
-            sig += "+" + str(ctx.pending[it.id].get("requestId"))
-    return sig
 
 
 @dataclass

@@ -8,7 +8,7 @@ import type { HelperState } from '../lib/types';
  * a short state — the rolled-up cost, and Review once something is done. Drawn from `session.state`
  * alone; it is the whole picture while the cards scroll away.
  */
-export function chipText(h: HelperState) {
+function chipText(h: HelperState) {
   const word = h.state === 'needs_action' ? 'needs you' : h.state.replace('_', ' ');
   let extra = '';
   if (h.state === 'running') extra = duration(h.elapsedMs || 0);

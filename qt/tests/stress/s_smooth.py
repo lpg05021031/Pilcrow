@@ -39,7 +39,7 @@ class Frames(QObject):
         self.w = w
         w.installEventFilter(self)
 
-    def eventFilter(self, obj, e) -> bool:  # noqa: N802
+    def eventFilter(self, obj, e) -> bool:
         if e.type() == QEvent.Type.Paint:
             self.times.append(time.perf_counter())
         return False
@@ -161,9 +161,9 @@ def run_scale(turns: int = 600) -> str:
 
 def run_window() -> str:
     """The real window: who repaints while a reply streams, and the panel toggle's frames."""
-    from harness import Client, start_mock
+    from harness import Client, free_port, start_mock
 
-    port = 5661
+    port = free_port()
     mock = start_mock(port, 400)
     try:
         c = Client(port)
@@ -190,7 +190,7 @@ def run_window() -> str:
         app_ = QApplication.instance()
 
         class F(QObject):
-            def eventFilter(self, obj, e) -> bool:  # noqa: N802
+            def eventFilter(self, obj, e) -> bool:
                 if e.type() == QEvent.Type.Paint and hasattr(obj, "isWidgetType") and obj.isWidgetType():
                     for name, w in watched.items():
                         if obj is w or (name != "window" and w.isAncestorOf(obj)):

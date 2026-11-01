@@ -1,8 +1,10 @@
 import { useMemo, useRef, useState } from 'react';
-import { ArrowUp, Folder, CircleAlert, ChevronDown, KeyRound, RefreshCw, PanelLeftOpen } from 'lucide-react';
-import { useStore, setDialog, createSession, refreshInfo, toast, setUi } from '../lib/store';
+import { ArrowUp, Folder, CircleAlert, ChevronDown, KeyRound, RefreshCw } from 'lucide-react';
+import { useStore, setDialog, createSession, refreshInfo, toast } from '../lib/store';
 import { basename, tildify } from '../lib/format';
-import { Spinner, CopyButton, AppIcon } from './ui/bits';
+import { ShowSidebarButton, Spinner } from './ui/bits';
+import { CopyButton } from './ui/clipboard';
+import { AppIcon } from './ui/brand';
 
 function greeting(name?: string) {
   const h = new Date().getHours();
@@ -42,15 +44,10 @@ export function Welcome() {
     }
   };
 
-  const sidebar = useStore((s) => s.ui.sidebar);
   const root = useRef<HTMLDivElement>(null);
   return (
     <div className="welcome" ref={root}>
-      {!sidebar && (
-        <button className="icon-btn head-sidebar welcome-sidebar" title="Show sidebar (Ctrl+B)" aria-label="Show sidebar" onClick={() => setUi({ sidebar: true })}>
-          <PanelLeftOpen size={16} />
-        </button>
-      )}
+      <ShowSidebarButton />
       <div className="welcome-inner">
         <AppIcon size={72} className="welcome-icon" />
         <h1 className="welcome-title">{greeting(info?.displayName || info?.user)}</h1>
@@ -64,7 +61,7 @@ export function Welcome() {
         {info?.claude.path && info.gateway && !info.gateway.error && !info.gateway.hasToken && !info.gateway.loggedIn && <SetupCard />}
         <div className="composer welcome-composer">
           <div className="composer-field">
-            <textarea
+            <textarea aria-label="First message"
               className="composer-input"
               rows={2}
               autoFocus
@@ -86,7 +83,7 @@ export function Welcome() {
               <ChevronDown size={12} className="cbtn-chev" />
             </button>
             <div className="grow" />
-            <button className={`send${prompt.trim() ? ' ready' : ''}`} disabled={!prompt.trim() || busy || !connected} onClick={go} title="Start (Enter)">
+            <button className={`send${prompt.trim() ? ' ready' : ''}`} disabled={!prompt.trim() || busy || !connected} onClick={go} title="Start (Enter)" aria-label="Start">
               {busy ? <Spinner size={14} /> : <ArrowUp size={16} strokeWidth={2.25} className="send-arrow" />}
             </button>
           </div>

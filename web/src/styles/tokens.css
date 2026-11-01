@@ -7,30 +7,67 @@
   --font-ui: 'Inter Variable', 'Inter', 'Noto Sans CJK TC', 'Noto Sans TC', 'Source Han Sans TC', 'PingFang TC', 'Microsoft JhengHei UI', 'Microsoft JhengHei', 'Segoe UI', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono Variable', 'JetBrains Mono', 'Noto Sans Mono CJK TC', 'Microsoft JhengHei', 'DejaVu Sans Mono', 'Cascadia Mono', Consolas, ui-monospace, monospace;
 
-  /* type scale (px) — UI is 13, reading text 15 */
+  /* type scale (px) — UI is 13, reading text 14.5. A "-plus" step is half a pixel up, for faces that
+     run small at that size: code, keycaps, counters. */
+  --fs-tiny: 10px;
+  --fs-tiny-plus: 10.5px;
   --fs-micro: 11px;
+  --fs-micro-plus: 11.5px;
   --fs-small: 12px;
+  --fs-small-plus: 12.5px;
   --fs-ui: 13px;
+  --fs-ui-plus: 13.5px;
   --fs-body: 14.5px;
   --font-size: 14.5px; /* conversation prose; user-configurable */
   --fs-h: 15px; /* section headings */
   --fs-title: 17px;
   --fs-display: 22px;
-  --mono-size: 12.5px;
+  --mono-size: var(--fs-small-plus); /* code */
 
-  /* radii: controls < cards < floating < bubbles */
+  /* radii, on a 2px step from controls to bubbles: chips and keycaps 4, buttons and rows 6, fields
+     and small cards 8, wells and menus 10, cards and sheets 12, sheets' footers 14, bubbles 16, and
+     the pill. A radius off this list follows from another (an inner box's is its frame's less the
+     inset between them) or is half the box's height, and stays a number. */
   --r-1: 4px;
   --r-2: 6px;
-  --r-3: 10px;
-  --r-4: 16px;
-  --r-5: 999px;
+  --r-3: 8px;
+  --r-4: 10px;
+  --r-5: 12px;
+  --r-6: 14px;
+  --r-7: 16px;
+  --r-pill: 999px;
 
+  /* spacing: --sp-N is N × 4px; _5 is a half step (--sp-1_5 is 6px) and, up to 13px, _25 and _75
+     quarter steps, the odd pixels that centre a line of 13px type in a box of even height (--sp-2_25
+     is 9px). Padding, margins and gaps use these. What stays a number: 1px (a hairline's nudge), a
+     negative margin (it undoes a padding rather than adds a step), and an inset that lines text up
+     with something drawn beside it (an icon's column): optical corrections, all of them. */
+  --sp-0_5: 2px;
+  --sp-0_75: 3px;
   --sp-1: 4px;
+  --sp-1_25: 5px;
+  --sp-1_5: 6px;
+  --sp-1_75: 7px;
   --sp-2: 8px;
+  --sp-2_25: 9px;
+  --sp-2_5: 10px;
+  --sp-2_75: 11px;
   --sp-3: 12px;
+  --sp-3_25: 13px;
+  --sp-3_5: 14px;
   --sp-4: 16px;
-  --sp-5: 24px;
-  --sp-6: 32px;
+  --sp-4_5: 18px;
+  --sp-5: 20px;
+  --sp-5_5: 22px;
+  --sp-6: 24px;
+  --sp-6_5: 26px;
+  --sp-7: 28px;
+  --sp-7_5: 30px;
+  --sp-9: 36px;
+  --sp-10: 40px;
+  --sp-11: 44px;
+  --sp-12: 48px;
+  --sp-14: 56px;
 
   /* motion: hover/press 120, menus 180, panels/dialogs 240, height 300; exits are short and accelerate */
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
@@ -55,18 +92,36 @@
   --spring-bouncy: linear(0, 0.0666 2.5%, 0.2304 5%, 0.4412 7.5%, 0.6584 10%, 0.8527 12.5%, 1.0066 15%, 1.1131 17.5%, 1.1731 20%, 1.1931 22.5%, 1.1828 25%, 1.1527 27.5%, 1.1125 30%, 1.0703 32.5%, 1.0321 35%, 1.0014 37.5%, 0.9799 40%, 0.9674 42.5%, 0.9628 45%, 0.9642 47.5%, 0.9697 50%, 0.9774 52.5%, 0.9856 55%, 0.9931 57.5%, 0.9992 60%, 1.0035 62.5%, 1.0061 65%, 1.0072 67.5%, 1.007 70%, 1.006 72.5%, 1.0045 75%, 1.003 77.5%, 1.0015 80%, 1.0003 82.5%, 0.9994 85%, 0.9989 87.5%, 0.9986 90%, 0.9986 92.5%, 0.9988 95%, 0.9991 97.5%, 1);
   --spring-bouncy-t: 760ms;
 
+  /* Colours that do not change with the theme: what sits on photos and the lightbox's veil, and the
+     white a web page assumes under it (previews, rendered documents). */
+  --veil: rgba(8, 8, 8, 0.72);
+  --veil-ink: #ffffff;
+  --frame: #ffffff;
+  /* a solid accent, error or success button: lit along its top edge, resting on a soft shadow */
+  --shadow-solid: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-solid-hover: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 2px 8px -2px color-mix(in srgb, var(--accent-solid) 55%, transparent);
+  --solid-key: rgba(0, 0, 0, 0.14); /* a keycap drawn on such a button */
+  /* the same in both themes: a switch's knob, the app's own icon, the lightbox's image, and a card
+     waiting on you lifted off the page (with its accent ring) */
+  --shadow-knob: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-icon: 0 1px 2px rgba(0, 0, 0, 0.12), 0 6px 18px -8px rgba(0, 0, 0, 0.35);
+  --shadow-photo: 0 0 0 0.5px rgba(255, 255, 255, 0.14), 0 40px 100px -24px rgba(0, 0, 0, 0.9);
+  --shadow-ask: inset 0 0 0 1.5px var(--accent-ring), 0 6px 20px -12px rgba(0, 0, 0, 0.5);
+  --shadow-ask-live: inset 0 0 0 1.5px var(--accent-ring), 0 8px 26px -14px rgba(0, 0, 0, 0.55);
+
+  /* stacking, bottom to top. A part floating over a pane's scrolling content (the find bar, the @ list,
+     the Latest pill, a resize handle) takes --z-float; inside a component, 1 and 2 only order siblings. */
+  --z-float: 10;
+  --z-boot: 50;
+  --z-dialog: 90;
+  --z-popover: 100;
+  --z-toast: 120;
+  --z-lightbox: 150;
+  --z-ghost: 2000; /* the still copy of something leaving (lib/motion ghost), over all it left from */
+  --z-tip: 3000;
+
   --header-h: 48px;
   --col: 700px; /* conversation column: ~80 characters at 14.5px */
-
-  /* legacy aliases used by older rules */
-  --r-xs: var(--r-1);
-  --r-sm: var(--r-2);
-  --r-md: var(--r-3);
-  --r-lg: var(--r-4);
-  --ui-size: var(--fs-ui);
-  --fs-base: var(--fs-ui);
-  --fs-code: var(--mono-size);
-  --mono: var(--font-mono);
 
   interpolate-size: allow-keywords;
 }
@@ -79,6 +134,9 @@
   --chrome: #1f1f1f; /* sidebar and side panel */
   --raised: #262626; /* composer, cards, menus */
   --raised-2: #303030; /* hover / selected on raised */
+  --card-ask: #212124; /* cards that wait on you: a permission, a question, a plan, setup */
+  --bubble: var(--fill-2); /* your own messages */
+  --switch-off: #3a3a3e;
   --inset: #141414; /* code, diffs, fields */
   --hair: rgba(255, 255, 255, 0.07);
   --hair-2: rgba(255, 255, 255, 0.12);
@@ -87,20 +145,33 @@
   --fill-2: rgba(255, 255, 255, 0.15);
   --fill-3: rgba(255, 255, 255, 0.2);
 
+  /* Text, primary to faintest. --text-2 and --text-3 meet WCAG AA (4.5:1) as small text on every
+     opaque surface: canvas, chrome, raised, inset and the cards (test/unit/contrast.test.ts checks
+     both themes). On the translucent selection fill of a lit row (and on --raised-2) they fall short,
+     to 2.8:1, so a lit or hovered row sets its secondary text in --text; on the hover fill over the
+     canvas or the chrome --text-2 holds too, over a card or glass it does not (the rows lit, and their
+     surfaces, are checked by the same test). --text-4 is for marks that are not text
+     (dots, rails, rings) and for disabled controls, and meets the 3:1 asked of those. */
   --text: #ededed;
   --text-2: #9c9c9c;
-  --text-3: #878787;
-  --text-4: #6b6b6b;
+  --text-3: #8c8c8c;
+  --text-4: #707070;
 
   /* elevation: a card is a lighter surface with a hairline; it never casts a shadow on dark */
   --card: var(--raised);
   --card-shadow: 0 0 0 0.5px var(--hair-2);
   --card-shadow-hover: 0 0 0 0.5px var(--hair-3);
-  --card-shadow-lift: 0 0 0 0.5px var(--hair-3), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
 
-  /* Claude's orange: primary action, send, attention, focus */
+  /* Claude's orange: primary action, send, attention, focus.
+     White on --accent is 3.12:1, which is fine for a mark (the send button's arrow, a focus ring,
+     a dot) and not for words. Anything orange that carries words or figures (a primary button, a
+     count, the current find match) is --accent-solid: white on it 4.77:1, on --accent-solid-2 (its
+     hover, darker) 5.54:1. A danger button with words is --err-solid: 5.33:1, and 4.84:1 under the
+     hover's brightness(1.06). In the light theme the same pairs hold (the ink is white there too). */
   --accent: #d97757;
   --accent-2: #e2896c;
+  --accent-solid: #bf5030;
+  --accent-solid-2: #ad4a2a;
   --accent-ink: #ffffff;
   --accent-text: #e8946f;
   --accent-wash: rgba(217, 119, 87, 0.14);
@@ -110,6 +181,7 @@
   --ok: #53c556;
   --ok-wash: rgba(83, 197, 86, 0.12);
   --err: #f17778;
+  --err-solid: #c53538;
   --err-wash: rgba(220, 60, 61, 0.12);
   --info: #6aabf1;
   --info-wash: rgba(106, 171, 241, 0.12);
@@ -127,12 +199,31 @@
   --diff-del: rgba(255, 44, 86, 0.11);
   --diff-del-hl: rgba(255, 44, 86, 0.3);
 
-  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-card: 0 0 0 1px var(--hair), 0 1px 2px rgba(0, 0, 0, 0.25);
-  --shadow-float: 0 0 0 1px var(--hair-2), 0 10px 30px -10px rgba(0, 0, 0, 0.7), 0 2px 8px -2px rgba(0, 0, 0, 0.4);
-  --shadow-pop: 0 0 0 1px var(--hair-2), 0 18px 48px -12px rgba(0, 0, 0, 0.75), 0 6px 16px -6px rgba(0, 0, 0, 0.45);
   --scrim: rgba(12, 11, 9, 0.55);
   --selection: rgba(122, 167, 240, 0.3);
+  --find: rgba(217, 119, 87, 0.28); /* matches of the find bar; the current one is solid accent */
+  --scroll-edge: rgba(0, 0, 0, 0.45); /* where wide code continues past the edge */
+  --mark-glow: rgba(217, 119, 87, 0.22); /* the warm light under the large app mark */
+
+  /* the sheets on the window's ground, and the composer resting and in use */
+  --shadow-ground: inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 1px 2px rgba(0, 0, 0, 0.18);
+  --shadow-composer: 0 6px 24px -14px rgba(0, 0, 0, 0.5);
+  --shadow-composer-focus: 0 12px 36px -14px rgba(0, 0, 0, 0.6);
+  --shadow-await: 0 2px 6px rgba(0, 0, 0, 0.25); /* a step waiting on you */
+  --inset-ring: none; /* code and output wells: on dark the darker fill is edge enough */
+  /* The dark theme's two finishes (motion.css): raised things lit along their top edge, and a
+     sheet's wells reading through its material. Light has neither: the edge is transparent, and
+     the wells keep their own fills (the variable is unset there, so their fallback applies). */
+  --edge-lit: var(--edge-hi);
+  --sheet-well: rgba(0, 0, 0, 0.22);
+  --thumb: var(--fill-3); /* the segmented control's chosen segment */
+  --shadow-thumb: none;
+
+  /* tooltips are dark in both themes */
+  --tip: #2b2b30;
+  --tip-ink: #f1f1f3;
+  --shadow-tip: 0 0 0 1px rgba(255, 255, 255, 0.08), 0 8px 24px -8px rgba(0, 0, 0, 0.6);
 
   /* Floating material: what menus, sheets and toasts are made of. Slightly translucent over a deep
      blur, so what lies underneath still colours the surface; a one-pixel light along the top edge
@@ -145,16 +236,7 @@
   --shadow-sheet: 0 0 0 0.5px rgba(0, 0, 0, 0.7), inset 0 0 0 0.5px rgba(255, 255, 255, 0.1), inset 0 1px 0 var(--edge-hi), 0 36px 90px -24px rgba(0, 0, 0, 0.85), 0 12px 28px -12px rgba(0, 0, 0, 0.55);
   --scrim-blur: blur(10px) saturate(120%);
 
-  /* legacy names */
-  --bg: var(--canvas);
-  --bg-2: var(--chrome);
-  --bg-3: var(--raised);
-  --bg-4: var(--raised-2);
-  --bg-inset: var(--inset);
-  --line: var(--hair);
-  --line-2: var(--hair-2);
-
-  --cm-comment: #767369;
+  --cm-comment: #8d897d;
   --cm-keyword: #c7aaee;
   --cm-string: #a8d19a;
   --cm-number: #ecb37e;
@@ -190,6 +272,9 @@
   --chrome: #fafafa;
   --raised: #ffffff;
   --raised-2: #f2f2f2;
+  --card-ask: #ffffff;
+  --bubble: #f0f0f2;
+  --switch-off: var(--fill-3);
   --inset: #f9f9f9;
   --hair: rgba(0, 0, 0, 0.08);
   --hair-2: rgba(0, 0, 0, 0.12);
@@ -199,18 +284,19 @@
   --fill-3: rgba(0, 0, 0, 0.145);
 
   --text: #1a1a1a;
-  --text-2: #666666;
-  --text-3: #878787;
-  --text-4: #a3a3a3;
+  --text-2: #636363;
+  --text-3: #717171;
+  --text-4: #8f8f8f;
 
   /* elevation: on a white page a card needs a soft shadow to exist at all */
   --card: #ffffff;
   --card-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.07), 0 1px 2px rgba(0, 0, 0, 0.04), 0 6px 16px -10px rgba(0, 0, 0, 0.12);
   --card-shadow-hover: 0 0 0 0.5px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.05), 0 8px 20px -10px rgba(0, 0, 0, 0.16);
-  --card-shadow-lift: 0 0 0 0.5px rgba(0, 0, 0, 0.1), 0 12px 32px -12px rgba(0, 0, 0, 0.22);
 
   --accent: #d97757;
   --accent-2: #c6613f;
+  --accent-solid: #bf5030;
+  --accent-solid-2: #ad4a2a;
   --accent-ink: #ffffff;
   --accent-text: #ad4f2e;
   --accent-wash: rgba(217, 119, 87, 0.12);
@@ -220,6 +306,7 @@
   --ok: #006c10;
   --ok-wash: rgba(0, 108, 16, 0.1);
   --err: #a42528;
+  --err-solid: #a42528; /* white on it 7.31:1 */
   --err-wash: rgba(220, 60, 61, 0.12);
   --info: #1757ac;
   --info-wash: rgba(23, 87, 172, 0.09);
@@ -236,12 +323,26 @@
   --diff-del: rgba(205, 32, 84, 0.08);
   --diff-del-hl: rgba(205, 32, 84, 0.24);
 
-  --shadow-1: 0 1px 2px rgba(44, 40, 30, 0.06);
   --shadow-card: 0 0 0 1px var(--hair), 0 1px 2px rgba(44, 40, 30, 0.04);
-  --shadow-float: 0 0 0 1px var(--hair), 0 8px 28px -10px rgba(44, 40, 30, 0.16), 0 2px 6px -2px rgba(44, 40, 30, 0.06);
-  --shadow-pop: 0 0 0 1px var(--hair-2), 0 18px 44px -12px rgba(44, 40, 30, 0.22), 0 4px 12px -4px rgba(44, 40, 30, 0.08);
   --scrim: rgba(40, 36, 28, 0.24);
   --selection: rgba(44, 98, 196, 0.16);
+  --find: rgba(201, 97, 63, 0.26);
+  --scroll-edge: rgba(17, 17, 26, 0.1);
+  --mark-glow: transparent;
+
+  --shadow-ground: 0 1px 2px rgba(20, 20, 19, 0.04);
+  --shadow-composer: 0 8px 24px -16px rgba(17, 17, 26, 0.22);
+  --shadow-composer-focus: 0 14px 36px -16px rgba(17, 17, 26, 0.28);
+  --shadow-await: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --inset-ring: inset 0 0 0 1px var(--hair);
+  --edge-lit: transparent;
+  --sheet-well: initial;
+  --thumb: var(--raised);
+  --shadow-thumb: 0 1px 2px rgba(0, 0, 0, 0.18), 0 0 0 1px var(--hair);
+
+  --tip: #1d1d21;
+  --tip-ink: #f1f1f3;
+  --shadow-tip: 0 8px 24px -8px rgba(17, 17, 26, 0.35);
 
   --glass: rgba(255, 255, 255, 0.78);
   --glass-2: rgba(255, 255, 255, 0.88);
@@ -251,15 +352,7 @@
   --shadow-sheet: 0 0 0 0.5px rgba(0, 0, 0, 0.14), inset 0 1px 0 var(--edge-hi), 0 36px 80px -24px rgba(44, 40, 30, 0.35), 0 10px 24px -10px rgba(44, 40, 30, 0.14);
   --scrim-blur: blur(10px) saturate(120%);
 
-  --bg: var(--canvas);
-  --bg-2: var(--chrome);
-  --bg-3: var(--raised);
-  --bg-4: var(--raised-2);
-  --bg-inset: var(--inset);
-  --line: var(--hair);
-  --line-2: var(--hair-2);
-
-  --cm-comment: #8d8a80;
+  --cm-comment: #797569;
   --cm-keyword: #7c3fbf;
   --cm-string: #2f7a37;
   --cm-number: #b2570f;
@@ -302,12 +395,3 @@
   font-weight: var(--shiki-light-font-weight);
 }
 
-/* Before the script has chosen a theme, follow the system so the very first frame is already right. */
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme]) {
-    color-scheme: light;
-    --canvas: #ffffff;
-    --chrome: #fafafa;
-    --text: #1a1a1a;
-  }
-}

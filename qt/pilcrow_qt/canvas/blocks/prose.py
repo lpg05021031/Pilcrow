@@ -16,27 +16,26 @@ import re
 import time
 from typing import Any, List, Optional, Tuple
 
-from PySide6.QtCore import QRect, QRectF, Qt, QTimer
+from PySide6.QtCore import QPointF, QRect, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter, QTextCursor, QTextDocument, QTextTable
 
 from ... import markdown, theme
 from ...lib.transcript_model import TextItem
 from .. import grow
 from ..paint import (
-    FULL,
     Measurer,
     PaintState,
     doc_height,
+    doc_links,
     doc_pos_at,
     draw_doc,
-    find_ranges,
+    find_selections,
     paint_decor,
     rounded,
-    selection,
     table_rect,
     well_rects,
 )
-from ..scene import GRADE_EXACT, GRADE_FAST, Block, Group, Target
+from ..scene import GRADE_EXACT, Block, Group, Target
 
 COPY_W, COPY_H = 56, 20  # the Copy at a well's corner: room for "Copied" in micro text, 8px sides
 COPIED_FOR = 1.2  # seconds the corner says "Copied"
@@ -57,6 +56,7 @@ class ProseBlock(Block):
         "_doc_src",
         "line_h",
         "_wells",
+        "_links",
         "_copied",
         "_grower",
     )
@@ -78,6 +78,7 @@ class ProseBlock(Block):
         self.doc: Optional[QTextDocument] = None
         self._doc_src = ""
         self._wells: Optional[List[Tuple[QRectF, str]]] = None  # (rect, code) of each code well
+        self._links: Optional[List[Target]] = None  # its links, as Tab and a screen reader visit them
         self._copied: Tuple[int, float] = (-1, 0.0)  # which well said "Copied", until when
         self._grower: Optional[grow.Grower] = None  # grows the document while the block streams
 
@@ -131,7 +132,7 @@ class ProseBlock(Block):
                     self.src, width, self.compact, self.quiet, self.streaming, self.cwd, self.line_h
                 )
             self._doc_src = self.src
-        self._wells = None
+        self._wells = self._links = None
         self.warm = True
         h = doc_height(self.doc) if self.src.strip() else 0
         if self.grade < GRADE_EXACT and self.h:
@@ -144,7 +145,7 @@ class ProseBlock(Block):
         cur.beginEditBlock()
         try:
             return g.finish()
-        except Exception:  # noqa: BLE001
+        except Exception:
             return False
         finally:
             cur.endEditBlock()
@@ -157,7 +158,7 @@ class ProseBlock(Block):
         cur.beginEditBlock()
         try:
             return g.grow(self._doc_src, self.src)
-        except Exception:  # noqa: BLE001 - a grower that trips falls back to the render
+        except Exception:  # a grower that trips falls back to the render
             return False
         finally:
             cur.endEditBlock()
@@ -165,7 +166,7 @@ class ProseBlock(Block):
     def cool(self) -> None:
         self.doc = None
         self._doc_src = ""
-        self._wells = None
+        self._wells = self._links = None
         self._grower = None
         self.warm = False
 
@@ -201,8 +202,9 @@ class ProseBlock(Block):
     def _paint_copies(self, p: QPainter, x: int, y: int, st: PaintState) -> None:
         hov = st.hover
         shown = -1
-        if hov is not None and isinstance(hov.id, str) and hov.id.startswith(("well:", "copy:")):
-            shown = int(hov.id.split(":")[1])
+        for on in (hov, st.focus):  # the pointer on a well, or the keyboard on its Copy
+            if on is not None and isinstance(on.id, str) and on.id.startswith(("well:", "copy:")):
+                shown = int(on.id.split(":")[1])
         said, until = self._copied
         for i, (r, code) in enumerate(self.wells()):
             copied = i == said and time.monotonic() < until
@@ -245,20 +247,7 @@ class ProseBlock(Block):
         if not st.caching:
             self._paint_copies(p, x, top, st)
         color = QColor(st.t.text_2 if self.quiet else st.t.text)
-        sels: List[Any] = []
-        if st.needle:
-            for k, (a, b) in enumerate(find_ranges(self.doc, st.needle)):
-                if k == st.needle_current:
-                    sels.append(selection(self.doc, a, b, QColor(st.t.accent), QColor("#ffffff")))
-                else:
-                    sels.append(selection(self.doc, a, b, theme.blend("rgba(217, 119, 87, 0.28)", st.t.canvas)))
-        if st.selection is not None:
-            bg = theme.blend(st.t.selection, st.t.canvas)
-            if st.selection == FULL:
-                sels.append(selection(self.doc, 0, self.doc.characterCount(), bg))
-            else:
-                a, b = st.selection
-                sels.append(selection(self.doc, a, b, bg))
+        sels = find_selections(self.doc, st)
         draw_doc(p, self.doc, x, top, clip, color, sels or None)
 
     # ---- interaction
@@ -278,11 +267,17 @@ class ProseBlock(Block):
         return None
 
     def targets(self) -> List[Target]:
-        out: List[Target] = []
+        """Its links and its wells' Copy buttons, top to bottom."""
+        if self.doc is None:
+            return []
+        if self._links is None:  # a screen reader asks once per child: a long list's links are read once
+            self._links = [Target("link", str(at), rect, href, words) for at, href, words, rect in doc_links(self.doc)]
+        out = list(self._links)
         for i, (r, code) in enumerate(self.wells()):
             if code:
                 cr = self.copy_rect(r)
                 out.append(Target("button", f"copy:{i}", (cr.x(), cr.y(), cr.width(), cr.height())))
+        out.sort(key=lambda t: (t.rect[1], t.rect[0]))
         return out
 
     def cursor_for(self, target: Target) -> Optional[Any]:
@@ -325,8 +320,6 @@ class ProseBlock(Block):
 
 
 def _pt(x: int, y: int):
-    from PySide6.QtCore import QPointF
-
     return QPointF(x, y)
 
 
@@ -432,6 +425,3 @@ class TextGroup(Group):
     @property
     def static(self) -> bool:
         return not self.item.streaming
-
-
-_ = (GRADE_FAST, Tuple)

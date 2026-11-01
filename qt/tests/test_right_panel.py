@@ -3,10 +3,9 @@ the button family, the segmented control, headings, empty states, and the tab st
 
 from __future__ import annotations
 
-from harness import app_client, mock_server  # noqa: F401
+from harness import app_client, mock_server
 from PySide6.QtGui import QFontInfo, QFontMetrics
 
-MOCK_PORT = 5393
 SID = "sess-login"
 
 
@@ -109,7 +108,6 @@ def test_section_and_empty_state_typography(app_client):
     assert e.text.width() > 300  # the sentence spans the block; it is centred by its alignment, not squeezed
     e.set_icon("")
     assert not e.ico.isVisible()
-    _ = theme
     for w in (s, faint, e):  # top-level windows left open would sit over the next test's window
         w.close()
         w.deleteLater()

@@ -152,7 +152,7 @@ def texts(n: nd.Node) -> List[str]:
 
 
 def html(n: nd.Node) -> str:
-    return "\n".join(x._text for x in nodes(n) if isinstance(x, nd.Text))  # noqa: SLF001
+    return "\n".join(x._text for x in nodes(n) if isinstance(x, nd.Text))
 
 
 def pump(ms: int = 30) -> None:
@@ -354,6 +354,44 @@ def test_agent_card_with_nested_children(app):
     assert "lib/parser.test.ts" in b2.reports.root.text()
 
 
+def test_a_running_card_ticks_its_marks_not_its_rows(app):
+    """DESIGN §6.5: a clock tick repaints the turning status mark (and the head once a second, when the
+    elapsed figure moves on); a body repaints its spinner, not the block."""
+    import time
+
+    card = block(make("Bash", {"command": "sleep 10"}))
+    assert card.item.status == "running"
+    now = time.monotonic()
+    assert card.tick(now) == (0, 0, 100000, card.head_h)  # the first tick of a second: the whole head
+    assert card.tick(now) == (0, 0, 20, card.head_h)  # then the mark alone
+    agent = block(make("Agent", {"description": "look around", "subagent_type": "Explore", "prompt": "Find it"}))
+    spinners = [n for n in nodes(body(agent)) if isinstance(n, nd.Spinner)]
+    assert len(spinners) == 1 and agent.body.live()
+    s = spinners[0]
+    assert agent.body.tick(now) == (s.x, s.y, 12, 12)
+    assert block(make("Bash", {"command": "ls"}, "a.ts")).body.tick(now) is None
+
+
+def test_a_row_measures_its_words_natural_width_once(app, monkeypatch):
+    """A Markdown or an HTML text beside an icon is not stretched: its natural width is read from a
+    document laid out once, not once per layout (a resize lays the row out at every step)."""
+    m = measurer()
+    built: List[str] = []
+    for name in ("markdown_doc", "html_doc"):
+        real = getattr(m, name)
+        monkeypatch.setattr(m, name, lambda *a, _r=real, _n=name, **k: (built.append(_n), _r(*a, **k))[1])
+    md, html_text = nd.Markdown("A **short** note."), nd.Text("<p>An <b>html</b> line</p>", 13, html=True)
+    row = nd.hstack(nd.Icon("info"), md, html_text, nd.Spacer(), stretch=[3])
+    for w in range(400, 800, 40):
+        row.layout(0, 0, w, m)
+    natural = [n for n in built if n in ("markdown_doc", "html_doc")]
+    assert len(natural) <= 4, built  # a natural width and a document each, whatever the row's width
+    assert md.natural_w(m) == md._nat > 0 and html_text.natural_w(m) == html_text._nat > 0
+    html_text.set_text("<p>Longer words in the same line now</p>")
+    md.cool()
+    assert md._nat == html_text._nat == -1 and html_text.natural_w(m) > 0
+
+
 def test_generic_and_mcp_body(app):
     item = make("mcp__github__list_issues", {"repo": "a/b", "state": "open"}, "#1 bug\n#2 feature")
     b = block(item)
@@ -422,7 +460,6 @@ def test_ask_body_answers_through_respond(app, respond):
     }
     _isl, body_w = special(item, perm)
     assert isinstance(body_w, AskBody) and body_w.live
-    labels = [lb.text() for lb in body_w.findChildren(type(body_w.findChildren(QWidget)[0]))] if False else None
     assert "Claude has 2 questions" in [lb.text() for lb in _labels(body_w)]
     assert not body_w.send_btn.isEnabled()
     body_w.rows[0][0].toggled.emit()  # React
@@ -446,7 +483,6 @@ def test_ask_body_answers_through_respond(app, respond):
             },
         )
     ]
-    _ = labels
 
 
 def _labels(w: QWidget) -> List[QWidget]:

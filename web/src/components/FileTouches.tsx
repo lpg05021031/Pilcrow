@@ -1,34 +1,25 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { History, ArrowUpRight } from 'lucide-react';
 import { useStore, call, openSession, setUi } from '../lib/store';
 import type { FileTouch } from '../lib/types';
 import { timeAgo, plural } from '../lib/format';
-import { Popover } from './ui/Popover';
+import { Popover, useAnchor } from './ui/Popover';
 import { revealItem } from './Transcript';
-import { useNow } from './ui/bits';
+import { useNow } from './ui/hooks';
+import { folders, loadOnce } from '../lib/cache';
 
 type HistoryMap = Record<string, FileTouch[]>;
-const cache = new Map<string, { at: number; data: HistoryMap; p?: Promise<HistoryMap> }>();
 
-/** Which sessions touched which files in a folder, from the timeline; cached briefly per folder. */
+/** Which sessions touched which files in a folder, from the timeline; kept briefly per folder (lib/cache). */
 export function useFileHistory(cwd: string): HistoryMap | null {
   const fsRev = useStore((s) => s.fsRev);
   const schedRev = useStore((s) => s.schedRev);
-  const [data, setData] = useState<HistoryMap | null>(() => cache.get(cwd)?.data || null);
+  const [data, setData] = useState<HistoryMap | null>(null);
   useEffect(() => {
     if (!cwd) return;
     let alive = true;
-    const cur = cache.get(cwd);
-    if (cur && Date.now() - cur.at < 15_000 && !cur.p) {
-      setData(cur.data);
-      return;
-    }
-    const p = call<HistoryMap>('project.fileHistory', { cwd }, { quiet: true }).catch(() => ({}) as HistoryMap);
-    cache.set(cwd, { at: Date.now(), data: cur?.data || {}, p });
-    p.then((d) => {
-      cache.set(cwd, { at: Date.now(), data: d });
-      if (alive) setData(d);
-    });
+    // A folder whose history cannot be read simply shows no marks.
+    loadOnce(folders.history, cwd, () => call<HistoryMap>('project.fileHistory', { cwd }, { quiet: true }).catch(() => ({}) as HistoryMap)).then((d) => alive && setData(d));
     return () => {
       alive = false;
     };
@@ -41,8 +32,7 @@ export function useFileHistory(cwd: string): HistoryMap | null {
  * picking one opens it at the step that made the change.
  */
 export function FileTouches({ touches, compact = false }: { touches: FileTouch[] | undefined; compact?: boolean }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLButtonElement>(null);
+  const { anchor, ref: setAnchor, open, setOpen } = useAnchor();
   const now = useNow(30_000, open);
   const activeId = useStore((s) => s.activeId);
   if (!touches?.length) return null;
@@ -68,9 +58,9 @@ export function FileTouches({ touches, compact = false }: { touches: FileTouch[]
   return (
     <>
       <button
-        ref={ref}
+        ref={setAnchor}
         className={`touches${open ? ' on' : ''}`}
-        title={`Changed in ${plural(n, 'session')}`}
+        title={`Changed in ${plural(n, 'session')}`} aria-label={`Changed in ${plural(n, 'session')}`}
         onClick={(e) => {
           e.stopPropagation();
           setOpen(!open);
@@ -79,7 +69,7 @@ export function FileTouches({ touches, compact = false }: { touches: FileTouch[]
         <History size={11} />
         <span className="tnum">{n}</span>
       </button>
-      <Popover anchor={ref.current} open={open} onClose={() => setOpen(false)} placement="bottom-end" width={360}>
+      <Popover anchor={anchor} open={open} onClose={() => setOpen(false)} placement="bottom-end" width={360} role="dialog" label="Sessions that changed this file">
         <div className="touches-pop">
           <div className="touches-h">Changed in {plural(n, 'session')}</div>
           {[...sessions.entries()].map(([id, ts]) => {

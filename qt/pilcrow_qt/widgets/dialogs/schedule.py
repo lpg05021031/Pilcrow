@@ -5,15 +5,14 @@ model, the time limit, the worktree and whether it is enabled. ``schedules.save`
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
-from PySide6.QtCore import QSize, Qt, QTime, QTimer, Signal
+from PySide6.QtCore import Qt, QTime, QTimer, Signal
 from PySide6.QtGui import QIntValidator
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -27,7 +26,7 @@ from ..ui.bits import Box, button
 from ..ui.menu import Popover, host_for
 from ..ui.signals import bind
 from .parts import ElideLabel, LayoutButton, Switch, Text, sheet_bg, well_bg, well_line
-from .settings_ui import ModelSelect, Select, input_css, line_edit, styled, text_area
+from .settings_ui import Field, ModelSelect, Select, line_edit, style_field, text_area
 from .sheet import Sheet
 
 Json = Dict[str, Any]
@@ -79,7 +78,7 @@ def _field(title: str, w: QWidget, note: Optional[QWidget] = None) -> QWidget:
     return box
 
 
-class NumInput(QLineEdit):
+class NumInput(Field):
     """``input.sd-num``: a 64px number box (the web's ``<input type=number>``), with a spin box's
     ``value``/``setValue``/``valueChanged`` so the form reads it the same way."""
 
@@ -95,13 +94,13 @@ class NumInput(QLineEdit):
         self.setAccessibleName(name)
         self.setValidator(QIntValidator(lo, hi, self))
         self.setText(str(value))
-        styled(self, lambda t: input_css("#input", t, False, "0 6px"))
+        style_field(self, False, "0 6px")
         self.textChanged.connect(self._typed)
 
     def value(self) -> int:
         return self._value
 
-    def setValue(self, v: int) -> None:  # noqa: N802
+    def setValue(self, v: int) -> None:
         v = max(self.lo, min(self.hi, int(v)))
         if v != self._value:
             self._value = v
@@ -117,7 +116,7 @@ class NumInput(QLineEdit):
                 self.valueChanged.emit(v)
 
 
-class TimeInput(QLineEdit):
+class TimeInput(Field):
     """``input.sd-time``: a 112px ``HH:MM`` box (the web's ``<input type=time>``), with ``time``/``setTime``/
     ``timeChanged`` as a QTimeEdit has."""
 
@@ -131,13 +130,13 @@ class TimeInput(QLineEdit):
         self.setAccessibleName(name)
         self.setInputMask("99:99")
         self.setText(t.toString("HH:mm"))
-        styled(self, lambda tk: input_css("#input", tk, False, "0 10px"))
+        style_field(self, False, "0 10px")
         self.textChanged.connect(self._typed)
 
     def time(self) -> QTime:
         return self._time
 
-    def setTime(self, t: QTime) -> None:  # noqa: N802
+    def setTime(self, t: QTime) -> None:
         if t != self._time:
             self._time = t
             self.timeChanged.emit(t)
@@ -203,13 +202,13 @@ class FolderButton(LayoutButton):
     def text(self) -> str:
         return self._value
 
-    def setText(self, v: str) -> None:  # noqa: N802
+    def setText(self, v: str) -> None:
         if v != self._value:
             self._value = v
             self._paint()
             self.textChanged.emit(v)
 
-    def open(self) -> None:  # noqa: A003
+    def open(self) -> None:
         if self._pop is not None and self._pop.is_open:
             self._pop.dismiss()
             return
@@ -312,7 +311,27 @@ class ScheduleDialog(Sheet):
             or ""
         )
 
-        # ---- what runs: a prompt in a folder, or a dispatch playbook across its repositories
+        self._build_what()
+        self._build_name_folder(default_cwd)
+        self._build_prompt()
+        self._build_when()
+        self._build_mode(info)
+        self._build_more()
+        self._build_footer(editing)
+        self._mode = "acceptEdits"
+        self.set_mode(self._mode)
+        if self.spec.get("kind") == "dispatch":
+            self.what.setCurrentIndex(1)
+            if self.spec.get("playbookId"):
+                self._pick_playbook(str(self.spec["playbookId"]))
+        self._on_kind()
+        self._on_cadence()
+        self._summary()
+        if editing:
+            store.call("schedules.list", {}, quiet=True).then(self._got_schedules).catch(lambda _e: None)
+
+    def _build_what(self) -> None:
+        """What runs: a prompt in a folder, or a dispatch playbook across its repositories."""
         what = QWidget()
         wl0 = QHBoxLayout(what)
         wl0.setContentsMargins(0, 0, 0, 0)
@@ -331,7 +350,8 @@ class ScheduleDialog(Sheet):
         bind(store.playbooks_changed, self, lambda _p: self._fill_playbooks())
         self._fill_playbooks()
 
-        # ---- name, folder
+    def _build_name_folder(self, default_cwd: str) -> None:
+        """The name and the folder, side by side."""
         two = QWidget()
         tl = QGridLayout(two)
         tl.setContentsMargins(0, 0, 0, 0)
@@ -345,7 +365,8 @@ class ScheduleDialog(Sheet):
         tl.addWidget(self.cwd_field, 0, 1)
         self.body_lay.addWidget(two)
 
-        # ---- prompt
+    def _build_prompt(self) -> None:
+        """The prompt (a playbook brings its own: a note says so instead)."""
         self.prompt = text_area(
             "Run the test suite, fix any failing tests you can, and summarise what changed. Do not push.",
             rows=4,
@@ -374,7 +395,8 @@ class ScheduleDialog(Sheet):
         self.dispatch_note.hide()
         self.body_lay.addWidget(self.dispatch_note)
 
-        # ---- when
+    def _build_when(self) -> None:
+        """When it runs: the cadence and its fields, or a cron expression."""
         when = QWidget()
         wl = QHBoxLayout(when)
         wl.setContentsMargins(0, 0, 0, 0)
@@ -416,7 +438,8 @@ class ScheduleDialog(Sheet):
         wl.addStretch(1)
         self.body_lay.addWidget(_field("When", when))
 
-        # ---- mode
+    def _build_mode(self, info: Json) -> None:
+        """What Claude may do while it runs: the permission modes."""
         radios = Box(bg=well_bg, line=well_line, radius=theme.R3)
         radios.setObjectName("radio-list")
         rl = QVBoxLayout(radios)
@@ -433,7 +456,8 @@ class ScheduleDialog(Sheet):
         self.mode_field = _field("While it runs, Claude may", radios)
         self.body_lay.addWidget(self.mode_field)
 
-        # ---- more
+    def _build_more(self) -> None:
+        """More: the model, a time limit, a worktree, enabled."""
         self.more_btn = LayoutButton()
         self.more_btn.setObjectName("disclose")
         self.more_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -492,7 +516,8 @@ class ScheduleDialog(Sheet):
         self.more_box.hide()
         self.body_lay.addWidget(self.more_box)
 
-        # ---- footer
+    def _build_footer(self, editing: bool) -> None:
+        """The footer: the next runs, Cancel and Save."""
         self.preview_lb = Text("", theme.FS_SMALL, 400, "text_3", 1.5)
         self.preview_lb.set_max_width(300)
         self.foot_lay.addWidget(self.preview_lb, 1)
@@ -500,18 +525,6 @@ class ScheduleDialog(Sheet):
         self.save_btn = button("Save" if editing else "Create schedule", kind="primary", on_click=self.save)
         self.save_btn.setDefault(False)
         self.add_footer(self.cancel_btn, self.save_btn, stretch_before=False)
-
-        self._mode = "acceptEdits"
-        self.set_mode(self._mode)
-        if self.spec.get("kind") == "dispatch":
-            self.what.setCurrentIndex(1)
-            if self.spec.get("playbookId"):
-                self._pick_playbook(str(self.spec["playbookId"]))
-        self._on_kind()
-        self._on_cadence()
-        self._summary()
-        if editing:
-            store.call("schedules.list", {}, quiet=True).then(self._got_schedules).catch(lambda _e: None)
 
     # ---- loading an existing schedule
     # ---- what runs
@@ -649,7 +662,6 @@ class ScheduleDialog(Sheet):
         err = r.get("error")
         nxt = r.get("nextRunAt")
         label = str(r.get("label") or "")
-        t = theme.tokens()
         if err:
             self.preview_lb.set_color("err")
             self.preview_lb.setText(str(err))
@@ -660,7 +672,6 @@ class ScheduleDialog(Sheet):
         else:
             self.preview_lb.set_color("text_3")
             self.preview_lb.setText(label)
-        _ = t
 
     # ---- mode, more
     def set_mode(self, mode: str) -> None:
@@ -758,6 +769,3 @@ def _row(title: str, note: str, control: QWidget) -> QWidget:
     lay.addLayout(col, 1)
     lay.addWidget(control, 0, Qt.AlignmentFlag.AlignVCenter)
     return box
-
-
-_ = (QSize, basename, List)

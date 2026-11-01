@@ -3,10 +3,11 @@ import { Workflow, Check, X, Ban, RotateCcw, ChevronRight, CircleStop, Bot, GitB
 import type { ToolItem } from '../../lib/transcript';
 import type { TaskInfo, WorkflowAgent } from '../../lib/types';
 import { useStore, call, toast, setUi, models } from '../../lib/store';
-import { duration, shortModel, tokens, truncate } from '../../lib/format';
+import { clock, duration, shortModel, tokens, truncate, plural } from '../../lib/format';
 import { parseWorkflowMeta, workflowColumns, workflowCounts, agentState, type AgentState } from '../../lib/workflow';
 import { Markdown } from '../Markdown';
-import { Spinner, useNow } from '../ui/bits';
+import { Spinner } from '../ui/bits';
+import { useNow } from '../ui/hooks';
 import { Collapse } from '../ui/Collapse';
 import type { ToolCtx } from './ToolCard';
 import { str } from '../../lib/tools';
@@ -33,7 +34,7 @@ export function WorkflowInline({ item, ctx }: { item: ToolItem; ctx: ToolCtx }) 
       {description && <div className="wfi-desc">{description}</div>}
       <div className="wfi-row">
         <span className="faint tnum">
-          {phases ? `${phases} phase${phases > 1 ? 's' : ''}` : ''}
+          {phases ? plural(phases, 'phase') : ''}
           {counts.total ? ` · ${counts.done} of ${counts.total} agents done` : ''}
           {counts.running ? ` · ${counts.running} running` : ''}
           {counts.error ? ` · ${counts.error} failed` : ''}
@@ -198,7 +199,8 @@ export function WorkflowDetail({ task, sessionId, allTasks }: { task: TaskInfo; 
   const subsByAgent = useMemo(() => {
     const m = new Map<number, TaskInfo[]>();
     for (const t of subs) {
-      const owner = (task.workflow?.agents || []).filter((a): a is WorkflowAgent => Boolean(a && a.startedAt && t.startedAt! >= a.startedAt && (agentState(a) === 'running' || !a.lastProgressAt || t.startedAt! <= a.lastProgressAt + 2000))).sort((x, y) => (y.startedAt || 0) - (x.startedAt || 0))[0];
+      const at = t.startedAt || 0; // subs all have one (above)
+      const owner = (task.workflow?.agents || []).filter((a): a is WorkflowAgent => Boolean(a && a.startedAt && at >= a.startedAt && (agentState(a) === 'running' || !a.lastProgressAt || at <= a.lastProgressAt + 2000))).sort((x, y) => (y.startedAt || 0) - (x.startedAt || 0))[0];
       const key = owner ? owner.index : -1;
       m.set(key, [...(m.get(key) || []), t]);
     }
@@ -300,7 +302,7 @@ export function WorkflowDetail({ task, sessionId, allTasks }: { task: TaskInfo; 
                 <div className="wf-log">
                   {logs.map((l, i) => (
                     <div key={i} className="wf-log-line">
-                      <span className="faint tnum">{new Date(l.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</span>
+                      <span className="faint tnum">{clock(l.at, true)}</span>
                       <span>{l.message}</span>
                     </div>
                   ))}

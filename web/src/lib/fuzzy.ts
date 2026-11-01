@@ -1,6 +1,6 @@
 // Small fuzzy matcher tuned for file paths and command names.
 
-export interface Match<T> {
+interface Match<T> {
   item: T;
   score: number;
   hits: number[];

@@ -7,7 +7,6 @@ import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QStackedWidget, QWidget
 
 from ... import icons, theme
@@ -564,7 +563,7 @@ class AddMcpSheet(Sheet):
                 self.url.setText(str(c.get("url") or ""))
                 self.headers.setPlainText("\n".join(f"{k}: {v}" for k, v in (c.get("headers") or {}).items()))
             self._toggle_mode()
-        except Exception as e:  # noqa: BLE001 — whatever was pasted, say why it did not parse
+        except Exception as e:  # whatever was pasted, say why it did not parse
             store.toast(f"Could not read that JSON: {err_text(e)}", "error")
 
     def submit(self) -> None:
@@ -631,6 +630,3 @@ class ToolsSheet(Sheet):
                 bl.addWidget(label(str(t["description"]), tone="muted", size="small", wrap=True))
             self.list_lay.addWidget(box)
         self.schedule_relayout()
-
-
-_ = Qt

@@ -1,12 +1,13 @@
 // Pilcrow server: serves the UI, speaks JSON-RPC over a WebSocket and owns the Claude Code sessions.
-// Usage: node server/main.js [--shell=chrome|browser|none] [--port=N]
+// Usage: node server/main.js [--shell=chrome|browser|none] [--port=N]; run that way, the command line
+// in cli.js (the launcher, --doctor) takes over. Imported (Electron, the tests), this only defines start().
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { WebSocketServer } from 'ws';
+import { WebSocket, WebSocketServer } from 'ws';
 import { resolveSettings } from '@anthropic-ai/claude-agent-sdk';
 import { store, CONFIG_DIR } from './config.js';
 import { resolveClaude } from './claude.js';
@@ -19,33 +20,35 @@ import * as term from './terminal.js';
 import * as customize from './customize.js';
 import * as snapshots from './snapshots.js';
 import * as schedules from './schedules.js';
+import * as inbox from './inbox.js';
 import * as dispatch from './dispatch.js';
 import * as memory from './memory.js';
 import { repos } from './repos.js';
 import * as helpersMod from './helpers.js';
-import { which, log, xdg, HOME, IS_ROOT, IS_WIN, slash, readJson, writeJson, debounce, expandHome, run, privateDir } from './util.js';
+import { which, log, xdg, HOME, IS_ROOT, IS_WIN, slash, readJson, writeJson, debounce, expandHome, run, privateDir, migrateLegacyDirs, VERSION, AppError, under, flushSaves } from './util.js';
 
 // Old environment variable names keep working after the rename.
 for (const k of Object.keys(process.env)) if (k.startsWith('RETICLE_') && !('PILCROW_' + k.slice(8) in process.env)) process.env['PILCROW_' + k.slice(8)] = process.env[k];
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const DIST = path.join(ROOT, 'web', 'dist');
-const VERSION = readJson(path.join(ROOT, 'package.json'), {}).version || '1.0.0';
+export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+export const DIST = path.join(ROOT, 'web', 'dist');
 const PREFERRED_PORT = 47117;
-const LOCK = path.join(xdg('state'), 'instance.json');
+const HEARTBEAT_MS = 30_000; // a window that misses a ping for this long is gone (the laptop slept, a tunnel dropped)
+const MAX_BUFFERED = 32 * 1024 * 1024; // bytes queued for one window; past this it cannot keep up (see deliver)
+const MAX_PAYLOAD = 64 * 1024 * 1024; // a message from a window: attachments travel inline
+const LIST_CHANGED_MS = 150; // a burst of session changes is one "the list changed" to the windows
+/** The running instance's pid and port, for the launcher to find it (cli.js). */
+export const LOCK = path.join(xdg('state'), 'instance.json');
 
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.woff': 'font/woff', '.ttf': 'font/ttf', '.ico': 'image/x-icon', '.wasm': 'application/wasm', '.map': 'application/json' };
+const OCTET = 'application/octet-stream';
+/** A file the Files panel shows as a page runs in a sandbox of its own (an opaque origin, as the panel's
+ *  iframe asks): whoever opens it, it can never act as this app (its WebSocket, its /api). */
+const FILE_CSP = 'sandbox allow-scripts allow-forms allow-popups allow-modals';
+/** The interface's pages may run only their own scripts and talk only to this server. */
+const CSP = "frame-ancestors 'none'; default-src 'self'; img-src 'self' data: blob: http://127.0.0.1:* http://localhost:*; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; connect-src 'self' ws://127.0.0.1:* ws://localhost:*; frame-src http: https:; worker-src 'self' blob:";
 
-function parseArgs(argv) {
-  const out = {};
-  for (const a of argv) {
-    const m = a.match(/^--([^=]+)(?:=(.*))?$/);
-    if (m) out[m[1]] = m[2] ?? true;
-  }
-  return out;
-}
-
-async function gatewayInfo(cwd) {
+/** Where Claude Code sends its requests and whether it has credentials, from its own settings. */
+export async function gatewayInfo(cwd) {
   try {
     const r = await resolveSettings({ cwd: cwd || '/' });
     const env = r.effective?.env || {};
@@ -73,7 +76,8 @@ async function displayName() {
   return cachedName;
 }
 
-function openExternal(target) {
+/** Open a URL in the default browser, or a file or folder in the file manager. */
+export function openExternal(target) {
   if (IS_WIN) {
     // URLs go to the default browser; folders and files open in Explorer.
     const isUrl = /^[a-z][a-z0-9+.-]*:\/\//i.test(target) || target.startsWith('mailto:');
@@ -88,44 +92,56 @@ function openExternal(target) {
   return true;
 }
 
-export async function start({ shell = 'none', port, quiet = false, onQuit } = {}) {
-  privateDir(xdg('config'));
-  privateDir(xdg('state'));
-  const clients = new Set();
-  let totalConnections = 0;
+// ---------------------------------------------------------------- RPC
 
-  const send = (ws, obj) => {
-    if (ws.readyState === 1) ws.send(JSON.stringify(obj));
-  };
-  const broadcast = (e, d) => {
-    const raw = JSON.stringify({ t: 'ev', e, d });
-    for (const ws of clients) if (ws.readyState === 1) ws.send(raw);
-  };
+/** A required, non-empty string param; anything else is the client's mistake (invalid_params). */
+function str(v, name) {
+  if (typeof v !== 'string' || !v) throw new AppError('invalid_params', `${name} is required`);
+  return v;
+}
 
-  const listChanged = debounce(() => broadcast('sessions.changed', {}), 150);
-  bus.on('msgs', (d) => broadcast('session.msgs', d));
-  bus.on('state', (d) => broadcast('session.state', d));
-  bus.on('permission', (d) => broadcast('session.permission', d));
-  bus.on('permission-resolved', (d) => broadcast('session.permissionResolved', d));
-  bus.on('list-changed', listChanged);
-  snapshots.events.on('step', (d) => broadcast('timeline.step', d));
-  schedules.events.on('schedules', () => broadcast('schedules.changed', {}));
-  schedules.events.on('inbox', () => broadcast('inbox.changed', schedules.inboxList().unread));
-  schedules.start();
-  dispatch.events.on('changed', (d) => broadcast('dispatch.changed', d));
-  dispatch.events.on('playbooks', () => broadcast('dispatch.playbooks', {}));
-  dispatch.events.on('finished', (d) => d.scheduleId && schedules.noteDispatchFinished(d.scheduleId, d.status));
-  schedules.setDispatchRunner((playbookId, opts) => dispatch.dispatch.startFromPlaybook(playbookId, opts));
-  dispatch.start();
-  memory.events.on('changed', (d) => broadcast('memory.changed', d));
-  repos.events.on('changed', (d) => broadcast('repos.changed', d));
-  helpersMod.start();
-  helpersMod.events.on('changed', (d) => broadcast('helpers.changed', d));
-  term.terminals.on('data', (d) => broadcast('term.data', d));
-  term.terminals.on('exit', (d) => broadcast('term.exit', d));
+/** A condition on the params; the error names the param that broke it. */
+function need(ok, name) {
+  if (!ok) throw new AppError('invalid_params', `${name} is missing or has the wrong type`);
+}
 
-  const S = (id) => sessions.get(id);
-  const methods = {
+/** An optional string param: absent (undefined, null or '') reads as undefined. */
+function optStr(v, name) {
+  need(v === undefined || v === null || typeof v === 'string', name);
+  return v || undefined;
+}
+
+/** An optional list of strings: absent (undefined or null) reads as undefined. */
+function optStrs(v, name) {
+  need(v === undefined || v === null || (Array.isArray(v) && v.every((x) => typeof x === 'string')), name);
+  return v || undefined;
+}
+
+/** An optional plain object (a cadence): absent reads as undefined. */
+function optObj(v, name) {
+  need(v === undefined || v === null || (typeof v === 'object' && !Array.isArray(v)), name);
+  return v || undefined;
+}
+
+/** A path param, with ~ expanded. */
+const pathParam = (v, name = 'path') => expandHome(str(v, name));
+/** An optional path param (a folder to work in), with ~ expanded. */
+const optPath = (v, name = 'cwd') => expandHome(optStr(v, name));
+
+/** Dispatch's targets: at least one, each with a folder. */
+const targetsOk = (t) => Array.isArray(t) && t.length > 0 && t.every((x) => typeof x?.path === 'string' && x.path);
+/** A job's or playbook's folders with ~ expanded; a field that is not given stays not given. */
+const withPaths = (p) => ({ ...p, root: optPath(p.root, 'root'), ...(p.targets === undefined ? {} : { targets: p.targets.map((t) => ({ ...t, path: expandHome(t.path) })) }) });
+
+/**
+ * The JSON-RPC methods by name. A function of the few things they need from the running server, so
+ * the names can be listed without starting one (METHODS, which the mock server checks itself against).
+ * Params are checked where a missing one would otherwise surface as a TypeError deep in a module.
+ * @param {{ shell?: string, quit?: () => void, listChanged?: () => void }} server
+ */
+function rpcMethods({ shell, quit, listChanged }) {
+  const S = (id) => sessions.get(str(id, 'id'));
+  return {
     'app.info': async () => {
       const cfg = store.getConfig();
       return {
@@ -146,7 +162,7 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
       };
     },
     'app.quit': () => {
-      setTimeout(() => (onQuit ? onQuit() : (stop(), process.exit(0))), 50);
+      setTimeout(() => quit?.(), 50); // after the reply is out
       return true;
     },
     'config.get': () => store.getConfig(),
@@ -159,46 +175,66 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
     },
     'session.open': async ({ id }) => ({ ...(await (await S(id)).snapshot()), meta: store.getMeta(id) }),
     'session.create': (p) => sessions.create(p),
-    'session.send': async ({ id, ...rest }) => (await S(id)).send(rest),
+    'session.send': async ({ id, ...rest }) => {
+      need((rest.text === undefined || typeof rest.text === 'string') && (rest.images === undefined || Array.isArray(rest.images)) && (rest.files === undefined || Array.isArray(rest.files)), 'text/images/files');
+      return (await S(id)).send(rest);
+    },
     'session.interrupt': async ({ id }) => (await S(id)).interrupt(),
     'session.setCwd': async ({ id, cwd }) => (await S(id)).setCwd(cwd),
-    'session.queue.remove': async ({ id, uuid: u }) => (await S(id)).removeHeld(u),
-    'session.queue.update': async ({ id, uuid: u, text }) => (await S(id)).updateHeld(u, text),
-    'session.queue.sendNow': async ({ id, uuid: u }) => (await S(id)).sendHeldNow(u),
-    'session.setMode': async ({ id, mode }) => (await S(id)).setMode(mode),
-    'session.setModel': async ({ id, model }) => (await S(id)).setModel(model),
-    'session.setEffort': async ({ id, effort }) => (await S(id)).setEffort(effort),
-    'session.permission': async ({ id, requestId, decision }) => (await S(id)).respond(requestId, decision),
-    'session.rename': ({ id, title }) => sessions.rename(id, title),
+    'session.queue.remove': async ({ id, uuid: u }) => {
+      str(u, 'uuid');
+      return (await S(id)).removeHeld(u);
+    },
+    'session.queue.update': async ({ id, uuid: u, text }) => {
+      str(u, 'uuid');
+      need(typeof text === 'string', 'text');
+      return (await S(id)).updateHeld(u, text);
+    },
+    'session.queue.sendNow': async ({ id, uuid: u }) => {
+      str(u, 'uuid');
+      return (await S(id)).sendHeldNow(u);
+    },
+    'session.setMode': async ({ id, mode }) => (await S(id)).setMode(str(mode, 'mode')),
+    'session.setModel': async ({ id, model }) => (await S(id)).setModel(optStr(model, 'model')),
+    'session.setEffort': async ({ id, effort }) => (await S(id)).setEffort(optStr(effort, 'effort')),
+    'session.permission': async ({ id, requestId, decision }) => {
+      need(typeof decision?.behavior === 'string', 'decision');
+      return (await S(id)).respond(str(requestId, 'requestId'), decision);
+    },
+    'session.rename': ({ id, title }) => {
+      need(typeof title === 'string', 'title');
+      return sessions.rename(str(id, 'id'), title);
+    },
     'session.delete': async ({ id, removeWorktree, removeHelpers }) => {
+      str(id, 'id');
       // a lead's helpers go with it when asked (HELPERS.md §5.10); otherwise they stay as sessions
       if (removeHelpers) for (const hid of helpersMod.helpers.helperIds(id)) await sessions.remove(hid, { removeWorktree: Boolean(removeWorktree) });
       return sessions.remove(id, { removeWorktree });
     },
     'session.archive': ({ id, archived }) => {
-      store.setMeta(id, { archived: archived || null });
-      listChanged();
+      store.setMeta(str(id, 'id'), { archived: archived || null });
+      listChanged?.();
     },
     'session.pin': ({ id, pinned }) => {
-      store.setMeta(id, { pinned: pinned || null });
-      listChanged();
+      store.setMeta(str(id, 'id'), { pinned: pinned || null });
+      listChanged?.();
     },
-    'session.fork': ({ id, upToMessageId, title }) => sessions.fork(id, { upToMessageId, title }),
-    'session.close': async ({ id }) => sessions.find(id)?.close(),
+    'session.fork': ({ id, upToMessageId, title }) => sessions.fork(str(id, 'id'), { upToMessageId: optStr(upToMessageId, 'upToMessageId'), title: optStr(title, 'title') }),
+    'session.close': async ({ id }) => sessions.find(str(id, 'id'))?.close(),
     'session.contextUsage': async ({ id }) => (await S(id)).contextUsage(),
-    'session.rewind': async ({ id, messageId, dryRun }) => (await S(id)).rewind(messageId, dryRun !== false),
+    'session.rewind': async ({ id, messageId, dryRun }) => (await S(id)).rewind(str(messageId, 'messageId'), dryRun !== false),
     'session.mcpStatus': async ({ id }) => (await S(id)).mcpStatus(),
-    'session.mcp.reconnect': async ({ id, name }) => (await S(id)).mcpReconnect(name),
-    'session.mcp.toggle': async ({ id, name, enabled }) => (await S(id)).mcpToggle(name, Boolean(enabled)),
-    'session.mcp.auth': async ({ id, name }) => (await S(id)).mcpAuth(name),
-    'session.mcp.authCallback': async ({ id, name, url }) => (await S(id)).mcpAuthCallback(name, url),
-    'session.mcp.clearAuth': async ({ id, name }) => (await S(id)).mcpClearAuth(name),
+    'session.mcp.reconnect': async ({ id, name }) => (await S(id)).mcpReconnect(str(name, 'name')),
+    'session.mcp.toggle': async ({ id, name, enabled }) => (await S(id)).mcpToggle(str(name, 'name'), Boolean(enabled)),
+    'session.mcp.auth': async ({ id, name }) => (await S(id)).mcpAuth(str(name, 'name')),
+    'session.mcp.authCallback': async ({ id, name, url }) => (await S(id)).mcpAuthCallback(str(name, 'name'), str(url, 'url')),
+    'session.mcp.clearAuth': async ({ id, name }) => (await S(id)).mcpClearAuth(str(name, 'name')),
     'session.reloadSkills': async ({ id }) => (await S(id)).reloadSkills(),
     // ---- skills & MCP configuration (Claude Code's own files)
-    'skills.list': ({ cwd }) => customize.listSkills({ cwd: cwd ? expandHome(cwd) : undefined }),
-    'skills.create': ({ scope, cwd, name, description }) => customize.createSkill({ scope, cwd: cwd ? expandHome(cwd) : undefined, name, description }),
-    'skills.remove': ({ dir, cwd }) => customize.removeSkill({ dir: expandHome(dir), cwd: cwd ? expandHome(cwd) : undefined }),
-    'skills.import': ({ scope, cwd, from, name }) => customize.importSkill({ scope, cwd: cwd ? expandHome(cwd) : undefined, from, name }),
+    'skills.list': ({ cwd }) => customize.listSkills({ cwd: optPath(cwd) }),
+    'skills.create': ({ scope, cwd, name, description }) => customize.createSkill({ scope: optStr(scope, 'scope'), cwd: optPath(cwd), name: str(name, 'name'), description: optStr(description, 'description') }),
+    'skills.remove': ({ dir, cwd }) => customize.removeSkill({ dir: pathParam(dir, 'dir'), cwd: optPath(cwd) }),
+    'skills.import': ({ scope, cwd, from, name }) => customize.importSkill({ scope, cwd: optPath(cwd), from, name }),
     'skills.reloadAll': async () => {
       let n = 0;
       for (const s of sessions.live()) {
@@ -207,22 +243,23 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
       }
       return n;
     },
-    'mcp.list': ({ cwd }) => customize.listMcp({ cwd: cwd ? expandHome(cwd) : undefined }),
+    'mcp.list': ({ cwd }) => customize.listMcp({ cwd: optPath(cwd) }),
     'mcp.add': async ({ scope, cwd, name, form }) => {
       const claude = await resolveClaude(store.getConfig().claudeBinary);
-      return customize.addMcp({ bin: claude.path, scope, cwd: cwd ? expandHome(cwd) : undefined, name, config: customize.mcpConfigFromForm(form) });
+      return customize.addMcp({ bin: claude.path, scope, cwd: optPath(cwd), name, config: customize.mcpConfigFromForm(form) });
     },
     'mcp.remove': async ({ scope, cwd, name }) => {
+      str(name, 'name');
       const claude = await resolveClaude(store.getConfig().claudeBinary);
-      return customize.removeMcp({ bin: claude.path, scope, cwd: cwd ? expandHome(cwd) : undefined, name });
+      return customize.removeMcp({ bin: claude.path, scope, cwd: optPath(cwd), name });
     },
-    'mcp.approve': ({ cwd, name, approved }) => customize.approveProjectMcp({ cwd: expandHome(cwd), name, approved: Boolean(approved) }),
+    'mcp.approve': ({ cwd, name, approved }) => customize.approveProjectMcp({ cwd: pathParam(cwd, 'cwd'), name, approved: Boolean(approved) }),
     // ---- project memory and who-touched-what
-    'memory.list': ({ cwd }) => memory.list(expandHome(cwd)),
-    'memory.add': ({ cwd, text }) => memory.add(expandHome(cwd), { text }),
-    'memory.update': ({ cwd, id, text, pinned }) => memory.update(expandHome(cwd), id, { text, pinned }),
-    'memory.remove': ({ cwd, id }) => memory.remove(expandHome(cwd), id),
-    'memory.clear': ({ cwd }) => memory.clear(expandHome(cwd)),
+    'memory.list': ({ cwd }) => memory.list(pathParam(cwd, 'cwd')),
+    'memory.add': ({ cwd, text }) => memory.add(pathParam(cwd, 'cwd'), { text }),
+    'memory.update': ({ cwd, id, text, pinned }) => memory.update(pathParam(cwd, 'cwd'), id, { text, pinned }),
+    'memory.remove': ({ cwd, id }) => memory.remove(pathParam(cwd, 'cwd'), str(id, 'id')),
+    'memory.clear': ({ cwd }) => memory.clear(pathParam(cwd, 'cwd')),
     'memory.distill': async ({ id, force }) => {
       const s = await S(id);
       await s.loadHistory();
@@ -232,7 +269,7 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
       const list = await sessions.list();
       const titles = Object.fromEntries(list.map((s) => [s.id, { title: s.title, firstPrompt: s.firstPrompt || null, lastModified: s.lastModified }]));
       const byPath = {};
-      for (const st of snapshots.folderSteps(expandHome(cwd))) {
+      for (const st of await snapshots.folderSteps(pathParam(cwd, 'cwd'))) {
         for (const f of st.files) {
           (byPath[f.path] ||= []).push({ sessionId: st.sessionId, title: titles[st.sessionId]?.title || 'Session', about: titles[st.sessionId]?.firstPrompt || null, at: st.at, n: st.n, toolUseId: st.toolUseId, kind: st.kind, add: f.add, del: f.del });
         }
@@ -242,10 +279,10 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
     },
     // ---- scheduled sessions and their inbox
     'schedules.list': () => schedules.list(),
-    'schedules.save': (p) => schedules.save({ ...p, cwd: p.cwd ? expandHome(p.cwd) : p.cwd }),
-    'schedules.remove': ({ id }) => schedules.remove(id),
-    'schedules.toggle': ({ id, enabled }) => schedules.toggle(id, enabled),
-    'schedules.runNow': ({ id }) => schedules.runNow(id, { manual: true }),
+    'schedules.save': (p) => schedules.save({ ...p, cwd: optPath(p.cwd), cadence: optObj(p.cadence, 'cadence') }),
+    'schedules.remove': ({ id }) => schedules.remove(str(id, 'id')),
+    'schedules.toggle': ({ id, enabled }) => schedules.toggle(str(id, 'id'), enabled),
+    'schedules.runNow': ({ id }) => schedules.runNow(str(id, 'id'), { manual: true }),
     'schedules.preview': ({ cadence }) => {
       try {
         return { nextRunAt: schedules.nextRun(cadence), label: schedules.describeCadence(cadence) };
@@ -253,45 +290,61 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
         return { nextRunAt: null, label: '', error: e.message };
       }
     },
-    'inbox.list': () => schedules.inboxList(),
-    'inbox.markRead': ({ ids }) => schedules.markRead(ids || null),
-    'inbox.remove': ({ id }) => schedules.removeItem(id),
+    'inbox.list': () => inbox.list(),
+    'inbox.markRead': ({ ids }) => inbox.markRead(optStrs(ids, 'ids') || null),
+    'inbox.remove': ({ id }) => inbox.remove(str(id, 'id')),
     // ---- dispatch: one job across many repositories
-    'helpers.list': ({ leadId }) => helpersMod.helpers.list(leadId),
-    'helpers.allow': ({ leadId, requestId }) => helpersMod.helpers.allow(leadId, requestId),
-    'helpers.stop': ({ leadId, name }) => helpersMod.helpers.stop(leadId, { name }),
-    'helpers.review': ({ leadId }) => helpersMod.helpers.review(leadId),
-    'helpers.finish': ({ leadId, name, action, message, pr }) => helpersMod.helpers.finish(leadId, { name, action, message, pr }),
-    'helpers.export': ({ leadId }) => helpersMod.helpers.exportMarkdown(leadId),
-    'helpers.detach': ({ id }) => helpersMod.helpers.detach(id),
+    'helpers.list': ({ leadId }) => helpersMod.helpers.list(str(leadId, 'leadId')),
+    'helpers.allow': ({ leadId, requestId }) => helpersMod.helpers.allow(str(leadId, 'leadId'), str(requestId, 'requestId')),
+    'helpers.stop': ({ leadId, name }) => helpersMod.helpers.stop(str(leadId, 'leadId'), { name: str(name, 'name') }),
+    'helpers.review': ({ leadId }) => helpersMod.helpers.review(str(leadId, 'leadId')),
+    'helpers.finish': ({ leadId, name, action, message, pr }) => helpersMod.helpers.finish(str(leadId, 'leadId'), { name: optStr(name, 'name'), action: str(action, 'action'), message: optStr(message, 'message'), pr }),
+    'helpers.export': ({ leadId }) => helpersMod.helpers.exportMarkdown(str(leadId, 'leadId')),
+    'helpers.detach': ({ id }) => helpersMod.helpers.detach(str(id, 'id')),
     'repos.list': () => repos.list(),
-    'repos.save': (p) => repos.save({ ...p, path: p.path ? expandHome(p.path) : p.path }),
-    'repos.remove': ({ id }) => repos.remove(id),
-    'repos.register': ({ path: dir, ...patch }) => repos.register(expandHome(dir), patch),
-    'repos.scan': ({ root, depth }) => repos.scan(expandHome(root), depth),
+    'repos.save': (p) => repos.save({ ...p, path: optPath(p.path, 'path') }),
+    'repos.remove': ({ id }) => repos.remove(str(id, 'id')),
+    'repos.register': ({ path: dir, ...patch }) => repos.register(pathParam(dir), patch),
+    'repos.scan': ({ root, depth }) => repos.scan(pathParam(root, 'root'), depth),
     'repos.refresh': ({ ids, force }) => repos.refresh(ids || null, { force: Boolean(force) }),
     'repos.resolve': ({ word }) => repos.resolve(word) || { nearest: repos.nearest(word) },
-    'workspace.scan': ({ root, depth, force }) => dispatch.dispatch.scan({ root: expandHome(root), depth, force: Boolean(force) }),
+    'workspace.scan': ({ root, depth, force }) => dispatch.dispatch.scan({ root: optPath(root, 'root'), depth, force: Boolean(force) }),
     'dispatch.list': () => dispatch.dispatch.list(),
-    'dispatch.get': ({ id }) => dispatch.dispatch.get(id),
-    'dispatch.save': (p) => dispatch.dispatch.save({ ...p, root: p.root ? expandHome(p.root) : p.root, targets: (p.targets || []).map((t) => ({ ...t, path: expandHome(t.path) })) }),
-    'dispatch.remove': ({ id, removeWorktrees }) => dispatch.dispatch.remove(id, { removeWorktrees: Boolean(removeWorktrees) }),
-    'dispatch.plan': (p) => dispatch.dispatch.plan(p.id && !p.targets ? p.id : { ...p, root: p.root ? expandHome(p.root) : p.root, targets: (p.targets || []).map((t) => ({ ...t, path: expandHome(t.path) })) }),
-    'dispatch.start': ({ id, wave }) => dispatch.dispatch.start(id, { wave }),
-    'dispatch.continue': ({ id, brief, learn }) => dispatch.dispatch.continue(id, { brief, learn }),
-    'dispatch.pause': ({ id }) => dispatch.dispatch.pause(id),
-    'dispatch.resume': ({ id }) => dispatch.dispatch.resume(id),
-    'dispatch.stop': ({ id, runId }) => dispatch.dispatch.stop(id, { runId }),
-    'dispatch.retry': ({ id, runId, brief }) => dispatch.dispatch.retry(id, runId, { brief }),
-    'dispatch.skip': ({ id, runId }) => dispatch.dispatch.skip(id, runId),
-    'dispatch.allow': ({ id, key, requestId }) => dispatch.dispatch.allow(id, key, requestId),
-    'dispatch.review': ({ id }) => dispatch.dispatch.review(id),
-    'dispatch.finish': ({ id, runId, action, message, pr }) => dispatch.dispatch.finish(id, { runId, action, message, pr }),
-    'dispatch.export': ({ id }) => dispatch.dispatch.exportMarkdown(id),
+    'dispatch.get': ({ id }) => dispatch.dispatch.get(str(id, 'id')),
+    'dispatch.save': (p) => {
+      // a new job needs somewhere to run; an update that names no targets keeps the job's
+      need(p.targets === undefined ? Boolean(p.id) : targetsOk(p.targets), 'targets');
+      return dispatch.dispatch.save(withPaths(p));
+    },
+    'dispatch.remove': ({ id, removeWorktrees }) => dispatch.dispatch.remove(str(id, 'id'), { removeWorktrees: Boolean(removeWorktrees) }),
+    'dispatch.plan': (p) => {
+      need(p.targets === undefined || Array.isArray(p.targets), 'targets');
+      return dispatch.dispatch.plan(p.id && !p.targets ? p.id : withPaths({ ...p, targets: p.targets || [] }));
+    },
+    'dispatch.start': ({ id, wave }) => dispatch.dispatch.start(str(id, 'id'), { wave: optStr(wave, 'wave') }),
+    'dispatch.continue': ({ id, brief, learn }) => dispatch.dispatch.continue(str(id, 'id'), { brief: optStr(brief, 'brief'), learn }),
+    'dispatch.pause': ({ id }) => dispatch.dispatch.pause(str(id, 'id')),
+    'dispatch.resume': ({ id }) => dispatch.dispatch.resume(str(id, 'id')),
+    'dispatch.stop': ({ id, runId }) => dispatch.dispatch.stop(str(id, 'id'), { runId: optStr(runId, 'runId') }),
+    'dispatch.retry': ({ id, runId, brief }) => dispatch.dispatch.retry(str(id, 'id'), str(runId, 'runId'), { brief: optStr(brief, 'brief') }),
+    'dispatch.skip': ({ id, runId }) => dispatch.dispatch.skip(str(id, 'id'), str(runId, 'runId')),
+    'dispatch.allow': ({ id, key, requestId }) => {
+      need(typeof key === 'string' || typeof requestId === 'string', 'key/requestId');
+      return dispatch.dispatch.allow(str(id, 'id'), optStr(key, 'key'), optStr(requestId, 'requestId'));
+    },
+    'dispatch.review': ({ id }) => dispatch.dispatch.review(str(id, 'id')),
+    'dispatch.finish': ({ id, runId, action, message, pr }) => dispatch.dispatch.finish(str(id, 'id'), { runId: optStr(runId, 'runId'), action: str(action, 'action'), message: optStr(message, 'message'), pr }),
+    'dispatch.export': ({ id }) => dispatch.dispatch.exportMarkdown(str(id, 'id')),
     'dispatch.playbooks': () => dispatch.dispatch.playbooks(),
-    'dispatch.savePlaybook': (p) => dispatch.dispatch.savePlaybook({ ...p, root: p.root ? expandHome(p.root) : p.root, targets: p.targets ? p.targets.map((t) => ({ ...t, path: expandHome(t.path) })) : p.targets }),
-    'dispatch.removePlaybook': ({ id }) => dispatch.dispatch.removePlaybook(id),
-    'dispatch.startFromPlaybook': ({ id, name, wave, targets }) => dispatch.dispatch.startFromPlaybook(id, { name, wave, targets }),
+    'dispatch.savePlaybook': (p) => {
+      need(p.targets === undefined || Array.isArray(p.targets), 'targets');
+      return dispatch.dispatch.savePlaybook(withPaths(p));
+    },
+    'dispatch.removePlaybook': ({ id }) => dispatch.dispatch.removePlaybook(str(id, 'id')),
+    'dispatch.startFromPlaybook': ({ id, name, wave, targets }) => {
+      need(targets === undefined || targetsOk(targets), 'targets');
+      return dispatch.dispatch.startFromPlaybook(str(id, 'id'), { name: optStr(name, 'name'), wave: optStr(wave, 'wave'), targets });
+    },
     // ---- control room: every live session at a glance, plus spend
     'fleet.state': async () => {
       const list = await sessions.list();
@@ -316,49 +369,155 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
     'timeline.diff': async ({ id, from, to }) => snapshots.diff(await S(id), { from, to }),
     'timeline.stepDiff': async ({ id, n }) => snapshots.stepDiff(await S(id), n),
     'timeline.file': async ({ id, n, path: p }) => snapshots.fileAt(await S(id), { n, path: p }),
-    'timeline.restore': async ({ id, n, paths }) => {
-      const r = await snapshots.restore(await S(id), { n, paths });
-      return r;
-    },
-    'session.stopTask': async ({ id, taskId }) => (await S(id)).stopTask(taskId),
-    'session.subagent': async ({ id, agentId }) => history.loadSubagent(id, agentId, (await S(id)).cwd),
+    'timeline.restore': async ({ id, n, paths }) => snapshots.restore(await S(id), { n, paths }),
+    'session.stopTask': async ({ id, taskId }) => (await S(id)).stopTask(str(taskId, 'taskId')),
+    'session.subagent': async ({ id, agentId }) => history.loadSubagent(id, str(agentId, 'agentId'), (await S(id)).cwd),
     'session.gateway': async ({ cwd }) => gatewayInfo(cwd),
     'models.gateway': async ({ cwd, force }) => gatewayModels(cwd, { force: Boolean(force), version: VERSION }),
 
-    'git.info': ({ cwd }) => git.info(cwd),
-    'git.diff': ({ cwd, base }) => git.diff(cwd, { base }),
-    'git.branches': ({ cwd }) => git.branches(cwd),
-    'git.commit': ({ cwd, message, paths }) => git.commit(cwd, { message, paths }),
-    'git.discard': ({ cwd, path: p, untracked }) => git.discard(cwd, { path: p, untracked }),
-    'git.log': ({ cwd, n }) => git.log(cwd, n),
-    'git.worktrees': ({ cwd }) => git.listWorktrees(cwd),
-    'git.removeWorktree': (p) => git.removeWorktree(p),
+    // Without a folder, git would answer for whatever folder the server runs in (info and diff say isRepo: false).
+    'git.info': ({ cwd }) => git.info(optPath(cwd)),
+    'git.diff': ({ cwd, base }) => git.diff(optPath(cwd), { base: optStr(base, 'base') }),
+    'git.branches': ({ cwd }) => git.branches(pathParam(cwd, 'cwd')),
+    'git.commit': ({ cwd, message, paths }) => {
+      return git.commit(pathParam(cwd, 'cwd'), { message: str(message, 'message'), paths: optStrs(paths, 'paths') });
+    },
+    'git.discard': ({ cwd, path: p, untracked }) => git.discard(pathParam(cwd, 'cwd'), { path: str(p, 'path'), untracked: Boolean(untracked) }),
+    'git.log': ({ cwd, n }) => {
+      need(n === undefined || (Number.isInteger(n) && n > 0), 'n');
+      return git.log(pathParam(cwd, 'cwd'), n);
+    },
+    'git.worktrees': ({ cwd }) => git.listWorktrees(pathParam(cwd, 'cwd')),
+    'git.removeWorktree': ({ repoRoot, dir, branch, deleteBranch }) => git.removeWorktree({ repoRoot: pathParam(repoRoot, 'repoRoot'), dir: pathParam(dir, 'dir'), branch: optStr(branch, 'branch'), deleteBranch: Boolean(deleteBranch) }),
 
-    'fs.list': ({ dir }) => files.listDir(expandHome(dir)),
-    'fs.read': ({ path: p }) => files.readFile(expandHome(p)),
-    'fs.write': ({ path: p, text, expectedMtime, force }) => files.writeFile(expandHome(p), text, { expectedMtime, force }),
-    'fs.browse': ({ dir }) => files.browse(expandHome(dir)),
-    'fs.index': ({ cwd, force }) => files.fileIndex(cwd, { force }),
-    'fs.mkdir': ({ path: p }) => {
-      fs.mkdirSync(expandHome(p), { recursive: true });
+    'fs.list': ({ dir }) => files.listDir(pathParam(dir, 'dir')),
+    'fs.read': ({ path: p }) => files.readFile(pathParam(p)),
+    'fs.write': ({ path: p, text, expectedMtime, force }) => {
+      need(typeof text === 'string', 'text');
+      return files.writeFile(pathParam(p), text, { expectedMtime, force });
+    },
+    'fs.browse': ({ dir }) => files.browse(optPath(dir, 'dir')),
+    'fs.index': ({ cwd, force }) => files.fileIndex(pathParam(cwd, 'cwd'), { force }),
+    'fs.mkdir': async ({ path: p }) => {
+      await fs.promises.mkdir(pathParam(p), { recursive: true });
       return true;
     },
-    'fs.exists': ({ path: p }) => fs.existsSync(expandHome(p)),
 
-    'term.open': (p) => term.open(p),
-    'term.input': ({ id, data }) => term.write(id, data),
-    'term.resize': ({ id, cols, rows }) => term.resize(id, cols, rows),
-    'term.close': ({ id }) => term.close(id),
+    'term.open': ({ cwd, cols, rows, command }) => {
+      need((cols === undefined || (Number.isInteger(cols) && cols > 0)) && (rows === undefined || (Number.isInteger(rows) && rows > 0)), 'cols/rows');
+      return term.open({ cwd: optPath(cwd), cols, rows, command: optStr(command, 'command') });
+    },
+    'term.input': ({ id, data }) => {
+      need(typeof data === 'string', 'data');
+      return term.write(str(id, 'id'), data);
+    },
+    'term.resize': ({ id, cols, rows }) => {
+      need(Number.isInteger(cols) && Number.isInteger(rows) && cols > 0 && rows > 0, 'cols/rows');
+      return term.resize(str(id, 'id'), cols, rows);
+    },
+    'term.close': ({ id }) => term.close(str(id, 'id')),
     'term.list': () => term.list(),
-    'term.snapshot': ({ id }) => term.snapshot(id),
+    'term.snapshot': ({ id }) => term.snapshot(str(id, 'id')),
 
-    'shell.openExternal': ({ url }) => /^(https?|file|mailto):/i.test(url) && openExternal(url),
-    'shell.openPath': ({ path: p }) => openExternal(expandHome(p)),
-    'shell.which': async ({ cmd }) => which(cmd),
-    'shell.run': async ({ cmd, args, cwd }) => run(cmd, args, { cwd }),
+    'shell.openExternal': ({ url }) => /^(https?|file|mailto):/i.test(str(url, 'url')) && openExternal(url),
+    'shell.openPath': ({ path: p }) => openExternal(pathParam(p)),
+  };
+}
+
+/** Every method name the server answers. */
+export const METHODS = Object.freeze(Object.keys(rpcMethods({})));
+
+/**
+ * What the client is told when a method fails: the message it shows, and a code it can act on.
+ * A bug (TypeError and its kind) is 'internal'; an error a module threw on purpose to say no, with
+ * a message for the person, is 'failed'. The mock server answers through it too.
+ */
+export function errorOf(e) {
+  const message = e?.message || String(e);
+  if (e instanceof AppError) return { code: e.code, message };
+  if (e?.code === 'ENOENT') return { code: 'not_found', message };
+  if (e instanceof TypeError || e instanceof RangeError || e instanceof ReferenceError || e instanceof SyntaxError) return { code: 'internal', message };
+  return { code: 'failed', message };
+}
+
+/** What nothing else caught is logged, never the end of the server. */
+const LAST_RESORT = { unhandledRejection: (e) => log('unhandledRejection', e), uncaughtException: (e) => log('uncaughtException', e) };
+
+/**
+ * Start the server (the Electron shell calls this in-process; `cli()` for the other shells).
+ * `heartbeatMs` and `maxBuffered` are there for the tests to turn down.
+ * @param {{ shell?: string, port?: number | string | boolean, quiet?: boolean, onQuit?: () => void, heartbeatMs?: number, maxBuffered?: number }} [opts]
+ */
+export async function start({ shell = 'none', port, quiet = false, onQuit, heartbeatMs = HEARTBEAT_MS, maxBuffered = MAX_BUFFERED } = {}) {
+  // once per process, however many servers it starts (the tests start several)
+  for (const [event, fn] of Object.entries(LAST_RESORT)) process.off(event, fn).on(event, fn);
+  migrateLegacyDirs();
+  privateDir(xdg('config'));
+  privateDir(xdg('state'));
+  const clients = new Set();
+  let totalConnections = 0;
+
+  /**
+   * Every event goes to every window. One that cannot keep up (asleep, on a slow tunnel) would hold an
+   * ever-growing queue here; past `maxBuffered` of events not yet written out it is dropped instead. It
+   * reconnects on its own and reopens what it shows from a fresh snapshot, which is the clean way to
+   * catch up. Only events count (in characters, near enough for JSON): a reply is what the window asked
+   * for, and one session.open of a long conversation is past maxBuffered on its own.
+   */
+  const behind = new WeakMap(); // window -> characters of events queued for it
+  const deliver = (ws, raw) => {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    const queued = behind.get(ws) || 0;
+    if (queued > maxBuffered) {
+      log(`dropping a window that is ${queued} bytes behind; it will reconnect`);
+      ws.terminate();
+      return;
+    }
+    behind.set(ws, queued + raw.length);
+    ws.send(raw, () => behind.set(ws, behind.get(ws) - raw.length));
+  };
+  const send = (ws, obj) => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj));
+  const broadcast = (e, d) => {
+    const raw = JSON.stringify({ t: 'ev', e, d });
+    for (const ws of clients) deliver(ws, raw);
   };
 
+  const listChanged = debounce(() => broadcast('sessions.changed', {}), LIST_CHANGED_MS);
+  bus.on('msgs', (d) => broadcast('session.msgs', d));
+  bus.on('state', (d) => broadcast('session.state', d));
+  bus.on('permission', (d) => broadcast('session.permission', { id: d.id, request: d.shown })); // the input cut as in the state
+  bus.on('permission-resolved', (d) => broadcast('session.permissionResolved', d));
+  bus.on('list-changed', listChanged);
+  snapshots.events.on('step', (d) => broadcast('timeline.step', d));
+  schedules.events.on('schedules', () => broadcast('schedules.changed', {}));
+  inbox.events.on('changed', () => broadcast('inbox.changed', inbox.list().unread));
+  schedules.start();
+  dispatch.events.on('changed', (d) => broadcast('dispatch.changed', d));
+  dispatch.events.on('playbooks', () => broadcast('dispatch.playbooks', {}));
+  dispatch.events.on('finished', (d) => d.scheduleId && schedules.noteDispatchFinished(d.scheduleId, d.status));
+  schedules.setDispatchRunner((playbookId, opts) => dispatch.dispatch.startFromPlaybook(playbookId, opts));
+  dispatch.start();
+  memory.events.on('changed', (d) => broadcast('memory.changed', d));
+  repos.events.on('changed', (d) => broadcast('repos.changed', d));
+  helpersMod.start();
+  helpersMod.events.on('changed', (d) => broadcast('helpers.changed', d));
+  sessions.start();
+  term.terminals.on('data', (d) => broadcast('term.data', d));
+  term.terminals.on('exit', (d) => broadcast('term.exit', d));
+
+  const methods = rpcMethods({ shell, quit: () => (onQuit ? onQuit() : stop().then(() => process.exit(0))), listChanged });
+
   const server = http.createServer((req, res) => {
+    try {
+      serveHttp(req, res);
+    } catch (e) {
+      // A malformed request (a bad %-escape in the path) must get an answer, not hang.
+      log('http request failed', req.url, e);
+      if (!res.headersSent) res.writeHead(e instanceof URIError ? 400 : 500).end();
+    }
+  });
+
+  function serveHttp(req, res) {
     const url = new URL(req.url, 'http://x');
     // Only this app's own pages may talk to the server: no other website open in your browser,
     // no other localhost dev server, and no DNS-rebinding tricks.
@@ -375,36 +534,39 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
     if (url.pathname.startsWith('/api/fs/')) {
       let p = decodeURIComponent(url.pathname.slice('/api/fs'.length));
       if (/^\/[a-zA-Z]:\//.test(p)) p = p.slice(1); // Windows drive paths arrive as /C:/…
-      fs.stat(p, (err, st) => {
-        if (err || !st.isFile()) {
-          res.writeHead(404).end('Not found');
-          return;
-        }
-        const ext = path.extname(p).toLowerCase();
-        const type = MIME[ext] || files.mimeFor(p) || (ext === '.txt' || ext === '.md' ? 'text/plain; charset=utf-8' : ext === '.xml' ? 'application/xml' : ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' : ext === '.gif' ? 'image/gif' : ext === '.webp' ? 'image/webp' : ext === '.mp4' ? 'video/mp4' : ext === '.pdf' ? 'application/pdf' : 'application/octet-stream');
-        res.writeHead(200, { 'content-type': type, 'content-length': st.size, 'cache-control': 'no-store', 'cross-origin-resource-policy': 'same-origin', 'x-content-type-options': 'nosniff' });
-        fs.createReadStream(p).pipe(res);
-      });
+      sendFile(res, p, { 'content-type': files.mimeOf(p) || OCTET, 'x-content-type-options': 'nosniff', 'content-security-policy': FILE_CSP });
       return;
     }
     if (url.pathname === '/api/raw') {
       const p = expandHome(url.searchParams.get('path') || '');
-      fs.stat(p, (err, st) => {
-        if (err || !st.isFile()) {
-          res.writeHead(404).end('Not found');
-          return;
-        }
-        res.writeHead(200, { 'content-type': files.mimeFor(p) || 'application/octet-stream', 'content-length': st.size, 'cache-control': 'no-store', 'cross-origin-resource-policy': 'same-origin' });
-        fs.createReadStream(p).pipe(res);
-      });
+      sendFile(res, p, { 'content-type': files.imageMime(p) || OCTET, 'x-content-type-options': 'nosniff' });
       return;
     }
     serveStatic(url.pathname, res);
-  });
+  }
 
+  /** A file from disk for the page, or 404; a read that fails (unreadable, gone midway) ends the answer. */
+  function sendFile(res, p, headers) {
+    fs.stat(p, (err, st) => {
+      if (err || !st.isFile()) {
+        res.writeHead(404).end('Not found');
+        return;
+      }
+      const stream = fs.createReadStream(p);
+      stream.once('open', () => stream.pipe(res.writeHead(200, { ...headers, 'content-length': st.size, 'cache-control': 'no-store', 'cross-origin-resource-policy': 'same-origin' })));
+      stream.once('error', (e) => {
+        log('file read failed', p, e.message);
+        if (res.headersSent) res.destroy();
+        else res.writeHead(500).end();
+      });
+    });
+  }
+
+  /** The port we listen on (set once listening; nothing is served before). */
+  let boundPort = 0;
   function originOk(req) {
     const origin = req.headers.origin || '';
-    const p = server.address()?.port;
+    const p = boundPort;
     return !origin || origin === `http://127.0.0.1:${p}` || origin === `http://localhost:${p}`;
   }
 
@@ -416,50 +578,60 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
 
   function hostOk(req) {
     const host = (req.headers.host || '').toLowerCase();
-    const p = server.address()?.port;
+    const p = boundPort;
     return host === `127.0.0.1:${p}` || host === `localhost:${p}`;
   }
 
+  /** The interface (web/dist): a path that is not a file is the app's own route, so index.html. */
   function serveStatic(pathname, res) {
-    let rel = decodeURIComponent(pathname).replace(/^\/+/, '');
-    if (!rel) rel = 'index.html';
-    let file = path.join(DIST, rel);
-    if (!file.startsWith(DIST)) {
+    const file = path.join(DIST, decodeURIComponent(pathname).replace(/^\/+/, '') || 'index.html');
+    if (!under(DIST, file)) {
       res.writeHead(403).end();
       return;
     }
-    if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) file = path.join(DIST, 'index.html');
-    if (!fs.existsSync(file)) {
-      res.writeHead(500, { 'content-type': 'text/plain' }).end('The interface files are missing (web/dist). Run the Pilcrow installer again to restore them.');
-      return;
-    }
-    const ext = path.extname(file);
-    const headers = {
-      'content-type': MIME[ext] || 'application/octet-stream',
-      'cache-control': file.includes(`${path.sep}assets${path.sep}`) ? 'public, max-age=31536000, immutable' : 'no-cache',
-      'x-content-type-options': 'nosniff',
-    };
-    if (ext === '.html') headers['x-frame-options'] = 'DENY';
-    if (ext === '.html') headers['content-security-policy'] = "frame-ancestors 'none'; default-src 'self'; img-src 'self' data: blob: http://127.0.0.1:* http://localhost:*; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; connect-src 'self' ws://127.0.0.1:* ws://localhost:*; frame-src http: https:; worker-src 'self' blob:";
-    res.writeHead(200, headers);
-    fs.createReadStream(file).pipe(res);
+    fs.stat(file, (err, st) => {
+      const target = err || st.isDirectory() ? path.join(DIST, 'index.html') : file;
+      const html = target.endsWith('.html');
+      const headers = {
+        'content-type': files.mimeOf(target) || OCTET,
+        'cache-control': target.includes(`${path.sep}assets${path.sep}`) ? 'public, max-age=31536000, immutable' : 'no-cache',
+        'x-content-type-options': 'nosniff',
+        ...(html ? { 'x-frame-options': 'DENY', 'content-security-policy': CSP } : {}),
+      };
+      const stream = fs.createReadStream(target);
+      stream.once('open', () => stream.pipe(res.writeHead(200, headers)));
+      stream.once('error', () => (res.headersSent ? res.destroy() : res.writeHead(500, { 'content-type': 'text/plain' }).end('The interface files are missing (web/dist). Run the Pilcrow installer again to restore them.')));
+    });
   }
 
-  const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 * 1024 });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD });
   server.on('upgrade', (req, socket, head) => {
-    const url = new URL(req.url, 'http://x');
+    const url = new URL(req.url || '/', 'http://x');
     if (url.pathname !== '/ws' || !originOk(req) || !hostOk(req) || !fetchSiteOk(req)) {
-      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); // as the HTTP refusals
       socket.destroy();
       return;
     }
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
   });
 
+  // Ping every window; one that has not answered the previous ping is gone, though its socket never said so.
+  const answered = new WeakSet();
+  const heartbeat = setInterval(() => {
+    for (const ws of clients) {
+      if (!answered.delete(ws)) ws.terminate();
+      else ws.ping();
+    }
+  }, heartbeatMs);
+
   wss.on('connection', (ws) => {
     totalConnections++;
     clients.add(ws);
+    answered.add(ws);
+    ws.on('pong', () => answered.add(ws));
     ws.on('close', () => clients.delete(ws));
+    // A broken connection (a bad frame, a reset) is logged; 'close' follows and cleans up.
+    ws.on('error', (e) => log('websocket error', e.message));
     ws.on('message', async (raw) => {
       let msg;
       try {
@@ -467,18 +639,19 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
       } catch {
         return;
       }
-      if (msg.t !== 'req') return;
-      const fn = methods[msg.m];
+      if (msg?.t !== 'req') return;
+      const fn = Object.hasOwn(methods, msg.m) ? methods[msg.m] : null;
       if (!fn) {
-        send(ws, { t: 'res', id: msg.id, ok: false, e: { message: `Unknown method ${msg.m}` } });
+        send(ws, { t: 'res', id: msg.id, ok: false, e: { code: 'unknown_method', message: `Unknown method ${msg.m}` } });
         return;
       }
       try {
-        const r = await fn(msg.p || {});
+        const r = await fn(msg.p && typeof msg.p === 'object' ? msg.p : {});
         send(ws, { t: 'res', id: msg.id, ok: true, r: r === undefined ? null : r });
       } catch (e) {
-        log('rpc error', msg.m, e);
-        send(ws, { t: 'res', id: msg.id, ok: false, e: { message: e?.message || String(e) } });
+        const err = errorOf(e);
+        log('rpc error', msg.m, err.code === 'internal' ? e : err.message);
+        send(ws, { t: 'res', id: msg.id, ok: false, e: err });
       }
     });
     send(ws, { t: 'ev', e: 'hello', d: { version: VERSION } });
@@ -492,7 +665,7 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
       };
       const onOk = () => {
         server.off('error', onErr);
-        resolve();
+        resolve(undefined);
       };
       server.once('error', onErr);
       server.once('listening', onOk);
@@ -507,361 +680,45 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
     if (explicit) throw new Error(`Port ${port} is already in use. Pick another one with --port=N.`);
     await listenOn(0);
   }
-  const actualPort = server.address().port;
+  const actualPort = (boundPort = /** @type {import('node:net').AddressInfo} */ (server.address()).port);
   const url = `http://127.0.0.1:${actualPort}/`;
   writeJson(LOCK, { pid: process.pid, port: actualPort, shell, startedAt: Date.now() });
   log(`Pilcrow ${VERSION} listening on 127.0.0.1:${actualPort} (shell=${shell})`);
   if (!quiet) console.log(`Pilcrow is running on port ${actualPort}.`);
 
-  let stopped = false;
-  const stop = () => {
-    if (stopped) return;
-    stopped = true;
-    sessions.closeAll();
-    term.closeAll();
-    try {
-      store.flush();
-    } catch {
-      /* ignore */
-    }
-    try {
-      const cur = readJson(LOCK, {});
-      if (cur.pid === process.pid) fs.rmSync(LOCK, { force: true });
-    } catch {
-      /* ignore */
-    }
-    for (const ws of clients) ws.close();
-    server.close();
-  };
+  let stopping = null;
+  /**
+   * Stop everything, once. What is pending is written before the first await, so even a caller that
+   * cannot wait has it on disk; the promise settles when the terminals' processes are gone and the
+   * timeline steps under way are taken (snapshots.drain), and the quit paths wait for it before they exit. Dispatch and helpers let go of the sessions first, so the
+   * processes closing here read as a restart to them (their runs resume as stopped), not as failures.
+   */
+  const stop = () =>
+    (stopping ??= (async () => {
+      schedules.stop();
+      dispatch.stop();
+      helpersMod.stop();
+      sessions.stop();
+      flushSaves(); // settings, sessions.json, the inbox, schedules, notes: what is waiting goes now
+      try {
+        const cur = readJson(LOCK, {});
+        if (cur.pid === process.pid) fs.rmSync(LOCK, { force: true });
+      } catch {
+        /* someone else's lock now */
+      }
+      clearInterval(heartbeat);
+      for (const ws of clients) ws.close();
+      server.close();
+      await Promise.all([term.closeAll(), snapshots.drain()]);
+    })());
   return { url, port: actualPort, stop, busy: () => sessions.busy(), connections: () => totalConnections };
 }
 
-// ---------------------------------------------------------------- launcher (non-Electron shells)
-
-const BROWSERS = ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser', 'microsoft-edge', 'microsoft-edge-stable', 'brave-browser', 'vivaldi'];
-
-/** Chrome first, then Edge (always present on Windows 10/11), then other Chromium browsers. */
-function findWindowsBrowser() {
-  const bases = [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.LOCALAPPDATA].filter(Boolean);
-  const rel = ['Google/Chrome/Application/chrome.exe', 'Microsoft/Edge/Application/msedge.exe', 'Chromium/Application/chrome.exe', 'BraveSoftware/Brave-Browser/Application/brave.exe'];
-  for (const r of rel) {
-    for (const b of bases) {
-      const p = path.join(b, r);
-      if (fs.existsSync(p)) return slash(p);
-    }
-  }
-  return which('chrome') || which('msedge');
-}
-
-function findChrome() {
-  if (process.env.PILCROW_CHROME) return which(process.env.PILCROW_CHROME);
-  if (IS_WIN) return findWindowsBrowser();
-  for (const b of BROWSERS) {
-    const p = which(b);
-    if (p) return p;
-  }
-  for (const p of ['/opt/google/chrome/chrome', '/snap/bin/chromium', '/usr/lib/chromium/chromium']) if (fs.existsSync(p)) return p;
-  return null;
-}
-
-/** The Pilcrow server already running for this user, if any. */
-async function existingInstance() {
-  const lock = readJson(LOCK, null);
-  if (!lock?.pid || !lock.port) return null;
-  try {
-    process.kill(lock.pid, 0);
-  } catch {
-    return null;
-  }
-  try {
-    const r = await fetch(`http://127.0.0.1:${lock.port}/api/hello`, { signal: AbortSignal.timeout(1500) });
-    const j = await r.json();
-    if (j.app === 'pilcrow' && j.pid === lock.pid) return { ...lock, version: j.version || '?', busy: typeof j.busy === 'number' ? j.busy : null, url: `http://127.0.0.1:${lock.port}/` };
-  } catch {
-    /* stale lock */
-  }
-  return null;
-}
-
-/**
- * After an update, the previous version can still be running in the background; a new window would then
- * talk to old code. Stop it when that is safe: it reports no busy sessions, or it predates busy reporting
- * (only possible right after upgrading from 1.2.2 or older). Returns true when the old process is gone.
- */
-export async function retireOutdated(existing, { force = false } = {}) {
-  if (!existing || existing.version === VERSION) return false;
-  if (!force && existing.busy) return false;
-  try {
-    process.kill(existing.pid, 'SIGTERM');
-  } catch {
-    return true;
-  }
-  for (let i = 0; i < 60; i++) {
-    await new Promise((r) => setTimeout(r, 100));
-    try {
-      process.kill(existing.pid, 0);
-    } catch {
-      return true;
-    }
-  }
-  try {
-    process.kill(existing.pid, 'SIGKILL');
-  } catch {
-    /* already gone */
-  }
-  return true;
-}
-
-export { existingInstance };
-
-/** The snap a browser binary belongs to (Ubuntu ships Firefox and Chromium as snaps), or null. */
-function snapOf(bin) {
-  if (!bin) return null;
-  const name = path.basename(bin).split('.')[0];
-  if (bin.startsWith('/snap/bin/')) return name;
-  try {
-    if (fs.realpathSync(bin) === '/usr/bin/snap') return name;
-    // Ubuntu's /usr/bin/chromium-browser is a small script that runs /snap/bin/chromium.
-    if (fs.statSync(bin).size < 16384) {
-      const m = fs.readFileSync(bin, 'utf8').match(/\/snap\/bin\/([\w-]+)/);
-      if (m) return m[1];
-    }
-  } catch {
-    /* not readable: assume a normal package */
-  }
-  return null;
-}
-
-function openChromeWindow(chrome, url) {
-  const snap = snapOf(chrome);
-  const common = snap ? path.join(HOME, 'snap', snap, 'common') : null;
-  // A snap browser cannot use a profile in a hidden folder; give it one inside its own snap folder.
-  // On Windows the profile stays in %LOCALAPPDATA% so it never roams with the user profile.
-  const profile = snap ? (fs.existsSync(common) ? privateDir(path.join(common, 'pilcrow-profile')) : null) : privateDir(path.join(xdg(IS_WIN ? 'data' : 'config'), 'chrome-profile'));
-  const win = store.getConfig().window || {};
-  const args = [`--app=${url}`, '--class=pilcrow', '--name=pilcrow', '--no-first-run', '--no-default-browser-check', '--disable-features=Translate,MediaRouter', `--window-size=${win.width || 1480},${win.height || 940}`];
-  if (profile) args.push(`--user-data-dir=${profile}`);
-  if (IS_ROOT) args.push('--no-sandbox');
-  if (process.env.PILCROW_CHROME_FLAGS) args.push(...process.env.PILCROW_CHROME_FLAGS.split(' ').filter(Boolean));
-  // Chromium builds without Google keys show a warning bar; these values silence it (no Google services are used).
-  const env = { ...process.env, GOOGLE_API_KEY: 'no', GOOGLE_DEFAULT_CLIENT_ID: 'no', GOOGLE_DEFAULT_CLIENT_SECRET: 'no' };
-  return spawn(chrome, args, { stdio: 'ignore', env });
-}
-
-// `pilcrow --doctor`: plain-text health check for the environment Pilcrow runs in.
-/** Git for Windows' bash.exe, which Claude Code uses for its Bash tool on Windows. */
-export function gitBash() {
-  if (!IS_WIN) return null;
-  const env = process.env.CLAUDE_CODE_GIT_BASH_PATH;
-  if (env && fs.existsSync(env)) return slash(env);
-  const git = which('git');
-  const candidates = [
-    git && path.join(path.dirname(path.dirname(git)), 'bin', 'bash.exe'),
-    ...[process.env.ProgramFiles, process.env['ProgramFiles(x86)'], process.env.LOCALAPPDATA && path.join(process.env.LOCALAPPDATA, 'Programs')].filter(Boolean).map((b) => path.join(b, 'Git', 'bin', 'bash.exe')),
-  ].filter(Boolean);
-  for (const c of candidates) if (fs.existsSync(c)) return slash(c);
-  return null;
-}
-
-async function doctor() {
-  const tty = process.stdout.isTTY;
-  const paint = (c, s) => (tty ? `\x1b[${c}m${s}\x1b[0m` : s);
-  const ok = (label, detail = '') => console.log(`  ${paint('32', '✓')} ${label}${detail ? paint('2', '  ' + detail) : ''}`);
-  const warn = (label, detail = '') => console.log(`  ${paint('33', '!')} ${label}${detail ? paint('2', '  ' + detail) : ''}`);
-  const bad = (label, detail = '') => console.log(`  ${paint('31', '✗')} ${label}${detail ? paint('2', '  ' + detail) : ''}`);
-  let failures = 0;
-  console.log(paint('1', `Pilcrow ${VERSION} doctor`) + paint('2', `  (${ROOT})`));
-
-  console.log(paint('1', '\nRuntime'));
-  const major = Number(process.versions.node.split('.')[0]);
-  (major >= 20 ? ok : (failures++, bad))(`Node ${process.version}`, process.execPath);
-  fs.existsSync(path.join(DIST, 'index.html')) ? ok('Interface', path.join('web', 'dist')) : (failures++, bad('Interface missing', 'run the installer again (it ships the built interface)'));
-  which('git') ? ok('git', which('git')) : warn('git not found', 'Changes, worktrees and commits are disabled');
-  const caps = term.capabilities();
-  if (IS_WIN) caps.conpty ? ok('Terminal', 'ConPTY (node-pty)') : warn('Terminal is basic (line mode)', 'node-pty was not installed; full-screen programs will not work');
-  else caps.python ? ok('Terminal', `python3 PTY bridge (${caps.python})`) : caps.script ? warn('Terminal uses `script` fallback', 'install python3 for a full PTY') : warn('Terminal unavailable', 'needs python3 or util-linux script');
-
-  console.log(paint('1', '\nClaude Code'));
-  const cfg = store.getConfig();
-  const claude = await resolveClaude(cfg.claudeBinary);
-  if (claude.path) ok(`Claude Code ${claude.version || '(version unknown)'}`, `${claude.source}: ${claude.path}`);
-  else (failures++, bad('Claude Code not found', 'reinstall Pilcrow, or install `claude` on PATH'));
-  if (claude.system && claude.source === 'bundled') ok(`Also on PATH: Claude Code ${claude.system.version || ''}`.trim(), `${claude.system.path} (switch in Settings → Claude Code)`);
-  if (IS_WIN) {
-    const bash = gitBash();
-    bash ? ok('Git Bash (for the Bash tool)', bash) : warn('No Git for Windows', 'Claude Code runs commands with PowerShell instead; install Git for Windows for the Bash tool');
-  }
-  const gw = await gatewayInfo(process.cwd());
-  if (gw.error) warn('Could not read Claude Code settings', gw.error);
-  else {
-    if (gw.baseUrl) ok('API endpoint', `${gw.baseUrl}${gw.source ? ` (from ${gw.source} settings)` : ' (from environment)'}`);
-    else ok('API endpoint', 'api.anthropic.com (default)');
-    gw.hasToken ? ok('Credentials configured') : warn('No API key or token in settings/env', 'fine if you log in with `claude` instead');
-    if (gw.model) ok('Default model', gw.model);
-    const target = gw.baseUrl || 'https://api.anthropic.com';
-    try {
-      const r = await fetch(target, { method: 'GET', signal: AbortSignal.timeout(6000) });
-      ok('Endpoint reachable', `HTTP ${r.status}`);
-    } catch (e) {
-      warn('Endpoint not reachable from here', e.cause?.code || e.message);
-    }
-    if (gw.hasToken) {
-      const m = await gatewayModels(process.cwd(), { version: VERSION });
-      if (m.ok) ok('Models on the gateway', `${m.models.length ? `${m.models.length}: ${m.models.slice(0, 4).map((x) => x.id).join(', ')}${m.models.length > 4 ? ', …' : ''}` : 'the list is empty'} (${m.url})`);
-      else warn('Could not list the gateway models', m.error);
-    }
-  }
-
-  console.log(paint('1', '\nDesktop window'));
-  if (!IS_WIN) {
-    const display = process.env.WAYLAND_DISPLAY ? `Wayland ${process.env.WAYLAND_DISPLAY}` : process.env.DISPLAY ? `X11 ${process.env.DISPLAY}` : null;
-    display ? ok('Display', display) : warn('No display', 'use `pilcrow --server` and open the printed URL');
-  }
-  const electron = path.join(ROOT, 'node_modules', 'electron', 'dist', IS_WIN ? 'electron.exe' : 'electron');
-  if (fs.existsSync(electron)) {
-    let version = '';
-    try {
-      version = fs.readFileSync(path.join(ROOT, 'node_modules', 'electron', 'dist', 'version'), 'utf8').trim();
-    } catch {
-      /* ignore */
-    }
-    ok(`Electron ${version}`, electron);
-    const noSandbox = fs.existsSync(path.join(xdg('state'), 'electron-no-sandbox'));
-    if (noSandbox) warn('Electron runs with --no-sandbox', 'set automatically because the sandbox failed on this machine');
-  } else {
-    const chrome = findChrome();
-    warn('Electron not downloaded', chrome ? `will use a ${path.basename(chrome)} app window instead` : 'will open in the default browser');
-  }
-  const chrome = findChrome();
-  chrome ? ok(IS_WIN ? 'Browser window fallback' : 'Chrome/Chromium fallback', chrome) : warn(IS_WIN ? 'No Chrome or Edge found' : 'No Chrome/Chromium', 'fallback is the default browser');
-
-  console.log(paint('1', '\nFiles'));
-  ok('Config', CONFIG_DIR);
-  ok('Logs', path.join(xdg('state'), 'pilcrow.log'));
-  const lock = await existingInstance();
-  if (lock) ok('Running instance', `pid ${lock.pid}, port ${lock.port}, ${lock.shell}`);
-  console.log(failures ? paint('31', `\n${failures} problem(s) found.`) : paint('32', '\nAll essential checks passed.'));
-  return failures;
-}
-
-/**
- * Used by the installer right after an update: if an older Pilcrow is still running, offer to stop it so
- * the next launch runs the new version. Busy sessions are never stopped without asking.
- */
-async function restartOutdatedPrompt() {
-  const existing = await existingInstance();
-  if (!existing || existing.version === VERSION) return 0;
-  const say = (s) => console.log(s);
-  const busy = existing.busy;
-  if (busy === 0) {
-    await retireOutdated(existing);
-    say(`  ✓ 已關閉還在背景執行的舊版 Pilcrow ${existing.version}；重新開啟就是 ${VERSION}`);
-    return 0;
-  }
-  const what = busy ? `Claude 還有 ${busy} 個 session 正在工作，關閉會中斷它們（對話會保留）。` : '如果 Claude 正在工作，關閉會中斷它（對話會保留）。';
-  if (!process.stdin.isTTY) {
-    say(`  ! 舊版 Pilcrow ${existing.version} 還在背景執行。${what}`);
-    say('    關閉所有 Pilcrow 視窗後再重新開啟，就會改用新版。');
-    return 0;
-  }
-  const rl = (await import('node:readline/promises')).createInterface({ input: process.stdin, output: process.stdout });
-  const ans = (await rl.question(`  ? 舊版 Pilcrow ${existing.version} 還在背景執行。${what}現在關閉它？[Y/n] `)).trim().toLowerCase();
-  rl.close();
-  if (ans === '' || ans === 'y' || ans === 'yes') {
-    await retireOutdated(existing, { force: true });
-    say(`  ✓ 已關閉舊版；重新開啟 Pilcrow 就是 ${VERSION}`);
-  } else {
-    say('  ! 沒有關閉。之後關閉所有 Pilcrow 視窗再重新開啟，就會改用新版。');
-  }
-  return 0;
-}
-
-async function cli() {
-  const args = parseArgs(process.argv.slice(2));
-  if (args.doctor) process.exit((await doctor()) ? 1 : 0);
-  if (args['restart-outdated']) process.exit(await restartOutdatedPrompt());
-  let shell = args.shell || (args.server || args.headless ? 'none' : 'chrome');
-  let existing = await existingInstance();
-  if (existing && existing.version !== VERSION && (await retireOutdated(existing))) {
-    log(`stopped Pilcrow ${existing.version} (pid ${existing.pid}) so ${VERSION} can start`);
-    console.log(`Restarted Pilcrow: the older ${existing.version} was still running in the background.`);
-    existing = null;
-  }
-  if (existing) {
-    if (shell === 'none') {
-      console.log(`Pilcrow is already running: ${existing.url}`);
-      return;
-    }
-    const chrome = shell === 'chrome' ? findChrome() : null;
-    if (chrome) openChromeWindow(chrome, existing.url).unref();
-    else openExternal(existing.url);
-    console.log('Pilcrow is already running; opened another window.');
-    return;
-  }
-  const chrome = shell === 'chrome' ? findChrome() : null;
-  if (shell === 'chrome' && !chrome) {
-    console.log('No Chrome/Chromium found; opening Pilcrow in your default browser instead.');
-    shell = 'browser';
-  }
-  let app;
-  try {
-    app = await start({ shell, port: args.port, quiet: true });
-  } catch (e) {
-    console.error(`Pilcrow could not start: ${e.message}`);
-    process.exit(1);
-  }
-  const shutdown = () => {
-    app.stop();
-    setTimeout(() => process.exit(0), 300);
-  };
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
-  process.on('SIGHUP', shutdown);
-
-  const toBrowser = (why) => {
-    if (why) console.log(`${why} Opening Pilcrow in your default browser instead.`);
-    if (!openExternal(app.url)) console.log(`Open ${app.url} in a browser.`);
-    console.log(`Pilcrow keeps running at ${app.url} until you quit it (Ctrl+Q in the window, or Ctrl+C here).`);
-  };
-
-  if (shell === 'none') {
-    console.log(`Pilcrow is running at ${app.url}`);
-    console.log('Press Ctrl+C to quit.');
-  } else if (shell === 'browser') {
-    toBrowser();
-  } else {
-    const child = openChromeWindow(chrome, app.url);
-    const startedAt = Date.now();
-    let fellBack = false;
-    const fallback = (why) => {
-      if (fellBack) return;
-      fellBack = true;
-      log(why);
-      toBrowser(why);
-    };
-    child.on('error', (e) => fallback(`Could not start ${path.basename(chrome)} (${e.message}).`));
-    child.on('exit', (code) => {
-      if (fellBack) return;
-      if (Date.now() - startedAt < 3000) {
-        // Exit code 0 right away means Chrome handed the window to its running instance.
-        if (code === 0) return console.log('Chrome opened the window in its running instance. Quit Pilcrow with Ctrl+Q in the window.');
-        return fallback(`${path.basename(chrome)} exited right away (code ${code}).`);
-      }
-      shutdown();
-    });
-    // If no window ever connects (blocked sandbox, broken GPU, policy), do not leave a server with no window.
-    setTimeout(() => {
-      if (!app.connections()) fallback('No Pilcrow window connected within 25 seconds.');
-    }, 25_000).unref();
-  }
-}
-
-process.on('unhandledRejection', (e) => log('unhandledRejection', e));
-process.on('uncaughtException', (e) => log('uncaughtException', e));
-
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
-  cli().catch((e) => {
-    console.error(e);
-    process.exit(1);
-  });
+  import('./cli.js')
+    .then((m) => m.cli())
+    .catch((e) => {
+      console.error(e);
+      process.exit(1);
+    });
 }

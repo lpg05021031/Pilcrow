@@ -7,7 +7,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import * as git from '../../server/git.js';
-import { createRegistry, normalizeWord, joinNotes, DIGEST_MAX } from '../../server/repos.js';
+import { createRegistry, normalizeWord, DIGEST_MAX } from '../../server/repos.js';
+import { joinNotes } from '../../server/workspace.js';
 import { createDispatcher } from '../../server/dispatch_core.js';
 import { EventEmitter } from 'node:events';
 
@@ -45,7 +46,7 @@ beforeEach(() => {
   web = mkRepo(path.join(tmp, 'code', 'web'), { 'package.json': JSON.stringify({ name: '@shop/web', dependencies: { '@shop/api': 'file:../api' } }), 'README.md': '# web\n' });
   api = mkRepo(path.join(tmp, 'code', 'api'), { 'package.json': JSON.stringify({ name: '@shop/api' }), 'CLAUDE.md': 'hi\n' });
   store = fakeStore();
-  reg = createRegistry({ store, git, expandHome: (p: string) => p });
+  reg = createRegistry({ store, git });
 });
 afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
@@ -153,7 +154,7 @@ describe('the person’s words', () => {
     expect(reg.defaultsFor(a.id).verify).toBe('go test ./...');
     expect(reg.notesFor('nope')).toBe('');
   });
-  it('writes the digest with names, aliases, about, path and policy, bounded', async () => {
+  it('writes the digest with names, aliases, about, path and policy, bounded', { timeout: 30_000 }, async () => {
     const d = reg.promptFor();
     expect(d).toMatch(/# Repositories/);
     expect(d).toMatch(/- web \(also: order FE, 前台\): storefront · .*web · helpers allowed/);

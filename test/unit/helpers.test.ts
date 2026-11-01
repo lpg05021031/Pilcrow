@@ -140,7 +140,7 @@ class FakeSessions {
       if (this.realWorktrees) {
         const info = await git.info(p.cwd);
         const dir = path.join(path.dirname(p.cwd), '.wt', `${path.basename(p.cwd)}-${id}`);
-        worktree = await git.createWorktree({ repo: info.root, base: p.worktree.base || 'main', branch: `pilcrow/${p.worktree.name}`, dir });
+        worktree = (await git.createWorktree({ repo: info.root, base: p.worktree.base || 'main', branch: `pilcrow/${p.worktree.name}`, dir })).worktree;
         cwd = worktree.path;
       } else {
         worktree = { path: `${p.cwd}/.wt/${id}`, branch: `pilcrow/${p.worktree.name}`, base: p.worktree.base || 'main', repoRoot: p.cwd };
@@ -211,7 +211,7 @@ function make(realWorktrees = false) {
   bus = new EventEmitter();
   store = fakeStore();
   sessions = new FakeSessions(bus, store, realWorktrees);
-  reg = createRegistry({ store, git, expandHome: (p: string) => p });
+  reg = createRegistry({ store, git });
   inbox = [];
   H = createHelpers({
     sessions,
@@ -229,7 +229,6 @@ function make(realWorktrees = false) {
       Object.assign(it, patch);
       return true;
     },
-    expandHome: (p: string) => p,
     homeDir: '/home/nobody',
     cpus: 4,
     noteMs: 20,
@@ -331,7 +330,7 @@ describe('start', () => {
     expect(store.getMeta(r.id).helper.name).toBe('api');
     expect(store.getMeta('lead').lead.helpers).toEqual([r.id]);
     await expect(H.start('lead', { name: 'api', brief: 'again', cwd: api })).rejects.toThrow(/named api exists/);
-    expect(H.list('lead').helpers[0]).toMatchObject({ name: 'api', state: 'running', branch: 'pilcrow/api' });
+    expect((await H.list('lead')).helpers[0]).toMatchObject({ name: 'api', state: 'running', branch: 'pilcrow/api' });
   });
   it('queues behind the parallel cap and behind after, skips when a dependency fails, and keeps the total cap', async () => {
     lead();
@@ -347,7 +346,7 @@ describe('start', () => {
     A.say('Did it.\n\n## Handoff\nAdded the route in src/routes.ts.');
     A.idle();
     await sleep(30);
-    expect(H.list('lead').helpers.map((h: any) => [h.name, h.state])).toEqual([
+    expect((await H.list('lead')).helpers.map((h: any) => [h.name, h.state])).toEqual([
       ['a', 'done'],
       ['b', 'running'],
       ['c', 'running'],
@@ -356,12 +355,12 @@ describe('start', () => {
     const B = sessions.all.get(b.id)!;
     B.state('error', { error: 'boom\nmore' });
     await sleep(30);
-    expect(H.list('lead').helpers.find((h: any) => h.name === 'd')!.state).toBe('running');
+    expect((await H.list('lead')).helpers.find((h: any) => h.name === 'd')!.state).toBe('running');
     const D = sessions.all.get(d.id)!;
     expect(D.sent[0].text).toMatch(/## From helpers you waited for\n- a \(done, \d+s\): worktree .*api.* on branch pilcrow\/a\. Read the change there before you start\.\n {2}## Handoff\n {2}Added the route/);
     const f = await H.start('lead', { name: 'f', brief: 'needs b', cwd: web, after: ['b'] });
     expect(f.state).toBe('skipped');
-    expect(H.list('lead').helpers.find((h: any) => h.name === 'f')!.reason).toMatch(/b failed/);
+    expect((await H.list('lead')).helpers.find((h: any) => h.name === 'f')!.reason).toMatch(/b failed/);
     await expect(H.start('lead', { name: 'g', brief: 'x', cwd: api })).rejects.toThrow(/cap is 5 helpers/);
   });
 });
@@ -376,7 +375,7 @@ describe('states, notes and waits', () => {
     const A = helperSession('api');
     const W = helperSession('web');
     A.ask({ toolName: 'Bash', input: { command: 'npm test' } });
-    expect(H.list('lead').helpers[0]).toMatchObject({ state: 'needs_action', pending: 1 });
+    expect((await H.list('lead')).helpers[0]).toMatchObject({ state: 'needs_action', pending: 1 });
     expect(L.sent).toHaveLength(0); // a permission is the person's, not the lead's
     A.respond([...A.pending.keys()][0], { behavior: 'allow' });
     A.run();
@@ -387,7 +386,7 @@ describe('states, notes and waits', () => {
     W.say('## Handoff\nButton added.', 0.2);
     W.idle();
     await sleep(60);
-    const [a, w] = H.list('lead').helpers;
+    const [a, w] = (await H.list('lead')).helpers;
     expect(a).toMatchObject({ name: 'api', state: 'done', cost: 0.31 });
     expect(w.state).toBe('done');
     expect(store.getMeta(a.id).helper.handoff).toBe('## Handoff\nGET /invoice added. Verify: npm test.');
@@ -452,7 +451,7 @@ describe('states, notes and waits', () => {
     expect(r.state).toBe('stopped');
     expect(A.interrupted).toBe(1);
     await sleep(30);
-    expect(H.list('lead').helpers[0]).toMatchObject({ state: 'stopped', reason: 'stopped by the lead' });
+    expect((await H.list('lead')).helpers[0]).toMatchObject({ state: 'stopped', reason: 'stopped by the lead' });
     await expect(H.send('lead', { name: 'ghost', text: 'x' })).rejects.toThrow(/No helper called ghost/);
   });
 });
@@ -473,8 +472,8 @@ describe('on real worktrees', () => {
     A.idle();
     helperSession('web').say('## Handoff\nAdded the button.');
     helperSession('web').idle();
-    await until(() => H.list('lead').helpers.every((h: any) => h.files === 1) && inbox.length === 1);
-    expect(H.list('lead').helpers.map((h: any) => [h.name, h.files, h.add])).toEqual([
+    await until(() => [...H._helpers.values()].every((h: any) => h.files === 1) && inbox.length === 1);
+    expect((await H.list('lead')).helpers.map((h: any) => [h.name, h.files, h.add])).toEqual([
       ['api', 1, 1],
       ['web', 1, 1],
     ]);
@@ -498,8 +497,8 @@ describe('on real worktrees', () => {
     expect(fin.results.every((r: any) => r.ok)).toBe(true);
     expect(fs.existsSync(a.worktree!.path)).toBe(false);
     expect(g(api, 'log', '--oneline', 'pilcrow/api')).toMatch(/Invoice download/);
-    expect(H.list('lead').helpers[0]).toMatchObject({ finished: 'commit' });
-    expect(H.list('lead').helpers[0].commit).toMatch(/^[0-9a-f]{7,}$/);
+    expect((await H.list('lead')).helpers[0]).toMatchObject({ finished: 'commit' });
+    expect((await H.list('lead')).helpers[0].commit).toMatch(/^[0-9a-f]{7,}$/);
     expect(inbox).toHaveLength(1);
     const md = H.exportMarkdown('lead');
     expect(md).toMatch(/# Lead lead: helpers[\s\S]*## api — done[\s\S]*## Handoff\nAdded invoice\.[\s\S]*## web — done/);
@@ -510,14 +509,14 @@ describe('on real worktrees', () => {
     const w = await H.start('lead', { name: 'web', brief: 'x', cwd: web });
     helperSession('api').idle();
     helperSession('web').idle();
-    await until(() => H.list('lead').helpers.every((h: any) => h.state === 'done'));
+    await until(() => [...H._helpers.values()].every((h: any) => h.state === 'done'));
     await sleep(60);
     await H.finish('lead', { name: 'api', action: 'discard' });
     expect(fs.existsSync(a.worktree!.path)).toBe(false);
     expect(g(api, 'branch', '--list', 'pilcrow/api').trim()).toBe('');
     await H.finish('lead', { name: 'web', action: 'keep' });
     expect(fs.existsSync(w.worktree!.path)).toBe(true);
-    expect(H.list('lead').helpers.map((h: any) => h.finished)).toEqual(['discard', 'keep']);
+    expect((await H.list('lead')).helpers.map((h: any) => h.finished)).toEqual(['discard', 'keep']);
   });
 });
 
@@ -584,17 +583,23 @@ describe('the person and a restart', () => {
     store.config.recentProjects = [api];
     const a = await H.start('lead', { name: 'api', brief: 'x', cwd: api });
     const w = await H.start('lead', { name: 'web', brief: 'x', repo: 'order FE' });
-    const known = H.known('lead');
+    const known = await H.known('lead');
     expect(known.find((k: any) => k.path === web)).toMatchObject({ name: 'web', registered: true, allowed: true, about: 'storefront' });
     expect(known.find((k: any) => k.path === api)).toMatchObject({ registered: false, allowed: false });
     expect(known.find((k: any) => k.path === path.join(tmp, 'code', 'lead'))).toMatchObject({ allowed: true });
+    const after = await H.start('lead', { name: 'after-api', brief: 'x', cwd: api, after: ['api'] });
+    expect(after.state).toBe('queued');
     await sessions.remove(a.id);
     await sleep(60);
-    expect(H.list('lead').helpers.map((h: any) => h.name)).toEqual(['web']);
+    // the one it waited for is gone: it is skipped with that reason, not left queued
+    expect((await H.list('lead')).helpers.find((h: any) => h.name === 'after-api')).toMatchObject({ state: 'skipped', reason: 'api is gone' });
+    await sessions.remove(after.id);
+    await sleep(60);
+    expect((await H.list('lead')).helpers.map((h: any) => h.name)).toEqual(['web']);
     expect(L.sent[0].text).toMatch(/state="removed">The person removed the helper api/);
     expect(H.detach(w.id)).toBe(true);
     expect(store.getMeta(w.id).helper).toBeUndefined();
-    expect(H.list('lead').helpers).toEqual([]);
+    expect((await H.list('lead')).helpers).toEqual([]);
     expect(H.detach('ghost')).toBe(false);
   });
   it('after a restart, helpers that were running are stopped and the lead is told once', async () => {
@@ -603,9 +608,9 @@ describe('the person and a restart', () => {
     expect(store.getMeta(a.id).helper.state).toBe('running');
     H.end();
     const L = sessions.all.get('lead')!;
-    H = createHelpers({ sessions, bus, store, git, registry: reg, expandHome: (p: string) => p, homeDir: '/home/nobody', noteMs: 20 });
+    H = createHelpers({ sessions, bus, store, git, registry: reg, homeDir: '/home/nobody', noteMs: 20 });
     H.begin();
-    expect(H.list('lead').helpers[0]).toMatchObject({ name: 'api', state: 'stopped', reason: 'server restarted' });
+    expect((await H.list('lead')).helpers[0]).toMatchObject({ name: 'api', state: 'stopped', reason: 'server restarted' });
     await sleep(60);
     expect(L.sent).toHaveLength(1);
     expect(L.sent[0].text).toMatch(/state="stopped"[^>]*>\nserver restarted/);

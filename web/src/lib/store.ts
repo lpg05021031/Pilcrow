@@ -1,14 +1,26 @@
 // App state (zustand) plus the RPC event wiring. Transcript models live outside React state
 // and are referenced by a `rev` counter so streaming updates re-render cheaply.
+//
+// Where state lives, the one rule for components:
+//   - what is drawn from lives in this store; one component asks another to do something by putting
+//     a request in a field (fileOpen, composerInsert) that the other takes: it acts on it once and
+//     clears it, so a request is never answered twice;
+//   - what a session remembers without drawing from it (a draft, open folds, where it was scrolled,
+//     its terminals) lives in its memo below, which goes with its transcript model;
+//   - what is cached about a folder (listings, file history, the @ index) lives in lib/cache.ts, with
+//     a budget and an age;
+//   - nothing else is kept in a module-level variable of a component.
+import { useEffect, useState } from 'react';
 import { create } from 'zustand';
+import { folders, loadOnce } from './cache';
 import { rpc } from './rpc';
-import { TranscriptModel } from './transcript';
-import { setHome } from './format';
-import { EASE_EXIT, reducedMotion } from './motion';
-import type { AppInfo, Config, SessionState, SessionSummary, PermissionMode, Effort, RawMsg, GatewayModels, TimelineStep, PermissionDecision, DispatchJob, DispatchRun, DispatchDelta, Playbook } from './types';
+import { TranscriptModel, type Item } from './transcript';
+import { setHome, plural, errText } from './format';
+import { EASE, EASE_EXIT, reducedMotion, yieldToEvents } from './motion';
+import { isBusy } from './types';
+import type { AppInfo, Config, SessionState, SessionSummary, PermissionMode, Effort, RawMsg, GatewayModels, TimelineStep, PermissionDecision, PermissionRequest, DispatchJob, DispatchRun, DispatchDelta, Playbook } from './types';
 import type { RepoEntry } from './types';
 import type { PilcrowNative } from './globals';
-import { errText } from './format';
 
 export type PanelTab = 'changes' | 'files' | 'terminal' | 'preview' | 'tasks' | 'history' | 'info';
 
@@ -52,7 +64,7 @@ interface Ui {
   /** How much of Claude's work the transcript shows: tools summarised, plus thinking, or every step opened. */
   view: ViewMode;
 }
-export type ViewMode = 'normal' | 'thinking' | 'verbose';
+type ViewMode = 'normal' | 'thinking' | 'verbose';
 export const VIEW_MODES: { id: ViewMode; label: string; hint: string }[] = [
   { id: 'normal', label: 'Normal', hint: 'Steps summarised, thinking folded' },
   { id: 'thinking', label: 'Thinking', hint: 'Thinking opened' },
@@ -60,9 +72,9 @@ export const VIEW_MODES: { id: ViewMode; label: string; hint: string }[] = [
 ];
 export function cycleView() {
   const cur = get().ui.view;
-  const next = VIEW_MODES[(VIEW_MODES.findIndex((v) => v.id === cur) + 1) % VIEW_MODES.length].id;
-  setUi({ view: next });
-  toast(`View: ${VIEW_MODES.find((v) => v.id === next)!.label}`, 'info');
+  const next = VIEW_MODES[(VIEW_MODES.findIndex((v) => v.id === cur) + 1) % VIEW_MODES.length];
+  setUi({ view: next.id });
+  toast(`View: ${next.label}`, 'info');
 }
 
 interface Dialogs {
@@ -73,6 +85,8 @@ interface Dialogs {
   palette: boolean;
   shortcuts: boolean;
   confirm: ConfirmSpec | null;
+  /** Edit or create a schedule (on the inbox page): `{}` new, `{ id }` edit. */
+  schedule: null | { id?: string; cwd?: string; kind?: 'prompt' | 'dispatch'; playbookId?: string };
 }
 
 interface State {
@@ -90,8 +104,10 @@ interface State {
   /** Bumped when files change outside Claude's own tool calls (restore, discard, commit, save). */
   fsRev: number;
   unread: Record<string, boolean>;
-  fileOpen: { path: string; line?: number; nonce: number } | null;
-  composerInsert: { id: string; text: string; nonce: number; replace?: boolean } | null;
+  /** A file to open in the Files tab (openFile), until the tab takes it (takeFileOpen). */
+  fileOpen: { path: string; line?: number } | null;
+  /** Text for a session's composer (insertIntoComposer), until that composer takes it (takeComposerInsert). */
+  composerInsert: { id: string; text: string; replace?: boolean } | null;
   theme: 'dark' | 'light';
   /** The endpoint's own model list; null until asked, 'loading' while asking. */
   gatewayModels: GatewayModels | 'loading' | null;
@@ -110,12 +126,14 @@ interface State {
   inboxUnread: number;
   /** Bumped when schedules or the inbox change on the server. */
   schedRev: number;
-  /** Edit or create a schedule; `null` closed, `{}` new. */
-  scheduleDialog: null | { id?: string; cwd?: string; kind?: 'prompt' | 'dispatch'; playbookId?: string };
   /** An image opened full-size over the app. */
   lightbox: string | null;
-  /** The find bar is open: every row of the conversation must be on the page to be searched. */
+  /** The find bar is open (FindBar, over the conversation on screen). */
   findOpen: boolean;
+  /** What was last looked for; the find bar opens on it again. */
+  findQuery: string;
+  /** The last message sent from this window: the conversation it went to follows it to the end. */
+  sent: { id: string; at: number } | null;
 }
 
 export const useStore = create<State>(() => ({
@@ -128,7 +146,7 @@ export const useStore = create<State>(() => ({
   activeId: null,
   rt: {},
   ui: { sidebar: true, panel: false, panelTab: 'changes', sidebarW: 268, panelW: 560, showArchived: false, diffMode: 'unified', view: 'normal' },
-  dialogs: { newSession: null, settings: false, palette: false, shortcuts: false, confirm: null, mcpAuth: null },
+  dialogs: { newSession: null, settings: false, palette: false, shortcuts: false, confirm: null, mcpAuth: null, schedule: null },
   toasts: [],
   fsRev: 0,
   unread: {},
@@ -145,17 +163,22 @@ export const useStore = create<State>(() => ({
   playbooks: [],
   inboxUnread: 0,
   schedRev: 0,
-  scheduleDialog: null,
   lightbox: null,
   findOpen: false,
+  findQuery: '',
+  sent: null,
 }));
 
 export const openLightbox = (src: string) => set({ lightbox: src });
 export const closeLightbox = () => set({ lightbox: null });
+export const openFind = () => set({ findOpen: true });
+export const closeFind = () => set({ findOpen: false });
+export const setFindQuery = (findQuery: string) => set({ findQuery });
 
 const get = useStore.getState;
 const set = useStore.setState;
 
+/** Transcript models by session, oldest opened first (openSession moves a session to the end). */
 export const models = new Map<string, TranscriptModel>();
 export function getModel(id: string) {
   let m = models.get(id);
@@ -163,8 +186,124 @@ export function getModel(id: string) {
   return m;
 }
 
+/** A file open in a session's Files tab. */
+export interface FileTab {
+  path: string;
+  doc: string;
+  saved: string;
+  mtime?: number;
+  binary?: boolean;
+  dataUrl?: string;
+  tooLarge?: boolean;
+  size?: number;
+  error?: string;
+  loading?: boolean;
+  /** Documents can be read as rendered pages, edited as text, or both side by side. */
+  view?: 'preview' | 'edit' | 'split';
+}
+
+/** What a session's Files tab has open (FilesPanel). */
+export interface FilesState {
+  tabs: FileTab[];
+  active: string | null;
+  expanded: Record<string, boolean>;
+  showTree: boolean;
+  showHidden: boolean;
+}
+
+/** Review notes on a session's diff: path -> line key -> note. */
+type DiffNotes = Record<string, Record<string, { text: string; line: string; lineNo: number }>>;
+/**
+ * What a session remembers outside React state while the window is open. Nothing re-renders when it
+ * changes. It goes with the session's transcript model (evictModels), all but unsent work (a draft, a
+ * note, a file with unsaved edits) and its open terminals, which stay until the session is deleted.
+ */
+export interface SessionMemo {
+  draft: string;
+  /** Messages sent from this window (↑ in the composer brings them back). */
+  sent: string[];
+  notes: DiffNotes;
+  /** Terminals opened from this session (TerminalPanel), and the one shown. */
+  terms: { id: string; title: string; exited?: boolean }[];
+  term: string | null;
+  /** The address the Preview tab shows. */
+  preview: string;
+  /** The files open in the Files tab. */
+  files: FilesState | null;
+  /** Which folds of the conversation were opened or closed by hand, by unit key (Transcript). */
+  folds: Map<string, boolean>;
+  /** Where the conversation was scrolled: the page at the top of the view and its distance from the edge (useFollow). */
+  scroll: { index: number; offset: number; bottom: boolean } | null;
+  /**
+   * Set by the conversation while it is on screen (Transcript ItemList), for revealItem: draw the
+   * page that holds an item and open the fold around it. Answered synchronously, from the grouping
+   * only the mounted list has, so it is a function here rather than a nonce in the store.
+   */
+  reveal: ((itemId: string) => boolean) | null;
+  /** The mounted folds, by unit key, so reveal can open one that is already on the page. */
+  openers: Map<string, () => void>;
+}
+const memos = new Map<string, SessionMemo>();
+const newMemo = (): SessionMemo => ({ draft: '', sent: [], notes: {}, terms: [], term: null, preview: '', files: null, folds: new Map(), scroll: null, reveal: null, openers: new Map() });
+export function memo(id: string): SessionMemo {
+  let m = memos.get(id);
+  if (!m) memos.set(id, (m = newMemo()));
+  return m;
+}
+function forgetMemo(id: string) {
+  const m = memos.get(id);
+  const unsaved = m?.files?.tabs.some((t) => t.doc !== t.saved);
+  if (m && (m.draft || Object.keys(m.notes).length || m.terms.length || unsaved)) memos.set(id, { ...newMemo(), draft: m.draft, notes: m.notes, terms: m.terms, term: m.term, files: unsaved ? m.files : null });
+  else memos.delete(id);
+}
+
+/**
+ * How much of the conversations stays modelled once you have moved on from them, in characters of
+ * what they hold (their text, tool input and output, and images, which are held as base64): about six
+ * long ones, or many short ones. A model also costs its objects, counted as MODEL_COST each. One you
+ * come back to after it went is loaded again.
+ */
+export const KEEP_CHARS = 24 << 20;
+const MODEL_COST = 128 << 10;
+const sizes = new WeakMap<TranscriptModel, { rev: number; chars: number }>();
+function charsOf(items: Item[]): number {
+  let n = 0;
+  for (const it of items) {
+    if ('text' in it && typeof it.text === 'string') n += it.text.length;
+    if (it.kind === 'user') for (const s of it.images) n += s.length;
+    if (it.kind === 'tool') {
+      n += it.inputJson.length + charsOf(it.children);
+      if (it.result) for (const s of [it.result.text, ...it.result.images]) n += s.length;
+    }
+  }
+  return n;
+}
+/** What a model holds, as KEEP_CHARS counts it (worked out again only after it changed). */
+export function modelSize(m: TranscriptModel) {
+  let s = sizes.get(m);
+  if (!s || s.rev !== m.rev) sizes.set(m, (s = { rev: m.rev, chars: MODEL_COST + charsOf(m.items) }));
+  return s.chars;
+}
+export function evictModels() {
+  const { activeId, rt } = get();
+  let total = 0;
+  for (const m of models.values()) total += modelSize(m);
+  for (const [id, m] of models) {
+    if (total <= KEEP_CHARS) break;
+    const r = rt[id];
+    // The one on screen, one loading, one Claude is working in or waiting on you in: all stay.
+    if (id === activeId || r?.loading || r?.pending?.length || isBusy(r?.status)) continue;
+    total -= modelSize(m);
+    models.delete(id);
+    forgetMemo(id);
+    if (r) patchRt(id, { loaded: false });
+  }
+}
+
 // ---- batched rev updates (one React update per frame per session)
 const dirty = new Set<string>();
+/** Runtime fields set from the message stream, applied with the next frame's rev. */
+const patches = new Map<string, Partial<Runtime>>();
 let raf = 0;
 function markDirty(id: string) {
   dirty.add(id);
@@ -175,9 +314,10 @@ function flushDirty() {
   const rt = { ...get().rt };
   for (const id of dirty) {
     const m = models.get(id);
-    if (m) rt[id] = { ...(rt[id] || { loaded: true, loading: false, rev: 0 }), rev: m.rev };
+    if (m) rt[id] = { ...(rt[id] || { loaded: true, loading: false, rev: 0 }), ...patches.get(id), rev: m.rev };
   }
   dirty.clear();
+  patches.clear();
   set({ rt });
 }
 
@@ -227,9 +367,16 @@ export function releaseToast(id: number) {
 }
 
 export function dismissToast(id: number) {
+  clearTimeout(toastTimers.get(id));
+  toastTimers.delete(id);
   set({ toasts: get().toasts.filter((t) => t.id !== id) });
 }
 
+/**
+ * One request to the background process. A failure is shown as an error toast, unless `quiet`, and
+ * the promise still rejects so the caller can undo what it did. A caller with nothing to undo ends
+ * the chain with `.catch(toasted)`; a quiet caller handles the failure itself or says why it need not.
+ */
 export async function call<T = unknown>(method: string, params: Record<string, unknown> = {}, { quiet = false } = {}): Promise<T> {
   try {
     return await rpc.call<T>(method, params);
@@ -237,6 +384,28 @@ export async function call<T = unknown>(method: string, params: Record<string, u
     if (!quiet) toast(errText(e), 'error');
     throw e;
   }
+}
+
+/** The end of a call() whose failure needs nothing more: call() has already shown it. */
+export const toasted = () => {};
+
+function quitNow() {
+  // Quitting while the process is already going away fails; the window ends either way.
+  call('app.quit', {}, { quiet: true }).catch(() => {});
+  if (native()) return; // the desktop shell closes its own window
+  // A browser tab cannot always close itself; leave a clear end state instead.
+  setTimeout(() => {
+    window.close();
+    document.body.innerHTML = '<div class="quit-note">Pilcrow has quit. You can close this window.</div>';
+  }, 300);
+}
+
+/** Quit, asking first when Claude is still working (the desktop shell asks natively instead). */
+export function quitApp() {
+  if (native()) return quitNow();
+  const busy = useStore.getState().sessions.filter((s) => isBusy(s.status)).length;
+  if (!busy) return quitNow();
+  setDialog('confirm', { title: 'Quit Pilcrow?', body: `Claude is still working in ${plural(busy, 'session')}. Quitting stops ${busy > 1 ? 'them' : 'it'}.`, confirm: 'Quit', danger: true, onConfirm: quitNow });
 }
 
 // ---- desktop notifications
@@ -326,27 +495,46 @@ function onMsgs({ id, msgs }: { id: string; msgs: RawMsg[] }) {
   }
   const m = models.get(id);
   if (!m) return;
+  const patch = (p: Partial<Runtime>) => patches.set(id, { ...patches.get(id), ...p });
   for (const msg of msgs) {
     if (msg.type === 'system' && msg.subtype === 'thinking_tokens') {
-      patchRt(id, { thinkingTokens: msg.estimated_tokens });
+      patch({ thinkingTokens: msg.estimated_tokens });
       continue;
     }
     if (msg.type === 'system' && msg.subtype === 'notification') {
       toast(msg.text || '', msg.priority === 'high' || msg.priority === 'immediate' ? 'warning' : 'info');
       continue;
     }
-    if (msg.type === 'stream_event' && msg.event?.type === 'message_start' && !msg.parent_tool_use_id) patchRt(id, { thinkingTokens: 0 });
+    if (msg.type === 'stream_event' && msg.event?.type === 'message_start' && !msg.parent_tool_use_id) patch({ thinkingTokens: 0 });
     m.push(msg);
   }
+  m.endBatch();
   markDirty(id);
+}
+
+/**
+ * The requests waiting in a fresh state are the ones already held when they have the same ids: the
+ * server sends a new list with every state, which is often, and the conversation keys what it draws
+ * on this list (Transcript), so a list that says nothing new keeps the identity of the one held.
+ */
+export function samePending(held: PermissionRequest[] | undefined, next: PermissionRequest[] | undefined) {
+  return Boolean(held && next && held.length === next.length && held.every((p, i) => p.requestId === next[i].requestId && p.toolUseId === next[i].toolUseId));
 }
 
 function onState(st: SessionState) {
   const prev = get().rt[st.id];
-  patchRt(st.id, st);
-  const sessions = get().sessions.map((s) => (s.id === st.id ? { ...s, status: st.status, live: st.live, pending: st.pending.length } : s));
-  set({ sessions });
-  const wasBusy = prev && (prev.status === 'running' || prev.status === 'requires_action');
+  patchRt(st.id, samePending(prev?.pending, st.pending) ? { ...st, pending: prev?.pending } : st);
+  // The list (and every row) keeps its identity unless what a row shows changed: state arrives often.
+  const sessions = get().sessions;
+  const i = sessions.findIndex((s) => s.id === st.id);
+  const row = sessions[i];
+  if (row && (row.status !== st.status || row.live !== st.live || row.pending !== st.pending.length)) {
+    const next = sessions.slice();
+    next[i] = { ...row, status: st.status, live: st.live, pending: st.pending.length };
+    set({ sessions: next });
+  }
+  // A turn was under way (a process starting is not one): its end is news.
+  const wasBusy = isBusy(prev?.status) && prev?.status !== 'starting';
   if (wasBusy && st.status === 'idle') {
     if (get().activeId !== st.id || document.hidden) set({ unread: { ...get().unread, [st.id]: true } });
     notify(st.id, 'Claude finished', titleOf(st.id));
@@ -365,7 +553,7 @@ export function initApp() {
       setHome(info.home);
       set({ info, config });
       loadGatewayModels();
-      rpc.call<{ unread: number }>('inbox.list').then((r) => set({ inboxUnread: r.unread })).catch(() => {});
+      rpc.call<{ unread: number }>('inbox.list').then((r) => set({ inboxUnread: r.unread }), () => {}); // the badge waits for inbox.changed
       loadJobs();
       loadPlaybooks();
       applyConfigUi(config);
@@ -394,14 +582,14 @@ export function initApp() {
   rpc.on('sessions.changed', () => refreshSessions());
   rpc.on('schedules.changed', () => set({ schedRev: get().schedRev + 1 }));
   rpc.on('memory.changed', () => set({ schedRev: get().schedRev + 1 }));
-  rpc.on('repos.changed', ({ repos }: { repos: RepoEntry[] }) => {
+  rpc.on('repos.changed', ({ repos }) => {
     const config = get().config;
     if (config) set({ config: { ...config, repos } });
   });
-  rpc.on('inbox.changed', (unread: number) => set({ inboxUnread: typeof unread === 'number' ? unread : get().inboxUnread, schedRev: get().schedRev + 1 }));
-  rpc.on('dispatch.changed', (d: DispatchDelta) => onDispatch(d));
+  rpc.on('inbox.changed', (unread) => set({ inboxUnread: typeof unread === 'number' ? unread : get().inboxUnread, schedRev: get().schedRev + 1 }));
+  rpc.on('dispatch.changed', onDispatch);
   rpc.on('dispatch.playbooks', () => loadPlaybooks());
-  rpc.on('timeline.step', ({ id, step }: { id: string; step: TimelineStep }) => {
+  rpc.on('timeline.step', ({ id, step }) => {
     const cur = get().timeline[id];
     if (!cur) return; // nobody has asked for this session's timeline yet
     if (cur.some((s) => s.n === step.n)) return;
@@ -411,10 +599,10 @@ export function initApp() {
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
 }
 
-const PANEL_TABS: PanelTab[] = ['changes', 'files', 'terminal', 'preview', 'tasks', 'history', 'info'];
+export const PANEL_TABS: PanelTab[] = ['changes', 'files', 'terminal', 'preview', 'tasks', 'history', 'info'];
 
 /** The saved window layout, taken field by field: the file on disk is loose JSON that an older version may have written. */
-function applyConfigUi(config: Config) {
+export function applyConfigUi(config: Config) {
   const ui = config.ui || {};
   const oneOf = <T extends string>(v: unknown, allowed: readonly T[]): T | undefined => (typeof v === 'string' && (allowed as readonly string[]).includes(v) ? (v as T) : undefined);
   const panelTab = oneOf(ui.panelTab, PANEL_TABS);
@@ -458,13 +646,37 @@ export function applyTheme() {
   const root = document.documentElement;
   const startup = !themeReady;
   if (get().config) themeReady = true;
-  if (!startup && !quietSwitch && root.dataset.theme && root.dataset.theme !== theme) {
-    // Cross-fade colours for a moment instead of flashing to the other theme.
-    root.classList.add('theme-switch');
-    setTimeout(() => root.classList.remove('theme-switch'), 360);
-  }
-  root.dataset.theme = theme;
-  set({ theme });
+  const apply = () => {
+    root.dataset.theme = theme;
+    set({ theme });
+  };
+  // The system's theme changed under the window: the new look fades in over the old one.
+  if (!startup && !quietSwitch && root.dataset.theme && root.dataset.theme !== theme) flipTheme(apply, (r) => r.animate({ opacity: [0, 1] }, { duration: 360, easing: EASE, pseudoElement: '::view-transition-new(root)' }));
+  else apply();
+}
+
+/**
+ * Flip the visible theme inside a View Transition: the window's old and new looks are two pictures
+ * the compositor blends while `reveal` animates the new one in, so a flip costs one style pass however
+ * long the conversation drawn, not a transition on every element. Without View Transitions, or with
+ * reduced motion, it flips at once.
+ */
+function flipTheme(apply: () => void, reveal: (root: HTMLElement) => void) {
+  const doc = document as Document & { startViewTransition?: (cb: () => void) => { ready: Promise<void> } };
+  // applyTheme inside does not start a flip of its own.
+  const quiet = () => {
+    quietSwitch = true;
+    try {
+      apply();
+    } finally {
+      quietSwitch = false;
+    }
+  };
+  if (!doc.startViewTransition || reducedMotion()) return quiet();
+  doc
+    .startViewTransition(quiet)
+    .ready.then(() => reveal(document.documentElement))
+    .catch(() => {}); // a skipped transition: the theme has changed all the same
 }
 
 let saveUiTimer: ReturnType<typeof setTimeout> | null = null;
@@ -473,6 +685,7 @@ export function setUi(patch: Partial<Ui>) {
   if (saveUiTimer) clearTimeout(saveUiTimer);
   saveUiTimer = setTimeout(() => {
     const { sidebar, panel, panelTab, sidebarW, panelW, diffMode, view } = get().ui;
+    // The layout is a convenience: if it cannot be saved, the next change tries again.
     rpc.call('config.set', { ui: { sidebar, panel, panelTab, sidebarW, panelW, diffMode, view } }).catch(() => {});
   }, 400);
 }
@@ -486,31 +699,15 @@ export function setTheme(pref: Config['theme'], at?: { x: number; y: number }) {
   if (!config) return;
   const before = document.documentElement.dataset.theme;
   const resolved = pref === 'dark' || (pref === 'system' && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
-  const doc = document as Document & { startViewTransition?: (cb: () => void) => { finished: Promise<void> } };
   set({ config: { ...config, theme: pref } });
-  if (resolved === before || !doc.startViewTransition || matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    applyTheme();
-  } else {
+  if (resolved === before) applyTheme();
+  else {
     const x = at?.x ?? innerWidth / 2;
     const y = at?.y ?? innerHeight / 2;
     const r = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
-    const vt = doc.startViewTransition(() => {
-      quietSwitch = true;
-      applyTheme();
-      quietSwitch = false;
-    });
-    vt.ready
-      .then(() =>
-        document.documentElement.animate(
-          { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${r}px at ${x}px ${y}px)`] },
-          { duration: 520, easing: 'cubic-bezier(0.65, 0, 0.35, 1)', pseudoElement: '::view-transition-new(root)' },
-        ),
-      )
-      .catch(() => {});
+    flipTheme(applyTheme, (root) => root.animate({ clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${r}px at ${x}px ${y}px)`] }, { duration: 520, easing: 'cubic-bezier(0.65, 0, 0.35, 1)', pseudoElement: '::view-transition-new(root)' }));
   }
-  call<Config>('config.set', { theme: pref })
-    .then((c) => set({ config: c }))
-    .catch(() => {});
+  call<Config>('config.set', { theme: pref }).then((c) => set({ config: c }), toasted);
 }
 
 export async function setConfig(patch: Partial<Config>) {
@@ -534,9 +731,14 @@ const opening = new Map<string, Promise<void>>();
 export function openSession(id: string): Promise<void> {
   if (get().page !== 'session') set({ page: 'session' });
   set({ activeId: id, unread: { ...get().unread, [id]: false } });
-  rpc.call('config.set', { ui: { lastSession: id } }).catch(() => {});
+  rpc.call('config.set', { ui: { lastSession: id } }).catch(() => {}); // remembered for the next start when it can be
   const r = get().rt[id];
-  if (models.has(id) && r?.loaded) return Promise.resolve();
+  const m = models.get(id);
+  if (m && r?.loaded) {
+    models.delete(id); // to the end: the most recently opened
+    models.set(id, m);
+    return Promise.resolve();
+  }
   // One load per session at a time; a second click must not build a second transcript model.
   let p = opening.get(id);
   if (!p) {
@@ -546,19 +748,33 @@ export function openSession(id: string): Promise<void> {
   return p;
 }
 
+/** Messages modelled per task while a conversation opens. */
+const SLICE = 300;
+
 async function loadSession(id: string) {
   patchRt(id, { loading: true });
+  // Measured by test/e2e/perf.mjs: from here to the history modelled, and to its first rows on screen (Transcript).
+  performance.mark(`pilcrow:open:${id}`);
   try {
     const snap = await rpc.call<{ state: SessionState; messages: RawMsg[]; inflight: RawMsg[]; meta: Record<string, unknown> }>('session.open', { id });
+    // A long history is modelled a slice at a time, so the window keeps drawing and answering while
+    // it opens; messages that arrive meanwhile wait in `buffered` (onMsgs) until it is done.
+    const all = snap.inflight?.length ? snap.messages.concat(snap.inflight) : snap.messages;
     const m = new TranscriptModel();
-    m.pushAll(snap.messages);
-    m.pushAll(snap.inflight || []);
+    for (let i = 0; i < all.length; i += SLICE) {
+      if (i) await yieldToEvents();
+      m.pushAll(all.slice(i, i + SLICE));
+    }
+    performance.measure('pilcrow:modelled', { start: `pilcrow:open:${id}`, detail: { id } });
+    models.delete(id);
     models.set(id, m);
     patchRt(id, { ...snap.state, meta: snap.meta, loaded: true, loading: false, rev: m.rev });
     const extra = buffered.get(id);
     buffered.delete(id);
     if (extra?.length) onMsgs({ id, msgs: extra });
+    evictModels();
   } catch (e) {
+    performance.clearMarks(`pilcrow:open:${id}`);
     patchRt(id, { loading: false });
     toast(errText(e), 'error');
     if (get().activeId === id) set({ activeId: null });
@@ -583,8 +799,8 @@ export async function createSession(opts: { cwd: string; worktree?: { base?: str
 
 /** `now` steers: the current step is interrupted and this message goes first. */
 export async function sendMessage(id: string, payload: { text: string; images?: { mediaType: string; data: string }[]; files?: { name: string; text: string }[] }, opts: { now?: boolean } = {}) {
-  // Sending is a reason to be at the live end again, wherever the reader had scrolled to (Transcript listens).
-  window.dispatchEvent(new CustomEvent('pilcrow:sent', { detail: id }));
+  // Sending is a reason to be at the live end again, wherever the reader had scrolled to (useFollow).
+  set({ sent: { id, at: Date.now() } });
   await call('session.send', { id, ...payload, now: Boolean(opts.now) });
 }
 
@@ -626,6 +842,9 @@ export const setMode = (id: string, mode: PermissionMode) => call('session.setMo
 export const setModel = (id: string, model: string) => call('session.setModel', { id, model });
 export const setEffort = (id: string, effort: Effort) => call('session.setEffort', { id, effort });
 export const respond = (id: string, requestId: string, decision: PermissionDecision) => call('session.permission', { id, requestId, decision });
+/** Allow this once, and decline: the answers every card gives a request. */
+export const ALLOW_ONCE: PermissionDecision = { behavior: 'allow', decisionClassification: 'user_temporary' };
+export const DECLINE: PermissionDecision = { behavior: 'deny', message: 'The user declined this action.', decisionClassification: 'user_reject' };
 
 export async function renameSession(id: string, title: string) {
   await call('session.rename', { id, title });
@@ -644,7 +863,7 @@ async function foldRow(id: string): Promise<() => void> {
   foldingRows.add(id);
   const h = el.offsetHeight;
   // The row's own min-height and the list's row gap would both keep a sliver of space; fold them too.
-  const gap = parseFloat(getComputedStyle(el.parentElement!).rowGap) || 0;
+  const gap = el.parentElement ? parseFloat(getComputedStyle(el.parentElement).rowGap) || 0 : 0;
   el.style.overflow = 'hidden';
   el.style.minHeight = '0';
   el.style.pointerEvents = 'none';
@@ -656,7 +875,7 @@ async function foldRow(id: string): Promise<() => void> {
     ],
     { duration: 280, easing: EASE_EXIT, fill: 'forwards' },
   );
-  await a.finished.catch(() => {});
+  await a.finished.catch(() => {}); // cancelled: the row is put back below
   return () => {
     foldingRows.delete(id);
     a.cancel();
@@ -676,6 +895,9 @@ export async function deleteSession(id: string, removeWorktree = false, removeHe
   }
   requestAnimationFrame(() => foldingRows.delete(id));
   models.delete(id);
+  // Its terminals cannot be reached again once the session is gone.
+  for (const t of memos.get(id)?.terms || []) if (!t.exited) call('term.close', { id: t.id }, { quiet: true }).catch(() => {}); // a shell that already went is gone either way
+  memos.delete(id);
   const rt = { ...get().rt };
   delete rt[id];
   set({ rt, activeId: get().activeId === id ? null : get().activeId, sessions: get().sessions.filter((s) => s.id !== id) });
@@ -713,9 +935,10 @@ export async function forkSession(id: string, upToMessageId?: string, sendAfter?
 }
 
 export function openFile(path: string, line?: number) {
-  set({ fileOpen: { path, line, nonce: Date.now() } });
+  set({ fileOpen: { path, line } });
   setUi({ panel: true, panelTab: 'files' });
 }
+export const takeFileOpen = () => set({ fileOpen: null });
 
 export function showPage(page: 'session' | 'overview' | 'inbox' | 'dispatch') {
   set({ page });
@@ -725,14 +948,19 @@ export function showPage(page: 'session' | 'overview' | 'inbox' | 'dispatch') {
 export function loadJobs() {
   rpc
     .call<DispatchJob[]>('dispatch.list')
-    .then((lst) => set({ jobs: Object.fromEntries((lst || []).map((j) => [j.id, j])), jobsLoaded: true }))
-    .catch(() => {});
+    // Disconnected: the board fills in on the reconnect, which asks again.
+    .then(
+      (lst) => set({ jobs: Object.fromEntries((lst || []).map((j) => [j.id, j])), jobsLoaded: true }),
+      () => {},
+    );
 }
 export function loadPlaybooks() {
   rpc
     .call<Playbook[]>('dispatch.playbooks')
-    .then((lst) => set({ playbooks: lst || [] }))
-    .catch(() => {});
+    .then(
+      (lst) => set({ playbooks: lst || [] }),
+      () => {}, // as above: asked again on the reconnect
+    );
 }
 function onDispatch(d: DispatchDelta) {
   if (!d?.id) return;
@@ -754,14 +982,16 @@ function onDispatch(d: DispatchDelta) {
   }
   set({ jobs, jobRuns });
 }
-export function fetchJob(id: string) {
+function fetchJob(id: string) {
   return rpc
     .call<{ job: DispatchJob; runs: DispatchRun[] }>('dispatch.get', { id })
-    .then((r) => {
-      const st = get();
-      set({ jobs: { ...st.jobs, [id]: r.job }, jobRuns: { ...st.jobRuns, [id]: Object.fromEntries(r.runs.map((x) => [x.id, x])) } });
-    })
-    .catch(() => {});
+    .then(
+      (r) => {
+        const st = get();
+        set({ jobs: { ...st.jobs, [id]: r.job }, jobRuns: { ...st.jobRuns, [id]: Object.fromEntries(r.runs.map((x) => [x.id, x])) } });
+      },
+      () => {}, // a job that is gone: dispatch.changed removes it from the board
+    );
 }
 /** A job's runs in the server's order, the superseded (retried) ones left out. */
 export function runsOf(runs: Record<string, Record<string, DispatchRun>>, id: string): DispatchRun[] {
@@ -785,17 +1015,47 @@ export function showDispatch(view: null | 'new' | string) {
 }
 export const openJob = (id: string) => showDispatch(id);
 
+/** Live state of sessions the control room shows without having opened them. */
+export function mergeLive(live: Record<string, Partial<SessionState>>) {
+  const cur = get().rt;
+  const next = { ...cur };
+  for (const [id, st] of Object.entries(live)) next[id] = { ...(cur[id] || { rev: 0, loaded: false, loading: false }), ...st };
+  set({ rt: next });
+}
+
 export function setTimeline(id: string, steps: TimelineStep[]) {
   set({ timeline: { ...get().timeline, [id]: steps } });
 }
+
+/**
+ * A folder's files for @ mentions, asked for once `wanted` (an @ has been typed) and shared for
+ * twenty seconds. A folder that cannot be listed leaves the list empty, which says as much.
+ */
+export function useFileIndex(cwd: string | undefined, wanted: boolean): string[] {
+  const [files, setFiles] = useState<{ cwd: string; list: string[] } | null>(null);
+  useEffect(() => {
+    if (!wanted || !cwd || files?.cwd === cwd) return;
+    let alive = true;
+    loadOnce(folders.index, cwd, () => call<string[]>('fs.index', { cwd }, { quiet: true })).then(
+      (list) => alive && setFiles({ cwd, list }),
+      () => {}, // empty, as above; the next @ asks again
+    );
+    return () => {
+      alive = false;
+    };
+  }, [cwd, wanted, files?.cwd]);
+  return files && files.cwd === cwd ? files.list : NONE;
+}
+const NONE: string[] = [];
 
 export function bumpFs() {
   set({ fsRev: get().fsRev + 1 });
 }
 
 export function insertIntoComposer(id: string, text: string, replace = false) {
-  set({ composerInsert: { id, text, nonce: Date.now(), replace } });
+  set({ composerInsert: { id, text, replace } });
 }
+export const takeComposerInsert = () => set({ composerInsert: null });
 
 /** The registered repository (REPOSITORIES.md) whose folder holds `path` (the deepest one), or null. */
 export function repoFor(path: string | undefined | null, repos: RepoEntry[] | undefined = useStore.getState().config?.repos): RepoEntry | null {

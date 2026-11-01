@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-from harness import app_client, mock_server  # noqa: F401
+from harness import app_client, mock_server
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-
-MOCK_PORT = 5421
 
 
 def _welcome(c):
@@ -35,7 +33,7 @@ def test_greeting_sub_and_chips(app_client):
     assert w.chips[0]._on and not w.chips[1]._on
     assert w.box.folder_btn.label.text() == "pilcrow"
     # the send button is quiet until there is text
-    assert not w.box.send.isEnabled() and not w.box.send._ready
+    assert not w.box.send.isEnabled() and w.box.send.state == "idle"
     w.chips[1].click()
     assert w.cwd == "/home/tester/code/website" and w.sub_b.text() == "website"
     assert w.box.folder_btn.label.text() == "website"
@@ -50,7 +48,7 @@ def test_box_starts_a_session_in_the_chosen_folder(app_client):
     c.call("mock.pace", {"ms": 0})
     before = {x.get("id") for x in c.store.sessions}
     w.box.edit.setPlainText("fix the parser")
-    assert w.box.send.isEnabled() and w.box.send._ready
+    assert w.box.send.isEnabled() and w.box.send.state == "ready"
     QTest.keyClick(w.box.edit, Qt.Key.Key_Return)
     c.wait_until(lambda: len(c.store.sessions) > len(before), 10, "session created")
     new_id = next(x.get("id") for x in c.store.sessions if x.get("id") not in before)

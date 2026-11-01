@@ -9,7 +9,7 @@ const cache = new Map();
 
 function isMusl() {
   try {
-    const header = process.report?.getReport?.().header;
+    const header = /** @type {{ header?: { glibcVersionRuntime?: string } }} */ (process.report?.getReport?.())?.header;
     return header ? !header.glibcVersionRuntime : false;
   } catch {
     return false;

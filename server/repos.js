@@ -10,7 +10,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
-import { findRepos, manifestOf } from './dispatch_core.js';
+import { findRepos, manifestOf } from './workspace.js';
+import { absolute, under } from './util.js';
 
 export const POLICIES = ['allowed', 'ask', 'never'];
 export const MODES = ['default', 'acceptEdits', 'plan'];
@@ -28,7 +29,7 @@ export function normalizeWord(w) {
     .normalize('NFKC')
     .toLowerCase()
     .replace(/^@/, '')
-    .replace(/[\s_\-]+/g, '');
+    .replace(/[\s_-]+/g, '');
 }
 
 function distance(a, b) {
@@ -45,7 +46,6 @@ function distance(a, b) {
 }
 
 const str = (v, max) => String(v ?? '').trim().slice(0, max);
-const under = (dir, p) => p === dir || p.startsWith(dir.endsWith('/') ? dir : dir + '/');
 
 export function createRegistry(deps) {
   const {
@@ -55,7 +55,6 @@ export function createRegistry(deps) {
     now = () => Date.now(),
     uuid = () => crypto.randomUUID(),
     slash = (p) => p,
-    expandHome = (p) => p,
     exists = (p) => fs.existsSync(p),
   } = deps;
   const events = new EventEmitter();
@@ -70,7 +69,6 @@ export function createRegistry(deps) {
     events.emit('changed', { repos: list.map(withMissing) });
   };
   const withMissing = (e) => ({ ...e, missing: !exists(e.path) });
-  const absolute = (p) => slash(path.resolve(expandHome(String(p || '').trim()))).replace(/(?<=.)\/+$/, '');
   const words = (e) => [e.name, ...(e.aliases || [])];
 
   /** The name a folder gets when the person types none: the folder's, or the manifest's when the folder's says nothing. */
@@ -171,19 +169,19 @@ export function createRegistry(deps) {
   function resolve(word) {
     const w = String(word || '').trim();
     if (!w) return null;
-    const list_ = all();
+    const entries = all();
     if (w.includes('/') || w.startsWith('~') || w.startsWith('.')) {
       const p = absolute(w);
-      const hit = list_.find((e) => e.path === p);
+      const hit = entries.find((e) => e.path === p);
       if (hit) return withMissing(hit);
     }
     const n = normalizeWord(w);
     if (!n) return null;
-    const byName = list_.find((e) => normalizeWord(e.name) === n);
+    const byName = entries.find((e) => normalizeWord(e.name) === n);
     if (byName) return withMissing(byName);
-    const byAlias = list_.find((e) => (e.aliases || []).some((a) => normalizeWord(a) === n));
+    const byAlias = entries.find((e) => (e.aliases || []).some((a) => normalizeWord(a) === n));
     if (byAlias) return withMissing(byAlias);
-    const byBase = list_.find((e) => normalizeWord(path.basename(e.path)) === n);
+    const byBase = entries.find((e) => normalizeWord(path.basename(e.path)) === n);
     return byBase ? withMissing(byBase) : null;
   }
   /** The closest names to a word that matched nothing. */
@@ -202,18 +200,18 @@ export function createRegistry(deps) {
 
   /** The digest every session gets in its system prompt; '' when nothing is registered. */
   function promptFor() {
-    const list_ = all();
-    if (!list_.length) return '';
+    const entries = all();
+    if (!entries.length) return '';
     const head = '\n\n# Repositories\nThe person registered these repositories (Pilcrow keeps the list; @name mentions them). Use these names when you talk about them and when you start helpers. A path the person gives wins over the list.\n';
     const lines = [];
     let used = head.length;
     let i = 0;
-    for (const e of list_) {
+    for (const e of entries) {
       const also = e.aliases?.length ? ` (also: ${e.aliases.join(', ')})` : '';
       const full = i < DIGEST_FULL;
       const line = full ? `- ${e.name}${also}: ${e.about || 'no description'} · ${tildifyPath(e.path)} · helpers ${e.policy}` : `- ${e.name}${also}`;
       if (used + line.length + 1 > DIGEST_MAX) {
-        lines.push(`- and ${list_.length - i} more; ask with the helpers list tool`);
+        lines.push(`- and ${entries.length - i} more; ask with the helpers list tool`);
         break;
       }
       lines.push(line);
@@ -234,8 +232,8 @@ export function createRegistry(deps) {
     const e = clean(input || {}, current);
     if (!exists(e.path) && (!current || current.path !== e.path)) throw new Error(`The folder does not exist: ${e.path}`);
     checkUnique(e);
-    const list_ = current ? all().map((x) => (x.id === e.id ? e : x)) : [...all(), e];
-    write(list_);
+    const entries = current ? all().map((x) => (x.id === e.id ? e : x)) : [...all(), e];
+    write(entries);
     await refresh([e.id], { force: true }).catch((err) => log('repos refresh failed', err?.message));
     return get(e.id);
   }
@@ -267,6 +265,7 @@ export function createRegistry(deps) {
     };
   }
   /** Re-read the scanned facts of some or all entries (throttled to once a minute each unless forced). */
+  /** @param {string[] | null} [ids] every entry when null */
   async function refresh(ids = null, { force = false } = {}) {
     const todo = all().filter((e) => (!ids || ids.includes(e.id)) && (force || now() - (refreshedAt.get(e.id) || 0) > REFRESH_MS));
     if (!todo.length) return list();
@@ -289,7 +288,7 @@ export function createRegistry(deps) {
   async function scan(root, depth = 3) {
     const r = absolute(root);
     if (!exists(r)) throw new Error('Pick a folder that exists.');
-    const dirs = findRepos(r, depth).map(slash);
+    const dirs = (await findRepos(r, depth)).map(slash);
     const known = new Set(all().map((e) => e.path));
     const found = [];
     let i = 0;
@@ -309,10 +308,10 @@ export function createRegistry(deps) {
   /** Dispatch's scan results, with what the registry knows about each: the registered mark, the about
    *  line, the policy, and the dependencies the person set, by path. */
   function annotate(reposList) {
-    const list_ = all();
-    const pathOf = new Map(list_.map((e) => [e.id, e.path]));
+    const entries = all();
+    const pathOf = new Map(entries.map((e) => [e.id, e.path]));
     for (const r of reposList) {
-      const e = list_.find((x) => x.path === r.path);
+      const e = entries.find((x) => x.path === r.path);
       if (!e) {
         r.registered = false;
         continue;
@@ -332,12 +331,10 @@ export function createRegistry(deps) {
   return { events, list, get, containing, policyFor, defaultsFor, notesFor, resolve, nearest, promptFor, save, remove, register, refresh, scan, annotate };
 }
 
-export { joinNotes } from './dispatch_core.js';
-
 // ---------------------------------------------------------------- the server's instance
 import { store } from './config.js';
 import * as git from './git.js';
-import { expandHome, log, slash } from './util.js';
+import { log, slash } from './util.js';
 
-export const repos = createRegistry({ store, git, log, slash, expandHome });
+export const repos = createRegistry({ store, git, log, slash });
 export const events = repos.events;

@@ -1,8 +1,9 @@
 """A Fenwick (binary indexed) tree over integer heights.
 
 The y of the i-th block in a list is ``prefix(i)``; the block under a y is ``find(y)``; a height
-change is ``set(i, h)``. All three are O(log n). Appending at the end is O(log n) too (the live end
-of a conversation grows by appending); cutting the tail or inserting in the middle rebuilds in O(n)
+change is ``set(i, h)``. All three are O(log n). The live end of a conversation grows and is cut
+there, so the tail is cheap: appending is O(log n) and cutting the tail costs what it cuts, because a
+node of the tree sums only values before it. Inserting or removing in the middle rebuilds in O(n)
 and is rare (a unit removed, a live turn reshaped).
 """
 
@@ -110,19 +111,27 @@ class Fenwick:
         t.append(s)
 
     def truncate(self, k: int) -> None:
-        """Keep the first ``k`` values."""
+        """Keep the first ``k`` values. ``tree[i]`` covers values below ``i`` only, so the first ``k + 1``
+        nodes stay exact and the rest are dropped: no rebuild."""
         if k >= self._n:
             return
-        del self._vals[max(0, k) :]
-        self._n = len(self._vals)
-        self._build()
+        k = max(0, k)
+        del self._vals[k:]
+        del self._tree[k + 1 :]
+        self._n = k
 
     def insert(self, i: int, value: int) -> None:
+        if i >= self._n:
+            self.append(value)
+            return
         self._vals.insert(i, int(value))
         self._n += 1
         self._build()
 
     def remove(self, i: int) -> None:
+        if i == self._n - 1:
+            self.truncate(i)
+            return
         del self._vals[i]
         self._n -= 1
         self._build()

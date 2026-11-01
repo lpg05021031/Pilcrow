@@ -1,13 +1,12 @@
-import { useMemo } from 'react';
 import { ListChecks, Bot, SquareTerminal, CircleStop, Check, X, Activity, Workflow } from 'lucide-react';
 import { WorkflowDetail } from '../tools/WorkflowBody';
 import { useStore, models, call } from '../../lib/store';
 import type { SessionSummary, TaskInfo } from '../../lib/types';
 import { duration, tokens, plural, timeAgo } from '../../lib/format';
-import { TodoBody } from '../tools/ToolCard';
+import { TodoBody } from '../tools/TodoBody';
 import { Spinner } from '../ui/bits';
 import { str } from '../../lib/tools';
-import type { Todo } from '../tools/ToolCard';
+import type { Todo } from '../tools/TodoBody';
 
 function reconstructTodos(sessionId: string) {
   const m = models.get(sessionId);
@@ -41,8 +40,9 @@ const NO_TASKS: TaskInfo[] = [];
 export function TasksPanel({ session }: { session: SessionSummary }) {
   // the tasks and the transcript revision, not the whole runtime: a streaming reply does not redraw the panel
   const tasks = useStore((s) => s.rt[session.id]?.tasks) || NO_TASKS;
-  const rev = useStore((s) => s.rt[session.id]?.rev);
-  const todos = useMemo(() => reconstructTodos(session.id), [session.id, rev]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Read again as the model changes (its rev); the panel draws only while its tab is shown.
+  useStore((s) => s.rt[session.id]?.rev);
+  const todos = reconstructTodos(session.id);
   const workflows = tasks.filter((t) => t.type === 'local_workflow' && !t.ambient);
   // Sub-agents that a workflow spawned are drawn inside the workflow; everything else lists here.
   const inWorkflow = (t: (typeof tasks)[number]) => t.type === 'local_agent' && t.ownedBySubagent && workflows.some((w) => w.startedAt && t.startedAt && t.startedAt >= w.startedAt && (!w.endedAt || t.startedAt <= w.endedAt + 2000));

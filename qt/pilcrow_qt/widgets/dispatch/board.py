@@ -4,7 +4,7 @@ for every repository that asks the same thing), so most jobs are never opened.""
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QEvent, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter
@@ -12,14 +12,14 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLay
 
 from ... import theme
 from ...lib.fmt import cost as fmt_cost
-from ...lib.fmt import duration, plural
+from ...lib.fmt import duration, now_ms, plural
 from ...store import store
-from ..dialogs.parts import Card, Text, half_hairline, page_column
+from ..dialogs.parts import Card, Text, half_hairline
 from ..overview import EmptyNote, SectionHead
-from ..ui.bits import IconButton, LayoutButton, Mark, button
+from ..ui.bits import IconButton, LayoutButton, button
 from ..ui.signals import bind
 from .cards import CanaryRow, RequestRow
-from .common import SegmentBar, counts_text, elapsed_text, group_requests, job_cost_text, job_state_text, now_ms
+from .common import SegmentBar, counts_text, elapsed_text, group_requests, job_cost_text, job_state_text
 
 Json = Dict[str, Any]
 
@@ -55,7 +55,7 @@ class JobCard(Card):
         self.extra.setSpacing(6)
         lay.addLayout(self.extra)
 
-    def paintEvent(self, e) -> None:  # noqa: N802
+    def paintEvent(self, e) -> None:
         super().paintEvent(e)
         if self._tone != "needs":
             return
@@ -113,7 +113,7 @@ class JobCard(Card):
                 w.set_keys(self._keys and first)
                 first = False
 
-    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, e) -> None:
         if e.button() == Qt.MouseButton.LeftButton and self.rect().contains(e.position().toPoint()):
             store.open_job(self.jid)
         super().mouseReleaseEvent(e)
@@ -285,21 +285,21 @@ class Board(QWidget):
         else:
             self._stale = True
 
-    def showEvent(self, e) -> None:  # noqa: N802
+    def showEvent(self, e) -> None:
         super().showEvent(e)
         self._tick_timer.start()
         if self._stale:
             self.refresh()
         store.load_jobs()
 
-    def hideEvent(self, e) -> None:  # noqa: N802
+    def hideEvent(self, e) -> None:
         self._tick_timer.stop()
         super().hideEvent(e)
 
-    def eventFilter(self, obj, e) -> bool:  # noqa: N802
+    def eventFilter(self, obj, e) -> bool:
         if obj is self.scroll.viewport() and e.type() == QEvent.Type.Resize:
             vw = self.scroll.viewport().width()
-            self.body.setFixedWidth(max(320, min(page_column(vw), vw)))
+            self.body.setFixedWidth(max(320, min(theme.column_width(vw), vw)))
         return False
 
     # ---- data
@@ -433,13 +433,10 @@ class Board(QWidget):
         self.refresh()
         return True
 
-    def keyPressEvent(self, e) -> None:  # noqa: N802
+    def keyPressEvent(self, e) -> None:
         if not self.handle_key(e.key(), e.text()):
             super().keyPressEvent(e)
 
     @property
     def focus_index(self) -> int:
         return self._focus
-
-
-_ = (Callable, Mark)

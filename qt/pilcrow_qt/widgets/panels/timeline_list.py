@@ -6,7 +6,6 @@ picking a step changes one island and the rows' tints, nothing is rebuilt.
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
 from PySide6.QtCore import QPointF, QRect, QRectF, Qt
@@ -21,15 +20,13 @@ from ...canvas.blocks.island import IslandBlock
 from ...canvas.paint import Measurer, PaintState, rounded
 from ...canvas.scene import Block, Scene, Target
 from ...canvas.view import CanvasView
-from ...lib.fmt import plural
+from ...lib.fmt import clock, plural
+from ...store import store
+from ..ui.bits import draw_mark
 
 Json = Dict[str, Any]
 ROW_PAD = (4, 5, 6, 5)
 RAIL_W = 18
-
-
-def _clock_s(ms: float) -> str:
-    return datetime.fromtimestamp(ms / 1000).strftime("%H:%M:%S")
 
 
 def step_title(s: Json) -> str:
@@ -66,6 +63,8 @@ def num(kind: str, n: int) -> nd.Text:
 
 class StepBlock(NodeBlock):
     """One step (``.tl-row``). Selected: the accent dot, the tint, and the jump arrow shown."""
+
+    __slots__ = ("last", "n", "on_pick", "selected", "step", "title")
 
     KIND = "tl-step"
     MT = 0
@@ -109,7 +108,7 @@ class StepBlock(NodeBlock):
         )
         sub = nd.hstack(
             nd.Text(step_sub(s), theme.FS_MICRO, 400, "text_4", wrap=False),
-            nd.Text(_clock_s(float(s.get("at") or 0)), theme.FS_MICRO, 400, "text_4", wrap=False),
+            nd.Text(clock(float(s.get("at") or 0), True), theme.FS_MICRO, 400, "text_4", wrap=False),
             spacing=8,
         )
         main = nd.vstack(title, sub, spacing=1)
@@ -119,12 +118,20 @@ class StepBlock(NodeBlock):
         else:
             parts.append(nd.Text("—", theme.FS_MICRO, 400, "text_3", wrap=False))
         if s.get("toolUseId") or s.get("uuid"):
-            parts.append(nd.Button("", "jump", icon="arrow-up-right", kind="ghost", size="xs", icon_px=13))
+            parts.append(
+                nd.Button(
+                    "",
+                    "jump",
+                    icon="arrow-up-right",
+                    kind="ghost",
+                    size="xs",
+                    icon_px=13,
+                    name="Show in the conversation",
+                )
+            )
         return nd.hstack(*parts, spacing=6, stretch=[1], pad=ROW_PAD, valign="top")
 
     def _jump(self, _t: Target, _view: Any) -> None:
-        from ...store import store
-
         store.toast("That step is not in the conversation view.", "info")
 
     def _paint_dot(self, p: QPainter, r: QRect, st: PaintState) -> None:
@@ -200,6 +207,8 @@ class StepBlock(NodeBlock):
 class NowBlock(NodeBlock):
     """``.tl-now``: the present, chosen when no step is."""
 
+    __slots__ = ("busy", "chosen", "on_pick")
+
     KIND = "tl-now"
 
     def __init__(self, on_pick: Callable[[], None]) -> None:
@@ -232,8 +241,6 @@ class NowBlock(NodeBlock):
         )
 
     def _paint_mark(self, p: QPainter, r: QRect, st: PaintState) -> None:
-        from ...canvas.blocks.misc import draw_mark
-
         draw_mark(p, QRectF(r.x() + 2, r.y() + 4, 14, 14), st.t, 1.0, st.t.text if self.chosen else st.t.text_2)
 
     def paint(self, p: QPainter, x: int, y: int, w: int, st: PaintState) -> None:
@@ -253,6 +260,8 @@ class NowBlock(NodeBlock):
 
 class DetailIsland(IslandBlock):
     """The picked step's detail (its diff, file by file): a real widget under the row."""
+
+    __slots__ = ("cwd", "sid", "step")
 
     MB = 6
 
@@ -345,6 +354,3 @@ class TimelineList(CanvasView):
         b: Optional[Block] = self.now if n is None else next((r for r in self.rows if r.n == n), None)
         if b is not None:
             self.scroll_to_block(b, 0.3)
-
-    def detail_widget(self) -> Optional[QWidget]:
-        return self.detail.widget if self.detail is not None and self.detail.alive else None

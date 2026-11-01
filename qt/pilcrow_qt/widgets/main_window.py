@@ -9,24 +9,37 @@ hairline round them; a 9px drag handle straddles each seam and takes 1px of the 
 
 from __future__ import annotations
 
+import os
+import sys
 from collections import OrderedDict
-from typing import Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import shiboken6
-from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QKeySequence, QPainter, QPainterPath, QPen, QShortcut
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, QRect, QRectF, QSettings, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QGuiApplication, QKeySequence, QPainter, QPainterPath, QPen, QRegion, QShortcut
+from PySide6.QtWidgets import (
+    QGraphicsOpacityEffect,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QSizePolicy,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from .. import icons, theme
-from ..store import store
+from ..canvas.clock import Tween
+from ..lib.shortcuts import SHORTCUTS
+from ..store import PANEL_TABS, store
+from .dialogs.parts import ElideLabel
 from .sidebar import Sidebar
-from .ui.bits import Mark, Row, label
+from .ui.bits import label
 from .ui.signals import bind
-
-TAB_KEYS = {"1": "changes", "2": "files", "3": "terminal", "4": "preview", "5": "tasks", "6": "history", "7": "info"}
 
 GROUND_PAD = 8  # .app { padding: 0 8px 8px 0 }
 SESSION_VIEWS_KEPT = 8  # conversations kept built behind the one on screen
+Shadow = Tuple[int, int, int, int, float]  # a line of a sheet's shadow: x, y, w, h, its share of the strength
 SIDEBAR_MIN, SIDEBAR_MAX = 200, 440  # App.tsx resizeSidebar
 PANEL_MIN, PANEL_SHARE = 340, 0.62  # App.tsx resizePanel
 
@@ -110,6 +123,11 @@ class MainWindow(QMainWindow):
         self.inbox: Optional[QWidget] = None
         self.dispatch: Optional[QWidget] = None
         self.panel: Optional[QWidget] = None
+        # a closed panel is built, or brought to the session on screen, once the window is idle
+        self._idle_panel = QTimer(self)
+        self._idle_panel.setSingleShot(True)
+        self._idle_panel.setInterval(700)
+        self._idle_panel.timeout.connect(self._prebuild_panel)
 
         self.boot = Boot(self)
         self.boot.raise_()
@@ -119,16 +137,16 @@ class MainWindow(QMainWindow):
 
         install_overlays(self)
 
-        store.connected_changed.connect(self._on_connected)
+        bind(store.connected_changed, self, self._on_connected)
         bind(store.config_changed, self, lambda _c: self._after_boot())
         bind(store.active_changed, self, lambda _a: self._route())
         bind(store.page_changed, self, lambda _p: self._route())
         bind(store.sessions_changed, self, lambda _s: self._route())
         bind(store.ui_changed, self, lambda _u: self._on_ui())
         bind(store.info_changed, self, lambda _i: self.update_notice.refresh())
-        store.dialog_changed.connect(self._on_dialog)
+        bind(store.dialog_changed, self, self._on_dialog)
         bind(store.toasts_changed, self, lambda _t: self._ensure_toasts())
-        store.notify.connect(self._notify)
+        bind(store.notify, self, self._notify)
         bind(
             store.attention,
             self,
@@ -150,7 +168,7 @@ class MainWindow(QMainWindow):
     def show_fatal(self, text: str) -> None:
         self.boot.set_fatal(text)
 
-    def eventFilter(self, obj, e) -> bool:  # noqa: N802
+    def eventFilter(self, obj, e) -> bool:
         if obj is self.main and e.type() in (QEvent.Type.Move, QEvent.Type.Resize, QEvent.Type.Show):
             self._place_title()
         return super().eventFilter(obj, e)
@@ -160,7 +178,7 @@ class MainWindow(QMainWindow):
         if self.titlebar is not None:
             self.titlebar.set_text_x(self.main.mapTo(self, QPoint(0, 0)).x() + 21)
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         self.boot.setGeometry(self.centralWidget().rect())
         if self.toasts is not None:
             self.toasts.reposition()
@@ -234,14 +252,14 @@ class MainWindow(QMainWindow):
         )
         self.setWindowTitle(f"{f'({waiting}) ' if waiting else ''}{head}{self._title}")
 
-    def showEvent(self, e) -> None:  # noqa: N802
+    def showEvent(self, e) -> None:
         super().showEvent(e)
         if not getattr(self, "_framed", False):
             self._framed = True
             apply_windows_frame(self)
             bind(theme.theme.changed, self, lambda _t: apply_windows_frame(self))
 
-    def closeEvent(self, e) -> None:  # noqa: N802
+    def closeEvent(self, e) -> None:
         save_geometry(self)
         super().closeEvent(e)
 
@@ -255,18 +273,23 @@ class MainWindow(QMainWindow):
 
             self.panel = RightPanel()
             self.panel_layout.addWidget(self.panel)
-        if self.panel is not None and session is not None:
+        if panel_open:
+            self._idle_panel.stop()
             self.panel.set_session(session)
+        elif session is not None and store.page == "session":
+            # closed: its tab follows the session when the window is idle, not on the switch itself,
+            # so the first open is a flip, and a run of switches builds nothing
+            self._idle_panel.start()
         self.panel_host.setFixedWidth(ui.panel_w)
         self.panel_host.setVisible(panel_open)
         self.body.place()
-        if self.panel is None and session is not None and store.page == "session":
-            # built while the window is idle, so the first open is a flip, not a construction
-            QTimer.singleShot(700, self._prebuild_panel)
 
     def _prebuild_panel(self) -> None:
         session = store.active_session()
-        if self.panel is not None or session is None or store.page != "session":
+        if session is None or store.page != "session" or self.panel_host.isVisible():
+            return
+        if self.panel is not None:
+            self.panel.set_session(session)
             return
         from .panels.right_panel import RightPanel
 
@@ -284,8 +307,16 @@ class MainWindow(QMainWindow):
         panel = self.panel
         if panel is None or not shiboken6.isValid(panel):
             return
-        panel.resize(max(PANEL_MIN, self.panel_host.width()), max(1, self.height()))
-        panel.grab()
+        # A grab lays a hidden widget out as if it were shown, and the window's row would make room
+        # for the closed panel's sheet: the conversation narrowed and widened again (two reflows,
+        # two whole repaints) on every warm-up. The row is held still while the panel is grabbed.
+        row = self.body.row
+        row.setEnabled(False)
+        try:
+            panel.resize(max(PANEL_MIN, self.panel_host.width()), max(1, self.height()))
+            panel.grab()
+        finally:
+            row.setEnabled(True)
         from .panels.changes import lexer_warmer
 
         step = lexer_warmer(store.active_id or "")
@@ -331,37 +362,36 @@ class MainWindow(QMainWindow):
 
     # ---- shortcuts (App.tsx)
     def _install_shortcuts(self) -> None:
-        def sc(keys: str, fn) -> None:
-            s = QShortcut(QKeySequence(keys), self)
-            s.setContext(Qt.ShortcutContext.ApplicationShortcut)
-            s.activated.connect(fn)
-
-        sc("Ctrl+K", lambda: store.set_dialog("palette", not store.dialogs.get("palette")))
-        sc("Ctrl+N", store.quick_new_session)
-        sc("Ctrl+Shift+N", lambda: store.set_dialog("newSession", {}))
-        sc("Ctrl+B", lambda: store.set_ui(sidebar=not store.ui.sidebar))
-        sc("Ctrl+O", store.cycle_view)
-        sc("Ctrl+=", lambda: store.zoom(1))
-        sc("Ctrl++", lambda: store.zoom(1))
-        sc("Ctrl+-", lambda: store.zoom(-1))
-        sc("Ctrl+0", lambda: store.zoom(0))
-        sc("Ctrl+Shift+O", lambda: store.show_page("session" if store.page == "overview" else "overview"))
-        sc(
-            "Ctrl+Shift+D",
-            lambda: store.show_page("session") if store.page == "dispatch" else store.show_dispatch(None),
-        )
-        sc("Ctrl+\\", lambda: store.set_ui(panel=not store.ui.panel))
-        sc("Ctrl+,", lambda: store.set_dialog("settings", True))
-        sc("Ctrl+Q", self._quit)
-        sc("Ctrl+/", lambda: store.set_dialog("shortcuts", True))
-        sc("Ctrl+F", self._find)
-        for k, tab in TAB_KEYS.items():
-            sc(f"Alt+{k}", lambda t=tab: self._toggle_tab(t))
-        sc("Ctrl+Alt+Up", lambda: self._step_session(-1))
-        sc("Ctrl+Alt+Down", lambda: self._step_session(1))
-        esc = QShortcut(QKeySequence("Escape"), self)
-        esc.setContext(Qt.ShortcutContext.WindowShortcut)
-        esc.activated.connect(self._escape)
+        """The window's keys, from the one table (``lib/shortcuts``): each entry this window runs gets a
+        QShortcut per key sequence, told which of them fired (Alt+1 … 7, the two arrows)."""
+        run: Dict[str, Callable[[int], None]] = {
+            "palette": lambda _i: store.set_dialog("palette", not store.dialogs.get("palette")),
+            "newSession": lambda _i: store.quick_new_session(),
+            "newSessionWith": lambda _i: store.set_dialog("newSession", {}),
+            "find": lambda _i: self._find(),
+            "sidebar": lambda _i: store.set_ui(sidebar=not store.ui.sidebar),
+            "panel": lambda _i: store.set_ui(panel=not store.ui.panel),
+            "view": lambda _i: store.cycle_view(),
+            "tabs": lambda i: self._toggle_tab(PANEL_TABS[i]),
+            "overview": lambda _i: store.show_page("session" if store.page == "overview" else "overview"),
+            "dispatch": lambda _i: (
+                store.show_page("session") if store.page == "dispatch" else store.show_dispatch(None)
+            ),
+            "nextSession": lambda i: self._step_session(1 if i else -1),
+            "zoom": lambda i: store.zoom((1, 1, -1, 0)[i]),
+            "stop": lambda _i: self._escape(),
+            "settings": lambda _i: store.set_dialog("settings", True),
+            "shortcuts": lambda _i: store.set_dialog("shortcuts", True),
+            "quit": lambda _i: self._quit(),
+        }
+        for name, fn in run.items():
+            for i, keys in enumerate(SHORTCUTS[name].sequences):
+                s = QShortcut(QKeySequence(keys), self)
+                # Esc stops Claude only in this window (a dialog's own Esc closes the dialog)
+                s.setContext(
+                    Qt.ShortcutContext.WindowShortcut if name == "stop" else Qt.ShortcutContext.ApplicationShortcut
+                )
+                s.activated.connect(lambda fn=fn, i=i: fn(i))
 
     def _toggle_tab(self, tab: str) -> None:
         if not store.active_id:
@@ -408,7 +438,6 @@ class MainWindow(QMainWindow):
 
 def fit_size(want_w: int = 1480, want_h: int = 940) -> Tuple[int, int]:
     """The default window size, clamped to the primary screen's available area with a margin."""
-    from PySide6.QtGui import QGuiApplication
 
     screen = QGuiApplication.primaryScreen()
     if screen is None:
@@ -419,7 +448,6 @@ def fit_size(want_w: int = 1480, want_h: int = 940) -> Tuple[int, int]:
 
 def _settings():
     """QSettings when the application has a name (the real app); tests run without persistence."""
-    from PySide6.QtCore import QCoreApplication, QSettings
 
     if not QCoreApplication.organizationName():
         return None
@@ -435,7 +463,7 @@ def restore_geometry(win: QMainWindow) -> None:
     if g is not None:
         try:
             win.restoreGeometry(g)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
 
@@ -448,14 +476,11 @@ def save_geometry(win: QMainWindow) -> None:
 def apply_windows_frame(win: QMainWindow) -> None:
     """Windows: the native title bar in the theme's colours (dark mode, caption, border, text) and
     rounded corners on Windows 11 — through DWM, like the WebView2 shell does. A no-op elsewhere."""
-    import sys
 
     if sys.platform != "win32":
         return
     try:
-        import ctypes
-
-        from PySide6.QtGui import QColor
+        import ctypes  # Windows only
 
         hwnd = int(win.winId())
         dwm = ctypes.windll.dwmapi
@@ -475,14 +500,11 @@ def apply_windows_frame(win: QMainWindow) -> None:
         put(34, colorref(t.chrome))  # DWMWA_BORDER_COLOR
         put(36, colorref(t.text))  # DWMWA_TEXT_COLOR
         put(33, 2)  # DWMWA_WINDOW_CORNER_PREFERENCE = DWMWCP_ROUND (Windows 11; ignored before)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
 def custom_titlebar() -> bool:
-    import os
-    import sys
-
     pref = os.environ.get("PILCROW_TITLEBAR", "").lower()
     if pref in ("custom", "native"):
         return pref == "custom"
@@ -514,6 +536,7 @@ class Shell(QWidget):
         self.panel: Optional[QWidget] = None
         self.side_resizer: Optional[Resizer] = None
         self.panel_resizer: Optional[Resizer] = None
+        self._shadows_at: Dict[str, List[Shadow]] = {}  # each sheet's shadow as last placed
         bind(theme.theme.changed, self, lambda _t: self.update())
 
     def set_parts(self, sidebar: QWidget, main: QWidget, panel: QWidget, side: Resizer, right: Resizer) -> None:
@@ -529,41 +552,58 @@ class Shell(QWidget):
         self.row.activate()
         h = self.height() - GROUND_PAD
         if self.side_resizer is not None:
-            self.side_resizer.setVisible(side_open)
-            if side_open:
-                seam = self.sidebar.geometry().right() + 1
-                self.side_resizer.setGeometry(seam - Resizer.WIDTH // 2, 0, Resizer.WIDTH, h)
-                self.side_resizer.raise_()
+            side_x = self.sidebar.geometry().right() + 1 if side_open else None
+            self._put_handle(self.side_resizer, side_x, h)
         if self.panel_resizer is not None:
             panel_open = self.panel is not None and not self.panel.isHidden()
-            self.panel_resizer.setVisible(panel_open)
-            if panel_open:
-                seam = self.main.geometry().right() + 1
-                self.panel_resizer.setGeometry(seam - Resizer.WIDTH // 2, 0, Resizer.WIDTH, h)
-                self.panel_resizer.raise_()
-        self.update()
+            self._put_handle(self.panel_resizer, self.main.geometry().right() + 1 if panel_open else None, h)
+        # the sheets repaint themselves when they move or resize; on the ground only the lines of
+        # shadow that moved are repainted (a full update repainted every widget in the window)
+        for card in (self.main, self.panel):
+            if card is None:
+                continue
+            now = self._shadows(card)
+            for x, y, w, h, _a in set(now).symmetric_difference(self._shadows_at.get(card.objectName(), [])):
+                self.update(x, y, w, h)
+            self._shadows_at[card.objectName()] = now
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    @staticmethod
+    def _put_handle(handle: Resizer, seam: Optional[int], h: int) -> None:
+        """A handle astride the seam at ``seam`` (hidden when None), above the sheets. Raised only
+        when it is shown: raising repaints what lies under it."""
+        if seam is None:
+            handle.hide()
+            return
+        handle.setGeometry(seam - Resizer.WIDTH // 2, 0, Resizer.WIDTH, h)
+        if handle.isHidden():
+            handle.show()
+            handle.raise_()
+
+    @staticmethod
+    def _shadows(card: QWidget) -> List[Shadow]:
+        """A sheet's shadow on the ground (box-shadow 0 1px 2px): three lines under it, two either
+        side, each (x, y, w, h, strength)."""
+        if card.isHidden():
+            return []
+        r = card.geometry().adjusted(0, Card.TOP, 0, 0)
+        out = [(r.left() + 1, r.bottom() + d, r.width() - 2, 1, k) for d, k in ((1, 0.75), (2, 0.36), (3, 0.17))]
+        for d, k in ((1, 0.36), (2, 0.17)):
+            out += [(r.left() - d, r.top() + 1, 1, r.height(), k), (r.right() + d, r.top() + 1, 1, r.height(), k)]
+        return out
+
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         self.place()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
-        # box-shadow 0 1px 2px: black at 18% on dark, 4% on light, blurred over the ground
-        t = theme.tokens()
-        strength = 0.18 if t.dark else 0.04
+    def paintEvent(self, e) -> None:
+        # black at 18% on dark, 4% on light, blurred over the ground
+        strength = 0.18 if theme.tokens().dark else 0.04
         p = QPainter(self)
+        region = e.region()
         for card in (self.main, self.panel):
-            if card is None or card.isHidden():
-                continue
-            r = card.geometry().adjusted(0, Card.TOP, 0, 0)
-            for d, k in ((1, 0.75), (2, 0.36), (3, 0.17)):
-                c = QColor(0, 0, 0, int(255 * strength * k))
-                p.fillRect(QRect(r.left() + 1, r.bottom() + d, r.width() - 2, 1), c)
-            for d, k in ((1, 0.36), (2, 0.17)):
-                c = QColor(0, 0, 0, int(255 * strength * k))
-                p.fillRect(QRect(r.left() - d, r.top() + 1, 1, r.height()), c)
-                p.fillRect(QRect(r.right() + d, r.top() + 1, 1, r.height()), c)
-            p.fillRect(QRect(r.left() + 1, r.top() - 1, r.width() - 2, 1), QColor(0, 0, 0, int(255 * strength * 0.17)))
+            for x, y, w, h, k in self._shadows(card) if card is not None else []:
+                if region.intersects(QRect(x, y, w, h)):
+                    p.fillRect(QRect(x, y, w, h), QColor(0, 0, 0, int(255 * strength * k)))
 
 
 class Card(QWidget):
@@ -581,27 +621,54 @@ class Card(QWidget):
         self.body_layout.setContentsMargins(0, self.TOP, 0, 0)
         self.body_layout.setSpacing(0)
         self._frame = _CardFrame(self)
+        # it paints every pixel of itself (the ground in the band above the sheet, then the sheet), so
+        # a repaint inside it does not repaint the ground under it first
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
         bind(theme.theme.changed, self, lambda _t: (self.update(), self._frame.update()))
 
     def sheet_rect(self) -> QRect:
         return self.rect().adjusted(0, self.TOP, 0, 0)
 
-    def childEvent(self, e) -> None:  # noqa: N802
+    def childEvent(self, e) -> None:
         super().childEvent(e)
         frame = getattr(self, "_frame", None)
         if frame is not None and e.type() == QEvent.Type.ChildAdded and e.child() is not frame:
             frame.raise_()
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         self._frame.setGeometry(self.rect())
+        self._frame.setMask(self._frame_region())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def _frame_region(self) -> QRegion:
+        """What the frame draws on: the band above the sheet with its top line and the light under
+        it, the corners, the side and bottom lines. Nothing else: Qt repaints the whole of a scrolled
+        rect that a sibling overlaps, and the conversation blits its scroll (CanvasView.scrollContentsBy)
+        only because the frame lies over nothing of it but the margins it leaves out."""
+        r, rad, w = self.sheet_rect(), self.RADIUS, self.width()
+        rg = QRegion(0, 0, w, r.top() + 3) + QRegion(0, r.bottom(), w, 1)
+        rg += QRegion(r.left(), r.top(), 1, r.height()) + QRegion(r.right(), r.top(), 1, r.height())
+        for x in (r.left(), r.right() + 1 - rad):
+            for y in (r.top(), r.bottom() + 1 - rad):
+                rg += QRegion(x, y, rad, rad)
+        return rg
+
+    def paintEvent(self, e) -> None:
+        t = theme.tokens()
         p = QPainter(self)
+        p.fillRect(e.rect(), theme.qcolor(t.canvas))
+        # the band above the sheet and its corners, antialiased; the rest is the plain canvas
+        sheet = self.sheet_rect()
+        edges = QRegion(self.rect()) - QRegion(sheet.adjusted(0, self.RADIUS, 0, -self.RADIUS))
+        edges = (edges - QRegion(sheet.adjusted(self.RADIUS, 0, -self.RADIUS, 0))) & e.region()
+        if edges.isEmpty():
+            return
+        p.setClipRegion(edges)
+        p.fillRect(edges.boundingRect(), theme.qcolor(t.chrome))
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(theme.qcolor(theme.tokens().canvas))
-        p.drawRoundedRect(QRectF(self.sheet_rect()), self.RADIUS, self.RADIUS)
+        p.setBrush(theme.qcolor(t.canvas))
+        p.drawRoundedRect(QRectF(sheet), self.RADIUS, self.RADIUS)
 
 
 class _CardFrame(QWidget):
@@ -614,10 +681,14 @@ class _CardFrame(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, e) -> None:
         t = theme.tokens()
         r = self._card.sheet_rect()
         radius = Card.RADIUS
+        # what it draws lies along the edges: a repaint inside them (a breathing mark, a streamed
+        # line) has nothing here to draw over
+        if e.region().subtracted(QRegion(r.adjusted(radius, radius, -radius, -radius))).isEmpty():
+            return
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         outside = QPainterPath()
@@ -652,7 +723,7 @@ class Resizer(QWidget):
         self._shown = 0.0
         self._last_x = 0.0
         self.dragging = False
-        self._anim: Optional[QVariantAnimation] = None
+        self.fade_t = Tween(self._set_shown, ms=theme.T_MED, curve=theme.ease)
         self._delay = QTimer(self)
         self._delay.setSingleShot(True)
         self._delay.setInterval(120)  # transition-delay: 120ms
@@ -661,47 +732,34 @@ class Resizer(QWidget):
 
     # ---- showing the handle
     def _fade(self, to: float) -> None:
-        if self._anim is not None:
-            self._anim.stop()
-            self._anim = None
-        if store.reduced_motion or to == self._shown:
-            self._set_shown(to)
-            return
-        a = QVariantAnimation(self)
-        a.setDuration(theme.T_MED)
-        a.setStartValue(self._shown)
-        a.setEndValue(to)
-        a.setEasingCurve(theme.ease())
-        a.valueChanged.connect(self._set_shown)
-        a.start()
-        self._anim = a
+        self.fade_t.go(to)
 
     def _set_shown(self, v: float) -> None:
         self._shown = float(v)
         self.update()
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         self._delay.start()
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self._delay.stop()
         if not self.dragging:
             self._fade(0.0)
         super().leaveEvent(e)
 
     # ---- dragging
-    def mousePressEvent(self, e) -> None:  # noqa: N802
+    def mousePressEvent(self, e) -> None:
         if e.button() == Qt.MouseButton.LeftButton:
             self.dragging = True
             self._last_x = e.globalPosition().x()
             self._delay.stop()
-            self._set_shown(1.0)
+            self.fade_t.jump(1.0)
             e.accept()
             return
         super().mousePressEvent(e)
 
-    def mouseMoveEvent(self, e) -> None:  # noqa: N802
+    def mouseMoveEvent(self, e) -> None:
         if self.dragging:
             x = e.globalPosition().x()
             dx = int(round(x - self._last_x))
@@ -712,7 +770,7 @@ class Resizer(QWidget):
             return
         super().mouseMoveEvent(e)
 
-    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, e) -> None:
         if self.dragging and e.button() == Qt.MouseButton.LeftButton:
             self.dragging = False
             self.released.emit()
@@ -723,7 +781,7 @@ class Resizer(QWidget):
             return
         super().mouseReleaseEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         if self._shown <= 0:
             return
         t = theme.tokens()
@@ -741,14 +799,6 @@ class Resizer(QWidget):
 # ---------------------------------------------------------------- bars and the boot screen
 
 
-class _ElideLabel(QLabel):
-    """A label a layout may squeeze: its text is elided to the room it gets (OfflineBar._fit), so its
-    full text must not become the sheet's minimum width."""
-
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
-        return QSize(0, super().minimumSizeHint().height())
-
-
 class OfflineBar(QWidget):
     """``.offline``: the line across the top of the sheet while the background process is away."""
 
@@ -761,38 +811,26 @@ class OfflineBar(QWidget):
         lay.addStretch(1)
         self.ico = QLabel()
         lay.addWidget(self.ico)
-        self.text = _ElideLabel()
+        # one centred line: a notice wider than the bar ends in … rather than wrapping or widening it
+        self.text = ElideLabel()
+        self.text.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         self.text.setFont(theme.font_ui(theme.FS_SMALL))
         theme.tint(self.text, fg="text_2")
         lay.addWidget(self.text)
         lay.addStretch(1)  # centred, like the web's justify-content: center
-        self._full = ""
         bind(theme.theme.changed, self, lambda _t: self._paint())
         self._paint()
         self.set_text("Lost the connection to Pilcrow's background process. Reconnecting…")
 
     def set_text(self, text: str) -> None:
-        self._full = text
-        self._fit()
-
-    def _fit(self) -> None:
-        # One centred line; a notice wider than the bar is elided rather than wrapped or cut.
-        room = self.width() - 14 * 2 - 14 - 8
-        fm = QFontMetrics(self.text.font())
-        self.text.setText(
-            fm.elidedText(self._full, Qt.TextElideMode.ElideRight, max(40, room)) if room > 0 else self._full
-        )
-
-    def resizeEvent(self, e) -> None:  # noqa: N802
-        super().resizeEvent(e)
-        self._fit()
+        self.text.setText(text)
 
     def _paint(self) -> None:
         t = theme.tokens()
         self.ico.setPixmap(icons.pixmap("wifi-off", t.text_2, 14))
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.fillRect(self.rect(), theme.blend(t.fill_1, t.canvas))
@@ -907,19 +945,9 @@ class Boot(QWidget):
         if store.reduced_motion:
             self.hide()
             return
-        from PySide6.QtCore import QPropertyAnimation
-        from PySide6.QtWidgets import QGraphicsOpacityEffect
 
         eff = QGraphicsOpacityEffect(self)
         self.setGraphicsEffect(eff)
-        anim = QPropertyAnimation(eff, b"opacity", self)
-        anim.setDuration(320)
-        anim.setStartValue(1.0)
-        anim.setEndValue(0.0)
-        anim.setEasingCurve(theme.ease_exit())
-        anim.finished.connect(self.hide)
-        anim.start()
-        self._anim = anim
-
-
-_ = (QEvent, Mark, Row)
+        self._fade_t = Tween(eff.setOpacity, self.hide, ms=320, curve=theme.ease_exit)
+        self._fade_t.jump(1.0)
+        self._fade_t.go(0.0)

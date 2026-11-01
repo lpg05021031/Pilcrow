@@ -1,14 +1,32 @@
 // WebSocket JSON-RPC client with automatic reconnect.
+import type { DispatchDelta, PermissionRequest, RawMsg, RepoEntry, SessionState, TimelineStep } from './types';
 
-// Handlers are registered per event with the payload type they expect; the wire carries unknown.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type Handler = (data: any) => void;
+/** The events the client subscribes to and their payloads, as server/main.js broadcasts them; `connection` is the client's own. */
+interface Events {
+  connection: { connected: boolean };
+  'session.msgs': { id: string; msgs: RawMsg[] };
+  'session.state': SessionState;
+  'session.permission': { id: string; request: PermissionRequest };
+  'sessions.changed': Record<string, never>;
+  'schedules.changed': Record<string, never>;
+  'memory.changed': { cwd: string };
+  'repos.changed': { repos: RepoEntry[] };
+  'inbox.changed': number;
+  'dispatch.changed': DispatchDelta;
+  'dispatch.playbooks': Record<string, never>;
+  'timeline.step': { id: string; step: TimelineStep };
+  'term.data': { id: string; data: string };
+  'term.exit': { id: string; code: number | null; signal: number | string | null };
+}
+/** A message from the server: a response, or an event with the payload its name carries. */
+type Wire = { t: 'res'; id: number; ok: boolean; r?: unknown; e?: { message?: string } } | { [K in keyof Events]: { t: 'ev'; e: K; d: Events[K] } }[keyof Events];
 
 class Rpc {
   private ws: WebSocket | null = null;
   private nextId = 1;
   private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void; method: string }>();
-  private handlers = new Map<string, Set<Handler>>();
+  // no prototype: an event name from the wire finds only the handlers registered for it
+  private handlers: { [K in keyof Events]?: Set<(data: Events[K]) => void> } = Object.create(null);
   private queue: string[] = [];
   private retry = 0;
   connected = false;
@@ -35,7 +53,7 @@ class Rpc {
     };
     ws.onmessage = (ev) => {
       // A response: { t: 'res', id, ok, r | e }. An event: { t: 'ev', e: name, d: payload }.
-      let msg: { t?: string; id?: number; ok?: boolean; r?: unknown; e?: unknown; d?: unknown };
+      let msg: Wire;
       try {
         msg = JSON.parse(ev.data);
       } catch {
@@ -46,7 +64,7 @@ class Rpc {
         if (!p) return;
         this.pending.delete(msg.id);
         if (msg.ok) p.resolve(msg.r);
-        else p.reject(new Error((msg.e as { message?: string } | undefined)?.message || `${p.method} failed`));
+        else p.reject(new Error(msg.e?.message || `${p.method} failed`));
       } else if (msg.t === 'ev' && typeof msg.e === 'string') {
         this.emit(msg.e, msg.d);
       }
@@ -63,15 +81,16 @@ class Rpc {
     });
   }
 
-  on(event: string, fn: Handler): () => void {
-    let set = this.handlers.get(event);
-    if (!set) this.handlers.set(event, (set = new Set()));
+  on<K extends keyof Events>(event: K, fn: (data: Events[K]) => void): () => void {
+    // the map seen as holding this one event's handlers, which TypeScript lets a generic key write to
+    const handlers: { [P in K]?: Set<(data: Events[P]) => void> } = this.handlers;
+    const set = (handlers[event] ||= new Set());
     set.add(fn);
-    return () => set!.delete(fn);
+    return () => set.delete(fn);
   }
 
-  private emit(event: string, data: unknown) {
-    for (const fn of this.handlers.get(event) || []) {
+  private emit<K extends keyof Events>(event: K, data: Events[K]) {
+    for (const fn of this.handlers[event] || []) {
       try {
         fn(data);
       } catch (e) {

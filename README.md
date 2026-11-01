@@ -348,7 +348,7 @@ npm run server              # 只開伺服器 http://127.0.0.1:47117/
 ### 原生 Qt 視窗（開發者）
 
 ```bash
-pip install -r qt/requirements.txt pytest pytest-qt
+pip install -r qt/requirements.txt pytest       # 測試用 qt/tests/harness.py 自己的 offscreen harness，不需要 pytest-qt
 node scripts/extract-icons.mjs        # Lucide 圖示 → qt/pilcrow_qt/assets/icons（已產生並進版）
 python scripts/make-qt-fonts.py       # Inter / JetBrains Mono → qt/pilcrow_qt/assets/fonts（已產生並進版）
 node test/mock/mock-server.mjs 5300   # 假伺服器

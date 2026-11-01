@@ -1,6 +1,10 @@
 // Shared client-side types for data coming from the Pilcrow server.
 
 export type SessionStatus = 'idle' | 'starting' | 'running' | 'requires_action' | 'error' | 'stopped';
+/** Claude has the session in hand: starting, working, or waiting on the person in the middle of a turn. */
+export const isBusy = (status: string | undefined) => status === 'running' || status === 'starting' || status === 'requires_action';
+/** Claude is producing something right now: busy, and not waiting on the person. */
+export const isWorking = (status: string | undefined) => status === 'running' || status === 'starting';
 export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions' | 'dontAsk' | 'auto';
 export type Effort = '' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
@@ -450,6 +454,8 @@ export interface InboxItem {
 
 // ---- dispatch: one job across many repositories (server/dispatch_core.js)
 export type RunState = 'queued' | 'preparing' | 'running' | 'needs_action' | 'done' | 'failed' | 'stopped' | 'skipped';
+/** The states a dispatch run or a helper ends in (the same words for both). */
+export const TERMINAL: ReadonlySet<string> = new Set<RunState>(['done', 'failed', 'stopped', 'skipped']);
 export type JobState = 'draft' | 'planned' | 'running' | 'reviewing' | 'finished' | 'stopped';
 export interface DispatchPending {
   requestId: string;

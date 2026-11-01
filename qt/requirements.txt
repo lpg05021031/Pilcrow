@@ -3,3 +3,4 @@ Pygments>=2.15
 markdown-it-py>=3.0
 linkify-it-py>=2.0
 pyte>=0.8
+orjson>=3.9

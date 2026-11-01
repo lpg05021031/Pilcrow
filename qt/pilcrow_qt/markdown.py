@@ -42,7 +42,7 @@ except ImportError:  # pragma: no cover - the package is in requirements.txt
 try:
     from pygments import lex
     from pygments.lexers import get_lexer_by_name, guess_lexer
-    from pygments.token import Comment, Keyword, Name, Number, Operator, Punctuation, String, Token
+    from pygments.token import Comment, Keyword, Name, Number, Operator, Punctuation, String
     from pygments.util import ClassNotFound
 except ImportError:  # pragma: no cover
     lex = None  # type: ignore[assignment]
@@ -268,7 +268,7 @@ def _md() -> MarkdownIt:
     try:
         md.enable("table")
         md.enable("strikethrough")
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     return md
 
@@ -503,26 +503,13 @@ def inline_tokens(text: str) -> list:
     return list(parsed[0].children or []) if parsed else []
 
 
-def render_inline(text: str, m: Metrics, colour: bool = True) -> str:
-    """The inline Markdown of one list item or table cell as HTML for a cursor to insert: the same
-    code pills and links the block render gives it, wrapped in the text colour when ``colour`` (the
-    words of a list item, whose marker is in the quiet colour)."""
-    t = theme.tokens()
-    if MarkdownIt is None:
-        return html.escape(text)
-    body = parser().renderInline(text)
-    body = _inline_code(body, t, m)
-    body = re.sub(r"<img src=\"(?!https?:|data:|/|pilcrow-check:)([^\"]+)\"", lambda mt: _img(mt, None), body)
-    return f'<span style="color:{t.text}">{body}</span>' if colour else body
-
-
 def fence_sources(src: str) -> List[str]:
     """The code of every fence in ``src``, in order (what a well's Copy copies)."""
     if not src or MarkdownIt is None:
         return []
     try:
         tokens = parser().parse(src)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return []
     return [tok.content.rstrip("\n") for tok in tokens if tok.type in ("fence", "code_block")]
 
@@ -1038,7 +1025,7 @@ def split_pieces(src: str, base: int = 0) -> List[Piece]:
         return [(src, False, base)]
     try:
         tokens = parser().parse(src)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return [(src, False, base)]
     lines = src.split("\n")
     starts = [0]
@@ -1103,6 +1090,3 @@ def as_path_ref(text: str) -> Optional[dict]:
     if "/" not in t and re.sub(r":(\d+)(-\d+)?$", "", t).split(".")[-1].lower() not in KNOWN_EXT:
         return None
     return {"path": re.sub(r":(\d+)(-\d+)?$", "", t), "line": int(m.group(1)) if m.group(1) else None}
-
-
-_ = Token

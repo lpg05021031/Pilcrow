@@ -172,11 +172,11 @@ class FileTree(QAbstractScrollArea):
         return QRect(self.viewport().width() - 6 - w, top + 4, w, 18)
 
     # ---- painting
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         self.set_rows(self._rows)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         vp = self.viewport()
         p = QPainter(vp)
@@ -249,18 +249,18 @@ class FileTree(QAbstractScrollArea):
         p.end()
 
     # ---- interaction
-    def mouseMoveEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+    def mouseMoveEvent(self, e: QMouseEvent) -> None:
         i = self.row_at(int(e.position().y()))
         if i != self._hover:
             self._hover = i
             self.viewport().update()
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self._hover = -1
         self.viewport().update()
         super().leaveEvent(e)
 
-    def mousePressEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+    def mousePressEvent(self, e: QMouseEvent) -> None:
         if e.button() != Qt.MouseButton.LeftButton:
             return super().mousePressEvent(e)
         i = self.row_at(int(e.position().y()))
@@ -282,7 +282,7 @@ class FileTree(QAbstractScrollArea):
             self.opened.emit(r.path)
         self.viewport().update()
 
-    def keyPressEvent(self, e: QKeyEvent) -> None:  # noqa: N802
+    def keyPressEvent(self, e: QKeyEvent) -> None:
         k = e.key()
         n = len(self._rows)
         if not n:
@@ -321,10 +321,10 @@ class FTab(QWidget):
 
     def __init__(self, path: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)  # Qt repaints it on enter and leave
         self.path = path
         self.on = False
         self.dirty = False
-        self._hover = False
         self._x_hover = False
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -339,14 +339,14 @@ class FTab(QWidget):
             self.on, self.dirty = on, dirty
             self.update()
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         fm = QFontMetrics(self._font)
         return QSize(12 + fm.horizontalAdvance(basename(self.path)) + (6 + 7 if self.dirty else 0) + 4 + 20 + 5, 30)
 
     def _x_rect(self) -> QRect:
         return QRect(self.width() - 25, 5, 20, 20)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -354,7 +354,7 @@ class FTab(QWidget):
             p.setPen(theme.blend(t.hair, t.chrome))
             p.setBrush(theme.qcolor(t.canvas))
             p.drawRoundedRect(self.rect().adjusted(0, 0, -1, 2), theme.R2, theme.R2)
-        p.setPen(theme.qcolor(t.text if (self.on or self._hover) else t.text_3))
+        p.setPen(theme.qcolor(t.text if (self.on or self.underMouse()) else t.text_3))
         p.setFont(self._font)
         fm = QFontMetrics(self._font)
         name = basename(self.path)
@@ -364,7 +364,7 @@ class FTab(QWidget):
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(theme.qcolor(t.text_2))
             p.drawEllipse(QRect(x, 12, 7, 7))
-        if self.on or self._hover:
+        if self.on or self.underMouse():
             xr = self._x_rect()
             if self._x_hover:
                 p.setPen(Qt.PenStyle.NoPen)
@@ -372,21 +372,18 @@ class FTab(QWidget):
                 p.drawRoundedRect(xr, 4, 4)
             p.drawPixmap(xr.left() + 4, xr.top() + 4, icons.pixmap("x", t.text if self._x_hover else t.text_3, 11))
 
-    def enterEvent(self, e) -> None:  # noqa: N802
-        self._hover = True
+    def leaveEvent(self, e) -> None:
+        self._x_hover = False
         self.update()
+        super().leaveEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
-        self._hover = self._x_hover = False
-        self.update()
-
-    def mouseMoveEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+    def mouseMoveEvent(self, e: QMouseEvent) -> None:
         xh = self._x_rect().contains(e.position().toPoint())
         if xh != self._x_hover:
             self._x_hover = xh
             self.update()
 
-    def mousePressEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+    def mousePressEvent(self, e: QMouseEvent) -> None:
         if e.button() == Qt.MouseButton.MiddleButton or (
             e.button() == Qt.MouseButton.LeftButton and self._x_rect().contains(e.position().toPoint())
         ):
@@ -639,7 +636,7 @@ class ImageView(QScrollArea):
         lay.addWidget(label(bytes_(tab.size), tone="faint"), 0, Qt.AlignmentFlag.AlignHCenter)
         self.setWidget(host)
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         if not self._pm.isNull():
             w = max(40, self.viewport().width() - 48)
@@ -652,25 +649,6 @@ class ImageView(QScrollArea):
                     Qt.TransformationMode.SmoothTransformation,
                 )
             )
-
-
-class SegButtons(Row):
-    """A small segmented control of icon buttons (the ``Seg`` in ui/bits.tsx)."""
-
-    changed = Signal(str)
-
-    def __init__(self, options: List[Dict[str, str]], parent: Optional[QWidget] = None) -> None:
-        super().__init__(0, (0, 0, 2, 0), parent)
-        self._btns: Dict[str, IconButton] = {}
-        for o in options:
-            b = IconButton(o["icon"], o["title"], 13)
-            b.clicked.connect(lambda _c=False, v=o["value"]: self.changed.emit(v))
-            self._btns[o["value"]] = b
-            self.add(b)
-
-    def set_value(self, v: str) -> None:
-        for k, b in self._btns.items():
-            b.set_active(k == v)
 
 
 # ---------------------------------------------------------------- the panel
@@ -1169,7 +1147,7 @@ class FilesPanel(QWidget):
             return
         self._reload_timer.start()
 
-    def showEvent(self, e) -> None:  # noqa: N802
+    def showEvent(self, e) -> None:
         super().showEvent(e)
         if getattr(self, "_stale", False):
             self._stale = False

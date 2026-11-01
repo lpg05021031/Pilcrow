@@ -166,3 +166,17 @@ def workflow_columns(task: Optional[TaskInfo], meta: WorkflowMeta) -> List[Workf
     for c in cols:
         c.agents.sort(key=lambda x: x["index"])
     return cols
+
+
+def running_workflow(tasks: Any, ambient: bool = True) -> Optional[TaskInfo]:
+    """The workflow under way among a session's tasks (``SessionView.tsx``); the control room leaves
+    the ambient ones out (``ambient=False``, ``Overview.tsx``)."""
+    for t in tasks or []:
+        if (
+            isinstance(t, dict)
+            and t.get("type") == "local_workflow"
+            and t.get("status") == "running"
+            and (ambient or not t.get("ambient"))
+        ):
+            return t
+    return None

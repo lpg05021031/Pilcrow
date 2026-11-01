@@ -15,8 +15,10 @@ from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Tuple
 
 from .fenwick import Fenwick
 
-if TYPE_CHECKING:  # pragma: no cover
-    from .paint import Measurer
+if TYPE_CHECKING:  # pragma: no cover - the types only: this module never imports Qt
+    from PySide6.QtGui import QPainter
+
+    from .paint import Measurer, PaintState
 
 GRADE_ESTIMATE, GRADE_FAST, GRADE_EXACT = 0, 1, 2
 Path = Tuple[int, ...]
@@ -24,15 +26,17 @@ Path = Tuple[int, ...]
 
 class Target:
     """What the pointer is on inside a block: a kind (``head``, ``link``, ``button``…), an id the
-    block understands, and the rect in block coordinates."""
+    block understands, the rect in block coordinates, and the words it is read with (a button's
+    label; else the block's ``tooltip_for`` names it)."""
 
-    __slots__ = ("kind", "id", "rect", "data")
+    __slots__ = ("kind", "id", "rect", "data", "name")
 
-    def __init__(self, kind: str, id_: str, rect: Tuple[int, int, int, int], data: Any = None) -> None:
+    def __init__(self, kind: str, id_: str, rect: Tuple[int, int, int, int], data: Any = None, name: str = "") -> None:
         self.kind = kind
         self.id = id_
         self.rect = rect  # x, y, w, h in block coordinates
         self.data = data
+        self.name = name
 
     def __eq__(self, other: object) -> bool:
         return isinstance(other, Target) and other.kind == self.kind and other.id == self.id
@@ -64,9 +68,9 @@ class Block:
         "grade",
         "h_width",
         "warm",
-        "last_seen",
         "indent",
         "scene",
+        "paint_failed",
     )
 
     def __init__(self, key: str) -> None:
@@ -81,9 +85,9 @@ class Block:
         self.grade = GRADE_ESTIMATE
         self.h_width = 0
         self.warm = False
-        self.last_seen = 0
         self.indent = 0
         self.scene: Optional[Scene] = None
+        self.paint_failed = False  # its painter raised once: logged then, not on every frame after
 
     def mt(self) -> int:
         return self.MT
@@ -111,8 +115,16 @@ class Block:
         """Drop documents and pixmaps; keep the height."""
         self.warm = False
 
+    def redraw(self) -> None:
+        """The picture changed with the rev and sig as they were: the generation moves on, so a pixmap
+        cached of the old picture is not blitted again, and the rectangle is noted, so the commit
+        repaints it even when its height stays the same."""
+        self.gen += 1
+        if self.scene is not None:
+            self.scene.note_block(self)  # its own rectangle; a height change notes the rest itself
+
     # ---- painting and interaction (block coordinates: origin at the block's top-left)
-    def paint(self, p: Any, x: int, y: int, w: int, st: Any) -> None:
+    def paint(self, p: QPainter, x: int, y: int, w: int, st: PaintState) -> None:
         """Draw the block with its top-left at (x, y) and width ``w`` (viewport coordinates)."""
 
     def hit(self, x: int, y: int) -> Optional[Target]:
@@ -120,6 +132,11 @@ class Block:
 
     def targets(self) -> List[Target]:
         return []
+
+    def hover_rect(self, target: Target) -> Tuple[int, int, int, int]:
+        """The part of the block whose picture depends on the pointer being on ``target`` (block
+        coordinates): the target's own rect, unless the block lights up more of itself on hover."""
+        return target.rect
 
     def activate(self, target: Target, view: Any) -> None:
         pass
@@ -252,6 +269,11 @@ class Group(Block):
     def measure(self, width: int, m: Measurer) -> int:
         self.warm = True
         return self.h
+
+    def head_text(self) -> str:
+        """What the head says (the name a screen reader gives a group that opens and closes); the
+        group's own text unless its text is its content."""
+        return self.text()
 
     # ---- margins: a headless group shows its children's margins to its siblings
     def mt(self) -> int:
@@ -409,10 +431,6 @@ class Group(Block):
             self.parent.refresh_gaps_at(self.index)
         return gone
 
-    def replace_children(self, blocks: List[Block]) -> None:
-        self.truncate(0)
-        self.extend(blocks)
-
     def insert(self, i: int, b: Block) -> None:
         at = self.child_y(min(i, len(self.children)))
         self.children.insert(i, b)
@@ -479,7 +497,9 @@ class Scene:
         self.root.scene = self
         self.by_key: Dict[str, Block] = {}
         self.width = 0
-        self.frame = 0
+        #: a conversation still arriving: the view shows ``skeleton`` alone, nothing to scroll
+        self.loading = False
+        self.skeleton: Optional[Block] = None
         #: block → the offset into it from which the picture may have moved (its own height, a gap
         #: above it, a child added or removed, a reveal); the view turns these into repaints
         self.dirty: Dict[Block, int] = {}
@@ -517,9 +537,6 @@ class Scene:
     def total(self) -> int:
         return self.root.h
 
-    def y_of(self, b: Block) -> int:
-        return b.y()
-
     def leaf_at(self, y: int) -> Optional[Tuple[Block, int]]:
         """The leaf block under scene y (and its y); None when the scene is empty."""
         g: Group = self.root
@@ -553,16 +570,6 @@ class Scene:
         cur = self.dirty.get(b)
         if cur is None or offset < cur:
             self.dirty[b] = offset
-
-    @property
-    def dirty_from(self) -> Optional[int]:
-        """The lowest scene y from which the picture may have moved (None when nothing changed)."""
-        ys = [b.y() + off for b, off in self.dirty.items() if b.scene is self]
-        return min(ys) if ys else None
-
-    def note_rect(self, b: Block, x: int, y: int, w: int, h: int) -> None:
-        by = b.y()
-        self.dirty_rects.append((x, by + y, w, h))
 
     def note_block(self, b: Block) -> None:
         self.dirty_rects.append((0, b.y(), self.width or 1, b.h))

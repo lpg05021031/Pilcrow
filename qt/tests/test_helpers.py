@@ -7,9 +7,8 @@ from __future__ import annotations
 
 import time
 
-from harness import app_client, mock_server  # noqa: F401
+from harness import app_client, mock_server
 
-MOCK_PORT = 5433
 HOME = "/home/tester"
 
 
@@ -61,9 +60,10 @@ def test_a_lead_and_its_helpers(app_client):
     )
     c.wait_until(lambda: v.pill.text() == "Leading", 5, "the lead's pill")
     web_chip = next(ch for ch in v.helpers_bar.chips if ch.h.get("name") == "web")
-    assert web_chip.text().startswith("web · needs you")
     api_chip = next(ch for ch in v.helpers_bar.chips if ch.h.get("name") == "api")
-    assert api_chip.h.get("state") == "done" and api_chip.text().startswith("api · done")
+    # the chips follow the lead's state, which reaches the bar on the next frame
+    c.wait_until(lambda: web_chip.text().startswith("web · needs you"), 5, "web's chip")
+    c.wait_until(lambda: api_chip.h.get("state") == "done" and api_chip.text().startswith("api · done"), 5, "api")
     assert c.shot("helpers-lead-bar").exists()
     # the control room: the card says whose helper asked, and Allow for all helpers answers it
     c.store.show_page("overview")
@@ -194,7 +194,7 @@ def test_helper_updates_touch_only_the_bar(app_client):
             self.who: dict = {}
             self.layouts: list = []
 
-        def eventFilter(self, obj, e) -> bool:  # noqa: N802
+        def eventFilter(self, obj, e) -> bool:
             t = e.type()
             if t == QEvent.Type.Paint:
                 for key, w in (("viewport", viewport), ("bar", bar), ("sidebar", sidebar), ("composer", v.composer)):

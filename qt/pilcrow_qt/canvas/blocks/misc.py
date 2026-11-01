@@ -7,15 +7,16 @@ import html
 import random
 import re
 import time
-from typing import Any, Callable, Optional, Tuple
+from typing import Any, Optional, Tuple
 
-from PySide6.QtCore import QPointF, QRect, QRectF, Qt
+from PySide6.QtCore import QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter
 
 from ... import theme
 from ...lib.fmt import cost, duration, tokens
 from ...lib.transcript_model import CommandOutputItem, CompactItem, NoticeItem, ResultItem
 from ...store import store
+from ...widgets.ui.bits import draw_mark
 from .. import nodes as nd
 from ..paint import Measurer, PaintState, rounded
 from ..pixels import hline
@@ -335,6 +336,9 @@ class ResultBlock(Block):
             )
         return Target("row", "result", (0, 0, self.h_width or 0, self.h))
 
+    def hover_rect(self, target: Target) -> Tuple[int, int, int, int]:
+        return (0, 0, self.h_width or 0, self.h)  # the details and the fork show on any hover
+
     def cursor_for(self, target: Target) -> Optional[Any]:
         return Qt.CursorShape.PointingHandCursor if target.kind == "button" else None
 
@@ -380,7 +384,7 @@ class WorkingBlock(Block):
     turn runs and no fold on the page carries the mark."""
 
     KIND = "working"
-    __slots__ = ("sid", "verb", "start_ts", "shown", "status", "compacting", "thinking_tokens", "_t0")
+    __slots__ = ("_second", "compacting", "shown", "sid", "start_ts", "status", "thinking_tokens", "verb")
 
     def __init__(self, sid: str) -> None:
         super().__init__("working")
@@ -391,7 +395,7 @@ class WorkingBlock(Block):
         self.status = ""
         self.compacting = False
         self.thinking_tokens = 0
-        self._t0 = time.monotonic()
+        self._second: Any = None  # the figures last painted
 
     def sync(self, start_ts: float, quiet: bool) -> bool:
         r = store.rt.get(self.sid)
@@ -417,7 +421,9 @@ class WorkingBlock(Block):
             return
         t = st.t
         cy = y + 10
-        draw_mark(p, QRectF(x, cy + 7, 15, 15), t, 0.55 + 0.45 * (0.5 - 0.5 * _cos((st.now - self._t0) % 1.8 / 1.8)))
+        draw_mark(p, QRectF(x, cy + 7, 15, 15), t, theme.breath(st.now, 1.8, 0.55))
+        if st.clip is not None and st.clip.right() < x + 25:
+            return  # a frame of the breathing mark alone (``tick``)
         f = st.m.font(theme.FS_UI, 500)
         text = (
             "Compacting the conversation"
@@ -440,34 +446,19 @@ class WorkingBlock(Block):
         return self.shown
 
     def tick(self, now: float) -> Optional[Tuple[int, int, int, int]]:
-        return (0, 0, 100000, self.h) if self.shown else None
+        """The breathing mark each frame; the whole line when its figures change (a second of elapsed
+        time, the thinking tokens)."""
+        if not self.shown:
+            return None
+        s = (int((time.time() * 1000 - self.start_ts) // 1000) if self.start_ts else 0, self.thinking_tokens)
+        if s != self._second:
+            self._second = s
+            return (0, 0, 100000, self.h)
+        return (0, 0, 20, self.h)
 
     @property
     def static(self) -> bool:
         return False
-
-
-def _cos(phase: float) -> float:
-    import math
-
-    return math.cos(phase * 2 * math.pi)
-
-
-def draw_mark(p: QPainter, r: QRectF, t: theme.Tokens, bowl_alpha: float = 1.0, ink: Optional[str] = None) -> None:
-    """The pilcrow ¶ from the brand SVG (viewBox 4.5 4 14 16)."""
-    p.setRenderHint(QPainter.RenderHint.Antialiasing)
-    s = r.height() / 16.0
-    x0, y0 = r.x() - 4.5 * s, r.y() - 4 * s
-    bowl = QColor(t.accent)
-    bowl.setAlphaF(bowl_alpha)
-    p.setPen(Qt.PenStyle.NoPen)
-    p.setBrush(bowl)
-    p.drawEllipse(QPointF(x0 + 10.6 * s, y0 + 9.2 * s), 4.1 * s, 4.1 * s)
-    p.setBrush(QColor(ink or t.text_2))
-    rx = 0.5 * s
-    p.drawRoundedRect(QRectF(x0 + 10.6 * s, y0 + 5.1 * s, 6.6 * s, 1.9 * s), rx, rx)
-    p.drawRoundedRect(QRectF(x0 + 12.4 * s, y0 + 5.1 * s, 1.9 * s, 13.8 * s), rx, rx)
-    p.drawRoundedRect(QRectF(x0 + 15.3 * s, y0 + 5.1 * s, 1.9 * s, 13.8 * s), rx, rx)
 
 
 # ---------------------------------------------------------------- the loading skeleton
@@ -500,34 +491,13 @@ class SkeletonBlock(Block):
         return True
 
 
-class GapBlock(Block):
-    """Empty room (the pads between units that the web's margins made)."""
-
-    KIND = "gap"
-    __slots__ = ("gap",)
-
-    def __init__(self, key: str, gap: int) -> None:
-        super().__init__(key)
-        self.gap = gap
-        self.h = gap
-
-    def estimate(self, width: int, m: Measurer) -> int:
-        return self.gap
-
-    measure = estimate
-
-
 __all__ = [
     "CommandOutputBlock",
     "DividerBlock",
-    "GapBlock",
     "NoticeBlock",
     "ResultBlock",
     "SkeletonBlock",
     "WorkingBlock",
     "compact_label",
-    "draw_mark",
     "result_notice",
 ]
-
-_ = (Callable,)

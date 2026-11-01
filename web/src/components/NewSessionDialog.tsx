@@ -1,27 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Folder, FolderGit2, ArrowUp, Home, ChevronRight, GitBranch, CornerLeftUp, FolderOpen, Check, ChevronDown } from 'lucide-react';
+import { ArrowUp, GitBranch, FolderOpen, Check, ChevronDown } from 'lucide-react';
 import { useStore, setDialog, createSession, call } from '../lib/store';
 import type { GitInfo, PermissionMode, Effort } from '../lib/types';
-import { basename, tildify } from '../lib/format';
+import { basename, tildify, plural } from '../lib/format';
 import { Dialog } from './ui/Dialog';
-import { Switch, Spinner } from './ui/bits';
+import { Switch, Spinner, Field } from './ui/bits';
+import { useEvent } from './ui/hooks';
 import { Collapse } from './ui/Collapse';
 import { Select } from './ui/Select';
-import { MODES } from './Composer';
+import { MODES } from './composer/Menus';
 import { ModelSelect } from './ModelSelect';
+import { FolderBrowser, type Browse } from './FolderPicker';
 import { errText } from '../lib/format';
 
-interface Browse {
-  dir: string;
-  display: string;
-  parent: string | null;
-  repo: boolean;
-  dirs: { name: string; path: string; repo: boolean }[];
-  error?: string;
-}
-
-export function NewSessionDialog() {
-  const spec = useStore((s) => s.dialogs.newSession)!;
+export function NewSessionDialog({ spec }: { spec: { cwd?: string; prompt?: string } }) {
   const config = useStore((s) => s.config);
   const info = useStore((s) => s.info);
   const sessions = useStore((s) => s.sessions);
@@ -48,12 +40,12 @@ export function NewSessionDialog() {
     return [...set].filter(Boolean).slice(0, 8);
   }, [config?.recentProjects, sessions]);
 
+  // The folder is listed once as the browser opens; later moves browse on their own. One that cannot
+  // be listed leaves the browser as it was; the path field still works.
+  const list = useEvent(() => call<Browse>('fs.browse', { dir: browse?.dir || cwd || info?.home }, { quiet: true }).then(setBrowse, () => {}));
   useEffect(() => {
-    if (!showBrowser) return;
-    call<Browse>('fs.browse', { dir: browse?.dir || cwd || info?.home }, { quiet: true })
-      .then(setBrowse)
-      .catch(() => {});
-  }, [showBrowser]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (showBrowser) list();
+  }, [showBrowser, list]);
 
   useEffect(() => {
     setError('');
@@ -128,7 +120,7 @@ export function NewSessionDialog() {
         <div className="ns-label">Folder</div>
         <div className="ns-folder">
           <FolderOpen size={16} className="ns-folder-ico" />
-          <input className="ns-folder-input mono" value={cwd} onChange={(e) => setCwd(e.target.value)} placeholder="/path/to/project" spellCheck={false} />
+          <input aria-label="Folder" className="ns-folder-input mono" value={cwd} onChange={(e) => setCwd(e.target.value)} placeholder="/path/to/project" spellCheck={false} />
           <button className={`btn sm ghost${showBrowser ? ' on' : ''}`} onClick={() => setShowBrowser(!showBrowser)}>
             Browse
           </button>
@@ -150,31 +142,7 @@ export function NewSessionDialog() {
               ))}
           </div>
         )}
-        {showBrowser && browse && (
-          <div className="browser">
-            <div className="browser-head">
-              <button className="icon-btn sm" title="Home" onClick={() => nav(info?.home || '/')}>
-                <Home size={13} />
-              </button>
-              <button className="icon-btn sm" title="Up one level" disabled={!browse.parent} onClick={() => browse.parent && nav(browse.parent)}>
-                <CornerLeftUp size={13} />
-              </button>
-              <span className="mono ellipsis grow">{browse.display}</span>
-              {browse.repo && <span className="badge">git</span>}
-            </div>
-            <div className="browser-list">
-              {browse.error && <div className="faint browser-empty">{browse.error}</div>}
-              {browse.dirs.map((d) => (
-                <button key={d.path} className="browser-item" onClick={() => nav(d.path)} onDoubleClick={() => (setCwd(d.path), setShowBrowser(false))}>
-                  {d.repo ? <FolderGit2 size={14} /> : <Folder size={14} />}
-                  <span className="ellipsis grow">{d.name}</span>
-                  <ChevronRight size={13} className="faint" />
-                </button>
-              ))}
-              {!browse.dirs.length && !browse.error && <div className="faint browser-empty">No subfolders</div>}
-            </div>
-          </div>
-        )}
+        {showBrowser && browse && <FolderBrowser browse={browse} nav={nav} onPick={(p) => (setCwd(p), setShowBrowser(false))} />}
       </section>
 
       <button className={`ns-disclose${showOptions ? ' open' : ''}`} onClick={() => setShowOptions(!showOptions)} aria-expanded={showOptions}>
@@ -200,19 +168,21 @@ export function NewSessionDialog() {
           </div>
           {useWorktree && (
             <div className="ns-two">
-              <div className="field">
-                <label>
-                  <GitBranch size={11} /> Start from
-                </label>
-                <Select value={base} onChange={setBase} options={branches.map((b) => ({ value: b.name, label: b.name }))} />
-              </div>
-              <div className="field">
-                <label>Branch name</label>
-                <input className="input" value={wtName} onChange={(e) => setWtName(e.target.value)} placeholder="murphy-yield" />
-              </div>
+              <Field
+                label={
+                  <>
+                    <GitBranch size={11} /> Start from
+                  </>
+                }
+              >
+                {(id) => <Select id={id} value={base} onChange={setBase} options={branches.map((b) => ({ value: b.name, label: b.name }))} />}
+              </Field>
+              <Field label="Branch name">
+                {(id) => <input id={id} className="input" value={wtName} onChange={(e) => setWtName(e.target.value)} placeholder="murphy-yield" />}
+              </Field>
             </div>
           )}
-          {!useWorktree && git.changed ? <div className="hint">{git.changed} uncommitted change{git.changed > 1 ? 's' : ''} here; Claude works on top of them.</div> : null}
+          {!useWorktree && git.changed ? <div className="hint">{plural(git.changed, 'uncommitted change')} here; Claude works on top of them.</div> : null}
         </section>
       )}
 
@@ -231,31 +201,31 @@ export function NewSessionDialog() {
       </section>
 
       <section className="ns-section ns-two">
-        <div className="field">
-          <label>Model</label>
-          <ModelSelect value={model} onChange={(v) => setModel(v)} />
-        </div>
-        <div className="field">
-          <label>Effort</label>
-          <Select
-            value={effort || ''}
-            onChange={(v) => setEffort(v as Effort)}
-            options={[
-              { value: '', label: 'Default' },
-              { value: 'low', label: 'Low' },
-              { value: 'medium', label: 'Medium' },
-              { value: 'high', label: 'High' },
-              { value: 'xhigh', label: 'Extra high' },
-              { value: 'max', label: 'Max' },
-            ]}
-          />
-        </div>
+        <Field label="Model">
+          {(id) => <ModelSelect id={id} value={model} onChange={(v) => setModel(v)} />}
+        </Field>
+        <Field label="Effort">
+          {(id) => (
+            <Select id={id}
+              value={effort || ''}
+              onChange={(v) => setEffort(v as Effort)}
+              options={[
+                { value: '', label: 'Default' },
+                { value: 'low', label: 'Low' },
+                { value: 'medium', label: 'Medium' },
+                { value: 'high', label: 'High' },
+                { value: 'xhigh', label: 'Extra high' },
+                { value: 'max', label: 'Max' },
+              ]}
+            />
+          )}
+        </Field>
       </section>
       </Collapse>
 
       <section className="ns-section">
         <div className="ns-label">First message</div>
-        <textarea className="textarea ns-prompt" rows={2} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={`What should Claude do in ${basename(cwd) || 'this folder'}? (optional)`} />
+        <textarea aria-label="First message" className="textarea ns-prompt" rows={2} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={`What should Claude do in ${basename(cwd) || 'this folder'}? (optional)`} />
       </section>
     </Dialog>
   );

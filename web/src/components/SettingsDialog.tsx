@@ -1,12 +1,15 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { Copy, CircleCheck, CircleAlert, RefreshCw } from 'lucide-react';
-import { useStore, setDialog, setConfig, toast, call, setTheme } from '../lib/store';
+import { useStore, setDialog, setConfig, call, setTheme } from '../lib/store';
 import type { AppInfo, Config } from '../lib/types';
 import { tildify } from '../lib/format';
 import { Dialog } from './ui/Dialog';
-import { Switch, copyText, Mark, Seg } from './ui/bits';
+import { Switch, Seg } from './ui/bits';
+import { copy } from './ui/clipboard';
+import { Mark } from './ui/brand';
+import { useInk } from './ui/hooks';
 import { Select } from './ui/Select';
-import { MODES } from './Composer';
+import { MODES } from './composer/Menus';
 import { ModelSelect } from './ModelSelect';
 import { SkillsPage } from './settings/SkillsPage';
 import { McpPage } from './settings/McpPage';
@@ -17,19 +20,14 @@ import type { PermissionMode, Effort } from '../lib/types';
 type Section = 'general' | 'repos' | 'claude' | 'skills' | 'mcp' | 'memory' | 'diagnostics';
 const WIDE: Section[] = ['repos', 'skills', 'mcp', 'memory'];
 
-export function SettingsDialog() {
-  const config = useStore((s) => s.config)!;
+export function SettingsDialog({ config }: { config: Config }) {
   const info = useStore((s) => s.info);
   const initial = useStore((s) => s.dialogs.settings);
   const [section, setSection] = useState<Section>(typeof initial === 'string' ? (initial as Section) : 'general');
   const set = (p: Partial<Config>) => setConfig(p).catch(() => {});
   // The highlight behind the chosen page glides to the next one.
   const nav = useRef<HTMLElement>(null);
-  const [ink, setInk] = useState<{ top: number; height: number } | null>(null);
-  useLayoutEffect(() => {
-    const el = nav.current?.querySelector<HTMLElement>('button.on');
-    if (el) setInk({ top: el.offsetTop, height: el.offsetHeight });
-  }, [section]);
+  const ink = useInk(nav, 'button.on', section);
 
   return (
     <Dialog title="Settings" onClose={() => setDialog('settings', false)} width={WIDE.includes(section) ? 860 : 720} className={`settings${WIDE.includes(section) ? ' settings-wide' : ''}`}>
@@ -47,7 +45,7 @@ export function SettingsDialog() {
               ['diagnostics', 'Diagnostics'],
             ] as [Section, string][]
           ).map(([id, label]) => (
-            <button key={id} className={section === id ? 'on' : ''} onClick={() => setSection(id)}>
+            <button key={id} className={section === id ? 'on' : ''} aria-current={section === id ? 'page' : undefined} onClick={() => setSection(id)}>
               {label}
             </button>
           ))}
@@ -58,6 +56,7 @@ export function SettingsDialog() {
             <>
               <Row label="Theme">
                 <Seg
+                  label="Theme"
                   value={config.theme || 'system'}
                   onChange={(t, e) => setTheme(t, { x: e.clientX, y: e.clientY })}
                   options={[
@@ -69,6 +68,7 @@ export function SettingsDialog() {
               </Row>
               <Row label="Conversation text size">
                 <Seg
+                  label="Conversation text size"
                   value={String(nearestSize(config.fontSize || 14.5))}
                   onChange={(v) => set({ fontSize: Number(v) })}
                   options={[
@@ -80,6 +80,7 @@ export function SettingsDialog() {
               </Row>
               <Row label="Send messages with">
                 <Seg
+                  label="Send messages with"
                   value={config.sendKey === 'mod-enter' ? 'mod-enter' : 'enter'}
                   onChange={(v) => set({ sendKey: v })}
                   options={[
@@ -89,13 +90,13 @@ export function SettingsDialog() {
                 />
               </Row>
               <Row label="Desktop notifications" hint="When Claude finishes or needs you while the window is in the background">
-                <Switch on={config.notifications} onChange={(v) => set({ notifications: v })} />
+                <Switch label="Desktop notifications" on={config.notifications} onChange={(v) => set({ notifications: v })} />
               </Row>
               <Row label="Suggest a next message" hint="Claude Code predicts a likely follow-up after each turn">
-                <Switch on={config.promptSuggestions} onChange={(v) => set({ promptSuggestions: v })} />
+                <Switch label="Suggest a next message" on={config.promptSuggestions} onChange={(v) => set({ promptSuggestions: v })} />
               </Row>
               <Row label="Timeline" hint="Snapshot the folder after every step, so any point can be revisited or restored (side panel → Timeline)">
-                <Switch on={config.timeline !== false} onChange={(v) => set({ timeline: v })} />
+                <Switch label="Timeline" on={config.timeline !== false} onChange={(v) => set({ timeline: v })} />
               </Row>
             </>
           )}
@@ -104,6 +105,7 @@ export function SettingsDialog() {
             <>
               <Row label="Claude Code program" hint={claudeHint(info)}>
                 <Select
+                  label="Claude Code program"
                   value={['auto', 'bundled', 'system'].includes(config.claudeBinary) ? config.claudeBinary : 'custom'}
                   onChange={(v) => set({ claudeBinary: v === 'custom' ? '' : v })}
                   width={300}
@@ -117,17 +119,18 @@ export function SettingsDialog() {
               </Row>
               {!['auto', 'bundled', 'system'].includes(config.claudeBinary) && (
                 <Row label="Custom path">
-                  <input className="input mono" defaultValue={config.claudeBinary} placeholder="/usr/local/bin/claude" onBlur={(e) => set({ claudeBinary: e.target.value.trim() || 'auto' })} />
+                  <input aria-label="Custom path to Claude Code" className="input mono" defaultValue={config.claudeBinary} placeholder="/usr/local/bin/claude" onBlur={(e) => set({ claudeBinary: e.target.value.trim() || 'auto' })} />
                 </Row>
               )}
               <Row label="Default permission mode">
-                <Select value={config.defaultMode} onChange={(v) => set({ defaultMode: v as PermissionMode })} width={300} options={MODES.filter((m) => !(m.id === 'bypassPermissions' && info?.isRoot)).map((m) => ({ value: m.id, label: m.label, hint: m.hint, icon: m.icon }))} />
+                <Select label="Default permission mode" value={config.defaultMode} onChange={(v) => set({ defaultMode: v as PermissionMode })} width={300} options={MODES.filter((m) => !(m.id === 'bypassPermissions' && info?.isRoot)).map((m) => ({ value: m.id, label: m.label, hint: m.hint, icon: m.icon }))} />
               </Row>
               <Row label="Default model" hint="For new sessions; the models your gateway offers">
                 <DefaultModel value={config.defaultModel || ''} save={(v) => set({ defaultModel: v })} />
               </Row>
               <Row label="Default effort">
                 <Select
+                  label="Default effort"
                   value={config.defaultEffort || ''}
                   onChange={(v) => set({ defaultEffort: v as Effort })}
                   options={[
@@ -141,17 +144,17 @@ export function SettingsDialog() {
                 />
               </Row>
               <Row label="Stop idle Claude Code processes after" hint="Sessions resume automatically on your next message">
-                <Select value={String(config.idleTimeoutMin)} onChange={(v) => set({ idleTimeoutMin: Number(v) })} options={[10, 30, 60, 240, 1440].map((m) => ({ value: String(m), label: m < 60 ? `${m} minutes` : m < 1440 ? `${m / 60} hour${m > 60 ? 's' : ''}` : '1 day' }))} />
+                <Select label="Stop idle Claude Code processes after" value={String(config.idleTimeoutMin)} onChange={(v) => set({ idleTimeoutMin: Number(v) })} options={[10, 30, 60, 240, 1440].map((m) => ({ value: String(m), label: m < 60 ? `${m} minutes` : m < 1440 ? `${m / 60} hour${m > 60 ? 's' : ''}` : '1 day' }))} />
               </Row>
               <Row label="Worktree folder" hint="Where isolated worktrees are created. Empty uses ~/.local/share/pilcrow/worktrees">
-                <input className="input mono" defaultValue={config.worktreeRoot} placeholder="~/.local/share/pilcrow/worktrees" onBlur={(e) => set({ worktreeRoot: e.target.value.trim() })} />
+                <input aria-label="Worktree folder" className="input mono" defaultValue={config.worktreeRoot} placeholder="~/.local/share/pilcrow/worktrees" onBlur={(e) => set({ worktreeRoot: e.target.value.trim() })} />
               </Row>
             </>
           )}
 
           {section === 'skills' && <SkillsPage />}
           {section === 'mcp' && <McpPage />}
-          {section === 'memory' && <MemoryPage />}
+          {section === 'memory' && <MemoryPage config={config} />}
           {section === 'repos' && <ReposPage />}
           {section === 'diagnostics' && <Diagnostics info={info} />}
           </div>
@@ -206,7 +209,7 @@ function Diagnostics({ info }: { info: AppInfo | null }) {
         ))}
       </div>
       <div className="row">
-        <button className="btn sm" onClick={() => copyText(text).then(() => toast('Diagnostics copied', 'success'), () => toast('Could not copy to the clipboard', 'error'))}>
+        <button className="btn sm" onClick={() => copy(text, 'Diagnostics')}>
           <Copy size={13} /> Copy diagnostics
         </button>
         <button className="btn sm ghost" onClick={() => call<AppInfo>('app.info').then(setFresh)}>
@@ -240,7 +243,7 @@ function claudeHint(info: AppInfo | null) {
   if (!c?.path) return 'Not found';
   const v = c.version ? ` ${c.version}` : '';
   const where = c.source === 'bundled' ? `The copy installed with Pilcrow${v}` : c.source === 'system' ? `The claude on your PATH${v}` : `Custom program${v}`;
-  return <span title={tildify(c.path, info!.home)}>{where}</span>;
+  return <span title={tildify(c.path, info?.home)}>{where}</span>;
 }
 
 /** Saves a picked model at once, and a typed custom ID when the field is left. */
@@ -248,6 +251,7 @@ function DefaultModel({ value, save }: { value: string; save: (v: string) => voi
   const [v, setV] = useState(value);
   return (
     <ModelSelect
+      label="Default model"
       value={v}
       onChange={(next, typing) => {
         setV(next);

@@ -11,11 +11,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
-import { findRepos, groupHunks, ruleKey, ruleLabel } from './dispatch_core.js';
+import { TERMINAL, ACTIVE, capRun, changesIn, land, review as reviewRuns, tally } from './runs.js';
+import { findRepos, ruleKey, ruleLabel } from './workspace.js';
+import { absolute, fmtCost, roundUsd, textOfContent, under } from './util.js';
 
 export const STATES = ['queued', 'preparing', 'running', 'needs_action', 'done', 'failed', 'stopped', 'skipped'];
-export const TERMINAL = new Set(['done', 'failed', 'stopped', 'skipped']);
-export const ACTIVE = new Set(['preparing', 'running', 'needs_action']);
 export const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 export const HANDOFF_MAX = 4000;
 export const READ_DEFAULT = 8000;
@@ -27,6 +27,7 @@ export const TOOLS = ['start', 'wait', 'read', 'send', 'stop', 'list'];
 export const TOOL_PREFIX = 'mcp__helpers__';
 const MODE_WIDTH = { plan: 0, default: 1, acceptEdits: 2, bypassPermissions: 3 };
 const DEFAULTS = { enabled: true, total: 8, parallel: 0, maxMinutes: 30, costUsd: 0, wakeLead: true };
+const FILE_LIST_MAX = 200; // changed files a helper's `read files` lists
 
 /** Prepended to every helper's brief: what a helper is and how to end. */
 export const HEADER =
@@ -65,7 +66,6 @@ export function fmtDuration(ms) {
   if (m < 60) return `${m}m${String(s % 60).padStart(2, '0')}s`;
   return `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}m`;
 }
-const fmtCost = (usd) => `$${(usd || 0).toFixed(2)}`;
 
 /** A unified diff as text from git.diff's files, cut per file at a budget. */
 export function renderDiff(files, { maxChars = READ_DEFAULT, only = '' } = {}) {
@@ -75,7 +75,7 @@ export function renderDiff(files, { maxChars = READ_DEFAULT, only = '' } = {}) {
   const list = files.filter((f) => !only || f.path === only || f.path.endsWith('/' + only));
   for (const f of list) {
     const head = `--- a/${f.path}\n+++ b/${f.path}\n`;
-    const body = (f.hunks || []).map((h) => `@@ -${h.oldStart},${h.oldLines} +${h.newStart},${h.newLines} @@\n` + (h.lines || []).map((l) => l.t + l.s).join('\n')).join('\n');
+    const body = f.truncated ? `(too large to show: +${f.additions || 0} −${f.deletions || 0})` : (f.hunks || []).map((h) => `@@ -${h.oldStart},${h.oldLines} +${h.newStart},${h.newLines} @@\n` + (h.lines || []).map((l) => l.t + l.s).join('\n')).join('\n');
     const text = head + body + '\n';
     if (used + text.length > maxChars) {
       const room = Math.max(0, maxChars - used - head.length - 40);
@@ -110,8 +110,6 @@ export function createHelpers(deps) {
     now = () => Date.now(),
     uuid = () => crypto.randomUUID(),
     slash = (p) => p,
-    expandHome = (p) => p,
-    textOfContent = (c) => (Array.isArray(c) ? c.filter((x) => x?.type === 'text').map((x) => x.text).join('\n') : typeof c === 'string' ? c : ''),
     homeDir = slash(os.homedir()),
     cpus = os.cpus().length || 2,
     exists = (p) => fs.existsSync(p),
@@ -119,7 +117,15 @@ export function createHelpers(deps) {
   } = deps;
 
   const events = new EventEmitter();
-  /** helperId -> H: the helper as the lead and the clients see it (persisted on the helper's meta). */
+  /**
+   * A helper as the lead and the clients see it (persisted on the helper's meta; HELPERS.md).
+   * @typedef {{ id: string, leadId: string, name: string, cwd: string, folder?: string, worktree: import('./git.js').Worktree | null, brief: string,
+   *   after: string[], maxMinutes: number, startedAt: number, launchedAt: number | null, endedAt: number | null, state: string, reason: string | null,
+   *   handoff: string, cost: number, files: number, add: number, del: number, pending: number, lastLine: string, rev: number, launched: boolean,
+   *   noted: boolean | number, stopping?: string | null, briefSent?: string, fileList?: { path: string, add: number, del: number }[],
+   *   finished?: string, commit?: string | null, pr?: string, prError?: string, finishError?: string, removed?: boolean, leadGone?: boolean, restartNote?: boolean, timer?: null }} Helper
+   */
+  /** @type {Map<string, Helper>} helperId -> the helper */
   const helpers = new Map();
   /** leadId -> { waits: Set<Wait>, noteBuf: string[], noteTimer } */
   const leads = new Map();
@@ -141,7 +147,6 @@ export function createHelpers(deps) {
   };
   const helpersOf = (leadId) => [...helpers.values()].filter((h) => h.leadId === leadId && !h.removed).sort((a, b) => a.startedAt - b.startedAt);
   const byName = (leadId, name) => helpersOf(leadId).find((h) => h.name === name) || null;
-  const absolute = (p) => slash(path.resolve(expandHome(String(p || '').trim()))).replace(/(?<=.)\/+$/, '');
   const leadMeta = (leadId) => store.getMeta(leadId) || {};
 
   // ---- persistence
@@ -165,7 +170,7 @@ export function createHelpers(deps) {
       state: h.state,
       since: h.startedAt,
       elapsedMs: (h.endedAt || now()) - (h.launchedAt || h.startedAt),
-      cost: Math.round((h.cost || 0) * 10000) / 10000,
+      cost: roundUsd(h.cost),
       files: h.files || 0,
       add: h.add || 0,
       del: h.del || 0,
@@ -183,6 +188,7 @@ export function createHelpers(deps) {
     s?.emitState?.();
     events.emit('changed', { leadId, helpers: helpersOf(leadId).map(publicState) });
   }
+  /** @param {Helper} h @param {string} state @param {string | null} [reason] */
   function setState(h, state, reason = null) {
     if (h.state === state && h.reason === reason) return false;
     h.state = state;
@@ -213,9 +219,11 @@ export function createHelpers(deps) {
     const s = leadSessionOf(leadId);
     return slash(m.worktree?.repoRoot || m.project || m.cwd || s?.cwd || '');
   }
-  const under = (dir, p) => Boolean(dir) && (p === dir || p.startsWith(dir.endsWith('/') ? dir : dir + '/'));
 
-  /** The folder a start names, from `repo` (a registered name or alias, or a path) or `cwd`. */
+  /**
+   * The folder a start names, from `repo` (a registered name or alias, or a path) or `cwd`.
+   * @param {{ repo?: string, cwd?: string }} where
+   */
   function resolveFolder({ repo, cwd }) {
     if (repo) {
       const hit = registry?.resolve(repo);
@@ -274,6 +282,7 @@ export function createHelpers(deps) {
       effort: args.effort || lead?.effort || undefined,
       title: name,
     });
+    /** @type {Helper} */
     const h = {
       id: made.id,
       leadId,
@@ -326,26 +335,18 @@ export function createHelpers(deps) {
     setState(h, 'preparing');
     try {
       const session = await sessions.get(h.id);
-      const deps_ = (h.after || []).map((a) => byName(h.leadId, a)).filter((d) => d && d.state === 'done');
+      const waitedFor = (h.after || []).map((a) => byName(h.leadId, a)).filter((d) => d && d.state === 'done');
       let text = HEADER + '\n\n' + h.brief;
       const notes = registry?.notesFor(h.folder || h.cwd);
       if (notes) text += `\n\n## About this repository\n${notes}`;
-      if (deps_.length) {
-        text += '\n\n## From helpers you waited for\n' + deps_.map((d) => `- ${d.name} (done, ${fmtDuration((d.endedAt || now()) - (d.launchedAt || d.startedAt))})${d.worktree ? `: worktree ${d.worktree.path} on branch ${d.worktree.branch}. Read the change there before you start.` : ''}\n${(d.handoff || 'no handoff').replace(/^/gm, '  ')}`).join('\n');
+      if (waitedFor.length) {
+        text += '\n\n## From helpers you waited for\n' + waitedFor.map((d) => `- ${d.name} (done, ${fmtDuration((d.endedAt || now()) - (d.launchedAt || d.startedAt))})${d.worktree ? `: worktree ${d.worktree.path} on branch ${d.worktree.branch}. Read the change there before you start.` : ''}\n${(d.handoff || 'no handoff').replace(/^/gm, '  ')}`).join('\n');
       }
       h.briefSent = text;
       setState(h, 'running');
       timers.set(
         h.id,
-        setTimeout(() => {
-          const s = sessions.find?.(h.id);
-          h.stopping = `Stopped after ${h.maxMinutes} minutes`;
-          persist(h);
-          s?.interrupt?.().catch?.(() => null);
-          setTimeout(() => {
-            if (ACTIVE.has(h.state)) end(h, 'stopped', h.stopping);
-          }, 3000);
-        }, h.maxMinutes * 60e3),
+        capRun(h, h.maxMinutes, () => sessions.find?.(h.id), (why) => ACTIVE.has(h.state) && end(h, 'stopped', why)),
       );
       await session.send({ text, from: 'lead' });
     } catch (e) {
@@ -358,14 +359,16 @@ export function createHelpers(deps) {
     const cp = caps();
     for (const h of helpersOf(leadId)) {
       if (h.state !== 'queued') continue;
-      const deps_ = (h.after || []).map((a) => byName(leadId, a));
-      const bad = deps_.find((d) => !d || (TERMINAL.has(d.state) && d.state !== 'done'));
-      if (bad) {
-        setState(h, 'skipped', `${bad?.name || 'a helper it waited for'} ${bad ? bad.state : 'is gone'}`);
+      const waitedFor = (h.after || []).map((a) => byName(leadId, a));
+      // one it waited for that ended badly, or is gone (removed), skips it
+      const i = waitedFor.findIndex((d) => !d || (TERMINAL.has(d.state) && d.state !== 'done'));
+      if (i !== -1) {
+        const bad = waitedFor[i];
+        setState(h, 'skipped', bad ? `${bad.name} ${bad.state}` : `${h.after[i]} is gone`);
         note(leadId, h, 'skipped');
         continue;
       }
-      if (!deps_.every((d) => d.state === 'done')) continue;
+      if (!waitedFor.every((d) => d?.state === 'done')) continue;
       if (helpersOf(leadId).filter((x) => ACTIVE.has(x.state)).length >= cp.parallel) continue;
       launch(h).catch((e) => log('helper launch failed', e?.message));
     }
@@ -391,22 +394,17 @@ export function createHelpers(deps) {
   /** Files, additions and deletions of a helper's worktree against its base. */
   async function collect(h) {
     const dir = h.worktree?.path || h.cwd;
-    if (!dir || !exists(dir)) return;
-    try {
-      const d = await git.diff(dir, { base: h.worktree?.base });
-      const files = d.files || [];
-      h.files = files.length;
-      h.add = files.reduce((s, f) => s + Number(f.additions ?? f.add ?? 0), 0);
-      h.del = files.reduce((s, f) => s + Number(f.deletions ?? f.del ?? 0), 0);
-      h.fileList = files.slice(0, 200).map((f) => ({ path: f.path, add: Number(f.additions ?? f.add ?? 0), del: Number(f.deletions ?? f.del ?? 0) }));
-      persist(h);
-    } catch {
-      /* not a repository, or gone */
-    }
+    if (!started || !dir || !exists(dir)) return; // not after end() (quitting): no git process starts then
+    const ch = await changesIn(git, dir, h.worktree?.base);
+    h.files = ch.files.length;
+    h.add = ch.add;
+    h.del = ch.del;
+    h.fileList = ch.files.slice(0, FILE_LIST_MAX);
+    persist(h);
   }
 
   /** The text of the helper's last reply, whole (the session's lastReply is a one-line gist). */
-  function lastAssistantText(session) {
+  function lastReplyText(session) {
     const msgs = session?.messages || [];
     const parts = [];
     for (let i = msgs.length - 1; i >= 0; i--) {
@@ -446,7 +444,7 @@ export function createHelpers(deps) {
       h.pending = pending;
       changed = true;
     }
-    const line = st.activity?.label || (st.status === 'idle' ? h.lastLine : h.lastLine);
+    const line = st.activity?.label || h.lastLine;
     if (line && line !== h.lastLine) {
       h.lastLine = line;
       changed = true;
@@ -460,7 +458,7 @@ export function createHelpers(deps) {
           h.stopping = null;
           end(h, 'stopped', why);
         } else {
-          h.handoff = extractHandoff(lastAssistantText(sessions.find?.(h.id)));
+          h.handoff = extractHandoff(lastReplyText(sessions.find?.(h.id)));
           persist(h);
           end(h, 'done', null);
         }
@@ -473,7 +471,7 @@ export function createHelpers(deps) {
     if (changed) {
       persist(h);
       emitLead(h.leadId);
-      if (h.state === 'needs_action') settleWaits(h.leadId, 'any');
+      if (h.state === 'needs_action') settleWaits(h.leadId);
     }
   }
   function onPermission({ id, request }) {
@@ -549,7 +547,7 @@ export function createHelpers(deps) {
   }
 
   // ---- wait
-  function settleWaits(leadId, trigger = 'change') {
+  function settleWaits(leadId) {
     const l = leads.get(leadId);
     if (!l) return;
     for (const w of [...l.waits]) {
@@ -562,7 +560,6 @@ export function createHelpers(deps) {
         w.resolve({ timedOut: false, helpers: mine.map(publicState) });
       }
     }
-    void trigger;
   }
   function wait(leadId, args = {}) {
     const all = helpersOf(leadId);
@@ -573,11 +570,16 @@ export function createHelpers(deps) {
     const timeoutSec = Math.max(1, Math.min(Number(args.timeoutSec) || WAIT_DEFAULT_S, WAIT_MAX_S));
     const l = leadOf(leadId);
     return new Promise((resolve) => {
-      const w = { names: new Set(names), until, resolve, revs: new Map(all.map((h) => [h.name, h.rev || 0])), timer: null };
-      w.timer = setTimeout(() => {
-        l.waits.delete(w);
-        resolve({ timedOut: true, helpers: helpersOf(leadId).filter((h) => w.names.has(h.name)).map(publicState) });
-      }, timeoutSec * 1000);
+      const w = {
+        names: new Set(names),
+        until,
+        resolve,
+        revs: new Map(all.map((h) => [h.name, h.rev || 0])),
+        timer: setTimeout(() => {
+          l.waits.delete(w);
+          resolve({ timedOut: true, helpers: helpersOf(leadId).filter((h) => w.names.has(h.name)).map(publicState) });
+        }, timeoutSec * 1000),
+      };
       l.waits.add(w);
       settleWaits(leadId);
     });
@@ -593,7 +595,8 @@ export function createHelpers(deps) {
     const base = { name: h.name, state: h.state };
     if (what === 'summary') return { ...base, ...cut(h.handoff || (TERMINAL.has(h.state) ? h.reason || 'No handoff.' : `Still ${h.state}; nothing to summarize yet.`)) };
     const session = sessions.find?.(h.id) || (await sessions.get(h.id).catch(() => null));
-    if (what === 'last') return { ...base, ...cut(lastAssistantText(session) || 'Nothing said yet.') };
+    await session?.loadHistory?.(); // a session reopened, or one whose transcript was let go when idle
+    if (what === 'last') return { ...base, ...cut(lastReplyText(session) || 'Nothing said yet.') };
     if (what === 'files') {
       await collect(h);
       const list = h.fileList || [];
@@ -643,7 +646,7 @@ export function createHelpers(deps) {
     await s.interrupt();
     return { name: h.name, state: 'stopped' };
   }
-  function known(leadId) {
+  async function known(leadId) {
     const out = new Map();
     const add = (p, more) => {
       const key = slash(p).replace(/\/+$/, '');
@@ -654,12 +657,12 @@ export function createHelpers(deps) {
     const lp = leadProject(leadId);
     if (lp) add(lp, { registered: out.has(lp), allowed: true, about: out.get(lp)?.about || 'this session’s project' });
     for (const p of store.getConfig().recentProjects || []) if (exists(p)) add(p, { registered: false, allowed: startPolicy(leadId, slash(p)) === 'allow' });
-    if (lp && exists(lp)) for (const d of findRepos(lp, 1)) add(d, { registered: false, allowed: startPolicy(leadId, slash(d)) === 'allow' });
+    if (lp && exists(lp)) for (const d of await findRepos(lp, 1)) add(d, { registered: false, allowed: startPolicy(leadId, slash(d)) === 'allow' });
     return [...out.values()];
   }
-  function list(leadId) {
+  async function list(leadId) {
     const mine = helpersOf(leadId);
-    return { helpers: mine.map(publicState), caps: caps(), cost: Math.round(mine.reduce((s, h) => s + (h.cost || 0), 0) * 10000) / 10000, known: known(leadId) };
+    return { helpers: mine.map(publicState), caps: caps(), cost: roundUsd(mine.reduce((s, h) => s + (h.cost || 0), 0)), known: await known(leadId) };
   }
 
   // ---- what the clients ask for
@@ -700,82 +703,44 @@ export function createHelpers(deps) {
     if (m.lead || helpersOf(id).length) {
       const mine = helpersOf(id);
       out.helpers = mine.map(publicState);
-      out.lead = { since: m.lead?.since || null, cost: Math.round(mine.reduce((s, h) => s + (h.cost || 0), 0) * 10000) / 10000, caps: caps(), rules: (m.lead?.rules || []).map((r) => r.label) };
+      out.lead = { since: m.lead?.since || null, cost: roundUsd(mine.reduce((s, h) => s + (h.cost || 0), 0)), caps: caps(), rules: (m.lead?.rules || []).map((r) => r.label) };
     }
     if (m.helper) out.helper = { leadId: m.helper.leadId, leadTitle: store.getMeta(m.helper.leadId)?.title || m.helper.leadTitle || '', name: m.helper.name, state: helpers.get(id)?.state || m.helper.state || null };
     return out;
   }
   async function review(leadId) {
-    const diffs = [];
-    for (const h of helpersOf(leadId)) {
-      const dir = h.worktree?.path;
-      if (!dir || !exists(dir) || h.finished === 'discard' || h.finished === 'commit') continue;
-      try {
-        const d = await git.diff(dir, { base: h.worktree.base });
-        diffs.push({ runId: h.id, name: h.name, files: d.files || [] });
-      } catch {
-        /* skip */
-      }
-    }
-    return { id: leadId, ...groupHunks(diffs) };
+    const open = helpersOf(leadId).filter((h) => h.finished !== 'discard' && h.finished !== 'commit');
+    return { id: leadId, ...(await reviewRuns(git, open.map((h) => ({ id: h.id, name: h.name, dir: h.worktree?.path, base: h.worktree?.base })))) };
   }
-  async function finish(leadId, { name, action, message, pr } = {}) {
+  /** @param {string} leadId @param {{ name?: string, action?: string, message?: string, pr?: boolean }} [opts] */
+  async function finish(leadId, { name, action = '', message, pr } = {}) {
     if (!['commit', 'discard', 'keep', 'pr'].includes(action)) throw new Error('Finish with commit, pr, discard or keep.');
     const mine = helpersOf(leadId).filter((h) => (!name || h.name === name) && TERMINAL.has(h.state) && !h.finished);
+    const title = leadMeta(leadId).title;
     const results = [];
     for (const h of mine) {
-      const res = { name: h.name, ok: true, output: '' };
-      try {
-        if (action === 'keep') h.finished = 'keep';
-        else if (!h.worktree?.path || !exists(h.worktree.path)) {
-          h.finished = action;
-          res.output = 'No worktree.';
-        } else if (action === 'discard') {
-          const r = await git.removeWorktree({ repoRoot: h.worktree.repoRoot, dir: h.worktree.path, branch: h.worktree.branch, deleteBranch: true });
-          res.ok = r.ok !== false;
-          res.output = r.output || '';
-          h.finished = 'discard';
-        } else {
-          const msg = (message || '').trim() || `${leadMeta(leadId).title || 'Helper'}: ${h.name}`;
-          const c = await git.commit(h.worktree.path, { message: msg });
-          if (!c.ok && !/nothing to commit|nothing added/i.test(c.output || '')) throw new Error(c.output || 'commit failed');
-          const head = await git.git(h.worktree.path, ['rev-parse', '--short', 'HEAD']);
-          h.commit = (head.stdout || '').trim() || null;
-          if (action === 'pr' || pr) {
-            const url = await openPr(leadId, h).catch((e) => {
-              h.prError = e?.message || 'Could not open a pull request';
-              return null;
-            });
-            if (url) h.pr = url;
-          }
-          const r = await git.removeWorktree({ repoRoot: h.worktree.repoRoot, dir: h.worktree.path, branch: h.worktree.branch, deleteBranch: false });
-          res.output = r.output || '';
-          h.finished = 'commit';
-        }
-        if (action !== 'keep') sessions.find?.(h.id)?.close?.();
-      } catch (e) {
-        res.ok = false;
-        res.output = e?.message || String(e);
-        h.finishError = res.output;
-      }
+      const siblings = helpersOf(leadId).filter((x) => x.id !== h.id && x.pr);
+      const how = {
+        git,
+        which,
+        exec,
+        message: (message || '').trim() || `${title || 'Helper'}: ${h.name}`,
+        pr:
+          action === 'pr' || pr
+            ? {
+                title: `${title || 'Helper'}: ${h.name}`,
+                body: `${h.brief}\n\n---\n${h.handoff || ''}${siblings.length ? `\n\nRelated pull requests from the same lead:\n${siblings.map((s) => `- ${s.name}: ${s.pr}`).join('\n')}` : ''}\n\nOpened by Pilcrow (helper “${h.name}” of “${title || 'a lead session'}”).`,
+              }
+            : null,
+      };
+      const res = await land(h, action === 'pr' ? 'commit' : action, how);
+      if (res.ok && action !== 'keep') sessions.find?.(h.id)?.close?.();
       persist(h);
-      results.push(res);
+      results.push({ name: h.name, ...res });
     }
     emitLead(leadId);
     maybeReport(leadId, true);
     return { results };
-  }
-  async function openPr(leadId, h) {
-    const gh = which('gh');
-    if (!gh || !exec) throw new Error('gh is not on the path.');
-    const wt = h.worktree;
-    const push = await git.git(wt.path, ['push', '-u', 'origin', wt.branch]);
-    if (push.code) throw new Error((push.stderr || push.stdout || 'push failed').trim());
-    const siblings = helpersOf(leadId).filter((x) => x.id !== h.id && x.pr);
-    const body = `${h.brief}\n\n---\n${h.handoff || ''}${siblings.length ? `\n\nRelated pull requests from the same lead:\n${siblings.map((s) => `- ${s.name}: ${s.pr}`).join('\n')}` : ''}\n\nOpened by Pilcrow (helper “${h.name}” of “${leadMeta(leadId).title || 'a lead session'}”).`;
-    const r = await exec(gh, ['pr', 'create', '--head', wt.branch, '--title', `${leadMeta(leadId).title || 'Helper'}: ${h.name}`, '--body', body], { cwd: wt.repoRoot, timeout: 60_000 });
-    if (r.code) throw new Error((r.stderr || r.stdout || 'gh pr create failed').trim());
-    return (r.stdout || '').trim().split('\n').pop() || null;
   }
   /** One inbox item per lead once every helper has reached a terminal state and one changed files; updated, not duplicated. */
   function maybeReport(leadId, force = false) {
@@ -784,8 +749,6 @@ export function createHelpers(deps) {
     if (!force && !mine.some((h) => (h.files || 0) > 0)) return;
     const lm = leadMeta(leadId);
     const title = lm.title || lm.firstPrompt || 'A lead session';
-    const done = mine.filter((h) => h.state === 'done').length;
-    const lines = mine.map((h) => `- ${h.name}: ${h.state}${h.reason ? ` (${h.reason})` : ''}; ${h.files || 0} files (+${h.add || 0} −${h.del || 0})${h.handoff ? ` — ${h.handoff.replace(/\s+/g, ' ').slice(0, 160)}` : ''}`);
     const item = {
       kind: 'helpers',
       leadId,
@@ -795,10 +758,11 @@ export function createHelpers(deps) {
       startedAt: Math.min(...mine.map((h) => h.startedAt)),
       endedAt: Math.max(...mine.map((h) => h.endedAt || now())),
       durationMs: Math.max(...mine.map((h) => h.endedAt || now())) - Math.min(...mine.map((h) => h.launchedAt || h.startedAt)),
-      status: done === mine.length ? 'completed' : done ? 'completed' : 'failed',
-      reason: done === mine.length ? null : `${mine.length - done} of ${mine.length} did not finish`,
-      summary: `${done} of ${mine.length} helper${mine.length === 1 ? '' : 's'} done.\n${lines.join('\n')}`.slice(0, 1200),
-      cost: Math.round(mine.reduce((s, h) => s + (h.cost || 0), 0) * 10000) / 10000,
+      ...tally(
+        mine.map((h) => ({ ...h, gist: h.handoff })),
+        `helper${mine.length === 1 ? '' : 's'} done`,
+      ),
+      cost: roundUsd(mine.reduce((s, h) => s + (h.cost || 0), 0)),
       helpers: mine.map((h) => ({ ...publicState(h), handoff: h.handoff || '' })),
       title,
     };
@@ -836,7 +800,8 @@ export function createHelpers(deps) {
   }
 
   // ---- the extension points sessions.js offers
-  /** Pilcrow's own decisions on the helpers tools: read-only ones never ask; a start in an allowed folder does not either. */
+  /** Pilcrow's own decisions on the helpers tools: read-only ones never ask; a start in an allowed folder does not either.
+   *  @returns {import('@anthropic-ai/claude-agent-sdk').PermissionResult | null} */
   function permission(session, toolName, input) {
     if (!toolName.startsWith(TOOL_PREFIX)) return null;
     if (toolName !== `${TOOL_PREFIX}start`) return { behavior: 'allow', updatedInput: input };
@@ -970,20 +935,25 @@ export function createHelpers(deps) {
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { store } from './config.js';
-import { sessions, bus, extensions, textOfContent } from './sessions.js';
+import { sessions, bus, extensions } from './sessions.js';
 import * as git from './git.js';
-import { pushInbox, updateInbox } from './schedules.js';
+import * as inbox from './inbox.js';
 import { repos } from './repos.js';
-import { expandHome, log, slash, run, which } from './util.js';
+import { log, slash, run, which } from './util.js';
 
-export const helpers = createHelpers({ sessions, bus, store, git, registry: repos, pushInbox, updateInbox, which, run, log, slash, expandHome, textOfContent });
+export const helpers = createHelpers({ sessions, bus, store, git, registry: repos, pushInbox: inbox.push, updateInbox: inbox.update, which, run, log, slash });
 export const events = helpers.events;
 
 /** Wire the instance into sessions.js: the MCP server, the permission decisions, the state fields. */
 export function start() {
   helpers.begin();
+  if (extensions.state.includes(helpers.stateOf)) return; // wired by an earlier start (a test starting servers)
   extensions.mcpServers.push((session) => helpers.serverFor(session, { createSdkMcpServer, tool, z }));
   extensions.permission.push(helpers.permission);
   extensions.respond.push(helpers.respond);
   extensions.state.push(helpers.stateOf);
+}
+
+export function stop() {
+  helpers.end();
 }

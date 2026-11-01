@@ -11,14 +11,14 @@ from typing import Any, Callable, Dict, List, Optional
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QCoreApplication, QEvent, QObject, QTimer  # noqa: E402
-from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget  # noqa: E402
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, QTimer
+from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
-from pilcrow_qt import fonts, markdown, theme  # noqa: E402
-from pilcrow_qt.canvas.transcript import Transcript, forget_scenes  # noqa: E402
-from pilcrow_qt.canvas.view import CanvasView  # noqa: E402
-from pilcrow_qt.lib.transcript_model import TranscriptModel  # noqa: E402
-from pilcrow_qt.store import Runtime, store  # noqa: E402
+from pilcrow_qt import fonts, markdown, theme
+from pilcrow_qt.canvas.transcript import Transcript, forget_scenes
+from pilcrow_qt.canvas.view import CanvasView
+from pilcrow_qt.lib.transcript_model import TranscriptModel
+from pilcrow_qt.store import Runtime, store
 
 CWD = "/proj"
 _seq = 0
@@ -186,7 +186,7 @@ class Probe:
             # paints are counted by an event filter on the viewport (a Python override of paintEvent
             # set after construction is not seen by Qt); their time is the stall probe's business
             class F(QObject):
-                def eventFilter(self, obj: Any, e: Any) -> bool:  # noqa: N802
+                def eventFilter(self, obj: Any, e: Any) -> bool:
                     if e.type() == QEvent.Type.Paint:
                         probe.paints += 1
                         probe.paint_rects.append(e.rect().height())

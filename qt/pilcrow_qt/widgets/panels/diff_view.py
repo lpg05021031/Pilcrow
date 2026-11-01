@@ -15,7 +15,7 @@ import difflib
 import re
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetricsF, QKeyEvent, QLinearGradient, QMouseEvent, QPainter, QPen
@@ -32,7 +32,7 @@ from PySide6.QtWidgets import (
 
 from ... import icons, theme
 from ...lib.fmt import basename, dirname
-from ..ui.bits import Clickable, Hairline, Pill
+from ..ui.bits import Clickable, Hairline, Pill, reveal_on_hover
 from ..ui.collapse import Collapse
 from ..ui.signals import bind
 from .editor import lexer_for_path, token_color
@@ -315,7 +315,7 @@ class NoteBadge(QLabel):
     def _paint(self) -> None:
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -372,7 +372,7 @@ class CommentEditor(QWidget):
         row.addWidget(self.save)
         lay.addLayout(row)
 
-    def eventFilter(self, obj, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj, e: QEvent) -> bool:
         if obj is self.edit and e.type() == QEvent.Type.KeyPress:
             ke: QKeyEvent = e  # type: ignore[assignment]
             if (
@@ -420,6 +420,97 @@ class CommentCard(Card):
         lay.addWidget(d, 0, Qt.AlignmentFlag.AlignTop)
 
 
+class _Kit:
+    """What one paint of a diff grid draws with: the painter, the faces and the colours, and the
+    pieces a row is made of (a line number, the comment glyph, the code with its word marks, a void)."""
+
+    def __init__(self, grid: DiffGrid, p: QPainter, t: theme.Tokens) -> None:
+        self.grid, self.p, self.t = grid, p, t
+        self.font = theme.font_mono(DIFF_FONT_PX)
+        self.italic_font = theme.font_mono(DIFF_FONT_PX)
+        self.italic_font.setItalic(True)
+        self.fm = QFontMetricsF(self.font)
+        self.lh = grid._lh
+        self.add_bg, self.del_bg = theme.qcolor(t.diff_add), theme.qcolor(t.diff_del)
+        self.add_hl, self.del_hl = theme.qcolor(t.diff_add_hl), theme.qcolor(t.diff_del_hl)
+        self.stripe = theme.qcolor(t.fill_1)
+        self.text_c = QColor(t.text)
+        self.baseline_off = (self.lh - self.fm.height()) / 2 + self.fm.ascent()
+
+    def bg(self, ln: Optional[Json]) -> Optional[QColor]:
+        if ln is None:
+            return None
+        return self.add_bg if ln.get("t") == "+" else self.del_bg if ln.get("t") == "-" else None
+
+    def void(self, rect: QRectF) -> None:
+        """``repeating-linear-gradient(135deg, transparent 0 5px, var(--fill-1) 5px 6px)``."""
+        self.p.save()
+        self.p.setClipRect(rect)
+        self.p.setPen(QPen(self.stripe, 1))
+        x0 = int(rect.left() - rect.height())
+        k = 0
+        while x0 + k * 6 < rect.right() + rect.height():
+            x = x0 + k * 6
+            self.p.drawLine(QPointF(x, rect.bottom()), QPointF(x + rect.height(), rect.top()))
+            k += 1
+        self.p.restore()
+
+    def code(self, ln: Optional[Json], x: int, y: int, segs: List[Range]) -> None:
+        if ln is None:
+            return
+        s = str(ln.get("s") or "")
+        marks = self.grid._words.get(id(ln)) or []
+        toks = self.grid._toks.get(id(ln)) or []
+        hl = self.add_hl if ln.get("t") == "+" else self.del_hl
+        for k, (a, b) in enumerate(segs):
+            yy = y + k * self.lh
+            for ma, mb in marks:
+                lo, hi = max(a, ma), min(b, mb)
+                if lo >= hi:
+                    continue
+                x1 = x + self.fm.horizontalAdvance(s[a:lo])
+                x2 = x1 + self.fm.horizontalAdvance(s[lo:hi])
+                self.p.setPen(Qt.PenStyle.NoPen)
+                self.p.setBrush(hl)
+                self.p.drawRoundedRect(QRectF(x1, yy + 2, x2 - x1, self.lh - 4), 2, 2)
+            # the code, one coloured run at a time
+            pos = a
+            runs = [(max(a, ts), min(b, te), *token_look(tt, self.t)) for ts, te, tt in toks if te > a and ts < b] or [
+                (a, b, None, False)
+            ]
+            for ts, te, col, it in runs:
+                if ts > pos:
+                    self.p.setFont(self.font)
+                    self.p.setPen(self.text_c)
+                    self.p.drawText(QPointF(x + self.fm.horizontalAdvance(s[a:pos]), yy + self.baseline_off), s[pos:ts])
+                self.p.setFont(self.italic_font if it else self.font)
+                self.p.setPen(col or self.text_c)
+                self.p.drawText(QPointF(x + self.fm.horizontalAdvance(s[a:ts]), yy + self.baseline_off), s[ts:te])
+                pos = te
+            if pos < b:
+                self.p.setFont(self.font)
+                self.p.setPen(self.text_c)
+                self.p.drawText(QPointF(x + self.fm.horizontalAdvance(s[a:pos]), yy + self.baseline_off), s[pos:b])
+        self.p.setFont(self.font)
+
+    def num(self, x: int, w: int, pad_r: int, y: int, n: Any, tone: str) -> None:
+        if not self.grid._numbers or n in (None, ""):
+            return
+        self.p.setPen(QColor(tone))
+        self.p.drawText(
+            QRectF(x, y, w - pad_r, self.lh), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, str(n)
+        )
+
+    def glyph(self, x: int, y: int) -> None:
+        self.p.setPen(Qt.PenStyle.NoPen)
+        self.p.setBrush(self.text_c)
+        self.p.drawRoundedRect(
+            QRectF(x, y + (self.lh - GUTTER_GLYPH) / 2, GUTTER_GLYPH, GUTTER_GLYPH), theme.R1, theme.R1
+        )
+        pm = icons.pixmap("message-square-plus", self.t.canvas, 12)
+        self.p.drawPixmap(QPointF(x + 3, y + (self.lh - 12) / 2), pm)
+
+
 class DiffGrid(QWidget):
     """One file's hunks, painted: line numbers, signs, code with word marks; comments hang under lines."""
 
@@ -456,7 +547,7 @@ class DiffGrid(QWidget):
         self._toks: Dict[int, List[Tok]] = {}
         self._geom: List[_Geom] = []
         self._extra_rects: List[Tuple[QRect, str]] = []
-        self._extras: Dict[str, QWidget] = {}
+        self._extras: Dict[str, Union[CommentEditor, CommentCard]] = {}
         self._key_lines: Dict[str, Json] = {}
         self._cols: Dict[str, int] = {}
         self._content_w = 0
@@ -476,10 +567,6 @@ class DiffGrid(QWidget):
     @property
     def rows(self) -> List[Row]:
         return self._rows
-
-    @property
-    def shown_rows(self) -> List[Row]:
-        return self._rows[: self._limit()]
 
     @property
     def columns(self) -> int:
@@ -514,10 +601,6 @@ class DiffGrid(QWidget):
             ed = self._extras.get(key)
             if isinstance(ed, CommentEditor):
                 ed.edit.setFocus()
-
-    def row_rect(self, i: int) -> QRect:
-        g = self._geom[i]
-        return QRect(0, g.y, self.width(), g.h)
 
     def row_tint(self, i: int) -> Optional[QColor]:
         """The background a row is painted with (None for plain context), for tests and tooling."""
@@ -718,8 +801,9 @@ class DiffGrid(QWidget):
                 del self._extras[key]
         for key in wanted:
             if key in self._extras:
-                if not isinstance(self._extras[key], CommentEditor):
-                    self._extras[key].text.setText(self._comments.get(key, ""))  # type: ignore[attr-defined]
+                w = self._extras[key]
+                if isinstance(w, CommentCard):
+                    w.text.setText(self._comments.get(key, ""))
                 continue
             if key == self._editing:
                 ed = CommentEditor(self._comments.get(key, ""), self)
@@ -749,13 +833,13 @@ class DiffGrid(QWidget):
         self._editing = None
         self._relayout()
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         return QSize(max(self._content_w, 200), self._total_h)
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         return QSize(self._content_w, self._total_h)
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         # without wrapping the rows' heights do not depend on the width: only the columns move
         if self._wrap or self._mode == "split" or self._extras:
@@ -815,7 +899,7 @@ class DiffGrid(QWidget):
             return r.right
         return None
 
-    def mouseMoveEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+    def mouseMoveEvent(self, e: QMouseEvent) -> None:
         i = self._row_at(int(e.position().y()))
         if i != self._hover:
             self._hover = i
@@ -831,12 +915,12 @@ class DiffGrid(QWidget):
             self.unsetCursor()
         super().mouseMoveEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self._hover = -1
         self.update()
         super().leaveEvent(e)
 
-    def mousePressEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+    def mousePressEvent(self, e: QMouseEvent) -> None:
         if e.button() == Qt.MouseButton.LeftButton and self._can_comment:
             i = self._row_at(int(e.position().y()))
             if i >= 0 and self._rows[i].kind != "hunk":
@@ -847,182 +931,38 @@ class DiffGrid(QWidget):
         super().mousePressEvent(e)
 
     # ---- painting
-    def paintEvent(self, e) -> None:  # noqa: N802
+    def paintEvent(self, e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.fillRect(self.rect(), theme.qcolor(t.canvas))
-        font = theme.font_mono(DIFF_FONT_PX)
-        italic_font = theme.font_mono(DIFF_FONT_PX)
-        italic_font.setItalic(True)
-        fm = QFontMetricsF(font)
-        p.setFont(font)
+        k = _Kit(self, p, t)
+        p.setFont(k.font)
         clip = e.rect()
         c = self._cols
-        lh = self._lh
         width = self.width()
-        add_bg, del_bg = theme.qcolor(t.diff_add), theme.qcolor(t.diff_del)
-        add_hl, del_hl = theme.qcolor(t.diff_add_hl), theme.qcolor(t.diff_del_hl)
-        stripe = theme.qcolor(t.fill_1)
-        text_c = QColor(t.text)
-        baseline_off = (lh - fm.height()) / 2 + fm.ascent()
-
-        def bg_of(ln: Optional[Json]) -> Optional[QColor]:
-            if ln is None:
-                return None
-            return add_bg if ln.get("t") == "+" else del_bg if ln.get("t") == "-" else None
-
-        def draw_void(rect: QRectF) -> None:
-            """``repeating-linear-gradient(135deg, transparent 0 5px, var(--fill-1) 5px 6px)``."""
-            p.save()
-            p.setClipRect(rect)
-            p.setPen(QPen(stripe, 1))
-            x0 = int(rect.left() - rect.height())
-            k = 0
-            while x0 + k * 6 < rect.right() + rect.height():
-                x = x0 + k * 6
-                p.drawLine(QPointF(x, rect.bottom()), QPointF(x + rect.height(), rect.top()))
-                k += 1
-            p.restore()
-
-        def draw_code(ln: Optional[Json], x: int, y: int, segs: List[Range]) -> None:
-            if ln is None:
-                return
-            s = str(ln.get("s") or "")
-            marks = self._words.get(id(ln)) or []
-            toks = self._toks.get(id(ln)) or []
-            hl = add_hl if ln.get("t") == "+" else del_hl
-            for k, (a, b) in enumerate(segs):
-                yy = y + k * lh
-                for ma, mb in marks:
-                    lo, hi = max(a, ma), min(b, mb)
-                    if lo >= hi:
-                        continue
-                    x1 = x + fm.horizontalAdvance(s[a:lo])
-                    x2 = x1 + fm.horizontalAdvance(s[lo:hi])
-                    p.setPen(Qt.PenStyle.NoPen)
-                    p.setBrush(hl)
-                    p.drawRoundedRect(QRectF(x1, yy + 2, x2 - x1, lh - 4), 2, 2)
-                # the code, one coloured run at a time
-                pos = a
-                runs = [(max(a, ts), min(b, te), *token_look(tt, t)) for ts, te, tt in toks if te > a and ts < b] or [
-                    (a, b, None, False)
-                ]
-                for ts, te, col, it in runs:
-                    if ts > pos:
-                        p.setFont(font)
-                        p.setPen(text_c)
-                        p.drawText(QPointF(x + fm.horizontalAdvance(s[a:pos]), yy + baseline_off), s[pos:ts])
-                    p.setFont(italic_font if it else font)
-                    p.setPen(col or text_c)
-                    p.drawText(QPointF(x + fm.horizontalAdvance(s[a:ts]), yy + baseline_off), s[ts:te])
-                    pos = te
-                if pos < b:
-                    p.setFont(font)
-                    p.setPen(text_c)
-                    p.drawText(QPointF(x + fm.horizontalAdvance(s[a:pos]), yy + baseline_off), s[pos:b])
-            p.setFont(font)
-
-        def draw_num(x: int, w: int, pad_r: int, y: int, n: Any, tone: str) -> None:
-            if not self._numbers or n in (None, ""):
-                return
-            p.setPen(QColor(tone))
-            p.drawText(QRectF(x, y, w - pad_r, lh), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, str(n))
-
-        def draw_glyph(x: int, y: int) -> None:
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(text_c)
-            p.drawRoundedRect(QRectF(x, y + (lh - GUTTER_GLYPH) / 2, GUTTER_GLYPH, GUTTER_GLYPH), theme.R1, theme.R1)
-            pm = icons.pixmap("message-square-plus", t.canvas, 12)
-            p.drawPixmap(QPointF(x + 3, y + (lh - 12) / 2), pm)
-
         for i, r in enumerate(self._rows[: self._limit()]):
             g = self._geom[i]
             if g.y + g.h < clip.top() or g.y > clip.bottom():
                 continue
             if r.kind == "hunk":
-                h = r.hunk or {}
-                prev = self._hunks[r.hi - 1] if r.hi > 0 else None
-                gap = int(h.get("oldStart") or 0) - (
-                    (int(prev.get("oldStart") or 0) + int(prev.get("oldLines") or 0)) if prev else 1
-                )
-                p.fillRect(QRect(0, g.y, width, HUNK_H), theme.blend(t.fill_1, t.canvas))
-                p.setFont(theme.font_ui(theme.FS_MICRO))
-                p.setPen(QColor(t.text_4))
-                x = 14
-                dots_w = QFontMetricsF(theme.font_ui(theme.FS_MICRO)).horizontalAdvance("⋯") + 2
-                p.drawText(QRectF(x, g.y, dots_w, HUNK_H), Qt.AlignmentFlag.AlignVCenter, "⋯")
-                x += dots_w + 10
-                txt = f"{gap} unchanged line{'s' if gap > 1 else ''}" if gap > 0 else ""
-                if txt:
-                    p.setPen(QColor(t.text_3))
-                    tw = QFontMetricsF(theme.font_ui(theme.FS_MICRO)).horizontalAdvance(txt)
-                    p.drawText(QRectF(x, g.y, tw + 2, HUNK_H), Qt.AlignmentFlag.AlignVCenter, txt)
-                    x += tw + 10
-                if h.get("header"):
-                    mf = theme.font_mono(11)
-                    p.setFont(mf)
-                    p.setPen(QColor(t.text_4))
-                    avail = max(0, width - x - 14)
-                    p.drawText(
-                        QRectF(x, g.y, avail, HUNK_H),
-                        Qt.AlignmentFlag.AlignVCenter,
-                        QFontMetricsF(mf).elidedText(str(h["header"]), Qt.TextElideMode.ElideRight, int(avail)),
-                    )
-                p.setFont(font)
+                self._paint_hunk(k, r, g)
                 continue
             hovered = i == self._hover and self._can_comment
             if r.kind == "line":
-                ln = r.line or {}
-                bg = bg_of(ln)
-                if bg is not None:
-                    p.fillRect(QRect(0, g.y, width, g.h), bg)
-                num_tone = t.text_3 if ln.get("t") in ("+", "-") else t.text_4
-                if "dn1" in c:
-                    draw_num(c["dn0"], c["nw0"], 4, g.y, "" if ln.get("t") == "+" else ln.get("o"), num_tone)
-                    draw_num(c["dn1"], c["nw1"], 10, g.y, "" if ln.get("t") == "-" else ln.get("n"), num_tone)
-                elif "dn0" in c:
-                    draw_num(c["dn0"], c["nw0"], 8, g.y, ln.get("o") if ln.get("t") == "-" else ln.get("n"), num_tone)
-                sign = " " if ln.get("t") == " " else "−" if ln.get("t") == "-" else "+"
-                p.setPen(QColor(t.ok if sign == "+" else t.err if sign == "−" else t.text_4))
-                p.drawText(QRectF(c["ds"], g.y, SIGN_W, lh), Qt.AlignmentFlag.AlignCenter, sign)
-                draw_code(ln, c["dc"], g.y, g.segs_l)
-                if hovered:
-                    draw_glyph(c["ds"], g.y)
-                continue
-            # split
-            lbg, rbg = bg_of(r.left), bg_of(r.right)
-            if r.left is None:
-                draw_void(QRectF(c["dn_l"], g.y, c["dn_r"] - c["dn_l"], g.h))
-            elif lbg is not None:
-                p.fillRect(QRect(c["dn_l"], g.y, c["dn_r"] - c["dn_l"], g.h), lbg)
-            if r.right is None:
-                draw_void(QRectF(c["dn_r"], g.y, width - c["dn_r"], g.h))
-            elif rbg is not None:
-                p.fillRect(QRect(c["dn_r"], g.y, width - c["dn_r"], g.h), rbg)
-            if r.left is not None:
-                draw_num(
-                    c["dn_l"], c["nw_l"], 8, g.y, r.left.get("o"), t.text_3 if r.left.get("t") == "-" else t.text_4
-                )
-                draw_code(r.left, c["dc_l"], g.y, g.segs_l)
-            if r.right is not None:
-                draw_num(
-                    c["dn_r"], c["nw_r"], 8, g.y, r.right.get("n"), t.text_3 if r.right.get("t") == "+" else t.text_4
-                )
-                draw_code(r.right, c["dc_r"], g.y, g.segs_r)
-            if hovered:
-                target = r.left if (r.left is not None and r.left.get("t") == "-" and r.right is None) else r.right
-                draw_glyph(c["dn_l"] if target is r.left and target is not r.right else c["dn_r"], g.y)
+                self._paint_line(k, r, g, c, hovered)
+            else:
+                self._paint_split(k, r, g, c, hovered)
         # comment rows: a quiet band of chrome with hairlines above and below
         chrome = theme.qcolor(t.chrome)
         hair = theme.blend(t.hair, t.chrome)
         for rect, _key in self._extra_rects:
             if rect.bottom() < clip.top() or rect.top() > clip.bottom():
                 continue
-            p.fillRect(rect, chrome)
-            p.setPen(QPen(hair, 1))
-            p.drawLine(rect.left(), rect.top(), rect.right(), rect.top())
-            p.drawLine(rect.left(), rect.bottom(), rect.right(), rect.bottom())
+            k.p.fillRect(rect, chrome)
+            k.p.setPen(QPen(hair, 1))
+            k.p.drawLine(rect.left(), rect.top(), rect.right(), rect.top())
+            k.p.drawLine(rect.left(), rect.bottom(), rect.right(), rect.bottom())
         if self._more is not None:
             # .code-more.fade: the last rows dissolve into the inset colour under the button
             grad = QLinearGradient(0, self._total_h - 52, 0, self._total_h)
@@ -1032,7 +972,82 @@ class DiffGrid(QWidget):
             grad.setColorAt(0, clear)
             grad.setColorAt(0.72, inset)
             grad.setColorAt(1, inset)
-            p.fillRect(QRect(0, self._total_h - 52, width, 52), grad)
+            k.p.fillRect(QRect(0, self._total_h - 52, width, 52), grad)
+
+    def _paint_hunk(self, k: _Kit, r: Row, g: _Geom) -> None:
+        """A hunk's head: ⋯, how many lines are unchanged, the enclosing line."""
+        t, width = k.t, self.width()
+        h = r.hunk or {}
+        prev = self._hunks[r.hi - 1] if r.hi > 0 else None
+        gap = int(h.get("oldStart") or 0) - (
+            (int(prev.get("oldStart") or 0) + int(prev.get("oldLines") or 0)) if prev else 1
+        )
+        k.p.fillRect(QRect(0, g.y, width, HUNK_H), theme.blend(t.fill_1, t.canvas))
+        k.p.setFont(theme.font_ui(theme.FS_MICRO))
+        k.p.setPen(QColor(t.text_4))
+        x = 14
+        dots_w = QFontMetricsF(theme.font_ui(theme.FS_MICRO)).horizontalAdvance("⋯") + 2
+        k.p.drawText(QRectF(x, g.y, dots_w, HUNK_H), Qt.AlignmentFlag.AlignVCenter, "⋯")
+        x += dots_w + 10
+        txt = f"{gap} unchanged line{'s' if gap > 1 else ''}" if gap > 0 else ""
+        if txt:
+            k.p.setPen(QColor(t.text_3))
+            tw = QFontMetricsF(theme.font_ui(theme.FS_MICRO)).horizontalAdvance(txt)
+            k.p.drawText(QRectF(x, g.y, tw + 2, HUNK_H), Qt.AlignmentFlag.AlignVCenter, txt)
+            x += tw + 10
+        if h.get("header"):
+            mf = theme.font_mono(11)
+            k.p.setFont(mf)
+            k.p.setPen(QColor(t.text_4))
+            avail = max(0, width - x - 14)
+            k.p.drawText(
+                QRectF(x, g.y, avail, HUNK_H),
+                Qt.AlignmentFlag.AlignVCenter,
+                QFontMetricsF(mf).elidedText(str(h["header"]), Qt.TextElideMode.ElideRight, int(avail)),
+            )
+        k.p.setFont(k.font)
+
+    def _paint_line(self, k: _Kit, r: Row, g: _Geom, c: Dict[str, int], hovered: bool) -> None:
+        """A unified row: the numbers, the sign, the code."""
+        t, width = k.t, self.width()
+        ln = r.line or {}
+        bg = k.bg(ln)
+        if bg is not None:
+            k.p.fillRect(QRect(0, g.y, width, g.h), bg)
+        num_tone = t.text_3 if ln.get("t") in ("+", "-") else t.text_4
+        if "dn1" in c:
+            k.num(c["dn0"], c["nw0"], 4, g.y, "" if ln.get("t") == "+" else ln.get("o"), num_tone)
+            k.num(c["dn1"], c["nw1"], 10, g.y, "" if ln.get("t") == "-" else ln.get("n"), num_tone)
+        elif "dn0" in c:
+            k.num(c["dn0"], c["nw0"], 8, g.y, ln.get("o") if ln.get("t") == "-" else ln.get("n"), num_tone)
+        sign = " " if ln.get("t") == " " else "−" if ln.get("t") == "-" else "+"
+        k.p.setPen(QColor(t.ok if sign == "+" else t.err if sign == "−" else t.text_4))
+        k.p.drawText(QRectF(c["ds"], g.y, SIGN_W, k.lh), Qt.AlignmentFlag.AlignCenter, sign)
+        k.code(ln, c["dc"], g.y, g.segs_l)
+        if hovered:
+            k.glyph(c["ds"], g.y)
+
+    def _paint_split(self, k: _Kit, r: Row, g: _Geom, c: Dict[str, int], hovered: bool) -> None:
+        """A split row: the old line on the left, the new on the right, a void where a side has none."""
+        t, width = k.t, self.width()
+        lbg, rbg = k.bg(r.left), k.bg(r.right)
+        if r.left is None:
+            k.void(QRectF(c["dn_l"], g.y, c["dn_r"] - c["dn_l"], g.h))
+        elif lbg is not None:
+            k.p.fillRect(QRect(c["dn_l"], g.y, c["dn_r"] - c["dn_l"], g.h), lbg)
+        if r.right is None:
+            k.void(QRectF(c["dn_r"], g.y, width - c["dn_r"], g.h))
+        elif rbg is not None:
+            k.p.fillRect(QRect(c["dn_r"], g.y, width - c["dn_r"], g.h), rbg)
+        if r.left is not None:
+            k.num(c["dn_l"], c["nw_l"], 8, g.y, r.left.get("o"), t.text_3 if r.left.get("t") == "-" else t.text_4)
+            k.code(r.left, c["dc_l"], g.y, g.segs_l)
+        if r.right is not None:
+            k.num(c["dn_r"], c["nw_r"], 8, g.y, r.right.get("n"), t.text_3 if r.right.get("t") == "+" else t.text_4)
+            k.code(r.right, c["dc_r"], g.y, g.segs_r)
+        if hovered:
+            target = r.left if (r.left is not None and r.left.get("t") == "-" and r.right is None) else r.right
+            k.glyph(c["dn_l"] if target is r.left and target is not r.right else c["dn_r"], g.y)
 
 
 # ---------------------------------------------------------------- files
@@ -1046,20 +1061,11 @@ class _Head(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.hover_widgets: List[QWidget] = []
+        reveal_on_hover(self, self.hover_widgets)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def enterEvent(self, e) -> None:  # noqa: N802
-        for w in self.hover_widgets:
-            w.setVisible(True)
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:  # noqa: N802
-        for w in self.hover_widgets:
-            w.setVisible(False)
-        super().leaveEvent(e)
-
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         p = QPainter(self)
         p.fillRect(self.rect(), theme.qcolor(theme.tokens().chrome))
 
@@ -1120,7 +1126,7 @@ class DiffFileRow(QWidget):
             for icon_name, tip, run in view.actions:
                 b = icon_btn(icon_name, tip(f), 13)
                 b.clicked.connect(lambda _c=False, fn=run, ff=f: fn(ff))
-                b.hide()
+                b.set_shown(False)
                 self.head.hover_widgets.append(b)
                 hl.addWidget(b)
         lay.addWidget(self.head)

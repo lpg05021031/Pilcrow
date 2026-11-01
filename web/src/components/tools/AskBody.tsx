@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useWindowKey } from '../ui/keys';
 import { Check } from 'lucide-react';
 import type { ToolItem } from '../../lib/transcript';
 import type { PermissionRequest } from '../../lib/types';
@@ -38,19 +39,14 @@ export function AskBody({ item, perm, ctx }: { item: ToolItem; perm?: Permission
   const first = Boolean(perm) && [...ctx.pending.values()][0]?.requestId === perm?.requestId;
   // number keys pick an option when one question is asked (the keys are shown on the rows)
   const keyed = Boolean(perm) && first && questions.length === 1;
-  useEffect(() => {
-    if (!keyed || busy) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (typingElsewhere(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
-      const n = Number(e.key);
-      const q = questions[0];
-      if (!(n >= 1 && n <= Math.min(9, q.options.length))) return;
-      toggle(0, q.options[n - 1].label, Boolean(q.multiSelect));
-      e.preventDefault();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  });
+  useWindowKey((e) => {
+    if (typingElsewhere(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
+    const n = Number(e.key);
+    const q = questions[0];
+    if (!(n >= 1 && n <= Math.min(9, q.options.length))) return;
+    toggle(0, q.options[n - 1].label, Boolean(q.multiSelect));
+    e.preventDefault();
+  }, keyed && !busy);
 
   if (!perm) {
     const resultText = item.result?.text || '';
@@ -131,7 +127,7 @@ export function AskBody({ item, perm, ctx }: { item: ToolItem; perm?: Permission
                 })}
                 <label className={`ask-opt ask-other${(other[qi] || '').trim() ? ' on' : ''}`}>
                   <span className={`ask-mark${q.multiSelect ? ' box' : ''}`}>{(other[qi] || '').trim() && <Check size={11} strokeWidth={3} />}</span>
-                  <input
+                  <input aria-label="Something else"
                     placeholder="Something else…"
                     value={other[qi] || ''}
                     onChange={(e) => {
@@ -144,7 +140,7 @@ export function AskBody({ item, perm, ctx }: { item: ToolItem; perm?: Permission
                 </label>
               </div>
               {noteOpen[qi] ? (
-                <input className="input ask-notes" autoFocus placeholder="A note for Claude about this answer" value={notes[qi] || ''} onChange={(e) => setNotes((s) => ({ ...s, [qi]: e.target.value }))} />
+                <input aria-label="Note for Claude about this answer" className="input ask-notes" autoFocus placeholder="A note for Claude about this answer" value={notes[qi] || ''} onChange={(e) => setNotes((s) => ({ ...s, [qi]: e.target.value }))} />
               ) : (
                 <button className="link ask-note-link" onClick={() => setNoteOpen((s) => ({ ...s, [qi]: true }))}>
                   Add a note

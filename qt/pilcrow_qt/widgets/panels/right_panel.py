@@ -16,11 +16,12 @@ tints (``theme.tint``), so a theme change costs a repaint and no stylesheet is r
 from __future__ import annotations
 
 import html
+import logging
 import re
 import time
 from typing import Callable, Dict, List, Optional
 
-from PySide6.QtCore import QEvent, QObject, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
+from PySide6.QtCore import QEvent, QObject, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPaintEvent, QPen
 from PySide6.QtWidgets import (
     QAbstractButton,
@@ -33,11 +34,14 @@ from PySide6.QtWidgets import (
 )
 
 from ... import icons, theme
+from ...canvas.clock import Tween
 from ...canvas.pixels import hline
 from ...store import store
-from ..ui.bits import Hairline, IconButton  # noqa: F401 - Hairline is re-exported to the panels
+from ..ui.bits import Hairline, IconButton  # Hairline is re-exported to the panels
 from ..ui.button import Btn  # noqa: F401 - re-exported to the panels
 from ..ui.signals import bind
+
+log = logging.getLogger(__name__)
 
 TABS = [
     {"id": "changes", "label": "Changes", "icon": "git-compare", "key": "1"},
@@ -69,7 +73,7 @@ class Text(QLabel):
         self._lh = line_height
         self.setTextFormat(Qt.TextFormat.RichText)
 
-    def setText(self, text: str) -> None:  # noqa: N802
+    def setText(self, text: str) -> None:
         self._plain = text
         if self._rich:
             super().setText(f'<p style="line-height:{int(self._lh * 100)}%; margin:0">{html.escape(text)}</p>')
@@ -120,11 +124,6 @@ def lbl(
         else Qt.TextInteractionFlag.NoTextInteraction
     )
     return lb
-
-
-def set_color(lb: QLabel, color: str, base: str = "") -> None:
-    """Recolour a ``lbl`` with a token name (``base`` is unused; kept for callers)."""
-    theme.tint(lb, fg=color)
 
 
 def set_rich(lb: QLabel, text: str, line_height: float = 1.45) -> None:
@@ -190,24 +189,24 @@ class Seg(QWidget):
         i = int((x - 2) // 27)
         return i if 0 <= i < len(self.options) else -1
 
-    def mouseMoveEvent(self, e) -> None:  # noqa: N802
+    def mouseMoveEvent(self, e) -> None:
         i = self._index_at(e.position().x())
         if i != self._hover:
             self._hover = i
             self.setToolTip(self.options[i].get("title", "") if i >= 0 else "")
             self.update()
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self._hover = -1
         self.update()
         super().leaveEvent(e)
 
-    def mousePressEvent(self, e) -> None:  # noqa: N802
+    def mousePressEvent(self, e) -> None:
         i = self._index_at(e.position().x())
         if e.button() == Qt.MouseButton.LeftButton and i >= 0 and self.options[i]["value"] not in self.disabled:
             self.changed.emit(self.options[i]["value"])
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -263,7 +262,7 @@ class Refresher(QObject):
         if visible_only:
             owner.installEventFilter(self)
 
-    def eventFilter(self, obj, e) -> bool:  # noqa: N802
+    def eventFilter(self, obj, e) -> bool:
         if obj is self._owner and e.type() == QEvent.Type.Show and self.stale:
             self.now()
         return False
@@ -409,7 +408,7 @@ class Card(QWidget):
         self.bg, self.ring, self.radius = bg, ring, radius
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -447,7 +446,6 @@ class TabButton(QAbstractButton):
         self._on = False
         self._narrow = False
         self._count = 0
-        self._hover = False
         self.setCheckable(False)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip(f"{spec['label']} (Alt+{spec['key']})")
@@ -485,7 +483,7 @@ class TabButton(QAbstractButton):
         """(left, right) padding: 0 8px, or 0 10px 0 8px for the chosen tab of a narrow panel."""
         return (8, 10) if (self._on and self._narrow) else (8, 8)
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         if not self.shows_label:
             return QSize(34, 30)
         fm = QFontMetrics(self._font())
@@ -495,25 +493,15 @@ class TabButton(QAbstractButton):
             w += 6 + max(16, QFontMetrics(theme.font_ui(10.5, 600)).horizontalAdvance(str(self._count)) + 8)
         return QSize(w, 30)
 
-    def enterEvent(self, e) -> None:  # noqa: N802
-        self._hover = True
-        self.update()
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:  # noqa: N802
-        self._hover = False
-        self.update()
-        super().leaveEvent(e)
-
-    def paintEvent(self, _e: QPaintEvent) -> None:  # noqa: N802
+    def paintEvent(self, _e: QPaintEvent) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        if self._hover and not self._on:
+        if self.underMouse() and not self._on:
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(theme.blend(t.fill_1, t.canvas))
             p.drawRoundedRect(QRectF(self.rect()), theme.R2, theme.R2)
-        color = QColor(t.text if (self._on or self._hover) else t.text_3)
+        color = QColor(t.text if (self._on or self.underMouse()) else t.text_3)
         pm = icons.pixmap(self.spec["icon"], color, 15)
         if not self._on:
             p.setOpacity(0.85)  # .panel-tab-ico opacity
@@ -555,7 +543,9 @@ class TabStrip(QWidget):
         self.setFixedHeight(theme.HEADER_H)
         self._active = ""
         self._ink: Optional[QRect] = None
-        self._anim: Optional[QVariantAnimation] = None
+        self._ink_from = QRect()
+        self._ink_to = QRect()
+        self.ink_t = Tween(self._set_ink, ms=theme.T_PANEL, curve=theme.spring_snappy)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(10, 0, 8, 0)
         lay.setSpacing(2)
@@ -590,7 +580,7 @@ class TabStrip(QWidget):
         if b is not None:
             b.set_count(n)
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         narrow = self.narrow
         for b in self.buttons.values():
             b.set_narrow(narrow)
@@ -605,26 +595,24 @@ class TabStrip(QWidget):
             target = QRect(b.x(), self.height() - 2, b.width(), 2)
         except RuntimeError:  # the strip was torn down before this deferred call ran
             return
-        if self._ink is None or store.reduced_motion or not self.isVisible():
+        if self._ink is None or not self.isVisible():
+            self.ink_t.stop()
             self._ink = target
             self.update()
             return
-        if self._anim is not None:
-            self._anim.stop()
-        anim = QVariantAnimation(self)
-        anim.setStartValue(self._ink)
-        anim.setEndValue(target)
-        anim.setDuration(theme.T_PANEL)
-        anim.setEasingCurve(theme.spring_snappy())
-        anim.valueChanged.connect(self._set_ink)
-        anim.start()
-        self._anim = anim
+        self._ink_from, self._ink_to = QRect(self._ink), target
+        self.ink_t.jump(0.0)
+        self.ink_t.go(1.0)
 
-    def _set_ink(self, r: QRect) -> None:
-        self._ink = r
+    def _set_ink(self, k: float) -> None:
+        """The underline ``k`` of the way from the tab it left to the tab it is going to."""
+        a, b = self._ink_from, self._ink_to
+        self._ink = QRect(
+            round(a.x() + (b.x() - a.x()) * k), b.y(), round(a.width() + (b.width() - a.width()) * k), b.height()
+        )
         self.update()
 
-    def paintEvent(self, _e: QPaintEvent) -> None:  # noqa: N802
+    def paintEvent(self, _e: QPaintEvent) -> None:
         t = theme.tokens()
         p = QPainter(self)
         hline(p, 0, self.height() - 1, self.width(), theme.blend(t.hair, t.canvas))
@@ -663,7 +651,7 @@ class RightPanel(QWidget):
     def _paint(self) -> None:
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         # painted, not styled: a stylesheet on the panel would re-polish every widget under it on each
         # theme switch
         QPainter(self).fillRect(self.rect(), theme.qcolor(theme.tokens().canvas))
@@ -745,8 +733,8 @@ class RightPanel(QWidget):
                 w = PreviewPanel(sid, cwd)
             else:
                 return placeholder(f"No such tab: {tab}")
-        except Exception as e:  # noqa: BLE001 — a tab that cannot load must not take the panel down
-            print(f"[panel] {tab} is not available: {e!r}")
+        except Exception:  # a tab that cannot load must not take the panel down
+            log.warning("the %s tab is not available", tab, exc_info=True)
             return placeholder(f"The {tab} tab is not available in this build.")
         set_session = getattr(w, "set_session", None)
         if set_session:

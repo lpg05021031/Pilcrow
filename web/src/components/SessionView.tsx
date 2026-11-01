@@ -1,18 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
-import { GitBranch, PanelRight, PanelLeftOpen, Ellipsis, Pencil, GitFork, FolderOpen, Archive, Trash, Copy, SquareTerminal, RotateCcw, Power, FolderGit2, Folder, Settings2, CircleDollarSign, ChevronDown, BookMarked, ArrowUpRight } from 'lucide-react';
-import { useStore, setUi, VIEW_MODES, renameSession, forkSession, archiveSession, deleteSession, confirmAction, call, insertIntoComposer, toast, openSession, openJob, setDialog, setCwd, getModel, repoFor } from '../lib/store';
+import { GitBranch, PanelRight, Ellipsis, Pencil, GitFork, FolderOpen, Archive, Trash, Copy, SquareTerminal, RotateCcw, Power, FolderGit2, Folder, Settings2, CircleDollarSign, ChevronDown, BookMarked, ArrowUpRight } from 'lucide-react';
+import { useStore, setUi, VIEW_MODES, renameSession, forkSession, archiveSession, deleteSession, confirmAction, call, insertIntoComposer, toast, openSession, openJob, setDialog, setCwd, getModel, repoFor, closeFind, toasted } from '../lib/store';
 import { basename, cost, errText, plural, tildify } from '../lib/format';
 import { McpNotice } from './McpNotice';
 import { HelpersBar } from './HelpersBar';
-import type { GitInfo, RepoEntry, SessionSummary } from '../lib/types';
+import type { GitInfo, HelperState, RepoEntry, SessionSummary } from '../lib/types';
 import { Transcript } from './Transcript';
 import { FindBar } from './FindBar';
 import { Composer } from './Composer';
-import { MenuButton, Popover } from './ui/Popover';
+import { MenuButton, Popover, useAnchor } from './ui/Popover';
 import { FolderPicker } from './FolderPicker';
-import { copyText, AppIcon, Leave } from './ui/bits';
+import { copy } from './ui/clipboard';
+import { AppIcon } from './ui/brand';
+import { Leave, ShowSidebarButton } from './ui/bits';
+import { ErrorBoundary } from './ui/ErrorBoundary';
 
-export function useGitInfo(cwd: string | undefined, tick: unknown) {
+function useGitInfo(cwd: string | undefined, tick: unknown) {
   const [info, setInfo] = useState<GitInfo | null>(null);
   const last = useRef(0);
   useEffect(() => {
@@ -20,9 +23,11 @@ export function useGitInfo(cwd: string | undefined, tick: unknown) {
     let alive = true;
     const run = () => {
       last.current = Date.now();
-      call<GitInfo>('git.info', { cwd }, { quiet: true })
-        .then((i) => alive && setInfo(i))
-        .catch(() => {});
+      // Not a repository, or git missing: the header simply shows no branch.
+      call<GitInfo>('git.info', { cwd }, { quiet: true }).then(
+        (i) => alive && setInfo(i),
+        () => {},
+      );
     };
     const wait = Math.max(0, 1500 - (Date.now() - last.current));
     const t = setTimeout(run, wait);
@@ -49,42 +54,42 @@ const STATUS_TEXT: Record<string, string> = {
   error: 'Stopped with an error',
 };
 
+const NO_HELPERS: HelperState[] = [];
+
 export function SessionView({ session }: { session: SessionSummary }) {
   const id = session.id;
-  const rt = useStore((s) => s.rt[id]);
-  const ui = useStore((s) => s.ui);
+  // Narrow reads: the runtime record changes with every streamed frame; the header shows a few of its fields.
+  const rtCwd = useStore((s) => s.rt[id]?.cwd);
+  const rtStatus = useStore((s) => s.rt[id]?.status);
+  const revStep = useStore((s) => Math.floor((s.rt[id]?.rev || 0) / 40));
+  const loaded = useStore((s) => s.rt[id]?.loaded);
+  const live = useStore((s) => s.rt[id]?.live);
+  const spent = useStore((s) => s.rt[id]?.usage?.costUsd) || 0;
+  const helper = useStore((s) => s.rt[id]?.helper);
+  const workflow = useStore((s) => runningWorkflow(s.rt[id]?.tasks));
+  const error = useStore((s) => s.rt[id]?.error);
+  const view = useStore((s) => s.ui.view);
+  const panel = useStore((s) => s.ui.panel);
+  const panelTab = useStore((s) => s.ui.panelTab);
   const info = useStore((s) => s.info);
-  const cwd = rt?.cwd || session.cwd;
-  const status = rt?.status || session.status;
+  const cwd = rtCwd || session.cwd;
+  const status = rtStatus || session.status;
   // a lead that is quiet while its helpers work is live work too (HELPERS.md §6.1)
-  const helpers = rt?.helpers || [];
+  const helpers = useStore((s) => s.rt[id]?.helpers) || NO_HELPERS;
   const activeHelpers = helpers.filter((h) => ['queued', 'preparing', 'running', 'needs_action'].includes(h.state));
   const shownStatus = (!status || status === 'idle' || status === 'stopped') && activeHelpers.length ? 'leading' : status;
   const fsRev = useStore((s) => s.fsRev);
-  const git = useGitInfo(cwd, `${status === 'running' ? Math.floor((rt?.rev || 0) / 40) : status}:${fsRev}`);
+  const git = useGitInfo(cwd, `${status === 'running' ? revStep : status}:${fsRev}`);
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(session.title);
   const [scrolled, setScrolled] = useState(false);
-  const [finding, setFinding] = useState(false);
-  useEffect(() => {
-    useStore.setState({ findOpen: finding });
-    return () => useStore.setState({ findOpen: false });
-  }, [finding]);
-  const [pickingFolder, setPickingFolder] = useState(false);
-  const folderBtn = useRef<HTMLButtonElement>(null);
+  const finding = useStore((s) => s.findOpen);
+  // The find bar belongs to the conversation on screen: leaving it closes the bar.
+  useEffect(() => closeFind, []);
+  const { anchor: folderBtn, ref: setFolderBtn, open: pickingFolder, setOpen: setPickingFolder } = useAnchor();
   const root = useRef<HTMLDivElement>(null);
   // Until the first message goes out, the folder is still a choice, not a fact.
-  const fresh = Boolean(rt?.loaded) && !rt?.live && getModel(id).items.length === 0 && !session.worktree && (rt?.status === 'idle' || rt?.status === 'stopped' || !rt?.status);
-  useEffect(() => {
-    const open = () => setFinding(true);
-    const pick = () => setPickingFolder(true);
-    window.addEventListener('pilcrow:find', open);
-    window.addEventListener('pilcrow:pick-folder', pick);
-    return () => {
-      window.removeEventListener('pilcrow:find', open);
-      window.removeEventListener('pilcrow:pick-folder', pick);
-    };
-  }, []);
+  const fresh = Boolean(loaded) && !live && getModel(id).items.length === 0 && !session.worktree && (rtStatus === 'idle' || rtStatus === 'stopped' || !rtStatus);
 
   useEffect(() => setTitle(session.title), [session.title]);
 
@@ -114,13 +119,13 @@ export function SessionView({ session }: { session: SessionSummary }) {
       },
     },
     { separator: true },
-    ...VIEW_MODES.map((v) => ({ label: `${v.label} view`, hint: v.hint, checked: v.id === ui.view, onSelect: () => setUi({ view: v.id }) })),
+    ...VIEW_MODES.map((v) => ({ label: `${v.label} view`, hint: v.hint, checked: v.id === view, onSelect: () => setUi({ view: v.id }) })),
     { separator: true },
-    { label: 'Copy session ID', icon: Copy, onSelect: () => copyText(id).then(() => toast('Session ID copied', 'success'), () => toast('Could not copy to the clipboard', 'error')) },
-    ...((rt?.usage?.costUsd || 0) > 0 ? [{ label: `Cost so far ${cost(rt!.usage!.costUsd)}`, icon: CircleDollarSign, onSelect: () => setUi({ panel: true, panelTab: 'info' }) }] : []),
+    { label: 'Copy session ID', icon: Copy, onSelect: () => copy(id, 'Session ID') },
+    ...(spent > 0 ? [{ label: `Cost so far ${cost(spent)}`, icon: CircleDollarSign, onSelect: () => setUi({ panel: true, panelTab: 'info' }) }] : []),
     { separator: true },
-    ...(rt?.live ? [{ label: 'Stop Claude Code process', hint: 'It restarts on your next message', icon: Power, onSelect: () => call('session.close', { id }) }] : []),
-    ...(rt?.helper ? [{ label: 'Detach from lead', hint: 'An ordinary session from now on; the lead is told', icon: GitBranch, onSelect: () => call('helpers.detach', { id }) }] : []),
+    ...(live ? [{ label: 'Stop Claude Code process', hint: 'It restarts on your next message', icon: Power, onSelect: () => call('session.close', { id }) }] : []),
+    ...(helper ? [{ label: 'Detach from lead', hint: 'An ordinary session from now on; the lead is told', icon: GitBranch, onSelect: () => call('helpers.detach', { id }) }] : []),
     { label: session.archived ? 'Unarchive' : 'Archive', icon: Archive, onSelect: () => archiveSession(id, !session.archived) },
     {
       label: 'Delete…',
@@ -142,14 +147,10 @@ export function SessionView({ session }: { session: SessionSummary }) {
   return (
     <div className="session" ref={root}>
       <header className={`session-head${scrolled ? ' scrolled' : ''}`}>
-        {!ui.sidebar && (
-          <button className="icon-btn head-sidebar" title="Show sidebar (Ctrl+B)" aria-label="Show sidebar" onClick={() => setUi({ sidebar: true })}>
-            <PanelLeftOpen size={16} />
-          </button>
-        )}
+        <ShowSidebarButton />
         <div className="session-title-wrap">
           {editing ? (
-            <input
+            <input aria-label="Session title"
               className="input title-input"
               autoFocus
               value={title}
@@ -173,7 +174,7 @@ export function SessionView({ session }: { session: SessionSummary }) {
           )}
           <span className="session-crumbs" title={tildify(cwd, info?.home)}>
             {fresh ? (
-              <button ref={folderBtn} className={`crumb crumb-btn${pickingFolder ? ' on' : ''}`} onClick={() => setPickingFolder(!pickingFolder)} title="Change the folder for this session" aria-expanded={pickingFolder}>
+              <button ref={setFolderBtn} className={`crumb crumb-btn${pickingFolder ? ' on' : ''}`} onClick={() => setPickingFolder(!pickingFolder)} title="Change the folder for this session" aria-expanded={pickingFolder}>
                 <Folder size={12} />
                 <span className="ellipsis">{basename(cwd)}</span>
                 <ChevronDown size={11} className="crumb-chev" />
@@ -184,12 +185,12 @@ export function SessionView({ session }: { session: SessionSummary }) {
                 <span className="ellipsis">{basename(session.worktree?.repoRoot || session.project || cwd)}</span>
               </span>
             )}
-            <Popover anchor={folderBtn.current} open={pickingFolder} onClose={() => setPickingFolder(false)} placement="bottom-start" width={380}>
+            <Popover anchor={folderBtn} open={pickingFolder} onClose={() => setPickingFolder(false)} placement="bottom-start" width={380} role="dialog" label="Choose a folder">
               <FolderPicker
                 value={cwd}
                 onPick={(dir) => {
                   setPickingFolder(false);
-                  if (dir !== cwd) setCwd(id, dir).catch(() => {});
+                  if (dir !== cwd) setCwd(id, dir).catch(toasted);
                 }}
               />
             </Popover>
@@ -199,14 +200,14 @@ export function SessionView({ session }: { session: SessionSummary }) {
                 <span className="ellipsis">{git.branch}</span>
               </span>
             )}
-            {rt?.helper && (
-              <button className="crumb crumb-btn wt" title="Open the lead session" onClick={() => openSession(rt.helper!.leadId)}>
+            {helper && (
+              <button className="crumb crumb-btn wt" title="Open the lead session" onClick={() => openSession(helper.leadId)}>
                 <ArrowUpRight size={12} />
-                <span className="ellipsis">helper of {rt.helper.leadTitle || 'a lead session'}</span>
+                <span className="ellipsis">helper of {helper.leadTitle || 'a lead session'}</span>
               </button>
             )}
             {session.dispatch?.jobId && (
-              <button className="crumb crumb-btn wt" title="Open the job" onClick={() => openJob(session.dispatch!.jobId)}>
+              <button className="crumb crumb-btn wt" title="Open the job" onClick={() => session.dispatch && openJob(session.dispatch.jobId)}>
                 <ArrowUpRight size={12} />
                 <span className="ellipsis">run of {session.dispatch.name || 'a job'}</span>
               </button>
@@ -221,9 +222,9 @@ export function SessionView({ session }: { session: SessionSummary }) {
                   · {activeHelpers.length} of {plural(helpers.length, 'helper')}
                 </span>
               )}
-              {status === 'running' && runningWorkflow(rt?.tasks) && (
+              {status === 'running' && workflow && (
                 <button className="status-sub status-link" title="Show the workflow in the Tasks panel" onClick={() => setUi({ panel: true, panelTab: 'tasks' })}>
-                  · {runningWorkflow(rt?.tasks)}
+                  · {workflow}
                 </button>
               )}
             </span>
@@ -231,12 +232,12 @@ export function SessionView({ session }: { session: SessionSummary }) {
         </div>
         <div className="session-actions">
           {git?.isRepo && changes > 0 && (
-            <button className={`diffstat${ui.panel && ui.panelTab === 'changes' ? ' on' : ''}`} onClick={() => setUi({ panel: !(ui.panel && ui.panelTab === 'changes'), panelTab: 'changes' })} title={`${changes} changed file${changes > 1 ? 's' : ''} — review (Alt+1)`}>
+            <button className={`diffstat${panel && panelTab === 'changes' ? ' on' : ''}`} onClick={() => setUi({ panel: !(panel && panelTab === 'changes'), panelTab: 'changes' })} title={`${plural(changes, 'changed file')} — review (Alt+1)`}>
               <span className={`num-add${git.insertions ? '' : ' zero'}`}>+{git.insertions ?? 0}</span>
               <span className={`num-del${git.deletions ? '' : ' zero'}`}>−{git.deletions ?? 0}</span>
             </button>
           )}
-          <button className={`icon-btn${ui.panel ? ' active' : ''}`} title="Side panel (Ctrl+\)" onClick={() => setUi({ panel: !ui.panel })}>
+          <button className={`icon-btn${panel ? ' active' : ''}`} title="Side panel (Ctrl+\)" aria-label="Side panel" onClick={() => setUi({ panel: !panel })}>
             <PanelRight size={16} />
           </button>
           <MenuButton items={menu} title="Session actions" width={250}>
@@ -246,10 +247,10 @@ export function SessionView({ session }: { session: SessionSummary }) {
       </header>
       <McpNotice sessionId={id} />
       <HelpersBar sessionId={id} />
-      {status === 'error' && rt?.error && (
+      {status === 'error' && error && (
         <Leave className="session-error">
-          <span className="grow">{rt.error.split('\n')[0]}</span>
-          {/Settings|not found|No Claude Code/i.test(rt.error) ? (
+          <span className="grow">{error.split('\n')[0]}</span>
+          {/Settings|not found|No Claude Code/i.test(error) ? (
             <button className="btn sm" onClick={() => setDialog('settings', 'claude')}>
               <Settings2 size={13} /> Settings
             </button>
@@ -260,23 +261,27 @@ export function SessionView({ session }: { session: SessionSummary }) {
           )}
         </Leave>
       )}
-      {finding && <FindBar root={() => document.querySelector('.session .transcript-inner')} onClose={() => setFinding(false)} />}
-      <Transcript sessionId={id} cwd={cwd} onScrolled={setScrolled} empty={<SessionEmpty session={session} git={git} cwd={cwd} fresh={fresh} />} />
-      <Composer sessionId={id} cwd={cwd} />
+      {finding && <FindBar sessionId={id} onClose={closeFind} />}
+      <Transcript sessionId={id} cwd={cwd} onScrolled={setScrolled} empty={<SessionEmpty session={session} git={git} cwd={cwd} fresh={fresh} onPickFolder={() => setPickingFolder(true)} />} />
+      <ErrorBoundary label="The message box">
+        <Composer sessionId={id} cwd={cwd} />
+      </ErrorBoundary>
     </div>
   );
 }
 
 const EXAMPLES = ['Give me a tour of this codebase', 'Find the riskiest code path and explain why', 'Write tests for the module I changed last', 'Review my uncommitted changes'];
 
-function SessionEmpty({ session, git, cwd, fresh }: { session: SessionSummary; git: GitInfo | null; cwd: string; fresh?: boolean }) {
+function SessionEmpty({ session, git, cwd, fresh, onPickFolder }: { session: SessionSummary; git: GitInfo | null; cwd: string; fresh?: boolean; onPickFolder: () => void }) {
   const info = useStore((s) => s.info);
   const [memory, setMemory] = useState<number>(0);
   useEffect(() => {
     let alive = true;
-    call<{ notes: unknown[] }>('memory.list', { cwd: session.project || cwd }, { quiet: true })
-      .then((r) => alive && setMemory(r.notes.length))
-      .catch(() => {});
+    // The count is a courtesy line under the folder name; without it the line is left out.
+    call<{ notes: unknown[] }>('memory.list', { cwd: session.project || cwd }, { quiet: true }).then(
+      (r) => alive && setMemory(r.notes.length),
+      () => {},
+    );
     return () => {
       alive = false;
     };
@@ -288,7 +293,7 @@ function SessionEmpty({ session, git, cwd, fresh }: { session: SessionSummary; g
       <div className="session-empty-path">
         <span className="faint mono">{tildify(cwd, info?.home)}</span>
         {fresh && (
-          <button className="link session-empty-change" onClick={() => window.dispatchEvent(new Event('pilcrow:pick-folder'))}>
+          <button className="link session-empty-change" onClick={onPickFolder}>
             <Folder size={12} /> Change folder
           </button>
         )}
@@ -302,7 +307,7 @@ function SessionEmpty({ session, git, cwd, fresh }: { session: SessionSummary; g
       )}
       {memory > 0 && (
         <button className="session-empty-mem" onClick={() => setDialog('settings', 'memory')} title="Notes from earlier sessions in this folder ride along in this session">
-          <BookMarked size={12} /> Claude starts with {memory} note{memory > 1 ? 's' : ''} from earlier sessions here
+          <BookMarked size={12} /> Claude starts with {plural(memory, 'note')} from earlier sessions here
         </button>
       )}
       <div className="examples">
@@ -316,8 +321,3 @@ function SessionEmpty({ session, git, cwd, fresh }: { session: SessionSummary; g
   );
 }
 
-export function NoSession() {
-  return <div className="session" />;
-}
-
-export { openSession };

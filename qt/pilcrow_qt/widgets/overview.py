@@ -9,103 +9,36 @@ state plus ``fleet.state`` polled every 20 s; nothing here needs a transcript lo
 from __future__ import annotations
 
 import math
-import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QEvent, QObject, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QColor, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
-    QPlainTextEdit,
     QScrollArea,
     QSizePolicy,
-    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from .. import icons, theme
-from ..lib.fmt import basename, cost, duration, plural, rel_path, time_ago
+from ..lib.fmt import basename, cost, duration, now_ms, plural, rel_path, time_ago
 from ..lib.tools_meta import str_
-from ..lib.workflow import workflow_counts
+from ..lib.workflow import running_workflow, workflow_counts
 from ..store import Runtime, store
-from .dialogs.parts import Badge, Card, ElideLabel, Kbd, LayoutButton, Text, Well, half_hairline, page_column
+from .dialogs.parts import Badge, Card, ElideLabel, Kbd, LayoutButton, Text, Well, half_hairline
+from .transcript.permission import suggestion_label, typing_elsewhere
 from .ui.bits import Box, ContextRing, IconButton, Mark, Spinner, WorkingMark, button, paint_box
 from .ui.signals import bind
 
 Json = Dict[str, Any]
 FLEET_EVERY_MS = 20_000
 STALE_MS = 45_000
-
-
-def now_ms() -> float:
-    return time.time() * 1000
-
-
-# ---------------------------------------------------------------- permission helpers
-# These live in widgets/transcript/permission.py (another part of the port); the control room
-# imports them lazily so it runs on its own while that module is still landing.
-
-
-def typing_elsewhere() -> bool:
-    """Number keys answer a prompt unless the person is typing somewhere. An empty composer counts as
-    not typing: it has focus by default, and a lone "1" there is never a message."""
-    fw = QApplication.focusWidget()
-    try:
-        from .transcript.permission import typing_elsewhere as impl  # type: ignore[import-not-found]
-
-        try:
-            return bool(impl(fw))
-        except TypeError:
-            return bool(impl())
-    except Exception:  # noqa: BLE001 — not there yet, or a different shape: use the local rule
-        pass
-    if fw is None:
-        return False
-    is_composer = fw.metaObject().className() == "ComposerEdit" or fw.objectName() == "ComposerEdit"
-    if is_composer:
-        text = fw.toPlainText() if hasattr(fw, "toPlainText") else fw.text() if hasattr(fw, "text") else ""
-        return bool(text)
-    return isinstance(fw, (QLineEdit, QTextEdit, QPlainTextEdit))
-
-
-def suggestion_label(s: Json, cwd: str = "") -> str:
-    """A short label for a permission suggestion (what "Always allow" would add)."""
-    try:
-        from .transcript.permission import suggestion_label as impl  # type: ignore[import-not-found]
-
-        return str(impl(s, cwd))
-    except Exception:  # noqa: BLE001
-        pass
-    dest = {
-        "session": "for this session",
-        "localSettings": "in this project (just you)",
-        "projectSettings": "in this project",
-        "userSettings": "everywhere",
-    }.get(str(s.get("destination") or ""), "")
-    if s.get("type") == "addRules" and s.get("behavior") == "allow":
-        rules = s.get("rules") or []
-        tools = {str(r.get("toolName")) for r in rules}
-        if len(tools) == 1 and (tools & {"Bash", "PowerShell"}):
-            return f"{f'Always allow these {len(rules)} commands' if len(rules) > 1 else 'Always allow this command'} {dest}".strip()
-        if len(tools) == 1:
-            return f"Always allow {next(iter(tools))} {dest}".strip()
-        return f"Always allow {len(rules)} rules {dest}".strip()
-    if s.get("type") == "setMode":
-        return (
-            f"Allow all edits {dest}" if s.get("mode") == "acceptEdits" else f"Switch to {s.get('mode')} {dest}"
-        ).strip()
-    if s.get("type") == "addDirectories":
-        return (
-            f"Allow access to {', '.join(rel_path(str(d), cwd) for d in (s.get('directories') or []))} {dest}".strip()
-        )
-    return f"{s.get('type')} {dest}".strip()
 
 
 def perm_summary(p: Json, cwd: str) -> Tuple[str, bool, str]:
@@ -141,18 +74,6 @@ def activity_line(st: Json) -> Tuple[str, str, bool]:
     if a.get("kind") == "text":
         return "message-square-quote", str(a.get("label") or ""), False
     return "brain", "Thinking…", True
-
-
-def running_workflow(tasks: Any) -> Optional[Json]:
-    for t in tasks or []:
-        if (
-            isinstance(t, dict)
-            and t.get("type") == "local_workflow"
-            and t.get("status") == "running"
-            and not t.get("ambient")
-        ):
-            return t
-    return None
 
 
 def short_model(m: Any) -> str:
@@ -219,7 +140,7 @@ class Tile(LayoutButton):
         self._tone, self._sub, self._live = tone, sub, live
         self._paint()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         line = theme.blend(t.hair_3 if self.underMouse() else t.hair_2, t.canvas)
@@ -325,7 +246,7 @@ class WorkflowBar(QWidget):
         self.done, self.running, self.error = done, running, error
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -432,7 +353,7 @@ class WorkingCard(Card):
         self.act.setText(text)
         theme.tint(self.act, fg="text_3" if quiet else "text_2")
         self.live.setToolTip("Quiet for a while" if stale else "Working")
-        wf = running_workflow(st.get("tasks"))
+        wf = running_workflow(st.get("tasks"), ambient=False)
         if wf:
             c = workflow_counts(((wf.get("workflow") or {}).get("agents")) or [])
             total = max(1, c.total)
@@ -471,7 +392,7 @@ class WorkingCard(Card):
         self.quiet.setText(f"quiet for {duration(now - float(last))}" if stale else "")
         self.quiet.setVisible(stale)
 
-    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, e) -> None:
         if e.button() == Qt.MouseButton.LeftButton:
             store.open_session(self.sid)
 
@@ -606,7 +527,7 @@ class NeedsCard(Card):
         theme.tint(self.decided_lb, fg="ok")
         self.decided_ico.setPixmap(icons.pixmap("circle-check", t.ok, 14))
 
-    def paintEvent(self, e) -> None:  # noqa: N802
+    def paintEvent(self, e) -> None:
         super().paintEvent(e)
         # the rail: a 3px accent (ok once answered) down the left edge
         t = theme.tokens()
@@ -858,8 +779,6 @@ class FinishedRow(LayoutButton):
 
 
 def _dot(color: str, size: int):
-    from PySide6.QtGui import QPixmap
-
     pm = QPixmap(size, size)
     pm.fill(Qt.GlobalColor.transparent)
     p = QPainter(pm)
@@ -884,7 +803,7 @@ class SpendBars(QWidget):
         self.buckets = list(b)
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -901,6 +820,25 @@ class SpendBars(QWidget):
         p.drawRect(QRectF(0, 29.2 * sy, 120 * sx, 0.8 * sy))
 
 
+class ShareBar(QWidget):
+    """A session's share of the top one's spend: an 88 × 4 track and its fill, the first in the accent."""
+
+    def __init__(self, share: float, first: bool) -> None:
+        super().__init__()
+        self.share, self.first = share, first
+        self.setFixedSize(88, 4)
+
+    def paintEvent(self, _e) -> None:
+        t = theme.tokens()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(theme.blend(t.fill_2, t.raised))
+        p.drawRoundedRect(QRectF(0, 0, 88, 4), 2, 2)
+        p.setBrush(QColor(t.accent if self.first else t.text_4))
+        p.drawRoundedRect(QRectF(0, 0, 88 * max(0.0, min(1.0, self.share)), 4), 2, 2)
+
+
 class SpendRow(LayoutButton):
     """One of the sessions that cost the most today: title, a bar against the top one, the amount."""
 
@@ -909,8 +847,6 @@ class SpendRow(LayoutButton):
     ) -> None:
         super().__init__(parent)
         self.sid = sid
-        self.share = share
-        self.first = first
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip("Open the session")
         self.setAccessibleName("Open the session")
@@ -921,22 +857,10 @@ class SpendRow(LayoutButton):
         lay.setSpacing(10)
         self.title = Text(title, theme.FS_MICRO, 400, "text_2", wrap=False)
         lay.addWidget(self.title, 1)
-        self.bar = QWidget()
-        self.bar.setFixedSize(88, 4)
-        self.bar.paintEvent = self._paint_bar  # type: ignore[method-assign]
+        self.bar = ShareBar(share, first)
         lay.addWidget(self.bar)
         self.amount = Text(cost(amount), theme.FS_MICRO, 400, "text_2", wrap=False)
         lay.addWidget(self.amount)
-
-    def _paint_bar(self, _e) -> None:
-        t = theme.tokens()
-        p = QPainter(self.bar)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(theme.blend(t.fill_2, t.raised))
-        p.drawRoundedRect(QRectF(0, 0, 88, 4), 2, 2)
-        p.setBrush(QColor(t.accent if self.first else t.text_4))
-        p.drawRoundedRect(QRectF(0, 0, 88 * max(0.0, min(1.0, self.share)), 4), 2, 2)
 
 
 class Spend(Card):
@@ -1032,7 +956,7 @@ class _KeyWatch(QObject):
         else:
             app.removeEventFilter(self)
 
-    def eventFilter(self, _obj: QObject, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, _obj: QObject, e: QEvent) -> bool:
         try:
             return self._page.key_event(e)
         except RuntimeError:  # the page is gone; the filter is on its way out with it
@@ -1199,14 +1123,14 @@ class Overview(QWidget):
         self.load_fleet()
 
     # ---- lifecycle
-    def showEvent(self, e) -> None:  # noqa: N802
+    def showEvent(self, e) -> None:
         super().showEvent(e)
         self._tick_timer.start()
         self._fleet_timer.start()
         self._keys.watch(True)
         self.load_fleet()
 
-    def hideEvent(self, e) -> None:  # noqa: N802
+    def hideEvent(self, e) -> None:
         self._tick_timer.stop()
         self._fleet_timer.stop()
         self._keys.watch(False)
@@ -1214,7 +1138,7 @@ class Overview(QWidget):
 
     def _fit_body(self) -> None:
         vw = self.scroll.viewport().width()
-        self.body.setFixedWidth(max(320, min(page_column(vw), vw)))
+        self.body.setFixedWidth(max(320, min(theme.column_width(vw), vw)))
         content = self.body.width() - 40
         tiles = 2 if content <= 640 else 4
         if tiles != self._laid_tiles:
@@ -1437,7 +1361,7 @@ class Overview(QWidget):
     def focus_index(self) -> int:
         return self._focus
 
-    def eventFilter(self, obj: QObject, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj: QObject, e: QEvent) -> bool:
         if obj is self.scroll.viewport() and e.type() == QEvent.Type.Resize:
             self._fit_body()
         return False
@@ -1453,7 +1377,7 @@ class Overview(QWidget):
             Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.AltModifier | Qt.KeyboardModifier.MetaModifier
         ):
             return False
-        if typing_elsewhere():
+        if typing_elsewhere(QApplication.focusWidget()):
             return False
         key, text = e.key(), e.text()
         if t == QEvent.Type.ShortcutOverride:

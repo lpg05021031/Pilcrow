@@ -1,14 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Plus, Play, Ellipsis, Pencil, Trash, CircleCheck, CircleAlert, CircleStop, ArrowUpRight, RotateCw, X, PanelLeftOpen, Check, MailOpen, Pause, Send, ClipboardPaste } from 'lucide-react';
-import { useStore, call, openSession, setUi, toast, confirmAction, openJob } from '../lib/store';
-import { copyText } from './ui/bits';
+import { Plus, Play, Ellipsis, Pencil, Trash, CircleCheck, CircleAlert, CircleStop, ArrowUpRight, RotateCw, X, Check, MailOpen, Pause, Send, ClipboardPaste } from 'lucide-react';
+import { useStore, call, openSession, toast, confirmAction, openJob, setDialog, toasted } from '../lib/store';
+import { copy } from './ui/clipboard';
 import type { InboxItem, Schedule } from '../lib/types';
-import { basename, cost, duration, timeAgo, plural, tildify } from '../lib/format';
+import { basename, clock, cost, duration, timeAgo, plural, tildify } from '../lib/format';
 import { MenuButton } from './ui/Popover';
-import { Switch, Spinner, useNow, Mark } from './ui/bits';
+import { ShowSidebarButton, Switch, Spinner } from './ui/bits';
+import { useNow } from './ui/hooks';
+import { Mark } from './ui/brand';
 import { ScheduleDialog } from './ScheduleDialog';
+import { Loading } from './ui/Empty';
+import { stagger } from '../lib/motion';
 
-const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 function dayLabel(ms: number, now: number) {
   const d = new Date(ms);
   const t = new Date(now);
@@ -37,8 +40,7 @@ function until(ms: number, now: number) {
  */
 export function InboxPage() {
   const rev = useStore((s) => s.schedRev);
-  const sidebar = useStore((s) => s.ui.sidebar);
-  const dialog = useStore((s) => s.scheduleDialog);
+  const dialog = useStore((s) => s.dialogs.schedule);
   const [items, setItems] = useState<InboxItem[] | null>(null);
   const [schedules, setSchedules] = useState<Schedule[] | null>(null);
   const [filter, setFilter] = useState<string | null>(null);
@@ -74,22 +76,18 @@ export function InboxPage() {
   const markOne = (id: string) => {
     const it = items?.find((i) => i.id === id);
     if (!it || it.read) return;
-    call('inbox.markRead', { ids: [id] }, { quiet: true }).catch(() => {});
+    call('inbox.markRead', { ids: [id] }, { quiet: true }).catch(() => {}); // the dot comes back with the next list if it did not stick
     setItems((xs) => (xs || []).map((i) => (i.id === id ? { ...i, read: true } : i)));
   };
   const remove = (id: string) => {
-    call('inbox.remove', { id }, { quiet: true }).catch(() => {});
+    call('inbox.remove', { id }, { quiet: true }).catch(() => {}); // the item comes back with the next list if it was not removed
     setItems((xs) => (xs || []).filter((i) => i.id !== id));
   };
 
   return (
     <div className="inbox" ref={root}>
       <header className="ov-head">
-        {!sidebar && (
-          <button className="icon-btn head-sidebar" title="Show sidebar (Ctrl+B)" aria-label="Show sidebar" onClick={() => setUi({ sidebar: true })}>
-            <PanelLeftOpen size={16} />
-          </button>
-        )}
+        <ShowSidebarButton />
         <h1 className="ov-title">Inbox</h1>
         <span className="ov-sum tnum">{items ? (unread ? `${unread} unread` : items.length ? 'All read' : '') : ''}</span>
         <div className="grow" />
@@ -110,15 +108,7 @@ export function InboxPage() {
             </div>
           )}
           {items === null && (
-            <div className="changes-loading">
-              {[0, 1, 2].map((k) => (
-                <div key={k} className="sk-file">
-                  <div className="sk" style={{ width: `${46 - k * 9}%` }} />
-                  <div className="sk" />
-                  <div className="sk short" />
-                </div>
-              ))}
-            </div>
+            <Loading label="Loading the inbox" rows={3} />
           )}
           {items && !shown.length && (
             <div className="inbox-empty">
@@ -128,14 +118,14 @@ export function InboxPage() {
                 {schedules?.length ? 'The first result lands here when a schedule fires. You can also run one now from the list on the right.' : 'A schedule runs a prompt in a folder at a set time — a nightly dependency audit, a Monday test sweep — and leaves the result here with a link back to the full session.'}
               </div>
               {!schedules?.length && (
-                <button className="btn primary sm" onClick={() => useStore.setState({ scheduleDialog: {} })}>
+                <button className="btn primary sm" onClick={() => setDialog('schedule', {})}>
                   <Plus size={13} /> New schedule
                 </button>
               )}
             </div>
           )}
           {groups.map((g, gi) => (
-            <section key={g.label} className="inbox-day" style={{ '--i': gi } as React.CSSProperties}>
+            <section key={g.label} className="inbox-day" style={stagger(gi)}>
               <h2 className="inbox-day-h">
                 {g.label}
                 <span className="ov-count">{g.items.length}</span>
@@ -151,7 +141,7 @@ export function InboxPage() {
             Schedules
             {schedules && schedules.length > 0 && <span className="ov-count">{schedules.length}</span>}
             <div className="grow" />
-            <button className="btn xs" onClick={() => useStore.setState({ scheduleDialog: {} })}>
+            <button className="btn xs" onClick={() => setDialog('schedule', {})}>
               <Plus size={12} /> New
             </button>
           </div>
@@ -183,7 +173,7 @@ function RunCard({ it, index, onOpen, onRead, onRemove }: { it: InboxItem; index
   const summary = it.summary || it.reason || (it.status === 'completed' ? 'Finished without a written summary.' : 'No output.');
   const long = summary.length > 280;
   return (
-    <article className={`run${it.read ? '' : ' unread'} ${it.status}`} onClick={onRead} style={{ animationDelay: `${Math.min(index, 6) * 40}ms` }}>
+    <article className={`run${it.read ? '' : ' unread'} ${it.status}`} onClick={onRead} style={stagger(Math.min(index, 6))}>
       <span className={`run-badge ${it.status}`} aria-hidden="true">
         <Icon size={15} />
       </span>
@@ -231,7 +221,6 @@ function RunCard({ it, index, onOpen, onRead, onRemove }: { it: InboxItem; index
   );
 }
 
-/** A dispatch job's report: the badge, the name, what landed where, the prose when an agent wrote it, one line per repository. */
 /** A lead's helpers once they are all done (HELPERS.md §6.6): a row per helper with its handoff's first line. */
 function HelpersCard({ it, index, onRead, onRemove }: { it: InboxItem; index: number; onRead: () => void; onRemove: () => void }) {
   const helpers = it.helpers || [];
@@ -245,15 +234,12 @@ function HelpersCard({ it, index, onRead, onRemove }: { it: InboxItem; index: nu
       .split('\n')
       .map((l) => l.replace(/^[#*\s]+|[*\s]+$/g, ''))
       .find((l) => l && !/^handoff\b/i.test(l)) || '';
-  const copy = async () => {
+  const copyMd = async () => {
     const md = await call<string>('helpers.export', { leadId: it.leadId }).catch(() => null);
-    if (md) {
-      await copyText(md);
-      toast('Copied as Markdown.', 'info');
-    }
+    if (md) await copy(md, 'Handoffs');
   };
   return (
-    <article className={`run dp-report${it.read ? '' : ' unread'} ${it.status}`} onClick={onRead} style={{ animationDelay: `${Math.min(index, 6) * 40}ms` }}>
+    <article className={`run dp-report${it.read ? '' : ' unread'} ${it.status}`} onClick={onRead} style={stagger(Math.min(index, 6))}>
       <span className={`run-badge ${it.status}`} aria-hidden="true">
         <Icon size={15} />
       </span>
@@ -271,41 +257,22 @@ function HelpersCard({ it, index, onRead, onRemove }: { it: InboxItem; index: nu
         <p className="run-sum">{line}</p>
         <div className="dp-report-rows">
           {helpers.slice(0, 12).map((h) => (
-            <div key={h.id} className="dp-report-row">
-              <span className={`dp-glyph ${h.state}`} aria-hidden="true" />
-              <span className="dp-report-name ellipsis">{h.name}</span>
-              <span className="dp-report-what ellipsis faint">{h.state !== 'done' ? h.reason || h.state : firstLine(h.handoff || '') || 'done'}</span>
-              <span className="dp-report-nums tnum faint">
-                {h.files > 0 && (
-                  <>
-                    {plural(h.files, 'file')} <span className="num-add">+{h.add}</span> <span className="num-del">−{h.del}</span>
-                  </>
-                )}
-                {h.cost > 0 && <span> {cost(h.cost)}</span>}
-                {h.commit && <span className="mono"> {h.commit}</span>}
-                {h.pr && (
-                  <a href={h.pr} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
-                    {' '}
-                    PR
-                  </a>
-                )}
-              </span>
-            </div>
+            <ReportRow key={h.id} r={h} done={firstLine(h.handoff || '')} />
           ))}
           {helpers.length > 12 && <div className="hint">and {helpers.length - 12} more</div>}
         </div>
         <div className="run-foot">
           {it.cost > 0 && <span className="tnum">{cost(it.cost)}</span>}
           <div className="grow" />
-          <button className="btn xs ghost" onClick={(e) => (e.stopPropagation(), copy())} title="The helpers' handoffs as Markdown, to the clipboard">
+          <button className="btn xs ghost" onClick={(e) => (e.stopPropagation(), copyMd())} title="The helpers' handoffs as Markdown, to the clipboard">
             <ClipboardPaste size={11} /> Copy Markdown
           </button>
           {it.leadId && (
-            <button className="btn xs" onClick={(e) => (e.stopPropagation(), onRead(), openSession(it.leadId!))} title="The lead's conversation">
+            <button className="btn xs" onClick={(e) => (e.stopPropagation(), onRead(), it.leadId && openSession(it.leadId))} title="The lead's conversation">
               <ArrowUpRight size={11} /> Open the lead
             </button>
           )}
-          <button className="icon-btn sm run-x" title="Dismiss" onClick={(e) => (e.stopPropagation(), onRemove())}>
+          <button className="icon-btn sm run-x" title="Dismiss" aria-label="Dismiss" onClick={(e) => (e.stopPropagation(), onRemove())}>
             <X size={13} />
           </button>
         </div>
@@ -314,6 +281,33 @@ function HelpersCard({ it, index, onRead, onRemove }: { it: InboxItem; index: nu
   );
 }
 
+/** One helper or repository in a report: how it ended, its name, what it did (`done`, when it is done), its numbers. */
+function ReportRow({ r, done }: { r: { state: string; name: string; reason?: string | null; files: number; add: number; del: number; cost: number; commit?: string | null; pr?: string | null }; done: string }) {
+  return (
+    <div className="dp-report-row">
+      <span className={`dp-glyph ${r.state}`} aria-hidden="true" />
+      <span className="dp-report-name ellipsis">{r.name}</span>
+      <span className="dp-report-what ellipsis faint">{r.state !== 'done' ? r.reason || r.state : done || 'done'}</span>
+      <span className="dp-report-nums tnum faint">
+        {r.files > 0 && (
+          <>
+            {plural(r.files, 'file')} <span className="num-add">+{r.add}</span> <span className="num-del">−{r.del}</span>
+          </>
+        )}
+        {r.cost > 0 && <span> {cost(r.cost)}</span>}
+        {r.commit && <span className="mono"> {r.commit}</span>}
+        {r.pr && (
+          <a href={r.pr} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
+            {' '}
+            PR
+          </a>
+        )}
+      </span>
+    </div>
+  );
+}
+
+/** A dispatch job's report: the badge, the name, what landed where, the prose when an agent wrote it, one line per repository. */
 function DispatchCard({ it, index, onRead, onRemove }: { it: InboxItem; index: number; onRead: () => void; onRemove: () => void }) {
   const rep = it.dispatch;
   const targets = rep?.targets || [];
@@ -322,15 +316,12 @@ function DispatchCard({ it, index, onRead, onRemove }: { it: InboxItem; index: n
   const prs = targets.filter((t) => t.pr).length;
   const Icon = it.status === 'completed' ? CircleCheck : CircleAlert;
   const line = `${done} of ${plural(targets.length, 'repository', 'repositories')} done${landed ? ` · ${landed} committed` : ''}${prs ? ` · ${plural(prs, 'pull request')}` : ''}${it.reason ? ` · ${it.reason}` : ''}`;
-  const copy = async () => {
+  const copyMd = async () => {
     const md = await call<string>('dispatch.export', { id: it.jobId }).catch(() => null);
-    if (md) {
-      await copyText(md);
-      toast('Report copied as Markdown.', 'info');
-    }
+    if (md) await copy(md, 'Report');
   };
   return (
-    <article className={`run dp-report${it.read ? '' : ' unread'} ${it.status}`} onClick={onRead} style={{ animationDelay: `${Math.min(index, 6) * 40}ms` }}>
+    <article className={`run dp-report${it.read ? '' : ' unread'} ${it.status}`} onClick={onRead} style={stagger(Math.min(index, 6))}>
       <span className={`run-badge ${it.status}`} aria-hidden="true">
         <Icon size={15} />
       </span>
@@ -349,26 +340,7 @@ function DispatchCard({ it, index, onRead, onRemove }: { it: InboxItem; index: n
         {rep?.prose ? <p className="run-sum dp-prose">{rep.prose}</p> : rep?.proseState === 'writing' ? <p className="run-sum faint">An agent is writing the report…</p> : null}
         <div className="dp-report-rows">
           {targets.slice(0, 12).map((t) => (
-            <div key={t.path} className="dp-report-row">
-              <span className={`dp-glyph ${t.state}`} aria-hidden="true" />
-              <span className="dp-report-name ellipsis">{t.name}</span>
-              <span className="dp-report-what ellipsis faint">{t.state !== 'done' ? t.reason || t.state : t.summary || 'done'}</span>
-              <span className="dp-report-nums tnum faint">
-                {t.files > 0 && (
-                  <>
-                    {plural(t.files, 'file')} <span className="num-add">+{t.add}</span> <span className="num-del">−{t.del}</span>
-                  </>
-                )}
-                {t.cost > 0 && <span> {cost(t.cost)}</span>}
-                {t.commit && <span className="mono"> {t.commit}</span>}
-                {t.pr && (
-                  <a href={t.pr} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
-                    {' '}
-                    PR
-                  </a>
-                )}
-              </span>
-            </div>
+            <ReportRow key={t.path} r={t} done={t.summary} />
           ))}
           {targets.length > 12 && <div className="hint">and {targets.length - 12} more</div>}
         </div>
@@ -376,11 +348,11 @@ function DispatchCard({ it, index, onRead, onRemove }: { it: InboxItem; index: n
           {it.cost > 0 && <span className="tnum">{cost(it.cost)}</span>}
           {rep?.rules?.length ? <span className="faint ellipsis">allowed for every repository: {rep.rules.map((r) => r.label || r.key).join('; ')}</span> : null}
           <div className="grow" />
-          <button className="btn xs ghost" onClick={(e) => (e.stopPropagation(), copy())} title="The report as Markdown, to the clipboard">
+          <button className="btn xs ghost" onClick={(e) => (e.stopPropagation(), copyMd())} title="The report as Markdown, to the clipboard">
             <ClipboardPaste size={11} /> Copy Markdown
           </button>
           {it.jobId && (
-            <button className="btn xs" onClick={(e) => (e.stopPropagation(), onRead(), openJob(it.jobId!))} title="The job's view, with every run">
+            <button className="btn xs" onClick={(e) => (e.stopPropagation(), onRead(), it.jobId && openJob(it.jobId))} title="The job's view, with every run">
               <ArrowUpRight size={11} /> Open job
             </button>
           )}
@@ -408,17 +380,17 @@ function ScheduleCard({ s, now, index, active, onFilter }: { s: Schedule; now: n
       setBusy(false);
     }
   };
-  const toggle = (on: boolean) => call('schedules.toggle', { id: s.id, enabled: on }).catch(() => {});
+  const toggle = (on: boolean) => call('schedules.toggle', { id: s.id, enabled: on }).catch(toasted);
   const del = () =>
     confirmAction({
       title: `Delete the schedule “${s.name}”?`,
       body: 'Its past runs stay in the inbox.',
       confirm: 'Delete schedule',
       danger: true,
-      onConfirm: () => call('schedules.remove', { id: s.id }).catch(() => {}),
+      onConfirm: () => call('schedules.remove', { id: s.id }).catch(toasted),
     });
   const menu = [
-    { label: 'Edit…', icon: Pencil, onSelect: () => useStore.setState({ scheduleDialog: { id: s.id } }) },
+    { label: 'Edit…', icon: Pencil, onSelect: () => setDialog('schedule', { id: s.id }) },
     { label: 'Run now', icon: Play, onSelect: run },
     { label: s.enabled ? 'Pause' : 'Resume', icon: s.enabled ? Pause : Play, onSelect: () => toggle(!s.enabled) },
     { separator: true },
@@ -427,7 +399,7 @@ function ScheduleCard({ s, now, index, active, onFilter }: { s: Schedule; now: n
   // How far along the wait for the next run is, when both ends are known.
   const progress = s.enabled && !s.running && s.nextRunAt && s.lastRunAt && s.nextRunAt > s.lastRunAt ? Math.max(0, Math.min(1, (now - s.lastRunAt) / (s.nextRunAt - s.lastRunAt))) : null;
   return (
-    <div className={`sched${s.enabled ? '' : ' off'}${active ? ' on' : ''}${s.running ? ' running' : ''}`} style={{ animationDelay: `${Math.min(index, 6) * 40}ms` }}>
+    <div className={`sched${s.enabled ? '' : ' off'}${active ? ' on' : ''}${s.running ? ' running' : ''}`} style={stagger(Math.min(index, 6))}>
       <button className="sched-main" onClick={onFilter} title={`${tildify(s.cwd)}\n\n${s.prompt}`}>
         <span className="sched-name ellipsis">{s.name}</span>
         <span className="sched-sub ellipsis">
@@ -458,7 +430,7 @@ function ScheduleCard({ s, now, index, active, onFilter }: { s: Schedule; now: n
       </button>
       <div className="sched-end">
         <Switch on={s.enabled} onChange={toggle} label={s.enabled ? 'Pause' : 'Resume'} />
-        <button className="icon-btn sm" title="Run now" onClick={run} disabled={busy || Boolean(s.running)}>
+        <button className="icon-btn sm" title="Run now" aria-label="Run now" onClick={run} disabled={busy || Boolean(s.running)}>
           {busy ? <Spinner size={12} /> : <Play size={13} />}
         </button>
         <MenuButton items={menu} title="Schedule actions" width={200}>

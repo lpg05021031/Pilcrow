@@ -19,7 +19,6 @@ from ..permission import key_badge, perm_button, typing_elsewhere
 from .common import (
     Badge,
     Hairline,
-    IconLabel,
     Json,
     LinkLabel,
     NeedsDot,
@@ -66,7 +65,7 @@ class PlanBody(QWidget):
             head.add(Badge("Kept planning"))
         if self.file:
             link = Row(spacing=4)
-            link.add(IconLabel("file-text", "text_2", 13))
+            link.add(bits.IconLabel("file-text", "text_2", 13))
             fl = LinkLabel("Plan file")
             fl.setToolTip("Open the plan file")
             fl.clicked.connect(lambda: store.open_file(self.file))
@@ -205,14 +204,14 @@ class PlanBody(QWidget):
         elif key == "3":
             self.start_revising()
 
-    def eventFilter(self, obj: Any, e: Any) -> bool:  # noqa: N802
+    def eventFilter(self, obj: Any, e: Any) -> bool:
         if obj is getattr(self, "feedback", None) and e.type() == e.Type.KeyPress:
             if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and e.modifiers() & Qt.KeyboardModifier.ControlModifier:
                 self.keep_planning()
                 return True
         return super().eventFilter(obj, e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
