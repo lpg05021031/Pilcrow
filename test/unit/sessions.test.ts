@@ -79,7 +79,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   forkSession: async () => ({}),
 }));
 vi.mock('../../server/claude.js', () => ({ resolveClaude: async () => ({ path: '/bin/true' }) }));
-vi.mock('../../server/snapshots.js', async (orig) => ({ ...(await orig<any>()), record: vi.fn(async () => null) }));
+vi.mock('../../server/snapshots.js', async (orig) => ({ ...(await orig<any>()), record: vi.fn(async () => null), forget: vi.fn(async () => {}) }));
 
 const { sessions, bus } = await import('../../server/sessions.js');
 const { store } = await import('../../server/config.js');
@@ -236,6 +236,12 @@ describe('the timeline', () => {
     q.emit(result(id));
     await until(() => toolSteps().length === 1);
     expect(toolSteps()[0][1]).toEqual({ kind: 'tool', tool: 'Edit, Bash', toolUseId: 'e1', label: 'a.txt and 1 more' });
+  });
+
+  it('is forgotten with the session', async () => {
+    const { id } = await live();
+    await sessions.remove(id);
+    expect(snapshots.forget).toHaveBeenCalledWith(cwd, id);
   });
 });
 

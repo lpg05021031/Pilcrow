@@ -113,6 +113,7 @@ async function ensure(cwd) {
             switchOff(cwd, 'git init failed: ' + r.stderr.trim());
             return false;
           }
+          // gc.auto = 0: git never packs on its own in the middle of a step; forget() packs and prunes.
           fs.writeFileSync(path.join(dir, 'config'), `[core]\n\tbare = false\n\trepositoryformatversion = 0\n\tfilemode = false\n\tlogallrefupdates = false\n[gc]\n\tauto = 0\n`);
           fs.mkdirSync(path.join(dir, 'info'), { recursive: true });
           fs.writeFileSync(path.join(dir, 'info', 'exclude'), EXCLUDES.join('\n') + '\n');
@@ -339,11 +340,25 @@ export async function folderSteps(cwd) {
   return out;
 }
 
+/**
+ * Drop a session's timeline when the session is removed: its steps, its ref, and the objects only it
+ * reached. The shadow repository never packs on its own (gc.auto = 0, so no packing in the middle of a
+ * turn); this is when it is packed and pruned, in the folder's queue, where every git process that
+ * writes it runs. The last session of a folder takes the whole shadow repository with it.
+ */
 export function forget(cwd, sid) {
   cache.delete(sid);
-  try {
+  const dir = cwd && dirOf(cwd);
+  if (!dir || !fs.existsSync(path.join(dir, 'HEAD'))) return Promise.resolve();
+  return serial(cwd, async () => {
     fs.rmSync(stepsFile(cwd, sid), { force: true });
-  } catch {
-    /* fine */
-  }
+    if (!fs.readdirSync(dir).some((f) => f.startsWith('steps-'))) {
+      ready.delete(cwd);
+      fs.rmSync(dir, { recursive: true, force: true });
+      return;
+    }
+    // Run from the shadow repository: the folder itself may be gone (a removed worktree).
+    await sg(cwd, ['update-ref', '-d', `refs/sessions/${sid}`], { cwd: dir });
+    await sg(cwd, ['gc', '--quiet', '--prune=now'], { cwd: dir });
+  }).catch((e) => log('timeline forget failed', sid, e?.message));
 }

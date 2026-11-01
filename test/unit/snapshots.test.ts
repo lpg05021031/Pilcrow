@@ -1,8 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- the server module is plain JavaScript */
 // snapshots.js on a real folder and a real shadow repository: a step per change, an index.lock that a
 // dead git left behind taken away, a folder switched off (a lock still held, indexing too slow) tried
-// again after the cool-down instead of for ever, and quitting waiting for the step under way.
+// again after the cool-down instead of for ever, quitting waiting for the step under way, and a removed
+// session's steps, ref and objects reclaimed.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -27,7 +29,8 @@ const { xdg, folderKey } = await import('../../server/util.js');
 
 const RETRY_AFTER_MS = 10 * 60e3; // as snapshots.js
 let session: { id: string; cwd: string };
-const lockOf = (cwd: string) => path.join(xdg('data'), 'timeline', folderKey(cwd), 'index.lock');
+const shadowOf = (cwd: string) => path.join(xdg('data'), 'timeline', folderKey(cwd));
+const lockOf = (cwd: string) => path.join(shadowOf(cwd), 'index.lock');
 const edit = (text: string) => fs.writeFileSync(path.join(session.cwd, 'a.txt'), text);
 const tool = () => snapshots.record(session, { kind: 'tool', tool: 'Edit', label: 'a.txt' });
 
@@ -104,5 +107,36 @@ describe('quitting', () => {
     hooks.gate = null;
     release();
     expect(await step).toMatchObject({ n: 2 });
+  });
+});
+
+describe('forgetting a session', () => {
+  const git = (...args: string[]) => execFileSync('git', ['--git-dir', shadowOf(session.cwd), ...args], { encoding: 'utf8' }).trim();
+  const blob = (text: string) => execFileSync('git', ['hash-object', '--stdin'], { input: text, encoding: 'utf8' }).trim();
+  const has = (sha: string) => git('cat-file', '--batch-check', '--batch-all-objects').includes(sha);
+
+  it('takes its steps, its ref and the objects only it reached; the last session takes the shadow repository', async () => {
+    edit('only this session\n');
+    await tool();
+    const other = { id: 'other', cwd: session.cwd };
+    edit('the other session\n');
+    await snapshots.record(other, { kind: 'start', label: 'Session started' });
+    const mine = blob('only this session\n');
+    expect(has(mine)).toBe(true);
+    expect((await snapshots.folderSteps(session.cwd)).map((s: any) => s.sessionId)).toContain(session.id);
+    expect(git('for-each-ref', '--format=%(refname)')).toBe(`refs/sessions/other\nrefs/sessions/${session.id}`);
+
+    await snapshots.forget(session.cwd, session.id);
+    expect(fs.existsSync(path.join(shadowOf(session.cwd), `steps-${session.id}.json`))).toBe(false);
+    expect(git('for-each-ref', '--format=%(refname)')).toBe('refs/sessions/other');
+    expect(has(mine)).toBe(false);
+    expect(git('count-objects', '-v')).toMatch(/^count: 0$/m);
+    expect((await snapshots.folderSteps(session.cwd)).map((s: any) => s.sessionId)).not.toContain(session.id);
+    expect(has(blob('the other session\n'))).toBe(true);
+
+    await snapshots.forget(session.cwd, 'other');
+    expect(fs.existsSync(shadowOf(session.cwd))).toBe(false);
+    edit('again\n');
+    expect(await snapshots.record(other, { kind: 'start', label: 'Session started' })).toMatchObject({ n: 1 });
   });
 });

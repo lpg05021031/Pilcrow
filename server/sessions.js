@@ -1198,6 +1198,7 @@ class SessionManager {
     if (s) s.close();
     this.sessions.delete(id);
     await history.remove(id, meta.cwd || s?.cwd);
+    void snapshots.forget(meta.cwd || s?.cwd, id); // packing the shadow repository is not waited for
     if (removeWorktree && meta.worktree) await git.removeWorktree({ repoRoot: meta.worktree.repoRoot, dir: meta.worktree.path, branch: meta.worktree.branch, deleteBranch: true });
     store.deleteMeta(id);
     bus.emit('removed', { id, meta });
