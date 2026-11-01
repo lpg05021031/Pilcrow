@@ -19,7 +19,17 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPen, QPixmap, QTextDocument
 
 from .. import theme
 from ..lib.fmt import truncate
-from .paint import Measurer, PaintState, doc_height, draw_doc, find_selections, paint_decor, rounded, set_line_height
+from .paint import (
+    Measurer,
+    PaintState,
+    doc_height,
+    doc_links,
+    draw_doc,
+    find_selections,
+    paint_decor,
+    rounded,
+    set_line_height,
+)
 from .pixels import hline
 from .scene import Target
 
@@ -438,6 +448,13 @@ class Markdown(Node):
         color = st.m.color(self.color) if self.color is not None else QColor(st.t.text_2 if self.quiet else st.t.text)
         sels = find_selections(self._doc, st)
         draw_doc(p, self._doc, ox + self.x, oy + self.y, clip, color, sels or None)
+
+    def targets(self) -> Iterator[Target]:
+        """Its links, each with (href, cwd) for ``NodeBlock.activate`` to open."""
+        if self._doc is None:
+            return
+        for at, href, words, (x, y, w, h) in doc_links(self._doc):
+            yield Target("link", f"{self.x},{self.y}:{at}", (self.x + x, self.y + y, w, h), (href, self.cwd), words)
 
     def text(self) -> str:
         return self.src
