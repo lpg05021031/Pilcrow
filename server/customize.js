@@ -10,7 +10,7 @@
 // file formats stay whatever the installed CLI expects.
 import fs from 'node:fs';
 import path from 'node:path';
-import { HOME, IS_WIN, slash, expandHome, claudeConfigDir, cleanEnv, run, readJson, writeJson, log } from './util.js';
+import { HOME, IS_WIN, slash, expandHome, claudeConfigDir, cleanEnv, run, readJson, writeJson, log, slicer } from './util.js';
 
 const SKILL_NAME_RE = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 
@@ -76,7 +76,8 @@ function readSkillDir(dir, scope, extra = {}) {
   };
 }
 
-function listSkillDirs(root, scope, extra) {
+/** The skills in a folder; `tick` (util.slicer) lets the event loop in between them. */
+async function listSkillDirs(root, scope, extra, tick = slicer()) {
   const out = [];
   let entries = [];
   try {
@@ -86,6 +87,7 @@ function listSkillDirs(root, scope, extra) {
   }
   for (const e of entries) {
     if (!e.isDirectory() && !e.isSymbolicLink()) continue;
+    await tick();
     const s = readSkillDir(path.join(root, e.name), scope, extra);
     if (s) out.push(s);
   }
@@ -99,13 +101,16 @@ export function skillRoots(cwd) {
   };
 }
 
-/** Plugin skills: best effort over the plugin cache; shown read-only. */
-function pluginSkills() {
+/** Plugin skills: best effort over the plugin cache (hundreds of skills, thousands of folders, walked a
+ *  slice at a time); shown read-only. */
+async function pluginSkills() {
   const out = [];
   const pluginsDir = path.join(claudeConfigDir(), 'plugins');
   const seen = new Set();
-  const visit = (dir, depth) => {
+  const tick = slicer();
+  const visit = async (dir, depth) => {
     if (depth > 5) return;
+    await tick();
     let entries = [];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -116,26 +121,26 @@ function pluginSkills() {
       if (!e.isDirectory() || e.name.startsWith('.') || e.name === 'node_modules') continue;
       const full = path.join(dir, e.name);
       if (e.name === 'skills') {
-        for (const s of listSkillDirs(full, 'plugin', { plugin: path.basename(dir) })) {
+        for (const s of await listSkillDirs(full, 'plugin', { plugin: path.basename(dir) }, tick)) {
           if (seen.has(s.dir)) continue;
           seen.add(s.dir);
           out.push(s);
         }
-      } else visit(full, depth + 1);
+      } else await visit(full, depth + 1);
     }
   };
-  visit(pluginsDir, 0);
+  await visit(pluginsDir, 0);
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** @param {{ cwd?: string }} [opts] */
-export function listSkills({ cwd } = {}) {
+export async function listSkills({ cwd } = {}) {
   const roots = skillRoots(cwd);
   return {
     roots,
-    user: listSkillDirs(roots.user, 'user'),
-    project: roots.project ? listSkillDirs(roots.project, 'project') : [],
-    plugin: pluginSkills(),
+    user: await listSkillDirs(roots.user, 'user'),
+    project: roots.project ? await listSkillDirs(roots.project, 'project') : [],
+    plugin: await pluginSkills(),
   };
 }
 

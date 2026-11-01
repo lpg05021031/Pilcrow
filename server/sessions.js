@@ -64,6 +64,9 @@ const STDERR_TAIL = 8000; // characters of Claude Code's stderr kept for an erro
 const TASK_PROMPT_MAX = 200; // no view shows a task's prompt; enough to tell tasks apart in a log
 const MAX_TOOL_USES = 400;
 const MAX_TASKS = 100; // finished tasks kept for the panel; running ones always stay
+// Characters of each string in a waiting request's input that the windows get: a card shows a path, a URL
+// or the start of a command, never a whole file a Write would create (the server keeps the whole input).
+const PENDING_INPUT_MAX = 2000;
 const MCP_AUTH_POLL_MS = 2000; // after an MCP sign-in starts, look for the server's reconnect this often…
 const MCP_AUTH_POLLS = 90; // …for three minutes
 
@@ -120,6 +123,8 @@ const WF_CAPS = { promptPreview: 600, resultPreview: 600, error: 600, lastToolSu
 const WF_LOG_LINE = 300;
 const WF_LOGS = 200;
 const cut = (s, n) => (s.length > n ? s.slice(0, n) + '…' : s);
+/** A value with every string in it cut to `n` characters. */
+const capStrings = (v, n) => (typeof v === 'string' ? cut(v, n) : Array.isArray(v) ? v.map((x) => capStrings(x, n)) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, capStrings(x, n)])) : v);
 function trimWf(a) {
   const o = { ...a };
   for (const [k, n] of Object.entries(WF_CAPS)) if (typeof o[k] === 'string') o[k] = cut(o[k], n);
@@ -167,8 +172,13 @@ class Session {
     this.inflight = [];
     this.loaded = !persisted;
     this.loading = null;
+    /** @type {Map<string, { req: Record<string, any>, shown: Record<string, any>, resolve: (d: any) => void }>} requestId -> a permission request waiting for the person */
     this.pending = new Map();
     this.tasks = new Map();
+    /** Bumped whenever a task changes; a routine state carries `tasks` only when it moved since the last one
+     *  sent (emitState), so a finished workflow is not sent again with every status change. */
+    this.tasksRev = 0;
+    this.tasksSent = -1;
     this.bgTasks = [];
     this.init = null;
     this.commands = null;
@@ -206,6 +216,11 @@ class Session {
     /** A scheduled run with nobody watching: permissions are declined with a reason (schedules.js). */
     this.unattended = false;
     this.unattendedDenials = 0;
+    /** @type {Promise<void> | null} Claude Code starting (ensureStarted), shared by the requests that wait for it */
+    this.starting = null;
+    /** @type {Promise<void> | null} the running process's message loop; settles when the process has ended */
+    this.consumed = null;
+    this.draining = false; // a held message is being handed over (drainHeld)
   }
 
   get meta() {
@@ -245,7 +260,7 @@ class Session {
       lastReply: this.lastReply,
       unattended: this.unattended,
       unattendedDenials: this.unattendedDenials,
-      pending: [...this.pending.values()].map((p) => p.req),
+      pending: [...this.pending.values()].map((p) => p.shown),
       tasks: [...this.tasks.values()],
       bgTasks: this.bgTasks,
       queued: [...this.queuedUuids],
@@ -282,7 +297,11 @@ class Session {
       clearTimeout(this._stateSoon);
       this._stateSoon = null;
     }
-    bus.emit('state', this.state(full));
+    const st = this.state(full);
+    // Tasks unchanged since the last state: left out, and the windows keep the ones they have.
+    if (!full && this.tasksSent === this.tasksRev) delete st.tasks;
+    this.tasksSent = this.tasksRev;
+    bus.emit('state', st);
   }
 
   /** State for a stream of small changes (a workflow's agents reporting): at most one every
@@ -477,6 +496,7 @@ class Session {
     for (const t of this.tasks.values()) {
       if (t.status === 'running' || t.status === 'pending') Object.assign(t, { status: 'stopped', endedAt: Date.now() });
     }
+    this.tasksRev++;
     if (err && !closing.has(q)) {
       const detail = (this.stderrTail || '').trim().split('\n').slice(-12).join('\n');
       this.error = [err.message, detail].filter(Boolean).join('\n');
@@ -603,7 +623,7 @@ class Session {
    */
   recordTurn() {
     const tools = this.turnTools.splice(0);
-    if (!tools.length) return;
+    if (!tools.length || quitting) return; // quitting: no git process may start after stop()
     const [first] = tools;
     const label = tools.length === 1 ? first.label : `${first.label} and ${tools.length - 1} more`;
     snapshots.record(this, { kind: 'tool', tool: [...new Set(tools.map((t) => t.tool))].join(', '), toolUseId: first.toolUseId, label });
@@ -643,17 +663,20 @@ class Session {
         if (this.status === 'idle') setTimeout(() => this.drainHeld(), DRAIN_MS);
         break;
       case 'task_started':
+        this.tasksRev++;
         this.trimTasks();
         this.tasks.set(msg.task_id, { id: msg.task_id, runId: msg.run_id, toolUseId: msg.tool_use_id, parentTaskId: msg.parent_task_id, description: msg.description, type: msg.task_type, subagentType: msg.subagent_type, workflowName: msg.workflow_name, ownedBySubagent: Boolean(msg.owned_by_subagent), background: msg.is_backgrounded, ambient: msg.ambient, status: 'running', startedAt: Date.now(), prompt: typeof msg.prompt === 'string' ? msg.prompt.slice(0, TASK_PROMPT_MAX) : undefined });
         this.emitState();
         break;
       case 'task_updated': {
+        this.tasksRev++;
         const t = this.tasks.get(msg.task_id);
         if (t) Object.assign(t, msg.patch?.status ? { status: msg.patch.status } : {}, msg.patch?.description ? { description: msg.patch.description } : {}, msg.patch?.is_backgrounded !== undefined ? { background: msg.patch.is_backgrounded } : {});
         this.emitState();
         break;
       }
       case 'task_progress': {
+        this.tasksRev++;
         const t = this.tasks.get(msg.task_id);
         if (t) {
           Object.assign(t, { usage: msg.usage, lastTool: msg.last_tool_name, summary: msg.summary || t.summary, progress: msg.description });
@@ -668,6 +691,7 @@ class Session {
         this.emitState();
         break;
       case 'task_notification': {
+        this.tasksRev++;
         const t = this.tasks.get(msg.task_id) || { id: msg.task_id };
         Object.assign(t, { status: msg.status, summary: msg.summary, outputFile: msg.output_file, usage: msg.usage || t.usage, toolUseId: msg.tool_use_id || t.toolUseId, endedAt: Date.now(), reason: msg.reason });
         if (t.workflow) for (const a of t.workflow.agents) if (a && (a.state === 'start' || a.state === 'progress')) a.state = msg.status === 'completed' ? 'done' : 'error';
@@ -741,9 +765,12 @@ class Session {
         this.emitState();
       };
       opts.signal?.addEventListener('abort', () => done({ behavior: 'deny', message: 'Cancelled' }));
-      this.pending.set(requestId, { req, resolve: done });
+      // What the windows get: the input cut down, except where the card hands it back as updatedInput
+      // (a question's answers, a plan approved), which needs it whole; respond() fills the rest from `req`.
+      const shown = req.interactive ? req : { ...req, input: capStrings(input, PENDING_INPUT_MAX) };
+      this.pending.set(requestId, { req, shown, resolve: done });
       this.status = 'requires_action';
-      bus.emit('permission', { id: this.id, request: req });
+      bus.emit('permission', { id: this.id, request: req, shown });
       this.emitState();
       bus.emit('list-changed');
     });

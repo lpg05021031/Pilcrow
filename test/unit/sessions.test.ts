@@ -2,7 +2,8 @@
 // sessions.js against a fake Agent SDK: the queue of messages typed while Claude works, the permission
 // flow, how a process ends (on purpose, by failing, past a bad message), the idle reaper letting go of
 // transcripts, the cap on finished tasks, one timeline step per settled turn, and what one window is
-// sent during a streamed turn and a workflow's progress storm (bytes per second, the longest stall).
+// sent during a streamed turn and a workflow's progress storm (bytes per second, the longest stall), and
+// what a routine state costs after heavy work (a finished workflow, a hundred tasks, a large Write waiting).
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -352,15 +353,83 @@ describe('what one window receives', () => {
   });
 });
 
+describe('what a routine state costs', () => {
+  // A state change (a send, a status, an effort switch) after the session did something heavy: the heavy
+  // part went out once, when it changed, and the windows keep it (store.ts onState merges).
+  // Measured at 620 bytes and 2.9 KB (91 KB, 129 KB and 221 KB before tasks and inputs were cut down).
+  const ROUTINE_STATE_BYTES = 1024;
+  const WAITING_STATE_BYTES = 4 * 1024; // with one request waiting: its input's strings at 2000 characters
+  const sys = (id: string, subtype: string, extra: any) => ({ type: 'system', subtype, session_id: id, ...extra });
+
+  /** The next state the session emits after `act`, and its size on the wire. */
+  async function nextState(s: any, act: () => unknown) {
+    let st: any = null;
+    const on = (d: any) => d.id === s.id && (st ??= d);
+    bus.on('state', on);
+    await act();
+    bus.off('state', on);
+    return { st, n: JSON.stringify(st).length };
+  }
+
+  it('stays small after a sixty-agent workflow finished', async () => {
+    const { id, s, q } = await live();
+    const long = (i: number) => `agent ${i} `.padEnd(600, 'found something worth saying. ');
+    q.emit(sys(id, 'task_started', { task_id: 'wf', task_type: 'local_workflow', description: 'review' }));
+    q.emit(sys(id, 'task_progress', { task_id: 'wf', workflow_progress: Array.from({ length: 60 }, (_, i) => ({ type: 'workflow_agent', index: i, label: `reviewer ${i}`, state: 'progress', promptPreview: long(i), resultPreview: long(i), lastToolSummary: long(i) })) }));
+    q.emit(sys(id, 'task_notification', { task_id: 'wf', status: 'completed', summary: 'done' }));
+    await until(() => s.tasks.get('wf')?.status === 'completed');
+    const { n } = await nextState(s, () => s.setEffort('high'));
+    console.log(`routine state after a finished 60-agent workflow: ${n} bytes`);
+    expect(n).toBeLessThan(ROUTINE_STATE_BYTES);
+    expect((await s.snapshot()).state.tasks[0].workflow.agents).toHaveLength(60); // a window that opens it gets them
+  });
+
+  it('stays small with a hundred finished tasks', async () => {
+    const { id, s, q } = await live();
+    for (let i = 0; i < 101; i++) q.emit(sys(id, 'task_started', { task_id: `t${i}`, description: `task ${i} `.padEnd(120, 'x'), prompt: 'p'.repeat(1000) }), sys(id, 'task_notification', { task_id: `t${i}`, status: 'completed', summary: 's'.repeat(800) }));
+    await until(() => s.tasks.get('t100')?.status === 'completed');
+    const { st, n } = await nextState(s, () => s.setEffort('high'));
+    console.log(`routine state with 101 finished tasks: ${n} bytes`);
+    expect(n).toBeLessThan(ROUTINE_STATE_BYTES);
+    expect(st).not.toHaveProperty('tasks');
+    // …and the next change to them goes out with them all
+    const next = await nextState(s, async () => {
+      q.emit(sys(id, 'task_started', { task_id: 'new' }));
+      await until(() => s.tasks.has('new'));
+    });
+    expect(next.st.tasks.map((t: any) => t.id)).toContain('new');
+  });
+
+  it('stays small while a 200 KB Write waits, and the answer still carries the whole input', async () => {
+    const { s, q } = await live();
+    const content = 'line of a large file\n'.repeat(10_000);
+    let asked = -1;
+    const on = (d: any) => d.id === s.id && asked < 0 && d.pending?.length && (asked = JSON.stringify(d).length);
+    bus.on('state', on);
+    const answer = q.options.canUseTool('Write', { file_path: path.join(cwd, 'big.txt'), content }, { signal: new AbortController().signal, toolUseID: 'w1' });
+    bus.off('state', on);
+    const { n } = await nextState(s, () => s.setEffort('high'));
+    console.log(`state with a pending 200 KB Write: ${asked} bytes when asked, ${n} bytes routine`);
+    expect(Math.max(asked, n)).toBeLessThan(WAITING_STATE_BYTES);
+    expect(s.respond(s.state().pending[0].requestId, { behavior: 'allow' })).toBe(true);
+    expect((await answer).updatedInput.content).toBe(content);
+  });
+});
+
 describe('quitting', () => {
-  it('starts no process once the server is quitting, not even for a held message', async () => {
+  it('starts no process once the server is quitting, not even for a held message, nor a timeline step', async () => {
     const { id, s, q } = await live();
     await s.send({ text: 'held' });
+    q.emit({ type: 'assistant', session_id: id, parent_tool_use_id: null, message: { role: 'assistant', content: [{ type: 'tool_use', id: 'w1', name: 'Write', input: { file_path: 'x' } }] } });
+    q.emit({ type: 'user', session_id: id, parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'w1', content: 'ok' }] } });
+    await until(() => s.turnTools.length === 1);
     sessions.stop();
     q.emit(result(id)); // the turn ends: the held message would start a process
     const before = sdk.queries.length;
     await expect(s.send({ text: 'too late' })).rejects.toThrow(/quitting/);
     await new Promise((r) => setTimeout(r, 120));
     expect(sdk.queries.length).toBe(before);
+    await until(() => s.q === null); // the process ended, which would take the turn's step
+    expect(vi.mocked(snapshots.record).mock.calls.filter(([, w]: any) => w.kind === 'tool')).toEqual([]);
   });
 });

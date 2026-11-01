@@ -1,6 +1,6 @@
 // Persistent app settings and per-session metadata (titles, worktrees, archive flags).
 import path from 'node:path';
-import { xdg, readJson, writeJson, writeJsonAsync, coalesce, log } from './util.js';
+import { xdg, readJson, jsonFile, AppError } from './util.js';
 
 const DIR = xdg('config');
 const CONFIG_FILE = path.join(DIR, 'config.json');
@@ -32,6 +32,11 @@ export const DEFAULT_CONFIG = {
   configVersion: 2,
 };
 
+/** What a setting must hold, from its default: a list, an object (`window` is null until it is set) or
+ *  the default's primitive type. */
+const kindOf = (d) => (Array.isArray(d) ? 'a list' : d === null || typeof d === 'object' ? 'an object' : `a ${typeof d}`);
+const isKind = (v, d) => (Array.isArray(d) ? Array.isArray(v) : d === null || typeof d === 'object' ? (v === null ? d === null : typeof v === 'object' && !Array.isArray(v)) : typeof v === typeof d);
+
 /** The config as saved, brought up to the current version. */
 function loadConfig() {
   const stored = readJson(CONFIG_FILE, {});
@@ -40,31 +45,22 @@ function loadConfig() {
     if (stored.fontSize === 14) delete stored.fontSize;
     stored.configVersion = 2;
   }
+  // A value of the wrong kind (a file edited by hand) reads as the default, as setConfig would refuse it.
+  for (const k of Object.keys(stored)) if (Object.hasOwn(DEFAULT_CONFIG, k) && !isKind(stored[k], DEFAULT_CONFIG[k])) delete stored[k];
   return { ...DEFAULT_CONFIG, ...stored };
 }
 
 /**
  * Both files are read on first use, not at import, so importing a module (a test, `--doctor`) never
  * reads or writes the person's files before it means to. Session ids come from the clients, so the
- * metadata has no prototype: no id ('__proto__', 'toString') names anything but a session.
- *
- * sessions.json changes with every turn and grows with the sessions, so it is written off the event
- * loop; flush() (quitting) writes it at once instead, and a write still in flight is then dropped
- * rather than renamed over it, as is any write a newer one has overtaken.
+ * metadata has no prototype: no id ('__proto__', 'toString') names anything but a session. Both are
+ * written off the event loop (jsonFile); flushSaves() writes them at once when the server quits.
  */
 class Store {
   #config = null;
   #meta = null;
-  #metaSeq = 0; // writes of sessions.json started; only the newest may land
-  #metaWriting = 0;
-  saveConfig = coalesce(() => writeJson(CONFIG_FILE, this.config), SAVE_MS);
-  saveMeta = coalesce(() => {
-    const seq = ++this.#metaSeq;
-    this.#metaWriting++;
-    writeJsonAsync(META_FILE, this.meta, () => seq === this.#metaSeq)
-      .catch((e) => log('could not save sessions.json', e))
-      .finally(() => this.#metaWriting--);
-  }, SAVE_MS);
+  #configFile = jsonFile(CONFIG_FILE, () => this.config, SAVE_MS);
+  #metaFile = jsonFile(META_FILE, () => this.meta, SAVE_MS);
 
   /** @type {Record<string, any>} */
   get config() {
@@ -80,13 +76,14 @@ class Store {
     return this.config;
   }
 
+  /** Merge known keys into the settings (`ui` merges one level down). A value of another kind than the
+   *  default's (a string for fontSize, an object for recentProjects) is refused before anything changes:
+   *  saved, it would break whatever reads that key next (session.create reads recentProjects). */
   setConfig(patch) {
-    for (const [k, v] of Object.entries(patch || {})) {
-      if (!Object.hasOwn(DEFAULT_CONFIG, k)) continue;
-      if (k === 'ui' && v && typeof v === 'object') this.config.ui = { ...this.config.ui, ...v };
-      else this.config[k] = v;
-    }
-    this.saveConfig();
+    const entries = Object.entries(patch || {}).filter(([k]) => Object.hasOwn(DEFAULT_CONFIG, k));
+    for (const [k, v] of entries) if (!isKind(v, DEFAULT_CONFIG[k])) throw new AppError('invalid_params', `${k} must be ${kindOf(DEFAULT_CONFIG[k])}`);
+    for (const [k, v] of entries) this.config[k] = k === 'ui' ? { ...this.config.ui, ...v } : v;
+    this.#configFile.save();
     return this.config;
   }
 
@@ -94,7 +91,7 @@ class Store {
     if (!dir) return;
     const list = [dir, ...this.config.recentProjects.filter((d) => d !== dir)].slice(0, 12);
     this.config.recentProjects = list;
-    this.saveConfig();
+    this.#configFile.save();
   }
 
   getMeta(id) {
@@ -108,23 +105,15 @@ class Store {
     const next = { ...cur, ...patch };
     for (const [k, v] of Object.entries(next)) if (v === undefined || v === null) delete next[k];
     this.meta[id] = next;
-    if (persist) this.saveMeta();
+    if (persist) this.#metaFile.save();
     return next;
   }
 
   deleteMeta(id) {
     delete this.meta[id];
-    this.saveMeta();
+    this.#metaFile.save();
   }
 
-  /** Write now what is waiting to be saved (the server is quitting). */
-  flush() {
-    this.saveConfig.flush();
-    if (this.saveMeta.cancel() || this.#metaWriting) {
-      this.#metaSeq++;
-      writeJson(META_FILE, this.meta);
-    }
-  }
 }
 
 export const store = new Store();

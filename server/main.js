@@ -25,7 +25,7 @@ import * as dispatch from './dispatch.js';
 import * as memory from './memory.js';
 import { repos } from './repos.js';
 import * as helpersMod from './helpers.js';
-import { which, log, xdg, HOME, IS_ROOT, IS_WIN, slash, readJson, writeJson, debounce, expandHome, run, privateDir, migrateLegacyDirs, VERSION, AppError, under } from './util.js';
+import { which, log, xdg, HOME, IS_ROOT, IS_WIN, slash, readJson, writeJson, debounce, expandHome, run, privateDir, migrateLegacyDirs, VERSION, AppError, under, flushSaves } from './util.js';
 
 // Old environment variable names keep working after the rename.
 for (const k of Object.keys(process.env)) if (k.startsWith('RETICLE_') && !('PILCROW_' + k.slice(8) in process.env)) process.env['PILCROW_' + k.slice(8)] = process.env[k];
@@ -41,6 +41,9 @@ const LIST_CHANGED_MS = 150; // a burst of session changes is one "the list chan
 export const LOCK = path.join(xdg('state'), 'instance.json');
 
 const OCTET = 'application/octet-stream';
+/** A file the Files panel shows as a page runs in a sandbox of its own (an opaque origin, as the panel's
+ *  iframe asks): whoever opens it, it can never act as this app (its WebSocket, its /api). */
+const FILE_CSP = 'sandbox allow-scripts allow-forms allow-popups allow-modals';
 /** The interface's pages may run only their own scripts and talk only to this server. */
 const CSP = "frame-ancestors 'none'; default-src 'self'; img-src 'self' data: blob: http://127.0.0.1:* http://localhost:*; style-src 'self' 'unsafe-inline'; font-src 'self' data:; script-src 'self'; connect-src 'self' ws://127.0.0.1:* ws://localhost:*; frame-src http: https:; worker-src 'self' blob:";
 
@@ -108,6 +111,18 @@ function optStr(v, name) {
   return v || undefined;
 }
 
+/** An optional list of strings: absent (undefined or null) reads as undefined. */
+function optStrs(v, name) {
+  need(v === undefined || v === null || (Array.isArray(v) && v.every((x) => typeof x === 'string')), name);
+  return v || undefined;
+}
+
+/** An optional plain object (a cadence): absent reads as undefined. */
+function optObj(v, name) {
+  need(v === undefined || v === null || (typeof v === 'object' && !Array.isArray(v)), name);
+  return v || undefined;
+}
+
 /** A path param, with ~ expanded. */
 const pathParam = (v, name = 'path') => expandHome(str(v, name));
 /** An optional path param (a folder to work in), with ~ expanded. */
@@ -160,7 +175,10 @@ function rpcMethods({ shell, quit, listChanged }) {
     },
     'session.open': async ({ id }) => ({ ...(await (await S(id)).snapshot()), meta: store.getMeta(id) }),
     'session.create': (p) => sessions.create(p),
-    'session.send': async ({ id, ...rest }) => (await S(id)).send(rest),
+    'session.send': async ({ id, ...rest }) => {
+      need((rest.text === undefined || typeof rest.text === 'string') && (rest.images === undefined || Array.isArray(rest.images)) && (rest.files === undefined || Array.isArray(rest.files)), 'text/images/files');
+      return (await S(id)).send(rest);
+    },
     'session.interrupt': async ({ id }) => (await S(id)).interrupt(),
     'session.setCwd': async ({ id, cwd }) => (await S(id)).setCwd(cwd),
     'session.queue.remove': async ({ id, uuid: u }) => {
@@ -176,14 +194,17 @@ function rpcMethods({ shell, quit, listChanged }) {
       str(u, 'uuid');
       return (await S(id)).sendHeldNow(u);
     },
-    'session.setMode': async ({ id, mode }) => (await S(id)).setMode(mode),
-    'session.setModel': async ({ id, model }) => (await S(id)).setModel(model),
-    'session.setEffort': async ({ id, effort }) => (await S(id)).setEffort(effort),
+    'session.setMode': async ({ id, mode }) => (await S(id)).setMode(str(mode, 'mode')),
+    'session.setModel': async ({ id, model }) => (await S(id)).setModel(optStr(model, 'model')),
+    'session.setEffort': async ({ id, effort }) => (await S(id)).setEffort(optStr(effort, 'effort')),
     'session.permission': async ({ id, requestId, decision }) => {
       need(typeof decision?.behavior === 'string', 'decision');
       return (await S(id)).respond(str(requestId, 'requestId'), decision);
     },
-    'session.rename': ({ id, title }) => sessions.rename(str(id, 'id'), title),
+    'session.rename': ({ id, title }) => {
+      need(typeof title === 'string', 'title');
+      return sessions.rename(str(id, 'id'), title);
+    },
     'session.delete': async ({ id, removeWorktree, removeHelpers }) => {
       str(id, 'id');
       // a lead's helpers go with it when asked (HELPERS.md §5.10); otherwise they stay as sessions
@@ -198,20 +219,20 @@ function rpcMethods({ shell, quit, listChanged }) {
       store.setMeta(str(id, 'id'), { pinned: pinned || null });
       listChanged?.();
     },
-    'session.fork': ({ id, upToMessageId, title }) => sessions.fork(str(id, 'id'), { upToMessageId, title }),
-    'session.close': async ({ id }) => sessions.find(id)?.close(),
+    'session.fork': ({ id, upToMessageId, title }) => sessions.fork(str(id, 'id'), { upToMessageId: optStr(upToMessageId, 'upToMessageId'), title: optStr(title, 'title') }),
+    'session.close': async ({ id }) => sessions.find(str(id, 'id'))?.close(),
     'session.contextUsage': async ({ id }) => (await S(id)).contextUsage(),
-    'session.rewind': async ({ id, messageId, dryRun }) => (await S(id)).rewind(messageId, dryRun !== false),
+    'session.rewind': async ({ id, messageId, dryRun }) => (await S(id)).rewind(str(messageId, 'messageId'), dryRun !== false),
     'session.mcpStatus': async ({ id }) => (await S(id)).mcpStatus(),
-    'session.mcp.reconnect': async ({ id, name }) => (await S(id)).mcpReconnect(name),
-    'session.mcp.toggle': async ({ id, name, enabled }) => (await S(id)).mcpToggle(name, Boolean(enabled)),
-    'session.mcp.auth': async ({ id, name }) => (await S(id)).mcpAuth(name),
-    'session.mcp.authCallback': async ({ id, name, url }) => (await S(id)).mcpAuthCallback(name, url),
-    'session.mcp.clearAuth': async ({ id, name }) => (await S(id)).mcpClearAuth(name),
+    'session.mcp.reconnect': async ({ id, name }) => (await S(id)).mcpReconnect(str(name, 'name')),
+    'session.mcp.toggle': async ({ id, name, enabled }) => (await S(id)).mcpToggle(str(name, 'name'), Boolean(enabled)),
+    'session.mcp.auth': async ({ id, name }) => (await S(id)).mcpAuth(str(name, 'name')),
+    'session.mcp.authCallback': async ({ id, name, url }) => (await S(id)).mcpAuthCallback(str(name, 'name'), str(url, 'url')),
+    'session.mcp.clearAuth': async ({ id, name }) => (await S(id)).mcpClearAuth(str(name, 'name')),
     'session.reloadSkills': async ({ id }) => (await S(id)).reloadSkills(),
     // ---- skills & MCP configuration (Claude Code's own files)
     'skills.list': ({ cwd }) => customize.listSkills({ cwd: optPath(cwd) }),
-    'skills.create': ({ scope, cwd, name, description }) => customize.createSkill({ scope, cwd: optPath(cwd), name, description }),
+    'skills.create': ({ scope, cwd, name, description }) => customize.createSkill({ scope: optStr(scope, 'scope'), cwd: optPath(cwd), name: str(name, 'name'), description: optStr(description, 'description') }),
     'skills.remove': ({ dir, cwd }) => customize.removeSkill({ dir: pathParam(dir, 'dir'), cwd: optPath(cwd) }),
     'skills.import': ({ scope, cwd, from, name }) => customize.importSkill({ scope, cwd: optPath(cwd), from, name }),
     'skills.reloadAll': async () => {
@@ -258,10 +279,10 @@ function rpcMethods({ shell, quit, listChanged }) {
     },
     // ---- scheduled sessions and their inbox
     'schedules.list': () => schedules.list(),
-    'schedules.save': (p) => schedules.save({ ...p, cwd: optPath(p.cwd) }),
+    'schedules.save': (p) => schedules.save({ ...p, cwd: optPath(p.cwd), cadence: optObj(p.cadence, 'cadence') }),
     'schedules.remove': ({ id }) => schedules.remove(str(id, 'id')),
-    'schedules.toggle': ({ id, enabled }) => schedules.toggle(id, enabled),
-    'schedules.runNow': ({ id }) => schedules.runNow(id, { manual: true }),
+    'schedules.toggle': ({ id, enabled }) => schedules.toggle(str(id, 'id'), enabled),
+    'schedules.runNow': ({ id }) => schedules.runNow(str(id, 'id'), { manual: true }),
     'schedules.preview': ({ cadence }) => {
       try {
         return { nextRunAt: schedules.nextRun(cadence), label: schedules.describeCadence(cadence) };
@@ -270,7 +291,7 @@ function rpcMethods({ shell, quit, listChanged }) {
       }
     },
     'inbox.list': () => inbox.list(),
-    'inbox.markRead': ({ ids }) => inbox.markRead(ids || null),
+    'inbox.markRead': ({ ids }) => inbox.markRead(optStrs(ids, 'ids') || null),
     'inbox.remove': ({ id }) => inbox.remove(str(id, 'id')),
     // ---- dispatch: one job across many repositories
     'helpers.list': ({ leadId }) => helpersMod.helpers.list(str(leadId, 'leadId')),
@@ -289,7 +310,7 @@ function rpcMethods({ shell, quit, listChanged }) {
     'repos.resolve': ({ word }) => repos.resolve(word) || { nearest: repos.nearest(word) },
     'workspace.scan': ({ root, depth, force }) => dispatch.dispatch.scan({ root: optPath(root, 'root'), depth, force: Boolean(force) }),
     'dispatch.list': () => dispatch.dispatch.list(),
-    'dispatch.get': ({ id }) => dispatch.dispatch.get(id),
+    'dispatch.get': ({ id }) => dispatch.dispatch.get(str(id, 'id')),
     'dispatch.save': (p) => {
       // a new job needs somewhere to run; an update that names no targets keeps the job's
       need(p.targets === undefined ? Boolean(p.id) : targetsOk(p.targets), 'targets');
@@ -300,24 +321,30 @@ function rpcMethods({ shell, quit, listChanged }) {
       need(p.targets === undefined || Array.isArray(p.targets), 'targets');
       return dispatch.dispatch.plan(p.id && !p.targets ? p.id : withPaths({ ...p, targets: p.targets || [] }));
     },
-    'dispatch.start': ({ id, wave }) => dispatch.dispatch.start(id, { wave }),
-    'dispatch.continue': ({ id, brief, learn }) => dispatch.dispatch.continue(id, { brief, learn }),
-    'dispatch.pause': ({ id }) => dispatch.dispatch.pause(id),
-    'dispatch.resume': ({ id }) => dispatch.dispatch.resume(id),
-    'dispatch.stop': ({ id, runId }) => dispatch.dispatch.stop(id, { runId }),
-    'dispatch.retry': ({ id, runId, brief }) => dispatch.dispatch.retry(id, runId, { brief }),
-    'dispatch.skip': ({ id, runId }) => dispatch.dispatch.skip(id, runId),
-    'dispatch.allow': ({ id, key, requestId }) => dispatch.dispatch.allow(id, key, requestId),
-    'dispatch.review': ({ id }) => dispatch.dispatch.review(id),
-    'dispatch.finish': ({ id, runId, action, message, pr }) => dispatch.dispatch.finish(id, { runId, action, message, pr }),
-    'dispatch.export': ({ id }) => dispatch.dispatch.exportMarkdown(id),
+    'dispatch.start': ({ id, wave }) => dispatch.dispatch.start(str(id, 'id'), { wave: optStr(wave, 'wave') }),
+    'dispatch.continue': ({ id, brief, learn }) => dispatch.dispatch.continue(str(id, 'id'), { brief: optStr(brief, 'brief'), learn }),
+    'dispatch.pause': ({ id }) => dispatch.dispatch.pause(str(id, 'id')),
+    'dispatch.resume': ({ id }) => dispatch.dispatch.resume(str(id, 'id')),
+    'dispatch.stop': ({ id, runId }) => dispatch.dispatch.stop(str(id, 'id'), { runId: optStr(runId, 'runId') }),
+    'dispatch.retry': ({ id, runId, brief }) => dispatch.dispatch.retry(str(id, 'id'), str(runId, 'runId'), { brief: optStr(brief, 'brief') }),
+    'dispatch.skip': ({ id, runId }) => dispatch.dispatch.skip(str(id, 'id'), str(runId, 'runId')),
+    'dispatch.allow': ({ id, key, requestId }) => {
+      need(typeof key === 'string' || typeof requestId === 'string', 'key/requestId');
+      return dispatch.dispatch.allow(str(id, 'id'), optStr(key, 'key'), optStr(requestId, 'requestId'));
+    },
+    'dispatch.review': ({ id }) => dispatch.dispatch.review(str(id, 'id')),
+    'dispatch.finish': ({ id, runId, action, message, pr }) => dispatch.dispatch.finish(str(id, 'id'), { runId: optStr(runId, 'runId'), action: str(action, 'action'), message: optStr(message, 'message'), pr }),
+    'dispatch.export': ({ id }) => dispatch.dispatch.exportMarkdown(str(id, 'id')),
     'dispatch.playbooks': () => dispatch.dispatch.playbooks(),
     'dispatch.savePlaybook': (p) => {
       need(p.targets === undefined || Array.isArray(p.targets), 'targets');
       return dispatch.dispatch.savePlaybook(withPaths(p));
     },
     'dispatch.removePlaybook': ({ id }) => dispatch.dispatch.removePlaybook(str(id, 'id')),
-    'dispatch.startFromPlaybook': ({ id, name, wave, targets }) => dispatch.dispatch.startFromPlaybook(id, { name, wave, targets }),
+    'dispatch.startFromPlaybook': ({ id, name, wave, targets }) => {
+      need(targets === undefined || targetsOk(targets), 'targets');
+      return dispatch.dispatch.startFromPlaybook(str(id, 'id'), { name: optStr(name, 'name'), wave: optStr(wave, 'wave'), targets });
+    },
     // ---- control room: every live session at a glance, plus spend
     'fleet.state': async () => {
       const list = await sessions.list();
@@ -343,7 +370,7 @@ function rpcMethods({ shell, quit, listChanged }) {
     'timeline.stepDiff': async ({ id, n }) => snapshots.stepDiff(await S(id), n),
     'timeline.file': async ({ id, n, path: p }) => snapshots.fileAt(await S(id), { n, path: p }),
     'timeline.restore': async ({ id, n, paths }) => snapshots.restore(await S(id), { n, paths }),
-    'session.stopTask': async ({ id, taskId }) => (await S(id)).stopTask(taskId),
+    'session.stopTask': async ({ id, taskId }) => (await S(id)).stopTask(str(taskId, 'taskId')),
     'session.subagent': async ({ id, agentId }) => history.loadSubagent(id, str(agentId, 'agentId'), (await S(id)).cwd),
     'session.gateway': async ({ cwd }) => gatewayInfo(cwd),
     'models.gateway': async ({ cwd, force }) => gatewayModels(cwd, { force: Boolean(force), version: VERSION }),
@@ -353,8 +380,7 @@ function rpcMethods({ shell, quit, listChanged }) {
     'git.diff': ({ cwd, base }) => git.diff(optPath(cwd), { base: optStr(base, 'base') }),
     'git.branches': ({ cwd }) => git.branches(pathParam(cwd, 'cwd')),
     'git.commit': ({ cwd, message, paths }) => {
-      need(paths === undefined || paths === null || (Array.isArray(paths) && paths.every((x) => typeof x === 'string')), 'paths');
-      return git.commit(pathParam(cwd, 'cwd'), { message: str(message, 'message'), paths: paths || undefined });
+      return git.commit(pathParam(cwd, 'cwd'), { message: str(message, 'message'), paths: optStrs(paths, 'paths') });
     },
     'git.discard': ({ cwd, path: p, untracked }) => git.discard(pathParam(cwd, 'cwd'), { path: str(p, 'path'), untracked: Boolean(untracked) }),
     'git.log': ({ cwd, n }) => {
@@ -414,14 +440,17 @@ export function errorOf(e) {
   return { code: 'failed', message };
 }
 
+/** What nothing else caught is logged, never the end of the server. */
+const LAST_RESORT = { unhandledRejection: (e) => log('unhandledRejection', e), uncaughtException: (e) => log('uncaughtException', e) };
+
 /**
  * Start the server (the Electron shell calls this in-process; `cli()` for the other shells).
  * `heartbeatMs` and `maxBuffered` are there for the tests to turn down.
  * @param {{ shell?: string, port?: number | string | boolean, quiet?: boolean, onQuit?: () => void, heartbeatMs?: number, maxBuffered?: number }} [opts]
  */
 export async function start({ shell = 'none', port, quiet = false, onQuit, heartbeatMs = HEARTBEAT_MS, maxBuffered = MAX_BUFFERED } = {}) {
-  process.on('unhandledRejection', (e) => log('unhandledRejection', e));
-  process.on('uncaughtException', (e) => log('uncaughtException', e));
+  // once per process, however many servers it starts (the tests start several)
+  for (const [event, fn] of Object.entries(LAST_RESORT)) process.off(event, fn).on(event, fn);
   migrateLegacyDirs();
   privateDir(xdg('config'));
   privateDir(xdg('state'));
@@ -430,19 +459,24 @@ export async function start({ shell = 'none', port, quiet = false, onQuit, heart
 
   /**
    * Every event goes to every window. One that cannot keep up (asleep, on a slow tunnel) would hold an
-   * ever-growing queue here; past `maxBuffered` it is dropped instead. It reconnects on its own and
-   * reopens what it shows from a fresh snapshot, which is the clean way to catch up.
+   * ever-growing queue here; past `maxBuffered` of events not yet written out it is dropped instead. It
+   * reconnects on its own and reopens what it shows from a fresh snapshot, which is the clean way to
+   * catch up. Only events count (in characters, near enough for JSON): a reply is what the window asked
+   * for, and one session.open of a long conversation is past maxBuffered on its own.
    */
+  const behind = new WeakMap(); // window -> characters of events queued for it
   const deliver = (ws, raw) => {
     if (ws.readyState !== WebSocket.OPEN) return;
-    if (ws.bufferedAmount > maxBuffered) {
-      log(`dropping a window that is ${ws.bufferedAmount} bytes behind; it will reconnect`);
+    const queued = behind.get(ws) || 0;
+    if (queued > maxBuffered) {
+      log(`dropping a window that is ${queued} bytes behind; it will reconnect`);
       ws.terminate();
       return;
     }
-    ws.send(raw);
+    behind.set(ws, queued + raw.length);
+    ws.send(raw, () => behind.set(ws, behind.get(ws) - raw.length));
   };
-  const send = (ws, obj) => deliver(ws, JSON.stringify(obj));
+  const send = (ws, obj) => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj));
   const broadcast = (e, d) => {
     const raw = JSON.stringify({ t: 'ev', e, d });
     for (const ws of clients) deliver(ws, raw);
@@ -451,7 +485,7 @@ export async function start({ shell = 'none', port, quiet = false, onQuit, heart
   const listChanged = debounce(() => broadcast('sessions.changed', {}), LIST_CHANGED_MS);
   bus.on('msgs', (d) => broadcast('session.msgs', d));
   bus.on('state', (d) => broadcast('session.state', d));
-  bus.on('permission', (d) => broadcast('session.permission', d));
+  bus.on('permission', (d) => broadcast('session.permission', { id: d.id, request: d.shown })); // the input cut as in the state
   bus.on('permission-resolved', (d) => broadcast('session.permissionResolved', d));
   bus.on('list-changed', listChanged);
   snapshots.events.on('step', (d) => broadcast('timeline.step', d));
@@ -500,12 +534,12 @@ export async function start({ shell = 'none', port, quiet = false, onQuit, heart
     if (url.pathname.startsWith('/api/fs/')) {
       let p = decodeURIComponent(url.pathname.slice('/api/fs'.length));
       if (/^\/[a-zA-Z]:\//.test(p)) p = p.slice(1); // Windows drive paths arrive as /C:/…
-      sendFile(res, p, { 'content-type': files.mimeOf(p) || OCTET, 'x-content-type-options': 'nosniff' });
+      sendFile(res, p, { 'content-type': files.mimeOf(p) || OCTET, 'x-content-type-options': 'nosniff', 'content-security-policy': FILE_CSP });
       return;
     }
     if (url.pathname === '/api/raw') {
       const p = expandHome(url.searchParams.get('path') || '');
-      sendFile(res, p, { 'content-type': files.imageMime(p) || OCTET });
+      sendFile(res, p, { 'content-type': files.imageMime(p) || OCTET, 'x-content-type-options': 'nosniff' });
       return;
     }
     serveStatic(url.pathname, res);
@@ -655,8 +689,8 @@ export async function start({ shell = 'none', port, quiet = false, onQuit, heart
   let stopping = null;
   /**
    * Stop everything, once. What is pending is written before the first await, so even a caller that
-   * cannot wait has it on disk; the promise settles when the terminals' processes are gone, and the
-   * quit paths wait for it before they exit. Dispatch and helpers let go of the sessions first, so the
+   * cannot wait has it on disk; the promise settles when the terminals' processes are gone and the
+   * timeline steps under way are taken (snapshots.drain), and the quit paths wait for it before they exit. Dispatch and helpers let go of the sessions first, so the
    * processes closing here read as a restart to them (their runs resume as stopped), not as failures.
    */
   const stop = () =>
@@ -665,11 +699,7 @@ export async function start({ shell = 'none', port, quiet = false, onQuit, heart
       dispatch.stop();
       helpersMod.stop();
       sessions.stop();
-      try {
-        store.flush();
-      } catch (e) {
-        log('could not save settings', e);
-      }
+      flushSaves(); // settings, sessions.json, the inbox, schedules, notes: what is waiting goes now
       try {
         const cur = readJson(LOCK, {});
         if (cur.pid === process.pid) fs.rmSync(LOCK, { force: true });
@@ -679,7 +709,7 @@ export async function start({ shell = 'none', port, quiet = false, onQuit, heart
       clearInterval(heartbeat);
       for (const ws of clients) ws.close();
       server.close();
-      await term.closeAll();
+      await Promise.all([term.closeAll(), snapshots.drain()]);
     })());
   return { url, port: actualPort, stop, busy: () => sessions.busy(), connections: () => totalConnections };
 }

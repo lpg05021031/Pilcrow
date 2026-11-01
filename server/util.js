@@ -30,6 +30,8 @@ export const uuid = () => crypto.randomUUID();
 /** A short, stable file name for a folder (the timeline's shadow repository, the project's notes). */
 export const folderKey = (cwd) => crypto.createHash('sha1').update(slash(cwd)).digest('hex').slice(0, 16);
 export const fmtCost = (usd) => `$${(usd || 0).toFixed(2)}`;
+/** A cost in dollars as the windows get it: to a hundredth of a cent, without the float noise of a sum. */
+export const roundUsd = (usd) => Math.round((usd || 0) * 10000) / 10000;
 
 /** The text of a message's content: a string, or its text blocks joined. */
 export function textOfContent(content) {
@@ -228,37 +230,11 @@ export function privateDir(dir) {
 }
 
 /** Atomic JSON write (temp file + rename). Pilcrow's own files are private to the user (0600). */
-export function writeJson(file, data) {
+export function writeJson(file, data, indent = 2) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const tmp = tempPath(file);
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
+  fs.writeFileSync(tmp, JSON.stringify(data, null, indent), { mode: 0o600 });
   fs.renameSync(tmp, file);
-}
-
-/**
- * Run `fn` once, `ms` after the first call of a burst. Unlike a debounce, a steady stream of calls
- * cannot starve it: a file saved this way is never more than `ms` behind.
- */
-export function coalesce(fn, ms) {
-  let t = null;
-  const run = () => {
-    clearTimeout(t);
-    t = null;
-    fn();
-  };
-  const call = () => {
-    t ??= setTimeout(run, ms);
-  };
-  /** Run now if a call is waiting (the server is quitting); nothing waiting, nothing to write. */
-  call.flush = () => t !== null && run();
-  /** Forget the waiting call; true if there was one. */
-  call.cancel = () => {
-    const was = t !== null;
-    clearTimeout(t);
-    t = null;
-    return was;
-  };
-  return call;
 }
 
 let tmpSeq = 0;
@@ -276,6 +252,69 @@ export async function writeJsonAsync(file, data, current = () => true) {
   await fs.promises.writeFile(tmp, text, { mode: 0o600 });
   if (current()) await fs.promises.rename(tmp, file);
   else await fs.promises.rm(tmp, { force: true });
+}
+
+/** Every jsonFile, for flushSaves. */
+const jsonFiles = new Set();
+
+/**
+ * One of Pilcrow's own JSON files, saved off the event loop: save() writes `data()` `ms` after the first
+ * call of a burst (unlike a debounce, a steady stream of calls cannot starve it), and a write that a
+ * newer one overtook is dropped rather than renamed over it. flushSaves() (quitting) writes at once,
+ * synchronously, every file with a save waiting or under way.
+ * @param {string} file @param {() => unknown} data @param {number} [ms]
+ */
+export function jsonFile(file, data, ms = 0) {
+  /** @type {ReturnType<typeof setTimeout> | null} */
+  let timer = null;
+  let seq = 0; // writes started; only the newest may land
+  let writing = 0;
+  const write = () => {
+    timer = null;
+    const mine = ++seq;
+    writing++;
+    writeJsonAsync(file, data(), () => mine === seq)
+      .catch((e) => log('could not save', file, e))
+      .finally(() => writing--);
+  };
+  const f = {
+    save: () => void (timer ??= setTimeout(write, ms)),
+    flush() {
+      if (timer === null && !writing) return;
+      if (timer) clearTimeout(timer);
+      timer = null;
+      seq++;
+      writeJson(file, data(), 0);
+    },
+  };
+  jsonFiles.add(f);
+  return f;
+}
+
+/** Write now what any jsonFile has waiting (the server is quitting); one that fails does not stop the rest. */
+export function flushSaves() {
+  for (const f of jsonFiles) {
+    try {
+      f.flush();
+    } catch (e) {
+      log('could not save on quit', e);
+    }
+  }
+}
+
+/**
+ * For a long synchronous walk over folders: `await tick()` at each step gives the event loop a turn once
+ * every `ms` of work, so the walk holds it no longer than that while taking hardly longer in all. (The
+ * same walk with fs.promises and Promise.all is several times slower, and its burst of completions holds
+ * the loop as long as the synchronous one did.)
+ */
+export function slicer(ms = 4) {
+  let since = performance.now();
+  return async () => {
+    if (performance.now() - since < ms) return;
+    await new Promise((r) => setImmediate(r));
+    since = performance.now();
+  };
 }
 
 export function debounce(fn, ms) {

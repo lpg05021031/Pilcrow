@@ -5,15 +5,21 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { readJson } from './util.js';
+import { readJson, slicer } from './util.js';
 
 const SKIP_DIRS = new Set(['node_modules', 'vendor', 'target', 'dist', 'build', '.git', '.hg', '.svn', '__pycache__', '.venv', 'venv']);
 
-/** Walk a folder for repositories: stop at the first `.git` on a path; skip build and dependency dirs. */
-export function findRepos(root, depth = 3) {
+/**
+ * Walk a folder for repositories: stop at the first `.git` on a path; skip build and dependency dirs. A
+ * slice at a time (util.slicer): a workspace of thousands of folders held the event loop for 40 ms.
+ * @returns {Promise<string[]>}
+ */
+export async function findRepos(root, depth = 3) {
   const out = [];
   const seen = new Set();
-  const walk = (dir, d) => {
+  const tick = slicer();
+  const walk = async (dir, d) => {
+    await tick();
     let entries;
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -31,10 +37,10 @@ export function findRepos(root, depth = 3) {
     if (d >= depth) return;
     for (const e of entries) {
       if (!e.isDirectory() || e.name.startsWith('.') || SKIP_DIRS.has(e.name)) continue;
-      walk(path.join(dir, e.name), d + 1);
+      await walk(path.join(dir, e.name), d + 1);
     }
   };
-  walk(root, 0);
+  await walk(root, 0);
   return out.sort();
 }
 

@@ -3,7 +3,7 @@
 // list them, mark them read and remove them.
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
-import { xdg, readJson, writeJson, uuid } from './util.js';
+import { xdg, readJson, jsonFile, uuid } from './util.js';
 
 export const events = new EventEmitter();
 
@@ -13,9 +13,11 @@ const MAX_ITEMS = 400;
 /** @type {{ items: Record<string, any>[] } | null} read on first use: importing must not touch the person's files */
 let data = null;
 const box = () => (data ??= readJson(FILE, { items: [] }));
+// Off the event loop (the file is megabytes at its cap); the windows list it from memory meanwhile.
+const file = jsonFile(FILE, box);
 
 function save() {
-  writeJson(FILE, box());
+  file.save();
   events.emit('changed');
 }
 

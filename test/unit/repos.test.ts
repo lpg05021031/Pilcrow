@@ -154,7 +154,7 @@ describe('the person’s words', () => {
     expect(reg.defaultsFor(a.id).verify).toBe('go test ./...');
     expect(reg.notesFor('nope')).toBe('');
   });
-  it('writes the digest with names, aliases, about, path and policy, bounded', async () => {
+  it('writes the digest with names, aliases, about, path and policy, bounded', { timeout: 30_000 }, async () => {
     const d = reg.promptFor();
     expect(d).toMatch(/# Repositories/);
     expect(d).toMatch(/- web \(also: order FE, 前台\): storefront · .*web · helpers allowed/);

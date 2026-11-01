@@ -9,7 +9,9 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import WebSocket from 'ws';
 import { METHODS } from '../../server/main.js';
+import { extensions } from '../../server/sessions.js';
 import { store } from '../../server/config.js';
+import { flushSaves } from '../../server/util.js';
 import * as term from '../../server/terminal.js';
 import { logSays, serve } from './serve.js';
 
@@ -95,12 +97,39 @@ describe('RPC errors', () => {
       ['helpers.detach', {}, 'id'],
       ['session.queue.remove', { id: 'x' }, 'uuid'],
       ['session.queue.update', { id: 'x', uuid: 'u' }, 'text'],
+      ['session.close', {}, 'id'],
+      ['session.rename', { id: 'x' }, 'title'],
+      ['session.fork', { id: 'x', title: 7 }, 'title'],
+      ...['get', 'start', 'continue', 'pause', 'resume', 'stop', 'review', 'export'].map((m): [string, unknown, string] => [`dispatch.${m}`, { id: 7 }, 'id']),
+      ['dispatch.retry', { id: 'j' }, 'runId'],
+      ['dispatch.skip', { id: 'j' }, 'runId'],
+      ['dispatch.allow', { id: 'j' }, 'key/requestId'],
+      ['dispatch.finish', { id: 'j' }, 'action'],
+      ['dispatch.startFromPlaybook', { id: 'p', targets: 'a' }, 'targets'],
+      ['schedules.toggle', {}, 'id'],
+      ['schedules.runNow', { id: ['s'] }, 'id'],
+      ['schedules.save', { name: 'n', cwd: '/tmp', prompt: 'p', cadence: 'daily' }, 'cadence'],
+      ['inbox.markRead', { ids: 'all' }, 'ids'],
+      ['inbox.markRead', { ids: [1] }, 'ids'],
+      ['skills.create', { name: { a: 1 } }, 'name'],
     ];
+    // methods of a session check its params once it is found
+    const { r: made } = await rpc('session.create', { cwd: os.tmpdir() });
+    cases.push(
+      ['session.setMode', { id: made.id }, 'mode'],
+      ['session.setModel', { id: made.id, model: 4 }, 'model'],
+      ['session.send', { id: made.id, images: 'a.png' }, 'images'],
+      ['session.rewind', { id: made.id }, 'messageId'],
+      ['session.stopTask', { id: made.id }, 'taskId'],
+      ['session.mcp.reconnect', { id: made.id }, 'name'],
+    );
     for (const [m, p, name] of cases) {
       const res = await rpc(m, p);
       expect(res, m).toMatchObject({ ok: false, e: { code: 'invalid_params' } });
       expect(res.e.message, m).toContain(name);
     }
+    expect(fs.existsSync(path.join(process.env.CLAUDE_CONFIG_DIR!, 'skills', 'object-object'))).toBe(false);
+    await rpc('session.delete', { id: made.id });
   });
 
   it('has no method to run a command or probe the file system that no window uses', async () => {
@@ -178,6 +207,20 @@ describe('who may talk to the server', () => {
     }
   });
 
+  it('serves a file as a sandboxed page that cannot act as the app, and nothing it may be sniffed into', async () => {
+    const file = path.join(os.tmpdir(), `pilcrow-page-${process.pid}.html`);
+    fs.writeFileSync(file, '<script>fetch("/api/hello")</script>');
+    const headersOf = (p: string): Promise<http.IncomingHttpHeaders> =>
+      new Promise((resolve, reject) => {
+        http.get({ host: '127.0.0.1', port: app.port, path: p, headers: { host: `127.0.0.1:${app.port}` } }, (res) => (res.resume(), resolve(res.headers))).on('error', reject);
+      });
+    const page = await headersOf(`/api/fs${file}`);
+    expect(page['content-type']).toMatch(/text\/html/);
+    expect(page['content-security-policy']).toMatch(/^sandbox /);
+    expect(page['content-security-policy']).not.toMatch(/allow-same-origin/);
+    expect((await headersOf(`/api/raw?path=${encodeURIComponent(file)}`))['x-content-type-options']).toBe('nosniff');
+  });
+
   it('answers a malformed path with 400 instead of hanging', async () => {
     expect(await get('/api/fs/%zz')).toBe(400);
     expect(await get('/%zz')).toBe(400);
@@ -237,6 +280,22 @@ describe('names that are not settings or sessions', () => {
     expect(Object.hasOwn(store.getConfig(), 'toString') || Object.hasOwn(store.getConfig(), 'constructor')).toBe(false);
   });
 
+  it('refuses a setting of the wrong kind, changes nothing, and a session can still be made', async () => {
+    const before = JSON.stringify(store.getConfig());
+    for (const p of [{ fontSize: 'huge' }, { recentProjects: 'oops' }, { helpers: null }, { theme: { x: 1 } }, { ui: [] }, { theme: 'dark', fontSize: 'huge' }]) {
+      const res = await rpc('config.set', p);
+      expect(res, JSON.stringify(p)).toMatchObject({ ok: false, e: { code: 'invalid_params' } });
+    }
+    expect((await rpc('config.set', { fontSize: 'huge' })).e.message).toBe('fontSize must be a number');
+    expect(JSON.stringify(store.getConfig())).toBe(before);
+    expect((await rpc('config.set', { window: { width: 900, height: 700 } })).ok).toBe(true);
+    expect((await rpc('config.set', { window: null })).ok).toBe(true);
+    const made = await rpc('session.create', { cwd: os.tmpdir() });
+    expect(made.ok).toBe(true);
+    expect(store.getConfig().recentProjects[0]).toBe(os.tmpdir());
+    await rpc('session.delete', { id: made.r.id });
+  });
+
   it('keeps session ids such as __proto__ as plain entries', async () => {
     expect((await rpc('session.archive', { id: '__proto__', archived: true })).ok).toBe(true);
     expect(Object.getPrototypeOf(store.meta)).toBe(null);
@@ -247,9 +306,20 @@ describe('names that are not settings or sessions', () => {
 
   it('writes the metadata on quit even with a save still waiting', () => {
     store.setMeta('sess-flush', { title: 'kept' });
-    store.flush();
+    flushSaves();
     const file = path.join(process.env.XDG_CONFIG_HOME!, 'pilcrow', 'sessions.json');
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))['sess-flush']).toEqual({ title: 'kept' });
     store.deleteMeta('sess-flush');
+  });
+});
+
+// Last: stopping the second server stops what the modules share (sessions, terminals), as quitting does.
+describe('starting again in the same process', () => {
+  it('registers its process-wide handlers and its session extensions once', async () => {
+    const counts = () => [process.listenerCount('uncaughtException'), process.listenerCount('unhandledRejection'), extensions.state.length, extensions.permission.length];
+    const before = counts();
+    const second = await serve();
+    expect(counts()).toEqual(before);
+    await second.app.stop();
   });
 });
