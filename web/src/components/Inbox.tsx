@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Play, Ellipsis, Pencil, Trash, CircleCheck, CircleAlert, CircleStop, ArrowUpRight, RotateCw, X, PanelLeftOpen, Check, MailOpen, Pause, Send, ClipboardPaste } from 'lucide-react';
-import { useStore, call, openSession, setUi, toast, confirmAction, openJob, setDialog } from '../lib/store';
+import { useStore, call, openSession, setUi, toast, confirmAction, openJob, setDialog, toasted } from '../lib/store';
 import { copyText } from './ui/bits';
 import type { InboxItem, Schedule } from '../lib/types';
 import { basename, clock, cost, duration, timeAgo, plural, tildify } from '../lib/format';
 import { MenuButton } from './ui/Popover';
 import { Switch, Spinner, useNow, Mark } from './ui/bits';
 import { ScheduleDialog } from './ScheduleDialog';
+import { Loading } from './ui/Empty';
 
 function dayLabel(ms: number, now: number) {
   const d = new Date(ms);
@@ -73,11 +74,11 @@ export function InboxPage() {
   const markOne = (id: string) => {
     const it = items?.find((i) => i.id === id);
     if (!it || it.read) return;
-    call('inbox.markRead', { ids: [id] }, { quiet: true }).catch(() => {});
+    call('inbox.markRead', { ids: [id] }, { quiet: true }).catch(() => {}); // the dot comes back with the next list if it did not stick
     setItems((xs) => (xs || []).map((i) => (i.id === id ? { ...i, read: true } : i)));
   };
   const remove = (id: string) => {
-    call('inbox.remove', { id }, { quiet: true }).catch(() => {});
+    call('inbox.remove', { id }, { quiet: true }).catch(() => {}); // the item comes back with the next list if it was not removed
     setItems((xs) => (xs || []).filter((i) => i.id !== id));
   };
 
@@ -109,15 +110,7 @@ export function InboxPage() {
             </div>
           )}
           {items === null && (
-            <div className="changes-loading">
-              {[0, 1, 2].map((k) => (
-                <div key={k} className="sk-file">
-                  <div className="sk" style={{ width: `${46 - k * 9}%` }} />
-                  <div className="sk" />
-                  <div className="sk short" />
-                </div>
-              ))}
-            </div>
+            <Loading label="Loading the inbox" rows={3} />
           )}
           {items && !shown.length && (
             <div className="inbox-empty">
@@ -407,14 +400,14 @@ function ScheduleCard({ s, now, index, active, onFilter }: { s: Schedule; now: n
       setBusy(false);
     }
   };
-  const toggle = (on: boolean) => call('schedules.toggle', { id: s.id, enabled: on }).catch(() => {});
+  const toggle = (on: boolean) => call('schedules.toggle', { id: s.id, enabled: on }).catch(toasted);
   const del = () =>
     confirmAction({
       title: `Delete the schedule “${s.name}”?`,
       body: 'Its past runs stay in the inbox.',
       confirm: 'Delete schedule',
       danger: true,
-      onConfirm: () => call('schedules.remove', { id: s.id }).catch(() => {}),
+      onConfirm: () => call('schedules.remove', { id: s.id }).catch(toasted),
     });
   const menu = [
     { label: 'Edit…', icon: Pencil, onSelect: () => setDialog('schedule', { id: s.id }) },

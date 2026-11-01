@@ -50,7 +50,7 @@ export function Composer() {
       alive = false;
     };
   }, [root]);
-  const rescan = () => call<{ repos: WorkspaceRepo[] }>('workspace.scan', { root, force: true }, { quiet: true }).then((r) => setRepos(r.repos)).catch(() => {});
+  const rescan = () => call<{ repos: WorkspaceRepo[] }>('workspace.scan', { root, force: true }, { quiet: true }).then((r) => setRepos(r.repos), () => {}); // the list keeps the last scan
   const shown = useMemo(() => {
     const q = filter.trim().toLowerCase();
     return (repos || [])

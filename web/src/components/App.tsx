@@ -15,6 +15,9 @@ import { McpAuthDialog } from './McpAuthDialog';
 import { CommandPalette, ShortcutsDialog, ConfirmDialog, Toasts, Lightbox } from './Overlays';
 import { Resizer, useWindowKey } from './ui/bits';
 import { Slot } from './ui/Slot';
+import { ErrorBoundary } from './ui/ErrorBoundary';
+
+const PAGE_NAMES = { session: 'The conversation', overview: 'The control room', inbox: 'The inbox', dispatch: 'Dispatch' };
 
 export function App() {
   const ui = useStore((s) => s.ui);
@@ -87,12 +90,19 @@ export function App() {
           </div>
         )}
         <UpdateNotice />
-        {page === 'overview' ? <Overview /> : page === 'inbox' ? <InboxPage /> : page === 'dispatch' ? <DispatchPage /> : session ? <SessionView key={session.id} session={session} /> : <Welcome />}
+        {/* A page that fails to draw says so in place; the sidebar and the rest of the window keep working. */}
+        <ErrorBoundary key={page === 'session' ? session?.id : page} label={PAGE_NAMES[page]}>
+          {page === 'overview' ? <Overview /> : page === 'inbox' ? <InboxPage /> : page === 'dispatch' ? <DispatchPage /> : session ? <SessionView key={session.id} session={session} /> : <Welcome />}
+        </ErrorBoundary>
         <Toasts />
       </main>
       {panelOpen && <Resizer side="right" onResize={resizePanel} />}
       <Slot open={panelOpen} side="right" className="panel-shell">
-        {panelSession && <RightPanel key={panelSession.id} session={panelSession} />}
+        {panelSession && (
+          <ErrorBoundary key={panelSession.id} label="The side panel">
+            <RightPanel session={panelSession} />
+          </ErrorBoundary>
+        )}
       </Slot>
       {dialogs.newSession && <NewSessionDialog />}
       {dialogs.settings && config && <SettingsDialog />}

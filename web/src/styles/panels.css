@@ -732,19 +732,6 @@
   background: var(--accent);
 }
 
-.changes-loading {
-  display: grid;
-  gap: 22px;
-  padding: var(--sp-4) var(--sp-3_5);
-  animation: fade var(--t-med) var(--ease) 120ms both;
-}
-.sk-file {
-  display: grid;
-  gap: 9px;
-}
-.sk-file .sk {
-  height: 11px;
-}
 
 .kv-sub {
   margin-left: var(--sp-1);

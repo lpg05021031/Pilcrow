@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { Plus, PanelLeftOpen, Play } from 'lucide-react';
-import { useStore, call, openSession, respond, setUi, showDispatch, openJob, runsOf, runsIn } from '../../lib/store';
+import { useStore, call, openSession, respond, setUi, showDispatch, openJob, runsOf, runsIn, toasted } from '../../lib/store';
 import type { DispatchJob } from '../../lib/types';
 import { cost, duration, plural } from '../../lib/format';
 import { Mark, useNow, onActivate } from '../ui/bits';
@@ -153,7 +153,7 @@ export function CanaryRow({ job }: { job: DispatchJob }) {
       <button className="btn sm ghost" onClick={openCanary}>
         Open canary
       </button>
-      <button className="btn sm primary" onClick={() => call('dispatch.continue', { id: job.id }).catch(() => {})}>
+      <button className="btn sm primary" onClick={() => call('dispatch.continue', { id: job.id }).catch(toasted)}>
         <Play size={12} /> Continue
       </button>
     </div>

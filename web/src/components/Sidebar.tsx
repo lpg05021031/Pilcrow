@@ -8,6 +8,7 @@ import { fuzzyScore } from '../lib/fuzzy';
 import { Mark, StatusGlyph, useNow } from './ui/bits';
 import { MenuButton, Popover, Menu } from './ui/Popover';
 import { Collapse } from './ui/Collapse';
+import { ErrorBoundary } from './ui/ErrorBoundary';
 
 interface Group {
   key: string;
@@ -133,51 +134,53 @@ export function Sidebar() {
         </div>
       </div>
 
-      <nav className="side-list" ref={list}>
-        {/* the highlight behind the open session: anchored to its row, it glides when another is chosen */}
-        <span className="side-sel" aria-hidden="true" />
-        {attention.length > 0 && (
-          <Section label="Needs you" tone="accent">
-            {attention.flatMap((s) => rowsFor(s, true))}
-          </Section>
-        )}
-        {pinned.length > 0 && (
-          <Section label="Pinned">
-            {pinned.flatMap((s) => rowsFor(s, true))}
-          </Section>
-        )}
-        {groups.map((g) => {
-          const isCollapsed = collapsed[g.key];
-          const limit = showAll[g.key] || q ? g.items.length : 6;
-          return (
-            <div key={g.key} className="side-group">
-              <div className="side-group-head">
-                <button className="side-group-toggle" onClick={() => setCollapsed({ ...collapsed, [g.key]: !isCollapsed })} title={tildify(g.path, info?.home)}>
-                  <span className="ellipsis">{g.label}</span>
-                  <ChevronRight size={12} className={`side-group-chev${isCollapsed ? '' : ' rot'}`} />
-                </button>
-                <button className="icon-btn sm side-group-add" title={`New session in ${g.label} · Shift+click for options`} aria-label={`New session in ${g.label} · Shift+click for options`} onClick={(e) => (e.shiftKey || e.altKey ? setDialog('newSession', { cwd: g.path }) : quickNewSession(g.path))}>
-                  <Plus size={13} />
-                </button>
+      <ErrorBoundary label="The session list">
+        <nav className="side-list" ref={list}>
+          {/* the highlight behind the open session: anchored to its row, it glides when another is chosen */}
+          <span className="side-sel" aria-hidden="true" />
+          {attention.length > 0 && (
+            <Section label="Needs you" tone="accent">
+              {attention.flatMap((s) => rowsFor(s, true))}
+            </Section>
+          )}
+          {pinned.length > 0 && (
+            <Section label="Pinned">
+              {pinned.flatMap((s) => rowsFor(s, true))}
+            </Section>
+          )}
+          {groups.map((g) => {
+            const isCollapsed = collapsed[g.key];
+            const limit = showAll[g.key] || q ? g.items.length : 6;
+            return (
+              <div key={g.key} className="side-group">
+                <div className="side-group-head">
+                  <button className="side-group-toggle" onClick={() => setCollapsed({ ...collapsed, [g.key]: !isCollapsed })} title={tildify(g.path, info?.home)}>
+                    <span className="ellipsis">{g.label}</span>
+                    <ChevronRight size={12} className={`side-group-chev${isCollapsed ? '' : ' rot'}`} />
+                  </button>
+                  <button className="icon-btn sm side-group-add" title={`New session in ${g.label} · Shift+click for options`} aria-label={`New session in ${g.label} · Shift+click for options`} onClick={(e) => (e.shiftKey || e.altKey ? setDialog('newSession', { cwd: g.path }) : quickNewSession(g.path))}>
+                    <Plus size={13} />
+                  </button>
+                </div>
+                <Collapse open={!isCollapsed}>
+                  {() => (
+                    <>
+                      {g.items.slice(0, limit).flatMap((s) => rowsFor(s))}
+                      {g.items.length > limit && (
+                        <button className="side-more" onClick={() => setShowAll({ ...showAll, [g.key]: true })}>
+                          Show {g.items.length - limit} more
+                        </button>
+                      )}
+                    </>
+                  )}
+                </Collapse>
               </div>
-              <Collapse open={!isCollapsed}>
-                {() => (
-                  <>
-                    {g.items.slice(0, limit).flatMap((s) => rowsFor(s))}
-                    {g.items.length > limit && (
-                      <button className="side-more" onClick={() => setShowAll({ ...showAll, [g.key]: true })}>
-                        Show {g.items.length - limit} more
-                      </button>
-                    )}
-                  </>
-                )}
-              </Collapse>
-            </div>
-          );
-        })}
-        {sessionsLoaded && !sessions.length && <div className="side-empty">No sessions yet. Start one to see it here.</div>}
-        {sessions.length > 0 && !groups.length && !attention.length && !pinned.length && <div className="side-empty">{ui.showArchived ? 'Nothing archived.' : 'No matching sessions.'}</div>}
-      </nav>
+            );
+          })}
+          {sessionsLoaded && !sessions.length && <div className="side-empty">No sessions yet. Start one to see it here.</div>}
+          {sessions.length > 0 && !groups.length && !attention.length && !pinned.length && <div className="side-empty">{ui.showArchived ? 'Nothing archived.' : 'No matching sessions.'}</div>}
+        </nav>
+      </ErrorBoundary>
 
       <div className="side-foot">
         <button className="side-foot-btn" title="Settings (Ctrl+,)" onClick={() => setDialog('settings', true)}>

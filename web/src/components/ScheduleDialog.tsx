@@ -55,7 +55,7 @@ export function ScheduleDialog({ spec, schedule }: { spec: { id?: string; cwd?: 
 
   useEffect(() => {
     let alive = true;
-    const t = setTimeout(() => call<{ nextRunAt: number | null; label: string; error?: string }>('schedules.preview', { cadence }, { quiet: true }).then((r) => alive && setPreview(r)).catch(() => {}), 150);
+    const t = setTimeout(() => call<{ nextRunAt: number | null; label: string; error?: string }>('schedules.preview', { cadence }, { quiet: true }).then((r) => alive && setPreview(r), () => {}), 150); // the preview line waits for a cadence it understands
     return () => {
       alive = false;
       clearTimeout(t);

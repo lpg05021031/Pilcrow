@@ -6,6 +6,7 @@ import { basename, timeAgo, tildify, plural } from '../../lib/format';
 import { Select } from '../ui/Select';
 import { Switch, Spinner, useNow } from '../ui/bits';
 import { ModelSelect } from '../ModelSelect';
+import { Empty } from '../ui/Empty';
 
 /**
  * Project memory: the notes earlier sessions left about a folder, which every new session there
@@ -146,11 +147,7 @@ export function MemoryPage() {
       <div className="mem-list">
         {notes === null && <Spinner size={14} />}
         {notes && !notes.length && (
-          <div className="empty">
-            <BookMarked size={22} />
-            <div>No notes for {basename(cwd) || 'this folder'} yet.</div>
-            <div className="hint">Notes appear after a session that decided something, hit a dead end, or found a quirk. You can also add one by hand.</div>
-          </div>
+          <Empty icon={BookMarked} title={`No notes for ${basename(cwd) || 'this folder'} yet.`} hint="Notes appear after a session that decided something, hit a dead end, or found a quirk. You can also add one by hand." />
         )}
         {pinned.length > 0 && (
           <div className="mem-group">

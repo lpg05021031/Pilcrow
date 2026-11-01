@@ -785,7 +785,7 @@ export function Transcript({ sessionId, cwd, empty, onScrolled }: { sessionId: s
     <div className={`transcript${settling ? ' settling' : ''}${reading ? ' reading' : ''}`} ref={scroller} onScroll={onScroll}>
       <div className="transcript-inner" ref={inner}>
         {!rt?.loaded && rt?.loading && (
-          <div className="transcript-loading">
+          <div className="transcript-loading" role="status" aria-label="Opening the conversation">
             <div className="sk" />
             <div className="sk short" />
             <div className="sk" />

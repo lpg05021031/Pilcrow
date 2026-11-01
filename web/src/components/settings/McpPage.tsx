@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Plus, Search, Plug, Globe, Terminal, RefreshCw, Ellipsis, Trash, KeyRound, LogOut, Power, Wrench, FileJson, CircleCheck, CircleAlert, CircleDashed, ShieldCheck, ShieldOff } from 'lucide-react';
-import { useStore, call, confirmAction, toast, setDialog } from '../../lib/store';
+import { useStore, call, confirmAction, toast, setDialog, toasted } from '../../lib/store';
 import type { McpConfigSummary, McpEntry, McpList, McpLive } from '../../lib/types';
 
 /** Claude Code reports a server's tools as a count or as the list itself, depending on version. */
@@ -60,6 +60,7 @@ export function McpPage() {
     setLoading(true);
     try {
       setData(await call<McpList>('mcp.list', { cwd }, { quiet: true }));
+      // The live status comes back as a pushed state; a session that cannot answer keeps its last one.
       if (sessionId && rt?.live) call('session.mcpStatus', { id: sessionId }, { quiet: true }).catch(() => {});
     } catch (e) {
       toast(errText(e) || 'Could not read the MCP configuration', 'error');
@@ -99,7 +100,7 @@ export function McpPage() {
   };
   const toggle = async (name: string, enabled: boolean) => {
     if (!needsSession(enabled ? 'Enabling' : 'Disabling')) return;
-    await call('session.mcp.toggle', { id: sessionId, name, enabled }).catch(() => {});
+    await call('session.mcp.toggle', { id: sessionId, name, enabled }).catch(toasted);
   };
   const signIn = (name: string) => {
     if (!needsSession('Signing in')) return;
@@ -112,8 +113,7 @@ export function McpPage() {
       confirm: 'Sign out',
       onConfirm: async () => {
         if (!needsSession('Signing out')) return;
-        await call('session.mcp.clearAuth', { id: sessionId, name }).catch(() => {});
-        toast(`Signed out of ${name}`, 'success');
+        await call('session.mcp.clearAuth', { id: sessionId, name }).then(() => toast(`Signed out of ${name}`, 'success'), toasted);
       },
     });
   const remove = (s: McpEntry) =>

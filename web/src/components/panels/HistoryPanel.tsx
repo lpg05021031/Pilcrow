@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { History, ChevronRight, Undo2, RotateCcw, ArrowUpRight, ArrowDownToLine } from 'lucide-react';
-import { useStore, call, setTimeline, confirmAction, toast, bumpFs, openFile } from '../../lib/store';
+import { useStore, call, setTimeline, confirmAction, toast, bumpFs, openFile, toasted } from '../../lib/store';
 import type { DiffFile, SessionSummary, TimelineStep } from '../../lib/types';
 import { basename, clock, dirname, plural, duration } from '../../lib/format';
 import { DiffView } from '../Code';
 import { Collapse } from '../ui/Collapse';
 import { revealItem } from '../Transcript';
 import { Spinner, useNow, Mark } from '../ui/bits';
+import { Empty, Loading } from '../ui/Empty';
 
 
 function stepTitle(s: TimelineStep) {
@@ -101,11 +102,7 @@ export function HistoryPanel({ session, cwd }: { session: SessionSummary; cwd: s
   if (meta && !meta.enabled) {
     return (
       <div className="history">
-        <div className="empty">
-          <History size={22} />
-          <div>The timeline is off for this folder.</div>
-          <div className="hint">{meta.reason === 'home folder' || meta.reason === 'root of a drive' || meta.reason === 'too close to the root' ? `Snapshots are not taken for ${meta.reason === 'home folder' ? 'your home folder' : 'a folder this close to the root'} — it would be too large. Start the session in a project folder.` : meta.reason || 'Turn it on in Settings → General.'}</div>
-        </div>
+        <Empty icon={History} title="The timeline is off for this folder." hint={meta.reason === 'home folder' || meta.reason === 'root of a drive' || meta.reason === 'too close to the root' ? `Snapshots are not taken for ${meta.reason === 'home folder' ? 'your home folder' : 'a folder this close to the root'} — it would be too large. Start the session in a project folder.` : meta.reason || 'Turn it on in Settings → General.'} />
       </div>
     );
   }
@@ -128,22 +125,11 @@ export function HistoryPanel({ session, cwd }: { session: SessionSummary; cwd: s
       </div>
 
       {!steps && (
-        <div className="changes-loading">
-          {[0, 1, 2].map((k) => (
-            <div key={k} className="sk-file">
-              <div className="sk" style={{ width: `${46 - k * 9}%` }} />
-              <div className="sk short" />
-            </div>
-          ))}
-        </div>
+        <Loading label="Loading the timeline" rows={3} />
       )}
 
       {steps && !list.length && (
-        <div className="empty">
-          <History size={22} />
-          <div>Nothing on the timeline yet.</div>
-          <div className="hint">Each step that can change files — an edit, a command, a message — becomes a point here. Pick any point to see what changed and put files back the way they were.</div>
-        </div>
+        <Empty icon={History} title="Nothing on the timeline yet." hint="Each step that can change files — an edit, a command, a message — becomes a point here. Pick any point to see what changed and put files back the way they were." />
       )}
 
       {list.length > 0 && (
@@ -347,7 +333,7 @@ function StepDetail({ step, sessionId, cwd, onJump }: { step: TimelineStep; sess
         <RestoreAll step={step} sessionId={sessionId} />
       </div>
       {!files && (
-        <div className="tl-note faint">
+        <div className="tl-note faint" role="status">
           <Spinner size={12} /> Loading the diff…
         </div>
       )}
@@ -429,9 +415,7 @@ async function doRestore(sessionId: string, step: TimelineStep, paths?: string[]
       ? {
           label: 'Undo',
           run: () =>
-            call('timeline.restore', { id: sessionId, n: r.safety!.n })
-              .then(() => (bumpFs(), toast('Put the files back', 'success')))
-              .catch(() => {}),
+            call('timeline.restore', { id: sessionId, n: r.safety!.n }).then(() => (bumpFs(), toast('Put the files back', 'success')), toasted),
         }
       : undefined;
     toast(paths?.length ? `Restored ${paths.length === 1 ? basename(paths[0]) : plural(paths.length, 'file')}` : `Restored the folder to step ${step.n}`, 'success', undo);

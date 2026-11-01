@@ -12,6 +12,7 @@ import { HelpersChanges } from './HelpersChanges';
 import { str } from '../../lib/tools';
 import { errText } from '../../lib/format';
 import type { ToolItem } from '../../lib/transcript';
+import { Empty, Loading } from '../ui/Empty';
 
 interface DiffResult {
   isRepo: boolean;
@@ -276,22 +277,10 @@ export function ChangesPanel({ session, cwd }: { session: SessionSummary; cwd: s
           );
         })}
         {!data && (
-          <div className="changes-loading" aria-label="Loading changes">
-            {[0, 1, 2].map((k) => (
-              <div key={k} className="sk-file">
-                <div className="sk" style={{ width: `${46 - k * 9}%` }} />
-                <div className="sk short" />
-                <div className="sk" />
-              </div>
-            ))}
-          </div>
+          <Loading label="Loading the changes" rows={3} />
         )}
         {data && !files.length && !loading && (
-          <div className="empty">
-            <CircleCheck size={22} />
-            <div>Working tree is clean.</div>
-            <div className="hint">Changes Claude makes will show up here for review. Hover a line and click the note icon to leave feedback.</div>
-          </div>
+          <Empty icon={CircleCheck} title="Working tree is clean." hint="Changes Claude makes will show up here for review. Hover a line and click the note icon to leave feedback." />
         )}
       </div>
 
@@ -361,7 +350,7 @@ function SessionEdits({ sessionId, cwd }: { sessionId: string; cwd: string }) {
             </div>
           </div>
         ))}
-        {!edits.length && <div className="empty">No file edits in this session yet.</div>}
+        {!edits.length && <Empty title="No file edits in this session yet." />}
       </div>
     </div>
   );

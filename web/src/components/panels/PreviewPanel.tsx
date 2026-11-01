@@ -3,6 +3,7 @@ import { RotateCw, ExternalLink, AppWindow, ArrowRight } from 'lucide-react';
 import { useStore, models, call } from '../../lib/store';
 import type { SessionSummary } from '../../lib/types';
 import type { ToolItem } from '../../lib/transcript';
+import { Empty } from '../ui/Empty';
 
 const urls = new Map<string, string>();
 
@@ -80,11 +81,7 @@ export function PreviewPanel({ session }: { session: SessionSummary }) {
       {url ? (
         <iframe key={nonce} ref={frame} className="preview-frame" src={url} title="App preview" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals allow-downloads" />
       ) : (
-        <div className="empty">
-          <AppWindow size={22} />
-          <div>Preview a local web app next to the conversation.</div>
-          <div className="hint">Ask Claude to start your dev server — addresses it prints show up above as shortcuts.</div>
-        </div>
+        <Empty icon={AppWindow} title="Preview a local web app next to the conversation." hint="Ask Claude to start your dev server — addresses it prints show up above as shortcuts." />
       )}
     </div>
   );

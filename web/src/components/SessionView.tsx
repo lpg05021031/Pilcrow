@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { GitBranch, PanelRight, PanelLeftOpen, Ellipsis, Pencil, GitFork, FolderOpen, Archive, Trash, Copy, SquareTerminal, RotateCcw, Power, FolderGit2, Folder, Settings2, CircleDollarSign, ChevronDown, BookMarked, ArrowUpRight } from 'lucide-react';
-import { useStore, setUi, VIEW_MODES, renameSession, forkSession, archiveSession, deleteSession, confirmAction, call, insertIntoComposer, toast, openSession, openJob, setDialog, setCwd, getModel, repoFor, closeFind } from '../lib/store';
+import { useStore, setUi, VIEW_MODES, renameSession, forkSession, archiveSession, deleteSession, confirmAction, call, insertIntoComposer, toast, openSession, openJob, setDialog, setCwd, getModel, repoFor, closeFind, toasted } from '../lib/store';
 import { basename, cost, errText, plural, tildify } from '../lib/format';
 import { McpNotice } from './McpNotice';
 import { HelpersBar } from './HelpersBar';
@@ -11,6 +11,7 @@ import { Composer } from './Composer';
 import { MenuButton, Popover } from './ui/Popover';
 import { FolderPicker } from './FolderPicker';
 import { copyText, AppIcon, Leave } from './ui/bits';
+import { ErrorBoundary } from './ui/ErrorBoundary';
 
 export function useGitInfo(cwd: string | undefined, tick: unknown) {
   const [info, setInfo] = useState<GitInfo | null>(null);
@@ -20,9 +21,11 @@ export function useGitInfo(cwd: string | undefined, tick: unknown) {
     let alive = true;
     const run = () => {
       last.current = Date.now();
-      call<GitInfo>('git.info', { cwd }, { quiet: true })
-        .then((i) => alive && setInfo(i))
-        .catch(() => {});
+      // Not a repository, or git missing: the header simply shows no branch.
+      call<GitInfo>('git.info', { cwd }, { quiet: true }).then(
+        (i) => alive && setInfo(i),
+        () => {},
+      );
     };
     const wait = Math.max(0, 1500 - (Date.now() - last.current));
     const t = setTimeout(run, wait);
@@ -177,7 +180,7 @@ export function SessionView({ session }: { session: SessionSummary }) {
                 value={cwd}
                 onPick={(dir) => {
                   setPickingFolder(false);
-                  if (dir !== cwd) setCwd(id, dir).catch(() => {});
+                  if (dir !== cwd) setCwd(id, dir).catch(toasted);
                 }}
               />
             </Popover>
@@ -250,7 +253,9 @@ export function SessionView({ session }: { session: SessionSummary }) {
       )}
       {finding && <FindBar root={() => document.querySelector('.session .transcript-inner')} onClose={closeFind} />}
       <Transcript sessionId={id} cwd={cwd} onScrolled={setScrolled} empty={<SessionEmpty session={session} git={git} cwd={cwd} fresh={fresh} onPickFolder={() => setPickingFolder(true)} />} />
-      <Composer sessionId={id} cwd={cwd} />
+      <ErrorBoundary label="The message box">
+        <Composer sessionId={id} cwd={cwd} />
+      </ErrorBoundary>
     </div>
   );
 }
@@ -262,9 +267,11 @@ function SessionEmpty({ session, git, cwd, fresh, onPickFolder }: { session: Ses
   const [memory, setMemory] = useState<number>(0);
   useEffect(() => {
     let alive = true;
-    call<{ notes: unknown[] }>('memory.list', { cwd: session.project || cwd }, { quiet: true })
-      .then((r) => alive && setMemory(r.notes.length))
-      .catch(() => {});
+    // The count is a courtesy line under the folder name; without it the line is left out.
+    call<{ notes: unknown[] }>('memory.list', { cwd: session.project || cwd }, { quiet: true }).then(
+      (r) => alive && setMemory(r.notes.length),
+      () => {},
+    );
     return () => {
       alive = false;
     };

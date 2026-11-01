@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, createContext, useContext } from 'react';
 import { ChevronRight, File as FileIcon, Folder, FolderOpen, RefreshCw, X, Save, PanelLeft, Eye, EyeOff, ExternalLink, AtSign, BookOpen, PencilLine, Columns2, RotateCw } from 'lucide-react';
-import { useStore, call, toast, confirmAction, insertIntoComposer, bumpFs } from '../../lib/store';
+import { useStore, call, toast, confirmAction, insertIntoComposer, bumpFs, toasted } from '../../lib/store';
 import { FileTouches, useFileHistory } from '../FileTouches';
 import { Markdown } from '../Markdown';
 import type { FileTouch, SessionSummary } from '../../lib/types';
@@ -8,6 +8,7 @@ import { basename, bytes, relPath, dirname } from '../../lib/format';
 import { Spinner, Seg } from '../ui/bits';
 import type { FileRead, FileWrite } from '../../lib/types';
 import { errText } from '../../lib/format';
+import { Empty, Loading } from '../ui/Empty';
 
 interface Entry {
   name: string;
@@ -210,32 +211,25 @@ export function FilesPanel({ session, cwd, visible }: { session: SessionSummary;
           )}
           {active ? (
             active.loading ? (
-              <div className="empty">
-                <Spinner /> Opening…
-              </div>
+              <Loading label="Opening…" />
             ) : active.error ? (
-              <div className="empty">{active.error}</div>
+              <Empty title={active.error} />
             ) : active.dataUrl ? (
               <div className="img-preview">
                 <img src={active.dataUrl} alt={basename(active.path)} />
                 <div className="faint">{bytes(active.size || 0)}</div>
               </div>
             ) : active.binary || active.tooLarge ? (
-              <div className="empty">
-                <div>{active.tooLarge ? 'This file is too large to open here' : 'Binary file'} · {bytes(active.size || 0)}</div>
-                <button className="btn sm" onClick={() => call('shell.openPath', { path: active.path })}>
+              <Empty title={`${active.tooLarge ? 'This file is too large to open here' : 'Binary file'} · ${bytes(active.size || 0)}`}>
+                <button className="btn sm" onClick={() => call('shell.openPath', { path: active.path }).catch(toasted)}>
                   <ExternalLink size={13} /> Open with system app
                 </button>
-              </div>
+              </Empty>
             ) : (
               <div className={`doc-area${isDoc(active.path) ? ` ${docView(active)}` : ' edit'}`}>
                 {(!isDoc(active.path) || docView(active) !== 'preview') && (
                   <Suspense
-                    fallback={
-                      <div className="empty">
-                        <Spinner /> Opening…
-                      </div>
-                    }
+                    fallback={<Loading label="Opening…" />}
                   >
                     <Editor
                       key={active.path}
@@ -260,11 +254,7 @@ export function FilesPanel({ session, cwd, visible }: { session: SessionSummary;
               </div>
             )
           ) : (
-            <div className="empty">
-              <FileIcon size={22} />
-              <div>Pick a file to view or edit it.</div>
-              <div className="hint">File paths in Claude's replies open here too.</div>
-            </div>
+            <Empty icon={FileIcon} title="Pick a file to view or edit it." hint="File paths in Claude's replies open here too." />
           )}
         </div>
       </div>

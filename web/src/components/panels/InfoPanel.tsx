@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Gauge, Plug, Cpu, FolderGit2, Copy, RefreshCw, ChevronRight, FolderOpen, Trash, Wrench, Globe, BookMarked, Sparkles } from 'lucide-react';
-import { useStore, call, toast, confirmAction, setDialog } from '../../lib/store';
+import { useStore, call, toast, confirmAction, setDialog, toasted } from '../../lib/store';
 import type { SessionSummary, MemoryNote } from '../../lib/types';
 import { tokens, cost, tildify, plural } from '../../lib/format';
 import { modelLabel, useGatewayModels } from '../../lib/models';
@@ -203,7 +203,7 @@ export function InfoPanel({ session, cwd }: { session: SessionSummary; cwd: stri
                     Sign in
                   </button>
                 ) : s.status === 'failed' ? (
-                  <button className="btn xs" onClick={() => call('session.mcp.reconnect', { id: session.id, name: s.name }).then(refreshMcp, () => {})}>
+                  <button className="btn xs" onClick={() => call('session.mcp.reconnect', { id: session.id, name: s.name }).then(refreshMcp, toasted)}>
                     Retry
                   </button>
                 ) : (

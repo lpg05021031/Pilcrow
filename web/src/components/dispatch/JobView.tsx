@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Pause, Play, Square, Ellipsis, GitCommitHorizontal, GitPullRequestArrow, ExternalLink, RotateCw, BookMarked, CalendarClock, ClipboardPaste, Trash, CircleDollarSign } from 'lucide-react';
-import { useStore, call, openSession, respond, confirmAction, toast, showDispatch, openJob, runsIn, loadPlaybooks, setDialog, showPage } from '../../lib/store';
+import { useStore, call, openSession, respond, confirmAction, toast, showDispatch, openJob, runsIn, loadPlaybooks, setDialog, showPage, toasted } from '../../lib/store';
 import type { DispatchJob, DispatchReview, DispatchRun, Playbook } from '../../lib/types';
 import { cost, duration, plural } from '../../lib/format';
 import { Switch, useNow, copyText } from '../ui/bits';
@@ -30,9 +30,11 @@ export function JobView({ id }: { id: string }) {
   useEffect(() => {
     if (!reviewing || st === 'finished') return;
     let alive = true;
-    call<DispatchReview>('dispatch.review', { id }, { quiet: true })
-      .then((r) => alive && setReview(r))
-      .catch(() => {});
+    // The review fills in once the job has one; until then the view shows the runs.
+    call<DispatchReview>('dispatch.review', { id }, { quiet: true }).then(
+      (r) => alive && setReview(r),
+      () => {},
+    );
     return () => {
       alive = false;
     };
@@ -57,19 +59,19 @@ export function JobView({ id }: { id: string }) {
 
   const saveBrief = () => {
     setEditing(false);
-    if (draft.trim() && draft !== job.brief) call('dispatch.save', { id, brief: draft }).catch(() => {});
+    if (draft.trim() && draft !== job.brief) call('dispatch.save', { id, brief: draft }).catch(toasted);
   };
   const finish = (action: 'commit' | 'discard' | 'keep', pr = false) => {
     const list = action === 'commit' ? doneOpen : openRuns;
     if (!list.length) return;
-    if (action === 'keep') return void call('dispatch.finish', { id, action }).catch(() => {});
+    if (action === 'keep') return void call('dispatch.finish', { id, action }).catch(toasted);
     const branch = `pilcrow/${job.slug || 'job'}`;
     confirmAction({
       title: action === 'commit' ? `${pr ? 'Open pull requests for' : 'Commit'} ${plural(list.length, 'repository', 'repositories')}?` : `Discard the changes in ${plural(list.length, 'repository', 'repositories')}?`,
       body: action === 'commit' ? `Each run's changes are committed on its branch ${branch} with the message “${job.settings.commitMessage || job.name}”. ${pr ? 'The branches are pushed and a pull request opened with gh where the repository has a GitHub remote. ' : ''}The worktree directories are removed; the branches stay.` : `The worktrees and the branches ${branch} are removed. This cannot be undone.`,
       confirm: pr ? 'Open pull requests' : action === 'commit' ? 'Commit' : 'Discard',
       danger: action === 'discard',
-      onConfirm: () => call('dispatch.finish', { id, action, pr }).catch(() => {}),
+      onConfirm: () => call('dispatch.finish', { id, action, pr }).catch(toasted),
     });
   };
   const ensurePlaybook = async (): Promise<string | null> => {
@@ -176,12 +178,12 @@ export function JobView({ id }: { id: string }) {
         </span>
         <div className="grow" />
         {st === 'running' && (
-          <button className="btn sm ghost" onClick={() => call(job.paused ? 'dispatch.resume' : 'dispatch.pause', { id }).catch(() => {})}>
+          <button className="btn sm ghost" onClick={() => call(job.paused ? 'dispatch.resume' : 'dispatch.pause', { id }).catch(toasted)}>
             {job.paused ? <Play size={13} /> : <Pause size={13} />} {job.paused ? 'Resume' : 'Pause'}
           </button>
         )}
         {(st === 'running' || st === 'reviewing') && (
-          <button className="btn sm ghost" onClick={() => confirmAction({ title: `Stop ${job.name}?`, body: 'Runs under way are interrupted and kept as they are; queued ones are skipped. Nothing is discarded.', confirm: 'Stop the job', danger: true, onConfirm: () => call('dispatch.stop', { id }).catch(() => {}) })}>
+          <button className="btn sm ghost" onClick={() => confirmAction({ title: `Stop ${job.name}?`, body: 'Runs under way are interrupted and kept as they are; queued ones are skipped. Nothing is discarded.', confirm: 'Stop the job', danger: true, onConfirm: () => call('dispatch.stop', { id }).catch(toasted) })}>
             <Square size={12} /> Stop
           </button>
         )}
@@ -317,7 +319,7 @@ function CanaryCard({ job, runs }: { job: DispatchJob; runs: DispatchRun[] }) {
         </div>
       )}
       <div className="ovc-actions">
-        <button className="btn sm primary" onClick={() => call('dispatch.continue', { id: job.id }).catch(() => {})}>
+        <button className="btn sm primary" onClick={() => call('dispatch.continue', { id: job.id }).catch(toasted)}>
           <Play size={12} /> Continue
         </button>
         <button className="btn sm ghost" onClick={openCanary}>
@@ -330,7 +332,7 @@ function CanaryCard({ job, runs }: { job: DispatchJob; runs: DispatchRun[] }) {
         )}
       </div>
       <div className="dp-learn">
-        <Switch on={job.settings.learn !== false} onChange={(on) => call('dispatch.save', { id: job.id, settings: { learn: on } }, { quiet: true }).catch(() => {})} label="the rest learn from its summary" />
+        <Switch on={job.settings.learn !== false} onChange={(on) => call('dispatch.save', { id: job.id, settings: { learn: on } }).catch(toasted)} label="the rest learn from its summary" />
         <span className="faint">the rest learn from its summary</span>
       </div>
     </article>
@@ -405,9 +407,9 @@ function RunRow({ run, jobId, now, runs }: { run: DispatchRun; jobId: string; no
     nowText = deps.length ? `after ${deps.join(', ')}` : 'waiting for a slot';
     nowClass = 'faint';
   } else nowText = run.now || STATE_WORD[run.state];
-  const stop = (e: React.MouseEvent) => (e.stopPropagation(), call('dispatch.stop', { id: jobId, runId: run.id }).catch(() => {}));
-  const retry = (e: React.MouseEvent) => (e.stopPropagation(), call('dispatch.retry', { id: jobId, runId: run.id }).catch(() => {}));
-  const skip = (e: React.MouseEvent) => (e.stopPropagation(), call('dispatch.skip', { id: jobId, runId: run.id }).catch(() => {}));
+  const stop = (e: React.MouseEvent) => (e.stopPropagation(), call('dispatch.stop', { id: jobId, runId: run.id }).catch(toasted));
+  const retry = (e: React.MouseEvent) => (e.stopPropagation(), call('dispatch.retry', { id: jobId, runId: run.id }).catch(toasted));
+  const skip = (e: React.MouseEvent) => (e.stopPropagation(), call('dispatch.skip', { id: jobId, runId: run.id }).catch(toasted));
   return (
     <tr className={`dp-row ${run.state}`} onClick={open}>
       <td className="dp-state">

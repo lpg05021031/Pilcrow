@@ -458,7 +458,7 @@ export function initApp() {
       setHome(info.home);
       set({ info, config });
       loadGatewayModels();
-      rpc.call<{ unread: number }>('inbox.list').then((r) => set({ inboxUnread: r.unread })).catch(() => {});
+      rpc.call<{ unread: number }>('inbox.list').then((r) => set({ inboxUnread: r.unread }), () => {}); // the badge waits for inbox.changed
       loadJobs();
       loadPlaybooks();
       applyConfigUi(config);
@@ -566,6 +566,7 @@ export function setUi(patch: Partial<Ui>) {
   if (saveUiTimer) clearTimeout(saveUiTimer);
   saveUiTimer = setTimeout(() => {
     const { sidebar, panel, panelTab, sidebarW, panelW, diffMode, view } = get().ui;
+    // The layout is a convenience: if it cannot be saved, the next change tries again.
     rpc.call('config.set', { ui: { sidebar, panel, panelTab, sidebarW, panelW, diffMode, view } }).catch(() => {});
   }, 400);
 }
@@ -599,11 +600,9 @@ export function setTheme(pref: Config['theme'], at?: { x: number; y: number }) {
           { duration: 520, easing: 'cubic-bezier(0.65, 0, 0.35, 1)', pseudoElement: '::view-transition-new(root)' },
         ),
       )
-      .catch(() => {});
+      .catch(() => {}); // a skipped transition: the theme has changed all the same
   }
-  call<Config>('config.set', { theme: pref })
-    .then((c) => set({ config: c }))
-    .catch(() => {});
+  call<Config>('config.set', { theme: pref }).then((c) => set({ config: c }), toasted);
 }
 
 export async function setConfig(patch: Partial<Config>) {
@@ -627,7 +626,7 @@ const opening = new Map<string, Promise<void>>();
 export function openSession(id: string): Promise<void> {
   if (get().page !== 'session') set({ page: 'session' });
   set({ activeId: id, unread: { ...get().unread, [id]: false } });
-  rpc.call('config.set', { ui: { lastSession: id } }).catch(() => {});
+  rpc.call('config.set', { ui: { lastSession: id } }).catch(() => {}); // remembered for the next start when it can be
   const r = get().rt[id];
   const m = models.get(id);
   if (m && r?.loaded) {
@@ -768,7 +767,7 @@ async function foldRow(id: string): Promise<() => void> {
     ],
     { duration: 280, easing: EASE_EXIT, fill: 'forwards' },
   );
-  await a.finished.catch(() => {});
+  await a.finished.catch(() => {}); // cancelled: the row is put back below
   return () => {
     foldingRows.delete(id);
     a.cancel();
@@ -838,14 +837,19 @@ export function showPage(page: 'session' | 'overview' | 'inbox' | 'dispatch') {
 export function loadJobs() {
   rpc
     .call<DispatchJob[]>('dispatch.list')
-    .then((lst) => set({ jobs: Object.fromEntries((lst || []).map((j) => [j.id, j])), jobsLoaded: true }))
-    .catch(() => {});
+    // Disconnected: the board fills in on the reconnect, which asks again.
+    .then(
+      (lst) => set({ jobs: Object.fromEntries((lst || []).map((j) => [j.id, j])), jobsLoaded: true }),
+      () => {},
+    );
 }
 export function loadPlaybooks() {
   rpc
     .call<Playbook[]>('dispatch.playbooks')
-    .then((lst) => set({ playbooks: lst || [] }))
-    .catch(() => {});
+    .then(
+      (lst) => set({ playbooks: lst || [] }),
+      () => {}, // as above: asked again on the reconnect
+    );
 }
 function onDispatch(d: DispatchDelta) {
   if (!d?.id) return;
@@ -870,11 +874,13 @@ function onDispatch(d: DispatchDelta) {
 export function fetchJob(id: string) {
   return rpc
     .call<{ job: DispatchJob; runs: DispatchRun[] }>('dispatch.get', { id })
-    .then((r) => {
-      const st = get();
-      set({ jobs: { ...st.jobs, [id]: r.job }, jobRuns: { ...st.jobRuns, [id]: Object.fromEntries(r.runs.map((x) => [x.id, x])) } });
-    })
-    .catch(() => {});
+    .then(
+      (r) => {
+        const st = get();
+        set({ jobs: { ...st.jobs, [id]: r.job }, jobRuns: { ...st.jobRuns, [id]: Object.fromEntries(r.runs.map((x) => [x.id, x])) } });
+      },
+      () => {}, // a job that is gone: dispatch.changed removes it from the board
+    );
 }
 /** A job's runs in the server's order, the superseded (retried) ones left out. */
 export function runsOf(runs: Record<string, Record<string, DispatchRun>>, id: string): DispatchRun[] {

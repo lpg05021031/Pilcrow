@@ -493,6 +493,36 @@ kbd {
   line-height: 1.55;
 }
 
+/* Something on its way (ui/Empty Loading): faint lines with a slow sheen where rows will be. */
+.loading-rows {
+  display: grid;
+  gap: 22px;
+  padding: var(--sp-4) var(--sp-3_5);
+  animation: fade var(--t-med) var(--ease) 120ms both;
+}
+.sk-row {
+  display: grid;
+  gap: 9px;
+}
+.sk-row .sk {
+  height: 11px;
+}
+.sk {
+  height: 14px;
+  border-radius: 7px;
+  background: linear-gradient(90deg, var(--fill-1), var(--fill-2), var(--fill-1));
+  background-size: 200% 100%;
+  animation: sheen 1.4s linear infinite;
+}
+.sk.short {
+  width: 60%;
+}
+@keyframes sheen {
+  to {
+    background-position: -200% 0;
+  }
+}
+
 /* Less motion, by request: everything lands at once. The delays go too, inline staggers included
    (an !important here outranks a style attribute), or a list would still appear row by row. */
 @media (prefers-reduced-motion: reduce) {

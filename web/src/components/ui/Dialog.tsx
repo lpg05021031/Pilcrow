@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useExitGhost } from '../../lib/motion';
 import { useEscape } from './bits';
+import { ErrorBoundary } from './ErrorBoundary';
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
@@ -78,7 +79,9 @@ export function Dialog({ title, label, onClose, onSubmit, children, footer, widt
             </button>
           </div>
         )}
-        <div className="dialog-body">{children}</div>
+        <div className="dialog-body">
+          <ErrorBoundary label="This dialog">{children}</ErrorBoundary>
+        </div>
         {footer && <div className="dialog-foot">{footer}</div>}
       </div>
     </div>,

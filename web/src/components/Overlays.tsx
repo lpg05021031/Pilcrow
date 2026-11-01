@@ -10,6 +10,7 @@ import { MODES } from './composer/Menus';
 import { Keys, useEscape } from './ui/bits';
 import type { LucideIcon } from 'lucide-react';
 import { SHORTCUTS as K } from '../lib/shortcuts';
+import { Empty } from './ui/Empty';
 
 interface Cmd {
   id: string;
@@ -149,7 +150,7 @@ export function CommandPalette() {
             </div>
           );
         })}
-        {!items.length && <div className="empty">Nothing matches “{q}”.</div>}
+        {!items.length && <Empty title={`Nothing matches “${q}”.`} />}
       </div>
     </Dialog>
   );
