@@ -307,8 +307,16 @@ class MainWindow(QMainWindow):
         panel = self.panel
         if panel is None or not shiboken6.isValid(panel):
             return
-        panel.resize(max(PANEL_MIN, self.panel_host.width()), max(1, self.height()))
-        panel.grab()
+        # A grab lays a hidden widget out as if it were shown, and the window's row would make room
+        # for the closed panel's sheet: the conversation narrowed and widened again (two reflows,
+        # two whole repaints) on every warm-up. The row is held still while the panel is grabbed.
+        row = self.body.row
+        row.setEnabled(False)
+        try:
+            panel.resize(max(PANEL_MIN, self.panel_host.width()), max(1, self.height()))
+            panel.grab()
+        finally:
+            row.setEnabled(True)
         from .panels.changes import lexer_warmer
 
         step = lexer_warmer(store.active_id or "")

@@ -41,7 +41,7 @@ FLING_BUDGET = 0.002
 OPEN_BUDGET = 0.014  # measuring a fold's children before it opens, so the reveal runs on true heights
 SCROLL_BUDGET = 0.008  # exact measuring on a person's scroll or a resize step; the rest follows in the drain
 BLIT_SIDE = 4  # px at each side of the viewport a seam's handle may lie over (4 of its 9)
-BLIT_FOOT = 44  # px at its bottom the composer's fade lies over
+BLIT_FOOT = 48  # px at its bottom other widgets lie over: the composer's fade (44), the Latest pill (18 + 30)
 WARM_MAX = 600  # warm blocks kept before the far ones are cooled regardless of movement
 
 _measurer: Optional[Measurer] = None
@@ -428,8 +428,9 @@ class CanvasView(ViewInput, QAbstractScrollArea):
 
     def scrollContentsBy(self, dx: int, dy: int) -> None:
         """Blit the picture by ``dy``. Qt blits only where no other widget lies over the scrolled rect
-        (else it repaints the whole viewport): the composer's fade lies over the view's bottom and a
-        seam's handle over its sides, so the blit leaves those margins out and they are repainted."""
+        (else it repaints the whole viewport): the composer's fade and the Latest pill lie over the
+        view's bottom and a seam's handle over its sides, so the blit leaves those margins out and
+        they are repainted."""
         if self._silent:
             return
         vp = self.viewport()

@@ -385,25 +385,45 @@ def test_a_scroll_in_the_window_blits_and_repaints_only_what_it_uncovers(app_cli
         vp = tr.view.viewport()
         vb = tr.verticalScrollBar()
         vb.setValue(vb.maximum() // 2)
-        c.sleep(200)
         areas: list = []
+        sizes: list = []
 
         class Paints(QObject):
             def eventFilter(self, obj, e) -> bool:
                 if obj is vp and e.type() == QEvent.Type.Paint:
                     areas.append(sum(r.width() * r.height() for r in e.region()))
+                elif obj is vp and e.type() == QEvent.Type.Resize:
+                    sizes.append(e.size())
                 return False
 
         f = Paints()
         vp.installEventFilter(f)
         try:
-            for _ in range(4):
+            # the window first comes to rest: the jump's paints done, nothing painting for 150 ms
+            c.sleep(150)
+            for _ in range(40):
+                n = len(areas)
+                c.sleep(150)
+                if len(areas) == n:
+                    break
+            areas.clear()
+            sizes.clear()
+            for k in range(8):
+                if k == 4:
+                    tr.view._grew = True  # unseen rows below: the Latest pill shows, over the view
+                    tr._on_latest(True)
+                    c.sleep(50)
+                    areas.clear()
                 vb.setValue(vb.value() - 24)
                 c.sleep(30)
         finally:
             vp.removeEventFilter(f)
+        # nothing may resize the conversation meanwhile (a resize repaints it whole, and once did:
+        # the closed side panel's warm-up made the window's row narrow it and widen it back)
+        assert sizes == [], sizes
         whole = vp.width() * vp.height()
-        assert areas and max(areas) < whole // 2, (areas, whole)
+        assert tr.jump.isVisible(), "the pill stayed for the last four steps"
+        assert len(areas) >= 4 and max(areas) < whole // 2, (areas, whole)
     finally:
         if win is not c.win:
             win.close()

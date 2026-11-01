@@ -264,7 +264,8 @@ flush that moved the scroll repainted the whole viewport, and the same flushes r
 shell (`Shell.place()` ended with `self.update()`, a paint event for every card, tab and file row
 under it). The first had a cause the view did not show: Qt blits a scroll only where no other
 widget lies over the scrolled rect, and the card's frame lay over all of the conversation (as did
-the composer's fade over its bottom and the sidebar seam's handle over its left edge). Now the
+the composer's fade and, up in the history, the Latest pill over its bottom, and the sidebar
+seam's handle over its left edge). Now the
 frame is masked to what it draws, the view blits all but those two margins and repaints them
 (`CanvasView.scrollContentsBy`), and `place()` repaints only the lines of a sheet's shadow that
 moved, the sheets being opaque. Measured with `s_smooth.py window` (a reply of ~96 words, the
