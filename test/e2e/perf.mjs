@@ -23,10 +23,10 @@
 //                       drawn whole: frame intervals, script time per second, long tasks once it is whole
 //   write               a 60 kB Write streamed with its card open (CPU ×4): frame intervals and long tasks
 //   memory              ten 300-turn conversations opened one after another: the heap after a collection
-//   code                a 60 kB TSX block coloured once on screen: no task over 50 ms
+//   code                a 60 kB TSX block coloured on screen (three of them): no task over 50 ms
 //
 // Budgets. Every scenario that takes time is measured three times in a row and its medians are what is
-// checked (thrice); find, history, memory and code once (their figures hold still from run to run).
+// checked (thrice); find, history and memory once (their figures hold still from run to run).
 // BASELINE holds those medians, the median of three runs, on the machine that wrote it (the date is
 // below), and a budget is that times MARGIN: a twofold regression is over it, the noise of runs in a row
 // here under it. Some figures are dominated by noise or quantised, and have a FLOOR instead, the
@@ -606,17 +606,19 @@ async function colour(page, id, minLength) {
  * the first time each is needed, 50–350 ms at a time here, a one-off per pattern and window that
  * slicing cannot split. That first block is reported apart, without a budget.
  */
-async function measureCode(page, warm, code) {
+async function measureCode(page, warm, codes) {
   const cold = await colour(page, 'perf-warm', warm.length - 1);
-  const out = await colour(page, 'perf-code', code.length - 1);
-  Object.assign(
-    out,
-    await page.evaluate((lines) => {
+  let i = 0;
+  const out = await thrice(async () => {
+    const code = codes[i];
+    const c = await colour(page, `perf-code-${i++}`, code.length - 1);
+    const drawn = await page.evaluate(() => {
       const pre = [...document.querySelectorAll('pre[data-hl="1"]')].at(-1);
-      return { lines, coloured: pre.querySelectorAll('.line').length, styled: pre.querySelectorAll('.line span[style*="--shiki"]').length };
-    }, code.split('\n').length),
-  );
-  return { ...out, kB: Math.round(code.length / 1024), cold: { kB: Math.round(warm.length / 1024), ...cold } };
+      return { coloured: pre.querySelectorAll('.line').length, styled: pre.querySelectorAll('.line span[style*="--shiki"]').length };
+    });
+    return { ...c, ...drawn, lines: code.split('\n').length };
+  });
+  return { ...out, kB: Math.round(codes[0].length / 1024), cold: { kB: Math.round(warm.length / 1024), ...cold } };
 }
 
 // ---------------------------------------------------------------- the run
@@ -847,15 +849,18 @@ await scenario('memory', async () => {
 
 await scenario('code', async () => {
   const warm = tsx('Markdown', 'RightPanel', 'SessionView', 'Inbox');
-  const code = sixty();
+  // Three blocks, each a little different so none is coloured from the cache of the one before.
+  const codes = [0, 1, 2].map((i) => `${sixty()}\n// block ${i}`);
   await ctl.call('mock.generate', { id: 'perf-warm', turns: 1, shape: 'mixed' });
   await ctl.call('mock.messages', { id: 'perf-warm', msgs: codeTurn(warm) });
-  await ctl.call('mock.generate', { id: 'perf-code', turns: 1, shape: 'mixed' });
-  await ctl.call('mock.messages', { id: 'perf-code', msgs: codeTurn(code) });
+  for (let i = 0; i < 3; i++) {
+    await ctl.call('mock.generate', { id: `perf-code-${i}`, turns: 1, shape: 'mixed' });
+    await ctl.call('mock.messages', { id: `perf-code-${i}`, msgs: codeTurn(codes[i]) });
+  }
   // To the top of the sidebar, which shows only the most recent rows of a folder.
-  for (const id of ['perf-warm', 'perf-code']) await ctl.call('mock.touch', { id });
+  for (const id of ['perf-warm', 'perf-code-0', 'perf-code-1', 'perf-code-2']) await ctl.call('mock.touch', { id });
   await onPage(async ({ page }) => {
-    const c = await measureCode(page, warm, code);
+    const c = await measureCode(page, warm, codes);
     results.code = c;
     console.log(`  first TSX block in the window (${c.cold.kB} kB, the grammar compiling): coloured in ${c.cold.ms} ms · long tasks ${c.cold.long.n}, max ${c.cold.long.max} ms`);
     console.log(`  a ${c.kB} kB TSX block: every line coloured in ${c.ms} ms (${c.coloured} of ${c.lines} lines, ${c.styled} coloured tokens) · long tasks ${c.long.n}, max ${c.long.max} ms`);
