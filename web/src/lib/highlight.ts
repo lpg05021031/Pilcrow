@@ -22,6 +22,9 @@ const LANGS: Record<string, () => Promise<unknown>> = {
   swift: () => import('shiki/langs/swift.mjs'),
   c: () => import('shiki/langs/c.mjs'),
   cpp: () => import('shiki/langs/cpp.mjs'),
+  // Listed so the bundler gives the C++ macro grammar a chunk of its own: folded into C++, which is
+  // the only grammar using it, the two make one 640 kB chunk. They still load together.
+  'cpp-macro': () => import('shiki/langs/cpp-macro.mjs'),
   csharp: () => import('shiki/langs/csharp.mjs'),
   ruby: () => import('shiki/langs/ruby.mjs'),
   php: () => import('shiki/langs/php.mjs'),

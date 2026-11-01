@@ -1,16 +1,18 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { GitCompare, FolderTree, SquareTerminal, AppWindow, ListChecks, Info, X, History } from 'lucide-react';
 import { useStore, setUi, type PanelTab } from '../lib/store';
 import type { SessionSummary } from '../lib/types';
 import { EASE, reducedMotion } from '../lib/motion';
 import { ChangesPanel } from './panels/ChangesPanel';
 import { FilesPanel } from './panels/FilesPanel';
-import { TerminalPanel } from './panels/TerminalPanel';
 import { PreviewPanel } from './panels/PreviewPanel';
 import { TasksPanel } from './panels/TasksPanel';
 import { InfoPanel } from './panels/InfoPanel';
 import { HistoryPanel } from './panels/HistoryPanel';
 import type { LucideIcon } from 'lucide-react';
+
+// xterm is a third of a megabyte and only this tab uses it: it loads the first time the tab opens.
+const TerminalPanel = lazy(() => import('./panels/TerminalPanel').then((m) => ({ default: m.TerminalPanel })));
 
 const TABS: { id: PanelTab; label: string; icon: LucideIcon; key: string }[] = [
   { id: 'changes', label: 'Changes', icon: GitCompare, key: '1' },
@@ -83,7 +85,9 @@ export function RightPanel({ session }: { session: SessionSummary }) {
         )}
         {mounted.terminal && (
           <div className="panel-keep" style={{ display: ui.panelTab === 'terminal' ? 'flex' : 'none' }}>
-            <TerminalPanel session={session} cwd={cwd} visible={ui.panelTab === 'terminal'} />
+            <Suspense fallback={null}>
+              <TerminalPanel session={session} cwd={cwd} visible={ui.panelTab === 'terminal'} />
+            </Suspense>
           </div>
         )}
         {ui.panelTab === 'preview' && <PreviewPanel session={session} />}

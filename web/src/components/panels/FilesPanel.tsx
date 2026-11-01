@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useRef, useState, createContext, useContext } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, createContext, useContext } from 'react';
 import { ChevronRight, File as FileIcon, Folder, FolderOpen, RefreshCw, X, Save, PanelLeft, Eye, EyeOff, ExternalLink, AtSign, BookOpen, PencilLine, Columns2, RotateCw } from 'lucide-react';
 import { useStore, call, toast, confirmAction, insertIntoComposer, bumpFs } from '../../lib/store';
 import { FileTouches, useFileHistory } from '../FileTouches';
 import { Markdown } from '../Markdown';
 import type { FileTouch, SessionSummary } from '../../lib/types';
 import { basename, bytes, relPath, dirname } from '../../lib/format';
-import { Editor } from './Editor';
 import { Spinner, Seg } from '../ui/bits';
 import type { FileRead, FileWrite } from '../../lib/types';
 import { errText } from '../../lib/format';
@@ -40,6 +39,9 @@ interface FilesState {
   showTree: boolean;
   showHidden: boolean;
 }
+
+// CodeMirror is most of a megabyte and only an open file needs it: it loads with the first one.
+const Editor = lazy(() => import('./Editor').then((m) => ({ default: m.Editor })));
 
 const perCwd = new Map<string, FilesState>();
 const dirCache = new Map<string, Entry[]>();
@@ -225,18 +227,26 @@ export function FilesPanel({ session, cwd }: { session: SessionSummary; cwd: str
             ) : (
               <div className={`doc-area${isDoc(active.path) ? ` ${docView(active)}` : ' edit'}`}>
                 {(!isDoc(active.path) || docView(active) !== 'preview') && (
-                  <Editor
-                    key={active.path}
-                    path={active.path}
-                    doc={active.doc === active.saved ? active.saved : active.doc}
-                    line={line.line}
-                    nonce={line.nonce}
-                    onChange={(text) => update((s) => ({ ...s, tabs: s.tabs.map((t) => (t.path === active.path ? { ...t, doc: text } : t)) }))}
-                    onSave={() => {
-                      const cur = perCwd.get(cwd)?.tabs.find((t) => t.path === active.path);
-                      if (cur) save(cur);
-                    }}
-                  />
+                  <Suspense
+                    fallback={
+                      <div className="empty">
+                        <Spinner /> Opening…
+                      </div>
+                    }
+                  >
+                    <Editor
+                      key={active.path}
+                      path={active.path}
+                      doc={active.doc === active.saved ? active.saved : active.doc}
+                      line={line.line}
+                      nonce={line.nonce}
+                      onChange={(text) => update((s) => ({ ...s, tabs: s.tabs.map((t) => (t.path === active.path ? { ...t, doc: text } : t)) }))}
+                      onSave={() => {
+                        const cur = perCwd.get(cwd)?.tabs.find((t) => t.path === active.path);
+                        if (cur) save(cur);
+                      }}
+                    />
+                  </Suspense>
                 )}
                 {docKind(active.path) === 'md' && docView(active) !== 'edit' && (
                   <div className="doc-preview" key={`p-${active.path}`}>
