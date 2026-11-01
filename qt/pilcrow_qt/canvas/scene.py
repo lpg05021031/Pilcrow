@@ -68,6 +68,7 @@ class Block:
         "warm",
         "indent",
         "scene",
+        "paint_failed",
     )
 
     def __init__(self, key: str) -> None:
@@ -84,6 +85,7 @@ class Block:
         self.warm = False
         self.indent = 0
         self.scene: Optional[Scene] = None
+        self.paint_failed = False  # its painter raised once: logged then, not on every frame after
 
     def mt(self) -> int:
         return self.MT

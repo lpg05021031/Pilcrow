@@ -719,12 +719,7 @@ class CanvasView(ViewInput, QAbstractScrollArea):
             if st.focus is not None and self.hasFocus():
                 self._paint_focus_ring(p, rect, st)
         except Exception:  # one row's painter must not blank the frame
-            if not getattr(b, "_paint_failed", False):
-                log.warning("%s could not paint", b.key, exc_info=True)
-                try:
-                    b._paint_failed = True  # type: ignore[attr-defined]
-                except AttributeError:
-                    pass
+            self._paint_failed(b)
             p.setPen(QColor(st.t.err))
             p.drawText(
                 rect.adjusted(4, 0, 0, 0),
@@ -732,6 +727,13 @@ class CanvasView(ViewInput, QAbstractScrollArea):
                 "could not draw this row",
             )
         p.restore()
+
+    @staticmethod
+    def _paint_failed(b: Block) -> None:
+        """A painter raised: log it the first time only (it would raise again on every frame)."""
+        if not b.paint_failed:
+            b.paint_failed = True
+            log.warning("%s could not paint", b.key, exc_info=True)
 
     def _paint_focus_ring(self, p: QPainter, rect: QRect, st: PaintState) -> None:
         """The keyboard focus: a ring around the target (``:focus-visible``), outside its box."""
@@ -758,7 +760,7 @@ class CanvasView(ViewInput, QAbstractScrollArea):
             try:
                 b.paint(pp, 0, 0, rect.width(), bst)
             except Exception:  # a painter that trips leaves the canvas colour, not a hole
-                log.warning("%s could not paint", b.key, exc_info=True)
+                self._paint_failed(b)
             pp.end()
             self.m.pixmaps.put(key, pm)
         p.drawPixmap(rect.topLeft(), pm)

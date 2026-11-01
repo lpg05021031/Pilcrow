@@ -460,3 +460,50 @@ def test_hover_repaints_the_targets_and_a_drag_the_rows_it_changed(view):
     assert moves and max(moves) <= vp.width() * para.h, (moves, vp.width() * para.h)
     assert user.key not in painted, "an unselected row paints from its cached pixmap"
     v.clear_selection()
+
+
+def test_a_painter_that_raises_logs_once_and_the_rest_of_the_frame_paints(app, caplog):
+    """DESIGN §6.6: one row's painter raising neither blanks the frame nor floods the log."""
+    import logging
+
+    from pilcrow_qt.canvas.scene import Block, Scene
+    from pilcrow_qt.canvas.view import CanvasView
+
+    painted: List[str] = []
+
+    class Row(Block):
+        __slots__ = ()
+
+        def estimate(self, width, m):
+            return 40
+
+        @property
+        def static(self) -> bool:
+            return False  # painted every frame, not from a cached pixmap
+
+        def paint(self, p, x, y, w, st):
+            if self.key == "boom":
+                raise ValueError("a painter bug")
+            painted.append(self.key)
+
+    scene = Scene()
+    v = CanvasView(scene)
+    v.resize(600, 400)
+    v.begin()
+    try:
+        for k in ("above", "boom", "below"):
+            scene.root.append(Row(k))
+    finally:
+        v.end()
+    try:
+        with caplog.at_level(logging.WARNING, logger="pilcrow_qt.canvas.view"):
+            v.show()
+            pump(30)
+            painted.clear()
+            for _ in range(10):
+                v.viewport().repaint()
+        failed = [r for r in caplog.records if "could not paint" in r.getMessage()]
+        assert len(failed) == 1 and scene.block("boom").paint_failed, failed
+        assert painted.count("above") == 10 and painted.count("below") == 10, painted
+    finally:
+        v.close()
