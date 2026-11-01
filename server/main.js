@@ -451,7 +451,7 @@ export async function start({ shell = 'none', port, quiet = false, onQuit, heart
   const listChanged = debounce(() => broadcast('sessions.changed', {}), LIST_CHANGED_MS);
   bus.on('msgs', (d) => broadcast('session.msgs', d));
   bus.on('state', (d) => broadcast('session.state', d));
-  bus.on('permission', (d) => broadcast('session.permission', d));
+  bus.on('permission', (d) => broadcast('session.permission', { id: d.id, request: d.shown })); // the input cut as in the state
   bus.on('permission-resolved', (d) => broadcast('session.permissionResolved', d));
   bus.on('list-changed', listChanged);
   snapshots.events.on('step', (d) => broadcast('timeline.step', d));
