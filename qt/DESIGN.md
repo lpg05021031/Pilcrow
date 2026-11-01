@@ -55,7 +55,7 @@ qt/pilcrow_qt/canvas/
     thinking.py   ThinkingBlock (head, peek, body)
     tool.py       ToolBlock (head), AgentChildren, the permission and special islands
     bodies.py     the card bodies per tool, built as node trees; codehtml.py: code and diffs
-    fold.py       FoldGroup (work fold head), Chapters, ChapterGroup, Explore, Steps, Flat
+    fold.py       FoldGroup (work fold head), Explore, Steps, Flat
     misc.py       notices, dividers, results, the working line, SkeletonBlock
     note.py       a helper's note in a lead's conversation
     island.py     IslandBlock (a real QWidget placed by the engine)
@@ -134,10 +134,11 @@ group clips its content from the bottom, as the web's height transition does. Gr
 always open (an ItemsUnit, a tool body group with no head) have `head_h = 0`, `reveal = 1`.
 
 Kinds of group: `UnitGroup` (one unit of the conversation: a stretch of plain items or a work
-fold), `FoldGroup` (the work fold with its head), `ChapterGroup`, `ExploreGroup`, `StepsGroup`,
+fold), `FoldGroup` (the work fold with its head), `ExploreGroup`, `StepsGroup`,
 `ToolBodyGroup` (a tool card's body, incl. an agent's children as nested blocks), `IslandGroup`.
-Depth is at most four: root → UnitGroup/FoldGroup → ChapterGroup/StepsGroup → ToolBodyGroup →
-(agent children) blocks.
+Depth is at most four: root → UnitGroup/FoldGroup → StepsGroup → ToolBodyGroup → (agent children)
+blocks. A work fold holds steps only: `group_turns` ends a stretch of work at every paragraph Claude
+writes, so a fold never holds a paragraph to make a heading of (`test_lib_units` proves it).
 
 ### 2.4 Scene
 
@@ -260,7 +261,7 @@ A person's scroll and a resize step measure exactly under an 8 ms deadline: what
 exactly, the rest shows as placeholder bars for a frame or two while the drain finishes it. A
 commit from the model (new output, a toggle) has no deadline: what it shows must be right.
 
-Shapes are lazy twice over: a work fold builds its inside (chapters, steps, cards) the first time it
+Shapes are lazy twice over: a work fold builds its inside (steps, cards) the first time it
 is opened, revealed by a search, or scrolled into view while open, and carries a guess (a row per
 step) until then; a finished text splits into its paragraphs the first time it comes near the
 screen, and is one estimate until then. Opening a 600-turn conversation builds its units and
@@ -296,7 +297,7 @@ Heads (verb · target · meta) are `QStaticText`s cached on the block — glyph 
 drawn in one call. Icons are `icons.pixmap` (already cached).
 
 The decorations QTextDocument cannot draw (the inline-code pill, the rule beside a quote, the code
-well, table hairlines, the rail of a chapter, the breathing mark) are painted from the layout's
+well, table hairlines, the rail of a fold, the breathing mark) are painted from the layout's
 geometry by the functions ported from `items.py` (`_pills`, `table_rect`, `_table_rules`,
 `_block_height`). The padding hacks for QTextBrowser (U+202F pads, negative viewport margins) go:
 the pill and the first-line leading are drawn by the painter at the right place.
@@ -403,8 +404,8 @@ Cost per update: O(live turn), typically under 0.5 ms.
 
 ### 7.2 Shapes
 
-The shape of a work fold (chapters, "Explored" runs, steps) uses the pure helpers that exist today
-(`chapters_of`, `group_items`, `is_quiet`, `tally`, `work_summary`). A **cold** UnitGroup does not
+The shape of a work fold ("Explored" runs, steps) uses the pure helpers of `lib/folds.py`
+(`group_items`, `is_quiet`, `work_summary`). A **cold** UnitGroup does not
 compute its shape: its height is the fold head's fixed height when closed, or the sum of its items'
 estimates when open. The shape is computed when the group warms, and marked stale (not recomputed)
 when the view mode changes, so a view-mode switch costs O(warm groups) — about ten milliseconds —
@@ -482,11 +483,11 @@ all, Copy link / path.
 
 ### 8.4 Groups opening and closing
 
-`view.toggle(group)`: `group.open = not open`; if `reduced_motion`, `reveal` jumps; otherwise a
-`QVariantAnimation` on `reveal` (spring curves from `theme.py`, 240–420 ms by content height, the
+`view.toggle_group(group)`: `group.open = not open`; if `reduced_motion`, `reveal` jumps; otherwise
+a `clock.Tween` on `reveal` (spring curves from `theme.py`, 240–420 ms by content height, the
 `ease_exit` curve when closing) whose each frame is a mutation: one Fenwick update on each level up
 to the root, anchor correction, `update(from group's y)`. The chevron angle is `90° × reveal`.
-Fold state is stored per key in the Scene (replacing `turn_open` / `chapter_open`).
+Fold state is stored per key in the Scene (replacing `turn_open`).
 
 ### 8.5 Find
 
@@ -644,7 +645,7 @@ Back-of-envelope from before the work; the measurements are in `PERF.md` §5 and
 Phases 1 and 2 have landed (2.10.0): `canvas/` with Fenwick, Scene, anchor, estimate, clock, paint,
 nodes, the prose / user / thinking / notice / result / working blocks, streaming append, the pixmap
 cache, pixel scrolling, follow and "Latest", the remembered place, islands for the empty card; the
-work folds (`FoldGroup`, `ChapterGroup`, `Explore`, `Steps`, `Flat`), `ToolBlock` with every body
+work folds (`FoldGroup`, `Explore`, `Steps`, `Flat`), `ToolBlock` with every body
 painter (Bash, Read, Edit/Write diff, Notebook, Grep/Glob, Todo, Task, Agent with nested children,
 Web, Workflow, generic/MCP, errors with fixes), the permission / question / plan islands, orphans.
 `canvas.transcript.Transcript` replaced `widgets.transcript.view.Transcript` behind the same public

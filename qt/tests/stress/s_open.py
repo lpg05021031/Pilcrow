@@ -13,13 +13,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", ".."))
 
-from harness import Client, start_mock  # noqa: E402
+from harness import Client, free_port, start_mock  # noqa: E402
 
 from pilcrow_qt import theme  # noqa: E402
 
 
 def main(turns: int) -> None:
-    port = 5631
+    port = free_port()
     mock = start_mock(port, turns)
     try:
         c = Client(port)

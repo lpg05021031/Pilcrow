@@ -7,8 +7,6 @@ from datetime import datetime
 
 from harness import app_client, mock_server
 
-MOCK_PORT = 5371
-
 
 def _overview(c):
     c.store.show_page("overview")

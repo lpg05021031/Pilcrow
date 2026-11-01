@@ -21,7 +21,6 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 
 FULL = os.environ.get("PILCROW_PERF") == "1"
-MOCK_PORT = 5392
 QUICK = (
     "open_cold",
     "fold_toggle",
@@ -54,7 +53,7 @@ def results(tmp_path_factory):
     out = tmp_path_factory.mktemp("bench") / "bench.json"
     names = QUICK + (MORE if FULL else ())
     cmd = [sys.executable, str(ROOT / "qt" / "tests" / "bench" / "run.py"), "--heavy", "120", "--mixed", "200"]
-    cmd += ["--port", str(MOCK_PORT), "--only", ",".join(names), "--out", str(out)]
+    cmd += ["--only", ",".join(names), "--out", str(out)]
     proc = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
     assert proc.returncode == 0, proc.stderr[-4000:]
     scenarios = json.loads(out.read_text(encoding="utf-8"))["scenarios"]

@@ -5,8 +5,6 @@ from __future__ import annotations
 
 from harness import app_client, mock_server
 
-MOCK_PORT = 5435
-
 
 def test_ring_follows_the_figure_and_says_so_after_a_compact(app_client):
     c = app_client

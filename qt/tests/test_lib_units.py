@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import itertools
+
 from pilcrow_qt.lib.transcript_model import Item, NoticeItem, ResultItem, TextItem, ThinkingItem, ToolItem, UserItem
 from pilcrow_qt.lib.units import group_turns, live_turn_folds
 
@@ -95,3 +97,15 @@ def test_true_when_the_tail_is_work_through_notices_false_when_it_is_words():
     assert live_turn_folds([user(), tool(), text()]) is False
     assert live_turn_folds([user()]) is False
     assert live_turn_folds([]) is False
+
+
+def test_a_work_unit_never_holds_what_claude_says():
+    """Every text item ends the run of work around it, so a fold has steps and never a paragraph: the
+    canvas folds hold no headings of their own (the chapters of an older design)."""
+    makers = (user, text, tool, thinking, notice, lambda: notice("divider"), result)
+    for seq in itertools.product(range(len(makers)), repeat=5):
+        items = [makers[i]() for i in seq]
+        for running in (False, True):
+            for u in group_turns(items, running):
+                if u.kind == "work":
+                    assert all(it.kind != "text" for it in u.work), (seq, [it.kind for it in u.work])

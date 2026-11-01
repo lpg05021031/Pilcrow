@@ -6,7 +6,6 @@ from __future__ import annotations
 from harness import app_client, mock_server
 from PySide6.QtGui import QFontInfo, QFontMetrics
 
-MOCK_PORT = 5393
 SID = "sess-login"
 
 

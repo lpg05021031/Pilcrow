@@ -7,14 +7,16 @@
         c.wait_until(lambda: c.store.sessions_loaded)
         ...
 
-Each test module should pick its own mock port (``MOCK_PORT`` module attribute) so modules can run
-in parallel. ``c.call`` talks to the mock through the client's own socket (the ``mock.*`` methods
-reset it, set the streaming pace, touch a session).
+Each test module gets a mock of its own on a free port the system picks (``free_port``), so nothing
+else listening on the machine can collide with a run and modules can run in parallel. ``c.call``
+talks to the mock through the client's own socket (the ``mock.*`` methods reset it, set the
+streaming pace, touch a session).
 """
 
 from __future__ import annotations
 
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -31,6 +33,13 @@ if sys.platform == "win32":
     os.environ.setdefault("QT_QPA_FONTDIR", os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"))
 
 
+def free_port() -> int:
+    """A port no one listens on: the one the system gives a socket bound to port 0."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
 def start_mock(port: int, long: int = 60) -> subprocess.Popen:
     p = subprocess.Popen(
         ["node", str(ROOT / "test" / "mock" / "mock-server.mjs"), str(port)],
@@ -40,6 +49,8 @@ def start_mock(port: int, long: int = 60) -> subprocess.Popen:
         stderr=subprocess.STDOUT,
     )
     for _ in range(150):
+        if p.poll() is not None:  # it exited: whatever answers on the port is not this mock
+            break
         try:
             with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/hello", timeout=1):
                 return p
@@ -191,7 +202,7 @@ class Client:
 
 @pytest.fixture(scope="module")
 def mock_server(request):
-    port = getattr(request.module, "MOCK_PORT", 5330)
+    port = free_port()
     p = start_mock(port, getattr(request.module, "MOCK_LONG", 60))
     yield port
     p.kill()

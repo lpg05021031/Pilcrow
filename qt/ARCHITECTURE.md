@@ -18,7 +18,7 @@ qt/
     store.py           app state + session actions (port of web/src/lib/store.ts)
     lib/               pure Python ports of web/src/lib (no Qt): transcript_model, units,
                        tools_meta, fmt, partial_json, ansi, fuzzy, workflow, folds (what a
-                       stretch of work is called, chapters, tallies, quiet steps)
+                       stretch of work is called, quiet steps)
     theme.py           tokens for dark/light (port of styles/tokens.css); the palette they map onto,
                        tint() for a widget's own roles, a static QSS on palette roles
     icons.py           icon(name, color, size) from assets/icons/*.svg (Lucide, currentColor)

@@ -161,9 +161,9 @@ def run_scale(turns: int = 600) -> str:
 
 def run_window() -> str:
     """The real window: who repaints while a reply streams, and the panel toggle's frames."""
-    from harness import Client, start_mock
+    from harness import Client, free_port, start_mock
 
-    port = 5661
+    port = free_port()
     mock = start_mock(port, 400)
     try:
         c = Client(port)

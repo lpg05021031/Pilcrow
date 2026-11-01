@@ -8,7 +8,6 @@ from typing import Any, Dict
 from harness import app_client, mock_server
 from PySide6.QtWidgets import QLabel
 
-MOCK_PORT = 5391
 SID = "sess-login"
 
 DIFF_FILES = [

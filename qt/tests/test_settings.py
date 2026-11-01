@@ -7,8 +7,6 @@ from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QLabel, QLineEdit, QPlainTextEdit, QPushButton
 
-MOCK_PORT = 5381
-
 
 def _labels(c, parent=None):
     """Every visible line of text: QLabels and the browser-like Text widgets the dialogs lay type on."""

@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 from harness import app_client, mock_server
 
-MOCK_PORT = 5341
 MOCK_LONG = 120
 
 ROOT = Path(__file__).resolve().parents[2]

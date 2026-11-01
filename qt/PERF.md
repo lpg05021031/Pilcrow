@@ -176,7 +176,7 @@ a QWidget except the rare **islands** (a permission prompt, a question form, a p
 are real widgets the canvas positions.
 
 Blocks are grouped the way the conversation is: a **Group** block holds a child list of its own
-(a work fold holds its chapters and steps; a tool card holds its body; an agent card holds its
+(a work fold holds its steps; a tool card holds its body; an agent card holds its
 children). Groups nest at most four deep. Every list, at every level, keeps its children's heights in
 a **Fenwick tree**, so the y of block *i* is a prefix sum in O(log n), the block under a y is a binary
 descent in O(log n), and one height change is O(log n). The whole conversation is positioned by
@@ -214,7 +214,7 @@ recomputes only the live turn, diffs its blocks by key and `rev`, and updates on
 ### 4.4 Folds are one number
 
 A fold is a Group whose visible height is `reveal × content height`. Opening or closing runs a
-`QVariantAnimation` on `reveal` with the spring curves in `theme.py`; each frame updates one Fenwick
+`clock.Tween` on `reveal` with the spring curves in `theme.py`; each frame updates one Fenwick
 entry, fixes the scroll anchor and repaints from the fold down. The content keeps being painted
 through the clip while it shrinks, as on the web. The chevron turns on the same clock. There is no
 second height to get wrong: the content's height is the sum of its children's measured heights.

@@ -1,6 +1,6 @@
 """Measure the client on a long conversation, offscreen, against the mock server.
 
-    python qt/tests/perf.py [--turns 400] [--port 5323]
+    python qt/tests/perf.py [--turns 400]
 
 Prints: time to open a conversation of N turns (RPC answer → rows on screen), the time the first
 paint after opening takes, average frame cost while a reply streams, and the process CPU share
@@ -26,13 +26,13 @@ if sys.platform == "win32":
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--turns", type=int, default=400)
-    ap.add_argument("--port", type=int, default=5323)
     args = ap.parse_args()
-    from harness import Client, start_mock
+    from harness import Client, free_port, start_mock
 
-    mock = start_mock(args.port, args.turns)
+    port = free_port()
+    mock = start_mock(port, args.turns)
     try:
-        c = Client(args.port)
+        c = Client(port)
         c.wait_until(lambda: c.store.sessions_loaded, 15, "sessions")
         c.call("mock.pace", {"ms": 8})
         # ---- open a long conversation

@@ -8,7 +8,6 @@ import time
 from harness import app_client, mock_server
 from PySide6.QtGui import QFontInfo
 
-MOCK_PORT = 5394
 SID = "sess-login"
 
 TODO_MSGS = [

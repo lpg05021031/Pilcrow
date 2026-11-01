@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from harness import app_client, mock_server
 
-MOCK_PORT = 5372
-
 
 def _ready(c):
     c.wait_until(lambda: c.store.sessions_loaded and len(c.store.sessions) >= 5, 10, "sessions")
