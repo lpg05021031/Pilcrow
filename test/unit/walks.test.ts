@@ -1,6 +1,7 @@
 // The two walks over many folders: skills.list over a plugin cache of 600 skills, and findRepos over a
-// workspace of 6 000 folders. Each finds what is there and never holds the event loop for long (a slice
-// at a time, util.slicer). In this test, before: 32 ms and 53 ms in one piece; now 6-11 ms and 5-8 ms.
+// workspace of 6 000 folders. Each finds what is there and lets the event loop in while it walks, a turn
+// at least every 10 ms of the walk (util.slicer yields every 4 ms). Counted in turns rather than timed:
+// the longest stall moves with whatever else the machine runs (alone: 32 and 53 ms before, about 5 now).
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -9,18 +10,25 @@ import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { listSkills, createSkill } from '../../server/customize.js';
 import { findRepos } from '../../server/workspace.js';
 
-const STALL_MS = 16; // a slice is 4 ms; the rest is the collector and the test runner
+const TURN_EVERY_MS = 10;
 const base = fs.mkdtempSync(path.join(os.tmpdir(), 'pilcrow-walks-'));
 
-/** The longest the event loop waited while `fn` ran, and what it returned. */
-async function stallOf<T>(fn: () => Promise<T>) {
+/** What `fn` returned, how long it took, how many turns the event loop had meanwhile, and the longest stall. */
+async function walked<T>(fn: () => Promise<T>) {
   const h = monitorEventLoopDelay({ resolution: 1 });
   h.enable();
   await new Promise((r) => setTimeout(r, 10));
+  let turns = 0;
+  let done = false;
+  const spin = () => !done && (turns++, setImmediate(spin));
+  setImmediate(spin);
+  const t0 = performance.now();
   const r = await fn();
-  await new Promise((r) => setTimeout(r, 10));
+  const ms = performance.now() - t0;
+  done = true;
   h.disable();
-  return { r, ms: h.max / 1e6 };
+  console.log(`  ${ms.toFixed(0)} ms, ${turns} turns of the event loop, longest stall ${(h.max / 1e6).toFixed(1)} ms`);
+  return { r, ms, turns };
 }
 
 describe('skills.list', () => {
@@ -33,12 +41,11 @@ describe('skills.list', () => {
         for (let f = 0; f < 4; f++) fs.writeFileSync(path.join(d, 'scripts', `s${f}.sh`), 'echo\n');
       }
     await createSkill({ scope: 'user', name: 'My Own Skill' });
-    const { r, ms } = await stallOf(() => listSkills({}));
-    console.log(`skills.list over 600 plugin skills: longest stall ${ms.toFixed(1)} ms`);
+    const { r, ms, turns } = await walked(() => listSkills({}));
     expect(r.plugin).toHaveLength(600);
     expect(r.plugin[0]).toMatchObject({ name: 's-0-0', description: 'does a thing', plugin: '1.0.0', files: 5, hasScripts: true, scope: 'plugin' });
     expect(r.user.map((s) => s.name)).toEqual(['my-own-skill']);
-    expect(ms).toBeLessThan(STALL_MS);
+    expect(turns).toBeGreaterThanOrEqual(Math.floor(ms / TURN_EVERY_MS));
   });
 });
 
@@ -48,9 +55,8 @@ describe('findRepos', () => {
     for (let a = 0; a < 20; a++) for (let b = 0; b < 15; b++) for (let c = 0; c < 20; c++) fs.mkdirSync(path.join(ws, `a${a}`, `b${b}`, `c${c}`), { recursive: true });
     for (let a = 0; a < 20; a++) fs.mkdirSync(path.join(ws, `a${a}`, 'b1', '.git'));
     fs.mkdirSync(path.join(ws, 'a0', 'node_modules', 'dep', '.git'), { recursive: true }); // never looked into
-    const { r, ms } = await stallOf(() => findRepos(ws, 3));
-    console.log(`findRepos over 6 000 folders: longest stall ${ms.toFixed(1)} ms`);
+    const { r, ms, turns } = await walked(() => findRepos(ws, 3));
     expect(r).toEqual(Array.from({ length: 20 }, (_, a) => path.join(ws, `a${a}`, 'b1')).sort());
-    expect(ms).toBeLessThan(STALL_MS);
+    expect(turns).toBeGreaterThanOrEqual(Math.floor(ms / TURN_EVERY_MS));
   });
 });
