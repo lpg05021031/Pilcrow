@@ -3,12 +3,11 @@ import { Plus, Play, Ellipsis, Pencil, Trash, CircleCheck, CircleAlert, CircleSt
 import { useStore, call, openSession, setUi, toast, confirmAction, openJob, setDialog } from '../lib/store';
 import { copyText } from './ui/bits';
 import type { InboxItem, Schedule } from '../lib/types';
-import { basename, cost, duration, timeAgo, plural, tildify } from '../lib/format';
+import { basename, clock, cost, duration, timeAgo, plural, tildify } from '../lib/format';
 import { MenuButton } from './ui/Popover';
 import { Switch, Spinner, useNow, Mark } from './ui/bits';
 import { ScheduleDialog } from './ScheduleDialog';
 
-const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
 function dayLabel(ms: number, now: number) {
   const d = new Date(ms);
   const t = new Date(now);

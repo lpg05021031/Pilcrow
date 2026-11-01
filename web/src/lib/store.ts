@@ -3,12 +3,11 @@
 import { create } from 'zustand';
 import { rpc } from './rpc';
 import { TranscriptModel } from './transcript';
-import { setHome } from './format';
+import { setHome, plural, errText } from './format';
 import { EASE_EXIT, reducedMotion, yieldToEvents } from './motion';
 import type { AppInfo, Config, SessionState, SessionSummary, PermissionMode, Effort, RawMsg, GatewayModels, TimelineStep, PermissionDecision, DispatchJob, DispatchRun, DispatchDelta, Playbook } from './types';
 import type { RepoEntry } from './types';
 import type { PilcrowNative } from './globals';
-import { errText } from './format';
 
 export type PanelTab = 'changes' | 'files' | 'terminal' | 'preview' | 'tasks' | 'history' | 'info';
 
@@ -322,7 +321,7 @@ export function quitApp() {
   if (native()) return quitNow();
   const busy = useStore.getState().sessions.filter((s) => s.status === 'running' || s.status === 'requires_action').length;
   if (!busy) return quitNow();
-  setDialog('confirm', { title: 'Quit Pilcrow?', body: `Claude is still working in ${busy} session${busy > 1 ? 's' : ''}. Quitting stops ${busy > 1 ? 'them' : 'it'}.`, confirm: 'Quit', danger: true, onConfirm: quitNow });
+  setDialog('confirm', { title: 'Quit Pilcrow?', body: `Claude is still working in ${plural(busy, 'session')}. Quitting stops ${busy > 1 ? 'them' : 'it'}.`, confirm: 'Quit', danger: true, onConfirm: quitNow });
 }
 
 // ---- desktop notifications

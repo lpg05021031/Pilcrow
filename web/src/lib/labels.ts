@@ -3,7 +3,7 @@
 // Pure, so they can be tested without drawing anything.
 import type { Item, ToolItem } from './transcript';
 import { str } from './tools';
-import { basename, truncate } from './format';
+import { basename, truncate, plural } from './format';
 
 /** What Claude is doing right now, for the fold line of a turn that is still running. */
 export function liveLabel(work: Item[]): string | null {
@@ -150,15 +150,15 @@ export function tally(steps: Item[]) {
     else other++;
   }
   const parts: string[] = [];
-  if (edits) parts.push(`${edits} edit${edits > 1 ? 's' : ''}`);
-  if (commands) parts.push(`${commands} command${commands > 1 ? 's' : ''}`);
-  if (reads) parts.push(`${reads} read${reads > 1 ? 's' : ''}`);
+  if (edits) parts.push(plural(edits, 'edit'));
+  if (commands) parts.push(plural(commands, 'command'));
+  if (reads) parts.push(plural(reads, 'read'));
   if (searches) parts.push(`${searches} search${searches > 1 ? 'es' : ''}`);
-  if (agents) parts.push(`${agents} agent${agents > 1 ? 's' : ''}`);
-  if (helpers) parts.push(`${helpers} helper step${helpers > 1 ? 's' : ''}`);
-  if (asks) parts.push(`${asks} question${asks > 1 ? 's' : ''}`);
-  if (plans) parts.push(`${plans} plan${plans > 1 ? 's' : ''}`);
-  if (mcp) parts.push(`${mcp} connector call${mcp > 1 ? 's' : ''}`);
+  if (agents) parts.push(plural(agents, 'agent'));
+  if (helpers) parts.push(plural(helpers, 'helper step'));
+  if (asks) parts.push(plural(asks, 'question'));
+  if (plans) parts.push(plural(plans, 'plan'));
+  if (mcp) parts.push(plural(mcp, 'connector call'));
   if (other) parts.push(`${other} other`);
   const first = tools[0]?.startTs;
   const last = tools[tools.length - 1];
@@ -213,4 +213,19 @@ export function parseNotes(text: string) {
   const rest = text.slice(last).trim();
   if (rest) tail.push(rest);
   return { parts, tail: tail.join(' ') };
+}
+
+const KANA = /[\u3040-\u30ff\u31f0-\u31ff]/;
+const HAN = /[\u3400-\u9fff\uf900-\ufaff]/;
+/**
+ * The language a message is marked with, so the browser picks the right CJK glyph forms, line
+ * breaking and voice: Japanese when it has kana; Chinese when it has Han characters only, in the
+ * reader's own Chinese locale when they have one, else Traditional (the face the interface is set
+ * in), with no region; nothing for the rest.
+ */
+export function langOf(text: string, locale: string = navigator.language): string | undefined {
+  const head = text.slice(0, 400);
+  if (KANA.test(head)) return 'ja';
+  if (!HAN.test(head)) return undefined;
+  return /^zh\b/i.test(locale) ? locale : 'zh-Hant';
 }

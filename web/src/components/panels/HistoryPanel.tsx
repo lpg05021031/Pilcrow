@@ -2,14 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { History, ChevronRight, Undo2, RotateCcw, ArrowUpRight, ArrowDownToLine } from 'lucide-react';
 import { useStore, call, setTimeline, confirmAction, toast, bumpFs, openFile } from '../../lib/store';
 import type { DiffFile, SessionSummary, TimelineStep } from '../../lib/types';
-import { basename, dirname, plural, duration } from '../../lib/format';
+import { basename, clock, dirname, plural, duration } from '../../lib/format';
 import { DiffView } from '../Code';
 import { Collapse } from '../ui/Collapse';
 import { revealItem } from '../Transcript';
 import { Spinner, useNow, Mark } from '../ui/bits';
 
-const clock = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-const clockS = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 
 function stepTitle(s: TimelineStep) {
   switch (s.kind) {
@@ -240,7 +238,7 @@ function Scrubber({ steps, sel, onPick, now }: { steps: TimelineStep[]; sel: num
   const selIdx = sel === null ? n : steps.findIndex((s) => s.n === sel);
   const hi = hover === null ? selIdx : hover;
   const hiStep = hi >= n ? null : steps[hi];
-  const label = hiStep ? `${clockS(hiStep.at)} · ${stepTitle(hiStep)}` : 'Now';
+  const label = hiStep ? `${clock(hiStep.at, true)} · ${stepTitle(hiStep)}` : 'Now';
   const first = steps[0].at;
   return (
     <div className={`tl-scrub${drag ? ' dragging' : ''}`} ref={ref} onPointerDown={onDown} onPointerMove={(e) => setHover(nearest(e.clientX))} onPointerLeave={() => setHover(null)} role="slider" aria-valuemin={0} aria-valuemax={n} aria-valuenow={selIdx} aria-label="Timeline">
@@ -285,7 +283,7 @@ function StepRow({ step, sessionId, cwd, selected, isLast, onPick }: { step: Tim
           <span className="tl-title ellipsis">{stepTitle(step)}</span>
           <span className="tl-sub">
             <span>{sub}</span>
-            <span className="tnum">{clockS(step.at)}</span>
+            <span className="tnum">{clock(step.at, true)}</span>
           </span>
         </span>
         {step.changed ? (

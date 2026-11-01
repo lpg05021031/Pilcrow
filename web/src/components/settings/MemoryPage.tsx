@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { BookMarked, Pin, PinOff, Trash, Plus, Sparkles, Check, X, Folder } from 'lucide-react';
 import { useStore, call, setConfig, toast, confirmAction, activeSession } from '../../lib/store';
 import type { MemoryNote } from '../../lib/types';
-import { basename, timeAgo, tildify } from '../../lib/format';
+import { basename, timeAgo, tildify, plural } from '../../lib/format';
 import { Select } from '../ui/Select';
 import { Switch, Spinner, useNow } from '../ui/bits';
 import { ModelSelect } from '../ModelSelect';
@@ -66,7 +66,7 @@ export function MemoryPage() {
     setBusy(true);
     try {
       const r = await call<{ added: MemoryNote[] }>('memory.distill', { id: s.id, force: true });
-      toast(r.added.length ? `Saved ${r.added.length} note${r.added.length > 1 ? 's' : ''} from this session` : 'Nothing new worth keeping from this session', r.added.length ? 'success' : 'info');
+      toast(r.added.length ? `Saved ${plural(r.added.length, 'note')} from this session` : 'Nothing new worth keeping from this session', r.added.length ? 'success' : 'info');
       if ((s.project || s.cwd) !== cwd) setCwd(s.project || s.cwd);
     } catch {
       /* toasted */

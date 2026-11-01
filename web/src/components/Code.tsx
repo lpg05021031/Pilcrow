@@ -3,7 +3,7 @@ import { diffWordsWithSpace } from 'diff';
 import { MessageSquarePlus, Trash, Check } from 'lucide-react';
 import { highlightTokens, cachedTokens, type Tok } from '../lib/highlight';
 import { parseAnsi } from '../lib/ansi';
-import { langFromPath } from '../lib/format';
+import { langFromPath, plural } from '../lib/format';
 import type { DiffHunk, DiffLine } from '../lib/types';
 
 type Range = [number, number];
@@ -313,7 +313,7 @@ export const DiffView = memo(function DiffView({
             return (
               <div key={i} className="diff-hunk" style={{ gridColumn: '1 / -1' }}>
                 <span className="diff-hunk-dots">⋯</span>
-                <span>{gap > 0 ? `${gap} unchanged line${gap > 1 ? 's' : ''}` : ''}</span>
+                <span>{gap > 0 ? plural(gap, 'unchanged line') : ''}</span>
                 {h.header && <span className="diff-hunk-ctx mono ellipsis">{h.header}</span>}
               </div>
             );

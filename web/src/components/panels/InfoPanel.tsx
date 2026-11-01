@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Gauge, Plug, Cpu, FolderGit2, Copy, RefreshCw, ChevronRight, FolderOpen, Trash, Wrench, Globe, BookMarked, Sparkles } from 'lucide-react';
 import { useStore, call, toast, confirmAction, setDialog } from '../../lib/store';
 import type { SessionSummary, MemoryNote } from '../../lib/types';
-import { tokens, cost, tildify } from '../../lib/format';
+import { tokens, cost, tildify, plural } from '../../lib/format';
 import { modelLabel, useGatewayModels } from '../../lib/models';
 import { contextLabel, copyText, Spinner, Num, RingGauge } from '../ui/bits';
 import { MODES } from '../composer/Menus';
@@ -309,7 +309,7 @@ function MemorySection({ session }: { session: SessionSummary }) {
     setBusy(true);
     try {
       const r = await call<{ added: MemoryNote[] }>('memory.distill', { id: session.id, force: true });
-      toast(r.added.length ? `Saved ${r.added.length} note${r.added.length > 1 ? 's' : ''} for ${session.project ? session.project.split('/').pop() : 'this folder'}` : 'Nothing new worth keeping yet', r.added.length ? 'success' : 'info');
+      toast(r.added.length ? `Saved ${plural(r.added.length, 'note')} for ${session.project ? session.project.split('/').pop() : 'this folder'}` : 'Nothing new worth keeping yet', r.added.length ? 'success' : 'info');
     } catch {
       /* toasted */
     } finally {
@@ -323,7 +323,7 @@ function MemorySection({ session }: { session: SessionSummary }) {
         <BookMarked size={14} /> Project memory
         <div className="grow" />
         <button className="link ps-link" onClick={() => setDialog('settings', 'memory')}>
-          {notes?.length ? `${notes.length} note${notes.length > 1 ? 's' : ''}` : 'Manage'}
+          {notes?.length ? plural(notes.length, 'note') : 'Manage'}
         </button>
       </div>
       {notes === null ? (

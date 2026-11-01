@@ -219,7 +219,7 @@ export function SessionView({ session }: { session: SessionSummary }) {
         </div>
         <div className="session-actions">
           {git?.isRepo && changes > 0 && (
-            <button className={`diffstat${ui.panel && ui.panelTab === 'changes' ? ' on' : ''}`} onClick={() => setUi({ panel: !(ui.panel && ui.panelTab === 'changes'), panelTab: 'changes' })} title={`${changes} changed file${changes > 1 ? 's' : ''} — review (Alt+1)`}>
+            <button className={`diffstat${ui.panel && ui.panelTab === 'changes' ? ' on' : ''}`} onClick={() => setUi({ panel: !(ui.panel && ui.panelTab === 'changes'), panelTab: 'changes' })} title={`${plural(changes, 'changed file')} — review (Alt+1)`}>
               <span className={`num-add${git.insertions ? '' : ' zero'}`}>+{git.insertions ?? 0}</span>
               <span className={`num-del${git.deletions ? '' : ' zero'}`}>−{git.deletions ?? 0}</span>
             </button>
@@ -290,7 +290,7 @@ function SessionEmpty({ session, git, cwd, fresh, onPickFolder }: { session: Ses
       )}
       {memory > 0 && (
         <button className="session-empty-mem" onClick={() => setDialog('settings', 'memory')} title="Notes from earlier sessions in this folder ride along in this session">
-          <BookMarked size={12} /> Claude starts with {memory} note{memory > 1 ? 's' : ''} from earlier sessions here
+          <BookMarked size={12} /> Claude starts with {plural(memory, 'note')} from earlier sessions here
         </button>
       )}
       <div className="examples">

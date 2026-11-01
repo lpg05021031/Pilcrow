@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Plus, Search, ScrollText, FolderOpen, Pencil, Trash, Copy, RefreshCw, Puzzle, FolderInput, Ellipsis } from 'lucide-react';
 import { useStore, call, openFile, confirmAction, toast, setDialog } from '../../lib/store';
 import type { SkillInfo, SkillsList } from '../../lib/types';
-import { tildify, timeAgo } from '../../lib/format';
+import { tildify, timeAgo, plural } from '../../lib/format';
 import { MenuButton } from '../ui/Popover';
 import { Dialog } from '../ui/Dialog';
 import { Spinner, Seg, Field } from '../ui/bits';
@@ -62,7 +62,7 @@ export function SkillsPage() {
   const reload = async () => {
     await load();
     const n = await call<number>('skills.reloadAll', {}, { quiet: true }).catch(() => 0);
-    if (n) toast(`Skills reloaded in ${n} running session${n > 1 ? 's' : ''}`, 'success');
+    if (n) toast(`Skills reloaded in ${plural(n, 'running session')}`, 'success');
   };
 
   const remove = (s: SkillInfo) =>

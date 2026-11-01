@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { exploreLabel, isQuiet, liveLabel, parseNotes, tally, toolWord, workSummary } from '../../web/src/lib/labels';
+import { exploreLabel, isQuiet, langOf, liveLabel, parseNotes, tally, toolWord, workSummary } from '../../web/src/lib/labels';
 import type { Item, ToolItem } from '../../web/src/lib/transcript';
 
 let n = 0;
@@ -56,5 +56,15 @@ describe('parseNotes', () => {
     const r = parseNotes('Before.\n<helper-note name="tests" state="done" files="2">\nAll green.\n</helper-note>\nAfter.');
     expect(r.parts).toEqual([{ name: 'tests', state: 'done', files: '2', body: 'All green.' }]);
     expect(r.tail).toBe('Before. After.');
+  });
+});
+
+describe('langOf', () => {
+  it('marks Japanese by its kana, Chinese by Han alone, in the reader’s Chinese locale if any', () => {
+    expect(langOf('このファイルを直してください', 'en-US')).toBe('ja');
+    expect(langOf('漢字とかな', 'zh-TW')).toBe('ja');
+    expect(langOf('請修正這個檔案', 'en-US')).toBe('zh-Hant');
+    expect(langOf('请修复这个文件', 'zh-CN')).toBe('zh-CN');
+    expect(langOf('Fix the parser', 'zh-TW')).toBeUndefined();
   });
 });

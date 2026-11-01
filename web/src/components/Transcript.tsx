@@ -3,7 +3,7 @@ import { ArrowDown, ArrowUpRight, CornerDownRight, PencilLine, GitFork, ChevronR
 import { useStore, models, forkSession, insertIntoComposer, toast, call, confirmAction, bumpFs, openLightbox, openSession } from '../lib/store';
 import type { Item, ToolItem, UserItem, ThinkingItem, TextItem, NoticeItem, ResultItem, CompactItem, CommandOutputItem } from '../lib/transcript';
 import type { PermissionRequest } from '../lib/types';
-import { duration, tokens, cost, truncate, relPath } from '../lib/format';
+import { duration, tokens, cost, truncate, relPath, plural } from '../lib/format';
 import { Markdown } from './Markdown';
 import { ToolCard, type ToolCtx } from './tools/ToolCard';
 import { PermissionCard } from './tools/Permission';
@@ -12,7 +12,7 @@ import { useSmoothText, useThrottled, useExitGhost } from '../lib/motion';
 import { Collapse } from './ui/Collapse';
 import { ErrorBoundary } from './ui/ErrorBoundary';
 import { chaptersOf, extendTurns, groupItems, liveTurnFolds, type Chapter, type Turns, type Unit } from '../lib/units';
-import { exploreLabel, isQuiet, liveLabel, parseNotes, tally, workSummary } from '../lib/labels';
+import { exploreLabel, isQuiet, langOf, liveLabel, parseNotes, tally, workSummary } from '../lib/labels';
 import { useFollow } from './useFollow';
 
 // ---------------------------------------------------------------- list with step grouping
@@ -518,7 +518,7 @@ function UserMessage({ item, ctx }: { item: UserItem; ctx: ToolCtx }) {
           const done = await call<{ canRewind: boolean; error?: string; skippedLinks?: number }>('session.rewind', { id: ctx.sessionId, messageId: item.uuid, dryRun: false });
           if (!done.canRewind) return toast(done.error || 'Could not restore the files.', 'error');
           bumpFs();
-          toast(`Restored ${files.length} file${files.length > 1 ? 's' : ''}${done.skippedLinks ? ` (${done.skippedLinks} linked file${done.skippedLinks > 1 ? 's' : ''} skipped)` : ''}`, 'success');
+          toast(`Restored ${plural(files.length, 'file')}${done.skippedLinks ? ` (${plural(done.skippedLinks, 'linked file')} skipped)` : ''}`, 'success');
           if (branch && item.prevUuid) {
             const id = await forkSession(ctx.sessionId, item.prevUuid);
             insertIntoComposer(id, item.text, true);
@@ -563,13 +563,6 @@ function UserMessage({ item, ctx }: { item: UserItem; ctx: ToolCtx }) {
       )}
     </div>
   );
-}
-
-// Chinese text is marked as Traditional Chinese so the browser picks Taiwanese glyph forms and
-// punctuation rules for it; English stays unmarked (and is read with an English voice).
-const HAN = /[\u3400-\u9fff\uf900-\ufaff]/;
-function langOf(text: string) {
-  return HAN.test(text.slice(0, 400)) ? 'zh-Hant-TW' : undefined;
 }
 
 function renderMentions(text: string) {

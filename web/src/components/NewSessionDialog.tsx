@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Folder, FolderGit2, ArrowUp, Home, ChevronRight, GitBranch, CornerLeftUp, FolderOpen, Check, ChevronDown } from 'lucide-react';
 import { useStore, setDialog, createSession, call } from '../lib/store';
 import type { GitInfo, PermissionMode, Effort } from '../lib/types';
-import { basename, tildify } from '../lib/format';
+import { basename, tildify, plural } from '../lib/format';
 import { Dialog } from './ui/Dialog';
 import { Switch, Spinner, Field } from './ui/bits';
 import { Collapse } from './ui/Collapse';
@@ -214,7 +214,7 @@ export function NewSessionDialog() {
               </Field>
             </div>
           )}
-          {!useWorktree && git.changed ? <div className="hint">{git.changed} uncommitted change{git.changed > 1 ? 's' : ''} here; Claude works on top of them.</div> : null}
+          {!useWorktree && git.changed ? <div className="hint">{plural(git.changed, 'uncommitted change')} here; Claude works on top of them.</div> : null}
         </section>
       )}
 
