@@ -456,19 +456,24 @@ export async function start({ shell = 'none', port, quiet = false, onQuit, heart
 
   /**
    * Every event goes to every window. One that cannot keep up (asleep, on a slow tunnel) would hold an
-   * ever-growing queue here; past `maxBuffered` it is dropped instead. It reconnects on its own and
-   * reopens what it shows from a fresh snapshot, which is the clean way to catch up.
+   * ever-growing queue here; past `maxBuffered` of events not yet written out it is dropped instead. It
+   * reconnects on its own and reopens what it shows from a fresh snapshot, which is the clean way to
+   * catch up. Only events count (in characters, near enough for JSON): a reply is what the window asked
+   * for, and one session.open of a long conversation is past maxBuffered on its own.
    */
+  const behind = new WeakMap(); // window -> characters of events queued for it
   const deliver = (ws, raw) => {
     if (ws.readyState !== WebSocket.OPEN) return;
-    if (ws.bufferedAmount > maxBuffered) {
-      log(`dropping a window that is ${ws.bufferedAmount} bytes behind; it will reconnect`);
+    const queued = behind.get(ws) || 0;
+    if (queued > maxBuffered) {
+      log(`dropping a window that is ${queued} bytes behind; it will reconnect`);
       ws.terminate();
       return;
     }
-    ws.send(raw);
+    behind.set(ws, queued + raw.length);
+    ws.send(raw, () => behind.set(ws, behind.get(ws) - raw.length));
   };
-  const send = (ws, obj) => deliver(ws, JSON.stringify(obj));
+  const send = (ws, obj) => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify(obj));
   const broadcast = (e, d) => {
     const raw = JSON.stringify({ t: 'ev', e, d });
     for (const ws of clients) deliver(ws, raw);

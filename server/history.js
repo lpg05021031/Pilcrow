@@ -2,9 +2,8 @@
 // enriching tool results with the structured data the SDK readers leave out.
 import fs from 'node:fs';
 import path from 'node:path';
-import readline from 'node:readline';
 import { listSessions, getSessionMessages, getSubagentMessages, renameSession, deleteSession, forkSession } from '@anthropic-ai/claude-agent-sdk';
-import { claudeConfigDir, log } from './util.js';
+import { claudeConfigDir, log, slicer } from './util.js';
 
 const LIST_TTL_MS = 4000; // the list is asked for on every change; the SDK reads every transcript's head
 /** @type {{ at: number, data: import('@anthropic-ai/claude-agent-sdk').SDKSessionInfo[], pending: Promise<import('@anthropic-ai/claude-agent-sdk').SDKSessionInfo[]> | null }} */
@@ -44,51 +43,67 @@ export async function findTranscriptFile(sessionId) {
 }
 
 /**
- * One read of the raw transcript for what the SDK's reader leaves out: each record's toolUseResult by
- * uuid, and, with `all` (after a compaction), every record by uuid for withEarlierMessages. A line is
- * parsed only when it can hold what is asked for. Null when the file cannot be read.
- * @param {string} file @param {{ all?: boolean }} [opts]
+ * The raw transcript, read and parsed once: every record (`entries`, in file order), by uuid, and each
+ * record's toolUseResult by uuid, which the SDK's reader leaves out. Null when the file cannot be read.
+ * @param {string} file
  */
-export async function readTranscript(file, { all = false } = {}) {
-  const results = new Map();
-  const byUuid = new Map();
+export async function readTranscript(file) {
+  let buf;
   try {
-    const rl = readline.createInterface({ input: fs.createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity });
-    for await (const line of rl) {
-      if (!line.includes(all ? '"uuid"' : '"toolUseResult"')) continue;
-      try {
-        const e = JSON.parse(line);
-        if (!e.uuid) continue;
-        if (all) byUuid.set(e.uuid, e);
-        if (e.toolUseResult !== undefined) results.set(e.uuid, e.toolUseResult);
-      } catch {
-        /* skip a malformed line */
-      }
-    }
+    buf = await fs.promises.readFile(file);
   } catch (e) {
     log('reading the transcript failed', file, e);
     return null;
   }
-  return { results, byUuid };
+  /** @type {import('@anthropic-ai/claude-agent-sdk').SessionStoreEntry[]} */
+  const entries = [];
+  const results = new Map();
+  const byUuid = new Map();
+  const tick = slicer(); // tens of megabytes of JSON: decoded and parsed a line, and a slice, at a time
+  for (let i = 0, j; i < buf.length; i = j + 1) {
+    await tick();
+    j = buf.indexOf(10, i);
+    if (j === -1) j = buf.length;
+    if (j - i < 2) continue; // an empty line (or a lone \r)
+    try {
+      const e = JSON.parse(buf.toString('utf8', i, j));
+      if (!e || typeof e !== 'object') continue;
+      entries.push(e);
+      if (!e.uuid) continue;
+      byUuid.set(e.uuid, e);
+      if (e.toolUseResult !== undefined) results.set(e.uuid, e.toolUseResult);
+    } catch {
+      /* skip a malformed line */
+    }
+  }
+  return { entries, results, byUuid };
 }
 
+/**
+ * A session's messages as the SDK's reader builds them (the conversation chain, what was delivered),
+ * with each tool result's structured data and, after a compaction, the conversation before it. The file
+ * is read and parsed once: the SDK is handed the parsed records as a session store (its `load` is the
+ * one call getSessionMessages makes of a store), instead of reading the file a second time itself.
+ */
 export async function loadTranscript(sessionId, dir) {
+  const file = await findTranscriptFile(sessionId);
+  const raw = file ? await readTranscript(file) : null;
+  /** @type {import('@anthropic-ai/claude-agent-sdk').SessionStore | undefined} */
+  const sessionStore = raw ? { load: async () => raw.entries, append: async () => {} } : undefined;
+  const opts = { includeSystemMessages: true, sessionStore };
   let msgs = [];
   try {
-    msgs = await getSessionMessages(sessionId, { dir, includeSystemMessages: true });
+    msgs = await getSessionMessages(sessionId, { dir, ...opts });
   } catch (e) {
     log('getSessionMessages failed', sessionId, e);
     try {
-      msgs = await getSessionMessages(sessionId, { includeSystemMessages: true });
+      msgs = await getSessionMessages(sessionId, opts);
     } catch {
       msgs = [];
     }
   }
-  const file = await findTranscriptFile(sessionId);
   // After a compaction the SDK reader starts at the newest compact boundary and leaves out what came before.
-  const compacted = msgs.some((m) => m.isCompactSummary);
-  const raw = file ? await readTranscript(file, { all: compacted }) : null;
-  if (raw && compacted) msgs = withEarlierMessages(msgs, raw.byUuid, sessionId);
+  if (raw && msgs.some((m) => m.isCompactSummary)) msgs = withEarlierMessages(msgs, raw.byUuid, sessionId);
   for (const m of msgs) {
     m._history = true;
     if (m.type === 'user' && raw?.results.has(m.uuid)) m.tool_use_result = raw.results.get(m.uuid);
@@ -101,7 +116,7 @@ export async function loadTranscript(sessionId, dir) {
  * `parentUuid` is null), so the SDK's reader, which follows `parentUuid`, shows only what came after the
  * newest compaction, and returns the boundary without its details. Put the earlier conversation back
  * (across older compactions too) and give each boundary its trigger and token counts, so a reopened
- * session reads the same as it did live. `byUuid` is every raw record (readTranscript with `all`).
+ * session reads the same as it did live. `byUuid` is every raw record (readTranscript).
  * @param {Record<string, any>[]} msgs @param {Map<string, Record<string, any>>} byUuid @param {string} sessionId
  */
 export function withEarlierMessages(msgs, byUuid, sessionId) {
