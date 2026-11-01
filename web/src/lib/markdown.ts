@@ -2,6 +2,7 @@
 import { Marked, type Tokens } from 'marked';
 import DOMPurify from 'dompurify';
 import { cachedHtml, normalizeLang } from './highlight';
+import { LruBytes } from './lru';
 
 // How code-block languages are labelled: people say "TypeScript", not "ts".
 const LANG_NAMES: Record<string, string> = {
@@ -61,7 +62,8 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
   }
 });
 
-const cache = new Map<string, string>();
+// Finished blocks by their source: a conversation drawn again, or a block scrolled back into view, costs nothing.
+const cache = new LruBytes<string>(4 << 20, (k, v) => k.length + v.length);
 
 export function renderMarkdown(src: string, { streaming = false, baseDir }: { streaming?: boolean; baseDir?: string } = {}): string {
   if (!src) return '';
@@ -79,10 +81,7 @@ export function renderMarkdown(src: string, { streaming = false, baseDir }: { st
     FORBID_TAGS: ['style', 'form', 'input', 'button', 'iframe', 'script'],
   });
   currentBase = null;
-  if (!streaming) {
-    if (cache.size > 400) cache.delete(cache.keys().next().value!);
-    cache.set(key, out);
-  }
+  if (!streaming) cache.set(key, out);
   return out;
 }
 

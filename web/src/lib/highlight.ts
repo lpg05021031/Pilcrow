@@ -1,7 +1,8 @@
-// Syntax highlighting with Shiki (JavaScript regex engine, no WASM), lazy-loaded per language.
-// Two hand-tuned themes are emitted as CSS variables so dark/light switch without re-highlighting.
-import { createHighlighterCore, type HighlighterCore, type ThemeRegistration } from 'shiki/core';
-import { createJavaScriptRegexEngine } from 'shiki/engine/javascript';
+// Syntax highlighting with Shiki (JavaScript regex engine, no WASM), lazy-loaded: the highlighter
+// with the first code block, each language with its first block. Two hand-tuned themes are emitted
+// as CSS variables so dark/light switch without re-highlighting.
+import type { HighlighterCore, ThemeRegistration } from 'shiki/core';
+import { LruBytes } from './lru';
 
 const LANGS: Record<string, () => Promise<unknown>> = {
   javascript: () => import('shiki/langs/javascript.mjs'),
@@ -142,7 +143,7 @@ const loaded = new Set<string>();
 const loading = new Map<string, Promise<void>>();
 
 function highlighter() {
-  if (!hlPromise) hlPromise = createHighlighterCore({ themes: [dark, light], langs: [], engine: createJavaScriptRegexEngine() });
+  hlPromise ||= Promise.all([import('shiki/core'), import('shiki/engine/javascript')]).then(([{ createHighlighterCore }, { createJavaScriptRegexEngine }]) => createHighlighterCore({ themes: [dark, light], langs: [], engine: createJavaScriptRegexEngine() }));
   return hlPromise;
 }
 
@@ -167,33 +168,42 @@ export interface Tok {
   s?: Record<string, string>;
 }
 
-const htmlCache = new Map<string, string>();
-const tokCache = new Map<string, Tok[][]>();
-const MAX_CACHE = 600;
+/**
+ * Code longer than this is shown plain. Shiki runs in one go on the main thread, and measured here
+ * (median over this repository's own files) TypeScript, TSX and JavaScript take 45–75 ms for 2,000
+ * characters and grow linearly from there, Python less than half that, shell and JSON far less: past
+ * this length a block would be a long task the reader feels as a stall when it scrolls into view.
+ */
+export const MAX_HIGHLIGHT = 2000;
 
-function remember<V>(map: Map<string, V>, key: string, v: V) {
-  if (map.size > MAX_CACHE) map.delete(map.keys().next().value!);
-  map.set(key, v);
-}
+// Keyed by language and the whole code, so a code block shown again is coloured in its first frame.
+const htmlCache = new LruBytes<string>(4 << 20, (k, v) => k.length + v.length);
+// A token is an object with its text and a style record: about 100 bytes each besides the text.
+const tokCache = new LruBytes<Tok[][]>(8 << 20, (k, v) => k.length + v.reduce((n, line) => n + line.length * 100, 0));
+
+// Code blocks drawn together would otherwise all be coloured in the one task their highlights resolve
+// in; a task each keeps every one of them short.
+const nextTask = () => new Promise<void>((done) => setTimeout(done, 0));
 
 export function cachedHtml(code: string, lang: string | null): string | null {
   const l = normalizeLang(lang);
-  return l ? htmlCache.get(l + '\0' + code) ?? null : null;
+  return l && code.length <= MAX_HIGHLIGHT ? (htmlCache.get(l + '\0' + code) ?? null) : null;
 }
 
 /** Highlight a code block; resolves to `<span class="line">…` markup (no <pre>). */
 export async function highlightHtml(code: string, lang: string | null): Promise<string | null> {
   const l = normalizeLang(lang);
-  if (!l || code.length > 200_000) return null;
+  if (!l || code.length > MAX_HIGHLIGHT) return null;
   const key = l + '\0' + code;
   const hit = htmlCache.get(key);
   if (hit) return hit;
   try {
     await ensureLang(l);
     const hl = await highlighter();
+    await nextTask();
     const html = hl.codeToHtml(code, { lang: l, themes: { dark: 'pilcrow-dark', light: 'pilcrow-light' }, defaultColor: false });
     const inner = html.replace(/^<pre[^>]*><code[^>]*>/, '').replace(/<\/code><\/pre>$/, '');
-    remember(htmlCache, key, inner);
+    htmlCache.set(key, inner);
     return inner;
   } catch (e) {
     console.warn('highlight failed', l, e);
@@ -203,22 +213,23 @@ export async function highlightHtml(code: string, lang: string | null): Promise<
 
 export function cachedTokens(code: string, lang: string | null): Tok[][] | null {
   const l = normalizeLang(lang);
-  return l ? tokCache.get(l + '\0' + code) ?? null : null;
+  return l && code.length <= MAX_HIGHLIGHT ? (tokCache.get(l + '\0' + code) ?? null) : null;
 }
 
 /** Tokens per line, for diff rendering where lines are laid out individually. */
 export async function highlightTokens(code: string, lang: string | null): Promise<Tok[][] | null> {
   const l = normalizeLang(lang);
-  if (!l || code.length > 300_000) return null;
+  if (!l || code.length > MAX_HIGHLIGHT) return null;
   const key = l + '\0' + code;
   const hit = tokCache.get(key);
   if (hit) return hit;
   try {
     await ensureLang(l);
     const hl = await highlighter();
+    await nextTask();
     const res = hl.codeToTokens(code, { lang: l, themes: { dark: 'pilcrow-dark', light: 'pilcrow-light' }, defaultColor: false });
     const lines: Tok[][] = res.tokens.map((line) => line.map((t) => ({ t: t.content, s: (t.htmlStyle as Record<string, string>) || undefined })));
-    remember(tokCache, key, lines);
+    tokCache.set(key, lines);
     return lines;
   } catch (e) {
     console.warn('tokenize failed', l, e);

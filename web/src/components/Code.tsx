@@ -45,11 +45,10 @@ function renderContent(text: string, toks?: Tok[] | null, ranges?: Range[] | nul
   return out.length ? out : '\u200b';
 }
 
-/** Token lines for a text, filled in once highlighting finishes. */
-export function useTokens(text: string, lang: string | null, enabled = true) {
-  const [toks, setToks] = useState<Tok[][] | null>(() => (enabled ? cachedTokens(text, lang) : null));
+/** Token lines for a text, filled in once highlighting finishes (never, past MAX_HIGHLIGHT in lib/highlight). */
+export function useTokens(text: string, lang: string | null) {
+  const [toks, setToks] = useState<Tok[][] | null>(() => cachedTokens(text, lang));
   useEffect(() => {
-    if (!enabled) return;
     let alive = true;
     const hit = cachedTokens(text, lang);
     if (hit) setToks(hit);
@@ -60,7 +59,7 @@ export function useTokens(text: string, lang: string | null, enabled = true) {
     return () => {
       alive = false;
     };
-  }, [text, lang, enabled]);
+  }, [text, lang]);
   return toks;
 }
 
@@ -75,7 +74,7 @@ export const CodeView = memo(function CodeView({ text, path, lang, startLine = 1
     return l;
   }, [text]);
   const shown = all ? lines : lines.slice(0, maxLines);
-  const toks = useTokens(text, language, lines.length < 20000);
+  const toks = useTokens(text, language);
   return (
     <div className={`code-view${wrap ? ' wrap' : ''}${lines.length > shown.length ? ' clipped' : ''}`}>
       <div className="code-grid" data-hl={toks ? '1' : '0'}>
