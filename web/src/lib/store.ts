@@ -582,14 +582,14 @@ export function initApp() {
   rpc.on('sessions.changed', () => refreshSessions());
   rpc.on('schedules.changed', () => set({ schedRev: get().schedRev + 1 }));
   rpc.on('memory.changed', () => set({ schedRev: get().schedRev + 1 }));
-  rpc.on('repos.changed', ({ repos }: { repos: RepoEntry[] }) => {
+  rpc.on('repos.changed', ({ repos }) => {
     const config = get().config;
     if (config) set({ config: { ...config, repos } });
   });
-  rpc.on('inbox.changed', (unread: number) => set({ inboxUnread: typeof unread === 'number' ? unread : get().inboxUnread, schedRev: get().schedRev + 1 }));
-  rpc.on('dispatch.changed', (d: DispatchDelta) => onDispatch(d));
+  rpc.on('inbox.changed', (unread) => set({ inboxUnread: typeof unread === 'number' ? unread : get().inboxUnread, schedRev: get().schedRev + 1 }));
+  rpc.on('dispatch.changed', onDispatch);
   rpc.on('dispatch.playbooks', () => loadPlaybooks());
-  rpc.on('timeline.step', ({ id, step }: { id: string; step: TimelineStep }) => {
+  rpc.on('timeline.step', ({ id, step }) => {
     const cur = get().timeline[id];
     if (!cur) return; // nobody has asked for this session's timeline yet
     if (cur.some((s) => s.n === step.n)) return;
