@@ -126,7 +126,7 @@ svg {
   background: var(--fill-3);
   border: 3px solid transparent;
   background-clip: padding-box;
-  border-radius: var(--r-3);
+  border-radius: var(--r-4);
 }
 ::-webkit-scrollbar-thumb:hover {
   background-color: var(--hair-3);
@@ -234,12 +234,12 @@ kbd {
   opacity: 0.85;
 }
 .btn.primary {
-  background: var(--accent);
+  background: var(--accent-solid);
   color: var(--accent-ink);
   box-shadow: var(--shadow-solid);
 }
 .btn.primary:hover {
-  background: var(--accent-2);
+  background: var(--accent-solid-2);
 }
 .btn.primary svg {
   opacity: 1;
@@ -266,7 +266,7 @@ kbd {
   background: var(--err-wash);
 }
 .btn.danger.solid {
-  background: var(--err);
+  background: var(--err-solid);
   color: var(--accent-ink);
 }
 .btn.danger.solid:hover {
@@ -277,12 +277,6 @@ kbd {
   padding: 0 var(--sp-2_5);
   font-size: var(--fs-small);
   border-radius: var(--r-2);
-}
-.btn.lg {
-  height: 36px;
-  padding: 0 var(--sp-4);
-  font-size: var(--fs-ui-plus);
-  border-radius: var(--r-3);
 }
 
 .icon-btn {
@@ -380,7 +374,7 @@ kbd {
   position: relative;
   width: 34px;
   height: 20px;
-  border-radius: var(--r-3);
+  border-radius: var(--r-4);
   background: var(--switch-off);
   flex: none;
 }
@@ -393,7 +387,7 @@ kbd {
   height: 16px;
   border-radius: 50%;
   background: var(--accent-ink);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-knob);
 }
 /* On = lit amber track; the knob stays white in both states so "off" can never read as "on". */
 .switch.on {
@@ -410,7 +404,7 @@ kbd {
   gap: var(--sp-1);
   height: 19px;
   padding: 0 7px;
-  border-radius: var(--r-5);
+  border-radius: var(--r-pill);
   font-size: var(--fs-micro);
   font-weight: 550;
   color: var(--text-2);
@@ -509,7 +503,7 @@ kbd {
 }
 .sk {
   height: 14px;
-  border-radius: 7px;
+  border-radius: var(--r-pill);
   background: linear-gradient(90deg, var(--fill-1), var(--fill-2), var(--fill-1));
   background-size: 200% 100%;
   animation: sheen 1.4s linear infinite;

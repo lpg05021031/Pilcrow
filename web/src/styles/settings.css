@@ -170,7 +170,7 @@
   display: grid;
   gap: var(--sp-2);
   padding: 18px var(--sp-5);
-  border-radius: 12px;
+  border-radius: var(--r-5);
   background: var(--inset);
 }
 .cust-intro-title {
@@ -204,7 +204,7 @@
   min-width: 18px;
   height: 18px;
   padding: 0 5px;
-  border-radius: 9px;
+  border-radius: var(--r-pill);
   background: var(--fill-1);
   font-size: var(--fs-micro);
   color: var(--text-2);
@@ -286,7 +286,7 @@
   gap: var(--sp-3);
 }
 .cust-picker {
-  border-radius: var(--r-3);
+  border-radius: var(--r-4);
   box-shadow: inset 0 0 0 0.5px var(--hair-2);
   padding: var(--sp-2);
   max-height: 300px;
@@ -384,7 +384,7 @@
   display: grid;
   gap: var(--sp-0_5);
   margin: var(--sp-1) 0 var(--sp-3);
-  border-radius: var(--r-3);
+  border-radius: var(--r-4);
   background: var(--fill-1);
   padding: var(--sp-1) var(--sp-3_5);
 }
@@ -424,7 +424,7 @@
   gap: var(--sp-2);
   padding: var(--sp-2_5) var(--sp-3);
   margin-bottom: var(--sp-2_5);
-  border-radius: var(--r-3);
+  border-radius: var(--r-4);
   background: var(--fill-1);
 }
 .mem-list {
@@ -439,7 +439,7 @@
   display: grid;
   gap: 3px;
   padding: var(--sp-2) var(--sp-2_5) var(--sp-1_5) var(--sp-3);
-  border-radius: var(--r-3);
+  border-radius: var(--r-4);
   background: var(--card);
   box-shadow: var(--card-shadow);
   position: relative;
@@ -521,7 +521,7 @@
   gap: var(--sp-1_5);
   margin-top: var(--sp-1);
   padding: var(--sp-1) var(--sp-2_5);
-  border-radius: var(--r-5);
+  border-radius: var(--r-pill);
   font-size: var(--fs-micro);
   color: var(--text-3);
   background: var(--fill-1);
@@ -549,7 +549,7 @@
   display: grid;
   gap: var(--sp-2);
   padding: var(--sp-2_5) var(--sp-3);
-  border-radius: var(--r-3);
+  border-radius: var(--r-4);
   background: var(--card);
   box-shadow: var(--card-shadow);
 }
@@ -602,7 +602,7 @@
   display: grid;
   gap: var(--sp-1_5);
   padding: var(--sp-2) var(--sp-2_5) var(--sp-2) var(--sp-3);
-  border-radius: var(--r-3);
+  border-radius: var(--r-4);
   background: var(--card);
   box-shadow: var(--card-shadow);
 }

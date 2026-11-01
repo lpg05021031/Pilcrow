@@ -133,18 +133,6 @@
 .section.accent .side-section-label {
   color: var(--accent-text);
 }
-.side-count {
-  display: inline-grid;
-  place-items: center;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 var(--sp-1);
-  border-radius: 8px;
-  font-size: var(--fs-tiny-plus);
-  font-weight: 650;
-  color: var(--accent-ink);
-  background: var(--accent);
-}
 
 .side-group-head {
   display: flex;
@@ -450,7 +438,7 @@
   min-width: 18px;
   height: 18px;
   padding: 0 5px;
-  border-radius: 9px;
+  border-radius: var(--r-pill);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -460,7 +448,7 @@
 }
 .side-page-n.needs {
   color: var(--accent-ink);
-  background: var(--accent);
+  background: var(--accent-solid);
 }
 .side-page-n.unread {
   color: var(--text);

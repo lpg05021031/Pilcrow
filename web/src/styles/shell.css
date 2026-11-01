@@ -190,7 +190,7 @@
   width: 3px;
   height: 40px;
   margin-top: -20px;
-  border-radius: 2px;
+  border-radius: var(--r-pill);
   background: var(--hair-3);
   opacity: 0;
   transform: scaleY(0.6);
@@ -263,7 +263,7 @@ html[data-os='win'] .msg-bubble {
 .main,
 .panel-shell {
   margin-top: var(--sp-2);
-  border-radius: 12px;
+  border-radius: var(--r-5);
   border: 0.5px solid var(--hair);
   overflow: hidden;
   box-shadow: var(--shadow-ground);

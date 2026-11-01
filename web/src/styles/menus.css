@@ -10,7 +10,7 @@
   max-height: min(70vh, 520px);
   overflow-y: auto;
   padding: 5px;
-  border-radius: var(--r-3);
+  border-radius: var(--r-4);
   background: var(--glass);
   -webkit-backdrop-filter: var(--glass-blur);
   backdrop-filter: var(--glass-blur);

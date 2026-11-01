@@ -28,7 +28,7 @@
   height: 22px;
   padding: 0 9px 0 var(--sp-2);
   border: 0;
-  border-radius: 11px;
+  border-radius: var(--r-pill);
   background: var(--fill-1);
   color: var(--text);
   font: inherit;
@@ -57,18 +57,6 @@
 .side-row.sub {
   margin-left: 18px;
 }
-.msg-user .msg-from {
-  align-self: flex-end;
-  margin: 0 var(--sp-1_5) 3px 0;
-  padding: 0 7px;
-  border-radius: 9px;
-  background: var(--plan-wash);
-  color: var(--plan);
-  font-size: var(--fs-tiny-plus);
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-}
 .msg-notes {
   display: grid;
   gap: var(--sp-0_5);
@@ -80,7 +68,7 @@
 }
 .tool-well {
   padding: var(--sp-2_5) var(--sp-3);
-  border-radius: var(--r-3);
+  border-radius: var(--r-4);
   background: var(--inset);
   color: var(--text-2);
   font-size: var(--fs-small);

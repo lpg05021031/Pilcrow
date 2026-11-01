@@ -75,7 +75,7 @@
   min-width: 16px;
   height: 16px;
   padding: 0 var(--sp-1);
-  border-radius: 8px;
+  border-radius: var(--r-3);
   background: var(--fill-3);
   color: var(--text);
   font-size: var(--fs-tiny-plus);
@@ -517,7 +517,7 @@
 .xterm-host .xterm .scrollbar .slider {
   left: 3px !important;
   width: 5px !important;
-  border-radius: 3px;
+  border-radius: var(--r-pill);
   background: var(--fill-3) !important;
 }
 .xterm-host .xterm .scrollbar .slider:hover,
@@ -594,13 +594,13 @@
 }
 .progress {
   height: 4px;
-  border-radius: 2px;
+  border-radius: var(--r-pill);
   background: var(--fill-2);
   overflow: hidden;
 }
 .progress > div {
   height: 100%;
-  border-radius: 2px;
+  border-radius: var(--r-pill);
   background: var(--text-2);
 }
 .task-row {
@@ -608,7 +608,7 @@
   align-items: center;
   gap: var(--sp-2_5);
   padding: 9px var(--sp-2_5) 9px var(--sp-3);
-  border-radius: var(--r-3);
+  border-radius: var(--r-4);
   background: var(--canvas);
   box-shadow: var(--shadow-card);
   font-size: var(--fs-ui);
@@ -629,45 +629,16 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-
-.ctx-big {
-  display: flex;
-  align-items: baseline;
-  gap: var(--sp-2_5);
-}
-.ctx-meter {
-  height: 6px;
-  border-radius: 3px;
-  background: var(--fill-2);
-  overflow: hidden;
-}
-.ctx-meter > div {
-  height: 100%;
-  border-radius: 3px;
-  background: var(--text-2);
-}
-.ctx-meter > .warm {
-  background: var(--accent);
-}
-.ctx-meter > .hot {
-  background: var(--err);
-}
 .ctx-analyze {
   justify-self: start;
   margin-left: -8px;
   color: var(--text-2);
 }
-.ctx-num {
-  font-size: var(--fs-display);
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  font-variant-numeric: tabular-nums;
-}
 .ctx-bar {
   display: flex;
   gap: var(--sp-0_5);
   height: 6px;
-  border-radius: 3px;
+  border-radius: var(--r-pill);
   overflow: hidden;
   background: var(--fill-2);
   margin-bottom: var(--sp-1_5);
@@ -766,7 +737,7 @@
   transform: translateX(-50%);
   max-width: 70%;
   padding: 1px 7px;
-  border-radius: var(--r-5);
+  border-radius: var(--r-pill);
   background: var(--raised-2);
   font-size: var(--fs-micro);
   color: var(--text-2);
@@ -776,15 +747,6 @@
 }
 .tl-scrub:hover .tl-scrub-label {
   transition: none;
-}
-.tl-scrub-label.edge-r {
-  left: auto !important;
-  right: 20px;
-  transform: none;
-}
-.tl-scrub-label.edge-l {
-  left: 20px !important;
-  transform: none;
 }
 .tl-scrub.dragging .tl-cursor {
   transform: scale(1.25);
@@ -807,7 +769,7 @@
   top: 50%;
   height: 2px;
   margin-top: -1px;
-  border-radius: 1px;
+  border-radius: var(--r-pill);
   background: var(--fill-2);
 }
 .tl-scrub-done {
@@ -816,7 +778,7 @@
   top: 50%;
   height: 2px;
   margin-top: -1px;
-  border-radius: 1px;
+  border-radius: var(--r-pill);
   background: var(--text-3);
   transition: width var(--t-fast);
 }
@@ -826,7 +788,7 @@
   width: 2px;
   height: 8px;
   margin: -4px 0 0 -1px;
-  border-radius: 1px;
+  border-radius: var(--r-pill);
   background: var(--hair-3);
 }
 .tl-tick.changed {
@@ -1241,7 +1203,7 @@
   display: grid;
   gap: var(--sp-0_5);
   padding: var(--sp-2) var(--sp-2_5) 7px;
-  border-radius: var(--r-3);
+  border-radius: var(--r-4);
   background: var(--fill-1);
   box-shadow: inset 0 0 0 0.5px var(--hair);
 }
@@ -1265,7 +1227,7 @@
   flex: none;
   height: 18px;
   padding: 0 5px;
-  border-radius: var(--r-5);
+  border-radius: var(--r-pill);
   font-size: var(--fs-tiny);
   color: var(--text-3);
 }

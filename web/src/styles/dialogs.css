@@ -21,7 +21,7 @@
   display: flex;
   flex-direction: column;
   max-height: min(88vh, 860px);
-  border-radius: var(--r-4);
+  border-radius: var(--r-7);
   background: var(--glass-2);
   -webkit-backdrop-filter: var(--glass-blur);
   backdrop-filter: var(--glass-blur);
@@ -114,7 +114,7 @@
   white-space: nowrap;
   height: 26px;
   padding: 0 11px;
-  border-radius: 13px;
+  border-radius: var(--r-pill);
   font-size: var(--fs-small);
   color: var(--text-2);
   background: var(--fill-1);
@@ -123,7 +123,7 @@
 .chip {
   height: 24px;
   padding: 0 9px;
-  border-radius: 12px;
+  border-radius: var(--r-5);
   font-size: var(--fs-micro-plus);
 }
 .folder-chip:hover,
@@ -139,7 +139,7 @@ button.chip:hover {
 }
 
 .browser {
-  border-radius: var(--r-3);
+  border-radius: var(--r-4);
   background: var(--inset);
   box-shadow: inset 0 0 0 1px var(--hair);
   overflow: hidden;
@@ -204,7 +204,7 @@ button.chip:hover {
   gap: var(--sp-1);
   height: 40px;
   padding: 0 5px 0 var(--sp-3);
-  border-radius: var(--r-3);
+  border-radius: var(--r-4);
   background: var(--fill-1);
   box-shadow: inset 0 0 0 1px var(--hair);
 }
@@ -255,7 +255,7 @@ button.chip:hover {
 
 .radio-list {
   display: grid;
-  border-radius: var(--r-3);
+  border-radius: var(--r-4);
   background: var(--fill-1);
   box-shadow: inset 0 0 0 1px var(--hair);
   overflow: hidden;
@@ -313,7 +313,7 @@ button.chip:hover {
 .seg {
   display: inline-flex;
   padding: var(--sp-0_5);
-  border-radius: 8px;
+  border-radius: var(--r-3);
   background: var(--fill-1);
   box-shadow: inset 0 0 0 1px var(--hair);
 }
@@ -475,7 +475,7 @@ button.chip:hover {
   max-width: 100%;
   min-height: 40px;
   padding: 9px var(--sp-1_5) 9px 13px;
-  border-radius: 12px;
+  border-radius: var(--r-5);
   background: var(--glass);
   -webkit-backdrop-filter: var(--glass-blur);
   backdrop-filter: var(--glass-blur);
@@ -495,7 +495,7 @@ button.chip:hover {
   flex: none;
   align-self: center;
   padding: 0 var(--sp-1_5);
-  border-radius: var(--r-5);
+  border-radius: var(--r-pill);
   font-size: var(--fs-tiny-plus);
   color: var(--text-3);
   background: var(--fill-2);

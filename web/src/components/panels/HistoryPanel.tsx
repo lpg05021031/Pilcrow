@@ -229,7 +229,8 @@ function Scrubber({ steps, sel, onPick, now }: { steps: TimelineStep[]; sel: num
   const first = steps[0].at;
   return (
     <div className={`tl-scrub${drag ? ' dragging' : ''}`} ref={ref} onPointerDown={onDown} onPointerMove={(e) => setHover(nearest(e.clientX))} onPointerLeave={() => setHover(null)} role="slider" aria-valuemin={0} aria-valuemax={n} aria-valuenow={selIdx} aria-label="Timeline">
-      <div className={`tl-scrub-label ellipsis${xAt(hi) > 80 ? ' edge-r' : xAt(hi) < 20 ? ' edge-l' : ''}`} style={{ left: `calc(20px + (100% - 40px) * ${xAt(hi) / 100})` }}>
+      {/* Centred over its step, except near an end, where it holds to the edge rather than spill past it. */}
+      <div className="tl-scrub-label ellipsis" style={xAt(hi) > 80 ? { left: 'auto', right: 20, transform: 'none' } : xAt(hi) < 20 ? { left: 20, transform: 'none' } : { left: `calc(20px + (100% - 40px) * ${xAt(hi) / 100})` }}>
         {label}
       </div>
       <div className="tl-scrub-track">

@@ -30,7 +30,7 @@
   container-type: inline-size;
   max-width: var(--col);
   margin: 0 auto;
-  border-radius: var(--r-4);
+  border-radius: var(--r-7);
   background: var(--raised);
   box-shadow: 0 0 0 1px var(--hair-2), var(--shadow-composer);
   cursor: text;
@@ -244,7 +244,7 @@
   position: relative;
   width: 60px;
   height: 60px;
-  border-radius: var(--r-3);
+  border-radius: var(--r-4);
   overflow: hidden;
   box-shadow: 0 0 0 1px var(--hair-2);
 }
@@ -303,7 +303,7 @@
   max-width: var(--col);
   margin: 0 auto;
   padding: var(--sp-1_5);
-  border-radius: var(--r-3);
+  border-radius: var(--r-4);
   background: var(--glass);
   -webkit-backdrop-filter: var(--glass-blur);
   backdrop-filter: var(--glass-blur);
@@ -379,7 +379,7 @@
   inset: 0 20px 6px;
   display: grid;
   place-items: center;
-  border-radius: var(--r-4);
+  border-radius: var(--r-7);
   font-size: var(--fs-ui);
   font-weight: 500;
   color: var(--text);
@@ -394,7 +394,7 @@
   max-width: var(--col);
   margin: 0 auto var(--sp-2);
   padding: var(--sp-1_5) var(--sp-1_5) var(--sp-1);
-  border-radius: var(--r-3);
+  border-radius: var(--r-4);
   background: color-mix(in srgb, var(--raised) 70%, var(--canvas));
   box-shadow: 0 0 0 1px var(--hair);
   animation: queue-in var(--t-panel) var(--ease);
@@ -465,7 +465,7 @@
   margin-left: var(--sp-1_5);
   padding: 0 var(--sp-1_5);
   height: 18px;
-  border-radius: var(--r-5);
+  border-radius: var(--r-pill);
   background: var(--fill-2);
   font-size: var(--fs-micro);
   color: var(--text-3);

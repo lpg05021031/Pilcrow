@@ -6,7 +6,7 @@ order is the cascade's:
 | File | Holds |
 |---|---|
 | `fonts.css` | The bundled Inter and JetBrains Mono faces (Latin only; CJK uses the system font). |
-| `tokens.css` | Every design token, then the dark (`:root, [data-theme='dark']`) and light (`[data-theme='light']`) values. Nothing else reads a raw colour. |
+| `tokens.css` | Every design token, then the dark (`:root, [data-theme='dark']`) and light (`[data-theme='light']`) values. No other stylesheet holds a colour (the `#000` in a mask gradient is an alpha, not a colour); the app icon's own artwork (`ui/bits.tsx` AppIcon) is the one drawing with fixed hexes. |
 | `base.css` | Elements and the shared controls: buttons, inputs, switches, badges, scrollbars, the reduced-motion switch, `.render-fault`. |
 | `shell.css` | The window: the opening, the shell's columns, the offline and update bars, resizers, the sheets on the ground, per-platform type tuning. |
 | `sidebar.css` | The sidebar: brand, page rows, sessions by folder, one-click new session, collapse and expand. |
@@ -37,7 +37,7 @@ goes in the file that owns the component.
   current item), `.open`, `.live` (being written now), `.running`, `.done`, `.error`, `.stale`,
   `.unread`, `.focused`, and `.leaving` (an exit is playing, see below). ARIA state attributes are
   styled directly where they exist (`[aria-expanded='true']`).
-- **Size modifiers** are plain classes on the base: `.btn.sm`, `.btn.lg`, `.seg.sm`, `.chip.tiny`.
+- **Size modifiers** are plain classes on the base: `.btn.sm`, `.btn.xs`, `.seg.sm`, `.chip.tiny`.
 - `.leaving` is set on the still copy that `lib/motion` (`useExitGhost`, `<Leave>`) leaves behind
   when a component unmounts; its rule in `motion.css` is the exit.
 
@@ -49,20 +49,28 @@ goes in the file that owns the component.
 - **Lines and fills**: `--hair`, `--hair-2`, `--hair-3`; `--fill-1…3` for hover and selection.
 - **Text**: `--text`, `--text-2`, `--text-3`, `--text-4`, from primary to faintest.
 - **Meaning**: `--accent` (primary action, attention, focus), `--ok`, `--err`, `--info`, `--warn`,
-  `--plan`, `--think` (reasoning only), each with a `-wash`; `--accent-ink` is the text on any solid one.
+  `--plan`, `--think` (reasoning only), each with a `-wash`. Orange or red that carries words or
+  figures is `--accent-solid` (`-2` on hover) or `--err-solid`, which white (`--accent-ink`) meets
+  4.5:1 on; `--accent` itself is for marks, focus and the icon-only send button.
 - **Spacing**: `--sp-N` is N × 4px, with `_5` half steps (`--sp-1_5` = 6px). A value off the scale
-  is an optical correction and stays a number.
+  is an optical correction and stays a number, and so is a negative margin, which undoes a padding
+  rather than adds a step.
 - **Type**: `--fs-tiny` 10 … `--fs-display` 22; a `-plus` step is half a pixel up for faces that run
   small (code, keycaps, counters). `--font-size` is the reading size the person sets.
-- **Radii**: `--r-1` 4, `--r-2` 6, `--r-3` 10, `--r-4` 16, `--r-5` pill.
+- **Radii**: `--r-1…7` are 4 to 16 in steps of 2, and `--r-pill`. A radius off the scale follows
+  from its frame (an inner box's is its frame's less the inset) and stays a number; a radius that is
+  half the box's height is the pill.
 - **Stacking**: `--z-float` inside a pane, then `--z-boot`, `--z-dialog`, `--z-popover`, `--z-toast`,
   `--z-lightbox`, `--z-ghost`, `--z-tip`. Inside a component, `z-index` 1 and 2 only order siblings.
 - **Motion**: `--t-*` durations with `--ease*`, and the sampled springs `--spring-soft|snappy|bouncy`
-  with their settle times (`-t`), always used as a pair.
+  with their settle times (`-t`), always used as a pair. A duration that is not one of these is
+  choreography of one piece (the beats of the opening, the step of a stagger, a loop's period) and is
+  a number where it plays, the same rule as an optical correction in spacing.
 
-A theme difference is a token with a value in each theme, never a `[data-theme]` rule in a component.
-The exceptions are the two finishes in `motion.css` that exist only on dark. `public/theme.js` sets
-`data-theme` before the first frame, so there is no unthemed state to style.
+A theme difference is a token with a value in each theme, never a `[data-theme]` rule outside
+`tokens.css`: the two finishes that show only on dark (`motion.css`) read tokens that are empty on
+light. `public/theme.js` sets `data-theme` before the first frame, so there is no unthemed state to
+style.
 
 ## Engine and platform corrections
 
