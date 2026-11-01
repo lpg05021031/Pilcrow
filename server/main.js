@@ -23,14 +23,13 @@ import * as dispatch from './dispatch.js';
 import * as memory from './memory.js';
 import { repos } from './repos.js';
 import * as helpersMod from './helpers.js';
-import { which, log, xdg, HOME, IS_ROOT, IS_WIN, slash, readJson, writeJson, debounce, expandHome, run, privateDir } from './util.js';
+import { which, log, xdg, HOME, IS_ROOT, IS_WIN, slash, readJson, writeJson, debounce, expandHome, run, privateDir, migrateLegacyDirs, VERSION } from './util.js';
 
 // Old environment variable names keep working after the rename.
 for (const k of Object.keys(process.env)) if (k.startsWith('RETICLE_') && !('PILCROW_' + k.slice(8) in process.env)) process.env['PILCROW_' + k.slice(8)] = process.env[k];
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = path.join(ROOT, 'web', 'dist');
-const VERSION = readJson(path.join(ROOT, 'package.json'), {}).version || '1.0.0';
 const PREFERRED_PORT = 47117;
 const LOCK = path.join(xdg('state'), 'instance.json');
 
@@ -89,6 +88,7 @@ function openExternal(target) {
 }
 
 export async function start({ shell = 'none', port, quiet = false, onQuit } = {}) {
+  migrateLegacyDirs();
   privateDir(xdg('config'));
   privateDir(xdg('state'));
   const clients = new Set();
@@ -121,6 +121,7 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
   repos.events.on('changed', (d) => broadcast('repos.changed', d));
   helpersMod.start();
   helpersMod.events.on('changed', (d) => broadcast('helpers.changed', d));
+  sessions.start();
   term.terminals.on('data', (d) => broadcast('term.data', d));
   term.terminals.on('exit', (d) => broadcast('term.exit', d));
 
@@ -517,7 +518,7 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
   const stop = () => {
     if (stopped) return;
     stopped = true;
-    sessions.closeAll();
+    sessions.stop();
     term.closeAll();
     try {
       store.flush();

@@ -15,8 +15,9 @@ const MAX_INBOX = 400;
 const MAX_PARALLEL = 2;
 const DEFAULT_MAX_MIN = 45;
 
-let data = readJson(FILE, { schedules: [] });
-let inbox = readJson(INBOX, { items: [] });
+// Read in start(), not at import: importing this module must not touch the person's files.
+let data = { schedules: [] };
+let inbox = { items: [] };
 const running = new Map(); // scheduleId -> { sessionId | jobId, startedAt, timer }
 /** How a schedule of kind 'dispatch' runs: (playbookId, { scheduleId, name, unattended }) → job summary. Set by main.js. */
 let dispatchRunner = null;
@@ -320,6 +321,8 @@ function lastAssistantText(session) {
 let ticker = null;
 export function start() {
   if (ticker) return;
+  data = readJson(FILE, data);
+  inbox = readJson(INBOX, inbox);
   const tick = async () => {
     const now = Date.now();
     for (const s of data.schedules) {

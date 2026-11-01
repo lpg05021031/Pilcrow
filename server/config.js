@@ -1,10 +1,11 @@
 // Persistent app settings and per-session metadata (titles, worktrees, archive flags).
 import path from 'node:path';
-import { xdg, readJson, writeJson, debounce } from './util.js';
+import { xdg, readJson, writeJson, coalesce } from './util.js';
 
 const DIR = xdg('config');
 const CONFIG_FILE = path.join(DIR, 'config.json');
 const META_FILE = path.join(DIR, 'sessions.json');
+const SAVE_MS = 1000; // sessions.json changes with every turn; once a second is plenty
 
 export const DEFAULT_CONFIG = {
   theme: 'system', // 'system' | 'dark' | 'light'
@@ -19,10 +20,10 @@ export const DEFAULT_CONFIG = {
   notifications: true,
   promptSuggestions: true,
   showThinking: true,
-  timeline: true,
+  timeline: true, // record a snapshot of the folder after every step so you can scrub back
   memoryAuto: true, // distil notes about a project when a turn ends
   memoryInject: true, // hand those notes to new sessions
-  memoryModel: '', // '' = the session default // record a snapshot of the folder after every step so you can scrub back
+  memoryModel: '', // '' = the session default
   recentProjects: [],
   repos: [], // the repositories registry (REPOSITORIES.md): names, aliases, policy, defaults, notes
   helpers: { enabled: true, total: 8, parallel: 0, maxMinutes: 30, costUsd: 0, wakeLead: true }, // HELPERS.md §5.7; parallel 0 = min(3, cores ÷ 2)
@@ -31,18 +32,35 @@ export const DEFAULT_CONFIG = {
   configVersion: 2,
 };
 
+/** The config as saved, brought up to the current version. */
+function loadConfig() {
+  const stored = readJson(CONFIG_FILE, {});
+  // 1.1 retuned the type scale; a size saved as the old default moves to the new default.
+  if ((stored.configVersion || 1) < 2) {
+    if (stored.fontSize === 14) delete stored.fontSize;
+    stored.configVersion = 2;
+  }
+  return { ...DEFAULT_CONFIG, ...stored };
+}
+
+/**
+ * Both files are read on first use, not at import, so importing a module (a test, `--doctor`) never
+ * reads or writes the person's files before it means to.
+ */
 class Store {
-  constructor() {
-    const stored = readJson(CONFIG_FILE, {});
-    // 1.1 retuned the type scale; a size saved as the old default moves to the new default.
-    if ((stored.configVersion || 1) < 2) {
-      if (stored.fontSize === 14) delete stored.fontSize;
-      stored.configVersion = 2;
-    }
-    this.config = { ...DEFAULT_CONFIG, ...stored };
-    this.meta = readJson(META_FILE, {});
-    this.saveConfig = debounce(() => writeJson(CONFIG_FILE, this.config), 200);
-    this.saveMeta = debounce(() => writeJson(META_FILE, this.meta), 200);
+  #config = null;
+  #meta = null;
+  saveConfig = coalesce(() => writeJson(CONFIG_FILE, this.config), SAVE_MS);
+  saveMeta = coalesce(() => writeJson(META_FILE, this.meta), SAVE_MS);
+
+  /** @type {Record<string, any>} */
+  get config() {
+    return (this.#config ??= loadConfig());
+  }
+
+  /** @type {Record<string, Record<string, any>>} id -> that session's metadata */
+  get meta() {
+    return (this.#meta ??= readJson(META_FILE, {}));
   }
 
   getConfig() {
@@ -70,12 +88,14 @@ class Store {
     return this.meta[id] || null;
   }
 
-  setMeta(id, patch) {
+  /** Merge `patch` into a session's metadata (null or undefined deletes a key). `persist: false`
+   *  keeps the change in memory until the next save, for callers on a read path. */
+  setMeta(id, patch, { persist = true } = {}) {
     const cur = this.meta[id] || {};
     const next = { ...cur, ...patch };
     for (const [k, v] of Object.entries(next)) if (v === undefined || v === null) delete next[k];
     this.meta[id] = next;
-    this.saveMeta();
+    if (persist) this.saveMeta();
     return next;
   }
 
@@ -84,9 +104,10 @@ class Store {
     this.saveMeta();
   }
 
+  /** Write now what is loaded (nothing loaded, nothing to lose). */
   flush() {
-    writeJson(CONFIG_FILE, this.config);
-    writeJson(META_FILE, this.meta);
+    if (this.#config) writeJson(CONFIG_FILE, this.#config);
+    if (this.#meta) writeJson(META_FILE, this.#meta);
   }
 }
 

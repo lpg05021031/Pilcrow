@@ -11,7 +11,7 @@ import * as snapshots from './snapshots.js';
 import * as memory from './memory.js';
 import * as git from './git.js';
 import { repos } from './repos.js';
-import { AsyncQueue, uuid, IS_ROOT, log, xdg, slugify, cleanEnv, slash } from './util.js';
+import { AsyncQueue, uuid, IS_ROOT, log, xdg, slugify, cleanEnv, slash, VERSION } from './util.js';
 import { applyAssistant, applyCompact, fromHistory } from './usage.js';
 
 export const bus = new EventEmitter();
@@ -48,10 +48,16 @@ bus.setMaxListeners(50);
 
 // Messages that only matter while they happen; they are forwarded but not kept in the transcript.
 const TRANSIENT_SYSTEM = new Set(['thinking_tokens', 'hook_started', 'hook_progress', 'hook_response', 'status', 'session_state_changed', 'background_tasks_changed', 'task_progress', 'commands_changed', 'files_persisted']);
-const APP_VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version || '1.0.0';
+const OUTBOX_MS = 16; // messages reach the clients in one batch per frame
+const STATE_SOON_MS = 120; // a stream of small state changes: at most one full state this often
+const DRAIN_MS = 50; // after a turn ends, before the next held message goes in
+const REAP_EVERY_MS = 60_000;
+const STDERR_TAIL = 8000; // characters of Claude Code's stderr kept for an error report
+const TASK_PROMPT_MAX = 4000;
+const MAX_TOOL_USES = 400;
 
 function childEnv() {
-  return cleanEnv({ CLAUDE_AGENT_SDK_CLIENT_APP: `pilcrow/${APP_VERSION}` });
+  return cleanEnv({ CLAUDE_AGENT_SDK_CLIENT_APP: `pilcrow/${VERSION}` });
 }
 
 /** A short, human line for a tool call: the file it touched or the command it ran. */
@@ -249,7 +255,7 @@ class Session {
         this.flushTimer = null;
         const msgs = this.outbox.splice(0);
         if (msgs.length) bus.emit('msgs', { id: this.id, msgs });
-      }, 16);
+      }, OUTBOX_MS);
     }
   }
 
@@ -337,7 +343,7 @@ class Session {
       env: childEnv(),
       canUseTool: (name, toolInput, opts) => this.askPermission(name, toolInput, opts),
       stderr: (d) => {
-        this.stderrTail = (this.stderrTail + d).slice(-8000);
+        this.stderrTail = (this.stderrTail + d).slice(-STDERR_TAIL);
       },
       promptSuggestions: cfg.promptSuggestions !== false,
       perTaskStopAffordance: true,
@@ -451,7 +457,7 @@ class Session {
         if (msg.is_error && msg.subtype !== 'success') this.error = (msg.errors || []).join('\n') || null;
         this.emitState();
         bus.emit('list-changed');
-        if (this.status === 'idle') setTimeout(() => this.drainHeld(), 50);
+        if (this.status === 'idle') setTimeout(() => this.drainHeld(), DRAIN_MS);
         if (this.mcp.length) this.scheduleMcpRefresh(300);
         if (this.status === 'idle' && memory.worthIt(this)) memory.distill(this).catch((e) => log('memory distill failed', this.id, e?.message));
         break;
@@ -493,7 +499,7 @@ class Session {
     for (const c of content) {
       if (c?.type === 'tool_use') {
         this.toolUses.set(c.id, { name: c.name, input: c.input, at: Date.now(), sub: Boolean(msg.parent_tool_use_id) });
-        if (this.toolUses.size > 400) this.toolUses.delete(this.toolUses.keys().next().value);
+        if (this.toolUses.size > MAX_TOOL_USES) this.toolUses.delete(this.toolUses.keys().next().value);
         if (!msg.parent_tool_use_id) this.setActivity({ kind: 'tool', tool: c.name, label: toolLabel(c.name, c.input, this.cwd) });
       } else if (c?.type === 'text' && c.text && !msg.parent_tool_use_id) this.setActivity({ kind: 'text', label: c.text.replace(/\s+/g, ' ').trim().slice(0, 140) });
       else if (c?.type === 'thinking' && !msg.parent_tool_use_id) this.setActivity({ kind: 'thinking', label: 'Thinking' });
@@ -543,10 +549,10 @@ class Session {
         else if (msg.state === 'idle' && !this.pending.size) this.status = 'idle';
         this.emitState();
         bus.emit('list-changed');
-        if (this.status === 'idle') setTimeout(() => this.drainHeld(), 50);
+        if (this.status === 'idle') setTimeout(() => this.drainHeld(), DRAIN_MS);
         break;
       case 'task_started':
-        this.tasks.set(msg.task_id, { id: msg.task_id, runId: msg.run_id, toolUseId: msg.tool_use_id, parentTaskId: msg.parent_task_id, description: msg.description, type: msg.task_type, subagentType: msg.subagent_type, workflowName: msg.workflow_name, ownedBySubagent: Boolean(msg.owned_by_subagent), background: msg.is_backgrounded, ambient: msg.ambient, status: 'running', startedAt: Date.now(), prompt: typeof msg.prompt === 'string' ? msg.prompt.slice(0, 4000) : undefined });
+        this.tasks.set(msg.task_id, { id: msg.task_id, runId: msg.run_id, toolUseId: msg.tool_use_id, parentTaskId: msg.parent_task_id, description: msg.description, type: msg.task_type, subagentType: msg.subagent_type, workflowName: msg.workflow_name, ownedBySubagent: Boolean(msg.owned_by_subagent), background: msg.is_backgrounded, ambient: msg.ambient, status: 'running', startedAt: Date.now(), prompt: typeof msg.prompt === 'string' ? msg.prompt.slice(0, TASK_PROMPT_MAX) : undefined });
         this.emitState();
         break;
       case 'task_updated': {
@@ -923,7 +929,12 @@ class Session {
 class SessionManager {
   constructor() {
     this.sessions = new Map();
-    this.reaper = setInterval(() => this.reap(), 60_000);
+    this.reaper = null;
+  }
+
+  /** Start reaping idle sessions (main.start; never at import, so tests stay free of timers). */
+  start() {
+    this.reaper ??= setInterval(() => this.reap(), REAP_EVERY_MS);
     this.reaper.unref?.();
   }
 
@@ -964,8 +975,9 @@ class SessionManager {
     // First sight of a session (one from before this rule, or one made in the terminal): it takes
     // the place its file time gives it today, and keeps it. Claude Code and the process's own exit
     // keep writing to transcripts long after a turn, and none of those writes is a reason to move.
+    // Kept in memory only: listing is a read and never writes; the next real save carries it.
     const touched = fileTime || meta.createdAt || Date.now();
-    store.setMeta(id, { touched });
+    store.setMeta(id, { touched }, { persist: false });
     return touched;
   }
 
@@ -1090,7 +1102,7 @@ class SessionManager {
     const mins = store.getConfig().idleTimeoutMin || 30;
     for (const s of this.sessions.values()) {
       const backgroundWork = s.bgTasks.length > 0 || [...s.tasks.values()].some((t) => t.status === 'running');
-      if (s.q && s.status === 'idle' && !s.pending.size && !backgroundWork && Date.now() - s.lastActivity > mins * 60_000) {
+      if (s.q && s.status === 'idle' && !s.pending.size && !backgroundWork && Date.now() - s.lastActivity > mins * 60e3) {
         log('closing idle session', s.id);
         s.close();
       }
@@ -1102,7 +1114,10 @@ class SessionManager {
     return [...this.sessions.values()].filter((s) => s.q && s.isBusy()).map((s) => ({ id: s.id, cwd: s.cwd, status: s.status }));
   }
 
-  closeAll() {
+  /** Stop reaping and close every Claude Code process (the server is quitting). */
+  stop() {
+    clearInterval(this.reaper);
+    this.reaper = null;
     for (const s of this.sessions.values()) s.close();
   }
 }

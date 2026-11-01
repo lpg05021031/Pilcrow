@@ -13,40 +13,50 @@ export const IS_WIN = process.platform === 'win32';
 export const slash = (p) => (IS_WIN && typeof p === 'string' ? p.replace(/\\/g, '/') : p);
 export const HOME = slash(os.homedir());
 export const IS_ROOT = typeof process.getuid === 'function' && process.getuid() === 0;
+/** The app's version, from its own package.json (the one copy every module uses). */
+export const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version || '1.0.0';
 
 export const uuid = () => crypto.randomUUID();
 export const token = () => crypto.randomBytes(24).toString('base64url');
 
-/** First run under the new name: move what the app kept as "Reticle" to its "Pilcrow" folders. */
-function migrateDir(oldDir, newDir) {
-  try {
-    if (fs.existsSync(newDir) || !fs.existsSync(oldDir)) return;
-    fs.mkdirSync(path.dirname(newDir), { recursive: true });
-    try {
-      fs.renameSync(oldDir, newDir);
-    } catch {
-      fs.cpSync(oldDir, newDir, { recursive: true });
-    }
-  } catch {
-    /* keep going with an empty folder */
-  }
-}
-
-export function xdg(kind) {
+/**
+ * Where Pilcrow keeps its config, data and state, and where the "Reticle" name kept them before the
+ * rename. Only computes paths: importing a module must never touch the person's files.
+ */
+function locate(kind) {
   if (IS_WIN) {
     // Settings roam with the profile (%APPDATA%); state and data stay on this machine (%LOCALAPPDATA%).
     const roaming = process.env.APPDATA || path.join(HOME, 'AppData', 'Roaming');
     const local = process.env.LOCALAPPDATA || path.join(HOME, 'AppData', 'Local');
-    const dir = kind === 'config' ? path.join(roaming, 'Pilcrow') : path.join(local, 'Pilcrow', kind);
-    migrateDir(kind === 'config' ? path.join(roaming, 'Reticle') : path.join(local, 'Reticle', kind), dir);
-    return dir;
+    return kind === 'config' ? { dir: path.join(roaming, 'Pilcrow'), legacy: path.join(roaming, 'Reticle') } : { dir: path.join(local, 'Pilcrow', kind), legacy: path.join(local, 'Reticle', kind) };
   }
   const env = { config: 'XDG_CONFIG_HOME', data: 'XDG_DATA_HOME', state: 'XDG_STATE_HOME' }[kind];
   const fallback = { config: '.config', data: '.local/share', state: '.local/state' }[kind];
   const base = process.env[env] || path.join(HOME, fallback);
-  const dir = path.join(base, 'pilcrow');
-  migrateDir(path.join(base, 'reticle'), dir);
-  return dir;
+  return { dir: path.join(base, 'pilcrow'), legacy: path.join(base, 'reticle') };
+}
+
+/** @param {'config' | 'data' | 'state'} kind */
+export function xdg(kind) {
+  return locate(kind).dir;
+}
+
+/** First run under the new name: move what the app kept as "Reticle" to its "Pilcrow" folders (main.start). */
+export function migrateLegacyDirs() {
+  for (const kind of /** @type {const} */ (['config', 'data', 'state'])) {
+    const { dir, legacy } = locate(kind);
+    try {
+      if (fs.existsSync(dir) || !fs.existsSync(legacy)) continue;
+      fs.mkdirSync(path.dirname(dir), { recursive: true });
+      try {
+        fs.renameSync(legacy, dir);
+      } catch {
+        fs.cpSync(legacy, dir, { recursive: true });
+      }
+    } catch {
+      /* keep going with an empty folder */
+    }
+  }
 }
 
 export function claudeConfigDir() {
@@ -154,6 +164,20 @@ export function writeJson(file, data) {
   fs.renameSync(tmp, file);
 }
 
+/**
+ * Run `fn` once, `ms` after the first call of a burst. Unlike a debounce, a steady stream of calls
+ * cannot starve it: a file saved this way is never more than `ms` behind.
+ */
+export function coalesce(fn, ms) {
+  let t = null;
+  return () => {
+    t ??= setTimeout(() => {
+      t = null;
+      fn();
+    }, ms);
+  };
+}
+
 export function debounce(fn, ms) {
   let t;
   return (...args) => {
@@ -162,15 +186,15 @@ export function debounce(fn, ms) {
   };
 }
 
-const LOG_DIR = xdg('state');
 let logStream = null;
 export function log(...args) {
   const line = `[${new Date().toISOString()}] ${args.map((a) => (typeof a === 'string' ? a : a instanceof Error ? a.stack : JSON.stringify(a))).join(' ')}\n`;
   if (process.env.PILCROW_DEBUG) process.stderr.write(line);
   try {
     if (!logStream) {
-      fs.mkdirSync(LOG_DIR, { recursive: true, mode: 0o700 });
-      const fd = fs.openSync(path.join(LOG_DIR, 'pilcrow.log'), 'a', 0o600);
+      const dir = xdg('state');
+      fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+      const fd = fs.openSync(path.join(dir, 'pilcrow.log'), 'a', 0o600);
       fs.fchmodSync(fd, 0o600); // also tightens logs left by older versions
       logStream = fs.createWriteStream(null, { fd });
     }
