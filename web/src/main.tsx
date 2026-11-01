@@ -7,7 +7,17 @@ import { createRoot } from 'react-dom/client';
 import './styles/fonts.css';
 import './styles/tokens.css';
 import './styles/base.css';
-import './styles/app.css';
+import './styles/shell.css';
+import './styles/sidebar.css';
+import './styles/session.css';
+import './styles/composer.css';
+import './styles/menus.css';
+import './styles/dialogs.css';
+import './styles/settings.css';
+import './styles/welcome.css';
+import './styles/overview.css';
+import './styles/inbox.css';
+import './styles/helpers.css';
 import './styles/transcript.css';
 import './styles/panels.css';
 import './styles/dispatch.css';
@@ -38,4 +48,5 @@ try {
 applyTheme();
 installTooltips();
 initApp();
-createRoot(document.getElementById('root')!).render(<App />);
+const root = document.getElementById('root'); // index.html's own; without it there is nothing to draw into
+if (root) createRoot(root).render(<App />);

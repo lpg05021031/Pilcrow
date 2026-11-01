@@ -183,8 +183,25 @@ export class TranscriptModel {
     this.bump(item);
   }
 
+  /** A batch of messages, as the server sends them: a streamed tool input is parsed once for all of it (endBatch). */
   pushAll(msgs: RawMsg[]) {
     for (const m of msgs) this.push(m);
+    this.endBatch();
+  }
+
+  /** Tools whose streamed input has grown since it was last parsed. */
+  private partial = new Set<ToolItem>();
+
+  /**
+   * Parse what each tool's input has streamed so far, once per batch: parsed per piece, a large Write
+   * (thousands of pieces, each parse reading the whole input so far) cost time quadratic in its size.
+   */
+  endBatch() {
+    for (const t of this.partial) {
+      const parsed = parsePartialJson(t.inputJson);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) t.input = parsed as ToolInput;
+    }
+    this.partial.clear();
   }
 
   push(m: RawMsg) {
@@ -241,7 +258,8 @@ export class TranscriptModel {
     }
     const msgId = this.current.get(parent);
     if (!msgId) return;
-    const drafts = this.drafts.get(msgId)!;
+    const drafts = this.drafts.get(msgId);
+    if (!drafts) return;
     const index = e.index ?? 0;
     if (e.type === 'content_block_start') {
       if ((this.ordinals.get(msgId) || 0) > index) return; // final block already shown
@@ -276,8 +294,7 @@ export class TranscriptModel {
       else if (d.type === 'thinking_delta' && item.kind === 'thinking') item.text += d.thinking || '';
       else if (d.type === 'input_json_delta' && item.kind === 'tool') {
         item.inputJson += d.partial_json || '';
-        const parsed = parsePartialJson(item.inputJson);
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) item.input = parsed as ToolInput;
+        this.partial.add(item);
       } else return;
       this.bump(item);
     } else if (e.type === 'content_block_stop') {
@@ -285,6 +302,7 @@ export class TranscriptModel {
         item.streaming = false;
         item.endTs = Date.now();
       } else if (item.kind === 'tool') {
+        this.partial.delete(item);
         item.inputDone = true;
         try {
           item.input = JSON.parse(item.inputJson || '{}');
@@ -380,10 +398,10 @@ export class TranscriptModel {
     for (const r of results) {
       const t = r.tool_use_id ? this.tools.get(r.tool_use_id) : undefined;
       if (!t) continue;
-      t.result = contentToResult(r.content, Boolean(r.is_error));
+      const res = (t.result = contentToResult(r.content, Boolean(r.is_error)));
       if (results.length === 1 && m.tool_use_result && typeof m.tool_use_result === 'object') t.structured = m.tool_use_result as StructuredResult;
       t.endTs = ts;
-      t.status = classifyResult(t);
+      t.status = classifyResult(t, res);
       this.bump(t);
     }
     if (results.length) return;
@@ -608,8 +626,7 @@ export class TranscriptModel {
   }
 }
 
-function classifyResult(t: ToolItem): ToolStatus {
-  const r = t.result!;
+function classifyResult(t: ToolItem, r: ToolResult): ToolStatus {
   const s = t.structured;
   if (s && typeof s === 'object') {
     if (s.isAsync || s.status === 'async_launched' || (s.backgroundTaskId && !r.isError)) return t.task && t.task.status !== 'running' ? (t.task.status === 'completed' ? 'done' : 'interrupted') : 'background';
@@ -662,4 +679,36 @@ function blocksOf(content: string | ContentBlock[] | undefined): ContentBlock[] 
 function originKind(m: RawMsg): string | undefined {
   const o = m.origin as unknown;
   return o && typeof o === 'object' ? (o as { kind?: string }).kind : typeof o === 'string' ? o : undefined;
+}
+
+// ---------------------------------------------------------------- find
+
+/** One place a search matched: the item, and which match within it (the k-th, in reading order). */
+export interface FindHit {
+  item: UserItem | TextItem;
+  k: number;
+}
+
+// Each item's text lowered once per change of it, so a search per keystroke reads, never re-lowers.
+const lowered = new WeakMap<Item, { rev: number; text: string }>();
+
+/**
+ * Where `needle` occurs in what the conversation says, the person's messages and Claude's words, in
+ * order: what Find counts and steps through without drawing the conversation (FindBar). The steps'
+ * own output is not searched; it stays folded away unless asked for. At most `max` hits.
+ */
+export function findInItems(items: Item[], needle: string, max = 3000): FindHit[] {
+  const out: FindHit[] = [];
+  const q = needle.toLocaleLowerCase();
+  if (!q) return out;
+  for (const it of items) {
+    if ((it.kind !== 'user' && it.kind !== 'text') || !it.text) continue;
+    let c = lowered.get(it);
+    if (!c || c.rev !== it.rev) lowered.set(it, (c = { rev: it.rev, text: it.text.toLocaleLowerCase() }));
+    for (let i = c.text.indexOf(q), k = 0; i >= 0; i = c.text.indexOf(q, i + q.length), k++) {
+      if (out.length >= max) return out;
+      out.push({ item: it, k });
+    }
+  }
+  return out;
 }

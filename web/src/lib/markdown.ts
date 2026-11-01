@@ -2,7 +2,7 @@
 import { Marked, type Tokens } from 'marked';
 import DOMPurify from 'dompurify';
 import { cachedHtml, normalizeLang } from './highlight';
-import { LruBytes } from './lru';
+import { LruBytes } from './cache';
 
 // How code-block languages are labelled: people say "TypeScript", not "ts".
 const LANG_NAMES: Record<string, string> = {
@@ -94,7 +94,7 @@ export function splitBlocks(src: string): string[] {
   if (!src) return [];
   let tokens: { type: string; raw: string }[];
   try {
-    tokens = marked.lexer(src) as unknown as { type: string; raw: string }[];
+    tokens = marked.lexer(src);
   } catch {
     return [src];
   }
@@ -118,9 +118,25 @@ export function extendBlocks(prev: { text: string; blocks: string[] }, text: str
   if (!n || !text.startsWith(prev.text)) return splitBlocks(text);
   let from = 0;
   for (let i = 0; i < n - 1; i++) from += prev.blocks[i].length;
-  if (from + prev.blocks[n - 1].length !== prev.text.length) return splitBlocks(text);
+  const last = prev.blocks[n - 1];
+  if (from + last.length !== prev.text.length) return splitBlocks(text);
+  // A code fence still open stays one block until a line could close it: everything up to that is its
+  // code. Lexing it again per piece would read the whole fence each time (60 kB, every frame).
+  const grown = last + text.slice(prev.text.length);
+  if (openFenceCode(last) !== null && openFenceCode(grown) !== null) return prev.blocks.slice(0, -1).concat(grown);
   const tail = splitBlocks(text.slice(from));
   return n === 1 ? tail : prev.blocks.slice(0, -1).concat(tail);
+}
+
+/**
+ * The code of a block that is one ``` code fence not closed yet, as it is drawn (renderMarkdown closes
+ * it for the parse, and the renderer drops the newline before the closing fence); null for anything
+ * else, including a fence with any line that might close it.
+ */
+export function openFenceCode(raw: string): string | null {
+  const open = /^```[^\n`]*\n/.exec(raw);
+  if (!open || /\n {0,3}```/.test(raw.slice(open[0].length - 1))) return null;
+  return raw.slice(open[0].length).replace(/\n$/, '');
 }
 
 export { normalizeLang };
@@ -137,7 +153,7 @@ export function asPathRef(text: string): { path: string; line?: number } | null 
   const m = t.match(PATH_RE);
   if (m) {
     // A bare `name.ext` is a file only when the extension is one; `Math.round` and `t.rawBody` are code.
-    if (!t.includes('/') && !KNOWN_EXT.has(t.replace(/:(\d+)(-\d+)?$/, '').split('.').pop()!.toLowerCase())) return null;
+    if (!t.includes('/') && !KNOWN_EXT.has(t.replace(/:(\d+)(-\d+)?$/, '').split('.').pop()?.toLowerCase() || '')) return null;
     return { path: t.replace(/:(\d+)(-\d+)?$/, ''), line: m[1] ? Number(m[1]) : undefined };
   }
   if (DIR_RE.test(t) && t.includes('/')) return null;

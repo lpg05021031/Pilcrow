@@ -1,5 +1,5 @@
-import { memo, useEffect, useMemo, useRef } from 'react';
-import { renderMarkdown, asPathRef, extendBlocks } from '../lib/markdown';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { renderMarkdown, asPathRef, extendBlocks, openFenceCode } from '../lib/markdown';
 import { CHUNK_OPEN, escapeHtml, highlightHtml, PAINT_LINES } from '../lib/highlight';
 import { rpc } from '../lib/rpc';
 import { openFile, toast } from '../lib/store';
@@ -39,13 +39,63 @@ async function paintCode(pre: HTMLPreElement, code: string, html: string) {
 }
 
 /**
+ * Add text to a code block being written, PAINT_LINES lines to a block of their own (the blocks a long
+ * one is coloured in, paintCode): one growing run of text is laid out and painted whole for every
+ * piece, while a new piece in the last of these blocks leaves the others as they were.
+ */
+function appendCode(code: Element, text: string) {
+  let chunk = code.lastElementChild instanceof HTMLElement && code.lastElementChild.classList.contains('hl-chunk') ? code.lastElementChild : null;
+  if (!chunk) {
+    chunk = code.appendChild(newChunk());
+    chunk.append(...[...code.childNodes].filter((n) => n !== chunk));
+    chunk.dataset.lines = String((chunk.textContent || '').split('\n').length - 1);
+  }
+  let lines = Number(chunk.dataset.lines);
+  for (const part of text.split(/(?<=\n)/)) {
+    if (lines >= PAINT_LINES) {
+      chunk.dataset.lines = String(lines);
+      chunk = code.appendChild(newChunk());
+      lines = 0;
+    }
+    chunk.append(part);
+    if (part.endsWith('\n')) lines++;
+  }
+  chunk.dataset.lines = String(lines);
+}
+
+function newChunk() {
+  const el = document.createElement('span');
+  el.className = 'hl-chunk';
+  el.style.display = 'block';
+  return el;
+}
+
+/**
  * One top-level block. Finished blocks never re-render, so their DOM (and the reader's selection)
  * survives streaming; while a reply streams, only the open block at the end renders, and only its
  * own DOM is looked over afterwards.
  */
 const Block = memo(function Block({ raw, open, baseDir }: { raw: string; open: boolean; baseDir?: string }) {
   const ref = useRef<HTMLDivElement>(null);
-  const html = useMemo(() => renderMarkdown(raw, { streaming: open, baseDir }), [raw, open, baseDir]);
+  // A code fence being written grows at its end, so what arrives is appended to the code's text
+  // (below) instead of the block being parsed, sanitised and laid out whole again for every piece:
+  // the markup stays the one drawn when the fence opened, and the block is drawn whole once it closes.
+  const fence = useRef<{ html: string; code: string } | null>(null); // what the DOM holds of an open fence
+  const code = open ? openFenceCode(raw) : null;
+  const drawn = fence.current;
+  const growing = code !== null && drawn !== null && code.startsWith(drawn.code);
+  const html = useMemo(() => (growing && drawn ? drawn.html : renderMarkdown(raw, { streaming: open, baseDir })), [raw, open, baseDir, growing, drawn]);
+  useLayoutEffect(() => {
+    const el = ref.current?.querySelector('pre:last-of-type code');
+    if (code === null || !el) fence.current = null;
+    else if (!growing || !drawn) fence.current = el.textContent === code ? { html, code } : null;
+    // Not what was drawn (something else changed it): the next piece draws the block whole.
+    else if (el.textContent !== drawn.code) fence.current = null;
+    else if (code.length > drawn.code.length) {
+      appendCode(el, code.slice(drawn.code.length));
+      drawn.code = code;
+    }
+  }, [code, html, growing, drawn]);
 
   useEffect(() => {
     const el = ref.current;

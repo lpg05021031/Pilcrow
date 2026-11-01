@@ -1,6 +1,6 @@
 import { useId, useMemo, useState, type RefObject } from 'react';
 import { File as FileIcon, Folder, FolderGit2 } from 'lucide-react';
-import { useStore, fileIndex } from '../../lib/store';
+import { useStore, useFileIndex } from '../../lib/store';
 import { fuzzyFilter } from '../../lib/fuzzy';
 import { tildify } from '../../lib/format';
 import type { SlashCommandInfo } from '../../lib/types';
@@ -35,7 +35,8 @@ export function useSuggest({ sessionId, cwd, text, setText, field }: { sessionId
   const repos = useStore((s) => s.config?.repos);
   const home = useStore((s) => s.info?.home);
   const [popup, setPopup] = useState<Popup>(null);
-  const [files, setFiles] = useState<string[]>([]);
+  // A folder that cannot be listed still offers the registered repositories.
+  const files = useFileIndex(cwd, popup?.kind === 'mention');
   const listId = useId();
 
   const commands: SlashCommandInfo[] = useMemo(() => {
@@ -68,8 +69,6 @@ export function useSuggest({ sessionId, cwd, text, setText, field }: { sessionId
     if (slash) return setPopup({ kind: 'slash', query: slash[1], start: 0, index: 0 });
     const at = before.match(/(?:^|\s)@([^\s@]*)$/);
     if (!at) return setPopup(null);
-    // A folder that cannot be listed still offers the registered repositories.
-    if (!files.length) fileIndex(cwd).then(setFiles, () => {});
     setPopup({ kind: 'mention', query: at[1], start: caret - at[1].length - 1, index: 0 });
   };
 
@@ -113,16 +112,16 @@ export function useSuggest({ sessionId, cwd, text, setText, field }: { sessionId
 
   const option = (i: number) => `${listId}-${i}`;
   /** For the field: what the list is, and which row is lit. */
-  const fieldProps = open ? { 'aria-controls': listId, 'aria-activedescendant': option(popup!.index) } : {};
+  const fieldProps = open && popup ? { 'aria-controls': listId, 'aria-activedescendant': option(popup.index) } : {};
 
-  const view = open ? (
+  const view = open && popup ? (
     <Leave className="suggest" duration={160}>
       <div className="suggest-head" id={`${listId}-h`}>
-        {popup!.kind === 'slash' ? 'Commands' : popup!.query ? (suggestions.some((s) => s.kind === 'repo') ? 'Repositories and files' : 'Files') : 'Files — keep typing to narrow down'}
+        {popup.kind === 'slash' ? 'Commands' : popup.query ? (suggestions.some((s) => s.kind === 'repo') ? 'Repositories and files' : 'Files') : 'Files — keep typing to narrow down'}
       </div>
       <div className="suggest-list" role="listbox" id={listId} aria-labelledby={`${listId}-h`} style={{ ['--name-ch' as string]: `${Math.min(30, Math.max(8, ...suggestions.filter((x) => x.kind === 'cmd').map((x) => x.label.length)))}ch` }}>
         {suggestions.slice(0, 40).map((s, i) => (
-          <button key={s.key} id={option(i)} role="option" aria-selected={i === popup!.index} tabIndex={-1} className={`suggest-item${i === popup!.index ? ' active' : ''}`} onMouseDown={(e) => e.preventDefault()} onClick={() => apply(s)} onMouseEnter={() => setPopup({ ...popup!, index: i })} ref={i === popup!.index ? (el) => el?.scrollIntoView({ block: 'nearest' }) : undefined}>
+          <button key={s.key} id={option(i)} role="option" aria-selected={i === popup.index} tabIndex={-1} className={`suggest-item${i === popup.index ? ' active' : ''}`} onMouseDown={(e) => e.preventDefault()} onClick={() => apply(s)} onMouseEnter={() => setPopup({ ...popup, index: i })} ref={i === popup.index ? (el) => el?.scrollIntoView({ block: 'nearest' }) : undefined}>
             {s.kind === 'repo' ? <FolderGit2 size={14} className="suggest-repo" aria-hidden="true" /> : s.kind === 'dir' ? <Folder size={14} aria-hidden="true" /> : s.kind === 'file' ? <FileIcon size={14} aria-hidden="true" /> : null}
             <span className={`suggest-label${s.kind === 'cmd' ? ' cmd' : ''}`}>
               {s.kind === 'cmd' ? (

@@ -5,7 +5,6 @@ import { cost, duration, plural } from '../../lib/format';
 export const STATE_WORD: Record<RunState, string> = { queued: 'queued', preparing: 'preparing', running: 'running', needs_action: 'needs action', done: 'done', failed: 'failed', stopped: 'stopped', skipped: 'skipped' };
 export const BAR_ORDER: RunState[] = ['done', 'needs_action', 'running', 'preparing', 'queued', 'failed', 'stopped', 'skipped'];
 export const ACTIVE: RunState[] = ['preparing', 'running', 'needs_action'];
-export const TERMINAL: RunState[] = ['done', 'failed', 'stopped', 'skipped'];
 
 export function clockMmss(ms: number) {
   const s = Math.max(0, Math.floor(ms / 1000));

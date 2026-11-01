@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { BookMarked, Pin, PinOff, Trash, Plus, Sparkles, Check, X, Folder } from 'lucide-react';
 import { useStore, call, setConfig, toast, confirmAction, activeSession } from '../../lib/store';
-import type { MemoryNote } from '../../lib/types';
+import type { Config, MemoryNote } from '../../lib/types';
 import { basename, timeAgo, tildify, plural } from '../../lib/format';
 import { Select } from '../ui/Select';
 import { Switch, Spinner, useNow } from '../ui/bits';
@@ -12,8 +12,7 @@ import { Empty } from '../ui/Empty';
  * Project memory: the notes earlier sessions left about a folder, which every new session there
  * gets to read. Notes come from a small run at the end of a turn, or are written here by hand.
  */
-export function MemoryPage() {
-  const config = useStore((s) => s.config)!;
+export function MemoryPage({ config }: { config: Config }) {
   const sessions = useStore((s) => s.sessions);
   const info = useStore((s) => s.info);
   const rev = useStore((s) => s.schedRev);

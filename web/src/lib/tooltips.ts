@@ -24,8 +24,7 @@ function text(el: HTMLElement) {
   return el.dataset.tip || '';
 }
 
-function render(content: string) {
-  const el = tip!;
+function render(el: HTMLElement, content: string) {
   el.textContent = '';
   const m = content.match(SHORTCUT);
   const label = document.createElement('span');
@@ -52,8 +51,7 @@ function render(content: string) {
   }
 }
 
-function place(anchor: HTMLElement) {
-  const el = tip!;
+function place(el: HTMLElement, anchor: HTMLElement) {
   const a = anchor.getBoundingClientRect();
   const w = el.offsetWidth;
   const h = el.offsetHeight;
@@ -68,12 +66,14 @@ function place(anchor: HTMLElement) {
 function show(anchor: HTMLElement) {
   const content = text(anchor);
   if (!content || !anchor.isConnected) return;
-  render(content);
-  tip!.classList.remove('show');
-  tip!.style.visibility = 'hidden';
-  tip!.hidden = false;
-  place(anchor);
-  tip!.style.visibility = '';
+  const el = tip;
+  if (!el) return; // not installed (installTooltips)
+  render(el, content);
+  el.classList.remove('show');
+  el.style.visibility = 'hidden';
+  el.hidden = false;
+  place(el, anchor);
+  el.style.visibility = '';
   requestAnimationFrame(() => tip?.classList.add('show'));
 }
 

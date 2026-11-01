@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, createContext, useContext } from 'react';
 import { ChevronRight, File as FileIcon, Folder, FolderOpen, RefreshCw, X, Save, PanelLeft, Eye, EyeOff, ExternalLink, AtSign, BookOpen, PencilLine, Columns2, RotateCw } from 'lucide-react';
-import { useStore, call, toast, confirmAction, insertIntoComposer, bumpFs, toasted } from '../../lib/store';
+import { useStore, call, toast, confirmAction, insertIntoComposer, bumpFs, toasted, memo, type FilesState, type FileTab } from '../../lib/store';
+import { folders, type DirEntry } from '../../lib/cache';
 import { FileTouches, useFileHistory } from '../FileTouches';
 import { Markdown } from '../Markdown';
 import type { FileTouch, SessionSummary } from '../../lib/types';
@@ -10,56 +11,24 @@ import type { FileRead, FileWrite } from '../../lib/types';
 import { errText } from '../../lib/format';
 import { Empty, Loading } from '../ui/Empty';
 
-interface Entry {
-  name: string;
-  path: string;
-  type: 'dir' | 'file';
-  size: number;
-  heavy?: boolean;
-}
-
-interface Tab {
-  path: string;
-  doc: string;
-  saved: string;
-  mtime?: number;
-  binary?: boolean;
-  dataUrl?: string;
-  tooLarge?: boolean;
-  size?: number;
-  error?: string;
-  loading?: boolean;
-  /** Documents can be read as rendered pages, edited as text, or both side by side. */
-  view?: 'preview' | 'edit' | 'split';
-}
-
-interface FilesState {
-  tabs: Tab[];
-  active: string | null;
-  expanded: Record<string, boolean>;
-  showTree: boolean;
-  showHidden: boolean;
-}
-
 // CodeMirror is most of a megabyte and only an open file needs it: it loads with the first one.
 const Editor = lazy(() => import('./Editor').then((m) => ({ default: m.Editor })));
 
-const perCwd = new Map<string, FilesState>();
-const dirCache = new Map<string, Entry[]>();
 
 const HistoryCtx = createContext<{ cwd: string; map: Record<string, FileTouch[]> | null }>({ cwd: '', map: null });
 
 export function FilesPanel({ session, cwd, visible }: { session: SessionSummary; cwd: string; visible: boolean }) {
   const fileOpen = useStore((s) => s.fileOpen);
   const history = useFileHistory(cwd);
-  const rev = useStore((s) => s.rt[session.id]?.rev || 0);
-  const [st, setSt] = useState<FilesState>(() => perCwd.get(cwd) || { tabs: [], active: null, expanded: { [cwd]: true }, showTree: true, showHidden: false });
+  // Kept mounted while another tab is shown (RightPanel): hidden, it does not follow the stream at all.
+  const rev = useStore((s) => (visible ? s.rt[session.id]?.rev || 0 : 0));
+  const [st, setSt] = useState<FilesState>(() => memo(session.id).files || { tabs: [], active: null, expanded: { [cwd]: true }, showTree: true, showHidden: false });
   const [line, setLine] = useState<{ line?: number; nonce: number }>({ nonce: 0 });
   const [treeNonce, setTreeNonce] = useState(0);
   const update = (fn: (s: FilesState) => FilesState) =>
     setSt((s) => {
       const n = fn(s);
-      perCwd.set(cwd, n);
+      memo(session.id).files = n;
       return n;
     });
 
@@ -67,7 +36,7 @@ export function FilesPanel({ session, cwd, visible }: { session: SessionSummary;
     async (path: string, ln?: number) => {
       update((s) => (s.tabs.some((t) => t.path === path) ? { ...s, active: path } : { ...s, active: path, tabs: [...s.tabs, { path, doc: '', saved: '', loading: true }] }));
       setLine({ line: ln, nonce: Date.now() });
-      const existing = (perCwd.get(cwd) || st).tabs.find((t) => t.path === path);
+      const existing = (memo(session.id).files || st).tabs.find((t) => t.path === path);
       if (existing && !existing.loading && !existing.error) return;
       try {
         const r = await call<FileRead>('fs.read', { path }, { quiet: true });
@@ -77,7 +46,7 @@ export function FilesPanel({ session, cwd, visible }: { session: SessionSummary;
         update((s) => ({ ...s, tabs: s.tabs.map((t) => (t.path === path ? { ...t, loading: false, error: errText(e) } : t)) }));
       }
     },
-    [cwd], // eslint-disable-line react-hooks/exhaustive-deps -- update() is a fresh closure each render over the same perCwd entry
+    [cwd], // eslint-disable-line react-hooks/exhaustive-deps -- update() is a fresh closure each render over the same memo entry
   );
 
   useEffect(() => {
@@ -91,7 +60,7 @@ export function FilesPanel({ session, cwd, visible }: { session: SessionSummary;
     if (!visible || checkedRev.current === rev) return;
     const timer = setTimeout(async () => {
       checkedRev.current = rev;
-      const cur = perCwd.get(cwd);
+      const cur = memo(session.id).files;
       if (!cur) return;
       for (const t of cur.tabs) {
         if (t.loading || t.binary || t.tooLarge || t.doc !== t.saved) continue;
@@ -106,11 +75,11 @@ export function FilesPanel({ session, cwd, visible }: { session: SessionSummary;
       setTreeNonce((n) => n + 1);
     }, 900);
     return () => clearTimeout(timer);
-  }, [rev, cwd, visible]); // eslint-disable-line react-hooks/exhaustive-deps -- update() is a fresh closure each render over the same perCwd entry
+  }, [rev, cwd, visible]); // eslint-disable-line react-hooks/exhaustive-deps -- update() is a fresh closure each render over the same memo entry
 
   const active = st.tabs.find((t) => t.path === st.active) || null;
 
-  const save = async (tab: Tab, force = false) => {
+  const save = async (tab: FileTab, force = false) => {
     const r = await call<FileWrite>('fs.write', { path: tab.path, text: tab.doc, expectedMtime: tab.mtime, force });
     if (r.conflict) {
       confirmAction({
@@ -178,7 +147,7 @@ export function FilesPanel({ session, cwd, visible }: { session: SessionSummary;
           className="icon-btn sm"
           title="Refresh" aria-label="Refresh"
           onClick={() => {
-            dirCache.clear();
+            folders.dirs.clear();
             setTreeNonce((n) => n + 1);
           }}
         >
@@ -239,7 +208,7 @@ export function FilesPanel({ session, cwd, visible }: { session: SessionSummary;
                       nonce={line.nonce}
                       onChange={(text) => update((s) => ({ ...s, tabs: s.tabs.map((t) => (t.path === active.path ? { ...t, doc: text } : t)) }))}
                       onSave={() => {
-                        const cur = perCwd.get(cwd)?.tabs.find((t) => t.path === active.path);
+                        const cur = memo(session.id).files?.tabs.find((t) => t.path === active.path);
                         if (cur) save(cur);
                       }}
                     />
@@ -263,17 +232,17 @@ export function FilesPanel({ session, cwd, visible }: { session: SessionSummary;
 }
 
 function TreeDir({ path, depth, st, update, onOpen, active, nonce, root }: { path: string; depth: number; st: FilesState; update: (fn: (s: FilesState) => FilesState) => void; onOpen: (p: string) => void; active: string | null; nonce: number; root?: boolean }) {
-  const [entries, setEntries] = useState<Entry[] | null>(() => dirCache.get(path) || null);
+  const [entries, setEntries] = useState<DirEntry[] | null>(() => folders.dirs.get(path) || null);
   const hist = useContext(HistoryCtx);
   const [error, setError] = useState<string | null>(null);
   const open = root || st.expanded[path];
   useEffect(() => {
     if (!open) return;
     let alive = true;
-    call<{ entries: Entry[]; error?: string }>('fs.list', { dir: path }, { quiet: true })
+    call<{ entries: DirEntry[]; error?: string }>('fs.list', { dir: path }, { quiet: true })
       .then((r) => {
         if (!alive) return;
-        dirCache.set(path, r.entries);
+        folders.dirs.set(path, r.entries);
         setEntries(r.entries);
         setError(r.error || null);
       })
@@ -332,7 +301,7 @@ function fsUrl(path: string) {
   return '/api/fs' + (path.startsWith('/') ? '' : '/') + path.split('/').map(encodeURIComponent).join('/');
 }
 /** A document opens as a page; a click on Edit (or a file that is not a document) shows the source. */
-function docView(t: Tab): 'preview' | 'edit' | 'split' {
+function docView(t: FileTab): 'preview' | 'edit' | 'split' {
   return t.view || (isDoc(t.path) ? 'preview' : 'edit');
 }
 

@@ -21,12 +21,12 @@ export function PlanBody({ item, perm, ctx }: { item: ToolItem; perm?: Permissio
   const decide = async (d: PermissionDecision) => {
     setBusy(true);
     try {
-      await respond(ctx.sessionId, perm!.requestId, d);
+      if (perm) await respond(ctx.sessionId, perm.requestId, d);
     } catch {
       setBusy(false);
     }
   };
-  const approve = (mode: 'acceptEdits' | 'default') => decide({ behavior: 'allow', updatedInput: perm!.input, updatedPermissions: [{ type: 'setMode', mode, destination: 'session' }] });
+  const approve = (mode: 'acceptEdits' | 'default') => decide({ behavior: 'allow', updatedInput: perm?.input, updatedPermissions: [{ type: 'setMode', mode, destination: 'session' }] });
   const keepPlanning = () => decide({ behavior: 'deny', message: feedback.trim() ? `The user wants changes to the plan: ${feedback.trim()}` : 'The user wants to keep planning. Ask what to change.' });
 
   const outcome = !perm && item.result ? (item.status === 'denied' || item.result.isError ? 'kept' : 'approved') : null;

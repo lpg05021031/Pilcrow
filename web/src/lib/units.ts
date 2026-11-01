@@ -1,4 +1,4 @@
-import type { Item, TextItem, ThinkingItem, ToolItem } from './transcript';
+import type { Item, ToolItem } from './transcript';
 
 export type Unit = { kind: 'items'; items: Item[]; key: string } | { kind: 'work'; key: string; work: Item[]; live: boolean };
 
@@ -137,43 +137,5 @@ export function groupItems(items: Item[]): Group[] {
     }
   }
   flush();
-  return out;
-}
-
-export type Chapter = { key: string; title: TextItem | null; thought: ThinkingItem | null; steps: Item[] };
-
-/**
- * Inside a turn, what Claude says along the way ("I'm reading the source; next I'll…") describes the
- * steps that follow it. So each stretch of narration becomes a chapter heading with its steps under
- * it, and a thought that led straight into the narration is tucked onto the same heading.
- */
-export function chaptersOf(items: Item[]): Chapter[] {
-  const out: Chapter[] = [];
-  let cur: Chapter = { key: 'c0', title: null, thought: null, steps: [] };
-  let pendingThought: ThinkingItem | null = null;
-  const push = () => {
-    if (cur.title || cur.thought || cur.steps.length) out.push(cur);
-  };
-  for (const it of items) {
-    if (it.kind === 'thinking') {
-      // Hold it: if narration follows, it belongs to that heading.
-      if (pendingThought) cur.steps.push(pendingThought);
-      pendingThought = it;
-      continue;
-    }
-    if (it.kind === 'text') {
-      push();
-      cur = { key: 'c-' + it.id, title: it, thought: pendingThought, steps: [] };
-      pendingThought = null;
-      continue;
-    }
-    if (pendingThought) {
-      cur.steps.push(pendingThought);
-      pendingThought = null;
-    }
-    cur.steps.push(it);
-  }
-  if (pendingThought) cur.steps.push(pendingThought);
-  push();
   return out;
 }

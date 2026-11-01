@@ -6,13 +6,20 @@ import { useEscape } from './bits';
 
 type Placement = 'bottom-start' | 'bottom-end' | 'top-start' | 'top-end';
 
+/** What a popover hangs from: an element, or a point (a context menu opens where the pointer was). */
+export interface Anchor {
+  getBoundingClientRect(): DOMRect;
+  contains?(node: Node | null): boolean;
+  focus?(): void;
+}
+
 const EXIT_MS = 160;
 
 /**
  * A floating pane anchored to an element. It carries no role of its own: a menu inside says `menu`;
  * other content passes `role="dialog"` and a `label`. `width="anchor"` matches the anchor's width.
  */
-export function Popover({ anchor, open, onClose, children, placement = 'bottom-start', className = '', width, role, label }: { anchor: HTMLElement | null; open: boolean; onClose: () => void; children: ReactNode; placement?: Placement; className?: string; width?: number | 'anchor'; role?: 'dialog'; label?: string }) {
+export function Popover({ anchor, open, onClose, children, placement = 'bottom-start', className = '', width, role, label }: { anchor: Anchor | null; open: boolean; onClose: () => void; children: ReactNode; placement?: Placement; className?: string; width?: number | 'anchor'; role?: 'dialog'; label?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number; up: boolean } | null>(null);
   // Closing keeps the popover on screen for its exit, inert, before it goes.
@@ -36,30 +43,39 @@ export function Popover({ anchor, open, onClose, children, placement = 'bottom-s
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps -- runs as it opens and closes; `shown` is what it sets
 
   useLayoutEffect(() => {
-    if (!open || !anchor || !ref.current) return;
-    const a = anchor.getBoundingClientRect();
-    if (width === 'anchor') ref.current.style.width = `${a.width}px`;
-    // Layout size, not the on-screen box: the opening animation scales the popover down for a moment.
-    const p = { width: ref.current.offsetWidth, height: ref.current.offsetHeight };
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    let left = placement.endsWith('end') ? a.right - p.width : a.left;
-    let top = placement.startsWith('top') ? a.top - p.height - 6 : a.bottom + 6;
-    if (top + p.height > vh - 8) top = Math.max(8, a.top - p.height - 6);
-    if (top < 8) top = Math.min(vh - p.height - 8, a.bottom + 6);
-    left = Math.max(8, Math.min(left, vw - p.width - 8));
-    setPos({ left, top, up: top < a.top });
+    if (!open || !anchor) return;
+    const place = () => {
+      const el = ref.current;
+      if (!el) return;
+      const a = anchor.getBoundingClientRect();
+      if (width === 'anchor') el.style.width = `${a.width}px`;
+      // Layout size, not the on-screen box: the opening animation scales the popover down for a moment.
+      const p = { width: el.offsetWidth, height: el.offsetHeight };
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      let left = placement.endsWith('end') ? a.right - p.width : a.left;
+      let top = placement.startsWith('top') ? a.top - p.height - 6 : a.bottom + 6;
+      if (top + p.height > vh - 8) top = Math.max(8, a.top - p.height - 6);
+      if (top < 8) top = Math.min(vh - p.height - 8, a.bottom + 6);
+      left = Math.max(8, Math.min(left, vw - p.width - 8));
+      setPos({ left, top, up: top < a.top });
+    };
+    place();
+    // The window resized under an open popover: it follows its anchor rather than floating off it.
+    window.addEventListener('resize', place);
+    return () => window.removeEventListener('resize', place);
   }, [open, anchor, placement, width, children]);
 
   useEscape(onClose, open);
   useEffect(() => {
     if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current?.contains(e.target as Node) || anchor?.contains(e.target as Node)) return;
+    // Pointer, not mouse: a touch or a pen outside closes it too.
+    const onDown = (e: PointerEvent) => {
+      if (ref.current?.contains(e.target as Node) || anchor?.contains?.(e.target as Node)) return;
       onClose();
     };
-    window.addEventListener('mousedown', onDown, true);
-    return () => window.removeEventListener('mousedown', onDown, true);
+    window.addEventListener('pointerdown', onDown, true);
+    return () => window.removeEventListener('pointerdown', onDown, true);
   }, [open, anchor, onClose]);
 
   useEffect(() => {

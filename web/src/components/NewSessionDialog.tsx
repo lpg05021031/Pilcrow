@@ -20,8 +20,7 @@ interface Browse {
   error?: string;
 }
 
-export function NewSessionDialog() {
-  const spec = useStore((s) => s.dialogs.newSession)!;
+export function NewSessionDialog({ spec }: { spec: { cwd?: string; prompt?: string } }) {
   const config = useStore((s) => s.config);
   const info = useStore((s) => s.info);
   const sessions = useStore((s) => s.sessions);

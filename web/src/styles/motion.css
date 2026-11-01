@@ -5,7 +5,10 @@
    parts that exist only to move (the segmented thumb, the settings ink, the sidebar's selection).
    A component's own rule never repeats one of those properties: scripts/css-overlap.mjs checks.
    Besides motion it keeps the lightbox, whose look is its motion, and two finishes of the dark theme
-   that cut across components. */
+   that cut across components.
+   Durations are the tokens (--t-*, a spring's -t). A number here is one piece's choreography — the
+   beat a stagger steps by, a loop's period, a delay that lets one thing land before the next — and
+   is written once, where it plays; the opening's own beats live with it in shell.css. */
 
 /* ---------------------------------------------------------------- arrivals and departures */
 @keyframes pop-spring {
@@ -92,30 +95,34 @@
 }
 
 /* ---------------------------------------------------------------- finishes of the dark theme
-   Two touches that cut across components and exist only on dark: a sheet's inset wells read through
-   its material, and raised things are lit from above. */
+   Two touches that cut across components and show only on dark, through tokens that are empty on
+   light (tokens.css): a sheet's inset wells read through its material, and raised things are lit
+   from above. `:root` gives these rules the weight the theme selector they replace had, so a
+   component's own state (a hover's background) does not take the finish off. */
 /* A sheet's footer and header hairlines stay, but its inset wells read through the material. */
-[data-theme='dark'] .dialog .confirm-list,
-[data-theme='dark'] .dialog .browser,
-[data-theme='dark'] .dialog .radio-list {
-  background: rgba(0, 0, 0, 0.22);
+:root .dialog .confirm-list,
+:root .dialog .browser {
+  background: var(--sheet-well, var(--inset));
+}
+:root .dialog .radio-list {
+  background: var(--sheet-well, var(--fill-1));
 }
 
-/* Raised things on a dark page are lit from above: one pixel of light along their top edge. */
-[data-theme='dark'] .composer,
-[data-theme='dark'] .ovc,
-[data-theme='dark'] .run,
-[data-theme='dark'] .sched,
-[data-theme='dark'] .askcard,
-[data-theme='dark'] .plancard,
-[data-theme='dark'] .tool.awaiting,
-[data-theme='dark'] .perm.orphan,
-[data-theme='dark'] .setup-card,
-[data-theme='dark'] .mem-note,
-[data-theme='dark'] .task-row:not(.done),
-[data-theme='dark'] .wfd,
-[data-theme='dark'] .ov-tile {
-  background-image: linear-gradient(to bottom, var(--edge-hi), transparent 1px);
+/* Raised things are lit from above: one pixel of light along their top edge. */
+:root .composer,
+:root .ovc,
+:root .run,
+:root .sched,
+:root .askcard,
+:root .plancard,
+:root .tool.awaiting,
+:root .perm.orphan,
+:root .setup-card,
+:root .mem-note,
+:root .task-row:not(.done),
+:root .wfd,
+:root .ov-tile {
+  background-image: linear-gradient(to bottom, var(--edge-lit), transparent 1px);
 }
 /* ---- popovers: grow from the anchor's corner, shrink back into it */
 .popover {
@@ -133,7 +140,7 @@
 }
 /* rows unfold a few milliseconds apart */
 .menu-item {
-  animation: menu-in 240ms var(--ease) both;
+  animation: menu-in var(--t-panel) var(--ease) both;
   animation-delay: calc(var(--i, 0) * 11ms);
 }
 @keyframes menu-in {
@@ -229,8 +236,8 @@
 .lightbox img {
   max-width: 100%;
   max-height: 100%;
-  border-radius: var(--r-3);
-  box-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.14), 0 40px 100px -24px rgba(0, 0, 0, 0.9);
+  border-radius: var(--r-4);
+  box-shadow: var(--shadow-photo);
   cursor: default;
   animation: lightbox-in var(--spring-snappy-t) var(--spring-snappy);
 }
@@ -241,10 +248,10 @@
   }
 }
 .lightbox.leaving {
-  animation: veil-out 180ms var(--ease-exit) forwards;
+  animation: veil-out var(--t-med) var(--ease-exit) forwards;
 }
 .lightbox.leaving img {
-  animation: shrink-away 180ms var(--ease-exit) forwards;
+  animation: shrink-away var(--t-med) var(--ease-exit) forwards;
 }
 .lightbox-x {
   position: absolute;
@@ -361,7 +368,6 @@ button.chip,
 .wfa-row,
 .work-head,
 .tool-head,
-.chap-head,
 .thinking-head,
 .explore > .tool-head,
 .steps-more,
@@ -416,7 +422,6 @@ button.chip:active,
 .wfd-head:active,
 .work-head:active,
 .tool-head:active,
-.chap-head:active,
 .thinking-head:active,
 .steps-more:active,
 .spend-row:active {
@@ -438,7 +443,7 @@ button.chip:active,
   transform: translateY(-1px);
 }
 .btn.primary:hover {
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 2px 8px -2px color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow: var(--shadow-solid-hover);
 }
 
 /* the switch: the knob stretches toward where it is going while held, then springs over */
@@ -555,7 +560,7 @@ button.chip:active,
   height: 0.95em;
   margin-left: 3px;
   vertical-align: -0.14em;
-  border-radius: 1px;
+  border-radius: var(--r-pill);
   background: var(--accent);
   opacity: 0.85;
   animation: caret 1.1s steps(2, jump-none) infinite;
@@ -572,9 +577,6 @@ button.chip:active,
 }
 /* the fold line of a turn is a row: it lights under the pointer like the steps beneath it */
 .work-head:hover {
-  background: var(--fill-1);
-}
-.chap-head:hover {
   background: var(--fill-1);
 }
 /* a new user message lands on a spring; replies simply rise (both from Transcript's observer, this is the fallback) */
@@ -607,8 +609,7 @@ button.chip:active,
   transition: background var(--t-med), transform var(--spring-bouncy-t) var(--spring-bouncy);
 }
 .side-page-n,
-.tab-count,
-.side-count {
+.tab-count {
   animation: pop-spring-sm var(--spring-bouncy-t) var(--spring-bouncy);
 }
 
@@ -619,7 +620,6 @@ button.chip:active,
 .panel-tab.on .panel-tab-ico {
   animation: pop-spring-sm var(--spring-snappy-t) var(--spring-snappy);
 }
-.ctx-meter > div,
 .progress > div,
 .wf-bar > div,
 .spend-bar > span {
@@ -639,7 +639,7 @@ button.chip:active,
   padding-top: calc(var(--header-h) + 22px);
 }
 .session:not(:has(> .mcp-notice-stack, > .helpers-bar, > .session-error)) > .transcript .session-empty {
-  padding-top: calc(12vh - var(--header-h) + 20px);
+  padding-top: calc(12vh - var(--header-h) + var(--sp-5));
 }
 
 /* ---- the send: the arrow launches, the field settles back to one line (Composer), and the
@@ -781,7 +781,7 @@ button.chip:active,
 
 /* ---------------------------------------------------------------- small things */
 .tip {
-  transition: opacity 120ms ease, transform var(--spring-snappy-t) var(--spring-snappy);
+  transition: opacity var(--t-fast) ease, transform var(--spring-snappy-t) var(--spring-snappy);
 }
 .drop-hint {
   animation: pop-spring var(--spring-snappy-t) var(--spring-snappy);

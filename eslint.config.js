@@ -18,7 +18,7 @@ export default tseslint.config(
       ...reactHooks.configs.recommended.rules,
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrors: 'none' }],
-      '@typescript-eslint/no-non-null-assertion': 'off',
+      '@typescript-eslint/no-non-null-assertion': 'error',
     },
   },
   {

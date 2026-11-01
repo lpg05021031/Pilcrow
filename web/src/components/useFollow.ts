@@ -1,13 +1,15 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { spring, EASE, takeLaunch } from '../lib/motion';
 import type { TranscriptModel } from '../lib/transcript';
-import { useStore } from '../lib/store';
+import { useStore, memo } from '../lib/store';
 
 // Where each conversation was scrolled to, so switching away and back keeps your place: the box at
 // the top of the view and how far it was from the edge (a scroll offset would drift, since boxes far
-// off screen only have estimated heights until they have been seen). Kept with the conversation's
-// model, so a conversation evicted from memory (store.ts) or deleted takes its place with it.
-const scrollMemory = new WeakMap<TranscriptModel, { index: number; offset: number; bottom: boolean }>();
+// off screen only have estimated heights until they have been seen). Kept in the session's memo, so a
+// conversation evicted from memory (store.ts) or deleted takes its place with it.
+
+/** Sent to the conversation's scroller by revealItem (Transcript): the reader is jumping into the history. */
+export const REVEAL_EVENT = 'pilcrow:reveal';
 
 /**
  * The conversation's scrolling: it lands at the end (or back where the reader was) when it opens,
@@ -35,11 +37,20 @@ export function useFollow({ sessionId, model, loaded, rev, extra, onScrolled }: 
     const onWheel = (e: WheelEvent) => e.deltaY < 0 && mark();
     const onKey = (e: KeyboardEvent) => ['ArrowUp', 'PageUp', 'Home'].includes(e.key) && mark();
     const onDown = (e: PointerEvent) => e.target === el && mark(); // the scrollbar itself
+    // revealItem: a jump into the history leaves the live end at once, before the page it draws grows.
+    const onReveal = () => {
+      mark();
+      atBottom.current = false;
+      if (raf.current != null) cancelAnimationFrame(raf.current);
+      raf.current = null;
+    };
+    el.addEventListener(REVEAL_EVENT, onReveal);
     el.addEventListener('wheel', onWheel, { passive: true });
     el.addEventListener('keydown', onKey);
     el.addEventListener('pointerdown', onDown);
     el.addEventListener('touchmove', mark, { passive: true });
     return () => {
+      el.removeEventListener(REVEAL_EVENT, onReveal);
       el.removeEventListener('wheel', onWheel);
       el.removeEventListener('keydown', onKey);
       el.removeEventListener('pointerdown', onDown);
@@ -84,7 +95,7 @@ export function useFollow({ sessionId, model, loaded, rev, extra, onScrolled }: 
     settled.current = false;
     setSettling(true);
     const el = scroller.current;
-    const saved = model && scrollMemory.get(model);
+    const saved = memo(sessionId).scroll;
     const anchor = saved && !saved.bottom && loaded ? (inner.current?.querySelector('.units')?.children[saved.index] as HTMLElement | undefined) : undefined;
     if (el && saved && anchor) {
       // Coming back to a conversation you had scrolled up in: return to that spot, not the bottom.
@@ -238,12 +249,14 @@ export function useFollow({ sessionId, model, loaded, rev, extra, onScrolled }: 
     return () => {
       ro.disconnect();
       if (raf.current != null) cancelAnimationFrame(raf.current);
-      raf.current = null;
+      if (anchorRaf.current != null) cancelAnimationFrame(anchorRaf.current);
+      raf.current = anchorRaf.current = null;
     };
   }, [sessionId]);
 
   const onScroll = () => {
-    const el = scroller.current!;
+    const el = scroller.current;
+    if (!el) return;
     // Raised by the follow itself (the position is exactly the one it set): reading scrollHeight here
     // would force a layout for every streamed frame, and all it would say is what we already know —
     // we are at the bottom. A reader's scroll lands anywhere else.
@@ -265,7 +278,7 @@ export function useFollow({ sessionId, model, loaded, rev, extra, onScrolled }: 
     if (atBottom.current) {
       // Following the live end: nothing to anchor to, and a layout read here (once per streamed
       // frame, since the follow itself scrolls) would be the costliest thing on the page.
-      if (model) scrollMemory.set(model, { index: 0, offset: 0, bottom: true });
+      memo(sessionId).scroll = { index: 0, offset: 0, bottom: true };
       return;
     }
     if (anchorRaf.current != null) return;
@@ -287,7 +300,7 @@ export function useFollow({ sessionId, model, loaded, rev, extra, onScrolled }: 
         index = lo;
       }
       const k = kids?.[index] as HTMLElement | undefined;
-      if (model) scrollMemory.set(model, { index, offset: k ? k.offsetTop - el.scrollTop : 0, bottom: atBottom.current });
+      memo(sessionId).scroll = { index, offset: k ? k.offsetTop - el.scrollTop : 0, bottom: atBottom.current };
     });
   };
 

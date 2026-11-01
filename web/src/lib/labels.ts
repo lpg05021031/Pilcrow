@@ -1,9 +1,9 @@
 // What the transcript says about Claude's work, as words: the line on a folded turn (live and done),
-// the tally under a chapter heading, the "Explored" line, and the cards a helper's note becomes.
+// the "Explored" line, and the cards a helper's note becomes.
 // Pure, so they can be tested without drawing anything.
 import type { Item, ToolItem } from './transcript';
 import { str } from './tools';
-import { basename, truncate, plural } from './format';
+import { basename, truncate } from './format';
 
 /** What Claude is doing right now, for the fold line of a turn that is still running. */
 export function liveLabel(work: Item[]): string | null {
@@ -120,50 +120,6 @@ export function workSummary(work: Item[]) {
   if (!parts.length) parts.push(work.some((it) => it.kind === 'thinking') ? 'thought it through' : 'worked');
   const text = parts.join(', ');
   return { text: text.charAt(0).toUpperCase() + text.slice(1), failed, steps: tools.length };
-}
-
-export function tally(steps: Item[]) {
-  const tools = steps.filter((it): it is ToolItem => it.kind === 'tool');
-  let edits = 0;
-  let commands = 0;
-  let reads = 0;
-  let searches = 0;
-  let agents = 0;
-  let mcp = 0;
-  let helpers = 0;
-  let asks = 0;
-  let plans = 0;
-  let other = 0;
-  let failed = 0;
-  for (const t of tools) {
-    if (t.status === 'error' || t.status === 'denied') failed++;
-    const w = toolWord(t);
-    if (w === 'edit') edits++;
-    else if (w === 'command') commands++;
-    else if (w === 'read') reads++;
-    else if (w === 'search') searches++;
-    else if (w === 'agent') agents++;
-    else if (w === 'helper') helpers++;
-    else if (w === 'ask') asks++;
-    else if (w === 'plan') plans++;
-    else if (w === 'mcp') mcp++;
-    else other++;
-  }
-  const parts: string[] = [];
-  if (edits) parts.push(plural(edits, 'edit'));
-  if (commands) parts.push(plural(commands, 'command'));
-  if (reads) parts.push(plural(reads, 'read'));
-  if (searches) parts.push(`${searches} search${searches > 1 ? 'es' : ''}`);
-  if (agents) parts.push(plural(agents, 'agent'));
-  if (helpers) parts.push(plural(helpers, 'helper step'));
-  if (asks) parts.push(plural(asks, 'question'));
-  if (plans) parts.push(plural(plans, 'plan'));
-  if (mcp) parts.push(plural(mcp, 'connector call'));
-  if (other) parts.push(`${other} other`);
-  const first = tools[0]?.startTs;
-  const last = tools[tools.length - 1];
-  const ms = first && last ? (last.endTs || last.startTs) - first : 0;
-  return { text: parts.join(' · '), failed, ms, n: tools.length };
 }
 
 // Read-only steps that finished cleanly fold into one "Explored" line; edits, agents, failures and

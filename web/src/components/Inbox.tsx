@@ -293,7 +293,7 @@ function HelpersCard({ it, index, onRead, onRemove }: { it: InboxItem; index: nu
             <ClipboardPaste size={11} /> Copy Markdown
           </button>
           {it.leadId && (
-            <button className="btn xs" onClick={(e) => (e.stopPropagation(), onRead(), openSession(it.leadId!))} title="The lead's conversation">
+            <button className="btn xs" onClick={(e) => (e.stopPropagation(), onRead(), it.leadId && openSession(it.leadId))} title="The lead's conversation">
               <ArrowUpRight size={11} /> Open the lead
             </button>
           )}
@@ -372,7 +372,7 @@ function DispatchCard({ it, index, onRead, onRemove }: { it: InboxItem; index: n
             <ClipboardPaste size={11} /> Copy Markdown
           </button>
           {it.jobId && (
-            <button className="btn xs" onClick={(e) => (e.stopPropagation(), onRead(), openJob(it.jobId!))} title="The job's view, with every run">
+            <button className="btn xs" onClick={(e) => (e.stopPropagation(), onRead(), it.jobId && openJob(it.jobId))} title="The job's view, with every run">
               <ArrowUpRight size={11} /> Open job
             </button>
           )}

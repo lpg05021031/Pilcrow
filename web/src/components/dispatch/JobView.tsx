@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Pause, Play, Square, Ellipsis, GitCommitHorizontal, GitPullRequestArrow, ExternalLink, RotateCw, BookMarked, CalendarClock, ClipboardPaste, Trash, CircleDollarSign } from 'lucide-react';
 import { useStore, call, openSession, respond, confirmAction, toast, showDispatch, openJob, runsIn, loadPlaybooks, setDialog, showPage, toasted } from '../../lib/store';
-import type { DispatchJob, DispatchReview, DispatchRun, Playbook } from '../../lib/types';
+import { TERMINAL, type DispatchJob, type DispatchReview, type DispatchRun, type Playbook } from '../../lib/types';
 import { cost, duration, plural } from '../../lib/format';
 import { Switch, useNow, copyText } from '../ui/bits';
 import { MenuButton } from '../ui/Popover';
-import { ACTIVE, Glyph, STATE_WORD, TERMINAL, askedBy, clockMmss, elapsedText, groupRequests, jobCostText, type RequestGroup } from './common';
+import { ACTIVE, Glyph, STATE_WORD, askedBy, clockMmss, elapsedText, groupRequests, jobCostText, type RequestGroup } from './common';
 
 /**
  * A job's view: the header with its state and controls, the brief and the plan, the canary waiting
@@ -52,7 +52,7 @@ export function JobView({ id }: { id: string }) {
     );
   }
   const groups = groupRequests(runs);
-  const openRuns = runs.filter((r) => TERMINAL.includes(r.state) && !r.finished && r.worktree);
+  const openRuns = runs.filter((r) => TERMINAL.has(r.state) && !r.finished && r.worktree);
   const doneOpen = openRuns.filter((r) => r.state === 'done');
   const rules = job.rules || [];
   const rep = job.report;

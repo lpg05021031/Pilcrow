@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { useStore, call, confirmAction, toast } from '../../lib/store';
-import type { DiffFile, HelperState } from '../../lib/types';
+import { TERMINAL, type DiffFile, type HelperState } from '../../lib/types';
 import { errText, plural } from '../../lib/format';
 import { DiffView } from '../Code';
 import { Collapse } from '../ui/Collapse';
@@ -10,7 +10,6 @@ import { Collapse } from '../ui/Collapse';
  * The lead's helpers in the Changes panel (HELPERS.md §6.5): a row with Dispatch's finish actions —
  * Commit all, Open pull requests, Keep, Discard — and one section per helper worktree with its diff.
  */
-const TERMINAL = new Set(['done', 'failed', 'stopped', 'skipped']);
 const WORDS: Record<string, string> = { commit: 'Committed', pr: 'Pull requests opened', keep: 'Kept', discard: 'Discarded' };
 
 export function HelpersChanges({ sessionId }: { sessionId: string }) {

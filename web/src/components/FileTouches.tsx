@@ -6,29 +6,20 @@ import { timeAgo, plural } from '../lib/format';
 import { Popover } from './ui/Popover';
 import { revealItem } from './Transcript';
 import { useNow } from './ui/bits';
+import { folders, loadOnce } from '../lib/cache';
 
 type HistoryMap = Record<string, FileTouch[]>;
-const cache = new Map<string, { at: number; data: HistoryMap; p?: Promise<HistoryMap> }>();
 
-/** Which sessions touched which files in a folder, from the timeline; cached briefly per folder. */
+/** Which sessions touched which files in a folder, from the timeline; kept briefly per folder (lib/cache). */
 export function useFileHistory(cwd: string): HistoryMap | null {
   const fsRev = useStore((s) => s.fsRev);
   const schedRev = useStore((s) => s.schedRev);
-  const [data, setData] = useState<HistoryMap | null>(() => cache.get(cwd)?.data || null);
+  const [data, setData] = useState<HistoryMap | null>(null);
   useEffect(() => {
     if (!cwd) return;
     let alive = true;
-    const cur = cache.get(cwd);
-    if (cur && Date.now() - cur.at < 15_000 && !cur.p) {
-      setData(cur.data);
-      return;
-    }
-    const p = call<HistoryMap>('project.fileHistory', { cwd }, { quiet: true }).catch(() => ({}) as HistoryMap);
-    cache.set(cwd, { at: Date.now(), data: cur?.data || {}, p });
-    p.then((d) => {
-      cache.set(cwd, { at: Date.now(), data: d });
-      if (alive) setData(d);
-    });
+    // A folder whose history cannot be read simply shows no marks.
+    loadOnce(folders.history, cwd, () => call<HistoryMap>('project.fileHistory', { cwd }, { quiet: true }).catch(() => ({}) as HistoryMap)).then((d) => alive && setData(d));
     return () => {
       alive = false;
     };

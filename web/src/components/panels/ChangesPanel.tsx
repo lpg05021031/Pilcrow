@@ -253,7 +253,7 @@ export function ChangesPanel({ session, cwd }: { session: SessionSummary; cwd: s
                 )}
                 <span className={`num-add${f.additions ? '' : ' zero'}`}>+{f.additions}</span>
                 <span className={`num-del${f.deletions ? '' : ' zero'}`}>−{f.deletions}</span>
-                <button className="icon-btn sm" title="Open file" aria-label="Open file" onClick={() => openFile(`${data!.root}/${f.path}`)}>
+                <button className="icon-btn sm" title="Open file" aria-label="Open file" onClick={() => data && openFile(`${data.root}/${f.path}`)}>
                   <FileText size={13} />
                 </button>
                 <button className="icon-btn sm" title={f.untracked ? 'Delete new file' : 'Discard changes'} aria-label={f.untracked ? 'Delete new file' : 'Discard changes'} onClick={() => discard(f)}>
@@ -266,7 +266,13 @@ export function ChangesPanel({ session, cwd }: { session: SessionSummary; cwd: s
                     {f.binary ? (
                       <div className="faint cfile-note">Binary file</div>
                     ) : f.truncated && !f.hunks.length ? (
-                      <div className="faint cfile-note">This diff is too large to show here.</div>
+                      // Past the diff's budget (server git.diff) a file comes with its counts only.
+                      <div className="faint cfile-note">
+                        Too large to show here.{' '}
+                        <button className="link" onClick={() => data && openFile(`${data.root}/${f.path}`)}>
+                          Open in Files
+                        </button>
+                      </div>
                     ) : (
                       <DiffView hunks={f.hunks} path={f.path} mode={viewMode} wrap={narrow} dual comments={noteMap} onComment={onComment(f.path)} maxRows={600} />
                     )}

@@ -1,17 +1,18 @@
-import { useState } from 'react';
-import type { ToolItem } from '../../lib/transcript';
+import { useMemo, useState, type ReactNode } from 'react';
+import { ArrowUpRight, ChevronRight, CornerDownRight } from 'lucide-react';
+import type { ToolItem, UserItem } from '../../lib/transcript';
 import type { ToolCtx } from './ToolCard';
-import type { HelperState } from '../../lib/types';
-import { openSession } from '../../lib/store';
+import { TERMINAL, type HelperState } from '../../lib/types';
+import { openSession, useStore } from '../../lib/store';
 import { str } from '../../lib/tools';
+import { parseNotes } from '../../lib/labels';
 import { Collapse } from '../ui/Collapse';
-import { ChevronRight } from 'lucide-react';
+import { Markdown } from '../Markdown';
 
 /**
  * The lead's tools (HELPERS.md §6.1): a start card with its brief folded and the helper's row; a wait or
  * list card with a row per helper; a read card with the text folded; told and stopped.
  */
-const TERMINAL = new Set(['done', 'failed', 'stopped', 'skipped']);
 
 function resultOf(item: ToolItem): Record<string, unknown> | null {
   const s = item.structured;
@@ -37,7 +38,7 @@ function HelperRow({ h }: { h: Partial<HelperState> }) {
       <span className={`dp-word ${h.state || ''}`}>{h.state === 'needs_action' ? 'needs you' : (h.state || '').replace('_', ' ')}</span>
       <span className="hb-last ellipsis faint">{line}</span>
       {h.id && (
-        <button className="btn xs ghost" onClick={() => openSession(h.id!)}>
+        <button className="btn xs ghost" onClick={() => h.id && openSession(h.id)}>
           Open
         </button>
       )}
@@ -65,7 +66,7 @@ export function HelpersBody({ item }: { item: ToolItem; ctx: ToolCtx }) {
   const data = resultOf(item);
   if (tool === 'start') {
     const wt = data?.worktree && typeof data.worktree === 'object' ? (data.worktree as { branch?: string }) : null;
-    const queued = Array.isArray(data?.queuedBehind) ? (data!.queuedBehind as string[]) : [];
+    const queued = Array.isArray(data?.queuedBehind) ? (data.queuedBehind as string[]) : [];
     return (
       <div className="tool-section hb">
         {str(i, 'brief') && (
@@ -90,7 +91,7 @@ export function HelpersBody({ item }: { item: ToolItem; ctx: ToolCtx }) {
     );
   }
   if (tool === 'wait' || tool === 'list') {
-    const hs = Array.isArray(data?.helpers) ? (data!.helpers as Partial<HelperState>[]) : [];
+    const hs = Array.isArray(data?.helpers) ? (data.helpers as Partial<HelperState>[]) : [];
     return (
       <div className="tool-section hb">
         {data?.timedOut ? <div className="faint small">Timed out; still going: {hs.filter((h) => !TERMINAL.has(h.state || '')).map((h) => h.name).join(', ') || 'none'}</div> : null}
@@ -128,4 +129,119 @@ export function HelpersBody({ item }: { item: ToolItem; ctx: ToolCtx }) {
     return <div className="tool-section hb">{data ? <HelperRow h={data as Partial<HelperState>} /> : !r ? <div className="faint">Stopping…</div> : null}</div>;
   }
   return <div className="tool-section hb">{r ? <pre className="tool-pre">{r.text}</pre> : <div className="faint">Running…</div>}</div>;
+}
+
+// ---------------------------------------------------------------- a helper's note to its lead (HELPERS.md §5.4)
+
+const HELPER_VERB: Record<string, string> = { done: 'Helper finished', failed: 'Helper failed', stopped: 'Helper stopped', needs_action: 'Helper needs you', skipped: 'Helper skipped' };
+const HELPER_HEADER_PREFIX = 'You are a helper started by another Pilcrow session';
+
+/** Words another session wrote, drawn as a tool card: a glyph in the status column, a verb, a target, figures
+ *  at the right, Open on hover, and a body that folds under the head (HELPERS.md §6.1). */
+function SessionCard({ id, glyph, verb, target, meta, openTip, onOpen, children }: { id?: string; glyph: ReactNode; verb: string; target: string; meta?: ReactNode; openTip: string; onOpen?: () => void; children?: ReactNode }) {
+  const [open, setOpen] = useState(true);
+  const foldable = Boolean(children);
+  return (
+    <div className={`tool session-card${open && foldable ? ' open' : ''}`} id={id}>
+      {/* The head folds the body wherever it is clicked; its button is what the keyboard reaches (ToolCard). */}
+      <div className="tool-head" onClick={() => foldable && setOpen(!open)}>
+        <span className="tool-ico">{glyph}</span>
+        <span className="tool-line">
+          <button className="tool-toggle" aria-expanded={foldable ? open : undefined} disabled={!foldable}>
+            <span className="tool-verb">{verb}</span>
+            <span className="tool-target">{target}</span>
+            {foldable && <ChevronRight size={13} className="tool-chev" />}
+          </button>
+          {onOpen && (
+            <button
+              className="icon-btn sm tool-open"
+              title={openTip} aria-label={openTip}
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpen();
+              }}
+            >
+              <ArrowUpRight size={13} />
+            </button>
+          )}
+        </span>
+        <span className="tool-meta">{meta}</span>
+      </div>
+      {foldable && <Collapse open={open}>{() => <div className="tool-body">{children}</div>}</Collapse>}
+    </div>
+  );
+}
+
+/** A note Pilcrow wrote to a lead: one card per helper it speaks of; the text around the cards is for the model. */
+export function HelperNote({ item, ctx }: { item: UserItem; ctx: ToolCtx }) {
+  const helpers = useStore((s) => s.rt[ctx.sessionId]?.helpers);
+  const { parts } = useMemo(() => parseNotes(item.text), [item.text]);
+  const list = parts.length ? parts : [{ name: 'note', state: '', body: item.text }];
+  return (
+    <div className="msg-notes" id={`msg-${item.uuid}`}>
+      {list.map((p, k) => {
+        const h = helpers?.find((x) => x.name === p.name);
+        const files = p.files && p.files !== '0';
+        return (
+          <SessionCard
+            key={k}
+            glyph={<span className={`dp-glyph ${p.state || 'stopped'}`} aria-hidden="true" />}
+            verb={HELPER_VERB[p.state] || 'Helper'}
+            target={p.name}
+            openTip="Open the helper's session"
+            onOpen={h ? () => openSession(h.id) : undefined}
+            meta={
+              <>
+                {p.elapsed && <span className="tnum">{p.elapsed}</span>}
+                {p.cost && <span className="tnum">{p.cost}</span>}
+                {files && (
+                  <span className="tool-stats tnum">
+                    {p.add && p.add !== '0' && <span className="num-add">+{p.add}</span>}
+                    {p.del && p.del !== '0' && <span className="num-del">−{p.del}</span>}
+                  </span>
+                )}
+              </>
+            }
+          >
+            {p.body ? (
+              <div className="tool-well">
+                <Markdown text={p.body} cwd={ctx.cwd} className="md-compact" />
+              </div>
+            ) : null}
+          </SessionCard>
+        );
+      })}
+    </div>
+  );
+}
+
+/** A brief or a message the lead sent to this helper (`_from: lead`): not the person speaking, so a card
+ *  rather than a bubble; the standing instructions a brief opens with fold under it. */
+export function FromLead({ item, ctx }: { item: UserItem; ctx: ToolCtx }) {
+  const lead = useStore((s) => s.rt[ctx.sessionId]?.helper);
+  const [showHeader, setShowHeader] = useState(false);
+  let header = '';
+  let brief = item.text;
+  if (item.text.startsWith(HELPER_HEADER_PREFIX)) {
+    const i = item.text.indexOf('\n\n');
+    header = i < 0 ? item.text : item.text.slice(0, i);
+    brief = i < 0 ? '' : item.text.slice(i + 2).trim();
+  }
+  return (
+    <SessionCard id={`msg-${item.uuid}`} glyph={<CornerDownRight size={14} />} verb="From the lead" target={lead?.leadTitle || 'the lead session'} openTip="Open the lead session" onOpen={lead ? () => openSession(lead.leadId) : undefined}>
+      {brief && (
+        <div className="tool-well">
+          <Markdown text={brief} cwd={ctx.cwd} className="md-compact" />
+        </div>
+      )}
+      {header && (
+        <div className="hb-fold">
+          <button className="tool-toggle" onClick={() => setShowHeader(!showHeader)}>
+            <ChevronRight size={12} className={showHeader ? 'rot' : ''} /> Standing instructions for a helper
+          </button>
+          <Collapse open={showHeader}>{() => <div className="tool-note">{header}</div>}</Collapse>
+        </div>
+      )}
+    </SessionCard>
+  );
 }

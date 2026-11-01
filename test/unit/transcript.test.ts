@@ -65,6 +65,8 @@ describe('TranscriptModel: tools', () => {
     m.push(stream({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"file_pa' } }));
     m.push(stream({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: 'th": "/a/b.ts"' } }));
     const t = m.tools.get('toolu_1')!;
+    expect(t.input).toEqual({}); // parsed once per batch, not per piece
+    m.endBatch();
     expect(t.status).toBe('streaming');
     expect(t.input).toEqual({ file_path: '/a/b.ts' });
     m.push(stream({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '}' } }));

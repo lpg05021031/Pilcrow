@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chaptersOf, extendTurns, groupItems, groupTurns, liveTurnFolds, type Turns, type Unit } from '../../web/src/lib/units';
+import { extendTurns, groupItems, groupTurns, liveTurnFolds, type Turns, type Unit } from '../../web/src/lib/units';
 import type { Item, ToolItem } from '../../web/src/lib/transcript';
 
 let n = 0;
@@ -132,18 +132,17 @@ describe('groupItems', () => {
   });
 });
 
-describe('chaptersOf', () => {
-  it('narration heads the steps after it, and a thought just before it rides on the heading', () => {
-    const th = thinking();
-    const t1 = text('reading the source');
-    const th2 = thinking();
-    const items = [tool(), th, t1, tool(), tool(), th2, text('now the tests'), tool()];
-    const ch = chaptersOf(items);
-    expect(ch.map((c) => [c.title?.text ?? null, c.steps.length])).toEqual([
-      [null, 1],
-      ['reading the source', 2],
-      ['now the tests', 1],
-    ]);
-    expect([ch[1].thought, ch[2].thought]).toEqual([th, th2]);
+describe('a work unit never holds what Claude says', () => {
+  // Claude's words always stay on the page between folds, so a fold's body is only ever steps and
+  // thoughts (and the notices among them): nothing in it could head a section of its own.
+  it('over every mix of items, no text or user message lands in a work unit', () => {
+    const makers = [user, () => text(), () => tool(), () => tool('Edit', 'running'), thinking, () => notice(), () => notice('divider'), result];
+    let seed = 7;
+    const rand = (k: number) => ((seed = (seed * 1103515245 + 12345) % 2147483648), seed % k);
+    for (let round = 0; round < 400; round++) {
+      const items = Array.from({ length: 1 + rand(30) }, () => makers[rand(makers.length)]());
+      for (const running of [false, true])
+        for (const u of groupTurns(items, running)) if (u.kind === 'work') expect(u.work.filter((it) => it.kind === 'text' || it.kind === 'user')).toEqual([]);
+    }
   });
 });

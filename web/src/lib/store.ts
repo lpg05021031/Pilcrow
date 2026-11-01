@@ -1,10 +1,22 @@
 // App state (zustand) plus the RPC event wiring. Transcript models live outside React state
 // and are referenced by a `rev` counter so streaming updates re-render cheaply.
+//
+// Where state lives, the one rule for components:
+//   - what is drawn from lives in this store; one component asks another to do something by setting
+//     a field with a fresh nonce (fileOpen, composerInsert) that the other acts on once;
+//   - what a session remembers without drawing from it (a draft, open folds, where it was scrolled,
+//     its terminals) lives in its memo below, which goes with its transcript model;
+//   - what is cached about a folder (listings, file history, the @ index) lives in lib/cache.ts, with
+//     a budget and an age;
+//   - nothing else is kept in a module-level variable of a component.
+import { useEffect, useState } from 'react';
 import { create } from 'zustand';
+import { folders, loadOnce } from './cache';
 import { rpc } from './rpc';
 import { TranscriptModel } from './transcript';
 import { setHome, plural, errText } from './format';
 import { EASE_EXIT, reducedMotion, yieldToEvents } from './motion';
+import { isBusy } from './types';
 import type { AppInfo, Config, SessionState, SessionSummary, PermissionMode, Effort, RawMsg, GatewayModels, TimelineStep, PermissionDecision, DispatchJob, DispatchRun, DispatchDelta, Playbook } from './types';
 import type { RepoEntry } from './types';
 import type { PilcrowNative } from './globals';
@@ -59,9 +71,9 @@ export const VIEW_MODES: { id: ViewMode; label: string; hint: string }[] = [
 ];
 export function cycleView() {
   const cur = get().ui.view;
-  const next = VIEW_MODES[(VIEW_MODES.findIndex((v) => v.id === cur) + 1) % VIEW_MODES.length].id;
-  setUi({ view: next });
-  toast(`View: ${VIEW_MODES.find((v) => v.id === next)!.label}`, 'info');
+  const next = VIEW_MODES[(VIEW_MODES.findIndex((v) => v.id === cur) + 1) % VIEW_MODES.length];
+  setUi({ view: next.id });
+  toast(`View: ${next.label}`, 'info');
 }
 
 interface Dialogs {
@@ -113,7 +125,7 @@ interface State {
   schedRev: number;
   /** An image opened full-size over the app. */
   lightbox: string | null;
-  /** The find bar is open: every row of the conversation must be on the page to be searched. */
+  /** The find bar is open (FindBar, over the conversation on screen). */
   findOpen: boolean;
   /** What was last looked for; the find bar opens on it again. */
   findQuery: string;
@@ -171,28 +183,74 @@ export function getModel(id: string) {
   return m;
 }
 
+/** A file open in a session's Files tab. */
+export interface FileTab {
+  path: string;
+  doc: string;
+  saved: string;
+  mtime?: number;
+  binary?: boolean;
+  dataUrl?: string;
+  tooLarge?: boolean;
+  size?: number;
+  error?: string;
+  loading?: boolean;
+  /** Documents can be read as rendered pages, edited as text, or both side by side. */
+  view?: 'preview' | 'edit' | 'split';
+}
+
+/** What a session's Files tab has open (FilesPanel). */
+export interface FilesState {
+  tabs: FileTab[];
+  active: string | null;
+  expanded: Record<string, boolean>;
+  showTree: boolean;
+  showHidden: boolean;
+}
+
 /** Review notes on a session's diff: path -> line key -> note. */
 export type DiffNotes = Record<string, Record<string, { text: string; line: string; lineNo: number }>>;
 /**
- * What a session remembers outside React state while the window is open: the composer's draft, the
- * messages sent from it (↑ brings them back) and review notes on its diff. Nothing re-renders when it
- * changes. It goes with the session's transcript model (evictModels), all but unsent work, a draft
- * or a note, which stays until the session is deleted.
+ * What a session remembers outside React state while the window is open. Nothing re-renders when it
+ * changes. It goes with the session's transcript model (evictModels), all but unsent work (a draft, a
+ * note, a file with unsaved edits) and its open terminals, which stay until the session is deleted.
  */
 export interface SessionMemo {
   draft: string;
+  /** Messages sent from this window (↑ in the composer brings them back). */
   sent: string[];
   notes: DiffNotes;
+  /** Terminals opened from this session (TerminalPanel), and the one shown. */
+  terms: { id: string; title: string; exited?: boolean }[];
+  term: string | null;
+  /** The address the Preview tab shows. */
+  preview: string;
+  /** The files open in the Files tab. */
+  files: FilesState | null;
+  /** Which folds of the conversation were opened or closed by hand, by unit key (Transcript). */
+  folds: Map<string, boolean>;
+  /** Where the conversation was scrolled: the page at the top of the view and its distance from the edge (useFollow). */
+  scroll: { index: number; offset: number; bottom: boolean } | null;
+  /**
+   * Set by the conversation while it is on screen (Transcript ItemList), for revealItem: draw the
+   * page that holds an item and open the fold around it. Answered synchronously, from the grouping
+   * only the mounted list has, so it is a function here rather than a nonce in the store.
+   */
+  reveal: ((itemId: string) => boolean) | null;
+  /** The mounted folds, by unit key, so reveal can open one that is already on the page. */
+  openers: Map<string, () => void>;
 }
 const memos = new Map<string, SessionMemo>();
+const newMemo = (): SessionMemo => ({ draft: '', sent: [], notes: {}, terms: [], term: null, preview: '', files: null, folds: new Map(), scroll: null, reveal: null, openers: new Map() });
 export function memo(id: string): SessionMemo {
   let m = memos.get(id);
-  if (!m) memos.set(id, (m = { draft: '', sent: [], notes: {} }));
+  if (!m) memos.set(id, (m = newMemo()));
   return m;
 }
 function forgetMemo(id: string) {
   const m = memos.get(id);
-  if (m && (m.draft || Object.keys(m.notes).length)) m.sent = [];
+  const unsaved = m?.files?.tabs.some((t) => t.doc !== t.saved);
+  if (m && (m.draft || Object.keys(m.notes).length || m.terms.length || unsaved)) memos.set(id, { ...newMemo(), draft: m.draft, notes: m.notes, terms: m.terms, term: m.term, files: unsaved ? m.files : null });
   else memos.delete(id);
 }
 
@@ -201,14 +259,14 @@ function forgetMemo(id: string) {
  * conversation, its images included; one you come back to after these is loaded again.
  */
 const KEEP_MODELS = 6;
-function evictModels() {
+export function evictModels() {
   const { activeId, rt } = get();
   let over = models.size - KEEP_MODELS;
   for (const id of models.keys()) {
     if (over <= 0) break;
     const r = rt[id];
     // The one on screen, one loading, one Claude is working in or waiting on you in: all stay.
-    if (id === activeId || r?.loading || r?.pending?.length || r?.status === 'running' || r?.status === 'starting' || r?.status === 'requires_action') continue;
+    if (id === activeId || r?.loading || r?.pending?.length || isBusy(r?.status)) continue;
     models.delete(id);
     forgetMemo(id);
     if (r) patchRt(id, { loaded: false });
@@ -319,7 +377,7 @@ function quitNow() {
 /** Quit, asking first when Claude is still working (the desktop shell asks natively instead). */
 export function quitApp() {
   if (native()) return quitNow();
-  const busy = useStore.getState().sessions.filter((s) => s.status === 'running' || s.status === 'requires_action').length;
+  const busy = useStore.getState().sessions.filter((s) => isBusy(s.status)).length;
   if (!busy) return quitNow();
   setDialog('confirm', { title: 'Quit Pilcrow?', body: `Claude is still working in ${plural(busy, 'session')}. Quitting stops ${busy > 1 ? 'them' : 'it'}.`, confirm: 'Quit', danger: true, onConfirm: quitNow });
 }
@@ -424,6 +482,7 @@ function onMsgs({ id, msgs }: { id: string; msgs: RawMsg[] }) {
     if (msg.type === 'stream_event' && msg.event?.type === 'message_start' && !msg.parent_tool_use_id) patch({ thinkingTokens: 0 });
     m.push(msg);
   }
+  m.endBatch();
   markDirty(id);
 }
 
@@ -439,7 +498,8 @@ function onState(st: SessionState) {
     next[i] = { ...row, status: st.status, live: st.live, pending: st.pending.length };
     set({ sessions: next });
   }
-  const wasBusy = prev && (prev.status === 'running' || prev.status === 'requires_action');
+  // A turn was under way (a process starting is not one): its end is news.
+  const wasBusy = isBusy(prev?.status) && prev?.status !== 'starting';
   if (wasBusy && st.status === 'idle') {
     if (get().activeId !== st.id || document.hidden) set({ unread: { ...get().unread, [st.id]: true } });
     notify(st.id, 'Claude finished', titleOf(st.id));
@@ -507,7 +567,7 @@ export function initApp() {
 export const PANEL_TABS: PanelTab[] = ['changes', 'files', 'terminal', 'preview', 'tasks', 'history', 'info'];
 
 /** The saved window layout, taken field by field: the file on disk is loose JSON that an older version may have written. */
-function applyConfigUi(config: Config) {
+export function applyConfigUi(config: Config) {
   const ui = config.ui || {};
   const oneOf = <T extends string>(v: unknown, allowed: readonly T[]): T | undefined => (typeof v === 'string' && (allowed as readonly string[]).includes(v) ? (v as T) : undefined);
   const panelTab = oneOf(ui.panelTab, PANEL_TABS);
@@ -755,7 +815,7 @@ async function foldRow(id: string): Promise<() => void> {
   foldingRows.add(id);
   const h = el.offsetHeight;
   // The row's own min-height and the list's row gap would both keep a sliver of space; fold them too.
-  const gap = parseFloat(getComputedStyle(el.parentElement!).rowGap) || 0;
+  const gap = el.parentElement ? parseFloat(getComputedStyle(el.parentElement).rowGap) || 0 : 0;
   el.style.overflow = 'hidden';
   el.style.minHeight = '0';
   el.style.pointerEvents = 'none';
@@ -787,6 +847,8 @@ export async function deleteSession(id: string, removeWorktree = false, removeHe
   }
   requestAnimationFrame(() => foldingRows.delete(id));
   models.delete(id);
+  // Its terminals cannot be reached again once the session is gone.
+  for (const t of memos.get(id)?.terms || []) if (!t.exited) call('term.close', { id: t.id }, { quiet: true }).catch(() => {}); // a shell that already went is gone either way
   memos.delete(id);
   const rt = { ...get().rt };
   delete rt[id];
@@ -916,20 +978,26 @@ export function setTimeline(id: string, steps: TimelineStep[]) {
   set({ timeline: { ...get().timeline, [id]: steps } });
 }
 
-// A folder's file list for @ mentions (composer, palette), shared and kept for 20 seconds.
-const fileIndexes = new Map<string, { at: number; files: Promise<string[]> }>();
-export function fileIndex(cwd: string): Promise<string[]> {
-  const now = Date.now();
-  for (const [k, v] of fileIndexes) if (now - v.at > 20_000) fileIndexes.delete(k);
-  let hit = fileIndexes.get(cwd);
-  if (!hit) {
-    hit = { at: now, files: call<string[]>('fs.index', { cwd }, { quiet: true }) };
-    fileIndexes.set(cwd, hit);
-    // A failed listing is not kept; the next @ asks again.
-    hit.files.catch(() => fileIndexes.delete(cwd));
-  }
-  return hit.files;
+/**
+ * A folder's files for @ mentions, asked for once `wanted` (an @ has been typed) and shared for
+ * twenty seconds. A folder that cannot be listed leaves the list empty, which says as much.
+ */
+export function useFileIndex(cwd: string | undefined, wanted: boolean): string[] {
+  const [files, setFiles] = useState<{ cwd: string; list: string[] } | null>(null);
+  useEffect(() => {
+    if (!wanted || !cwd || files?.cwd === cwd) return;
+    let alive = true;
+    loadOnce(folders.index, cwd, () => call<string[]>('fs.index', { cwd }, { quiet: true })).then(
+      (list) => alive && setFiles({ cwd, list }),
+      () => {}, // empty, as above; the next @ asks again
+    );
+    return () => {
+      alive = false;
+    };
+  }, [cwd, wanted, files?.cwd]);
+  return files && files.cwd === cwd ? files.list : NONE;
 }
+const NONE: string[] = [];
 
 export function bumpFs() {
   set({ fsRev: get().fsRev + 1 });

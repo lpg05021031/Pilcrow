@@ -1,11 +1,9 @@
 import { useMemo, useRef, useState } from 'react';
 import { RotateCw, ExternalLink, AppWindow, ArrowRight } from 'lucide-react';
-import { useStore, models, call } from '../../lib/store';
+import { useStore, models, call, memo } from '../../lib/store';
 import type { SessionSummary } from '../../lib/types';
 import type { ToolItem } from '../../lib/transcript';
 import { Empty } from '../ui/Empty';
-
-const urls = new Map<string, string>();
 
 const LOCAL_URL = /https?:\/\/(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d+)?(?:\/[^\s'"<>)]*)?/g;
 // What each command printed, read once per change of that command: the panel looks again with every
@@ -31,7 +29,7 @@ function findUrls(sessionId: string): string[] {
 
 export function PreviewPanel({ session }: { session: SessionSummary }) {
   const rev = useStore((s) => s.rt[session.id]?.rev);
-  const [url, setUrl] = useState(() => urls.get(session.id) || '');
+  const [url, setUrl] = useState(() => memo(session.id).preview);
   const [draft, setDraft] = useState(url || 'http://localhost:3000');
   const [nonce, setNonce] = useState(0);
   const frame = useRef<HTMLIFrameElement>(null);
@@ -41,7 +39,7 @@ export function PreviewPanel({ session }: { session: SessionSummary }) {
     let v = u.trim();
     if (!v) return;
     if (!/^https?:\/\//.test(v)) v = `http://${v}`;
-    urls.set(session.id, v);
+    memo(session.id).preview = v;
     setUrl(v);
     setDraft(v);
     setNonce((n) => n + 1);

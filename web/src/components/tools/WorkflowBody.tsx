@@ -198,7 +198,8 @@ export function WorkflowDetail({ task, sessionId, allTasks }: { task: TaskInfo; 
   const subsByAgent = useMemo(() => {
     const m = new Map<number, TaskInfo[]>();
     for (const t of subs) {
-      const owner = (task.workflow?.agents || []).filter((a): a is WorkflowAgent => Boolean(a && a.startedAt && t.startedAt! >= a.startedAt && (agentState(a) === 'running' || !a.lastProgressAt || t.startedAt! <= a.lastProgressAt + 2000))).sort((x, y) => (y.startedAt || 0) - (x.startedAt || 0))[0];
+      const at = t.startedAt || 0; // subs all have one (above)
+      const owner = (task.workflow?.agents || []).filter((a): a is WorkflowAgent => Boolean(a && a.startedAt && at >= a.startedAt && (agentState(a) === 'running' || !a.lastProgressAt || at <= a.lastProgressAt + 2000))).sort((x, y) => (y.startedAt || 0) - (x.startedAt || 0))[0];
       const key = owner ? owner.index : -1;
       m.set(key, [...(m.get(key) || []), t]);
     }

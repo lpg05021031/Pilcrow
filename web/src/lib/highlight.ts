@@ -2,7 +2,7 @@
 // with the first code block, each language with its first block. Two hand-tuned themes are emitted
 // as CSS variables so dark/light switch without re-highlighting.
 import type { GrammarState, HighlighterCore, ThemeRegistration } from 'shiki/core';
-import { LruBytes } from './lru';
+import { LruBytes } from './cache';
 import { yieldToEvents } from './motion';
 
 const LANGS: Record<string, () => Promise<unknown>> = {

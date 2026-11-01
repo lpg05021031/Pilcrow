@@ -1,10 +1,10 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { Copy, CircleCheck, CircleAlert, RefreshCw } from 'lucide-react';
 import { useStore, setDialog, setConfig, toast, call, setTheme } from '../lib/store';
 import type { AppInfo, Config } from '../lib/types';
 import { tildify } from '../lib/format';
 import { Dialog } from './ui/Dialog';
-import { Switch, copyText, Mark, Seg } from './ui/bits';
+import { Switch, copyText, Mark, Seg, useInk } from './ui/bits';
 import { Select } from './ui/Select';
 import { MODES } from './composer/Menus';
 import { ModelSelect } from './ModelSelect';
@@ -17,19 +17,14 @@ import type { PermissionMode, Effort } from '../lib/types';
 type Section = 'general' | 'repos' | 'claude' | 'skills' | 'mcp' | 'memory' | 'diagnostics';
 const WIDE: Section[] = ['repos', 'skills', 'mcp', 'memory'];
 
-export function SettingsDialog() {
-  const config = useStore((s) => s.config)!;
+export function SettingsDialog({ config }: { config: Config }) {
   const info = useStore((s) => s.info);
   const initial = useStore((s) => s.dialogs.settings);
   const [section, setSection] = useState<Section>(typeof initial === 'string' ? (initial as Section) : 'general');
   const set = (p: Partial<Config>) => setConfig(p).catch(() => {});
   // The highlight behind the chosen page glides to the next one.
   const nav = useRef<HTMLElement>(null);
-  const [ink, setInk] = useState<{ top: number; height: number } | null>(null);
-  useLayoutEffect(() => {
-    const el = nav.current?.querySelector<HTMLElement>('button.on');
-    if (el) setInk({ top: el.offsetTop, height: el.offsetHeight });
-  }, [section]);
+  const ink = useInk(nav, 'button.on', section);
 
   return (
     <Dialog title="Settings" onClose={() => setDialog('settings', false)} width={WIDE.includes(section) ? 860 : 720} className={`settings${WIDE.includes(section) ? ' settings-wide' : ''}`}>
@@ -156,7 +151,7 @@ export function SettingsDialog() {
 
           {section === 'skills' && <SkillsPage />}
           {section === 'mcp' && <McpPage />}
-          {section === 'memory' && <MemoryPage />}
+          {section === 'memory' && <MemoryPage config={config} />}
           {section === 'repos' && <ReposPage />}
           {section === 'diagnostics' && <Diagnostics info={info} />}
           </div>
@@ -245,7 +240,7 @@ function claudeHint(info: AppInfo | null) {
   if (!c?.path) return 'Not found';
   const v = c.version ? ` ${c.version}` : '';
   const where = c.source === 'bundled' ? `The copy installed with Pilcrow${v}` : c.source === 'system' ? `The claude on your PATH${v}` : `Custom program${v}`;
-  return <span title={tildify(c.path, info!.home)}>{where}</span>;
+  return <span title={tildify(c.path, info?.home)}>{where}</span>;
 }
 
 /** Saves a picked model at once, and a typed custom ID when the field is left. */

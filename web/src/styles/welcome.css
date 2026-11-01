@@ -1,0 +1,173 @@
+/* ================================================================ welcome
+   The welcome page, and the first run without API settings. */
+
+/* ================================================================ welcome */
+
+.welcome {
+  flex: 1;
+  overflow-y: auto;
+  display: grid;
+  place-items: center;
+  padding: 40px var(--sp-6) 10vh;
+}
+.welcome-inner {
+  width: min(var(--col), 100%);
+  display: grid;
+  justify-items: center;
+  gap: 0;
+}
+/* The app's own icon opens the page; the bowl settles into place once, then nothing moves. */
+.app-icon {
+  display: block;
+  border-radius: 23.4%;
+  box-shadow: var(--shadow-icon);
+}
+.welcome-icon {
+  margin-bottom: 22px;
+  animation: icon-in 520ms var(--ease) both;
+}
+.welcome-icon .app-icon-bowl,
+.session-empty-icon .app-icon-bowl {
+  transform-box: view-box;
+  transform-origin: 105px 98px;
+  animation: bowl-in 600ms 160ms var(--spring) both;
+}
+@keyframes icon-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.96);
+  }
+}
+@keyframes bowl-in {
+  from {
+    transform: scale(0.55);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .welcome-icon,
+  .welcome-icon .app-icon-bowl,
+  .session-empty-icon .app-icon-bowl {
+    animation: none;
+  }
+}
+.welcome-title {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 560;
+  letter-spacing: -0.024em;
+  text-align: center;
+  animation: rise var(--t-panel) 120ms var(--ease) both;
+}
+.welcome-sub {
+  margin: var(--sp-2) 0 26px;
+  color: var(--text-3);
+  font-size: var(--fs-body);
+  text-align: center;
+  animation: rise var(--t-panel) 180ms var(--ease) both;
+}
+.welcome-sub b {
+  color: var(--text-2);
+  font-weight: 550;
+}
+.welcome-composer {
+  width: 100%;
+  animation: rise var(--t-panel) 240ms var(--ease) both;
+}
+.welcome-composer .composer-input {
+  min-height: 74px;
+}
+.welcome-folders {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--sp-1_5);
+  margin-top: var(--sp-3_5);
+  animation: fade var(--t-panel) 320ms var(--ease) both;
+}
+.welcome-keys {
+  display: flex;
+  gap: 22px;
+  margin-top: 30px;
+  font-size: var(--fs-small);
+  color: var(--text-3);
+  animation: fade var(--t-panel) 380ms var(--ease) both;
+}
+.welcome-keys span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.welcome .notice {
+  width: 100%;
+  margin-bottom: var(--sp-3_5);
+}
+.popover[data-placement='top'] {
+  transform-origin: bottom left;
+}
+.popover[data-placement='bottom'] {
+  transform-origin: top left;
+}
+
+/* first run without API settings */
+.setup-card {
+  width: 100%;
+  margin: 0 0 18px;
+  padding: var(--sp-3_5) var(--sp-4) var(--sp-3);
+  border-radius: var(--r-6);
+  background: var(--card-ask);
+  box-shadow: inset 0 0 0 1.5px var(--accent-ring);
+  text-align: left;
+  animation: rise var(--t-panel) 200ms var(--ease) both;
+}
+.setup-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: 14px;
+  font-weight: 600;
+}
+.setup-head svg {
+  color: var(--accent-text);
+}
+.setup-card p {
+  margin: var(--sp-1_5) 0 var(--sp-2_5);
+  font-size: var(--fs-ui);
+  line-height: 1.55;
+  color: var(--text-2);
+}
+.setup-card code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  padding: 0.1em 0.35em;
+  border-radius: var(--r-1);
+  background: var(--fill-2);
+  color: var(--text);
+}
+.setup-snippet {
+  position: relative;
+  border-radius: var(--r-4);
+  background: var(--inset);
+}
+.setup-snippet pre {
+  margin: 0;
+  padding: var(--sp-2_5) 40px var(--sp-2_5) var(--sp-3);
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  line-height: 1.55;
+  color: var(--text-2);
+  overflow-x: auto;
+}
+.setup-snippet .copy-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+}
+.setup-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2_5);
+  margin-top: var(--sp-2_5);
+  font-size: var(--fs-small);
+}

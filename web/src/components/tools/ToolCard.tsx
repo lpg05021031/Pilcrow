@@ -7,7 +7,7 @@ import type { PermissionRequest } from '../../lib/types';
 import { toolMeta, isFileTool, filePathOf } from '../../lib/tools';
 import { duration, relPath, plural, truncate } from '../../lib/format';
 import { openFile, setDialog, call, toast, useStore, openLightbox } from '../../lib/store';
-import { Spinner, CopyButton, onActivate } from '../ui/bits';
+import { Spinner, CopyButton } from '../ui/bits';
 import { ErrorBoundary } from '../ui/ErrorBoundary';
 import { CodeView, DiffView, AnsiText, hunksFromPatch } from '../Code';
 import { Markdown } from '../Markdown';
@@ -18,7 +18,8 @@ import { AskBody } from './AskBody';
 import { PlanBody } from './PlanBody';
 import { WorkflowInline, WorkflowMeta } from './WorkflowBody';
 import { str } from '../../lib/tools';
-import type { ToolInput, PatchHunk } from '../../lib/types';
+import type { ToolInput, PatchHunk, DiffHunk } from '../../lib/types';
+import { LruBytes } from '../../lib/cache';
 
 export interface ToolCtx {
   sessionId: string;
@@ -107,16 +108,20 @@ export const ToolCard = memo(function ToolCard({ item, ctx }: { item: ToolItem; 
 
   return (
     <div className={`tool ${item.status}${isOpen ? ' open' : ''}${perm ? ' awaiting' : ''}`} data-tool={item.name} id={`tool-${item.id}`}>
-      <div className="tool-head" role="button" tabIndex={0} onClick={() => setOpen(!isOpen)} onKeyDown={onActivate(() => setOpen(!isOpen))} aria-expanded={isOpen}>
+      {/* The head opens the card wherever it is clicked. Its button, the step's name and the chevron,
+          is what the keyboard and a screen reader reach; Open in Files is a button beside it, not in it. */}
+      <div className="tool-head" onClick={() => setOpen(!isOpen)}>
         <span className="tool-ico">
           <span key={perm ? 'wait' : item.status} className="tool-ico-swap">
             <StatusIcon item={item} waiting={!!perm} />
           </span>
         </span>
         <span className="tool-line">
-          {meta.verb && <span className="tool-verb">{meta.verb}</span>}
-          <span className={`tool-target${meta.mono ? ' mono' : ''}`}>{meta.target}</span>
-          <ChevronRight size={13} className="tool-chev" />
+          <button className="tool-toggle" aria-expanded={isOpen}>
+            {meta.verb && <span className="tool-verb">{meta.verb}</span>}
+            <span className={`tool-target${meta.mono ? ' mono' : ''}`}>{meta.target}</span>
+            <ChevronRight size={13} className="tool-chev" />
+          </button>
           {file && (
             <button
               className="icon-btn sm tool-open"
@@ -383,7 +388,7 @@ function BashBody({ item, ctx }: { item: ToolItem; ctx: ToolCtx }) {
             </span>
           )}
           {item.task?.outputFile && (
-            <button className="btn sm ghost" onClick={() => openFile(item.task!.outputFile!)}>
+            <button className="btn sm ghost" onClick={() => item.task?.outputFile && openFile(item.task.outputFile)}>
               <FileText size={12} /> Output file
             </button>
           )}
@@ -435,17 +440,24 @@ function ReadBody({ item, ctx }: { item: ToolItem; ctx: ToolCtx }) {
 
 // ---------------------------------------------------------------- Edit / Write
 
-const hunkCache = new Map<string, ReturnType<typeof hunksFromPatch>>();
+// An edit's diff by its two strings, so a card drawn again costs nothing. The hunks hold the strings'
+// lines again, with a little for each line: twice the key is a fair measure.
+const hunkCache = new LruBytes<DiffHunk[]>(4 << 20, (k) => k.length * 2);
 function computeHunks(oldS: string, newS: string) {
   const key = oldS + '\u0000' + newS;
   const hit = hunkCache.get(key);
   if (hit) return hit;
   const p = structuredPatch('a', 'b', oldS, newS, '', '', { context: 3 });
   const h = hunksFromPatch(p.hunks as PatchHunk[]);
-  if (hunkCache.size > 300) hunkCache.delete(hunkCache.keys().next().value!);
   hunkCache.set(key, h);
   return h;
 }
+
+/**
+ * Text still being written into an Edit or Write is shown plain: coloured, each streamed piece would
+ * have the whole draft tokenised again (a 60 kB file, every frame). It is coloured once, when complete.
+ */
+const DRAFT = 'text';
 
 function EditBody({ item }: { item: ToolItem; ctx: ToolCtx }) {
   const i = item.input || {};
@@ -458,14 +470,14 @@ function EditBody({ item }: { item: ToolItem; ctx: ToolCtx }) {
     return { hunks: [], numbered: false };
   }, [s, i.old_string, i.new_string, i.edits]);
   // While the edit is still arriving, a diff against half a replacement would show phantom deletions.
-  // Show the new text as it is written instead, and the real diff once the edit is complete.
+  // Show the new text as it is written instead, plain (DRAFT), and the real diff once the edit is complete.
   if (item.status === 'streaming') {
     const edits = Array.isArray(i.edits) ? (i.edits as { new_string?: string }[]) : null;
     const draft = typeof i.new_string === 'string' ? i.new_string : edits ? String(edits[edits.length - 1]?.new_string ?? '') : '';
     return (
       <div className="tool-section">
         <div className="tool-note shimmer-soft">Writing the change…</div>
-        {draft ? <CodeView text={draft} path={path} maxLines={16} /> : null}
+        {draft ? <CodeView text={draft} lang={DRAFT} maxLines={16} /> : null}
       </div>
     );
   }
@@ -486,7 +498,7 @@ function WriteBody({ item }: { item: ToolItem; ctx: ToolCtx }) {
   const hunks = useMemo(() => (patch ? hunksFromPatch(patch) : null), [patch]);
   return (
     <div className="tool-section">
-      {hunks ? <DiffView hunks={hunks} path={path} maxRows={16} /> : typeof i.content === 'string' ? <CodeView text={i.content} path={path} maxLines={16} /> : null}
+      {hunks ? <DiffView hunks={hunks} path={path} maxRows={16} /> : typeof i.content === 'string' ? <CodeView text={i.content} path={path} lang={item.inputDone ? undefined : DRAFT} maxLines={16} /> : null}
       {item.result?.isError && <ResultText item={item} />}
     </div>
   );
