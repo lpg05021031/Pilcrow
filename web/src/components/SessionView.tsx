@@ -8,14 +8,14 @@ import type { GitInfo, HelperState, RepoEntry, SessionSummary } from '../lib/typ
 import { Transcript } from './Transcript';
 import { FindBar } from './FindBar';
 import { Composer } from './Composer';
-import { MenuButton, Popover } from './ui/Popover';
+import { MenuButton, Popover, useAnchor } from './ui/Popover';
 import { FolderPicker } from './FolderPicker';
 import { copyText } from './ui/clipboard';
 import { AppIcon } from './ui/brand';
 import { Leave } from './ui/bits';
 import { ErrorBoundary } from './ui/ErrorBoundary';
 
-export function useGitInfo(cwd: string | undefined, tick: unknown) {
+function useGitInfo(cwd: string | undefined, tick: unknown) {
   const [info, setInfo] = useState<GitInfo | null>(null);
   const last = useRef(0);
   useEffect(() => {
@@ -87,8 +87,7 @@ export function SessionView({ session }: { session: SessionSummary }) {
   const finding = useStore((s) => s.findOpen);
   // The find bar belongs to the conversation on screen: leaving it closes the bar.
   useEffect(() => closeFind, []);
-  const [pickingFolder, setPickingFolder] = useState(false);
-  const [folderBtn, setFolderBtn] = useState<HTMLButtonElement | null>(null);
+  const { anchor: folderBtn, ref: setFolderBtn, open: pickingFolder, setOpen: setPickingFolder } = useAnchor();
   const root = useRef<HTMLDivElement>(null);
   // Until the first message goes out, the folder is still a choice, not a fact.
   const fresh = Boolean(loaded) && !live && getModel(id).items.length === 0 && !session.worktree && (rtStatus === 'idle' || rtStatus === 'stopped' || !rtStatus);
@@ -327,8 +326,3 @@ function SessionEmpty({ session, git, cwd, fresh, onPickFolder }: { session: Ses
   );
 }
 
-export function NoSession() {
-  return <div className="session" />;
-}
-
-export { openSession };

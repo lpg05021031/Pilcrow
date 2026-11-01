@@ -3,7 +3,7 @@ import { cost, duration, plural } from '../../lib/format';
 
 /** The word of each run state, and the order the bar paints them in. */
 export const STATE_WORD: Record<RunState, string> = { queued: 'queued', preparing: 'preparing', running: 'running', needs_action: 'needs action', done: 'done', failed: 'failed', stopped: 'stopped', skipped: 'skipped' };
-export const BAR_ORDER: RunState[] = ['done', 'needs_action', 'running', 'preparing', 'queued', 'failed', 'stopped', 'skipped'];
+const BAR_ORDER: RunState[] = ['done', 'needs_action', 'running', 'preparing', 'queued', 'failed', 'stopped', 'skipped'];
 export const ACTIVE: RunState[] = ['preparing', 'running', 'needs_action'];
 
 export function clockMmss(ms: number) {

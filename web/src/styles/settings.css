@@ -403,6 +403,9 @@
 .mem-settings .hint {
   color: var(--text-2); /* on the group's fill, the faintest text would fall under 4.5:1 */
 }
+.mem-setting-control {
+  width: 240px;
+}
 .mem-setting-title {
   font-weight: 550;
   font-size: var(--fs-small);

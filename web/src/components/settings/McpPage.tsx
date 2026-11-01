@@ -16,14 +16,14 @@ import { errText } from '../../lib/format';
 type Scope = 'user' | 'project' | 'local';
 const SCOPE_LABEL: Record<Scope, string> = { user: 'All projects', project: 'Project (.mcp.json)', local: 'This project, just you' };
 
-export function useActiveSession() {
+function useActiveSession() {
   const activeId = useStore((s) => s.activeId);
   const rt = useStore((s) => (activeId ? s.rt[activeId] : null));
   const session = useStore((s) => s.sessions.find((x) => x.id === activeId));
   return { id: activeId, rt, cwd: rt?.cwd || session?.cwd || '' };
 }
 
-export function statusMeta(st?: string) {
+function statusMeta(st?: string) {
   switch (st) {
     case 'connected':
       return { label: 'Connected', icon: CircleCheck, cls: 'ok' };
@@ -41,7 +41,7 @@ export function statusMeta(st?: string) {
 }
 
 /** One line that says what the server is: its URL, or its command. */
-export function describeConfig(c: McpEntry['config']) {
+function describeConfig(c: McpEntry['config']) {
   if (c.type === 'stdio') return [c.command, ...(c.args || [])].join(' ');
   return c.url || '';
 }

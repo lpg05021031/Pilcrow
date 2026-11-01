@@ -87,7 +87,7 @@ export function McpAuthDialog({ spec }: { spec: { sessionId: string; name: strin
       footer={
         <>
           {start?.authUrl && !done && (
-            <button className="btn sm ghost" onClick={() => copyText(start.authUrl || '').then(() => toast('Link copied', 'success'))}>
+            <button className="btn sm ghost" onClick={() => copyText(start.authUrl || '').then(() => toast('Link copied', 'success'), () => toast('Could not copy to the clipboard', 'error'))}>
               Copy link
             </button>
           )}

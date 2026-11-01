@@ -5,7 +5,7 @@ import { rpc } from '../lib/rpc';
 import { openFile, toast } from '../lib/store';
 import { copyText } from './ui/clipboard';
 
-export function resolvePath(p: string, cwd?: string) {
+function resolvePath(p: string, cwd?: string) {
   if (!p) return p;
   if (p.startsWith('/')) return p;
   if (p.startsWith('~/')) return p;

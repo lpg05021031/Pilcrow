@@ -6,7 +6,7 @@ import type { DispatchPlan, DispatchSettings, DispatchTarget, Playbook, Workspac
 import { basename, dirname, plural, tildify } from '../../lib/format';
 import { Switch, Field } from '../ui/bits';
 import { Select } from '../ui/Select';
-import { Popover } from '../ui/Popover';
+import { Popover, useAnchor } from '../ui/Popover';
 import { FolderPicker } from '../FolderPicker';
 
 const VARIABLES = '{{repo.name}} {{repo.path}} {{repo.branch}} {{job.name}} {{notes}}';
@@ -26,7 +26,7 @@ export function Composer() {
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [filter, setFilter] = useState('');
-  const [picking, setPicking] = useState(false);
+  const { anchor: folderBtn, ref: setFolderBtn, open: picking, setOpen: setPicking } = useAnchor();
   const [settings, setSettings] = useState<DispatchSettings>(DEFAULTS);
   const [branch, setBranch] = useState('');
   const [branchAuto, setBranchAuto] = useState(true);
@@ -35,7 +35,6 @@ export function Composer() {
   const [playbookId, setPlaybookId] = useState('');
   const [starting, setStarting] = useState(false);
   const [showOptions, setShowOptions] = useState(false);
-  const [folderBtn, setFolderBtn] = useState<HTMLButtonElement | null>(null);
   const planSeq = useRef(0);
 
   // the workspace
@@ -220,7 +219,7 @@ export function Composer() {
           <div className="dp-targets-top">
             <button ref={setFolderBtn} className={`ns-folder sd-folder dp-folder${picking ? ' on' : ''}`} onClick={() => setPicking(!picking)} title={tildify(root, info?.home)}>
               <Folder size={14} className="ns-folder-ico" />
-              <span className="ellipsis grow" style={{ textAlign: 'left' }}>
+              <span className="ellipsis grow">
                 {basename(root) || 'Pick a folder'}
               </span>
               <ChevronDown size={13} className="faint" />

@@ -3,7 +3,7 @@ import { History, ArrowUpRight } from 'lucide-react';
 import { useStore, call, openSession, setUi } from '../lib/store';
 import type { FileTouch } from '../lib/types';
 import { timeAgo, plural } from '../lib/format';
-import { Popover } from './ui/Popover';
+import { Popover, useAnchor } from './ui/Popover';
 import { revealItem } from './Transcript';
 import { useNow } from './ui/hooks';
 import { folders, loadOnce } from '../lib/cache';
@@ -32,8 +32,7 @@ export function useFileHistory(cwd: string): HistoryMap | null {
  * picking one opens it at the step that made the change.
  */
 export function FileTouches({ touches, compact = false }: { touches: FileTouch[] | undefined; compact?: boolean }) {
-  const [open, setOpen] = useState(false);
-  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
+  const { anchor, ref: setAnchor, open, setOpen } = useAnchor();
   const now = useNow(30_000, open);
   const activeId = useStore((s) => s.activeId);
   if (!touches?.length) return null;

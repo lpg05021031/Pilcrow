@@ -108,7 +108,7 @@ export function MemoryPage({ config }: { config: Config }) {
             <span className="mem-setting-title">Model for note-taking</span>
             <span className="hint">A smaller model is plenty here.</span>
           </span>
-          <div style={{ width: 240 }}>
+          <div className="mem-setting-control">
             <ModelSelect label="Model for note-taking" value={config.memoryModel || ''} onChange={(v, typing) => !typing && setConfig({ memoryModel: v })} onCommit={() => {}} />
           </div>
         </div>

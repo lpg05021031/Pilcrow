@@ -369,6 +369,9 @@
 .ovc {
   animation: rise var(--t-panel) var(--ease) both;
 }
+.ovc.busy {
+  animation-delay: calc(var(--i, 0) * 40ms);
+}
 .ovc-rail {
   transition: background var(--t-slow) var(--ease);
 }
@@ -394,12 +397,14 @@
 }
 .run {
   animation: rise var(--t-panel) var(--ease) both;
+  animation-delay: calc(var(--i, 0) * 40ms);
 }
 .inbox-rail {
   animation: page-in var(--t-panel) var(--ease) 80ms both;
 }
 .sched {
   animation: rise var(--t-panel) var(--ease) both;
+  animation-delay: calc(var(--i, 0) * 40ms);
 }
 .sched-bar > span {
   transition: width var(--spring-soft-t) var(--spring-soft);

@@ -313,6 +313,9 @@
   height: 36px;
   cursor: pointer;
 }
+.sd-folder > .grow {
+  text-align: left;
+}
 .sd-when {
   display: flex;
   align-items: center;

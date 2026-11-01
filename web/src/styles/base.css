@@ -352,8 +352,7 @@ kbd {
   display: grid;
   gap: var(--sp-1_75);
 }
-.field > label,
-.field-label {
+.field > label {
   font-size: var(--fs-small);
   font-weight: 550;
   color: var(--text-2);

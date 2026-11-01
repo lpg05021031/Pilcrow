@@ -209,7 +209,7 @@ export interface Growth {
   head: string;
 }
 /** The markup of a growing block's container: the pieces now final, then the one still being written. */
-export interface Grown {
+interface Grown {
   g: Growth;
   settled: string;
   rest: string;

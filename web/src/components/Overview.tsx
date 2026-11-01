@@ -11,6 +11,7 @@ import { suggestionLabel, typingElsewhere } from './tools/Permission';
 import { workflowCounts } from '../lib/workflow';
 import { str } from '../lib/tools';
 import type { PermissionDecision } from '../lib/types';
+import { stagger } from '../lib/motion';
 
 interface Fleet {
   live: Record<string, SessionState>;
@@ -18,7 +19,6 @@ interface Fleet {
   spend: { at: number; id: string; delta: number }[];
 }
 
-const order = (i: number) => ({ '--i': i }) as React.CSSProperties;
 
 /**
  * The control room: every session that is working or waiting, at a glance, with the things that need
@@ -116,7 +116,7 @@ export function Overview() {
       </header>
 
       <div className="ov-body">
-        <div className="ov-stats" style={order(k++)}>
+        <div className="ov-stats" style={stagger(k++)}>
           <Tile icon={working.length ? <WorkingMark size={18} /> : <Activity size={16} />} label="Working" value={working.length} tone={working.length ? 'live' : ''} onClick={jump('ov-working')} />
           <Tile icon={<Hourglass size={16} />} label="Needs you" value={needs.length} tone={needs.length ? 'accent' : ''} onClick={jump(needs.length ? 'ov-needs' : 'ov-working')} />
           <Tile icon={<CircleCheck size={16} />} label="Finished today" value={finished.length} onClick={jump('ov-finished')} />
@@ -124,7 +124,7 @@ export function Overview() {
         </div>
 
         {needs.length > 0 && (
-          <section id="ov-needs" className="ov-sec" style={order(k++)}>
+          <section id="ov-needs" className="ov-sec" style={stagger(k++)}>
             <h2 className="ov-h">
               <span className="glyph needs" aria-hidden="true" /> Needs you <span className="ov-count">{needs.length}</span>
               <span className="ov-h-end faint">Press 1, 2 or 3 to answer the first</span>
@@ -137,7 +137,7 @@ export function Overview() {
           </section>
         )}
 
-        <section id="ov-working" className="ov-sec" style={order(k++)}>
+        <section id="ov-working" className="ov-sec" style={stagger(k++)}>
           <h2 className="ov-h">
             Working <span className="ov-count">{working.length}</span>
           </h2>
@@ -155,7 +155,7 @@ export function Overview() {
           )}
         </section>
 
-        <div className="ov-two" style={order(k++)}>
+        <div className="ov-two" style={stagger(k++)}>
           <section id="ov-finished" className="ov-sec">
             <h2 className="ov-h">
               Finished today <span className="ov-count">{finished.length}</span>
@@ -242,7 +242,7 @@ function WorkingCard({ s, st, focused, now, hot, index }: { s: SessionSummary; s
   const u = st?.usage;
   const stale = st?.lastActivity ? now - st.lastActivity > 45_000 : false;
   return (
-    <article className={`ovc busy${focused ? ' focused' : ''}${stale ? ' stale' : ''}`} data-card={s.id} onClick={() => openSession(s.id)} onKeyDown={onActivate(() => openSession(s.id))} role="button" tabIndex={0} style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}>
+    <article className={`ovc busy${focused ? ' focused' : ''}${stale ? ' stale' : ''}`} data-card={s.id} onClick={() => openSession(s.id)} onKeyDown={onActivate(() => openSession(s.id))} role="button" tabIndex={0} style={stagger(Math.min(index, 8))}>
       <div className="ovc-row">
         <CardHead s={s} st={st} />
         <span className="ovc-live" title={stale ? 'Quiet for a while' : 'Working'}>

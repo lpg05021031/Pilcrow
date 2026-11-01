@@ -256,44 +256,47 @@ function Scrubber({ steps, sel, onPick, now }: { steps: TimelineStep[]; sel: num
 
 function StepRow({ step, sessionId, cwd, selected, isLast, onPick }: { step: TimelineStep; sessionId: string; cwd: string; selected: boolean; isLast: boolean; onPick: () => void }) {
   const sub = step.kind === 'tool' ? step.tool : step.kind === 'external' ? plural(step.files.length, 'file') + ' changed between turns' : step.kind === 'message' ? 'You' : step.kind === 'start' ? 'Claude Code' : 'Timeline';
-  const jump = async (e?: React.MouseEvent) => {
-    e?.stopPropagation();
+  const jump = async () => {
     const el = step.toolUseId ? await revealItem(sessionId, `tool-${step.toolUseId}`, step.toolUseId) : step.uuid ? await revealItem(sessionId, `msg-${step.uuid}`, step.uuid) : null;
     if (!el) return toast('That step is not in the conversation view.', 'info');
     el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     el.classList.add('flash');
     setTimeout(() => el.classList.remove('flash'), 1400);
   };
+  const jumps = Boolean(step.toolUseId || step.uuid);
   return (
     <div className={`tl-row ${step.kind}${selected ? ' on' : ''}${step.changed ? ' changed' : ''}`} data-step={step.n}>
-      <button className="tl-row-btn" onClick={onPick} aria-expanded={selected}>
-        <span className="tl-rail" aria-hidden="true">
-          <span className={`tl-dot${step.changed ? ' changed' : ''}`} />
-          {!isLast && <span className="tl-line" />}
-        </span>
-        <span className="tl-main">
-          <span className="tl-title ellipsis">{stepTitle(step)}</span>
-          <span className="tl-sub">
-            <span>{sub}</span>
-            <span className="tnum">{clock(step.at, true)}</span>
+      <div className="tl-row-head">
+        <button className="tl-row-btn" onClick={onPick} aria-expanded={selected}>
+          <span className="tl-rail" aria-hidden="true">
+            <span className={`tl-dot${step.changed ? ' changed' : ''}`} />
+            {!isLast && <span className="tl-line" />}
           </span>
-        </span>
-        {step.changed ? (
-          <span className="tl-stat tnum">
-            <span className={`num-add${step.add ? '' : ' zero'}`}>+{step.add}</span>
-            <span className={`num-del${step.del ? '' : ' zero'}`}>−{step.del}</span>
+          <span className="tl-main">
+            <span className="tl-title ellipsis">{stepTitle(step)}</span>
+            <span className="tl-sub">
+              <span>{sub}</span>
+              <span className="tnum">{clock(step.at, true)}</span>
+            </span>
           </span>
-        ) : (
-          <span className="tl-stat faint">—</span>
-        )}
-        {(step.toolUseId || step.uuid) && (
-          // A shortcut for the pointer; the keyboard has the same action in the step's details.
-          <span className="icon-btn sm tl-jump" title="Show in the conversation" onClick={jump} aria-hidden="true">
+          {step.changed ? (
+            <span className="tl-stat tnum">
+              <span className={`num-add${step.add ? '' : ' zero'}`}>+{step.add}</span>
+              <span className={`num-del${step.del ? '' : ' zero'}`}>−{step.del}</span>
+            </span>
+          ) : (
+            <span className="tl-stat faint">—</span>
+          )}
+          {/* the jump's place in the row: the button sits over it, beside the row's own button rather than in it */}
+          {jumps && <span className="tl-jump-room" aria-hidden="true" />}
+        </button>
+        {jumps && (
+          <button className="icon-btn sm tl-jump" title="Show in the conversation" aria-label="Show in the conversation" onClick={jump}>
             <ArrowUpRight size={13} />
-          </span>
+          </button>
         )}
-      </button>
-      <Collapse open={selected}>{() => <StepDetail step={step} sessionId={sessionId} cwd={cwd} onJump={step.toolUseId || step.uuid ? () => jump() : undefined} />}</Collapse>
+      </div>
+      <Collapse open={selected}>{() => <StepDetail step={step} sessionId={sessionId} cwd={cwd} onJump={jumps ? jump : undefined} />}</Collapse>
     </div>
   );
 }

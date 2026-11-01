@@ -2,7 +2,7 @@ import type { Item, ToolItem } from './transcript';
 
 export type Unit = { kind: 'items'; items: Item[]; key: string } | { kind: 'work'; key: string; work: Item[]; live: boolean };
 
-export const isWork = (it: Item) => it.kind === 'tool' || it.kind === 'thinking';
+const isWork = (it: Item) => it.kind === 'tool' || it.kind === 'thinking';
 
 const itemsOf = (u: Unit) => (u.kind === 'work' ? u.work : u.items);
 

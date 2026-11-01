@@ -10,6 +10,7 @@ import { useNow } from './ui/hooks';
 import { Mark } from './ui/brand';
 import { ScheduleDialog } from './ScheduleDialog';
 import { Loading } from './ui/Empty';
+import { stagger } from '../lib/motion';
 
 function dayLabel(ms: number, now: number) {
   const d = new Date(ms);
@@ -129,7 +130,7 @@ export function InboxPage() {
             </div>
           )}
           {groups.map((g, gi) => (
-            <section key={g.label} className="inbox-day" style={{ '--i': gi } as React.CSSProperties}>
+            <section key={g.label} className="inbox-day" style={stagger(gi)}>
               <h2 className="inbox-day-h">
                 {g.label}
                 <span className="ov-count">{g.items.length}</span>
@@ -177,7 +178,7 @@ function RunCard({ it, index, onOpen, onRead, onRemove }: { it: InboxItem; index
   const summary = it.summary || it.reason || (it.status === 'completed' ? 'Finished without a written summary.' : 'No output.');
   const long = summary.length > 280;
   return (
-    <article className={`run${it.read ? '' : ' unread'} ${it.status}`} onClick={onRead} style={{ animationDelay: `${Math.min(index, 6) * 40}ms` }}>
+    <article className={`run${it.read ? '' : ' unread'} ${it.status}`} onClick={onRead} style={stagger(Math.min(index, 6))}>
       <span className={`run-badge ${it.status}`} aria-hidden="true">
         <Icon size={15} />
       </span>
@@ -242,12 +243,11 @@ function HelpersCard({ it, index, onRead, onRemove }: { it: InboxItem; index: nu
   const copy = async () => {
     const md = await call<string>('helpers.export', { leadId: it.leadId }).catch(() => null);
     if (md) {
-      await copyText(md);
-      toast('Copied as Markdown.', 'info');
+      await copyText(md).then(() => toast('Copied as Markdown.', 'info'), () => toast('Could not copy to the clipboard', 'error'));
     }
   };
   return (
-    <article className={`run dp-report${it.read ? '' : ' unread'} ${it.status}`} onClick={onRead} style={{ animationDelay: `${Math.min(index, 6) * 40}ms` }}>
+    <article className={`run dp-report${it.read ? '' : ' unread'} ${it.status}`} onClick={onRead} style={stagger(Math.min(index, 6))}>
       <span className={`run-badge ${it.status}`} aria-hidden="true">
         <Icon size={15} />
       </span>
@@ -319,12 +319,11 @@ function DispatchCard({ it, index, onRead, onRemove }: { it: InboxItem; index: n
   const copy = async () => {
     const md = await call<string>('dispatch.export', { id: it.jobId }).catch(() => null);
     if (md) {
-      await copyText(md);
-      toast('Report copied as Markdown.', 'info');
+      await copyText(md).then(() => toast('Report copied as Markdown.', 'info'), () => toast('Could not copy to the clipboard', 'error'));
     }
   };
   return (
-    <article className={`run dp-report${it.read ? '' : ' unread'} ${it.status}`} onClick={onRead} style={{ animationDelay: `${Math.min(index, 6) * 40}ms` }}>
+    <article className={`run dp-report${it.read ? '' : ' unread'} ${it.status}`} onClick={onRead} style={stagger(Math.min(index, 6))}>
       <span className={`run-badge ${it.status}`} aria-hidden="true">
         <Icon size={15} />
       </span>
@@ -421,7 +420,7 @@ function ScheduleCard({ s, now, index, active, onFilter }: { s: Schedule; now: n
   // How far along the wait for the next run is, when both ends are known.
   const progress = s.enabled && !s.running && s.nextRunAt && s.lastRunAt && s.nextRunAt > s.lastRunAt ? Math.max(0, Math.min(1, (now - s.lastRunAt) / (s.nextRunAt - s.lastRunAt))) : null;
   return (
-    <div className={`sched${s.enabled ? '' : ' off'}${active ? ' on' : ''}${s.running ? ' running' : ''}`} style={{ animationDelay: `${Math.min(index, 6) * 40}ms` }}>
+    <div className={`sched${s.enabled ? '' : ' off'}${active ? ' on' : ''}${s.running ? ' running' : ''}`} style={stagger(Math.min(index, 6))}>
       <button className="sched-main" onClick={onFilter} title={`${tildify(s.cwd)}\n\n${s.prompt}`}>
         <span className="sched-name ellipsis">{s.name}</span>
         <span className="sched-sub ellipsis">

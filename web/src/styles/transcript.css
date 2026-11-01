@@ -1173,7 +1173,9 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 .diff.wrap .diff-grid {
   min-width: 0;
 }
+/* a hunk's head spans every column of a side-by-side diff */
 .diff-hunk {
+  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   gap: var(--sp-2_5);
@@ -1302,6 +1304,9 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 }
 .comment-editor .textarea {
   font-size: var(--fs-small-plus);
+}
+.comment-editor > .row {
+  justify-content: flex-end;
 }
 
 /* ---------------------------------------------------------------- permission prompt

@@ -702,11 +702,11 @@
    A scrubber on top — one tick per step, taller for messages — and the same steps as a list below,
    joined by a rail. Picking a point opens what that step changed; the footer says how far the
    folder has moved since. */
+/* keyboard-operable (the arrows step through the timeline): its focus ring is base.css's */
 .history {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  outline: none;
 }
 .history .panel-toolbar {
   flex: none;
@@ -850,11 +850,14 @@
   border-radius: var(--r-2);
   text-align: left;
 }
-.tl-row-btn:hover,
-.tl-row.on > .tl-row-btn {
+.tl-row-head {
+  position: relative;
+}
+.tl-row-head:hover > .tl-row-btn,
+.tl-row.on .tl-row-btn {
   background: var(--fill-1);
 }
-.tl-row.on > .tl-row-btn {
+.tl-row.on .tl-row-btn {
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
 }
@@ -946,11 +949,21 @@
   font-size: var(--fs-micro);
   white-space: nowrap;
 }
+/* The jump to the conversation is a button of its own over the place the row keeps for it. */
+.tl-jump-room {
+  width: 24px;
+  height: 24px;
+}
 .tl-jump {
+  position: absolute;
+  top: 50%;
+  right: var(--sp-1_5);
+  translate: 0 -50%;
   opacity: 0;
 }
-.tl-row-btn:hover .tl-jump,
-.tl-row.on .tl-jump {
+.tl-row-head:hover .tl-jump,
+.tl-row.on .tl-jump,
+.tl-jump:focus-visible {
   opacity: 1;
 }
 .tl-now {
@@ -1055,7 +1068,6 @@
 .doc-area.split > :first-child {
   box-shadow: inset -1px 0 0 var(--hair);
 }
-.doc-area > .cm-host,
 .doc-area > .editor {
   min-height: 0;
 }

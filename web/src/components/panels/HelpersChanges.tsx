@@ -99,7 +99,7 @@ function HelperSection({ h }: { h: HelperState }) {
   return (
     <div className="hc-sec">
       <div className="hc-head">
-        <button className="icon-btn sm" onClick={() => setOpen(!open)} title={open ? 'Fold' : 'Unfold'}>
+        <button className="icon-btn sm" onClick={() => setOpen(!open)} title={open ? 'Fold' : 'Unfold'} aria-label={`What ${h.name} changed`} aria-expanded={open}>
           <ChevronRight size={13} className={open ? 'rot' : ''} />
         </button>
         <span className={`dp-glyph ${h.state}`} aria-hidden="true" />

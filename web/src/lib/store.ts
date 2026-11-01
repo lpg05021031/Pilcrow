@@ -64,7 +64,7 @@ interface Ui {
   /** How much of Claude's work the transcript shows: tools summarised, plus thinking, or every step opened. */
   view: ViewMode;
 }
-export type ViewMode = 'normal' | 'thinking' | 'verbose';
+type ViewMode = 'normal' | 'thinking' | 'verbose';
 export const VIEW_MODES: { id: ViewMode; label: string; hint: string }[] = [
   { id: 'normal', label: 'Normal', hint: 'Steps summarised, thinking folded' },
   { id: 'thinking', label: 'Thinking', hint: 'Thinking opened' },
@@ -212,7 +212,7 @@ export interface FilesState {
 }
 
 /** Review notes on a session's diff: path -> line key -> note. */
-export type DiffNotes = Record<string, Record<string, { text: string; line: string; lineNo: number }>>;
+type DiffNotes = Record<string, Record<string, { text: string; line: string; lineNo: number }>>;
 /**
  * What a session remembers outside React state while the window is open. Nothing re-renders when it
  * changes. It goes with the session's transcript model (evictModels), all but unsent work (a draft, a
@@ -979,7 +979,7 @@ function onDispatch(d: DispatchDelta) {
   }
   set({ jobs, jobRuns });
 }
-export function fetchJob(id: string) {
+function fetchJob(id: string) {
   return rpc
     .call<{ job: DispatchJob; runs: DispatchRun[] }>('dispatch.get', { id })
     .then(

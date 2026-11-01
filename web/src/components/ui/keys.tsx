@@ -1,5 +1,6 @@
 // The keyboard: window keys, the Esc stack, keyboard activation, keycaps, and focus that waits its turn.
 import { useEffect } from 'react';
+import { useStore } from '../../lib/store';
 import { useEvent } from './hooks';
 
 /** A keydown listener on the window while `active`, subscribed once; it always calls the latest `onKey`. */
@@ -53,7 +54,8 @@ export function focusIfFree(el: HTMLElement | null | undefined) {
   if (!el) return;
   const a = document.activeElement as HTMLElement | null;
   const busy = a && a !== document.body && a !== el && (a.closest('[role="dialog"], .palette, .dialog') || a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable);
-  if (busy || document.querySelector('.palette, .dialog')) return;
+  // A dialog or the palette open over the window (store.ts dialogs): what is under it waits.
+  if (busy || Object.values(useStore.getState().dialogs).some(Boolean)) return;
   el.focus();
 }
 

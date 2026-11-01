@@ -1,5 +1,5 @@
 // Small controls and indicators shared across the app.
-import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { LoaderCircle } from 'lucide-react';
 import { isWorking, type SessionStatus } from '../../lib/types';
 import { tokens } from '../../lib/format';
@@ -44,10 +44,10 @@ export function Seg<T extends string>({ value, options, onChange, size, classNam
  * A labelled form row: the label names the control that takes the `id` it is handed (a <Select> also
  * keeps its current value in its name). Rows with several controls name each one with aria-label.
  */
-export function Field({ label, children, style }: { label: ReactNode; children: (id: string) => ReactNode; style?: CSSProperties }) {
+export function Field({ label, children }: { label: ReactNode; children: (id: string) => ReactNode }) {
   const id = useId();
   return (
-    <div className="field" style={style}>
+    <div className="field">
       <label htmlFor={id} id={`${id}-label`}>
         {label}
       </label>

@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, type LucideIcon } from 'lucide-react';
-import { reducedMotion } from '../../lib/motion';
+import { reducedMotion, stagger } from '../../lib/motion';
 import { useEscape } from './keys';
 import { useEvent } from './hooks';
 
@@ -166,7 +166,7 @@ export function Menu({ items, onClose, id, label }: { items: MenuItem[]; onClose
             aria-checked={it.checked}
             tabIndex={-1}
             className={`menu-item${it.danger ? ' danger' : ''}${active === i ? ' active' : ''}`}
-            style={{ '--i': order } as React.CSSProperties}
+            style={stagger(order)}
             disabled={it.disabled}
             onFocus={(e) => setActive(e.currentTarget.matches(':focus-visible') ? i : -1)}
             onMouseEnter={(e) => {
@@ -191,10 +191,16 @@ export function Menu({ items, onClose, id, label }: { items: MenuItem[]; onClose
   );
 }
 
+/** A control that opens a popover: the element to place it against (`ref` goes on the control), and whether it is open. */
+export function useAnchor<T extends HTMLElement = HTMLButtonElement>() {
+  const [anchor, ref] = useState<T | null>(null);
+  const [open, setOpen] = useState(false);
+  return { anchor, ref, open, setOpen };
+}
+
 /** A button that opens a menu. Its `title` is also its accessible name: these buttons are icons. */
 export function MenuButton({ items, children, className = 'icon-btn', title, placement = 'bottom-end', width }: { items: MenuItem[] | (() => MenuItem[]); children: ReactNode; className?: string; title?: string; placement?: Placement; width?: number }) {
-  const [open, setOpen] = useState(false);
-  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
+  const { anchor, ref: setAnchor, open, setOpen } = useAnchor();
   const id = useId();
   return (
     <>

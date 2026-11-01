@@ -97,7 +97,7 @@ export function Board() {
 }
 
 /** A request waiting on a job, as one line in a well (`.ovc-well`): the tool, what it asks, who asked, the answers. */
-export function RequestRow({ jobId, group }: { jobId: string; group: RequestGroup }) {
+function RequestRow({ jobId, group }: { jobId: string; group: RequestGroup }) {
   const first = group.asks[0];
   const [tool, ...rest] = group.label.split(': ');
   const what = rest.join(': ');
@@ -133,7 +133,7 @@ export function RequestRow({ jobId, group }: { jobId: string; group: RequestGrou
 }
 
 /** The canary finished: read it and continue, with the forecast for the rest. */
-export function CanaryRow({ job }: { job: DispatchJob }) {
+function CanaryRow({ job }: { job: DispatchJob }) {
   const myRuns = useStore((s) => s.jobRuns[job.id]);
   const names = job.learned.map((l) => l.name).join(', ') || 'the canary';
   const f = job.forecast;

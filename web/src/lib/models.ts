@@ -9,7 +9,7 @@ export const ALIASES = [
   { value: 'haiku', displayName: 'Haiku', description: 'Fastest' },
 ];
 
-export interface GatewayModelState {
+interface GatewayModelState {
   models: GatewayModel[];
   loading: boolean;
   /** Something went wrong that is worth showing (not "this endpoint has no list"). */

@@ -1,6 +1,7 @@
 // The clipboard: copying text, and the copy button that confirms in place.
 import { useState } from 'react';
 import { Copy, Check } from 'lucide-react';
+import { toast } from '../../lib/store';
 
 /** Copy to the clipboard. Falls back to the legacy path when the async API is unavailable or refused. */
 export async function copyText(text: string) {
@@ -25,7 +26,7 @@ export async function copyText(text: string) {
   if (!ok) throw new Error('Copy was blocked');
 }
 
-/** Copy with a check-mark confirmation in place, instead of a toast. */
+/** Copy with a check-mark confirmation in place, instead of a toast; a copy the system refused says so in one. */
 export function CopyButton({ text, title = 'Copy', size = 13 }: { text: string; title?: string; size?: number }) {
   const [done, setDone] = useState(false);
   return (
@@ -38,7 +39,7 @@ export function CopyButton({ text, title = 'Copy', size = 13 }: { text: string; 
             setDone(true);
             setTimeout(() => setDone(false), 1300);
           },
-          () => {},
+          () => toast('Could not copy to the clipboard', 'error'),
         )
       }
     >

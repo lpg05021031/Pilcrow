@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Plus, Search, ScrollText, FolderOpen, Pencil, Trash, Copy, RefreshCw, Puzzle, FolderInput, Ellipsis } from 'lucide-react';
 import { useStore, call, openFile, confirmAction, toast, setDialog } from '../../lib/store';
 import type { SkillInfo, SkillsList } from '../../lib/types';
-import { tildify, timeAgo, plural } from '../../lib/format';
+import { tildify, timeAgo, plural, moment } from '../../lib/format';
 import { MenuButton } from '../ui/Popover';
 import { Dialog } from '../ui/Dialog';
 import { Spinner, Seg, Field } from '../ui/bits';
@@ -163,7 +163,7 @@ export function SkillsPage() {
                     {s.description || <span className="faint">No description — Claude will rarely pick this skill</span>}
                   </span>
                 </span>
-                <span className="cust-time faint" title={new Date(s.mtime).toLocaleString()}>
+                <span className="cust-time faint" title={moment(s.mtime)}>
                   {timeAgo(s.mtime)}
                 </span>
                 <MenuButton

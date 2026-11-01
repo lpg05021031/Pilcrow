@@ -5,6 +5,7 @@ import { highlightTokens, cachedTokens, PAINT_LINES, type Tok } from '../lib/hig
 import { parseAnsi } from '../lib/ansi';
 import { langFromPath, plural } from '../lib/format';
 import type { DiffHunk, DiffLine } from '../lib/types';
+import { stagger } from '../lib/motion';
 
 type Range = [number, number];
 
@@ -46,7 +47,7 @@ function renderContent(text: string, toks?: Tok[] | null, ranges?: Range[] | nul
 }
 
 /** Token lines for a text, filled in once highlighting finishes (never, past MAX_HIGHLIGHT in lib/highlight). */
-export function useTokens(text: string, lang: string | null) {
+function useTokens(text: string, lang: string | null) {
   const [toks, setToks] = useState<Tok[][] | null>(() => cachedTokens(text, lang));
   useEffect(() => {
     let alive = true;
@@ -206,11 +207,6 @@ function useHunkTokens(hunks: DiffHunk[], lang: string) {
   return state;
 }
 
-export interface DiffComment {
-  key: string;
-  text: string;
-}
-
 const NO_ANIM: React.CSSProperties = { animation: 'none' };
 
 export const DiffView = memo(function DiffView({
@@ -273,7 +269,7 @@ export const DiffView = memo(function DiffView({
   // The first rows write themselves in one after another (the stylesheet staggers on --i); the rest
   // simply appear, so a long diff never has hundreds of cells animating at once.
   const STAGGER = 40;
-  const order = (i: number) => (i < STAGGER ? ({ '--i': i } as React.CSSProperties) : NO_ANIM);
+  const order = (i: number) => (i < STAGGER ? stagger(i) : NO_ANIM);
 
   const commentBlock = (l: DiffLine, span: number) => {
     const key = keyOf(l);
@@ -321,7 +317,7 @@ export const DiffView = memo(function DiffView({
             const prev = r.hi > 0 ? hunks[r.hi - 1] : null;
             const gap = prev ? h.oldStart - (prev.oldStart + prev.oldLines) : h.oldStart - 1;
             return (
-              <div key={i} className="diff-hunk" style={{ gridColumn: '1 / -1' }}>
+              <div key={i} className="diff-hunk">
                 <span className="diff-hunk-dots">⋯</span>
                 <span>{gap > 0 ? plural(gap, 'unchanged line') : ''}</span>
                 {h.header && <span className="diff-hunk-ctx mono ellipsis">{h.header}</span>}
@@ -399,7 +395,7 @@ function CommentEditor({ initial, onSave, onCancel }: { initial: string; onSave:
           }
         }}
       />
-      <div className="row" style={{ justifyContent: 'flex-end' }}>
+      <div className="row">
         <button className="btn sm ghost" onClick={onCancel}>
           Cancel
         </button>

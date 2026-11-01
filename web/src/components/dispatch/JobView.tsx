@@ -122,8 +122,7 @@ export function JobView({ id }: { id: string }) {
       onSelect: async () => {
         const md = await call<string>('dispatch.export', { id }).catch(() => null);
         if (md) {
-          await copyText(md);
-          toast('Report copied as Markdown.', 'info');
+          await copyText(md).then(() => toast('Report copied as Markdown.', 'info'), () => toast('Could not copy to the clipboard', 'error'));
         }
       },
     },

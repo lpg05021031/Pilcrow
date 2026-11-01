@@ -1,5 +1,5 @@
 // Shared motion helpers. Durations and curves mirror the tokens in styles/tokens.css.
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
 
 export const EASE = 'cubic-bezier(0.22, 1, 0.36, 1)';
 export const EASE_EXIT = 'cubic-bezier(0.4, 0, 1, 1)';
@@ -28,6 +28,12 @@ export function spring() {
 export function reducedMotion() {
   return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
+
+/**
+ * A row's place in a list that eases in one row after another: the stylesheet (motion.css) delays its
+ * entrance by --i beats. The one way a stagger is said, whatever the beat.
+ */
+export const stagger = (i: number) => ({ '--i': i }) as CSSProperties;
 
 /**
  * Leaving gracefully. React removes an element the instant its state says so; a menu, a sheet or a

@@ -11,7 +11,7 @@ export const str = (i: ToolInput | undefined | null, k: string): string => (i &&
 export const num = (i: ToolInput | undefined | null, k: string): number | undefined => (i && typeof i[k] === 'number' ? (i[k] as number) : undefined);
 
 
-export interface ToolMeta {
+interface ToolMeta {
   icon: LucideIcon;
   verb: string;
   target: string;
