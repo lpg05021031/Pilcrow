@@ -30,6 +30,11 @@ NO_PAD: Pad = (0, 0, 0, 0)
 _TAG = re.compile(r"<[^>]+>")  # the markup of a node's HTML text, for its words
 
 
+def _union(a: Tuple[int, int, int, int], b: Tuple[int, int, int, int]) -> Tuple[int, int, int, int]:
+    x, y = min(a[0], b[0]), min(a[1], b[1])
+    return (x, y, max(a[0] + a[2], b[0] + b[2]) - x, max(a[1] + a[3], b[1] + b[3]) - y)
+
+
 class Node:
     __slots__ = ("x", "y", "w", "h", "hidden")
 
@@ -73,7 +78,11 @@ class Node:
         pass
 
     def live(self) -> bool:
-        return False
+        return self.live_rect() is not None
+
+    def live_rect(self) -> Optional[Tuple[int, int, int, int]]:
+        """What changes on a clock tick (a turning spinner), in block coordinates; None when nothing does."""
+        return None
 
 
 class Container(Node):
@@ -124,8 +133,13 @@ class Container(Node):
         for c in self.children:
             c.cool()
 
-    def live(self) -> bool:
-        return any(c.live() for c in self.children if not c.hidden)
+    def live_rect(self) -> Optional[Tuple[int, int, int, int]]:
+        out: Optional[Tuple[int, int, int, int]] = None
+        for c in self.children:
+            r = None if c.hidden else c.live_rect()
+            if r is not None:
+                out = r if out is None else _union(out, r)
+        return out
 
 
 class Column(Container):
@@ -482,8 +496,8 @@ class Surface(Node):
     def cool(self) -> None:
         self.child.cool()
 
-    def live(self) -> bool:
-        return self.child.live()
+    def live_rect(self) -> Optional[Tuple[int, int, int, int]]:
+        return self.child.live_rect()
 
 
 class Icon(Node):
@@ -830,8 +844,8 @@ class Spinner(Node):
         ang = int((st.now % 1.0) * 360)
         p.drawArc(QRectF(ox + self.x + 1.5, oy + self.y + 1.5, self.size - 3, self.size - 3), -ang * 16, 270 * 16)
 
-    def live(self) -> bool:
-        return True
+    def live_rect(self) -> Optional[Tuple[int, int, int, int]]:
+        return (self.x, self.y, self.size, self.size)
 
 
 class Painted(Node):

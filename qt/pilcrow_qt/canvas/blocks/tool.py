@@ -89,6 +89,7 @@ class ToolBlock(Group):
     __slots__ = (
         "_loaded_items",
         "_meta_rects",
+        "_second",
         "_tsig",
         "body",
         "child_builder",
@@ -120,6 +121,8 @@ class ToolBlock(Group):
         self.perm_island: Optional[IslandBlock] = None
         self._loaded_items: Optional[List[Item]] = None
         self._meta_rects: Dict[str, QRect] = {}
+        self._second = -1  # the elapsed second the head last showed while it runs
+        self._tsig: Any = None  # the workflow task's progress the body last showed
         self.shaped = True
         self.append(self.body)
         self.sync(item, ctx, perm, first=True)
@@ -156,7 +159,7 @@ class ToolBlock(Group):
         changed: List[Block] = []
         # a workflow's body says how far the run is: it follows the task in session.state, not only the item
         tsig = self._task_sig() if item.name in ("Workflow", "RunWorkflow") else None
-        task_changed = tsig != getattr(self, "_tsig", None)
+        task_changed = tsig != self._tsig
         self._tsig = tsig
         if not (rev_changed or perm_changed or ctx_changed or first or task_changed):
             return changed
@@ -389,7 +392,15 @@ class ToolBlock(Group):
         return self.item.status in ("running", "streaming") or self.awaiting
 
     def tick(self, now: float) -> Optional[Tuple[int, int, int, int]]:
-        return (0, 0, 100000, self.head_h) if self.item.status in ("running", "streaming") else None
+        """The turning status mark each frame; the whole head when the elapsed figure moves on a second."""
+        it = self.item
+        if it.status not in ("running", "streaming"):
+            return None
+        s = int((time.time() * 1000 - it.start_ts) // 1000) if it.start_ts else 0
+        if s != self._second:
+            self._second = s
+            return (0, 0, 100000, self.head_h)
+        return (0, 0, 20, self.head_h)
 
     @property
     def static(self) -> bool:

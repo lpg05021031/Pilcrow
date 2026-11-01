@@ -354,6 +354,24 @@ def test_agent_card_with_nested_children(app):
     assert "lib/parser.test.ts" in b2.reports.root.text()
 
 
+def test_a_running_card_ticks_its_marks_not_its_rows(app):
+    """DESIGN §6.5: a clock tick repaints the turning status mark (and the head once a second, when the
+    elapsed figure moves on); a body repaints its spinner, not the block."""
+    import time
+
+    card = block(make("Bash", {"command": "sleep 10"}))
+    assert card.item.status == "running"
+    now = time.monotonic()
+    assert card.tick(now) == (0, 0, 100000, card.head_h)  # the first tick of a second: the whole head
+    assert card.tick(now) == (0, 0, 20, card.head_h)  # then the mark alone
+    agent = block(make("Agent", {"description": "look around", "subagent_type": "Explore", "prompt": "Find it"}))
+    spinners = [n for n in nodes(body(agent)) if isinstance(n, nd.Spinner)]
+    assert len(spinners) == 1 and agent.body.live()
+    s = spinners[0]
+    assert agent.body.tick(now) == (s.x, s.y, 12, 12)
+    assert block(make("Bash", {"command": "ls"}, "a.ts")).body.tick(now) is None
+
+
 def test_generic_and_mcp_body(app):
     item = make("mcp__github__list_issues", {"repo": "a/b", "state": "open"}, "#1 bug\n#2 feature")
     b = block(item)
