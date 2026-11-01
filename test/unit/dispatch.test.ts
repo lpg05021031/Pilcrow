@@ -722,3 +722,50 @@ describe('playbooks, schedules and the written report', () => {
     void runs;
   });
 });
+
+describe('dispatch.json over many jobs', () => {
+  /** `n` jobs of `targets` repositories each, run and finished; their briefs are `briefKB` long. */
+  async function finishedJobs(h: ReturnType<typeof harness>, n: number, { targets = 8, briefKB = 6 } = {}) {
+    const repos = Array.from({ length: targets }, (_, i) => mkRepo(path.join(root, `r${i}`)));
+    const ids: string[] = [];
+    for (let j = 0; j < n; j++) {
+      const job = h.d.save({ name: `Job ${j}`, brief: `In {{repo.name}}: ${'do the careful thing. '.repeat(briefKB * 47)}`, targets: repos.map((p, i) => ({ path: p, name: `r${i}`, base: 'main' })), settings: { canary: 0, parallel: 8 } });
+      await h.d.start(job.id);
+      await sleep(20);
+      for (const r of h.d.get(job.id).runs) {
+        const s = h.sessions.find(r.sessionId)!;
+        s.say(`Did the thing in ${r.name}.`);
+        s.idle();
+      }
+      await sleep(20);
+      await h.d.finish(job.id, { action: 'keep' });
+      expect(h.d.get(job.id).job.state).toBe('finished');
+      ids.push(job.id);
+    }
+    return ids;
+  }
+
+  it('keeps one copy of each target’s brief (the plan’s)', { timeout: 30_000 }, async () => {
+    const file = path.join(root, 'dispatch.json');
+    const h = harness({ file });
+    await finishedJobs(h, 12);
+    h.d.end();
+    const bytes = fs.statSync(file).size;
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    console.log(`dispatch.json with 12 finished jobs of 8 repositories, 6 KB briefs: ${Math.round(bytes / 1024)} KB`);
+    expect(data.jobs[0].runs.every((r: any) => !('brief' in r))).toBe(true);
+    expect(data.jobs[0].plan.targets[0].brief).toMatch(/^In r0: do the careful thing/);
+    expect(bytes).toBeLessThan(900 * 1024); // 783 KB; 1 467 KB when each run kept its brief too (and the file was indented)
+  });
+
+  it('keeps the newest forty finished jobs and tells the windows the others are gone', { timeout: 30_000 }, async () => {
+    const h = harness();
+    const removed: string[] = [];
+    h.d.events.on('changed', (e) => e.removed && removed.push(e.id));
+    const ids = await finishedJobs(h, 42, { targets: 1, briefKB: 0 });
+    await sleep(40);
+    expect(h.d.list().map((j: any) => j.id).sort()).toEqual(ids.slice(2).sort());
+    expect(removed).toEqual(ids.slice(0, 2));
+    h.d.end();
+  });
+});

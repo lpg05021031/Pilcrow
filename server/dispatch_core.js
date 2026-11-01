@@ -42,6 +42,7 @@ const SAVE_MS = 1000;
 const CLOSE_AFTER_MS = 1500; // a finished run's process lingers this long for its last messages
 const SCAN_TTL_MS = 60_000; // a workspace scan walks folders; the picker asks again on every open
 const MAX_BACKOFF_MS = 60_000; // a rate-limited run waits twice as long each time, up to this
+const MAX_FINISHED = 40; // finished jobs kept, the newest; each one's report stays in the inbox
 
 // ---------------------------------------------------------------- pure helpers
 
@@ -152,6 +153,7 @@ export function createDispatcher(deps) {
   const data = file ? readJson(file, { jobs: [], playbooks: [] }) : { jobs: [], playbooks: [] };
   if (!Array.isArray(data.jobs)) data.jobs = [];
   if (!Array.isArray(data.playbooks)) data.playbooks = [];
+  for (const j of data.jobs) for (const r of j.runs || []) delete r.brief; // older versions kept each run's brief too
   const timers = new Map(); // runId -> timeout
   const backoffTimers = new Map(); // jobId -> timeout
   const scanCache = new Map(); // root -> { at, result }
@@ -458,6 +460,15 @@ export function createDispatcher(deps) {
     return Promise.all(work).then(() => true);
   }
 
+  /** Let the oldest finished jobs go past MAX_FINISHED: every save writes the whole file. */
+  function prune() {
+    const finished = data.jobs.filter((j) => j.state === 'finished').sort((a, b) => (b.finishedAt || 0) - (a.finishedAt || 0));
+    for (const j of finished.slice(MAX_FINISHED)) {
+      data.jobs.splice(data.jobs.indexOf(j), 1);
+      dirty.set(j.id, 'all'); // flush() tells the windows it is gone
+    }
+  }
+
   // ---- the plan
   async function plan(input) {
     const job = typeof input === 'string' ? jobOf(input) : input.id && data.jobs.find((j) => j.id === input.id) ? Object.assign(jobOf(input.id), normalizeJob(input, jobOf(input.id)), { runs: jobOf(input.id).runs }) : normalizeJob(input, null);
@@ -568,7 +579,6 @@ export function createDispatcher(deps) {
       commit: null,
       pr: null,
       finished: null,
-      brief: t.brief,
     }));
     job.state = 'running';
     job.wave = canaryPaths.size ? 'canary' : 'main';
@@ -706,8 +716,9 @@ export function createDispatcher(deps) {
       armCap(job, run);
       const extras = { learned: job.wave === 'main' && job.settings.learn ? job.learned : [], deps: run.dependsOn.map((d) => job.runs.find((x) => x.path === d && x.state === 'done')).filter(Boolean).map((d) => ({ name: d.name, summary: d.summary })) };
       const tgt = job.targets.find((x) => x.path === run.path);
-      run.brief = renderBrief(job.brief, { job, target: { ...run, notes: joinNotes(registry?.notesFor(run.path), tgt?.notes) }, ...extras });
-      await (session || (await sessions.get(made.id))).send({ text: run.brief });
+      // Rendered now, with what the canary and the dependencies learned; not kept: the plan has the brief.
+      const brief = renderBrief(job.brief, { job, target: { ...run, notes: joinNotes(registry?.notesFor(run.path), tgt?.notes) }, ...extras });
+      await (session || (await sessions.get(made.id))).send({ text: brief });
     } catch (e) {
       if (ACTIVE.has(run.state)) endRun(job, run, 'failed', e?.message || 'Could not start', session);
     }
@@ -971,8 +982,7 @@ export function createDispatcher(deps) {
     const old = runOf(job, runId);
     if (!TERMINAL.has(old.state)) throw new Error('That run is still going.');
     if (typeof brief === 'string' && brief.trim()) job.brief = brief;
-    const t = job.plan?.targets.find((x) => x.path === old.path);
-    const run = { ...old, id: uuid(), state: 'queued', attempt: (old.attempt || 1) + 1, sessionId: null, worktree: null, startedAt: null, endedAt: null, durationMs: 0, cost: 0, summary: '', files: [], add: 0, del: 0, reason: null, verify: null, prepare: null, now: null, pending: [], retried: false, commit: null, pr: null, prError: null, finished: null, finishError: null, stopping: null, wave: 'main', brief: t?.brief || old.brief };
+    const run = { ...old, id: uuid(), state: 'queued', attempt: (old.attempt || 1) + 1, sessionId: null, worktree: null, startedAt: null, endedAt: null, durationMs: 0, cost: 0, summary: '', files: [], add: 0, del: 0, reason: null, verify: null, prepare: null, now: null, pending: [], retried: false, commit: null, pr: null, prError: null, finished: null, finishError: null, stopping: null, wave: 'main' };
     old.superseded = run.id;
     job.runs.push(run);
     if (job.state !== 'running') {
@@ -1052,6 +1062,7 @@ export function createDispatcher(deps) {
     if (!live.every((r) => r.finished || r.state !== 'done' || !r.worktree)) return;
     job.state = 'finished';
     job.finishedAt = now();
+    prune();
     job.report = buildReport(job);
     const item = inboxItem(job);
     job.inboxId = item.id;
