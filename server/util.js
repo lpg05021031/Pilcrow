@@ -250,7 +250,9 @@ export async function writeJsonAsync(file, data, current = () => true) {
   await fs.promises.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   const tmp = tempPath(file);
   await fs.promises.writeFile(tmp, text, { mode: 0o600 });
-  if (current()) await fs.promises.rename(tmp, file);
+  // The rename is synchronous (a metadata operation): a quit flush on the event loop cannot land
+  // between the check and the rename, so an older write never covers the newer one.
+  if (current()) fs.renameSync(tmp, file);
   else await fs.promises.rm(tmp, { force: true });
 }
 
