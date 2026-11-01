@@ -947,6 +947,7 @@ export const events = helpers.events;
 /** Wire the instance into sessions.js: the MCP server, the permission decisions, the state fields. */
 export function start() {
   helpers.begin();
+  if (extensions.state.includes(helpers.stateOf)) return; // wired by an earlier start (a test starting servers)
   extensions.mcpServers.push((session) => helpers.serverFor(session, { createSdkMcpServer, tool, z }));
   extensions.permission.push(helpers.permission);
   extensions.respond.push(helpers.respond);

@@ -440,14 +440,17 @@ export function errorOf(e) {
   return { code: 'failed', message };
 }
 
+/** What nothing else caught is logged, never the end of the server. */
+const LAST_RESORT = { unhandledRejection: (e) => log('unhandledRejection', e), uncaughtException: (e) => log('uncaughtException', e) };
+
 /**
  * Start the server (the Electron shell calls this in-process; `cli()` for the other shells).
  * `heartbeatMs` and `maxBuffered` are there for the tests to turn down.
  * @param {{ shell?: string, port?: number | string | boolean, quiet?: boolean, onQuit?: () => void, heartbeatMs?: number, maxBuffered?: number }} [opts]
  */
 export async function start({ shell = 'none', port, quiet = false, onQuit, heartbeatMs = HEARTBEAT_MS, maxBuffered = MAX_BUFFERED } = {}) {
-  process.on('unhandledRejection', (e) => log('unhandledRejection', e));
-  process.on('uncaughtException', (e) => log('uncaughtException', e));
+  // once per process, however many servers it starts (the tests start several)
+  for (const [event, fn] of Object.entries(LAST_RESORT)) process.off(event, fn).on(event, fn);
   migrateLegacyDirs();
   privateDir(xdg('config'));
   privateDir(xdg('state'));

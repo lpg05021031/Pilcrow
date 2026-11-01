@@ -9,6 +9,7 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import WebSocket from 'ws';
 import { METHODS } from '../../server/main.js';
+import { extensions } from '../../server/sessions.js';
 import { store } from '../../server/config.js';
 import { flushSaves } from '../../server/util.js';
 import * as term from '../../server/terminal.js';
@@ -309,5 +310,16 @@ describe('names that are not settings or sessions', () => {
     const file = path.join(process.env.XDG_CONFIG_HOME!, 'pilcrow', 'sessions.json');
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))['sess-flush']).toEqual({ title: 'kept' });
     store.deleteMeta('sess-flush');
+  });
+});
+
+// Last: stopping the second server stops what the modules share (sessions, terminals), as quitting does.
+describe('starting again in the same process', () => {
+  it('registers its process-wide handlers and its session extensions once', async () => {
+    const counts = () => [process.listenerCount('uncaughtException'), process.listenerCount('unhandledRejection'), extensions.state.length, extensions.permission.length];
+    const before = counts();
+    const second = await serve();
+    expect(counts()).toEqual(before);
+    await second.app.stop();
   });
 });
