@@ -1,9 +1,8 @@
-import { useState } from 'react';
 import { ChevronDown, ShieldCheck, FilePen, Map as MapIcon, Zap, ShieldOff, RefreshCw, type LucideIcon } from 'lucide-react';
 import { useStore, setMode, setModel, setEffort, loadGatewayModels, toasted } from '../../lib/store';
 import { ALIASES, useGatewayModels, modelLabel } from '../../lib/models';
 import type { PermissionMode, Effort, ModelInfo } from '../../lib/types';
-import { Popover, Menu, type MenuItem } from '../ui/Popover';
+import { Popover, Menu, useAnchor, type MenuItem } from '../ui/Popover';
 
 export const MODES: { id: PermissionMode; label: string; hint: string; icon: LucideIcon; tone: string }[] = [
   { id: 'default', label: 'Ask before edits', hint: 'Asks before changing files or running commands', icon: ShieldCheck, tone: '' },
@@ -16,8 +15,7 @@ export const MODES: { id: PermissionMode; label: string; hint: string; icon: Luc
 /** The permission mode chip and its menu. */
 export function ModeMenu({ sessionId, mode }: { sessionId: string; mode: PermissionMode }) {
   const isRoot = useStore((s) => s.info?.isRoot);
-  const [open, setOpen] = useState(false);
-  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
+  const { anchor, ref: setAnchor, open, setOpen } = useAnchor();
   const info = MODES.find((m) => m.id === mode) || MODES[0];
   const items: MenuItem[] = MODES.filter((m) => !(m.id === 'bypassPermissions' && isRoot)).map((m) => ({ label: m.label, hint: m.hint, icon: m.icon, checked: m.id === mode, danger: m.id === 'bypassPermissions', onSelect: () => setMode(sessionId, m.id).catch(toasted) }));
   return (
@@ -55,8 +53,7 @@ export function ModelMenu({ sessionId }: { sessionId: string }) {
   const borrowed = useStore((s) => Object.values(s.rt).find((r) => r?.models?.length)?.models);
   const defaultSeen = useStore((s) => Object.values(s.rt).find((r) => r?.activeModel && !r?.model)?.activeModel);
   const gw = useGatewayModels();
-  const [open, setOpen] = useState(false);
-  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
+  const { anchor, ref: setAnchor, open, setOpen } = useAnchor();
   const models: ModelInfo[] = own?.length ? own : borrowed?.length ? borrowed : ALIASES;
   const info = models.find((m) => m.value === current) || models.find((m) => m.value === 'default');
   const levels = (info?.supportedEffortLevels || (info?.supportsEffort ? ['low', 'medium', 'high', 'xhigh', 'max'] : [])) as Effort[];

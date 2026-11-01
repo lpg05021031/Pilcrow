@@ -7,7 +7,7 @@ import { fuzzyFilter } from '../lib/fuzzy';
 import { basename, timeAgo } from '../lib/format';
 import { Dialog } from './ui/Dialog';
 import { MODES } from './composer/Menus';
-import { Keys, useEscape } from './ui/bits';
+import { Keys, useEscape } from './ui/keys';
 import type { LucideIcon } from 'lucide-react';
 import { SHORTCUTS as K } from '../lib/shortcuts';
 import { Empty } from './ui/Empty';
@@ -284,10 +284,19 @@ function LightboxView({ src }: { src: string }) {
   const ref = useRef<HTMLDivElement>(null);
   useExitGhost(ref, { duration: 200, pin: false });
   useEscape(closeLightbox);
+  // The focus goes in with it, and back to what opened it.
+  const x = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const back = document.activeElement as HTMLElement | null;
+    x.current?.focus();
+    return () => {
+      if (back?.isConnected) back.focus();
+    };
+  }, []);
   return createPortal(
     <div ref={ref} className="lightbox" role="dialog" aria-modal="true" aria-label="Image" onClick={closeLightbox}>
       <img src={src} alt="" onClick={(e) => e.stopPropagation()} draggable={false} />
-      <button className="lightbox-x" onClick={closeLightbox} aria-label="Close" title="Close (Esc)">
+      <button ref={x} className="lightbox-x" onClick={closeLightbox} aria-label="Close" title="Close (Esc)">
         <X size={18} />
       </button>
     </div>,

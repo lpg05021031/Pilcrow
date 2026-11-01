@@ -1,9 +1,13 @@
 #!/usr/bin/env node
-// Selectors that two stylesheets both declare with a property in common. With equal specificity the
-// file imported later (web/src/main.tsx) wins on order alone, and the earlier rule is dead weight
-// that reads as if it rendered. Prints each pair as dead → winning; exits 1 if there are any.
+// The rules of web/src/styles/README.md that a script can hold the stylesheets to:
+//   - selectors that two stylesheets both declare with a property in common. With equal specificity
+//     the file imported later (web/src/main.tsx) wins on order alone, and the earlier rule is dead
+//     weight that reads as if it rendered. Printed as dead → winning.
+//   - motion outside motion.css: an `animation…` or `transition…` declaration, or a @keyframes;
+//   - a @keyframes that no animation in the stylesheets or the components names.
+// Exits 1 if there are any.
 //   node scripts/css-overlap.mjs
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 
 const dir = 'web/src/styles';
@@ -14,6 +18,8 @@ const clash = (p, q) => p === q || (SHORT.test(p) && q.startsWith(p + '-')) || (
 
 const rules = new Map(); // "context selector" -> [{ file, line, props }]
 const frames = new Map(); // @keyframes name -> "file:line", the later of two silently replaces the earlier
+const MOTION = /^(animation|transition)(-|$)/;
+const named = new Set(); // what the stylesheets' animations name
 let n = 0;
 for (const file of order) {
   const src = readFileSync(join(dir, file), 'utf8').replace(/\/\*[\s\S]*?\*\//g, (c) => c.replace(/[^\n]/g, ' '));
@@ -30,6 +36,10 @@ for (const file of order) {
           n++;
           console.log(`@keyframes ${kf[1]}  ${frames.get(kf[1])} → ${file}:${line}`);
         }
+        if (file !== 'motion.css') {
+          n++;
+          console.log(`@keyframes ${kf[1]}  ${file}:${line}: motion lives in motion.css`);
+        }
         frames.set(kf[1], `${file}:${line}`);
       }
       stack.push(stack.includes(null) || /^@(keyframes|font-face|property)/.test(head) ? null : { head, line });
@@ -37,7 +47,15 @@ for (const file of order) {
     } else if (ch === '}') {
       const top = stack.pop();
       if (top && !top.head.startsWith('@')) {
-        const props = [...buf.matchAll(/(?:^|;)\s*([-\w]+)\s*:/g)].map((m) => m[1].replace(/^-webkit-/, ''));
+        const decls = [...buf.matchAll(/(?:^|;)\s*([-\w]+)\s*:([^;]*)/g)].map((m) => [m[1].replace(/^-webkit-/, ''), m[2]]);
+        const props = decls.map(([p]) => p);
+        for (const [p, v] of decls) {
+          if (/^animation(-name)?$/.test(p)) for (const w of v.match(/[-\w]+/g) || []) named.add(w);
+          if (MOTION.test(p) && file !== 'motion.css') {
+            n++;
+            console.log(`${top.head.replace(/\s+/g, ' ')}  ${file}:${top.line}: ${p} outside motion.css`);
+          }
+        }
         const ctx = stack.filter((b) => b?.head.startsWith('@')).map((b) => b.head).join(' ');
         for (const sel of top.head.split(/,(?![^()]*\))/).map((s) => s.trim().replace(/\s+/g, ' '))) {
           const k = `${ctx ? ctx + ' ' : ''}${sel}`;
@@ -57,5 +75,13 @@ for (const [sel, list] of rules)
       n++;
       console.log(`${sel}  ${list[a].file}:${list[a].line} → ${list[b].file}:${list[b].line}  (${[...new Set(common)].join(', ')})`);
     }
-console.log(`${n} overlap${n === 1 ? '' : 's'}`);
+// Keyframes the components play themselves (an inline animation, a class added from script) count as named.
+const code = (d) => readdirSync(d).flatMap((f) => (statSync(join(d, f)).isDirectory() ? code(join(d, f)) : /\.tsx?$/.test(f) ? [readFileSync(join(d, f), 'utf8')] : []));
+const scripts = code('web/src').join('\n');
+for (const [name, at] of frames)
+  if (!named.has(name) && !new RegExp(`\\b${name}\\b`).test(scripts)) {
+    n++;
+    console.log(`@keyframes ${name}  ${at}: nothing plays it`);
+  }
+console.log(`${n} problem${n === 1 ? '' : 's'}`);
 process.exit(n ? 1 : 0);

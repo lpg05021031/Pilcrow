@@ -4,7 +4,7 @@ import { useStore, call, toast, setDialog } from '../lib/store';
 import type { Cadence, Schedule, PermissionMode } from '../lib/types';
 import { basename, tildify } from '../lib/format';
 import { Dialog } from './ui/Dialog';
-import { Popover } from './ui/Popover';
+import { Popover, useAnchor } from './ui/Popover';
 import { Select } from './ui/Select';
 import { Switch, Field } from './ui/bits';
 import { FolderPicker } from './FolderPicker';
@@ -47,11 +47,10 @@ export function ScheduleDialog({ spec, schedule }: { spec: { id?: string; cwd?: 
   const [worktree, setWorktree] = useState(schedule?.worktree || false);
   const [maxMinutes, setMaxMinutes] = useState(schedule?.maxMinutes || 45);
   const [enabled, setEnabled] = useState(schedule?.enabled ?? true);
-  const [picking, setPicking] = useState(false);
+  const { anchor: folderBtn, ref: setFolderBtn, open: picking, setOpen: setPicking } = useAnchor();
   const [more, setMore] = useState(false);
   const [preview, setPreview] = useState<{ nextRunAt: number | null; label: string; error?: string } | null>(null);
   const [busy, setBusy] = useState(false);
-  const [folderBtn, setFolderBtn] = useState<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -90,7 +89,7 @@ export function ScheduleDialog({ spec, schedule }: { spec: { id?: string; cwd?: 
       width={580}
       footer={
         <>
-          <span className="hint sd-preview">{preview?.error ? <span className="st-err">{preview.error}</span> : preview?.nextRunAt ? `${preview.label} · first run ${new Date(preview.nextRunAt).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })}` : ''}</span>
+          <span className="hint sd-preview">{preview?.error ? <span className="st-err">{preview.error}</span> : preview?.nextRunAt ? `${preview.label} · first run ${new Date(preview.nextRunAt).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}` : ''}</span>
           <div className="grow" />
           <button className="btn" onClick={close}>
             Cancel
@@ -114,28 +113,30 @@ export function ScheduleDialog({ spec, schedule }: { spec: { id?: string; cwd?: 
           <Field label="Name">
             {(id) => <input id={id} className="input" autoFocus value={name} placeholder="Nightly dependency audit" onChange={(e) => setName(e.target.value)} />}
           </Field>
-          <Field label="Folder" style={kind === 'dispatch' ? { display: 'none' } : undefined}>
-            {(id) => (
-              <>
-                <button id={id} ref={setFolderBtn} className={`ns-folder sd-folder${picking ? ' on' : ''}`} onClick={() => setPicking(!picking)} title={tildify(cwd, info?.home)}>
-                  <Folder size={14} className="ns-folder-ico" />
-                  <span className="ellipsis grow" style={{ textAlign: 'left' }}>
-                    {basename(cwd) || 'Pick a folder'}
-                  </span>
-                  <ChevronDown size={13} className="faint" />
-                </button>
-                <Popover anchor={folderBtn} open={picking} onClose={() => setPicking(false)} placement="bottom-start" width={380} role="dialog" label="Choose a folder">
-                  <FolderPicker
-                    value={cwd}
-                    onPick={(d) => {
-                      setCwd(d);
-                      setPicking(false);
-                    }}
-                  />
-                </Popover>
-              </>
-            )}
-          </Field>
+          {kind !== 'dispatch' && (
+            <Field label="Folder">
+              {(id) => (
+                <>
+                  <button id={id} ref={setFolderBtn} className={`ns-folder sd-folder${picking ? ' on' : ''}`} onClick={() => setPicking(!picking)} title={tildify(cwd, info?.home)}>
+                    <Folder size={14} className="ns-folder-ico" />
+                    <span className="ellipsis grow">
+                      {basename(cwd) || 'Pick a folder'}
+                    </span>
+                    <ChevronDown size={13} className="faint" />
+                  </button>
+                  <Popover anchor={folderBtn} open={picking} onClose={() => setPicking(false)} placement="bottom-start" width={380} role="dialog" label="Choose a folder">
+                    <FolderPicker
+                      value={cwd}
+                      onPick={(d) => {
+                        setCwd(d);
+                        setPicking(false);
+                      }}
+                    />
+                  </Popover>
+                </>
+              )}
+            </Field>
+          )}
         </div>
 
         {kind !== 'dispatch' && (

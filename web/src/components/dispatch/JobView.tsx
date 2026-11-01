@@ -3,7 +3,9 @@ import { ArrowLeft, Pause, Play, Square, Ellipsis, GitCommitHorizontal, GitPullR
 import { useStore, call, openSession, respond, confirmAction, toast, showDispatch, openJob, runsIn, loadPlaybooks, setDialog, showPage, toasted } from '../../lib/store';
 import { TERMINAL, type DispatchJob, type DispatchReview, type DispatchRun, type Playbook } from '../../lib/types';
 import { cost, duration, plural } from '../../lib/format';
-import { Switch, useNow, copyText } from '../ui/bits';
+import { Switch } from '../ui/bits';
+import { useNow } from '../ui/hooks';
+import { copyText } from '../ui/clipboard';
 import { MenuButton } from '../ui/Popover';
 import { ACTIVE, Glyph, STATE_WORD, askedBy, clockMmss, elapsedText, groupRequests, jobCostText, type RequestGroup } from './common';
 
@@ -120,8 +122,7 @@ export function JobView({ id }: { id: string }) {
       onSelect: async () => {
         const md = await call<string>('dispatch.export', { id }).catch(() => null);
         if (md) {
-          await copyText(md);
-          toast('Report copied as Markdown.', 'info');
+          await copyText(md).then(() => toast('Report copied as Markdown.', 'info'), () => toast('Could not copy to the clipboard', 'error'));
         }
       },
     },

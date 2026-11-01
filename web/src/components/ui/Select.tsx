@@ -1,8 +1,8 @@
-import { useId, useState } from 'react';
+import { useId } from 'react';
 import { ChevronsUpDown, type LucideIcon } from 'lucide-react';
-import { Popover, Menu, type MenuItem } from './Popover';
+import { Popover, Menu, useAnchor, type MenuItem } from './Popover';
 
-export interface SelectOption<T extends string> {
+interface SelectOption<T extends string> {
   value: T;
   label: string;
   hint?: string;
@@ -16,8 +16,7 @@ export interface SelectOption<T extends string> {
  * chosen one focused. Named by `label`, or inside a ui/Field by the row's label and its own value.
  */
 export function Select<T extends string>({ value, options, onChange, className = '', width, title, placeholder, id, label }: { value: T; options: SelectOption<T>[]; onChange: (v: T) => void; className?: string; width?: number; title?: string; placeholder?: string; id?: string; label?: string }) {
-  const [open, setOpen] = useState(false);
-  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
+  const { anchor, ref: setAnchor, open, setOpen } = useAnchor();
   const menuId = useId();
   const current = options.find((o) => o.value === value);
   const items: MenuItem[] = options.map((o) => ({ label: o.label, hint: o.hint, icon: o.icon, mono: o.mono, checked: o.value === value, disabled: o.disabled, onSelect: () => onChange(o.value) }));

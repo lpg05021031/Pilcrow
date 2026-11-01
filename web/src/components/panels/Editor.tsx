@@ -8,6 +8,7 @@ import { syntaxHighlighting, HighlightStyle, indentOnInput, bracketMatching, fol
 import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 import { tags as t } from '@lezer/highlight';
 import { langFromPath } from '../../lib/format';
+import { useEvent } from '../ui/hooks';
 
 const style = HighlightStyle.define([
   { tag: [t.comment, t.lineComment, t.blockComment, t.docComment], color: 'var(--cm-comment)', fontStyle: 'italic' },
@@ -142,18 +143,20 @@ async function languageFor(path: string): Promise<Extension | null> {
   }
 }
 
-export function Editor({ path, doc, onChange, onSave, line, nonce }: { path: string; doc: string; onChange: (text: string) => void; onSave: () => void; line?: number; nonce?: number }) {
+export function Editor({ path, doc, onChange, onSave, jump }: { path: string; doc: string; onChange: (text: string) => void; onSave: () => void; jump?: { line?: number } | null }) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const langComp = useRef(new Compartment());
-  const cbs = useRef({ onChange, onSave });
-  cbs.current = { onChange, onSave };
+  // The editor is made once per file: it starts from the document of that moment and calls the latest handlers.
+  const initial = useEvent(() => doc);
+  const change = useEvent(onChange);
+  const save = useEvent(onSave);
 
   useEffect(() => {
     const parent = host.current;
     if (!parent) return;
     const state = EditorState.create({
-      doc,
+      doc: initial(),
       extensions: [
         lineNumbers(),
         foldGutter(),
@@ -173,9 +176,9 @@ export function Editor({ path, doc, onChange, onSave, line, nonce }: { path: str
         syntaxHighlighting(style),
         theme,
         langComp.current.of([]),
-        keymap.of([{ key: 'Mod-s', preventDefault: true, run: () => (cbs.current.onSave(), true) }, ...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...foldKeymap, indentWithTab]),
+        keymap.of([{ key: 'Mod-s', preventDefault: true, run: () => (save(), true) }, ...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...foldKeymap, indentWithTab]),
         EditorView.updateListener.of((u) => {
-          if (u.docChanged) cbs.current.onChange(u.state.doc.toString());
+          if (u.docChanged) change(u.state.doc.toString());
         }),
       ],
     });
@@ -190,7 +193,7 @@ export function Editor({ path, doc, onChange, onSave, line, nonce }: { path: str
       v.destroy();
       view.current = null;
     };
-  }, [path]); // eslint-disable-line react-hooks/exhaustive-deps -- one editor per file; the document and handlers are read at creation and kept current through refs
+  }, [path, initial, change, save]);
 
   // External reloads replace the document.
   useEffect(() => {
@@ -201,12 +204,12 @@ export function Editor({ path, doc, onChange, onSave, line, nonce }: { path: str
 
   useEffect(() => {
     const v = view.current;
-    if (!v || !line) return;
-    const ln = Math.min(Math.max(1, line), v.state.doc.lines);
+    if (!v || !jump?.line) return;
+    const ln = Math.min(Math.max(1, jump.line), v.state.doc.lines);
     const pos = v.state.doc.line(ln).from;
     v.dispatch({ selection: { anchor: pos }, effects: EditorView.scrollIntoView(pos, { y: 'center' }) });
     v.focus();
-  }, [line, nonce]);
+  }, [jump]);
 
   return <div className="editor" ref={host} />;
 }

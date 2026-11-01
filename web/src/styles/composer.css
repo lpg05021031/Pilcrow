@@ -70,7 +70,6 @@
   pointer-events: none;
   white-space: nowrap;
   overflow: hidden;
-  animation: fade var(--t-med) var(--ease);
 }
 .composer-ghost span {
   overflow: hidden;
@@ -94,7 +93,7 @@
   align-items: center;
   gap: var(--sp-1_5);
   height: 30px;
-  padding: 0 9px;
+  padding: 0 var(--sp-2_25);
   border-radius: var(--r-2);
   font-size: var(--fs-small);
   font-weight: 500;
@@ -135,20 +134,19 @@
 .ctx-btn {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--sp-1_25);
   height: 30px;
   padding: 0 var(--sp-2);
   border-radius: var(--r-2);
   font-size: var(--fs-micro);
   color: var(--text-3);
-  animation: fade var(--t-med) var(--ease);
 }
 .ctx-btn:hover {
   background: var(--fill-1);
   color: var(--text);
 }
 .ctx-btn:not(.with-num) {
-  padding: 0 5px;
+  padding: 0 var(--sp-1_25);
 }
 .ctx-btn.hot {
   color: var(--err);
@@ -210,7 +208,6 @@
   font-size: var(--fs-micro);
   color: var(--text-3);
   opacity: 0;
-  transition: opacity var(--t-med);
 }
 .composer-foot span {
   display: inline-flex;
@@ -265,7 +262,6 @@
   background: var(--veil);
   color: var(--veil-ink);
   opacity: 0;
-  transition: opacity var(--t-fast);
 }
 .attach-img:hover .attach-x {
   opacity: 1;
@@ -370,6 +366,12 @@
   font-size: var(--fs-small);
   color: var(--text-3);
 }
+/* on the lit row's fill the faint inks fall short of 4.5:1 (tokens.css) */
+.suggest-item.active svg,
+.suggest-item.active .suggest-slash,
+.suggest-item.active .suggest-hint {
+  color: var(--text);
+}
 
 .composer-wrap.dragging .composer {
   box-shadow: 0 0 0 2px var(--accent-line), 0 0 0 6px var(--accent-wash);
@@ -397,14 +399,8 @@
   border-radius: var(--r-4);
   background: color-mix(in srgb, var(--raised) 70%, var(--canvas));
   box-shadow: 0 0 0 1px var(--hair);
-  animation: queue-in var(--t-panel) var(--ease);
 }
-@keyframes queue-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-}
+
 .queue-head {
   display: flex;
   align-items: center;
@@ -423,17 +419,15 @@
   grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: start;
   gap: var(--sp-2);
-  padding: 5px var(--sp-1_5) 5px var(--sp-2);
+  padding: var(--sp-1_25) var(--sp-1_5) var(--sp-1_25) var(--sp-2);
   border-radius: var(--r-2);
-  animation: queue-in var(--t-med) var(--ease);
-  transition: background var(--t-fast);
 }
 .queue-item:hover,
 .queue-item.editing {
   background: var(--fill-1);
 }
 .queue-n {
-  margin-top: 3px;
+  margin-top: var(--sp-0_75);
   font-size: var(--fs-micro);
   font-weight: 600;
   color: var(--text-3);
@@ -453,7 +447,6 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
   cursor: text;
-  transition: color var(--t-fast);
 }
 .queue-item:hover .queue-text {
   color: var(--text);
@@ -461,7 +454,7 @@
 .queue-attach {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: var(--sp-0_75);
   margin-left: var(--sp-1_5);
   padding: 0 var(--sp-1_5);
   height: 18px;
@@ -494,7 +487,6 @@
   align-items: center;
   gap: var(--sp-0_5);
   opacity: 0;
-  transition: opacity var(--t-fast);
 }
 .queue-item:hover .queue-actions,
 .queue-item:focus-within .queue-actions {

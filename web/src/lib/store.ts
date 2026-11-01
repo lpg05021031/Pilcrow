@@ -2,8 +2,9 @@
 // and are referenced by a `rev` counter so streaming updates re-render cheaply.
 //
 // Where state lives, the one rule for components:
-//   - what is drawn from lives in this store; one component asks another to do something by setting
-//     a field with a fresh nonce (fileOpen, composerInsert) that the other acts on once;
+//   - what is drawn from lives in this store; one component asks another to do something by putting
+//     a request in a field (fileOpen, composerInsert) that the other takes: it acts on it once and
+//     clears it, so a request is never answered twice;
 //   - what a session remembers without drawing from it (a draft, open folds, where it was scrolled,
 //     its terminals) lives in its memo below, which goes with its transcript model;
 //   - what is cached about a folder (listings, file history, the @ index) lives in lib/cache.ts, with
@@ -13,11 +14,11 @@ import { useEffect, useState } from 'react';
 import { create } from 'zustand';
 import { folders, loadOnce } from './cache';
 import { rpc } from './rpc';
-import { TranscriptModel } from './transcript';
+import { TranscriptModel, type Item } from './transcript';
 import { setHome, plural, errText } from './format';
-import { EASE_EXIT, reducedMotion, yieldToEvents } from './motion';
+import { EASE, EASE_EXIT, reducedMotion, yieldToEvents } from './motion';
 import { isBusy } from './types';
-import type { AppInfo, Config, SessionState, SessionSummary, PermissionMode, Effort, RawMsg, GatewayModels, TimelineStep, PermissionDecision, DispatchJob, DispatchRun, DispatchDelta, Playbook } from './types';
+import type { AppInfo, Config, SessionState, SessionSummary, PermissionMode, Effort, RawMsg, GatewayModels, TimelineStep, PermissionDecision, PermissionRequest, DispatchJob, DispatchRun, DispatchDelta, Playbook } from './types';
 import type { RepoEntry } from './types';
 import type { PilcrowNative } from './globals';
 
@@ -63,7 +64,7 @@ interface Ui {
   /** How much of Claude's work the transcript shows: tools summarised, plus thinking, or every step opened. */
   view: ViewMode;
 }
-export type ViewMode = 'normal' | 'thinking' | 'verbose';
+type ViewMode = 'normal' | 'thinking' | 'verbose';
 export const VIEW_MODES: { id: ViewMode; label: string; hint: string }[] = [
   { id: 'normal', label: 'Normal', hint: 'Steps summarised, thinking folded' },
   { id: 'thinking', label: 'Thinking', hint: 'Thinking opened' },
@@ -103,8 +104,10 @@ interface State {
   /** Bumped when files change outside Claude's own tool calls (restore, discard, commit, save). */
   fsRev: number;
   unread: Record<string, boolean>;
-  fileOpen: { path: string; line?: number; nonce: number } | null;
-  composerInsert: { id: string; text: string; nonce: number; replace?: boolean } | null;
+  /** A file to open in the Files tab (openFile), until the tab takes it (takeFileOpen). */
+  fileOpen: { path: string; line?: number } | null;
+  /** Text for a session's composer (insertIntoComposer), until that composer takes it (takeComposerInsert). */
+  composerInsert: { id: string; text: string; replace?: boolean } | null;
   theme: 'dark' | 'light';
   /** The endpoint's own model list; null until asked, 'loading' while asking. */
   gatewayModels: GatewayModels | 'loading' | null;
@@ -209,7 +212,7 @@ export interface FilesState {
 }
 
 /** Review notes on a session's diff: path -> line key -> note. */
-export type DiffNotes = Record<string, Record<string, { text: string; line: string; lineNo: number }>>;
+type DiffNotes = Record<string, Record<string, { text: string; line: string; lineNo: number }>>;
 /**
  * What a session remembers outside React state while the window is open. Nothing re-renders when it
  * changes. It goes with the session's transcript model (evictModels), all but unsent work (a draft, a
@@ -255,22 +258,45 @@ function forgetMemo(id: string) {
 }
 
 /**
- * How many conversations stay modelled once you have moved on from them. A model holds a whole
- * conversation, its images included; one you come back to after these is loaded again.
+ * How much of the conversations stays modelled once you have moved on from them, in characters of
+ * what they hold (their text, tool input and output, and images, which are held as base64): about six
+ * long ones, or many short ones. A model also costs its objects, counted as MODEL_COST each. One you
+ * come back to after it went is loaded again.
  */
-const KEEP_MODELS = 6;
+export const KEEP_CHARS = 24 << 20;
+const MODEL_COST = 128 << 10;
+const sizes = new WeakMap<TranscriptModel, { rev: number; chars: number }>();
+function charsOf(items: Item[]): number {
+  let n = 0;
+  for (const it of items) {
+    if ('text' in it && typeof it.text === 'string') n += it.text.length;
+    if (it.kind === 'user') for (const s of it.images) n += s.length;
+    if (it.kind === 'tool') {
+      n += it.inputJson.length + charsOf(it.children);
+      if (it.result) for (const s of [it.result.text, ...it.result.images]) n += s.length;
+    }
+  }
+  return n;
+}
+/** What a model holds, as KEEP_CHARS counts it (worked out again only after it changed). */
+export function modelSize(m: TranscriptModel) {
+  let s = sizes.get(m);
+  if (!s || s.rev !== m.rev) sizes.set(m, (s = { rev: m.rev, chars: MODEL_COST + charsOf(m.items) }));
+  return s.chars;
+}
 export function evictModels() {
   const { activeId, rt } = get();
-  let over = models.size - KEEP_MODELS;
-  for (const id of models.keys()) {
-    if (over <= 0) break;
+  let total = 0;
+  for (const m of models.values()) total += modelSize(m);
+  for (const [id, m] of models) {
+    if (total <= KEEP_CHARS) break;
     const r = rt[id];
     // The one on screen, one loading, one Claude is working in or waiting on you in: all stay.
     if (id === activeId || r?.loading || r?.pending?.length || isBusy(r?.status)) continue;
+    total -= modelSize(m);
     models.delete(id);
     forgetMemo(id);
     if (r) patchRt(id, { loaded: false });
-    over--;
   }
 }
 
@@ -486,9 +512,18 @@ function onMsgs({ id, msgs }: { id: string; msgs: RawMsg[] }) {
   markDirty(id);
 }
 
+/**
+ * The requests waiting in a fresh state are the ones already held when they have the same ids: the
+ * server sends a new list with every state, which is often, and the conversation keys what it draws
+ * on this list (Transcript), so a list that says nothing new keeps the identity of the one held.
+ */
+export function samePending(held: PermissionRequest[] | undefined, next: PermissionRequest[] | undefined) {
+  return Boolean(held && next && held.length === next.length && held.every((p, i) => p.requestId === next[i].requestId && p.toolUseId === next[i].toolUseId));
+}
+
 function onState(st: SessionState) {
   const prev = get().rt[st.id];
-  patchRt(st.id, st);
+  patchRt(st.id, samePending(prev?.pending, st.pending) ? { ...st, pending: prev?.pending } : st);
   // The list (and every row) keeps its identity unless what a row shows changed: state arrives often.
   const sessions = get().sessions;
   const i = sessions.findIndex((s) => s.id === st.id);
@@ -611,13 +646,37 @@ export function applyTheme() {
   const root = document.documentElement;
   const startup = !themeReady;
   if (get().config) themeReady = true;
-  if (!startup && !quietSwitch && root.dataset.theme && root.dataset.theme !== theme) {
-    // Cross-fade colours for a moment instead of flashing to the other theme.
-    root.classList.add('theme-switch');
-    setTimeout(() => root.classList.remove('theme-switch'), 360);
-  }
-  root.dataset.theme = theme;
-  set({ theme });
+  const apply = () => {
+    root.dataset.theme = theme;
+    set({ theme });
+  };
+  // The system's theme changed under the window: the new look fades in over the old one.
+  if (!startup && !quietSwitch && root.dataset.theme && root.dataset.theme !== theme) flipTheme(apply, (r) => r.animate({ opacity: [0, 1] }, { duration: 360, easing: EASE, pseudoElement: '::view-transition-new(root)' }));
+  else apply();
+}
+
+/**
+ * Flip the visible theme inside a View Transition: the window's old and new looks are two pictures
+ * the compositor blends while `reveal` animates the new one in, so a flip costs one style pass however
+ * long the conversation drawn, not a transition on every element. Without View Transitions, or with
+ * reduced motion, it flips at once.
+ */
+function flipTheme(apply: () => void, reveal: (root: HTMLElement) => void) {
+  const doc = document as Document & { startViewTransition?: (cb: () => void) => { ready: Promise<void> } };
+  // applyTheme inside does not start a flip of its own.
+  const quiet = () => {
+    quietSwitch = true;
+    try {
+      apply();
+    } finally {
+      quietSwitch = false;
+    }
+  };
+  if (!doc.startViewTransition || reducedMotion()) return quiet();
+  doc
+    .startViewTransition(quiet)
+    .ready.then(() => reveal(document.documentElement))
+    .catch(() => {}); // a skipped transition: the theme has changed all the same
 }
 
 let saveUiTimer: ReturnType<typeof setTimeout> | null = null;
@@ -640,27 +699,13 @@ export function setTheme(pref: Config['theme'], at?: { x: number; y: number }) {
   if (!config) return;
   const before = document.documentElement.dataset.theme;
   const resolved = pref === 'dark' || (pref === 'system' && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
-  const doc = document as Document & { startViewTransition?: (cb: () => void) => { finished: Promise<void> } };
   set({ config: { ...config, theme: pref } });
-  if (resolved === before || !doc.startViewTransition || matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    applyTheme();
-  } else {
+  if (resolved === before) applyTheme();
+  else {
     const x = at?.x ?? innerWidth / 2;
     const y = at?.y ?? innerHeight / 2;
     const r = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
-    const vt = doc.startViewTransition(() => {
-      quietSwitch = true;
-      applyTheme();
-      quietSwitch = false;
-    });
-    vt.ready
-      .then(() =>
-        document.documentElement.animate(
-          { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${r}px at ${x}px ${y}px)`] },
-          { duration: 520, easing: 'cubic-bezier(0.65, 0, 0.35, 1)', pseudoElement: '::view-transition-new(root)' },
-        ),
-      )
-      .catch(() => {}); // a skipped transition: the theme has changed all the same
+    flipTheme(applyTheme, (root) => root.animate({ clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${r}px at ${x}px ${y}px)`] }, { duration: 520, easing: 'cubic-bezier(0.65, 0, 0.35, 1)', pseudoElement: '::view-transition-new(root)' }));
   }
   call<Config>('config.set', { theme: pref }).then((c) => set({ config: c }), toasted);
 }
@@ -887,9 +932,10 @@ export async function forkSession(id: string, upToMessageId?: string, sendAfter?
 }
 
 export function openFile(path: string, line?: number) {
-  set({ fileOpen: { path, line, nonce: Date.now() } });
+  set({ fileOpen: { path, line } });
   setUi({ panel: true, panelTab: 'files' });
 }
+export const takeFileOpen = () => set({ fileOpen: null });
 
 export function showPage(page: 'session' | 'overview' | 'inbox' | 'dispatch') {
   set({ page });
@@ -933,7 +979,7 @@ function onDispatch(d: DispatchDelta) {
   }
   set({ jobs, jobRuns });
 }
-export function fetchJob(id: string) {
+function fetchJob(id: string) {
   return rpc
     .call<{ job: DispatchJob; runs: DispatchRun[] }>('dispatch.get', { id })
     .then(
@@ -1004,8 +1050,9 @@ export function bumpFs() {
 }
 
 export function insertIntoComposer(id: string, text: string, replace = false) {
-  set({ composerInsert: { id, text, nonce: Date.now(), replace } });
+  set({ composerInsert: { id, text, replace } });
 }
+export const takeComposerInsert = () => set({ composerInsert: null });
 
 /** The registered repository (REPOSITORIES.md) whose folder holds `path` (the deepest one), or null. */
 export function repoFor(path: string | undefined | null, repos: RepoEntry[] | undefined = useStore.getState().config?.repos): RepoEntry | null {

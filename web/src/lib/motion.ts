@@ -1,5 +1,5 @@
 // Shared motion helpers. Durations and curves mirror the tokens in styles/tokens.css.
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
 
 export const EASE = 'cubic-bezier(0.22, 1, 0.36, 1)';
 export const EASE_EXIT = 'cubic-bezier(0.4, 0, 1, 1)';
@@ -30,6 +30,12 @@ export function reducedMotion() {
 }
 
 /**
+ * A row's place in a list that eases in one row after another: the stylesheet (motion.css) delays its
+ * entrance by --i beats. The one way a stagger is said, whatever the beat.
+ */
+export const stagger = (i: number) => ({ '--i': i }) as CSSProperties;
+
+/**
  * Leaving gracefully. React removes an element the instant its state says so; a menu, a sheet or a
  * toast then vanishes between two frames, which is the single thing that makes an interface feel
  * abrupt. This hook keeps a still copy of the element on screen for a moment after it unmounts and
@@ -43,13 +49,13 @@ export function useExitGhost(ref: RefObject<HTMLElement | null>, opts: { duratio
   const o = useRef(opts);
   o.current = opts;
   useLayoutEffect(() => {
-    // The element is read at unmount on purpose: that is the last frame to copy.
+    // The element the ref holds for the component's life (each caller's root): copied as it is at unmount.
+    const el = ref.current;
     return () => {
-      const el = ref.current; // eslint-disable-line react-hooks/exhaustive-deps -- read at unmount on purpose: the last frame to copy
       if (!el || !el.isConnected || reducedMotion() || document.hidden) return;
       ghost(el, o.current);
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- subscribe once; the options are read through a ref
+  }, [ref]);
 }
 
 /** Make the still copy of an element and play its exit on it. See useExitGhost. */
@@ -181,7 +187,7 @@ export function useFlipRows(ref: RefObject<HTMLElement | null>, selector: string
       }
     }
     last.current = next;
-  }, [deps]); // eslint-disable-line react-hooks/exhaustive-deps -- the caller says when to measure; the root and selector are fixed
+  }, [ref, selector, deps]);
 }
 
 const LATIN = /[A-Za-z0-9_'’-]/;

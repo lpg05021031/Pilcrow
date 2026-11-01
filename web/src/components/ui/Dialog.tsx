@@ -2,7 +2,7 @@ import { useEffect, useId, useLayoutEffect, useRef, type ReactNode } from 'react
 import { createPortal } from 'react-dom';
 import { X } from 'lucide-react';
 import { useExitGhost } from '../../lib/motion';
-import { useEscape } from './bits';
+import { useEscape } from './keys';
 import { ErrorBoundary } from './ErrorBoundary';
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';

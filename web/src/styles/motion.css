@@ -1,14 +1,722 @@
 /* ================================================================ motion
-   The choreography layer, loaded last. tokens.css holds the springs; this file says what each thing
-   does with them: how it arrives and leaves, how the shell opens and closes, and how every control
-   answers the hand. It owns `animation` and `transition` for the selectors it names, and the moving
-   parts that exist only to move (the segmented thumb, the settings ink, the sidebar's selection).
-   A component's own rule never repeats one of those properties: scripts/css-overlap.mjs checks.
-   Besides motion it keeps the lightbox, whose look is its motion, and two finishes of the dark theme
-   that cut across components.
+   Every `animation` and `transition` in the stylesheets, and every @keyframes, is here, loaded
+   last; no other file declares one (scripts/css-overlap.mjs checks, and that each @keyframes is
+   played by something). tokens.css holds the springs; this file says what each thing does with
+   them. First each component's own motion (a hover's colour, a chevron turning, a row easing in),
+   under the stylesheet that owns the component, in the order they load, so the cascade between
+   them is the one they would have in their own files; then the choreography across components: how
+   things arrive and leave, how the shell opens and closes, how every control answers the hand, and
+   the parts that exist only to move (the segmented thumb, the settings ink, the sidebar's
+   selection). Besides motion it keeps the lightbox, whose look is its motion, and two finishes of
+   the dark theme that cut across components. Less motion, by request, is the switch at the top.
    Durations are the tokens (--t-*, a spring's -t). A number here is one piece's choreography — the
-   beat a stagger steps by, a loop's period, a delay that lets one thing land before the next — and
-   is written once, where it plays; the opening's own beats live with it in shell.css. */
+   beat a stagger steps by, a loop's period, a delay that lets one thing land before the next, the
+   beats of the opening — and is written once, where it plays. */
+
+/* ---------------------------------------------------------------- elements and the shared controls (base.css) */
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+}
+.link {
+  transition: color var(--t-fast);
+}
+.spin {
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* Appear: used by things that mount in response to the user (rows, cards, panels). */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+.loading-rows {
+  animation: fade var(--t-med) var(--ease) 120ms both;
+}
+.sk {
+  animation: sheen 1.4s linear infinite;
+}
+@keyframes sheen {
+  to {
+    background-position: -200% 0;
+  }
+}
+/* Less motion, by request: everything lands at once. The delays go too, inline staggers included
+   (an !important here outranks a style attribute), or a list would still appear row by row. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    transition-delay: 0s !important;
+  }
+}
+
+/* ---------------------------------------------------------------- the window (shell.css) */
+
+.boot {
+  animation: boot-in var(--t-med) var(--ease);
+}
+.boot.leaving {
+  animation: boot-out 320ms var(--ease-exit) forwards;
+}
+@keyframes boot-in {
+  from {
+    opacity: 0.999;
+  }
+}
+@keyframes boot-out {
+  to {
+    opacity: 0;
+    transform: scale(1.02);
+  }
+}
+.boot-bowl {
+  animation: boot-bowl 640ms var(--spring) both, boot-breathe 2.4s var(--ease-io) 900ms infinite;
+}
+.boot-bar,
+.boot-stem {
+  animation: boot-set 520ms var(--ease) both;
+}
+.boot-bar {
+  animation-name: boot-bar;
+  animation-delay: 160ms;
+}
+.boot-stem.s1 {
+  animation-delay: 240ms;
+}
+.boot-stem.s2 {
+  animation-delay: 320ms;
+}
+.boot.linked .boot-bowl {
+  animation: boot-bowl 640ms var(--spring) both, boot-settle 400ms var(--ease) forwards;
+}
+@keyframes boot-bowl {
+  from {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+}
+@keyframes boot-bar {
+  from {
+    transform: scaleX(0);
+    opacity: 0;
+  }
+}
+@keyframes boot-set {
+  from {
+    transform: scaleY(0);
+    opacity: 0;
+  }
+}
+@keyframes boot-breathe {
+  50% {
+    transform: scale(0.86);
+    opacity: 0.7;
+  }
+}
+@keyframes boot-settle {
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.boot-name {
+  animation: boot-name 600ms var(--ease) 420ms both;
+}
+@keyframes boot-name {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+    letter-spacing: 0.04em;
+  }
+}
+.boot-line {
+  animation: fade var(--t-slow) var(--ease) 700ms both;
+}
+@keyframes breathe {
+  50% {
+    opacity: 0.4;
+  }
+}
+.offline {
+  animation: fade var(--t-med) var(--ease);
+}
+.resizer::after {
+  transition: opacity var(--t-med) var(--ease), transform var(--t-med) var(--ease), background var(--t-fast);
+}
+.resizer:hover::after {
+  transition-delay: 120ms;
+}
+
+/* ---------------------------------------------------------------- the sidebar (sidebar.css) */
+
+.side-kbd {
+  transition: opacity var(--t-fast);
+}
+.side-group-toggle {
+  transition: color var(--t-fast);
+}
+.side-row {
+  animation: fade var(--t-med) var(--ease);
+}
+.side-row-title {
+  transition: color var(--t-fast);
+}
+.side-row-status {
+  transition: opacity var(--t-fast);
+}
+.side-row-menu {
+  transition: opacity var(--t-fast);
+}
+.glyph.needs {
+  animation: halo 2.4s var(--ease-io) 3;
+}
+@keyframes halo {
+  50% {
+    box-shadow: 0 0 0 5px transparent;
+  }
+}
+.glyph.running {
+  animation: spin 0.9s linear infinite;
+}
+.side-collapse {
+  transition: opacity var(--t-fast), background var(--t-fast), color var(--t-fast);
+}
+.head-sidebar {
+  animation: fade var(--t-med) var(--ease);
+}
+
+/* ---------------------------------------------------------------- around the conversation (session.css) */
+
+.session-head {
+  transition: box-shadow var(--t-med);
+}
+.status-pill {
+  animation: fade var(--t-med) var(--ease);
+}
+.status-pill.running .status-dot,
+.status-pill.starting .status-dot {
+  animation: breathe 1.2s ease-in-out infinite;
+}
+.diffstat {
+  animation: pop var(--t-med) var(--ease);
+}
+.session-error {
+  animation: rise var(--t-med) var(--ease);
+}
+.session-empty {
+  animation: rise var(--t-panel) var(--ease);
+}
+@keyframes find-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+}
+.crumb-btn {
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.mcp-notice {
+  animation: fade var(--t-med) var(--ease);
+}
+
+/* ---------------------------------------------------------------- the composer (composer.css) */
+
+.composer-ghost {
+  animation: fade var(--t-med) var(--ease);
+}
+.ctx-btn {
+  animation: fade var(--t-med) var(--ease);
+}
+.composer-foot {
+  transition: opacity var(--t-med);
+}
+.attach-x {
+  transition: opacity var(--t-fast);
+}
+.queue {
+  animation: queue-in var(--t-panel) var(--ease);
+}
+@keyframes queue-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.queue-item {
+  animation: queue-in var(--t-med) var(--ease);
+  transition: background var(--t-fast);
+}
+.queue-text {
+  transition: color var(--t-fast);
+}
+.queue-actions {
+  transition: opacity var(--t-fast);
+}
+
+/* ---------------------------------------------------------------- dialogs, the palette, toasts (dialogs.css) */
+
+.browser {
+  animation: rise var(--t-med) var(--ease);
+}
+.ns-two {
+  animation: rise var(--t-med) var(--ease);
+}
+.toasts {
+  transition: bottom var(--t-med) var(--ease);
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+}
+.ns-disclose {
+  transition: background var(--t-fast), color var(--t-fast);
+}
+
+/* ---------------------------------------------------------------- settings (settings.css) */
+
+.settings-nav button {
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.set-row {
+  animation: fade var(--t-med) var(--ease);
+}
+
+/* ---------------------------------------------------------------- the welcome page (welcome.css) */
+
+.welcome-icon {
+  animation: icon-in 520ms var(--ease) both;
+}
+.welcome-icon .app-icon-bowl,
+.session-empty-icon .app-icon-bowl {
+  animation: bowl-in 600ms 160ms var(--spring) both;
+}
+@keyframes icon-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.96);
+  }
+}
+@keyframes bowl-in {
+  from {
+    transform: scale(0.55);
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .welcome-icon,
+  .welcome-icon .app-icon-bowl,
+  .session-empty-icon .app-icon-bowl {
+    animation: none;
+  }
+}
+.welcome-title {
+  animation: rise var(--t-panel) 120ms var(--ease) both;
+}
+.welcome-sub {
+  animation: rise var(--t-panel) 180ms var(--ease) both;
+}
+.welcome-composer {
+  animation: rise var(--t-panel) 240ms var(--ease) both;
+}
+.welcome-folders {
+  animation: fade var(--t-panel) 320ms var(--ease) both;
+}
+.welcome-keys {
+  animation: fade var(--t-panel) 380ms var(--ease) both;
+}
+.setup-card {
+  animation: rise var(--t-panel) 200ms var(--ease) both;
+}
+
+/* ---------------------------------------------------------------- the control room (overview.css) */
+
+/* the page assembles top to bottom, each block a beat after the one above */
+.ov-body > * {
+  animation: page-in var(--t-panel) var(--ease) both;
+  animation-delay: calc(var(--i, 0) * 40ms);
+}
+.ov-tile {
+  transition: box-shadow var(--t-fast), transform var(--spring-snappy-t) var(--spring-snappy);
+}
+.ov-tile:active {
+  transition-duration: var(--t-fast), 70ms;
+}
+.ovc {
+  animation: rise var(--t-panel) var(--ease) both;
+}
+.ovc.busy {
+  animation-delay: calc(var(--i, 0) * 40ms);
+}
+.ovc-rail {
+  transition: background var(--t-slow) var(--ease);
+}
+.ovc.needs.decided {
+  transition: opacity var(--t-slow) var(--ease), background var(--t-slow) var(--ease);
+}
+.ovc.stale .ovc-live .wm-bowl,
+.ovc.stale .ovc-live .wm-stems {
+  animation-duration: 4s;
+}
+.spend-bars rect {
+  transition: y var(--spring-soft-t) var(--spring-soft), height var(--spring-soft-t) var(--spring-soft);
+}
+
+/* ---------------------------------------------------------------- the inbox and schedules (inbox.css) */
+
+.inbox-main {
+  animation: page-in var(--t-panel) var(--ease) both;
+}
+.inbox-day {
+  animation: page-in var(--t-panel) var(--ease) both;
+  animation-delay: calc(var(--i, 0) * 70ms);
+}
+.run {
+  animation: rise var(--t-panel) var(--ease) both;
+  animation-delay: calc(var(--i, 0) * 40ms);
+}
+.inbox-rail {
+  animation: page-in var(--t-panel) var(--ease) 80ms both;
+}
+.sched {
+  animation: rise var(--t-panel) var(--ease) both;
+  animation-delay: calc(var(--i, 0) * 40ms);
+}
+.sched-bar > span {
+  transition: width var(--spring-soft-t) var(--spring-soft);
+}
+.sched.running .sched-bar > span {
+  animation: sched-sweep 1.4s var(--ease-io) infinite;
+}
+@keyframes sched-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+.sd-more {
+  animation: rise var(--t-med) var(--ease);
+}
+
+/* ---------------------------------------------------------------- helpers (helpers.css) */
+
+.status-pill.leading .status-dot {
+  animation: breathe 1.2s ease-in-out infinite;
+}
+
+/* ---------------------------------------------------------------- the conversation (transcript.css) */
+
+@keyframes jump-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(6px);
+  }
+}
+.msg-actions {
+  transition: opacity var(--t-fast);
+}
+.shimmer {
+  animation: shimmer 2s linear infinite;
+}
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -150% 0;
+  }
+}
+.turn-detail {
+  transition: opacity var(--t-fast);
+}
+.turn-fork {
+  transition: opacity var(--t-fast), color var(--t-fast);
+}
+.working {
+  animation: fade var(--t-med) var(--ease);
+}
+.wm-bowl {
+  animation: wm-breathe 1.8s var(--ease-io) infinite;
+}
+.wm-stems {
+  animation: wm-ink 1.8s var(--ease-io) infinite;
+}
+@keyframes wm-breathe {
+  0%,
+  100% {
+    transform: scale(0.72);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+@keyframes wm-ink {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.95;
+  }
+}
+.md-copy {
+  transition: opacity var(--t-fast), background var(--t-fast), color var(--t-fast);
+}
+.tool {
+  animation: tool-in var(--t-panel) var(--ease) both;
+}
+@keyframes tool-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+}
+.tool-meta {
+  animation: fade var(--t-med) var(--ease);
+}
+.tool.streaming .tool-target {
+  animation: fade var(--t-med) var(--ease);
+}
+.msg-assistant {
+  animation: fade var(--t-panel) var(--ease);
+}
+.thinking {
+  animation: fade var(--t-panel) var(--ease);
+}
+/* Rows arriving in the live pages ease in; rows of history pages being drawn as the reader scrolls
+   up must not — a page of paragraphs fading in during a scroll reads as the page flickering. */
+.page:not(.live) .msg-assistant,
+.page:not(.live) .thinking,
+.page:not(.live) .tool,
+.page:not(.live) .tool-ico-swap,
+.page:not(.live) .tool-meta {
+  animation: none;
+}
+.thinking-text.peek {
+  transition: opacity var(--t-med);
+}
+.tool-open {
+  transition: opacity var(--t-fast), background var(--t-fast);
+}
+.tool-note.shimmer-soft {
+  animation: breathe 1.6s ease-in-out infinite;
+}
+.todo-dot {
+  animation: breathe 1.4s ease-in-out infinite;
+}
+.diff-add-comment {
+  transition: opacity var(--t-fast);
+}
+.perm {
+  animation: perm-in var(--t-panel) var(--ease);
+}
+@keyframes perm-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+.perm::after,
+.askcard.live::after,
+.plancard.live::after {
+  animation: ping 1100ms 300ms var(--ease-io) both;
+}
+@keyframes ping {
+  0% {
+    opacity: 0;
+  }
+  35% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.perm-feedback {
+  animation: rise var(--t-med) var(--ease);
+}
+.askcard.live,
+.plancard.live {
+  animation: perm-in var(--t-panel) var(--ease);
+}
+.ask-mark {
+  transition: background var(--t-fast), box-shadow var(--t-fast);
+}
+.ask-notes {
+  animation: rise var(--t-med) var(--ease);
+}
+.plan-feedback {
+  animation: rise var(--t-med) var(--ease);
+}
+.agent-prompt {
+  animation: rise var(--t-med) var(--ease);
+}
+.thinking.live .thinking-ico {
+  animation: breathe 1.4s ease-in-out infinite;
+}
+.tool-error-more {
+  transition: color var(--t-fast), background var(--t-fast);
+}
+.tool-error-more .tool-chev {
+  transition: transform var(--t-med) var(--ease);
+}
+.tool.awaiting {
+  animation: perm-in var(--t-panel) var(--ease);
+}
+.tool.awaiting .perm {
+  animation: none;
+}
+.perm-note-link {
+  transition: color var(--t-fast), background var(--t-fast);
+}
+.wfd-end .tool-chev {
+  transition: transform var(--t-med) var(--ease);
+}
+.wfd-node {
+  transition: background var(--t-med), color var(--t-med), box-shadow var(--t-med);
+}
+.wf-foot-btn {
+  transition: color var(--t-fast), background var(--t-fast);
+}
+.wf-foot-btn .tool-chev {
+  transition: transform var(--t-med) var(--ease);
+}
+.work-head .tool-chev {
+  transition: transform var(--t-med) var(--ease), opacity var(--t-fast);
+}
+.work-mark {
+  transition: width var(--t-med) var(--ease), margin var(--t-med) var(--ease), opacity var(--t-fast);
+}
+.work-mark.gone .wm-bowl,
+.work-mark.gone .wm-stems {
+  animation: none;
+}
+
+/* ---------------------------------------------------------------- the side panel (panels.css) */
+
+@container (max-width: 759px) {
+  .panel-tab.on {
+    animation: tab-name var(--t-panel) var(--ease);
+  }
+}
+@keyframes tab-name {
+  from {
+    opacity: 0.4;
+  }
+}
+.commit-box {
+  animation: rise var(--t-med) var(--ease);
+}
+.cfile-head .icon-btn {
+  transition: opacity var(--t-fast);
+}
+.notes-bar {
+  animation: rise var(--t-med) var(--ease);
+}
+.ftab-x {
+  transition: opacity var(--t-fast), background var(--t-fast);
+}
+.tl-scrub-label {
+  transition: left var(--t-fast);
+}
+.tl-scrub:hover .tl-scrub-label {
+  transition: none;
+}
+.tl-scrub.dragging .tl-cursor {
+  transition: transform var(--t-fast) var(--spring);
+}
+.tl-scrub.dragging .tl-scrub-label,
+.tl-scrub.dragging .tl-cursor,
+.tl-scrub.dragging .tl-scrub-done {
+  transition-duration: 0ms;
+}
+.tl-scrub-done {
+  transition: width var(--t-fast);
+}
+.tl-cursor {
+  transition: left var(--t-fast), transform var(--t-fast) var(--ease);
+}
+.tl-row {
+  animation: rise var(--t-panel) var(--ease) both;
+}
+.tl-dot {
+  transition: transform var(--t-fast) var(--ease), background var(--t-fast), box-shadow var(--t-fast);
+}
+.tl-since-btn .tool-chev {
+  transition: transform var(--t-med) var(--ease);
+}
+/* a step jumped to from the timeline lights up briefly */
+.flash {
+  animation: flash 1.4s var(--ease);
+}
+@keyframes flash {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-text) 0%, transparent);
+  }
+  20% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent-text) 35%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 4px transparent;
+  }
+}
+.doc-preview {
+  animation: fade var(--t-med) var(--ease);
+}
+
+/* ---------------------------------------------------------------- dispatch (dispatch.css) */
+
+.dp-seg.running,
+.dp-seg.preparing {
+  animation: dp-breathe 1.6s ease-in-out infinite;
+}
+@keyframes dp-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dp-seg.running,
+  .dp-seg.preparing {
+    animation: none;
+  }
+}
+.dp-glyph.running,
+.dp-glyph.preparing {
+  animation: dp-breathe 1.6s ease-in-out infinite;
+}
 
 /* ---------------------------------------------------------------- arrivals and departures */
 @keyframes pop-spring {
@@ -226,7 +934,7 @@
   z-index: var(--z-lightbox);
   display: grid;
   place-items: center;
-  padding: 36px;
+  padding: var(--sp-9);
   background: var(--veil);
   -webkit-backdrop-filter: blur(18px) saturate(120%);
   backdrop-filter: blur(18px) saturate(120%);
@@ -299,10 +1007,10 @@ body.resizing .main {
 .overview,
 .inbox,
 .welcome {
-  animation: page-in 260ms var(--ease);
+  animation: page-in var(--t-panel) var(--ease);
 }
 .settings-page {
-  animation: page-in 220ms var(--ease);
+  animation: page-in var(--t-panel) var(--ease);
 }
 
 /* settings: the highlight behind the chosen page glides */
@@ -558,7 +1266,7 @@ button.chip:active,
   display: inline-block;
   width: 2px;
   height: 0.95em;
-  margin-left: 3px;
+  margin-left: var(--sp-0_75);
   vertical-align: -0.14em;
   border-radius: var(--r-pill);
   background: var(--accent);
@@ -636,7 +1344,7 @@ button.chip:active,
   margin-top: calc(-1 * var(--header-h));
 }
 .session:not(:has(> .mcp-notice-stack, > .helpers-bar, > .session-error)) > .transcript > .transcript-inner {
-  padding-top: calc(var(--header-h) + 22px);
+  padding-top: calc(var(--header-h) + var(--sp-5_5));
 }
 .session:not(:has(> .mcp-notice-stack, > .helpers-bar, > .session-error)) > .transcript .session-empty {
   padding-top: calc(12vh - var(--header-h) + var(--sp-5));

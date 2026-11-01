@@ -446,7 +446,7 @@ test('changes: a file past the diff budget says so in one line and opens in File
     // One file: it is shown open.
     await page.waitForSelector('.cfile.open .cfile-note:has-text("Too large to show here")', { timeout: 5000 });
     await page.click('.cfile-note button:has-text("Open in Files")');
-    await page.waitForSelector('.ftab.on[title="/home/me/pilcrow/web/dist/bundle.js"]', { timeout: 5000 });
+    await page.waitForSelector('.ftab.on .ftab-main:has-text("bundle.js")', { timeout: 5000 });
   } finally {
     await ctl.call('mock.answer', { method: 'git.diff', result: null });
   }
@@ -534,7 +534,7 @@ test('helpers: a lead starts two helpers; the bar follows them, the person answe
   await page.waitForSelector('.helper-chip.warm', { timeout: 20_000 }); // web asks a permission
   await page.waitForSelector('.status-pill.leading', { timeout: 10_000 });
   expect((await page.locator('.side-row.sub').count()) === 2, 'the helpers sit under the lead in the sidebar');
-  await page.click('.side-page[title^="Every session"]');
+  await page.getByRole('button', { name: 'Control room' }).click();
   await page.waitForSelector('.ovc.needs .btn:has-text("Allow for all helpers")', { timeout: 10_000 });
   expect((await page.locator('.ovc.needs .ovc-proj').first().innerText()).includes('helper of'), 'the card says whose helper asked');
   await page.click('.ovc.needs .btn:has-text("Allow for all helpers")');
@@ -547,7 +547,7 @@ test('helpers: a lead starts two helpers; the bar follows them, the person answe
   expect((await page.locator('.hc-sec').count()) === 2, 'a Changes section per helper');
   await page.click('.hc-row .btn:has-text("Keep")');
   await page.waitForFunction(() => document.querySelectorAll('.hc-sec .chip.tiny').length === 2, null, { timeout: 10_000 });
-  await page.click('.side-page[title="Results of scheduled sessions"]');
+  await page.getByRole('button', { name: 'Inbox' }).click();
   await page.waitForSelector('.dp-report .chip:has-text("helpers")', { timeout: 10_000 });
   expect((await page.locator('.dp-report .dp-report-row').count()) === 2, 'the record lists both helpers');
 });
@@ -579,8 +579,8 @@ test('answer cards: the question and the plan open with the dot, carry key boxes
 
 test('workflow: the Tasks tab draws the run live and settled, and the card in the conversation follows', async ({ page }) => {
   await open(page, 'sess-tests');
-  await page.click('.icon-btn[title^="Side panel"]');
-  await page.click('.panel-tab[title^="Tasks"]');
+  await page.getByRole('button', { name: 'Side panel', exact: true }).click();
+  await page.getByRole('tab', { name: 'Tasks' }).click();
   await send(page, 'run the review workflow');
   await page.waitForSelector('.wfd', { timeout: 20_000 });
   expect((await page.locator('.wfd-name').first().innerText()) === 'review-changes', 'the run is named from its meta');
@@ -589,7 +589,7 @@ test('workflow: the Tasks tab draws the run live and settled, and the card in th
   await page.waitForFunction(() => document.querySelector('.wfd-sub')?.textContent.startsWith('7 of 8 agents done'), null, { timeout: 5000 }).catch(() => {}); // asserted next
   expect((await page.locator('.wfd-sub').first().innerText()).startsWith('7 of 8 agents done'), 'the figures settled');
   expect((await page.locator('.wfd.completed').count()) === 1, 'the card says completed');
-  await page.click('.icon-btn[title="Close panel"]');
+  await page.getByRole('button', { name: 'Close panel' }).click();
   await page.click('text=Ran an agent');
   await page.click('.tool[data-tool="Workflow"] .tool-head'); // the card is folded once done; its body carries the figures
   await page.waitForSelector('.wfi-row', { timeout: 10_000 });

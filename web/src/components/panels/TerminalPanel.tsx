@@ -10,6 +10,7 @@ import type { SessionSummary } from '../../lib/types';
 import { basename } from '../../lib/format';
 import { errText } from '../../lib/format';
 import { Empty } from '../ui/Empty';
+import { useEvent } from '../ui/hooks';
 
 type TermRef = SessionMemo['terms'][number];
 
@@ -67,9 +68,13 @@ export function TerminalPanel({ session, cwd, visible }: { session: SessionSumma
     }
   };
 
+  // A first terminal opens the first time the tab is shown, not again on each render.
+  const openFirst = useEvent(() => {
+    if (!memo(session.id).terms.length && info?.terminal.pty !== false) create();
+  });
   useEffect(() => {
-    if (visible && !memo(session.id).terms.length && info?.terminal.pty !== false) create();
-  }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps -- a first terminal opens the first time the tab is shown, not again on each render
+    if (visible) openFirst();
+  }, [visible, openFirst]);
 
   useEffect(
     () =>

@@ -3,11 +3,15 @@ import { ArrowUpRight, Bot, Brain, Wrench, MessageSquareQuote, Workflow, PanelLe
 import { useStore, call, openSession, respond, setUi, mergeLive } from '../lib/store';
 import { isWorking, type PermissionRequest, type SessionState, type SessionSummary, type TaskInfo } from '../lib/types';
 import { basename, cost, duration, timeAgo, relPath, plural } from '../lib/format';
-import { ContextRing, Spinner, useNow, Num, WorkingMark, Mark, useWindowKey, onActivate } from './ui/bits';
+import { ContextRing, Spinner, Num } from './ui/bits';
+import { useNow } from './ui/hooks';
+import { WorkingMark, Mark } from './ui/brand';
+import { useWindowKey, onActivate } from './ui/keys';
 import { suggestionLabel, typingElsewhere } from './tools/Permission';
 import { workflowCounts } from '../lib/workflow';
 import { str } from '../lib/tools';
 import type { PermissionDecision } from '../lib/types';
+import { stagger } from '../lib/motion';
 
 interface Fleet {
   live: Record<string, SessionState>;
@@ -15,7 +19,6 @@ interface Fleet {
   spend: { at: number; id: string; delta: number }[];
 }
 
-const order = (i: number) => ({ '--i': i }) as React.CSSProperties;
 
 /**
  * The control room: every session that is working or waiting, at a glance, with the things that need
@@ -30,9 +33,10 @@ export function Overview() {
   const [fleet, setFleet] = useState<Fleet | null>(null);
   const now = useNow(1000, true);
   // Every session's runtime changes with each streamed frame of every session at work; the cards read
-  // only what session.state carries. So they read a snapshot taken on the clock's tick, and at once
-  // when a row's status or waiting count changes (the session list only changes then).
-  const rt = useMemo(() => useStore.getState().rt, [now, sessions, fleet]); // eslint-disable-line react-hooks/exhaustive-deps -- the deps are when to take the snapshot
+  // only what session.state carries. So the page does not subscribe to it: it reads it as it draws,
+  // which is on the clock's tick, and at once when a row's status or waiting count changes (the
+  // session list only changes then).
+  const rt = useStore.getState().rt;
   const [focus, setFocus] = useState(-1); // keyboard focus; none until the keys are used
   const box = useRef<HTMLDivElement>(null);
 
@@ -82,9 +86,11 @@ export function Overview() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [ordered, focus]);
+  // When the keyboard focus moves, to the card it moved to.
+  const focused = ordered[focus]?.id;
   useEffect(() => {
-    box.current?.querySelector<HTMLElement>(`[data-card="${ordered[focus]?.id}"]`)?.scrollIntoView({ block: 'nearest' });
-  }, [focus]); // eslint-disable-line react-hooks/exhaustive-deps -- scrolls when the keyboard focus moves, to the card it moved to
+    if (focused) box.current?.querySelector<HTMLElement>(`[data-card="${focused}"]`)?.scrollIntoView({ block: 'nearest' });
+  }, [focused]);
 
   const totalCost = fleet?.today.cost || 0;
   const median = useMemo(() => {
@@ -110,7 +116,7 @@ export function Overview() {
       </header>
 
       <div className="ov-body">
-        <div className="ov-stats" style={order(k++)}>
+        <div className="ov-stats" style={stagger(k++)}>
           <Tile icon={working.length ? <WorkingMark size={18} /> : <Activity size={16} />} label="Working" value={working.length} tone={working.length ? 'live' : ''} onClick={jump('ov-working')} />
           <Tile icon={<Hourglass size={16} />} label="Needs you" value={needs.length} tone={needs.length ? 'accent' : ''} onClick={jump(needs.length ? 'ov-needs' : 'ov-working')} />
           <Tile icon={<CircleCheck size={16} />} label="Finished today" value={finished.length} onClick={jump('ov-finished')} />
@@ -118,7 +124,7 @@ export function Overview() {
         </div>
 
         {needs.length > 0 && (
-          <section id="ov-needs" className="ov-sec" style={order(k++)}>
+          <section id="ov-needs" className="ov-sec" style={stagger(k++)}>
             <h2 className="ov-h">
               <span className="glyph needs" aria-hidden="true" /> Needs you <span className="ov-count">{needs.length}</span>
               <span className="ov-h-end faint">Press 1, 2 or 3 to answer the first</span>
@@ -131,7 +137,7 @@ export function Overview() {
           </section>
         )}
 
-        <section id="ov-working" className="ov-sec" style={order(k++)}>
+        <section id="ov-working" className="ov-sec" style={stagger(k++)}>
           <h2 className="ov-h">
             Working <span className="ov-count">{working.length}</span>
           </h2>
@@ -149,7 +155,7 @@ export function Overview() {
           )}
         </section>
 
-        <div className="ov-two" style={order(k++)}>
+        <div className="ov-two" style={stagger(k++)}>
           <section id="ov-finished" className="ov-sec">
             <h2 className="ov-h">
               Finished today <span className="ov-count">{finished.length}</span>
@@ -236,7 +242,7 @@ function WorkingCard({ s, st, focused, now, hot, index }: { s: SessionSummary; s
   const u = st?.usage;
   const stale = st?.lastActivity ? now - st.lastActivity > 45_000 : false;
   return (
-    <article className={`ovc busy${focused ? ' focused' : ''}${stale ? ' stale' : ''}`} data-card={s.id} onClick={() => openSession(s.id)} onKeyDown={onActivate(() => openSession(s.id))} role="button" tabIndex={0} style={{ animationDelay: `${Math.min(index, 8) * 40}ms` }}>
+    <article className={`ovc busy${focused ? ' focused' : ''}${stale ? ' stale' : ''}`} data-card={s.id} onClick={() => openSession(s.id)} onKeyDown={onActivate(() => openSession(s.id))} role="button" tabIndex={0} style={stagger(Math.min(index, 8))}>
       <div className="ovc-row">
         <CardHead s={s} st={st} />
         <span className="ovc-live" title={stale ? 'Quiet for a while' : 'Working'}>
@@ -432,17 +438,19 @@ function FinishedRow({ s, st, unread, focused, now }: { s: SessionSummary; st?: 
 
 /** Spend in the last hour, five-minute bars (the current one in Claude's colour), and the sessions that cost the most today. */
 function Spend({ fleet, byId, now }: { fleet: Fleet; byId: Record<string, SessionSummary>; now: number }) {
+  // The bars move with the spend and once a minute, not every second: they end at the next whole minute.
+  const end = Math.ceil(now / 60e3) * 60e3;
   const buckets = useMemo(() => {
     const n = 12;
     const w = 5 * 60e3;
-    const start = now - n * w;
+    const start = end - n * w;
     const out = new Array(n).fill(0);
     for (const e of fleet.spend) {
       const i = Math.floor((e.at - start) / w);
       if (i >= 0 && i < n) out[i] += e.delta;
     }
     return out;
-  }, [fleet.spend, Math.floor(now / 60e3)]); // eslint-disable-line react-hooks/exhaustive-deps -- buckets move with the spend and once a minute, not every second
+  }, [fleet.spend, end]);
   const hour = buckets.reduce((a, b) => a + b, 0);
   const max = Math.max(...buckets, 0.0001);
   const top = fleet.today.perSession.slice(0, 5);

@@ -11,7 +11,7 @@ import { TasksPanel } from './panels/TasksPanel';
 import { InfoPanel } from './panels/InfoPanel';
 import { HistoryPanel } from './panels/HistoryPanel';
 import type { LucideIcon } from 'lucide-react';
-import { useInk } from './ui/bits';
+import { useInk } from './ui/hooks';
 
 // xterm is a third of a megabyte and only this tab uses it: it loads the first time the tab opens.
 const TerminalPanel = lazy(() => import('./panels/TerminalPanel').then((m) => ({ default: m.TerminalPanel })));

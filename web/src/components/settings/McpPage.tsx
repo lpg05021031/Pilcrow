@@ -10,19 +10,20 @@ import { MenuButton } from '../ui/Popover';
 import { Dialog } from '../ui/Dialog';
 import { Select } from '../ui/Select';
 import { Spinner, Field } from '../ui/bits';
+import { useEvent } from '../ui/hooks';
 import { errText } from '../../lib/format';
 
 type Scope = 'user' | 'project' | 'local';
 const SCOPE_LABEL: Record<Scope, string> = { user: 'All projects', project: 'Project (.mcp.json)', local: 'This project, just you' };
 
-export function useActiveSession() {
+function useActiveSession() {
   const activeId = useStore((s) => s.activeId);
   const rt = useStore((s) => (activeId ? s.rt[activeId] : null));
   const session = useStore((s) => s.sessions.find((x) => x.id === activeId));
   return { id: activeId, rt, cwd: rt?.cwd || session?.cwd || '' };
 }
 
-export function statusMeta(st?: string) {
+function statusMeta(st?: string) {
   switch (st) {
     case 'connected':
       return { label: 'Connected', icon: CircleCheck, cls: 'ok' };
@@ -40,7 +41,7 @@ export function statusMeta(st?: string) {
 }
 
 /** One line that says what the server is: its URL, or its command. */
-export function describeConfig(c: McpEntry['config']) {
+function describeConfig(c: McpEntry['config']) {
   if (c.type === 'stdio') return [c.command, ...(c.args || [])].join(' ');
   return c.url || '';
 }
@@ -56,7 +57,7 @@ export function McpPage() {
   const live = useMemo(() => rt?.mcp || [], [rt?.mcp]);
   const liveByName = useMemo(() => new Map(live.map((s) => [s.name, s])), [live]);
 
-  const load = async () => {
+  const load = useEvent(async () => {
     setLoading(true);
     try {
       setData(await call<McpList>('mcp.list', { cwd }, { quiet: true }));
@@ -67,10 +68,11 @@ export function McpPage() {
     } finally {
       setLoading(false);
     }
-  };
+  });
+  // Per folder; the session's state is read as it is at the time.
   useEffect(() => {
     load();
-  }, [cwd]); // eslint-disable-line react-hooks/exhaustive-deps -- loads per folder; load() reads the session state of the moment
+  }, [cwd, load]);
 
   const servers = useMemo(() => {
     const n = q.trim().toLowerCase();

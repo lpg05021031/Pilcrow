@@ -1,8 +1,9 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, type LucideIcon } from 'lucide-react';
-import { reducedMotion } from '../../lib/motion';
-import { useEscape } from './bits';
+import { reducedMotion, stagger } from '../../lib/motion';
+import { useEscape } from './keys';
+import { useEvent } from './hooks';
 
 type Placement = 'bottom-start' | 'bottom-end' | 'top-start' | 'top-end';
 
@@ -40,7 +41,7 @@ export function Popover({ anchor, open, onClose, children, placement = 'bottom-s
     }
     const t = setTimeout(() => setShown(false), EXIT_MS + 20);
     return () => clearTimeout(t);
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps -- runs as it opens and closes; `shown` is what it sets
+  }, [open, shown, anchor]);
 
   useLayoutEffect(() => {
     if (!open || !anchor) return;
@@ -127,10 +128,11 @@ export function Menu({ items, onClose, id, label }: { items: MenuItem[]; onClose
   const selectable = items.flatMap((it, i) => (it.separator || it.heading || it.disabled ? [] : [i]));
   const focusAt = (i: number | undefined) => ref.current?.querySelector<HTMLElement>(`[data-i="${i}"]`)?.focus();
   // A frame later: the popover is hidden until it has been placed, and a hidden row cannot take focus.
+  const focusFirst = useEvent(() => focusAt(selectable.find((i) => items[i].checked) ?? selectable[0]));
   useEffect(() => {
-    const t = requestAnimationFrame(() => focusAt(selectable.find((i) => items[i].checked) ?? selectable[0]));
+    const t = requestAnimationFrame(focusFirst);
     return () => cancelAnimationFrame(t);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps -- once, as the menu opens
+  }, [focusFirst]);
   const onKeyDown = (e: React.KeyboardEvent) => {
     const at = selectable.indexOf(active);
     const to = e.key === 'ArrowDown' ? selectable[(at + 1) % selectable.length] : e.key === 'ArrowUp' ? selectable[(at - 1 + selectable.length) % selectable.length] : e.key === 'Home' ? selectable[0] : e.key === 'End' ? selectable[selectable.length - 1] : undefined;
@@ -164,7 +166,7 @@ export function Menu({ items, onClose, id, label }: { items: MenuItem[]; onClose
             aria-checked={it.checked}
             tabIndex={-1}
             className={`menu-item${it.danger ? ' danger' : ''}${active === i ? ' active' : ''}`}
-            style={{ '--i': order } as React.CSSProperties}
+            style={stagger(order)}
             disabled={it.disabled}
             onFocus={(e) => setActive(e.currentTarget.matches(':focus-visible') ? i : -1)}
             onMouseEnter={(e) => {
@@ -189,10 +191,16 @@ export function Menu({ items, onClose, id, label }: { items: MenuItem[]; onClose
   );
 }
 
+/** A control that opens a popover: the element to place it against (`ref` goes on the control), and whether it is open. */
+export function useAnchor<T extends HTMLElement = HTMLButtonElement>() {
+  const [anchor, ref] = useState<T | null>(null);
+  const [open, setOpen] = useState(false);
+  return { anchor, ref, open, setOpen };
+}
+
 /** A button that opens a menu. Its `title` is also its accessible name: these buttons are icons. */
 export function MenuButton({ items, children, className = 'icon-btn', title, placement = 'bottom-end', width }: { items: MenuItem[] | (() => MenuItem[]); children: ReactNode; className?: string; title?: string; placement?: Placement; width?: number }) {
-  const [open, setOpen] = useState(false);
-  const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
+  const { anchor, ref: setAnchor, open, setOpen } = useAnchor();
   const id = useId();
   return (
     <>

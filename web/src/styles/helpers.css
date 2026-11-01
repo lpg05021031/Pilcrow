@@ -9,7 +9,7 @@
   align-items: center;
   gap: var(--sp-2);
   min-height: 34px;
-  padding: var(--sp-1) 18px var(--sp-1) var(--sp-5);
+  padding: var(--sp-1) var(--sp-4_5) var(--sp-1) var(--sp-5);
   border-bottom: 1px solid var(--hair);
   background: var(--chrome);
   font-size: var(--fs-small);
@@ -24,9 +24,9 @@
 .helper-chip {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--sp-1_75);
   height: 22px;
-  padding: 0 9px 0 var(--sp-2);
+  padding: 0 var(--sp-2_25) 0 var(--sp-2);
   border: 0;
   border-radius: var(--r-pill);
   background: var(--fill-1);
@@ -51,11 +51,9 @@
 .status-pill.leading {
   color: var(--accent-text);
 }
-.status-pill.leading .status-dot {
-  animation: breathe 1.2s ease-in-out infinite;
-}
+
 .side-row.sub {
-  margin-left: 18px;
+  margin-left: var(--sp-4_5);
 }
 .msg-notes {
   display: grid;
@@ -134,7 +132,7 @@
 .hc-body {
   display: grid;
   gap: var(--sp-2);
-  padding: 0 var(--sp-3) var(--sp-2_5) 36px;
+  padding: 0 var(--sp-3) var(--sp-2_5) var(--sp-9);
 }
 .hc-note {
   padding: var(--sp-0_5) 0 var(--sp-1);

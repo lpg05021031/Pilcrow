@@ -30,15 +30,11 @@ body {
   overflow: hidden;
 }
 
-/* Smooth colour change when switching theme (class set briefly by applyTheme). */
-html.theme-switch * {
-  transition: background-color var(--t-slow) var(--ease-io), border-color var(--t-slow) var(--ease-io), color var(--t-slow) var(--ease-io), fill var(--t-slow), stroke var(--t-slow) !important;
-}
-
-/* Theme switches reveal through a clip-path circle animated from script; no default cross-fade. */
+/* Theme switches are View Transitions animated from script (store.ts flipTheme): a circle growing
+   from the click in Settings, a fade when the system's theme changes; the default cross-fade is off
+   (motion.css). */
 ::view-transition-old(root),
 ::view-transition-new(root) {
-  animation: none;
   mix-blend-mode: normal;
 }
 ::view-transition-old(root) {
@@ -158,7 +154,7 @@ kbd {
   justify-content: center;
   min-width: 18px;
   height: 18px;
-  padding: 0 5px;
+  padding: 0 var(--sp-1_25);
   font-family: var(--font-ui);
   font-size: var(--fs-micro);
   font-weight: 500;
@@ -309,7 +305,6 @@ kbd {
   gap: var(--sp-1);
   color: var(--text-2);
   font-size: inherit;
-  transition: color var(--t-fast);
 }
 .link:hover {
   color: var(--text);
@@ -321,7 +316,7 @@ kbd {
 .textarea {
   width: 100%;
   height: 34px;
-  padding: 0 11px;
+  padding: 0 var(--sp-2_75);
   border-radius: var(--r-2);
   border: none;
   background: var(--fill-1);
@@ -339,7 +334,7 @@ kbd {
 }
 .textarea {
   height: auto;
-  padding: 9px 11px;
+  padding: var(--sp-2_25) var(--sp-2_75);
   resize: none;
   line-height: 1.55;
 }
@@ -355,10 +350,9 @@ kbd {
 
 .field {
   display: grid;
-  gap: 7px;
+  gap: var(--sp-1_75);
 }
-.field > label,
-.field-label {
+.field > label {
   font-size: var(--fs-small);
   font-weight: 550;
   color: var(--text-2);
@@ -397,13 +391,12 @@ kbd {
   transform: translateX(14px);
 }
 
-
 .badge {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
   height: 19px;
-  padding: 0 7px;
+  padding: 0 var(--sp-1_75);
   border-radius: var(--r-pill);
   font-size: var(--fs-micro);
   font-weight: 550;
@@ -449,39 +442,11 @@ kbd {
   color: var(--text-3);
 }
 
-.spin {
-  animation: spin 0.8s linear infinite;
-}
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-/* Appear: used by things that mount in response to the user (rows, cards, panels). */
-@keyframes rise {
-  from {
-    opacity: 0;
-    transform: translateY(5px);
-  }
-}
-@keyframes fade {
-  from {
-    opacity: 0;
-  }
-}
-@keyframes pop {
-  from {
-    opacity: 0;
-    transform: scale(0.96);
-  }
-}
-
 .empty {
   display: grid;
   place-items: center;
   gap: var(--sp-2);
-  padding: 44px var(--sp-5);
+  padding: var(--sp-11) var(--sp-5);
   text-align: center;
   color: var(--text-3);
   line-height: 1.55;
@@ -490,13 +455,12 @@ kbd {
 /* Something on its way (ui/Empty Loading): faint lines with a slow sheen where rows will be. */
 .loading-rows {
   display: grid;
-  gap: 22px;
+  gap: var(--sp-5_5);
   padding: var(--sp-4) var(--sp-3_5);
-  animation: fade var(--t-med) var(--ease) 120ms both;
 }
 .sk-row {
   display: grid;
-  gap: 9px;
+  gap: var(--sp-2_25);
 }
 .sk-row .sk {
   height: 11px;
@@ -506,29 +470,9 @@ kbd {
   border-radius: var(--r-pill);
   background: linear-gradient(90deg, var(--fill-1), var(--fill-2), var(--fill-1));
   background-size: 200% 100%;
-  animation: sheen 1.4s linear infinite;
 }
 .sk.short {
   width: 60%;
-}
-@keyframes sheen {
-  to {
-    background-position: -200% 0;
-  }
-}
-
-/* Less motion, by request: everything lands at once. The delays go too, inline staggers included
-   (an !important here outranks a style attribute), or a list would still appear row by row. */
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001ms !important;
-    animation-delay: 0s !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
-    transition-delay: 0s !important;
-  }
 }
 
 /* A part of the page that failed to render (ui/ErrorBoundary.tsx): says so in place, offers a retry. */

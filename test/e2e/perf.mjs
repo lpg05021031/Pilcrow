@@ -7,26 +7,35 @@
 // The scenarios, each with what it measures:
 //   open400 / open2000  open a heavy conversation: modelled and first rows (the app's own performance.measure
 //                       entries, store.ts and Transcript.tsx), long tasks, DOM nodes, heap
-//   stream              a long turn streamed into the 2,000-turn one, the CPU slowed fourfold: frame intervals,
-//                       long tasks, script time per second, how far behind the live end the view falls
+//   stream / panel      a long turn streamed into the 2,000-turn one, the CPU slowed fourfold, the side panel
+//                       closed and then open on Changes: frame intervals, long tasks, script time per second,
+//                       how far behind the live end the view falls
 //   find                Ctrl+F, then typing a six-letter word that matches all through the 2,000 turns: the
 //                       longest task, the DOM nodes after, the time to the first match shown
 //   history             from the end of the 2,000 turns, a fling to the top, then reading down with the wheel:
 //                       frame intervals and long tasks while it moves, the pages drawn once it stops
 //   switch              after reading far up the 2,000 turns, another conversation and back: the time to the
 //                       place the reader left, and the longest task
-//   fence / write       a 60 kB code fence, and a 60 kB Write with its card open, streamed in pieces (CPU ×4):
-//                       frame intervals and long tasks
+//   read                the 400 turns read from top to end, every page drawn: DOM nodes and heap; then thirty
+//                       session.state events that change nothing drawn (CPU ×4), and the system theme flipping
+//   fence, list30, list60, table30, paragraph60
+//                       a reply that is one long block, streamed 200 characters a time (CPU ×4) until it is
+//                       drawn whole: frame intervals, script time per second, long tasks once it is whole
+//   write               a 60 kB Write streamed with its card open (CPU ×4): frame intervals and long tasks
 //   memory              ten 300-turn conversations opened one after another: the heap after a collection
-//   code                a 60 kB TSX block coloured once on screen: no task over 50 ms
+//   code                a 60 kB TSX block coloured on screen (three of them): no task over 50 ms
 //
-// Budgets. BASELINE holds the median of three runs on the machine that wrote it (the date is below). A
-// budget is that times MARGIN, so a twofold regression is over it and the noise of three runs in a row
-// here is under it. A figure whose own noise is larger than that is reported and not budgeted: the long
-// tasks in all while the marathon and the code fence stream (318 to 998 ms, and 225 to 684 ms, over
-// the three runs below); their frame intervals, longest task and script time per second are budgeted
-// instead. A few figures sit near nothing, so their budget has a FLOOR and is the larger of the two.
-// Two budgets are rules rather than measurements (RULES).
+// Budgets. Every scenario that takes time is measured three times in a row and its medians are what is
+// checked (thrice); find, history and memory once (their figures hold still from run to run).
+// BASELINE holds those medians, the median of three runs, on the machine that wrote it (the date is
+// below), and a budget is that times MARGIN: a twofold regression is over it, the noise of runs in a row
+// here under it. Some figures are dominated by noise or quantised, and have a FLOOR instead, the
+// larger of the two: a frame interval comes in steps of 16.7 ms (its p50 is always one or two steps),
+// a long task is 50 ms or more by definition, a GC pause lands anywhere, and the long tasks of a theme
+// flip or of thirty state events are near none. Those budgets catch a figure that leaves its band, not
+// a doubling inside it. Long tasks in all while something streams move by two or three times from
+// run to run and are reported, not budgeted; the frame intervals, longest task and script time per
+// second are. Two budgets are rules rather than measurements (RULES).
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -45,23 +54,34 @@ const only = args.includes('--only') ? args[args.indexOf('--only') + 1].split(',
 const runs = (name) => !only || only.includes(name);
 
 const MARGIN = 1.6;
-// The median of three runs: headless Chrome, 1400×900, the development container, 2026-11-01.
+// The median of three runs (each figure itself the median of thrice where measured so): headless Chrome,
+// 1400×900, the development container, 2026-11-01, with other work on the machine now and then.
 const BASELINE = {
-  open400: { modelled: 126, rows: 184, longMax: 95, nodes: 1070, heapMB: 12 },
-  open2000: { modelled: 561, rows: 641, longMax: 163, nodes: 1995, heapMB: 25 },
-  stream: { p95: 50, longMax: 81, scriptPerSec: 206 },
-  find: { openMax: 0, typeMax: 0, nodes: 6186, firstMs: 6 },
-  history: { p95: 33.3, longTotal: 0, nodes: 31433, drawn: 40 },
-  switch: { ms: 122, longMax: 0 },
-  fence: { p50: 16.7, p95: 50, scriptPerSec: 234, closing: 61 },
-  write: { p50: 16.7, p95: 33.3, scriptPerSec: 245, longTotal: 52 },
-  memory: { heapMB: 24 },
-  code: { ms: 1125 },
+  open400: { modelled: 163, rows: 213, longMax: 109, nodes: 1072, heapMB: 12 },
+  open2000: { modelled: 550, rows: 660, longMax: 160, nodes: 1997, heapMB: 25 },
+  stream: { p95: 49.9, longMax: 115, scriptPerSec: 159 },
+  panel: { p95: 50, longMax: 133, scriptPerSec: 160 },
+  find: { openMax: 0, typeMax: 0, nodes: 11781, firstMs: 6 },
+  history: { p95: 16.8, longTotal: 0, nodes: 37795, drawn: 49 },
+  switch: { ms: 119, longMax: 0 },
+  read: { nodes: 51635, heapMB: 23, stateScript: 199, longMax: 0, longTotal: 0 },
+  fence: { p50: 16.7, p95: 50.1, scriptPerSec: 219, closing: 422 },
+  list30: { p50: 33.3, p95: 50.1, scriptPerSec: 237, closing: 0 },
+  list60: { p50: 33.3, p95: 50, scriptPerSec: 188, closing: 0 },
+  table30: { p50: 33.3, p95: 83.3, scriptPerSec: 213, closing: 0 },
+  paragraph60: { p50: 49.9, p95: 83.3, scriptPerSec: 187, closing: 0 },
+  write: { p50: 16.7, p95: 33.3, scriptPerSec: 211, longTotal: 64 },
+  memory: { heapMB: 32 },
+  code: { ms: 1227 },
 };
 // Where a baseline is near nothing a margin means nothing: a frame interval comes in steps of 16.7 ms,
 // a long task is 50 ms or more by definition, and a GC pause can land on any step. These budgets are
-// the floor instead, which is still under what the work measured before it was made cheap.
-const FLOOR = { longMax: 120, openMax: 60, typeMax: 60, longTotal: 200, closing: 200, p95: 40, firstMs: 100 };
+// the floor instead, set over the noise measured here (a 56 ms task while typing in Find in one of
+// nine runs, the rest none) and under what the work cost before it was made cheap (a system theme
+// flip: 473 ms of long tasks; thirty state events over every page drawn: a 322 ms task).
+// The DOM nodes after opening move by a page: the page above the landing one is drawn or not before the
+// view holds still (1,072 or 1,839 nodes for the 400 turns over twelve opens).
+const FLOOR = { longMax: 120, openMax: 100, typeMax: 100, longTotal: 200, closing: 200, p95: 40, firstMs: 100, nodes: 2000 };
 const RULES = {
   // JavaScript parsed before a conversation's first rows: the editor, the terminal, the highlighter and
   // the app pages load on first use. vite.config.mjs warns past the same figure.
@@ -70,7 +90,13 @@ const RULES = {
   codeLongMax: 50,
   codeMs: 15000,
 };
-const budget = (scenario, key) => Math.round(Math.max(BASELINE[scenario][key] * MARGIN, FLOOR[key] || 0) * 10) / 10;
+// A frame interval moves in whole frames, so its budget is rounded up to one: a p95 of 50 ms (three
+// frames) gets 83.4, which one frame of noise stays under and a doubling (100) does not.
+const FRAME = 1000 / 60;
+const budget = (scenario, key) => {
+  const b = Math.max(BASELINE[scenario][key] * MARGIN, FLOOR[key] || 0);
+  return Math.round((/^p\d+$/.test(key) ? Math.ceil(b / FRAME - 0.01) * FRAME + 0.1 : b) * 10) / 10;
+};
 
 if (!existsSync(join(ROOT, 'web', 'dist', 'index.html'))) {
   console.error('web/dist is missing: run `npm run build` first');
@@ -122,8 +148,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  * earlier scenario's opening in this one's figures.
  */
 async function freshPage() {
-  await ctl.call('config.set', { ui: { lastSession: '' } });
-  const context = await browser.newContext({ viewport: { width: 1400, height: 900 }, reducedMotion: 'no-preference' });
+  // The theme follows the system's, as it does out of the box, so `theme` can flip it the way the OS does.
+  await ctl.call('config.set', { theme: 'system', ui: { lastSession: '' } });
+  const context = await browser.newContext({ viewport: { width: 1400, height: 900 }, reducedMotion: 'no-preference', colorScheme: 'dark' });
   await context.addInitScript(() => {
     window.__long = [];
     new PerformanceObserver((l) => window.__long.push(...l.getEntries().map((e) => ({ at: e.startTime, ms: e.duration })))).observe({ type: 'longtask', buffered: true });
@@ -415,27 +442,47 @@ async function feed(sid, batches, every = 16) {
   }
 }
 
-/** A reply that is one 60 kB code fence, streamed 200 characters at a time (CPU ×4); it ends as the SDK ends it, with the whole message. */
-async function measureFence(page, cdp, sid) {
-  await warmTsx(page, sid);
-  const code = sixty();
-  const text = '```tsx\n' + code + '\n```';
-  const msgId = 'msg_fence';
-  await ctl.call('mock.messages', { id: sid, msgs: [{ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'show me the code' }] } }] });
-  await page.waitForFunction(() => [...document.querySelectorAll('.msg-user-text')].some((e) => e.textContent === 'show me the code'), null, { timeout: 5000 });
+// Replies of one long block, as they come from Claude: a list, a table and a paragraph that grow at
+// their end, made of the inline code, bold and links Claude writes.
+const PROSE = ['the reader', 'scrolls back', 'to `useFollow`', 'and **every** row', 'keeps its place', 'while [the list](https://example.com/list)', 'grows at its end', 'in `web/src/lib/markdown.ts`', 'without a jump'];
+const prose = (i, n) => Array.from({ length: n }, (_, k) => PROSE[(i * 3 + k) % PROSE.length]).join(' ');
+const upTo = (kB, line) => {
+  let s = '';
+  for (let i = 0; s.length < kB * 1024; i++) s += line(i);
+  return s;
+};
+const SHAPES = {
+  list30: () => upTo(30, (i) => `- Item ${i}: ${prose(i, 4)}.\n`),
+  list60: () => upTo(60, (i) => `- Item ${i}: ${prose(i, 4)}.\n`),
+  table30: () => '| # | Where | What | State |\n|---|---|---|---|\n' + upTo(30, (i) => `| ${i} | \`src/f${i}.ts\` | ${prose(i, 3)} | ok |\n`),
+  paragraph60: () => upTo(60, (i) => `${prose(i, 5)}, `) + 'and that is all.',
+  fence60: () => '```tsx\n' + sixty() + '\n```',
+};
+
+/**
+ * A reply streamed into a small conversation 200 characters every 16 ms (CPU ×4), ended as the SDK
+ * ends it, with the whole message: the frames from its first piece until it is drawn whole (the
+ * reveal catches up after the reply ends, Transcript useSmoothText), then the long tasks of the
+ * half second after, where it is drawn whole once and coloured.
+ */
+let replies = 0;
+async function measureReply(page, cdp, sid, text) {
+  const ask = `reply ${++replies}, please`;
+  const msgId = `msg_reply_${replies}`;
+  await ctl.call('mock.messages', { id: sid, msgs: [{ type: 'user', message: { role: 'user', content: [{ type: 'text', text: ask }] } }] });
+  await page.waitForFunction((ask) => [...document.querySelectorAll('.msg-user-text')].some((e) => e.textContent === ask), ask, { timeout: 5000 });
   await settle(page); // the question lands first; the reply is what is measured
   await cdp.send('Performance.enable');
   const m0 = await metrics(cdp);
   const t0 = await startFrames(page);
   await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
   await feed(sid, [[ev({ type: 'message_start', message: { id: msgId } }), ev({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } })], ...pieces(text, 200).map((p) => [ev({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: p } })])]);
-  // While it streams, apart from the moment it ends: the closed block is drawn whole once, then coloured.
+  await feed(sid, [[ev({ type: 'content_block_stop', index: 0 }), ev({ type: 'message_stop' }), { type: 'assistant', message: { id: msgId, role: 'assistant', content: [{ type: 'text', text }] } }]]);
+  await page.waitForFunction(() => !document.querySelector('.md.streaming'), null, { timeout: 120_000 });
   const f = await stopFrames(page);
   const per = perSecond(m0, await metrics(cdp), f.ms);
   const long = await longSince(page, t0);
   const t1 = await now(page);
-  await feed(sid, [[ev({ type: 'content_block_stop', index: 0 }), ev({ type: 'message_stop' }), { type: 'assistant', message: { id: msgId, role: 'assistant', content: [{ type: 'text', text }] } }]]);
-  await page.waitForFunction((n) => [...document.querySelectorAll('.md:not(.streaming) pre')].some((p) => p.textContent.length >= n), code.length - 1, { timeout: 60_000 });
   await sleep(500);
   const closing = await longSince(page, t1);
   await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
@@ -456,10 +503,9 @@ async function warmTsx(page, sid) {
 
 /** A 60 kB Write streamed as its input arrives (CPU ×4), its fold and card open. */
 async function measureWrite(page, cdp, sid) {
-  await warmTsx(page, sid);
   const input = JSON.stringify({ file_path: '/home/me/pilcrow/web/src/components/Big.tsx', content: sixty() });
-  const msgId = 'msg_write';
-  const id = 'toolu_write_perf';
+  const msgId = `msg_write_${++replies}`;
+  const id = `toolu_write_${replies}`;
   const delta = (p) => [ev({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: p } })];
   const parts = pieces(input, 200);
   await feed(sid, [[ev({ type: 'message_start', message: { id: msgId } }), ev({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id, name: 'Write', input: {} } })], ...parts.slice(0, 5).map(delta)]);
@@ -489,6 +535,56 @@ async function measureMemory(page, cdp, ids) {
   return { sessions: ids.length, heapMB: await heapMB(cdp) };
 }
 
+/** To the top of a conversation with the wheel, then down to its end a little at a time, so every page is drawn. */
+async function readAll(page) {
+  const box = await page.locator('.transcript').boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  for (let i = 0; i < 80 && (await page.evaluate(() => document.querySelector('.transcript').scrollTop)) > 50; i++) {
+    await page.mouse.wheel(0, -6000);
+    await sleep(16);
+  }
+  await settle(page);
+  for (let i = 0; i < 4000; i++) {
+    await page.mouse.wheel(0, 700);
+    await sleep(40);
+    const left = await page.evaluate(() => {
+      const el = document.querySelector('.transcript');
+      return el.scrollHeight - el.scrollTop - el.clientHeight > 2 || document.querySelector('.page.far') !== null;
+    });
+    if (!left) break;
+  }
+  await settle(page);
+}
+
+/**
+ * Thirty session.state events, one every 33 ms, that change nothing the conversation shows (the
+ * server sends one for every task event, status and permission change), with every page drawn and
+ * the CPU slowed fourfold: the main thread's time per second, and the longest task.
+ */
+async function measureState(page, cdp, id) {
+  await cdp.send('Performance.enable');
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+  const t0 = await now(page);
+  const m0 = await metrics(cdp);
+  for (let i = 0; i < 30; i++) {
+    await ctl.call('mock.patch', { id, state: { lastActivity: Date.now() } });
+    await sleep(33);
+  }
+  await sleep(300);
+  const per = perSecond(m0, await metrics(cdp), (await now(page)) - t0);
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
+  return { ...per, long: await longSince(page, t0) };
+}
+
+/** The system's theme flipping under every page drawn: the long tasks until it has settled. */
+async function measureTheme(page, scheme) {
+  const t0 = await now(page);
+  await page.emulateMedia({ colorScheme: scheme });
+  await page.waitForFunction((scheme) => document.documentElement.dataset.theme === scheme, scheme, { timeout: 5000 });
+  await sleep(800);
+  return { long: await longSince(page, t0) };
+}
+
 const codeTurn = (code) => [{ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'show me the code' }] } }, { type: 'assistant', message: { id: `msg_${code.length}`, role: 'assistant', content: [{ type: 'text', text: 'Here it is:\n\n```tsx\n' + code + '\n```' }] } }];
 
 /** Open a conversation and wait until its last code block is coloured; the long tasks from its first rows on. */
@@ -510,20 +606,36 @@ async function colour(page, id, minLength) {
  * the first time each is needed, 50–350 ms at a time here, a one-off per pattern and window that
  * slicing cannot split. That first block is reported apart, without a budget.
  */
-async function measureCode(page, warm, code) {
+async function measureCode(page, warm, codes) {
   const cold = await colour(page, 'perf-warm', warm.length - 1);
-  const out = await colour(page, 'perf-code', code.length - 1);
-  Object.assign(
-    out,
-    await page.evaluate((lines) => {
+  let i = 0;
+  const out = await thrice(async () => {
+    const code = codes[i];
+    const c = await colour(page, `perf-code-${i++}`, code.length - 1);
+    const drawn = await page.evaluate(() => {
       const pre = [...document.querySelectorAll('pre[data-hl="1"]')].at(-1);
-      return { lines, coloured: pre.querySelectorAll('.line').length, styled: pre.querySelectorAll('.line span[style*="--shiki"]').length };
-    }, code.split('\n').length),
-  );
-  return { ...out, kB: Math.round(code.length / 1024), cold: { kB: Math.round(warm.length / 1024), ...cold } };
+      return { coloured: pre.querySelectorAll('.line').length, styled: pre.querySelectorAll('.line span[style*="--shiki"]').length };
+    });
+    return { ...c, ...drawn, lines: code.split('\n').length };
+  });
+  return { ...out, kB: Math.round(codes[0].length / 1024), cold: { kB: Math.round(warm.length / 1024), ...cold } };
 }
 
 // ---------------------------------------------------------------- the run
+
+/** The median of each figure over runs of one measurement, nested figures included. */
+function median(outs) {
+  const first = outs[0];
+  if (typeof first === 'number') return outs.slice().sort((a, b) => a - b)[Math.floor(outs.length / 2)];
+  if (first && typeof first === 'object') return Object.fromEntries(Object.keys(first).map((k) => [k, median(outs.map((o) => o[k]))]));
+  return first;
+}
+/** A measurement taken three times in a row, and its medians: one run's figure moves by half again from run to run here. */
+async function thrice(fn) {
+  const outs = [];
+  for (let i = 0; i < 3; i++) outs.push(await fn(i));
+  return median(outs);
+}
 
 const failures = [];
 const check = (what, value, max) => {
@@ -558,21 +670,20 @@ console.log('Pilcrow performance (headless Chrome, heavy generated conversations
 const gen = {};
 for (const turns of [400, 2000]) gen[turns] = await ctl.call('mock.generate', { id: `perf-${turns}`, turns, shape: 'heavy' });
 
-/**
- * Opening is measured three times, each in a window of its own, and the median taken: one open is a
- * few hundred milliseconds of work, and one run's figure moves by half again from run to run here.
- */
+/** Opening, three times, each in a window of its own; the last window is handed to `keep` when given. */
 async function openThrice(id, keep) {
-  const outs = [];
-  for (let i = 0; i < 3; i++) {
+  let i = 0;
+  let last = null;
+  const out = await thrice(async () => {
     const p = await freshPage();
     current = p.page;
-    outs.push(await measureOpen(p.page, p.cdp, id));
-    if (i < 2 || !keep) await p.context.close();
-    else await keep(p);
-  }
-  const mid = (f) => outs.map(f).sort((a, b) => a - b)[1];
-  return { ...outs[2], modelled: mid((o) => o.modelled), rows: mid((o) => o.rows), wall: mid((o) => o.wall), longMax: mid((o) => o.long.max), longTotal: mid((o) => o.long.total), nodes: mid((o) => o.nodes), heapMB: mid((o) => o.heapMB), fromBottom: Math.max(...outs.map((o) => o.fromBottom)) };
+    const o = await measureOpen(p.page, p.cdp, id);
+    if (++i < 3 || !keep) await p.context.close();
+    else last = p;
+    return o;
+  });
+  if (last) await keep(last);
+  return out;
 }
 
 await scenario('open400', async () => reportOpen('open400', 400, await openThrice('perf-400')));
@@ -580,20 +691,23 @@ await scenario('open400', async () => reportOpen('open400', 400, await openThric
 function reportOpen(name, turns, out) {
   results[name] = out;
   const b = (k) => budget(name, k);
-  console.log(`  open ${turns} turns (${gen[turns].messages} messages, ${(gen[turns].bytes / 1048576).toFixed(1)} MB): ${out.eagerKB} kB of JS before the first rows · modelled ${out.modelled} ms · first rows ${out.rows} ms (wall ${out.wall} ms) · longest task ${out.longMax} ms, long tasks in all ${out.longTotal} ms · ${out.nodes} nodes · heap ${out.heapMB} MB (medians of three)`);
+  console.log(`  open ${turns} turns (${gen[turns].messages} messages, ${(gen[turns].bytes / 1048576).toFixed(1)} MB): ${out.eagerKB} kB of JS before the first rows · modelled ${out.modelled} ms · first rows ${out.rows} ms (wall ${out.wall} ms) · longest task ${out.long.max} ms, long tasks in all ${out.long.total} ms · ${out.nodes} nodes · heap ${out.heapMB} MB · ${out.fromBottom}px from the end`);
   check(`${name}: JavaScript loaded before the first rows (kB)`, out.eagerKB, RULES.eagerKB);
   check(`${name}: open → modelled (ms)`, out.modelled, b('modelled'));
   check(`${name}: open → first rows (ms)`, out.rows, b('rows'));
-  check(`${name}: longest task while opening (ms)`, out.longMax, b('longMax'));
+  check(`${name}: longest task while opening (ms)`, out.long.max, b('longMax'));
   check(`${name}: DOM nodes`, out.nodes, b('nodes'));
   check(`${name}: heap (MB)`, out.heapMB, b('heapMB'));
   check(`${name}: distance from the live end after opening (px)`, out.fromBottom, 60);
 }
 
+/** A streaming figure, said the same way for every scenario that streams. */
+const said = (s) => `${s.frames} frames · frame p50 ${s.p50} ms, p95 ${s.p95} ms, max ${s.max} ms · long tasks ${s.long.n}, max ${s.long.max} ms, total ${s.long.total} ms · main thread ${s.taskPerSec} ms/s (script ${s.scriptPerSec}, style ${s.stylePerSec}, layout ${s.layoutPerSec})`;
+
 // The 2,000-turn conversation, one window for all its scenarios after the opening, in the order a session goes.
 let big = null;
 await scenario('open2000', async () => reportOpen('open2000', 2000, await openThrice('perf-2000', (p) => (big = p))));
-if (['stream', 'find', 'history', 'switch'].some(runs))
+if (['stream', 'panel', 'find', 'history', 'switch'].some(runs))
   await (async () => {
     if (!big) {
       big = await freshPage();
@@ -601,15 +715,25 @@ if (['stream', 'find', 'history', 'switch'].some(runs))
     }
     const { page, cdp } = big;
     current = page;
-    await scenario('stream', async () => {
-      const s = await measureStream(page, cdp);
-      results.stream = s;
-      const b = (k) => budget('stream', k);
-      console.log(`  stream into 2000 turns: ${s.frames} frames in ${s.ms} ms · frame p50 ${s.p50} ms, p95 ${s.p95} ms, max ${s.max} ms · long tasks ${s.long.n}, max ${s.long.max} ms, total ${s.long.total} ms · main thread ${s.taskPerSec} ms/s (script ${s.scriptPerSec}, style ${s.stylePerSec}, layout ${s.layoutPerSec}) · ${s.nodes} nodes · at most ${s.behindMax}px behind, ${s.behind}px at the end`);
-      check('stream: frame interval p95 (ms)', s.p95, b('p95'));
-      check('stream: longest task (ms)', s.long.max, b('longMax'));
-      check('stream: script time per second of streaming (ms)', s.scriptPerSec, b('scriptPerSec'));
-      check('stream: distance from the live end once it ends (px)', s.behind, 60);
+    const stream = async (name, what) => {
+      const s = await thrice(() => measureStream(page, cdp));
+      results[name] = s;
+      const b = (k) => budget(name, k);
+      console.log(`  ${what}: ${said(s)} · ${s.nodes} nodes · at most ${s.behindMax}px behind, ${s.behind}px at the end`);
+      check(`${name}: frame interval p95 (ms)`, s.p95, b('p95'));
+      check(`${name}: longest task (ms)`, s.long.max, b('longMax'));
+      check(`${name}: script time per second of streaming (ms)`, s.scriptPerSec, b('scriptPerSec'));
+      check(`${name}: distance from the live end once it ends (px)`, s.behind, 60);
+    };
+    await scenario('stream', () => stream('stream', 'stream into 2000 turns'));
+    await scenario('panel', async () => {
+      await page.locator('.composer-input').click();
+      await page.keyboard.press('Alt+1');
+      await page.waitForSelector('.changes', { timeout: 10_000 });
+      await settle(page);
+      await stream('panel', 'the same with the Changes panel open');
+      await page.keyboard.press('Alt+1');
+      await page.waitForSelector('.changes', { state: 'detached', timeout: 10_000 });
     });
     await scenario('find', async () => {
       const f = await measureFind(page);
@@ -632,7 +756,7 @@ if (['stream', 'find', 'history', 'switch'].some(runs))
       check('history: pages drawn once it stops', h.drawn, b('drawn'));
     });
     await scenario('switch', async () => {
-      const s = await measureSwitch(page, 'perf-2000', 'perf-400');
+      const s = await thrice(() => measureSwitch(page, 'perf-2000', 'perf-400'));
       results.switch = s;
       const b = (k) => budget('switch', k);
       console.log(`  back to 2000 turns after reading far up (${s.drawnBefore} pages drawn) and another conversation: the place back in ${s.ms} ms · longest task ${s.long.max} ms · ${s.drawnAfter} pages drawn · the place moved ${s.moved}px`);
@@ -643,35 +767,74 @@ if (['stream', 'find', 'history', 'switch'].some(runs))
     await big.context.close();
   })();
 
-await scenario('fence', async () => {
-  await ctl.call('mock.generate', { id: 'perf-small', turns: 4, shape: 'mixed' });
-  await onPage(async ({ page, cdp }) => {
-    await openSession(page, 'perf-small');
-    const f = await measureFence(page, cdp, 'perf-small');
-    results.fence = f;
-    const b = (k) => budget('fence', k);
-    console.log(`  a ${f.kB} kB code fence streamed (CPU ×4): ${f.frames} frames · frame p50 ${f.p50} ms, p95 ${f.p95} ms, max ${f.max} ms · long tasks ${f.long.n}, max ${f.long.max} ms, total ${f.long.total} ms · main thread ${f.taskPerSec} ms/s (script ${f.scriptPerSec}, style ${f.stylePerSec}, layout ${f.layoutPerSec}) · once it closes, long tasks ${f.closing.total} ms in all`);
-    check('fence: frame interval p50 (ms)', f.p50, b('p50'));
-    check('fence: frame interval p95 (ms)', f.p95, b('p95'));
-    check('fence: script time per second (ms)', f.scriptPerSec, b('scriptPerSec'));
-    check('fence: long tasks once it closes (ms)', f.closing.total, b('closing'));
-  });
-});
+// The 400-turn conversation read from its first message to its last: every page drawn, which is as
+// heavy as a window gets (drawn pages stay drawn while the conversation is on screen, Transcript).
+await scenario('read', () =>
+  onPage(async ({ page, cdp }) => {
+    await openSession(page, 'perf-400');
+    await settle(page);
+    await readAll(page);
+    const r = { drawn: await drawn(page), nodes: await nodes(page), heapMB: await heapMB(cdp) };
+    r.state = await thrice(() => measureState(page, cdp, 'perf-400'));
+    let scheme = 'dark';
+    r.theme = await thrice(() => measureTheme(page, (scheme = scheme === 'dark' ? 'light' : 'dark')));
+    results.read = r;
+    const b = (k) => budget('read', k);
+    console.log(`  400 turns read to the end: ${r.drawn} pages drawn, ${r.nodes} nodes, heap ${r.heapMB} MB · 30 session.state events (CPU ×4): main thread ${r.state.taskPerSec} ms/s (script ${r.state.scriptPerSec}), longest task ${r.state.long.max} ms · the system theme flipping: long tasks ${r.theme.long.n}, max ${r.theme.long.max} ms, total ${r.theme.long.total} ms`);
+    check('read: DOM nodes with every page drawn', r.nodes, b('nodes'));
+    check('read: heap with every page drawn (MB)', r.heapMB, b('heapMB'));
+    check('read: script time per second of session.state events (ms)', r.state.scriptPerSec, b('stateScript'));
+    check('read: longest task of session.state events (ms)', r.state.long.max, b('longMax'));
+    check('read: long tasks of a system theme flip in all (ms)', r.theme.long.total, b('longTotal'));
+  }),
+);
 
-await scenario('write', async () => {
-  await ctl.call('mock.generate', { id: 'perf-small', turns: 4, shape: 'mixed' });
-  await onPage(async ({ page, cdp }) => {
-    await openSession(page, 'perf-small');
-    const w = await measureWrite(page, cdp, 'perf-small');
+// Replies of one long block each, each in a small conversation and a window of its own (what the
+// replies before it drew would otherwise weigh on it): the fence (and the Write below) after the TSX
+// grammar has compiled, which is a one-off per window (measureCode).
+async function small(page, sid) {
+  await ctl.call('mock.generate', { id: sid, turns: 4, shape: 'mixed' });
+  await ctl.call('mock.touch', { id: sid }); // the sidebar lists a folder's most recent rows
+  await openSession(page, sid);
+}
+for (const [name, what] of [
+  ['fence', 'code fence'],
+  ['list30', 'bullet list'],
+  ['list60', 'bullet list'],
+  ['table30', 'table'],
+  ['paragraph60', 'paragraph'],
+])
+  await scenario(name, () =>
+    onPage(async ({ page, cdp }) => {
+      const sid = `perf-${name}`;
+      await small(page, sid);
+      if (name === 'fence') await warmTsx(page, sid);
+      const text = SHAPES[name === 'fence' ? 'fence60' : name]();
+      const f = await thrice(() => measureReply(page, cdp, sid, text));
+      results[name] = f;
+      const b = (k) => budget(name, k);
+      console.log(`  a ${f.kB} kB ${what} streamed (CPU ×4), until drawn whole: ${said(f)} · the half second after, long tasks ${f.closing.total} ms in all`);
+      check(`${name}: frame interval p50 (ms)`, f.p50, b('p50'));
+      check(`${name}: frame interval p95 (ms)`, f.p95, b('p95'));
+      check(`${name}: script time per second (ms)`, f.scriptPerSec, b('scriptPerSec'));
+      check(`${name}: long tasks once drawn whole (ms)`, f.closing.total, b('closing'));
+    }),
+  );
+
+await scenario('write', () =>
+  onPage(async ({ page, cdp }) => {
+    await small(page, 'perf-write');
+    await warmTsx(page, 'perf-write');
+    const w = await thrice(() => measureWrite(page, cdp, 'perf-write'));
     results.write = w;
     const b = (k) => budget('write', k);
-    console.log(`  a ${w.kB} kB Write streamed, its card open (CPU ×4): ${w.frames} frames · frame p50 ${w.p50} ms, p95 ${w.p95} ms, max ${w.max} ms · long tasks ${w.long.n}, max ${w.long.max} ms, total ${w.long.total} ms · main thread ${w.taskPerSec} ms/s (script ${w.scriptPerSec}, style ${w.stylePerSec}, layout ${w.layoutPerSec})`);
+    console.log(`  a ${w.kB} kB Write streamed, its card open (CPU ×4): ${said(w)}`);
     check('write: frame interval p50 (ms)', w.p50, b('p50'));
     check('write: frame interval p95 (ms)', w.p95, b('p95'));
     check('write: script time per second (ms)', w.scriptPerSec, b('scriptPerSec'));
     check('write: long tasks in total (ms)', w.long.total, b('longTotal'));
-  });
-});
+  }),
+);
 
 await scenario('memory', async () => {
   const ids = [];
@@ -686,15 +849,18 @@ await scenario('memory', async () => {
 
 await scenario('code', async () => {
   const warm = tsx('Markdown', 'RightPanel', 'SessionView', 'Inbox');
-  const code = sixty();
+  // Three blocks, each a little different so none is coloured from the cache of the one before.
+  const codes = [0, 1, 2].map((i) => `${sixty()}\n// block ${i}`);
   await ctl.call('mock.generate', { id: 'perf-warm', turns: 1, shape: 'mixed' });
   await ctl.call('mock.messages', { id: 'perf-warm', msgs: codeTurn(warm) });
-  await ctl.call('mock.generate', { id: 'perf-code', turns: 1, shape: 'mixed' });
-  await ctl.call('mock.messages', { id: 'perf-code', msgs: codeTurn(code) });
+  for (let i = 0; i < 3; i++) {
+    await ctl.call('mock.generate', { id: `perf-code-${i}`, turns: 1, shape: 'mixed' });
+    await ctl.call('mock.messages', { id: `perf-code-${i}`, msgs: codeTurn(codes[i]) });
+  }
   // To the top of the sidebar, which shows only the most recent rows of a folder.
-  for (const id of ['perf-warm', 'perf-code']) await ctl.call('mock.touch', { id });
+  for (const id of ['perf-warm', 'perf-code-0', 'perf-code-1', 'perf-code-2']) await ctl.call('mock.touch', { id });
   await onPage(async ({ page }) => {
-    const c = await measureCode(page, warm, code);
+    const c = await measureCode(page, warm, codes);
     results.code = c;
     console.log(`  first TSX block in the window (${c.cold.kB} kB, the grammar compiling): coloured in ${c.cold.ms} ms · long tasks ${c.cold.long.n}, max ${c.cold.long.max} ms`);
     console.log(`  a ${c.kB} kB TSX block: every line coloured in ${c.ms} ms (${c.coloured} of ${c.lines} lines, ${c.styled} coloured tokens) · long tasks ${c.long.n}, max ${c.long.max} ms`);

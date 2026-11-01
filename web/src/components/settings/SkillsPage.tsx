@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { Plus, Search, ScrollText, FolderOpen, Pencil, Trash, Copy, RefreshCw, Puzzle, FolderInput, Ellipsis } from 'lucide-react';
 import { useStore, call, openFile, confirmAction, toast, setDialog } from '../../lib/store';
 import type { SkillInfo, SkillsList } from '../../lib/types';
-import { tildify, timeAgo, plural } from '../../lib/format';
+import { tildify, timeAgo, plural, moment } from '../../lib/format';
 import { MenuButton } from '../ui/Popover';
 import { Dialog } from '../ui/Dialog';
 import { Spinner, Seg, Field } from '../ui/bits';
+import { useEvent } from '../ui/hooks';
 import { FolderPicker } from '../FolderPicker';
 import { errText } from '../../lib/format';
 
@@ -19,6 +20,12 @@ function useActiveCwd() {
   return rt?.cwd || session?.cwd || '';
 }
 
+/** The skills whose name or description holds what was typed. */
+function matching(list: SkillInfo[], q: string) {
+  const n = q.trim().toLowerCase();
+  return n ? list.filter((s) => s.name.toLowerCase().includes(n) || s.description.toLowerCase().includes(n)) : list;
+}
+
 export function SkillsPage() {
   const cwd = useActiveCwd();
   const info = useStore((s) => s.info);
@@ -28,7 +35,7 @@ export function SkillsPage() {
   const [creating, setCreating] = useState<null | Scope>(null);
   const [importing, setImporting] = useState<null | Scope>(null);
 
-  const load = async () => {
+  const load = useEvent(async () => {
     setLoading(true);
     try {
       setData(await call<SkillsList>('skills.list', { cwd }, { quiet: true }));
@@ -37,25 +44,21 @@ export function SkillsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  });
   useEffect(() => {
     load();
-  }, [cwd]); // eslint-disable-line react-hooks/exhaustive-deps -- loads per folder; load() is a fresh closure each render
+  }, [cwd, load]);
 
-  const filter = (list: SkillInfo[]) => {
-    const n = q.trim().toLowerCase();
-    return n ? list.filter((s) => s.name.toLowerCase().includes(n) || s.description.toLowerCase().includes(n)) : list;
-  };
   const groups = useMemo(
     () =>
       data
         ? [
-            { id: 'user', title: 'Personal', hint: tildify(data.roots.user, info?.home), items: filter(data.user), editable: true },
-            { id: 'project', title: 'This project', hint: data.roots.project ? tildify(data.roots.project, info?.home) : 'Open a session to see project skills', items: filter(data.project), editable: Boolean(data.roots.project) },
-            { id: 'plugin', title: 'From plugins', hint: 'Installed with a plugin; edit them there', items: filter(data.plugin), editable: false },
+            { id: 'user', title: 'Personal', hint: tildify(data.roots.user, info?.home), items: matching(data.user, q), editable: true },
+            { id: 'project', title: 'This project', hint: data.roots.project ? tildify(data.roots.project, info?.home) : 'Open a session to see project skills', items: matching(data.project, q), editable: Boolean(data.roots.project) },
+            { id: 'plugin', title: 'From plugins', hint: 'Installed with a plugin; edit them there', items: matching(data.plugin, q), editable: false },
           ]
         : [],
-    [data, q, info?.home], // eslint-disable-line react-hooks/exhaustive-deps -- filter() is a fresh closure over q, which is listed
+    [data, q, info?.home],
   );
   const total = data ? data.user.length + data.project.length + data.plugin.length : 0;
 
@@ -160,7 +163,7 @@ export function SkillsPage() {
                     {s.description || <span className="faint">No description — Claude will rarely pick this skill</span>}
                   </span>
                 </span>
-                <span className="cust-time faint" title={new Date(s.mtime).toLocaleString()}>
+                <span className="cust-time faint" title={moment(s.mtime)}>
                   {timeAgo(s.mtime)}
                 </span>
                 <MenuButton

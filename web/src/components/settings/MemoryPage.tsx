@@ -4,7 +4,8 @@ import { useStore, call, setConfig, toast, confirmAction, activeSession } from '
 import type { Config, MemoryNote } from '../../lib/types';
 import { basename, timeAgo, tildify, plural } from '../../lib/format';
 import { Select } from '../ui/Select';
-import { Switch, Spinner, useNow } from '../ui/bits';
+import { Switch, Spinner } from '../ui/bits';
+import { useNow } from '../ui/hooks';
 import { ModelSelect } from '../ModelSelect';
 import { Empty } from '../ui/Empty';
 
@@ -107,7 +108,7 @@ export function MemoryPage({ config }: { config: Config }) {
             <span className="mem-setting-title">Model for note-taking</span>
             <span className="hint">A smaller model is plenty here.</span>
           </span>
-          <div style={{ width: 240 }}>
+          <div className="mem-setting-control">
             <ModelSelect label="Model for note-taking" value={config.memoryModel || ''} onChange={(v, typing) => !typing && setConfig({ memoryModel: v })} onCommit={() => {}} />
           </div>
         </div>

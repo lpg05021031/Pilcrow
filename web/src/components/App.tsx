@@ -10,7 +10,8 @@ import { Welcome } from './Welcome';
 import { NewSessionDialog } from './NewSessionDialog';
 import { McpAuthDialog } from './McpAuthDialog';
 import { CommandPalette, ShortcutsDialog, ConfirmDialog, Toasts, Lightbox } from './Overlays';
-import { Resizer, useWindowKey } from './ui/bits';
+import { Resizer } from './ui/bits';
+import { useWindowKey } from './ui/keys';
 import { Slot } from './ui/Slot';
 import { ErrorBoundary } from './ui/ErrorBoundary';
 
@@ -37,9 +38,10 @@ export function App() {
   const session = sessions.find((s) => s.id === activeId) || null;
   const waiting = sessions.filter((s) => s.status === 'requires_action').length;
 
+  const title = `${waiting ? `(${waiting}) ` : ''}${page === 'overview' ? 'Control room — ' : page === 'inbox' ? 'Inbox — ' : page === 'dispatch' ? 'Dispatch — ' : session ? `${session.title} — ` : ''}Pilcrow`;
   useEffect(() => {
-    document.title = `${waiting ? `(${waiting}) ` : ''}${page === 'overview' ? 'Control room — ' : page === 'inbox' ? 'Inbox — ' : page === 'dispatch' ? 'Dispatch — ' : session ? `${session.title} — ` : ''}Pilcrow`;
-  }, [waiting, session?.title, page]); // eslint-disable-line react-hooks/exhaustive-deps -- only the title is read
+    document.title = title;
+  }, [title]);
 
   useWindowKey((e) => {
     const hit = shortcutFor(e);

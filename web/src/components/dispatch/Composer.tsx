@@ -6,7 +6,7 @@ import type { DispatchPlan, DispatchSettings, DispatchTarget, Playbook, Workspac
 import { basename, dirname, plural, tildify } from '../../lib/format';
 import { Switch, Field } from '../ui/bits';
 import { Select } from '../ui/Select';
-import { Popover } from '../ui/Popover';
+import { Popover, useAnchor } from '../ui/Popover';
 import { FolderPicker } from '../FolderPicker';
 
 const VARIABLES = '{{repo.name}} {{repo.path}} {{repo.branch}} {{job.name}} {{notes}}';
@@ -26,7 +26,7 @@ export function Composer() {
   const [checked, setChecked] = useState<Record<string, boolean>>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [filter, setFilter] = useState('');
-  const [picking, setPicking] = useState(false);
+  const { anchor: folderBtn, ref: setFolderBtn, open: picking, setOpen: setPicking } = useAnchor();
   const [settings, setSettings] = useState<DispatchSettings>(DEFAULTS);
   const [branch, setBranch] = useState('');
   const [branchAuto, setBranchAuto] = useState(true);
@@ -35,7 +35,6 @@ export function Composer() {
   const [playbookId, setPlaybookId] = useState('');
   const [starting, setStarting] = useState(false);
   const [showOptions, setShowOptions] = useState(false);
-  const [folderBtn, setFolderBtn] = useState<HTMLButtonElement | null>(null);
   const planSeq = useRef(0);
 
   // the workspace
@@ -77,7 +76,7 @@ export function Composer() {
   const selected = Object.values(checked).filter(Boolean).length;
 
   // the plan, a moment after the last change
-  const values = () => ({ playbookId: playbookId || null, name: name.trim(), brief, root, targets, settings: { ...settings, branch: branch.startsWith('pilcrow/') ? branch.slice('pilcrow/'.length) : branch } });
+  const values = useMemo(() => ({ playbookId: playbookId || null, name: name.trim(), brief, root, targets, settings: { ...settings, branch: branch.startsWith('pilcrow/') ? branch.slice('pilcrow/'.length) : branch } }), [playbookId, name, brief, root, targets, settings, branch]);
   useEffect(() => {
     if (!targets.length) {
       setPlan(null);
@@ -86,7 +85,7 @@ export function Composer() {
     setPlanning(true);
     const seq = ++planSeq.current;
     const t = setTimeout(() => {
-      call<DispatchPlan>('dispatch.plan', values(), { quiet: true })
+      call<DispatchPlan>('dispatch.plan', values, { quiet: true })
         .then((p) => {
           if (seq !== planSeq.current) return;
           setPlan(p);
@@ -95,7 +94,7 @@ export function Composer() {
         .catch(() => seq === planSeq.current && setPlanning(false));
     }, 600);
     return () => clearTimeout(t);
-  }, [name, brief, root, targets, settings, branch]); // eslint-disable-line react-hooks/exhaustive-deps -- values() reads the same state
+  }, [values, targets.length]);
   const verdicts = useMemo(() => Object.fromEntries((plan?.targets || []).map((t) => [t.path, t])), [plan]);
   const canStart = Boolean(plan && plan.targets.length && !plan.blocked && brief.trim()) && !starting;
 
@@ -121,7 +120,7 @@ export function Composer() {
   };
   const savePlaybook = async () => {
     if (!brief.trim()) return toast('Write the brief first.', 'warning');
-    const v = values();
+    const v = values;
     const pb = await call<Playbook>('dispatch.savePlaybook', { ...(playbookId ? { id: playbookId } : {}), name: v.name || brief.trim().split('\n')[0].slice(0, 60) || 'Untitled playbook', brief, root, targets, settings: v.settings }).catch(() => null);
     if (pb) {
       setPlaybookId(pb.id);
@@ -133,7 +132,7 @@ export function Composer() {
     if (!canStart) return;
     setStarting(true);
     try {
-      const v = values();
+      const v = values;
       const job = await call<{ id: string }>('dispatch.save', { ...v, name: v.name || brief.trim().split('\n')[0].slice(0, 60) || 'Untitled job' });
       try {
         await call('dispatch.start', { id: job.id });
@@ -220,7 +219,7 @@ export function Composer() {
           <div className="dp-targets-top">
             <button ref={setFolderBtn} className={`ns-folder sd-folder dp-folder${picking ? ' on' : ''}`} onClick={() => setPicking(!picking)} title={tildify(root, info?.home)}>
               <Folder size={14} className="ns-folder-ico" />
-              <span className="ellipsis grow" style={{ textAlign: 'left' }}>
+              <span className="ellipsis grow">
                 {basename(root) || 'Pick a folder'}
               </span>
               <ChevronDown size={13} className="faint" />

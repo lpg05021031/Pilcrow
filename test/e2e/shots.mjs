@@ -116,7 +116,7 @@ try {
 
   await key('Control+Shift+O', 900);
   await shot('overview');
-  await page.click('button[title="Results of scheduled sessions"]');
+  await page.getByRole('button', { name: 'Inbox' }).click();
   await sleep(900);
   await shot('inbox');
   await open('sess-login');

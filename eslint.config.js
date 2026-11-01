@@ -16,6 +16,9 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.browser, __APP_VERSION__: 'readonly' } },
     rules: {
       ...reactHooks.configs.recommended.rules,
+      // An effect's dependencies are complete, with no exception: a handler an effect must not re-run
+      // for is a useEvent (components/ui/hooks.ts), so nothing reads a stale closure.
+      'react-hooks/exhaustive-deps': 'error',
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrors: 'none' }],
       '@typescript-eslint/no-non-null-assertion': 'error',

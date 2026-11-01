@@ -7,7 +7,7 @@ order is the cascade's:
 |---|---|
 | `fonts.css` | The bundled Inter and JetBrains Mono faces (Latin only; CJK uses the system font). |
 | `tokens.css` | Every design token, then the dark (`:root, [data-theme='dark']`) and light (`[data-theme='light']`) values. No other stylesheet holds a colour (the `#000` in a mask gradient is an alpha, not a colour); the app icon's own artwork (`ui/bits.tsx` AppIcon) is the one drawing with fixed hexes. |
-| `base.css` | Elements and the shared controls: buttons, inputs, switches, badges, scrollbars, the reduced-motion switch, `.render-fault`. |
+| `base.css` | Elements and the shared controls: buttons, inputs, switches, badges, scrollbars, `.render-fault`. |
 | `shell.css` | The window: the opening, the shell's columns, the offline and update bars, resizers, the sheets on the ground, per-platform type tuning. |
 | `sidebar.css` | The sidebar: brand, page rows, sessions by folder, one-click new session, collapse and expand. |
 | `session.css` | Around the conversation: the header and crumbs, the folder picker, the fresh session, MCP notices, the find bar. |
@@ -22,12 +22,13 @@ order is the cascade's:
 | `transcript.css` | The conversation: messages, Markdown, tool cards, permission and question cards, workflows. |
 | `panels.css` | The side panel's tabs: changes, files, terminal, preview, tasks, timeline, info; the file-history mark. |
 | `dispatch.css` | The dispatch page (`dp-`). |
-| `motion.css` | How things move: `animation` and `transition` for the selectors it names, the parts that exist only to move (segmented thumb, settings ink, sidebar selection), the lightbox, and the dark theme's two cross-cutting finishes (lit top edges, sheet wells). |
+| `motion.css` | How things move: every `animation`, `transition` and `@keyframes` (each component's own, under the file that owns the component, then the choreography across them and the less-motion switch), the parts that exist only to move (segmented thumb, settings ink, sidebar selection), the lightbox, and the dark theme's two cross-cutting finishes (lit top edges, sheet wells). |
 
 **One property, one file.** No selector sets the same property, or a shorthand and one of its
-longhands, in two files, and no `@keyframes` name is defined twice; `scripts/css-overlap.mjs` checks
-it as part of `npm run lint`. A component's motion goes in `motion.css`; everything else about it
-goes in the file that owns the component.
+longhands, in two files, and no `@keyframes` name is defined twice. A component's motion goes in
+`motion.css`, and only there; everything else about it goes in the file that owns the component.
+`scripts/css-overlap.mjs` checks all three as part of `npm run lint`, and that every `@keyframes`
+is played by something.
 
 ## Names
 
@@ -52,9 +53,10 @@ goes in the file that owns the component.
   `--plan`, `--think` (reasoning only), each with a `-wash`. Orange or red that carries words or
   figures is `--accent-solid` (`-2` on hover) or `--err-solid`, which white (`--accent-ink`) meets
   4.5:1 on; `--accent` itself is for marks, focus and the icon-only send button.
-- **Spacing**: `--sp-N` is N × 4px, with `_5` half steps (`--sp-1_5` = 6px). A value off the scale
-  is an optical correction and stays a number, and so is a negative margin, which undoes a padding
-  rather than adds a step.
+- **Spacing**: `--sp-N` is N × 4px, with `_5` half steps (`--sp-1_5` = 6px) and, up to 13px, `_25`
+  and `_75` quarter steps for the odd pixels that centre 13px type in an even box (`--sp-2_25` = 9px).
+  What stays a number is an optical correction: 1px (a hairline's nudge), a negative margin (it
+  undoes a padding rather than adds a step), and an inset that lines text up with an icon's column.
 - **Type**: `--fs-tiny` 10 … `--fs-display` 22; a `-plus` step is half a pixel up for faces that run
   small (code, keycaps, counters). `--font-size` is the reading size the person sets.
 - **Radii**: `--r-1…7` are 4 to 16 in steps of 2, and `--r-pill`. A radius off the scale follows

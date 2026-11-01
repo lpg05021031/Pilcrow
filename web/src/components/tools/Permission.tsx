@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useWindowKey } from '../ui/bits';
+import { useWindowKey } from '../ui/keys';
 import { CornerDownLeft } from 'lucide-react';
 import type { ToolItem } from '../../lib/transcript';
 import type { PermissionRequest, PermissionSuggestion } from '../../lib/types';
@@ -45,12 +45,12 @@ export function suggestionLabel(s: PermissionSuggestion, cwd?: string): string {
   return describeSuggestion(s, cwd);
 }
 
-export function suggestionRules(s: PermissionSuggestion): string {
+function suggestionRules(s: PermissionSuggestion): string {
   if (s.type !== 'addRules') return '';
   return (s.rules || []).map((r) => (r.ruleContent ? `${r.toolName}(${r.ruleContent})` : r.toolName)).join('  ·  ');
 }
 
-export function describeSuggestion(s: PermissionSuggestion, cwd?: string): string {
+function describeSuggestion(s: PermissionSuggestion, cwd?: string): string {
   if (s.type === 'setMode') return s.mode === 'acceptEdits' ? `Allow all edits ${destLabel(s.destination)}` : `Switch to ${s.mode} ${destLabel(s.destination)}`;
   if (s.type === 'addDirectories') return `Allow access to ${(s.directories || []).map((d) => relPath(d, cwd)).join(', ')} ${destLabel(s.destination)}`;
   if (s.type === 'addRules' && s.behavior === 'allow') {

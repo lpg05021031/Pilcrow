@@ -26,7 +26,7 @@
 .transcript-inner {
   max-width: calc(var(--col) + 48px);
   margin: 0 auto;
-  padding: 22px var(--sp-6) 44px;
+  padding: var(--sp-5_5) var(--sp-6) var(--sp-11);
 }
 /* Long conversations. Every unit of the conversation (a stretch of what was said, or one fold of
    work) sits in its own box, and a box that is off screen is neither laid out nor painted. It keeps a
@@ -74,7 +74,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   margin-bottom: 0;
 }
 .unit:has(> :first-child.msg-user) {
-  margin-top: 26px;
+  margin-top: var(--sp-6_5);
 }
 .unit:has(> :first-child.msg-assistant),
 .unit:has(> :first-child.work),
@@ -93,7 +93,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   margin-top: var(--sp-3);
 }
 .unit:has(> :first-child.divider) {
-  margin-top: 18px;
+  margin-top: var(--sp-4_5);
 }
 .unit:has(> :last-child.msg-user),
 .unit:has(> :last-child.thinking) {
@@ -117,7 +117,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   margin-bottom: var(--sp-3);
 }
 .unit:has(> :last-child.divider) {
-  margin-bottom: 18px;
+  margin-bottom: var(--sp-4_5);
 }
 .units > .page:first-child > .unit:first-child {
   margin-top: var(--sp-1_5);
@@ -153,12 +153,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   box-shadow: var(--shadow-glass);
   z-index: var(--z-float);
 }
-@keyframes jump-in {
-  from {
-    opacity: 0;
-    transform: translateX(-50%) translateY(6px);
-  }
-}
+
 .jump:hover {
   background: var(--raised-2);
 }
@@ -169,11 +164,11 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  margin: 26px 0 var(--sp-2);
+  margin: var(--sp-6_5) 0 var(--sp-2);
 }
 .msg-bubble {
   max-width: 84%;
-  padding: 9px var(--sp-3_5);
+  padding: var(--sp-2_25) var(--sp-3_5);
   border-radius: var(--r-7);
   background: var(--bubble);
   font-size: var(--font-size);
@@ -227,7 +222,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   gap: var(--sp-0_5);
   margin-top: var(--sp-1);
   opacity: 0;
-  transition: opacity var(--t-fast);
 }
 .msg-user:hover .msg-actions,
 .msg-actions:focus-within {
@@ -309,15 +303,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-  animation: shimmer 2s linear infinite;
-}
-@keyframes shimmer {
-  from {
-    background-position: 100% 0;
-  }
-  to {
-    background-position: -150% 0;
-  }
 }
 
 /* ---------------------------------------------------------------- notices, dividers, footers */
@@ -326,7 +311,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   display: flex;
   align-items: center;
   gap: var(--sp-3);
-  margin: 18px 0;
+  margin: var(--sp-4_5) 0;
   font-size: var(--fs-micro);
   color: var(--text-3);
 }
@@ -398,7 +383,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   color: var(--text-3);
 }
 .cli-info > svg {
-  margin-top: 3px;
+  margin-top: var(--sp-0_75);
 }
 .cli-info.warning > svg {
   color: var(--accent-text);
@@ -435,7 +420,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 }
 .turn-detail {
   opacity: 0;
-  transition: opacity var(--t-fast);
 }
 .turn-foot:hover .turn-detail {
   opacity: 1;
@@ -444,7 +428,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   font-size: var(--fs-micro);
   color: var(--text-3);
   opacity: 0;
-  transition: opacity var(--t-fast), color var(--t-fast);
 }
 .turn-foot:hover .turn-fork,
 .turn-fork:focus-visible {
@@ -479,7 +462,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   margin: var(--sp-2_5) 0 var(--sp-1);
   font-size: var(--fs-ui);
   color: var(--text-3);
-  animation: fade var(--t-med) var(--ease);
 }
 /* The working mark is the app's pilcrow, focusing: a slowly turning crosshair ring around the safelight. */
 .working-mark {
@@ -491,31 +473,8 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 .wm-bowl {
   fill: var(--accent);
   transform-origin: 10.6px 9.2px;
-  animation: wm-breathe 1.8s var(--ease-io) infinite;
 }
-.wm-stems {
-  animation: wm-ink 1.8s var(--ease-io) infinite;
-}
-@keyframes wm-breathe {
-  0%,
-  100% {
-    transform: scale(0.72);
-    opacity: 0.55;
-  }
-  50% {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
-@keyframes wm-ink {
-  0%,
-  100% {
-    opacity: 0.55;
-  }
-  50% {
-    opacity: 0.95;
-  }
-}
+
 .working-verb {
   font-weight: 500;
 }
@@ -654,7 +613,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 }
 .md th,
 .md td {
-  padding: 7px var(--sp-3_5) 7px 0;
+  padding: var(--sp-1_75) var(--sp-3_5) var(--sp-1_75) 0;
   text-align: left;
   vertical-align: top;
   box-shadow: inset 0 -1px 0 var(--hair);
@@ -686,7 +645,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   border-radius: var(--r-1);
   cursor: pointer;
   opacity: 0;
-  transition: opacity var(--t-fast), background var(--t-fast), color var(--t-fast);
 }
 .md-code:hover .md-copy,
 .md-copy:focus-visible {
@@ -702,7 +660,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 }
 .md pre {
   margin: 0;
-  padding: 0 var(--sp-3_5) 13px;
+  padding: 0 var(--sp-3_5) var(--sp-3_25);
   overflow-x: auto;
   font-size: var(--mono-size);
   line-height: 1.6;
@@ -750,43 +708,14 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 
 .tool {
   position: relative;
-  animation: tool-in var(--t-panel) var(--ease) both;
 }
-@keyframes tool-in {
-  from {
-    opacity: 0;
-    transform: translateY(3px);
-  }
-}
-/* the status mark crossfades when a step finishes; the right-hand figures settle in after it */
+
+/* the status mark, which crossfades when a step finishes (motion.css) */
 .tool-ico-swap {
   display: grid;
   place-items: center;
 }
-.tool-meta {
-  animation: fade var(--t-med) var(--ease);
-}
-.tool.streaming .tool-target {
-  animation: fade var(--t-med) var(--ease);
-}
-.msg-assistant {
-  animation: fade var(--t-panel) var(--ease);
-}
-.thinking {
-  animation: fade var(--t-panel) var(--ease);
-}
-/* Rows arriving in the live pages ease in; rows of history pages being drawn as the reader scrolls
-   up must not — a page of paragraphs fading in during a scroll reads as the page flickering. */
-.page:not(.live) .msg-assistant,
-.page:not(.live) .thinking,
-.page:not(.live) .tool,
-.page:not(.live) .tool-ico-swap,
-.page:not(.live) .tool-meta {
-  animation: none;
-}
-.thinking-text.peek {
-  transition: opacity var(--t-med);
-}
+
 .tool.special {
   margin: var(--sp-3) 0;
 }
@@ -829,7 +758,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 .tool-toggle {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--sp-1_75);
   min-width: 0;
   white-space: nowrap;
 }
@@ -887,7 +816,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 }
 .tool-stats {
   display: inline-flex;
-  gap: 5px;
+  gap: var(--sp-1_25);
 }
 .tool-open {
   flex: none;
@@ -895,7 +824,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   height: 22px;
   margin: -2px 0;
   opacity: 0;
-  transition: opacity var(--t-fast), background var(--t-fast);
 }
 .tool-head:hover .tool-open,
 .tool-open:focus-visible {
@@ -922,12 +850,12 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   display: flow-root;
 }
 .tool-body {
-  margin: var(--sp-1) 0 var(--sp-2_5) 28px;
+  margin: var(--sp-1) 0 var(--sp-2_5) var(--sp-7);
 }
 
 .explore-body {
   position: relative;
-  padding-left: 28px;
+  padding-left: var(--sp-7);
   padding-bottom: var(--sp-1);
 }
 
@@ -954,7 +882,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 }
 .tool-note.shimmer-soft {
   color: var(--text-3);
-  animation: breathe 1.6s ease-in-out infinite;
 }
 .tool-wait {
   font-size: var(--fs-small);
@@ -1025,7 +952,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 }
 .bash-out {
   margin: 0;
-  padding: var(--sp-0_5) var(--sp-3) 11px;
+  padding: var(--sp-0_5) var(--sp-3) var(--sp-2_75);
   font-size: var(--fs-small);
   line-height: 1.55;
   color: var(--text-2);
@@ -1045,7 +972,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   display: flex;
   align-items: center;
   gap: var(--sp-2);
-  padding: 7px var(--sp-3);
+  padding: var(--sp-1_75) var(--sp-3);
   font-size: var(--fs-micro);
   box-shadow: inset 0 1px 0 var(--hair);
 }
@@ -1085,7 +1012,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   height: 52px;
   display: grid;
   place-items: end center;
-  padding: 0 0 9px;
+  padding: 0 0 var(--sp-2_25);
   border-radius: 0;
   background: linear-gradient(to bottom, transparent, var(--inset) 72%);
   font-weight: 550;
@@ -1123,7 +1050,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   display: flex;
   align-items: flex-start;
   gap: var(--sp-2_5);
-  padding: 3px 0;
+  padding: var(--sp-0_75) 0;
   font-size: var(--fs-ui);
   line-height: 1.5;
   color: var(--text-2);
@@ -1162,7 +1089,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   height: 5px;
   border-radius: 50%;
   background: var(--text);
-  animation: breathe 1.4s ease-in-out infinite;
 }
 
 /* ---------------------------------------------------------------- code and diffs */
@@ -1247,7 +1173,9 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 .diff.wrap .diff-grid {
   min-width: 0;
 }
+/* a hunk's head spans every column of a side-by-side diff */
 .diff-hunk {
+  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   gap: var(--sp-2_5);
@@ -1291,7 +1219,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   user-select: none;
 }
 .dc {
-  padding-right: 18px;
+  padding-right: var(--sp-4_5);
   white-space: pre;
 }
 .dn.add,
@@ -1345,7 +1273,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   color: var(--canvas);
   background: var(--text);
   opacity: 0;
-  transition: opacity var(--t-fast);
 }
 .diff-grid > span:hover .diff-add-comment,
 .diff-grid > span:hover + span .diff-add-comment,
@@ -1354,7 +1281,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   opacity: 1;
 }
 .diff-comment-row {
-  padding: var(--sp-2) var(--sp-3) var(--sp-2_5) 44px;
+  padding: var(--sp-2) var(--sp-3) var(--sp-2_5) var(--sp-11);
   font-family: var(--font-ui);
   font-size: var(--fs-small);
   background: var(--chrome);
@@ -1378,25 +1305,22 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 .comment-editor .textarea {
   font-size: var(--fs-small-plus);
 }
+.comment-editor > .row {
+  justify-content: flex-end;
+}
 
 /* ---------------------------------------------------------------- permission prompt
    Attached to its step, one level deep, with a single amber ring that pulses once. */
 
 .perm {
   position: relative;
-  margin: var(--sp-1_5) 0 var(--sp-3_5) 28px;
+  margin: var(--sp-1_5) 0 var(--sp-3_5) var(--sp-7);
   padding: var(--sp-3_5) var(--sp-4) var(--sp-3_5);
   border-radius: var(--r-5);
   background: var(--card-ask);
   box-shadow: var(--shadow-ask);
-  animation: perm-in var(--t-panel) var(--ease);
 }
-@keyframes perm-in {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-}
+
 /* one soft ping when something starts waiting on you, then stillness */
 .perm::after,
 .askcard.live::after,
@@ -1409,19 +1333,8 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   opacity: 0;
   /* the border brightens once to full amber and settles; no glow spilling outside the card */
   box-shadow: inset 0 0 0 1.5px var(--accent), 0 0 12px -2px var(--accent-wash);
-  animation: ping 1100ms 300ms var(--ease-io) both;
 }
-@keyframes ping {
-  0% {
-    opacity: 0;
-  }
-  35% {
-    opacity: 1;
-  }
-  100% {
-    opacity: 0;
-  }
-}
+
 .tool.orphan .perm {
   margin-left: 0;
 }
@@ -1433,7 +1346,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 .perm-sub {
   display: grid;
   gap: var(--sp-0_5);
-  margin-top: 3px;
+  margin-top: var(--sp-0_75);
   font-size: var(--fs-small);
   color: var(--text-2);
 }
@@ -1457,7 +1370,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 .perm-choice {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--sp-1_25);
 }
 .perm-key {
   min-width: 16px;
@@ -1494,7 +1407,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   align-items: center;
   gap: var(--sp-2_5);
   margin-top: var(--sp-2_5);
-  animation: rise var(--t-med) var(--ease);
 }
 .perm-feedback .input {
   flex: 1;
@@ -1502,7 +1414,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 .perm-enter {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--sp-1_25);
   font-size: var(--fs-micro);
   color: var(--text-3);
   white-space: nowrap;
@@ -1520,7 +1432,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 .askcard.live,
 .plancard.live {
   box-shadow: var(--shadow-ask-live);
-  animation: perm-in var(--t-panel) var(--ease);
 }
 .askcard {
   padding: var(--sp-3_5) var(--sp-4) var(--sp-3_5);
@@ -1546,11 +1457,11 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 }
 .ask-qs {
   display: grid;
-  gap: 18px;
+  gap: var(--sp-4_5);
 }
 .ask-q {
   display: grid;
-  gap: 9px;
+  gap: var(--sp-2_25);
 }
 .ask-qline {
   display: flex;
@@ -1606,7 +1517,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   border-radius: 50%;
   box-shadow: inset 0 0 0 1.5px var(--hair-3);
   color: var(--canvas);
-  transition: background var(--t-fast), box-shadow var(--t-fast);
 }
 .ask-mark.box {
   border-radius: var(--r-1);
@@ -1647,9 +1557,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   font-size: var(--fs-small);
   color: var(--text-3);
 }
-.ask-notes {
-  animation: rise var(--t-med) var(--ease);
-}
+
 .ask-preview {
   border-radius: var(--r-4);
   background: var(--inset);
@@ -1665,7 +1573,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 .ask-actions .btn,
 .plan-actions .btn {
   height: 28px;
-  padding: 0 11px;
+  padding: 0 var(--sp-2_75);
   font-size: var(--fs-ui);
   border-radius: 7px;
 }
@@ -1718,7 +1626,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 }
 .plan-text {
   position: relative;
-  padding: var(--sp-4) 22px 18px;
+  padding: var(--sp-4) var(--sp-5_5) var(--sp-4_5);
 }
 .plan-text .md > .md-b:first-child > h1,
 .plan-text .md > .md-b:first-child > h2 {
@@ -1737,7 +1645,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 .plan-feedback {
   display: grid;
   gap: var(--sp-2);
-  animation: rise var(--t-med) var(--ease);
 }
 
 /* ---------------------------------------------------------------- subagents */
@@ -1775,7 +1682,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   white-space: pre-wrap;
   max-height: 220px;
   overflow: auto;
-  animation: rise var(--t-med) var(--ease);
 }
 .agent-children {
   margin-left: 1px;
@@ -1806,8 +1712,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
     var(--inset);
 }
 
-
-
 /* ================================================================ reading the transcript
    Three voices. Speech: full-contrast prose at the column edge. Action: rows with an icon column
    and a rail, set in secondary text. Thought: one lilac line that opens on request. */
@@ -1823,9 +1727,9 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   margin: var(--sp-2) 0;
 }
 .thinking-head {
-  gap: 7px;
+  gap: var(--sp-1_75);
   margin-left: -8px;
-  padding: 0 9px 0 7px;
+  padding: 0 var(--sp-2_25) 0 var(--sp-1_75);
   color: var(--text-3);
 }
 .thinking-head:hover {
@@ -1837,9 +1741,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   place-items: center;
   color: var(--think);
 }
-.thinking.live .thinking-ico {
-  animation: breathe 1.4s ease-in-out infinite;
-}
+
 .thinking-text {
   margin-left: var(--sp-2);
   box-shadow: inset 1px 0 0 color-mix(in srgb, var(--think) 55%, transparent);
@@ -1870,14 +1772,13 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 .tool-error-more {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: var(--sp-0_75);
   justify-self: start;
   margin-left: -4px;
   padding: var(--sp-0_5) var(--sp-1_5) var(--sp-0_5) var(--sp-1);
   border-radius: var(--r-1);
   font-size: var(--fs-small);
   color: var(--text-3);
-  transition: color var(--t-fast), background var(--t-fast);
 }
 .tool-error-more:hover {
   color: var(--text);
@@ -1885,7 +1786,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 }
 .tool-error-more .tool-chev {
   opacity: 0.8;
-  transition: transform var(--t-med) var(--ease);
 }
 .tool-error-more .tool-chev.open {
   transform: rotate(90deg);
@@ -1899,7 +1799,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   color: var(--text-2);
 }
 
-
 /* ================================================================ asking for permission
    One card, not two: the tool row and its command sit on a raised sheet and the answer bar is the
    sheet's footer. Nothing orange around it; the dot in the row and the chip in the header already
@@ -1910,7 +1809,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   border-radius: var(--r-5);
   background: var(--raised);
   box-shadow: inset 0 0 0 1.5px var(--accent-ring), var(--shadow-await);
-  animation: perm-in var(--t-panel) var(--ease);
 }
 .tool.awaiting > .tool-head {
   width: calc(100% + 8px);
@@ -1922,7 +1820,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   display: none;
 }
 .tool.awaiting .tool-body {
-  margin: 0 0 var(--sp-2) 22px;
+  margin: 0 0 var(--sp-2) var(--sp-5_5);
 }
 .tool.awaiting .bash,
 .tool.awaiting .tool-pre,
@@ -1937,7 +1835,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   border-radius: 0 0 var(--r-5) var(--r-5);
   background: transparent;
   box-shadow: inset 0 0.5px 0 var(--hair-2);
-  animation: none;
 }
 .tool.awaiting .perm::after {
   display: none;
@@ -1985,7 +1882,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 }
 .perm-actions .btn {
   height: 28px;
-  padding: 0 11px;
+  padding: 0 var(--sp-2_75);
   font-size: var(--fs-ui);
   border-radius: 7px;
 }
@@ -1998,7 +1895,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   border-radius: var(--r-1);
   font-size: var(--fs-small);
   color: var(--text-3);
-  transition: color var(--t-fast), background var(--t-fast);
 }
 .perm-note-link:hover {
   color: var(--text);
@@ -2089,9 +1985,9 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 9px;
+  gap: var(--sp-2_25);
   width: 100%;
-  padding: 9px var(--sp-2_5) 9px 11px;
+  padding: var(--sp-2_25) var(--sp-2_5) var(--sp-2_25) var(--sp-2_75);
   text-align: left;
 }
 .wfd-head:hover {
@@ -2128,21 +2024,19 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   gap: var(--sp-1);
   color: var(--text-3);
 }
-.wfd-end .tool-chev {
-  transition: transform var(--t-med) var(--ease);
-}
+
 .wfd-end .tool-chev.open {
   transform: rotate(90deg);
 }
 .wfd .wf-bar {
-  margin: 0 11px 0 11px;
+  margin: 0 var(--sp-2_75) 0 var(--sp-2_75);
   height: 2px;
 }
 .wfd.collapsed .wf-bar {
-  margin-bottom: 9px;
+  margin-bottom: var(--sp-2_25);
 }
 .wfd-body {
-  padding: var(--sp-2_5) var(--sp-2) var(--sp-1) 11px;
+  padding: var(--sp-2_5) var(--sp-2) var(--sp-1) var(--sp-2_75);
 }
 .wfd-empty {
   padding: 0 0 var(--sp-2);
@@ -2160,7 +2054,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   position: relative;
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
-  column-gap: 9px;
+  column-gap: var(--sp-2_25);
   padding-bottom: var(--sp-2_5);
 }
 .wfd-phase:last-child {
@@ -2195,7 +2089,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   color: var(--text-3);
   background: var(--raised);
   box-shadow: inset 0 0 0 1px var(--hair-3);
-  transition: background var(--t-med), color var(--t-med), box-shadow var(--t-med);
 }
 .wfd-phase.running .wfd-node {
   color: var(--accent-text);
@@ -2229,7 +2122,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 }
 .wf-phase-kind {
   font-size: var(--fs-tiny);
-  padding: 0 5px;
+  padding: 0 var(--sp-1_25);
   border-radius: var(--r-pill);
   background: var(--fill-2);
   color: var(--text-3);
@@ -2258,7 +2151,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   border-radius: var(--r-1);
 }
 .wfa.ghost {
-  padding: 3px var(--sp-1_5);
+  padding: var(--sp-0_75) var(--sp-1_5);
   font-size: var(--fs-micro);
   color: var(--text-3);
 }
@@ -2266,9 +2159,9 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   display: grid;
   grid-template-columns: 14px minmax(0, 1fr);
   align-items: start;
-  gap: 7px;
+  gap: var(--sp-1_75);
   width: 100%;
-  padding: var(--sp-1) var(--sp-1_5) var(--sp-1) 5px;
+  padding: var(--sp-1) var(--sp-1_5) var(--sp-1) var(--sp-1_25);
   border-radius: var(--r-1);
   text-align: left;
 }
@@ -2284,7 +2177,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 .wfa-top {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--sp-1_25);
   min-width: 0;
   line-height: 16px;
 }
@@ -2298,7 +2191,7 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 .wfa-end {
   margin-left: auto;
   display: inline-flex;
-  gap: 7px;
+  gap: var(--sp-1_75);
   font-size: var(--fs-micro);
   color: var(--text-3);
   white-space: nowrap;
@@ -2314,12 +2207,12 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 .wfa-body {
   display: grid;
   gap: var(--sp-2);
-  padding: var(--sp-0_5) var(--sp-1_5) var(--sp-2) 26px;
+  padding: var(--sp-0_5) var(--sp-1_5) var(--sp-2) var(--sp-6_5);
 }
 .wfa-subs {
   display: grid;
   gap: 1px;
-  padding: 1px 0 3px 11px;
+  padding: 1px 0 var(--sp-0_75) var(--sp-2_75);
 }
 
 /* a sub-agent an agent spawned: an elbow off the agent's mark */
@@ -2367,13 +2260,14 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 }
 .wfs-end {
   display: inline-flex;
-  gap: 7px;
+  gap: var(--sp-1_75);
   margin-left: auto;
   padding-left: var(--sp-2);
   font-size: var(--fs-micro);
   color: var(--text-3);
   white-space: nowrap;
 }
+/* in line with a phase's text: its 18px mark column and the 9px gap */
 .wfd-orphans {
   padding: var(--sp-1_5) 0 var(--sp-1_5) 27px;
 }
@@ -2426,13 +2320,13 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 .wf-kv {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: var(--sp-1_25);
   font-size: var(--fs-small);
   color: var(--text-2);
 }
 .wf-block {
   display: grid;
-  gap: 3px;
+  gap: var(--sp-0_75);
 }
 .wf-pre {
   font-size: var(--fs-small);
@@ -2446,7 +2340,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 .wf-pre.err {
   color: var(--err);
 }
-
 
 /* footer: log, tokens, stop */
 .wfd-foot {
@@ -2463,11 +2356,10 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
-  padding: 3px 7px 3px var(--sp-1);
+  padding: var(--sp-0_75) var(--sp-1_75) var(--sp-0_75) var(--sp-1);
   border-radius: var(--r-1);
   font-size: var(--fs-small);
   color: var(--text-3);
-  transition: color var(--t-fast), background var(--t-fast);
 }
 .wf-foot-btn:hover {
   color: var(--text);
@@ -2475,7 +2367,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 }
 .wf-foot-btn .tool-chev {
   opacity: 0.8;
-  transition: transform var(--t-med) var(--ease);
 }
 .wf-foot-btn .tool-chev.open {
   transform: rotate(90deg);
@@ -2500,7 +2391,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
 .wf-result {
   padding: var(--sp-0_5) 0 var(--sp-1);
 }
-
 
 .status-sub {
   color: var(--text-3);
@@ -2547,7 +2437,6 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   flex: none;
   margin-left: 0;
   opacity: 0.7;
-  transition: transform var(--t-med) var(--ease), opacity var(--t-fast);
 }
 .work-head:hover .tool-chev {
   opacity: 1;
@@ -2579,17 +2468,13 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   width: 16px;
   margin-right: var(--sp-1);
   overflow: hidden;
-  transition: width var(--t-med) var(--ease), margin var(--t-med) var(--ease), opacity var(--t-fast);
 }
 .work-mark.gone {
   width: 0;
   margin-right: -6px; /* swallows the row gap so the words sit on the answer's left edge */
   opacity: 0;
 }
-.work-mark.gone .wm-bowl,
-.work-mark.gone .wm-stems {
-  animation: none;
-}
+
 .work.live .work-sum {
   font-weight: 500;
 }

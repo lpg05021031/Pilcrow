@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { ExternalLink, KeyRound, CircleCheck, ClipboardPaste } from 'lucide-react';
 import { useStore, call, setDialog, toast } from '../lib/store';
 import { Dialog } from './ui/Dialog';
-import { Spinner, copyText } from './ui/bits';
+import { Spinner } from './ui/bits';
+import { copyText } from './ui/clipboard';
 
 interface AuthStart {
   authUrl?: string;
@@ -12,6 +13,8 @@ interface AuthStart {
   callbackPort?: number;
   state?: string;
 }
+
+const close = () => setDialog('mcpAuth', null);
 
 /**
  * OAuth sign-in to an MCP server. Claude Code runs the flow and listens for the browser's redirect on
@@ -26,7 +29,7 @@ export function McpAuthDialog({ spec }: { spec: { sessionId: string; name: strin
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const opened = useRef(false);
-  const close = () => setDialog('mcpAuth', null);
+
 
   useEffect(() => {
     let alive = true;
@@ -56,7 +59,7 @@ export function McpAuthDialog({ spec }: { spec: { sessionId: string; name: strin
       }, 900);
       return () => clearTimeout(t);
     }
-  }, [status, start]); // eslint-disable-line react-hooks/exhaustive-deps -- reacts to the sign-in completing; close and the name are the same for the dialog's life
+  }, [status, start, spec.name]);
 
   const submitPasted = async () => {
     const url = pasted.trim();
@@ -84,7 +87,7 @@ export function McpAuthDialog({ spec }: { spec: { sessionId: string; name: strin
       footer={
         <>
           {start?.authUrl && !done && (
-            <button className="btn sm ghost" onClick={() => copyText(start.authUrl || '').then(() => toast('Link copied', 'success'))}>
+            <button className="btn sm ghost" onClick={() => copyText(start.authUrl || '').then(() => toast('Link copied', 'success'), () => toast('Could not copy to the clipboard', 'error'))}>
               Copy link
             </button>
           )}

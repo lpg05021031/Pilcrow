@@ -1,9 +1,10 @@
 // Incremental transcript model: turns raw SDK messages (live or from history) into render items.
 // Items are mutable objects with a `rev` counter so React can re-render only what changed.
 import { parsePartialJson } from './partialJson';
+import { moment } from './format';
 import type { RawMsg, ContentBlock, ToolInput, StructuredResult } from './types';
 
-export type ToolStatus = 'streaming' | 'running' | 'done' | 'error' | 'denied' | 'interrupted' | 'background';
+type ToolStatus = 'streaming' | 'running' | 'done' | 'error' | 'denied' | 'interrupted' | 'background';
 
 interface Base {
   id: string;
@@ -39,7 +40,7 @@ export interface ThinkingItem extends Base {
   endTs?: number;
   redacted?: boolean;
 }
-export interface ToolResult {
+interface ToolResult {
   text: string;
   images: string[];
   isError: boolean;
@@ -99,7 +100,7 @@ let seq = 0;
 const nid = (p: string) => `${p}-${++seq}`;
 
 /** What a task_started / task_progress / task_notification message says about a background task. */
-export interface TaskInfoPatch {
+interface TaskInfoPatch {
   taskId: string;
   status?: string;
   summary?: string;
@@ -614,7 +615,7 @@ export class TranscriptModel {
 
   private onRateLimit(m: RawMsg) {
     const info = m.rate_limit_info || {};
-    if (info.status === 'rejected') this.add({ kind: 'notice', id: nid('n'), rev: 0, level: 'error', text: 'Usage limit reached', detail: info.resetsAt ? `Resets ${new Date(info.resetsAt * 1000).toLocaleString()}` : undefined }, null);
+    if (info.status === 'rejected') this.add({ kind: 'notice', id: nid('n'), rev: 0, level: 'error', text: 'Usage limit reached', detail: info.resetsAt ? `Resets ${moment(info.resetsAt * 1000)}` : undefined }, null);
   }
 
   /** Find the most recent tool item with this name (used for plans and todos). */

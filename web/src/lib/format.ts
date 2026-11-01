@@ -102,9 +102,14 @@ export function firstLine(s: string): string {
   return (s || '').split('\n')[0];
 }
 
-/** A 24-hour time of day, "14:05", or "14:05:09" with `seconds`. */
+/** A time of day on the person's own clock ("14:05", or "2:05 PM" where the locale counts to 12); `seconds` adds them. */
 export function clock(ms: number, seconds = false) {
-  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', ...(seconds ? { second: '2-digit' } : {}), hour12: false });
+  return new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', ...(seconds ? { second: '2-digit' } : {}) });
+}
+
+/** A moment, date and time, the way the person's locale writes it ("1 Nov 2026, 14:05"). */
+export function moment(ms: number) {
+  return new Date(ms).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
 }
 
 export function plural(n: number, one: string, many = one + 's') {
