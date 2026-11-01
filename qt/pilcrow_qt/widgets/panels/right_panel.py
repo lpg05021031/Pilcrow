@@ -21,7 +21,7 @@ import re
 import time
 from typing import Callable, Dict, List, Optional
 
-from PySide6.QtCore import QEvent, QObject, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
+from PySide6.QtCore import QEvent, QObject, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPaintEvent, QPen
 from PySide6.QtWidgets import (
     QAbstractButton,
@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 )
 
 from ... import icons, theme
+from ...canvas.clock import Tween
 from ...canvas.pixels import hline
 from ...store import store
 from ..ui.bits import Hairline, IconButton  # Hairline is re-exported to the panels
@@ -558,7 +559,9 @@ class TabStrip(QWidget):
         self.setFixedHeight(theme.HEADER_H)
         self._active = ""
         self._ink: Optional[QRect] = None
-        self._anim: Optional[QVariantAnimation] = None
+        self._ink_from = QRect()
+        self._ink_to = QRect()
+        self.ink_t = Tween(self._set_ink, ms=theme.T_PANEL, curve=theme.spring_snappy)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(10, 0, 8, 0)
         lay.setSpacing(2)
@@ -608,23 +611,21 @@ class TabStrip(QWidget):
             target = QRect(b.x(), self.height() - 2, b.width(), 2)
         except RuntimeError:  # the strip was torn down before this deferred call ran
             return
-        if self._ink is None or store.reduced_motion or not self.isVisible():
+        if self._ink is None or not self.isVisible():
+            self.ink_t.stop()
             self._ink = target
             self.update()
             return
-        if self._anim is not None:
-            self._anim.stop()
-        anim = QVariantAnimation(self)
-        anim.setStartValue(self._ink)
-        anim.setEndValue(target)
-        anim.setDuration(theme.T_PANEL)
-        anim.setEasingCurve(theme.spring_snappy())
-        anim.valueChanged.connect(self._set_ink)
-        anim.start()
-        self._anim = anim
+        self._ink_from, self._ink_to = QRect(self._ink), target
+        self.ink_t.jump(0.0)
+        self.ink_t.go(1.0)
 
-    def _set_ink(self, r: QRect) -> None:
-        self._ink = r
+    def _set_ink(self, k: float) -> None:
+        """The underline ``k`` of the way from the tab it left to the tab it is going to."""
+        a, b = self._ink_from, self._ink_to
+        self._ink = QRect(
+            round(a.x() + (b.x() - a.x()) * k), b.y(), round(a.width() + (b.width() - a.width()) * k), b.height()
+        )
         self.update()
 
     def paintEvent(self, _e: QPaintEvent) -> None:

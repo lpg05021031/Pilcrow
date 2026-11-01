@@ -189,6 +189,7 @@ class Flat(Group):
     """A stretch of plain items, or the inside of a fold or a chapter: rows, runs of tools as Steps."""
 
     KIND = "flat"
+    __slots__ = ("ctx", "in_work", "items", "live_run", "sid")
 
     def __init__(
         self, items: List[Item], ctx: ToolCtx, sid: str, in_work: bool = False, key: str = "", live: bool = False
@@ -236,6 +237,7 @@ class MoreBlock(Block):
     KIND = "more"
     MT = 0
     MB = 0
+    __slots__ = ("label", "on_click")
 
     def __init__(self, key: str, label: str, on_click: Callable[[], None]) -> None:
         super().__init__(key)
@@ -273,6 +275,7 @@ class Explore(Group):
     KIND = "explore"
     CHILD_INDENT = 28
     HEAD = 28
+    __slots__ = ("ctx", "items", "label", "sid")
 
     def __init__(self, items: List[ToolItem], ctx: ToolCtx, sid: str, key: str) -> None:
         super().__init__(key, head_h=self.HEAD, pad_top=0, pad_bottom=4, open_=False)
@@ -344,6 +347,7 @@ class Steps(Group):
     MT = 6
     MB = 6
     COLLAPSE_AT = 10
+    __slots__ = ("_expand_ref", "ctx", "expanded", "items", "live_run", "sid")
 
     def __init__(self, items: List[ToolItem], ctx: ToolCtx, sid: str, key: str, live: bool = False) -> None:
         super().__init__(key, head_h=0, open_=True)
@@ -433,6 +437,19 @@ class ChapterGroup(Group):
 
     KIND = "chapter"
     CHILD_INDENT = 24
+    __slots__ = (
+        "_title_rev",
+        "_title_src",
+        "ch",
+        "ctx",
+        "flat",
+        "last",
+        "sid",
+        "state",
+        "tally_failed",
+        "tally_text",
+        "title_doc",
+    )
 
     def __init__(self, ch: Chapter, ctx: ToolCtx, sid: str, last: bool, state: Dict[str, bool]) -> None:
         super().__init__(ch.key, head_h=24, pad_top=2, pad_bottom=2 if last else 12, open_=False)
@@ -578,6 +595,7 @@ class ChapterGroup(Group):
 
 class Chapters(Group):
     KIND = "chapters"
+    __slots__ = ("ctx", "sid", "state")
 
     def __init__(self, items: List[Item], ctx: ToolCtx, sid: str, state: Dict[str, bool], key: str) -> None:
         super().__init__(key, head_h=0, pad_top=2, pad_bottom=2, open_=True)
@@ -611,6 +629,7 @@ class FoldGroup(Group):
     MB = 14
     CHILD_INDENT = 14
     HEAD = 30
+    __slots__ = ("_mode", "ctx", "inner", "sid", "state", "summary", "unit")
 
     def __init__(self, unit: WorkUnit, ctx: ToolCtx, sid: str, state: Dict[str, bool]) -> None:
         super().__init__(unit.key, head_h=self.HEAD, pad_top=6, pad_bottom=4, open_=False)

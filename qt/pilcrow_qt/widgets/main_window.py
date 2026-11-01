@@ -13,11 +13,12 @@ from collections import OrderedDict
 from typing import Optional, Tuple
 
 import shiboken6
-from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QKeySequence, QPainter, QPainterPath, QPen, QShortcut
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QStackedWidget, QVBoxLayout, QWidget
 
 from .. import icons, theme
+from ..canvas.clock import Tween
 from ..store import store
 from .sidebar import Sidebar
 from .ui.bits import Mark, Row, label
@@ -110,6 +111,11 @@ class MainWindow(QMainWindow):
         self.inbox: Optional[QWidget] = None
         self.dispatch: Optional[QWidget] = None
         self.panel: Optional[QWidget] = None
+        # a closed panel is built, or brought to the session on screen, once the window is idle
+        self._idle_panel = QTimer(self)
+        self._idle_panel.setSingleShot(True)
+        self._idle_panel.setInterval(700)
+        self._idle_panel.timeout.connect(self._prebuild_panel)
 
         self.boot = Boot(self)
         self.boot.raise_()
@@ -255,18 +261,23 @@ class MainWindow(QMainWindow):
 
             self.panel = RightPanel()
             self.panel_layout.addWidget(self.panel)
-        if self.panel is not None and session is not None:
+        if panel_open:
+            self._idle_panel.stop()
             self.panel.set_session(session)
+        elif session is not None and store.page == "session":
+            # closed: its tab follows the session when the window is idle, not on the switch itself,
+            # so the first open is a flip, and a run of switches builds nothing
+            self._idle_panel.start()
         self.panel_host.setFixedWidth(ui.panel_w)
         self.panel_host.setVisible(panel_open)
         self.body.place()
-        if self.panel is None and session is not None and store.page == "session":
-            # built while the window is idle, so the first open is a flip, not a construction
-            QTimer.singleShot(700, self._prebuild_panel)
 
     def _prebuild_panel(self) -> None:
         session = store.active_session()
-        if self.panel is not None or session is None or store.page != "session":
+        if session is None or store.page != "session" or self.panel_host.isVisible():
+            return
+        if self.panel is not None:
+            self.panel.set_session(session)
             return
         from .panels.right_panel import RightPanel
 
@@ -652,7 +663,7 @@ class Resizer(QWidget):
         self._shown = 0.0
         self._last_x = 0.0
         self.dragging = False
-        self._anim: Optional[QVariantAnimation] = None
+        self.fade_t = Tween(self._set_shown, ms=theme.T_MED, curve=theme.ease)
         self._delay = QTimer(self)
         self._delay.setSingleShot(True)
         self._delay.setInterval(120)  # transition-delay: 120ms
@@ -661,20 +672,7 @@ class Resizer(QWidget):
 
     # ---- showing the handle
     def _fade(self, to: float) -> None:
-        if self._anim is not None:
-            self._anim.stop()
-            self._anim = None
-        if store.reduced_motion or to == self._shown:
-            self._set_shown(to)
-            return
-        a = QVariantAnimation(self)
-        a.setDuration(theme.T_MED)
-        a.setStartValue(self._shown)
-        a.setEndValue(to)
-        a.setEasingCurve(theme.ease())
-        a.valueChanged.connect(self._set_shown)
-        a.start()
-        self._anim = a
+        self.fade_t.go(to)
 
     def _set_shown(self, v: float) -> None:
         self._shown = float(v)
@@ -696,7 +694,7 @@ class Resizer(QWidget):
             self.dragging = True
             self._last_x = e.globalPosition().x()
             self._delay.stop()
-            self._set_shown(1.0)
+            self.fade_t.jump(1.0)
             e.accept()
             return
         super().mousePressEvent(e)
@@ -907,19 +905,13 @@ class Boot(QWidget):
         if store.reduced_motion:
             self.hide()
             return
-        from PySide6.QtCore import QPropertyAnimation
         from PySide6.QtWidgets import QGraphicsOpacityEffect
 
         eff = QGraphicsOpacityEffect(self)
         self.setGraphicsEffect(eff)
-        anim = QPropertyAnimation(eff, b"opacity", self)
-        anim.setDuration(320)
-        anim.setStartValue(1.0)
-        anim.setEndValue(0.0)
-        anim.setEasingCurve(theme.ease_exit())
-        anim.finished.connect(self.hide)
-        anim.start()
-        self._anim = anim
+        self._fade_t = Tween(eff.setOpacity, self.hide, ms=320, curve=theme.ease_exit)
+        self._fade_t.jump(1.0)
+        self._fade_t.go(0.0)
 
 
 _ = (QEvent, Mark, Row)

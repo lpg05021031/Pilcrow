@@ -32,32 +32,39 @@ behaviour, the side panel, the migration, and the tests.
 
 ```
 qt/pilcrow_qt/canvas/
-  fenwick.py      Fenwick (binary indexed) tree over int heights: prefix, update, find_by_prefix
-  clock.py        the shared animation clock
+  fenwick.py      Fenwick (binary indexed) tree over int heights: prefix, add/set, find, append, truncate
+  clock.py        the shared animation clock and the Tween that runs on it
   estimate.py     height estimation (formula + fast measure) and its calibration
-  anchor.py       anchor choice and correction, follow state, the scroll easing
-  scene.py        Block, Group, Scene, incremental reconciliation, warm/cold, prefetch order
-  paint.py        PaintState, the pixmap cache, decoration painters (ported from items.py), the
-                  fit pass over a laid-out document (images to the column)
+  anchor.py       the follow state (whether the view keeps to the live end)
+  scene.py        Block, Group, Scene: heights, gaps, reveal, the registry, dirtiness, anchors
+  paint.py        PaintState, the Measurer (fonts, metrics, documents), the pixmap cache, the
+                  decoration painters, find, the fit pass over a laid-out document
   build.py        Markdown → QTextDocument from the token stream with a cursor (no HTML round trip)
   pixels.py       rules and bordered rectangles on the device pixel grid (hline, vline, snap)
   grow.py         the growers: a fence, a list, a table, a paragraph being written grow in place
-  canvas.py       CanvasView(QAbstractScrollArea): events, hit testing, hover, focus, selection,
-                  islands, overlays, the paint loop, pixel scrolling
+  nodes.py        the mini-layout (columns, rows, text, icons, boxes) the card bodies are built from
+  view.py         CanvasView(QAbstractScrollArea): commit and anchor, prefetch, the paint loop,
+                  hit testing, hover, focus, selection, islands, pixel scrolling, the scroll easing
+  a11y.py         the viewport as an accessible list of its blocks; the events the view sends
+  find_bar.py     Ctrl+F over the whole conversation
   blocks/
-    prose.py      ProseBlock: one Markdown top-level block, one QTextDocument, streaming append
-    user.py       UserBlock (bubble, attachments, actions), CommandChip
+    base.py       NodeBlock: a block painted from a node tree
+    prose.py      ProseBlock: one Markdown top-level block, one QTextDocument, streaming append;
+                  TextGroup
+    user.py       UserBlock (bubble, attachments, actions)
     thinking.py   ThinkingBlock (head, peek, body)
-    tool.py       ToolBlock (head), ToolBodyGroup, the body painters per tool
-    fold.py       FoldGroup (work fold head), ChapterGroup, ExploreGroup, StepsGroup
-    misc.py       NoticeBlock, DividerBlock, ResultBlock, WorkingBlock, SkeletonBlock
+    tool.py       ToolBlock (head), AgentChildren, the permission and special islands
+    bodies.py     the card bodies per tool, built as node trees; codehtml.py: code and diffs
+    fold.py       FoldGroup (work fold head), Chapters, ChapterGroup, Explore, Steps, Flat
+    misc.py       notices, dividers, results, the working line, SkeletonBlock
+    note.py       a helper's note in a lead's conversation
     island.py     IslandBlock (a real QWidget placed by the engine)
-  transcript.py   TranscriptScene: items → units → groups and blocks; the Transcript widget API
-  lists.py        RowScene: a flat scene for the Timeline, Tasks and other panel lists
+  transcript.py   the session's scene: items → units → groups and blocks; the Transcript widget API
 ```
 
 `fenwick.py`, `estimate.py`, `anchor.py`, `scene.py` import nothing from Qt. `paint.py` and the
-blocks import QtGui only. `canvas.py` is the one QtWidgets file.
+blocks paint with QtGui. `view.py` is the QtWidgets file; the panels' lists (the Timeline, a
+dispatch job's rows, the target picker) are scenes of their own blocks on the same view.
 
 ## 2. Data structures
 
@@ -325,7 +332,9 @@ two columns past the code it belongs to.
 
 A block that is **static** (not streaming, not live, not hovered, not focused, not selected, not
 lit by find) and **shorter than twice the viewport** is painted once into a `QPixmap` at the
-device pixel ratio and blitted afterwards. Key: `(key, rev, sig, gen, width, theme, dpr, font_scale)`.
+device pixel ratio and blitted afterwards. Key: `(key, rev, sig, gen, width, theme, dpr)`. The text
+scale is not in the key: a scale change runs `Measurer.refresh()`, which empties the cache (once,
+however many views ask), so no picture of the old scale survives it.
 LRU by bytes, 48 MB budget; a block's entry is dropped when its `rev`/`sig` changes or it cools.
 `gen` moves on when a `NodeBlock` is rebuilt while its `rev` and `sig` stand (a list row whose data
 changed: a dispatch run, a timeline step), so the old picture is never blitted again; the rebuild
@@ -515,7 +524,7 @@ well, folded by the head like a tool body.
 - **View mode**: fold defaults and quiet grouping change: shapes are marked stale (§7.2), the
   anchor is kept, warm groups reshape on their next paint.
 - **Font scale** (a new feature the engine makes cheap, Ctrl+= / Ctrl+− / Ctrl+0): the theme's
-  prose and mono sizes scale; heights are stale at the new `font_scale` key; visible blocks are
+  prose and mono sizes scale; the measurer refreshes (new metrics, empty caches); visible blocks are
   measured now under anchoring, the rest by the prefetch queue.
 - **Width change** (window or panel resize, sidebar toggle, composer growing): same as font scale
   for the width key. During a drag, visible blocks are re-measured every frame (≈ 20 × 0.5 ms), the
@@ -534,13 +543,16 @@ Scene syncs when shown (O(live turn)). Switching costs one paint.
 `store._load_session` pushes the snapshot into the model in slices of 300 messages per event-loop
 turn (a zero timer chain), under the loading skeleton; the Scene is built when the model is complete
 (blocks are small: ~16,000 in a few hundred milliseconds, spread over slices as well). The first
-paint needs only the last screen's blocks exact. `orjson` is used for `json.loads` when installed.
+paint needs only the last screen's blocks exact. `orjson` parses the messages when it is installed
+(it is optional, not in requirements.txt); the standard library does otherwise.
 
 ## 9. The clock
 
-`clock.py`: one `QTimer`, 33 ms while only indicators are live (breathing marks, spinners, rails,
-elapsed counters), 16 ms while an animation runs (reveal, scroll easing, resizer handle), stopped
-when nothing subscribes. Subscribers are weak references with a `tick(now)` that returns the rect to
+`clock.py`: one `QTimer` for every animation in the process, 33 ms while only indicators are live
+(breathing marks, spinners, rails, elapsed counters), 16 ms while an animation runs (a fold's
+reveal, the scroll easing, the composer's springs, a menu's rows unfolding, the window's handles
+and tab underline), stopped when nothing subscribes. The other `QTimer`s in the widgets are not
+animations: debounces, toasts that expire, polling, a deferred layout. Subscribers are weak references with a `tick(now)` that returns the rect to
 repaint. The canvas subscribes once and fans out to its live blocks on screen; off-screen live blocks
 do not tick. An elapsed counter repaints its meta rectangle; its width is reserved for "99m 59s".
 

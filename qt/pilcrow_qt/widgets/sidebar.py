@@ -16,7 +16,7 @@ import time as _time
 from html import escape
 from typing import Any, Callable, Dict, List, Optional
 
-from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, QTimer, QVariantAnimation, Signal
+from PySide6.QtCore import QEvent, QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import (
     QAbstractButton,
@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import icons, theme
+from ..canvas.clock import Tween
 from ..lib.fmt import basename, tildify, time_ago
 from ..lib.fuzzy import fuzzy_score
 from ..store import ConfirmSpec, store
@@ -879,7 +880,8 @@ class _GroupToggle(QAbstractButton):
         self._collapsed = collapsed
         self._angle = 0.0 if collapsed else 90.0
         self._revealed = False
-        self._anim: Optional[QVariantAnimation] = None
+        self.turn_t = Tween(self._turn, ms=theme.T_MED, curve=theme.ease)
+        self.turn_t.value = self._angle
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedHeight(HEAD_H)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -896,22 +898,7 @@ class _GroupToggle(QAbstractButton):
         if collapsed == self._collapsed:
             return
         self._collapsed = collapsed
-        target = 0.0 if collapsed else 90.0
-        if self._anim is not None:
-            self._anim.stop()
-            self._anim = None
-        if store.reduced_motion:
-            self._angle = target
-            self.update()
-            return
-        a = QVariantAnimation(self)
-        a.setDuration(theme.T_MED)
-        a.setStartValue(self._angle)
-        a.setEndValue(target)
-        a.setEasingCurve(theme.ease())
-        a.valueChanged.connect(self._turn)
-        a.start()
-        self._anim = a
+        self.turn_t.go(0.0 if collapsed else 90.0)
 
     def _turn(self, v) -> None:
         self._angle = float(v)

@@ -51,6 +51,7 @@ def _boundary(items: List[Item]) -> int:
 class OrphanIsland(IslandBlock):
     MT = 10
     MB = 14
+    __slots__ = ("ctx", "perm")
 
     def __init__(self, perm: Json, ctx: ToolCtx) -> None:
         self.perm, self.ctx = perm, ctx
@@ -64,6 +65,8 @@ class OrphanIsland(IslandBlock):
 
 class EmptyIsland(IslandBlock):
     """The session view's empty card, shown through the scene; the view owns the widget."""
+
+    __slots__ = ("_w",)
 
     def __init__(self, widget: QWidget) -> None:
         self._w = widget

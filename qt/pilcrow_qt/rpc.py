@@ -16,6 +16,11 @@ from PySide6.QtWebSockets import QWebSocket
 
 log = logging.getLogger(__name__)
 
+try:  # a history snapshot is megabytes of JSON parsed on the GUI thread; orjson does it several times faster
+    from orjson import loads as _loads
+except ImportError:  # not a requirement: the standard library parses the same messages
+    _loads = json.loads
+
 Params = Dict[str, Any]
 
 
@@ -150,7 +155,7 @@ class Rpc(QObject):
 
     def _on_message(self, text: str) -> None:
         try:
-            msg = json.loads(text)
+            msg = _loads(text)
         except ValueError:
             return
         t = msg.get("t")
