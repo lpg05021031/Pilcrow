@@ -683,12 +683,22 @@ def panel_tabs(ctx: Ctx) -> Json:
     settle(300)
     ctx.counters.reset()
     steps: List[float] = []
+    steps_cpu: List[float] = []
     for dx in [-12] * 16 + [12] * 16:
-        t0 = time.perf_counter()
+        t0, c0 = time.perf_counter(), time.thread_time()
         ctx.win._drag_panel(dx)
         ctx.c.app.processEvents()
         steps.append(time.perf_counter() - t0)
-    out["drag"] = {"step": rig.summary(steps), "layout": sc.layout, "paint": sc.paint}
+        steps_cpu.append(time.thread_time() - c0)
+    win = ctx.counters.scopes["window"]
+    out["drag"] = {
+        "step": rig.summary(steps),
+        "step_cpu": rig.summary(steps_cpu),
+        "layout": sc.layout,
+        "paint": sc.paint,
+        "window_paint": win.paint,  # paint events in the whole window, the panel's among them
+        "window_paint_px": win.paint_area,
+    }
     ctx.counters.drop("panel")
     return out
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 import sys
 from collections import OrderedDict
-from typing import Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import shiboken6
 from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, QRect, QRectF, QSettings, Qt, QTimer, Signal
@@ -40,6 +40,7 @@ TAB_KEYS = {"1": "changes", "2": "files", "3": "terminal", "4": "preview", "5": 
 
 GROUND_PAD = 8  # .app { padding: 0 8px 8px 0 }
 SESSION_VIEWS_KEPT = 8  # conversations kept built behind the one on screen
+Shadow = Tuple[int, int, int, int, float]  # a line of a sheet's shadow: x, y, w, h, its share of the strength
 SIDEBAR_MIN, SIDEBAR_MAX = 200, 440  # App.tsx resizeSidebar
 PANEL_MIN, PANEL_SHARE = 340, 0.62  # App.tsx resizePanel
 
@@ -530,6 +531,7 @@ class Shell(QWidget):
         self.panel: Optional[QWidget] = None
         self.side_resizer: Optional[Resizer] = None
         self.panel_resizer: Optional[Resizer] = None
+        self._shadows_at: Dict[str, List[Shadow]] = {}  # each sheet's shadow as last placed
         bind(theme.theme.changed, self, lambda _t: self.update())
 
     def set_parts(self, sidebar: QWidget, main: QWidget, panel: QWidget, side: Resizer, right: Resizer) -> None:
@@ -545,43 +547,58 @@ class Shell(QWidget):
         self.row.activate()
         h = self.height() - GROUND_PAD
         if self.side_resizer is not None:
-            self.side_resizer.setVisible(side_open)
-            if side_open:
-                seam = self.sidebar.geometry().right() + 1
-                self.side_resizer.setGeometry(seam - Resizer.WIDTH // 2, 0, Resizer.WIDTH, h)
-                self.side_resizer.raise_()
+            side_x = self.sidebar.geometry().right() + 1 if side_open else None
+            self._put_handle(self.side_resizer, side_x, h)
         if self.panel_resizer is not None:
             panel_open = self.panel is not None and not self.panel.isHidden()
-            self.panel_resizer.setVisible(panel_open)
-            if panel_open:
-                seam = self.main.geometry().right() + 1
-                self.panel_resizer.setGeometry(seam - Resizer.WIDTH // 2, 0, Resizer.WIDTH, h)
-                self.panel_resizer.raise_()
-        self.update()
+            self._put_handle(self.panel_resizer, self.main.geometry().right() + 1 if panel_open else None, h)
+        # the sheets repaint themselves when they move or resize; on the ground only the lines of
+        # shadow that moved are repainted (a full update repainted every widget in the window)
+        for card in (self.main, self.panel):
+            if card is None:
+                continue
+            now = self._shadows(card)
+            for x, y, w, h, _a in set(now).symmetric_difference(self._shadows_at.get(card.objectName(), [])):
+                self.update(x, y, w, h)
+            self._shadows_at[card.objectName()] = now
+
+    @staticmethod
+    def _put_handle(handle: Resizer, seam: Optional[int], h: int) -> None:
+        """A handle astride the seam at ``seam`` (hidden when None), above the sheets. Raised only
+        when it is shown: raising repaints what lies under it."""
+        if seam is None:
+            handle.hide()
+            return
+        handle.setGeometry(seam - Resizer.WIDTH // 2, 0, Resizer.WIDTH, h)
+        if handle.isHidden():
+            handle.show()
+            handle.raise_()
+
+    @staticmethod
+    def _shadows(card: QWidget) -> List[Shadow]:
+        """A sheet's shadow on the ground (box-shadow 0 1px 2px): three lines under it, two either
+        side, each (x, y, w, h, strength)."""
+        if card.isHidden():
+            return []
+        r = card.geometry().adjusted(0, Card.TOP, 0, 0)
+        out = [(r.left() + 1, r.bottom() + d, r.width() - 2, 1, k) for d, k in ((1, 0.75), (2, 0.36), (3, 0.17))]
+        for d, k in ((1, 0.36), (2, 0.17)):
+            out += [(r.left() - d, r.top() + 1, 1, r.height(), k), (r.right() + d, r.top() + 1, 1, r.height(), k)]
+        return out
 
     def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         self.place()
 
     def paintEvent(self, e) -> None:
-        # box-shadow 0 1px 2px: black at 18% on dark, 4% on light, blurred over the ground
-        t = theme.tokens()
-        strength = 0.18 if t.dark else 0.04
+        # black at 18% on dark, 4% on light, blurred over the ground
+        strength = 0.18 if theme.tokens().dark else 0.04
         p = QPainter(self)
+        region = e.region()
         for card in (self.main, self.panel):
-            if card is None or card.isHidden():
-                continue
-            r = card.geometry().adjusted(0, Card.TOP, 0, 0)
-            if r.adjusted(2, 2, -2, -2).contains(e.rect()):
-                continue  # a repaint inside the sheet: the shadow is outside it
-            for d, k in ((1, 0.75), (2, 0.36), (3, 0.17)):
-                c = QColor(0, 0, 0, int(255 * strength * k))
-                p.fillRect(QRect(r.left() + 1, r.bottom() + d, r.width() - 2, 1), c)
-            for d, k in ((1, 0.36), (2, 0.17)):
-                c = QColor(0, 0, 0, int(255 * strength * k))
-                p.fillRect(QRect(r.left() - d, r.top() + 1, 1, r.height()), c)
-                p.fillRect(QRect(r.right() + d, r.top() + 1, 1, r.height()), c)
-            p.fillRect(QRect(r.left() + 1, r.top() - 1, r.width() - 2, 1), QColor(0, 0, 0, int(255 * strength * 0.17)))
+            for x, y, w, h, k in self._shadows(card) if card is not None else []:
+                if region.intersects(QRect(x, y, w, h)):
+                    p.fillRect(QRect(x, y, w, h), QColor(0, 0, 0, int(255 * strength * k)))
 
 
 class Card(QWidget):
@@ -599,6 +616,9 @@ class Card(QWidget):
         self.body_layout.setContentsMargins(0, self.TOP, 0, 0)
         self.body_layout.setSpacing(0)
         self._frame = _CardFrame(self)
+        # it paints every pixel of itself (the ground in the band above the sheet, then the sheet), so
+        # a repaint inside it does not repaint the ground under it first
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
         bind(theme.theme.changed, self, lambda _t: (self.update(), self._frame.update()))
 
     def sheet_rect(self) -> QRect:
@@ -614,12 +634,22 @@ class Card(QWidget):
         super().resizeEvent(e)
         self._frame.setGeometry(self.rect())
 
-    def paintEvent(self, _e) -> None:
+    def paintEvent(self, e) -> None:
+        t = theme.tokens()
         p = QPainter(self)
+        p.fillRect(e.rect(), theme.qcolor(t.canvas))
+        # the band above the sheet and its corners, antialiased; the rest is the plain canvas
+        sheet = self.sheet_rect()
+        edges = QRegion(self.rect()) - QRegion(sheet.adjusted(0, self.RADIUS, 0, -self.RADIUS))
+        edges = (edges - QRegion(sheet.adjusted(self.RADIUS, 0, -self.RADIUS, 0))) & e.region()
+        if edges.isEmpty():
+            return
+        p.setClipRegion(edges)
+        p.fillRect(edges.boundingRect(), theme.qcolor(t.chrome))
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(theme.qcolor(theme.tokens().canvas))
-        p.drawRoundedRect(QRectF(self.sheet_rect()), self.RADIUS, self.RADIUS)
+        p.setBrush(theme.qcolor(t.canvas))
+        p.drawRoundedRect(QRectF(sheet), self.RADIUS, self.RADIUS)
 
 
 class _CardFrame(QWidget):
