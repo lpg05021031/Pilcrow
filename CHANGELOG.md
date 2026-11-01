@@ -65,6 +65,16 @@
    （Linux 同）；桌面捷徑被「受控資料夾存取」擋下時改為警告而非中止；說明裡不再建議 `[scriptblock]::Create` 這種繞過
    執行原則的寫法，改為 `Unblock-File`；WebView2 DLL 的簽章檢查比對完整的 `O=Microsoft Corporation` 欄位；
    `make-installers.py` 會驗證 Windows 安裝檔整份是純 ASCII。
+   **Dispatch 檢視**：兩個 client 的 Dispatch 畫面逐一狀態截圖對照（看板、工作頁的等待回答／canary 完成／執行中／
+   review／完成、新工作、收件匣卡片、某個 run 自己的對話；深淺兩色），並以四十個 repo、每秒十次回報的工作量測
+   （`qt/tests/stress/s_dispatch.py`，數字在 `qt/PERF.md` §5）。修掉的：工作頁表格列在 canvas 上就地更新後，畫面仍是
+   舊狀態（重建的 block 沿用快取的 pixmap、也沒要求重繪——現在重建會換代並記下自己的矩形，所有引擎上的清單一體適用）；
+   引擎上的清單（run 表、timeline、target picker）不跟著主題切換；看板與工作頁在別的頁面前面時仍逐筆 refresh（現在
+   隱藏時標記、顯示時才算）；看板每個 delta 重排所有卡片（現在只有成員或順序變了才重排）；側欄每個 delta 整個重建
+   （現在只有工作集合或名稱變了才重建，否則只更新徽章）；新工作表單的三個開關沒有文字；run 自己的對話沒說它屬於哪個
+   job（現在有「run of …」麵包屑可以回到工作頁，跟 helper 的「helper of …」一樣）；完成列改成跟控制室一樣有 hover；
+   web 端 state 欄跑出表格列、完成列名稱被擠到看不見、收件匣卡片的按鈕溢出，都修了。順手：`Text` 的換行結果依寬度
+   快取、一行字寬度沒變就不觸發重排；側欄頁籤的徽章數字沒變就不重繪。
 
 - **2.11.0**：**Dispatch：一份 brief、一組 repo、一個 job**（設計與現況見 `DISPATCH.md`）。伺服器新增 `server/dispatch_core.js`
   與 `server/dispatch.js`：掃描資料夾找 repo（分支、未提交、遠端、大小、CLAUDE.md，以及 package.json / go.mod /

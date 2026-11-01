@@ -765,7 +765,11 @@ export function fetchJob(id: string) {
 }
 /** A job's runs in the server's order, the superseded (retried) ones left out. */
 export function runsOf(runs: Record<string, Record<string, DispatchRun>>, id: string): DispatchRun[] {
-  return Object.values(runs[id] || {}).filter((r) => !r.superseded);
+  return runsIn(runs[id]);
+}
+/** The same from one job's own map (what a component selects, so another job's change does not reach it). */
+export function runsIn(runs: Record<string, DispatchRun> | undefined): DispatchRun[] {
+  return Object.values(runs || {}).filter((r) => !r.superseded);
 }
 /** Requests waiting across jobs, plus the canaries waiting to be read: the sidebar's badge. */
 export function dispatchNeeds(jobs: Record<string, DispatchJob>): number {

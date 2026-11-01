@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Pause, Play, Square, Ellipsis, GitCommitHorizontal, GitPullRequestArrow, ExternalLink, RotateCw, BookMarked, CalendarClock, ClipboardPaste, Trash, CircleDollarSign } from 'lucide-react';
-import { useStore, call, openSession, respond, confirmAction, toast, showDispatch, openJob, runsOf, loadPlaybooks } from '../../lib/store';
+import { useStore, call, openSession, respond, confirmAction, toast, showDispatch, openJob, runsIn, loadPlaybooks } from '../../lib/store';
 import type { DispatchJob, DispatchReview, DispatchRun, Playbook } from '../../lib/types';
 import { cost, plural } from '../../lib/format';
 import { Switch, useNow, copyText } from '../ui/bits';
@@ -15,10 +15,10 @@ import { ACTIVE, Glyph, STATE_WORD, TERMINAL, clockMmss, elapsedText, groupReque
  */
 export function JobView({ id }: { id: string }) {
   const job = useStore((s) => s.jobs[id]);
-  const jobRuns = useStore((s) => s.jobRuns);
+  const myRuns = useStore((s) => s.jobRuns[id]); // this job's own map: another job's delta does not render here
   const playbooks = useStore((s) => s.playbooks);
   const now = useNow(1000, true);
-  const runs = useMemo(() => runsOf(jobRuns, id).sort((a, b) => a.level - b.level || a.name.localeCompare(b.name)), [jobRuns, id]);
+  const runs = useMemo(() => runsIn(myRuns).sort((a, b) => a.level - b.level || a.name.localeCompare(b.name)), [myRuns]);
   const [review, setReview] = useState<DispatchReview | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');

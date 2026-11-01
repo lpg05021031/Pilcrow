@@ -363,8 +363,6 @@ class Transcript(QWidget):
         bind(store.rt_changed, self, self._on_rt)
         bind(store.sent, self, lambda sid: sid == self.sid and self.scroll_to_bottom())
         bind(store.ui_changed, self, lambda _u: self._on_ui())
-        bind(theme.theme.changed, self, lambda _t: self.view.on_theme())
-        bind(theme.theme.scale_changed, self, lambda _k: self.view.on_theme())
         self._sync()
         QTimer.singleShot(0, self, self._initial_place)
 

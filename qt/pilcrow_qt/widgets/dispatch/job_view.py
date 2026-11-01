@@ -192,7 +192,7 @@ class RunBlock(NodeBlock):
             QRectF(r.x() + 2, r.y() + 2, 14, 14),
             state,
             st.t,
-            self.list.breath0 if state in ("running", "preparing") else None,
+            self.list.breath0 if self.live() else None,
         )
 
     def paint(self, p: QPainter, x: int, y: int, w: int, st: PaintState) -> None:
@@ -224,10 +224,11 @@ class RunBlock(NodeBlock):
         return f"{self.run.get('name')} {STATE_WORD.get(str(self.run.get('state')), '')}"
 
     def live(self) -> bool:
-        return self.run.get("state") in ("running", "preparing")
+        """Breathing while it runs: the glyph alone, and not under reduced motion."""
+        return self.run.get("state") in ("running", "preparing") and not store.reduced_motion
 
     def tick(self, now: float) -> Optional[tuple]:
-        return (0, 0, 100000, self.h) if self.live() else None
+        return (0, 0, ROW_PAD[0] + 20, self.h) if self.live() else None
 
 
 class HeadBlock(NodeBlock):
@@ -442,11 +443,14 @@ class JobView(QWidget):
         self._tick_timer.timeout.connect(self._tick)
         bind(store.dispatch_changed, self, self._on_change)
         self._extra_sig: Any = None
+        self._stale = False
 
     # ---- lifecycle
     def showEvent(self, e) -> None:  # noqa: N802
         super().showEvent(e)
         self._tick_timer.start()
+        if self._stale:
+            self.refresh()
 
     def hideEvent(self, e) -> None:  # noqa: N802
         self._tick_timer.stop()
@@ -461,8 +465,13 @@ class JobView(QWidget):
         self.refresh()
 
     def _on_change(self, d: Any) -> None:
+        """A change of this job: refreshed now when the view shows, else when it shows next
+        (a hidden page does nothing on an update)."""
         if d is None or (isinstance(d, dict) and d.get("id") == self.jid):
-            self.refresh()
+            if self.isVisible():
+                self.refresh()
+            else:
+                self._stale = True
 
     @property
     def job(self) -> Json:
@@ -471,6 +480,7 @@ class JobView(QWidget):
     # ---- rendering
     def refresh(self) -> None:
         self.now = now_ms()
+        self._stale = False
         job = self.job
         runs = store.runs_of(self.jid)
         if not job:
@@ -582,6 +592,7 @@ class JobView(QWidget):
             lambda on: store.call("dispatch.save", {"id": self.jid, "settings": {"learn": bool(on)}}, quiet=True)
         )
         rl.addWidget(sw)
+        rl.addWidget(Text("let the rest learn from the canary's summary", theme.FS_SMALL, 400, "text_2", wrap=False))
         rl.addStretch(1)
         return row
 

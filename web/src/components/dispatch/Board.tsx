@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { Plus, PanelLeftOpen, Play } from 'lucide-react';
-import { useStore, call, openSession, respond, setUi, showDispatch, openJob, runsOf } from '../../lib/store';
+import { useStore, call, openSession, respond, setUi, showDispatch, openJob, runsOf, runsIn } from '../../lib/store';
 import type { DispatchJob } from '../../lib/types';
 import { cost, duration, plural } from '../../lib/format';
 import { Mark, useNow } from '../ui/bits';
@@ -131,11 +131,11 @@ export function RequestRow({ jobId, group }: { jobId: string; group: RequestGrou
 
 /** The canary finished: read it and continue, with the forecast for the rest. */
 export function CanaryRow({ job }: { job: DispatchJob }) {
-  const jobRuns = useStore((s) => s.jobRuns);
+  const myRuns = useStore((s) => s.jobRuns[job.id]);
   const names = job.learned.map((l) => l.name).join(', ') || 'the canary';
   const f = job.forecast;
   const openCanary = () => {
-    const run = runsOf(jobRuns, job.id).find((r) => r.wave === 'canary' && r.sessionId);
+    const run = runsIn(myRuns).find((r) => r.wave === 'canary' && r.sessionId);
     if (run?.sessionId) openSession(run.sessionId);
     else openJob(job.id);
   };
@@ -160,8 +160,8 @@ export function CanaryRow({ job }: { job: DispatchJob }) {
 }
 
 function JobCard({ job, now, detail }: { job: DispatchJob; now: number; detail: boolean }) {
-  const jobRuns = useStore((s) => s.jobRuns);
-  const groups = detail ? groupRequests(runsOf(jobRuns, job.id)).slice(0, 4) : [];
+  const myRuns = useStore((s) => s.jobRuns[job.id]);
+  const groups = detail ? groupRequests(runsIn(myRuns)).slice(0, 4) : [];
   return (
     <article className="ovc dp-card" data-card={job.id} onClick={() => openJob(job.id)} role="button" tabIndex={0}>
       <div className="dp-line">

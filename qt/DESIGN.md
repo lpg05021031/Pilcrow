@@ -325,8 +325,11 @@ two columns past the code it belongs to.
 
 A block that is **static** (not streaming, not live, not hovered, not focused, not selected, not
 lit by find) and **shorter than twice the viewport** is painted once into a `QPixmap` at the
-device pixel ratio and blitted afterwards. Key: `(key, rev, sig, width, theme, dpr, font_scale)`.
+device pixel ratio and blitted afterwards. Key: `(key, rev, sig, gen, width, theme, dpr, font_scale)`.
 LRU by bytes, 48 MB budget; a block's entry is dropped when its `rev`/`sig` changes or it cools.
+`gen` moves on when a `NodeBlock` is rebuilt while its `rev` and `sig` stand (a list row whose data
+changed: a dispatch run, a timeline step), so the old picture is never blitted again; the rebuild
+also notes the block's own rectangle, so the commit repaints it although its height may not change.
 The pixmap is opaque (the canvas background is uniform), so the blit is a memcpy per scanline.
 Blocks that are not static paint directly; text drawn from a laid-out document costs ~0.1 ms per
 screenful of lines in the raster engine.
@@ -548,7 +551,10 @@ do not tick. An elapsed counter repaints its meta rectangle; its width is reserv
 `Refresher` gains `visible_only=True`: a hidden tab marks itself stale and refreshes in `showEvent`.
 Change keys never include `rt.rev`; they are built from the data the tab shows (the tasks list, the
 usage dict, the steps). `TasksPanel`, `InfoPanel` and `HistoryPanel.render` reconcile their rows by
-id: update in place, insert new, remove gone; sections are created once.
+id: update in place, insert new, remove gone; sections are created once. The Dispatch board and job
+view keep the same rule (`_stale`, refreshed in `showEvent`); the board re-lays a section only when
+its membership or order changed; the sidebar rebuilds for a `dispatch.changed` only when the set of
+jobs or a job's name changed, else it touches its badge.
 
 ### 10.2 Lists on the engine
 

@@ -42,11 +42,16 @@ class NodeBlock(Block):
         return self
 
     def rebuild(self) -> None:
-        """Drop the tree so the next measure builds it again (after the item changed)."""
+        """Drop the tree so the next measure builds it again (after the item changed). The generation
+        moves on, so a pixmap cached of the old picture is not blitted again; its rectangle is noted,
+        so the commit repaints it even when its height stays the same."""
         if self.root is not None:
             self.root.cool()
         self.root = None
         self.warm = False
+        self.gen += 1
+        if self.scene is not None:
+            self.scene.note_block(self)  # its own rectangle; a height change notes the rest itself
 
     # ---- heights
     def estimate(self, width: int, m: Measurer) -> int:

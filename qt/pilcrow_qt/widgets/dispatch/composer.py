@@ -39,6 +39,18 @@ def field(title: str, w: QWidget, note: Optional[QWidget] = None) -> QWidget:
     return box
 
 
+def switch_line(sw: Switch, text: str) -> QWidget:
+    """A switch with its words beside it (``.dp-learn``)."""
+    box = QWidget()
+    lay = QHBoxLayout(box)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.setSpacing(8)
+    lay.addWidget(sw)
+    lay.addWidget(Text(text, theme.FS_SMALL, 400, "text_2", wrap=False))
+    lay.addStretch(1)
+    return box
+
+
 def inline(*pairs: Any) -> QWidget:
     """Label–control pairs in one row (``.sd-inline``): ``inline("parallel", w, "max", w2)``."""
     box = QWidget()
@@ -243,7 +255,7 @@ class JobComposer(QWidget):
             1,
             2,
         )
-        rg.addWidget(self.learn, 2, 0, 1, 2)
+        rg.addWidget(switch_line(self.learn, "the rest learn from the canary"), 2, 0, 1, 2)
         bl.addWidget(field("Run", run_grid))
 
         # ---- prepare, verify
@@ -257,7 +269,7 @@ class JobComposer(QWidget):
         pg.setVerticalSpacing(10)
         pg.addWidget(field("Prepare (before the agent, in the worktree)", self.prepare), 0, 0)
         pg.addWidget(field("Verify (after the agent)", self.verify), 0, 1)
-        pg.addWidget(self.verify_retry, 1, 0, 1, 2)
+        pg.addWidget(switch_line(self.verify_retry, "send a failing verify back to the agent once"), 1, 0, 1, 2)
         bl.addWidget(pv)
 
         # ---- finish
@@ -280,7 +292,7 @@ class JobComposer(QWidget):
         fg.addWidget(field("Branch in every repository", self.branch), 0, 0)
         fg.addWidget(field("Commit message", self.message), 0, 1)
         fg.addWidget(field("Report", self.report), 1, 0)
-        fg.addWidget(self.pr, 2, 0, 1, 2)
+        fg.addWidget(switch_line(self.pr, "open pull requests with gh after committing"), 2, 0, 1, 2)
         bl.addWidget(field("Finish", fin))
 
         # ---- the plan

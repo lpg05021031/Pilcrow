@@ -149,10 +149,11 @@
   font-size: var(--fs-small);
 }
 
-/* ---- the finished rows */
+/* ---- the finished rows: the overview row without its mark column */
 .dp-fin {
   width: 100%;
   cursor: pointer;
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 /* ---- the job view */
@@ -236,10 +237,15 @@
   background: var(--warn-wash);
 }
 .dp-state {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   width: 112px;
+  white-space: nowrap;
+}
+.dp-state .dp-glyph {
+  margin-right: 8px;
+  vertical-align: middle;
+}
+.dp-word {
+  vertical-align: middle;
 }
 .dp-word.done {
   color: var(--ok);
@@ -427,6 +433,14 @@
 }
 
 /* ---- the inbox card */
+.dp-report .run-foot {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+.dp-report .run-foot .ellipsis {
+  min-width: 0;
+  flex: 1 1 160px;
+}
 .dp-report-rows {
   display: grid;
   gap: 2px;

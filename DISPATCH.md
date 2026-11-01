@@ -48,6 +48,17 @@ puts them first with their notes prefilled, the plan blocks a repository whose p
 target's notes join the registry's standing notes in the brief, and prepare and verify fall back to
 the registry's defaults.
 
+Both clients were toured state by state (board, job view asking / canary waiting / running / review /
+finished, composer, inbox card, a run's own conversation; dark and light) and measured under a job of
+forty repositories reporting ten times a second (`qt/tests/stress/s_dispatch.py`, figures in
+`qt/PERF.md` §5). What that found and fixed: a run's row on the canvas kept the picture of its old
+state (a rebuilt block now paints anew and asks for its repaint), the engine's lists did not follow a
+theme switch, the board and the job view refreshed while hidden, the board re-laid every card on
+every delta, the sidebar rebuilt its rows on every delta, the composer's switches had no words beside
+them, a run's own conversation did not say which job it runs for (a crumb opens the job now, as a
+helper's opens its lead), and on the web the state cell broke out of its table row, a finished row's
+name was squeezed to nothing and the inbox card's actions overflowed.
+
 Pull requests through `gh` are implemented on the server and not yet exercised against a live GitHub
 remote. A lead agent that splits one task into per-repository briefs is the other shape, Helpers
 (HELPERS.md), built since. Not built: sessions on other machines (Pilcrow runs where its server runs).

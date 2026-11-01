@@ -278,3 +278,94 @@ def test_playbooks_run_again_schedule_and_the_written_report(app_client):
     card = next(w for w in c.win.inbox.run_cards if isinstance(w, DispatchCard) and w.it.get("jobId") == jid)
     assert card.prose is not None and card.prose.text().startswith("The brief was carried out")
     assert c.win.inbox.sched_cards and c.win.inbox.sched_cards[0].s["kind"] == "dispatch"
+
+
+def test_a_rows_picture_follows_its_state_and_the_theme(app_client):
+    """A run's row is patched in place; the picture must follow (a rebuilt block paints anew, not from
+    the pixmap cached of its old state, and asks for its repaint), and the list follows a theme switch."""
+    c = app_client
+    from pilcrow_qt import theme
+    from pilcrow_qt.widgets.dispatch.job_view import RunList
+
+    lst = RunList()
+    lst.resize(900, 300)
+    lst.show()
+    run = {"id": "r1", "name": "docs", "path": "/p/docs", "state": "queued", "level": 0, "dependsOn": [], "pending": []}
+    lst.sync("job-x", [run], 0.0)
+    c.sleep(150)
+    before = lst.viewport().grab().toImage()
+    block = lst.scene.block("run:r1")
+    gen = block.gen
+    done = dict(run, state="done", startedAt=1.0, endedAt=61000.0, files=[{"path": "a"}], add=3, cost=0.02)
+    done["del"] = 1
+    lst.sync("job-x", [done], 70000.0)
+    c.sleep(150)
+    after = lst.viewport().grab().toImage()
+    assert lst.scene.block("run:r1") is block and block.gen > gen, "the same block, a new generation"
+    assert "done" in block.text()
+    assert before != after, "the row repainted with its new state"
+    theme.theme.apply(False)
+    c.sleep(200)
+    light = lst.viewport().grab().toImage()
+    theme.theme.apply(True)
+    c.sleep(200)
+    assert light != after, "the list follows the theme"
+    lst.close()
+
+
+def test_hidden_dispatch_pages_do_nothing_until_shown(app_client):
+    c = app_client
+    page = _dispatch(c)
+    jid = next(iter(c.store.jobs))
+    c.store.open_job(jid)
+    c.wait_until(lambda: page.job_view is not None and page.job_view.isVisible(), 5, "job view")
+    c.store.show_page("session")
+    c.wait_until(lambda: not page.isVisible(), 5, "dispatch hidden")
+    board, jv = page.board, page.job_view
+    calls = {"board": 0, "jv": 0}
+    orig_b, orig_j = board.refresh, jv.refresh
+    board.refresh = lambda: calls.__setitem__("board", calls["board"] + 1)
+    jv.refresh = lambda: calls.__setitem__("jv", calls["jv"] + 1)
+    try:
+        c.store._on_dispatch({"id": jid, "job": dict(c.store.jobs[jid], cost=9), "runs": [], "all": False})
+        c.sleep(50)
+        assert calls == {"board": 0, "jv": 0}, "a hidden page does nothing on an update"
+        assert board._stale and jv._stale
+    finally:
+        board.refresh, jv.refresh = orig_b, orig_j
+    c.store.show_dispatch(jid)
+    c.wait_until(lambda: jv.isVisible() and not jv._stale, 5, "refreshed on show")
+
+
+def test_the_sidebar_rebuilds_only_when_the_jobs_change(app_client):
+    c = app_client
+    _dispatch(c)
+    sb = c.win.sidebar
+    jid = next(iter(c.store.jobs))
+    n = {"k": 0}
+    orig = sb.rebuild
+    sb.rebuild = lambda: n.__setitem__("k", n["k"] + 1)
+    try:
+        c.store._on_dispatch({"id": jid, "job": dict(c.store.jobs[jid], cost=9), "runs": [], "all": False})
+        c.sleep(30)
+        assert n["k"] == 0, "a run's progress is not the sidebar's business"
+        c.store._on_dispatch({"id": jid, "job": dict(c.store.jobs[jid], name="Renamed"), "runs": [], "all": False})
+        c.sleep(30)
+        assert n["k"] == 1, "a job's name is"
+    finally:
+        sb.rebuild = orig
+
+
+def test_the_composers_switches_say_what_they_do(app_client):
+    c = app_client
+    page = _dispatch(c)
+    page.board.new_btn.click()
+    c.wait_until(lambda: page.composer is not None and page.composer.isVisible(), 5, "composer")
+    from pilcrow_qt.widgets.dialogs.parts import Text
+
+    words = {t.text() for t in c.find(Text, page.composer)}
+    assert {
+        "the rest learn from the canary",
+        "send a failing verify back to the agent once",
+        "open pull requests with gh after committing",
+    } <= words

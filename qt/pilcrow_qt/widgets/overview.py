@@ -510,7 +510,8 @@ class KeyButton(LayoutButton):
         else:
             self.set_look(bg="fill_2/canvas", hover="fill_3/canvas", radius=theme.R2)
 
-    def set_key(self, n: Optional[int]) -> None:
+    def set_key(self, n: Any) -> None:
+        """The cap: a number (the control room's keys) or a letter (the board's); None hides it."""
         self.kbd.setText(str(n) if n else "")
         self.kbd.setVisible(bool(n))
 
