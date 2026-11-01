@@ -6,7 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { WebSocketServer } from 'ws';
+import { WebSocket, WebSocketServer } from 'ws';
 import { resolveSettings } from '@anthropic-ai/claude-agent-sdk';
 import { store, CONFIG_DIR } from './config.js';
 import { resolveClaude } from './claude.js';
@@ -31,6 +31,9 @@ for (const k of Object.keys(process.env)) if (k.startsWith('RETICLE_') && !('PIL
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = path.join(ROOT, 'web', 'dist');
 const PREFERRED_PORT = 47117;
+const HEARTBEAT_MS = 30_000; // a window that misses a ping for this long is gone (the laptop slept, a tunnel dropped)
+const MAX_BUFFERED = 32 * 1024 * 1024; // bytes queued for one window; past this it cannot keep up (see deliver)
+const MAX_PAYLOAD = 64 * 1024 * 1024; // a message from a window: attachments travel inline
 const LOCK = path.join(xdg('state'), 'instance.json');
 
 const OCTET = 'application/octet-stream';
@@ -382,9 +385,10 @@ function errorOf(e) {
 
 /**
  * Start the server (the Electron shell calls this in-process; `cli()` for the other shells).
- * @param {{ shell?: string, port?: number | string | boolean, quiet?: boolean, onQuit?: () => void }} [opts]
+ * `heartbeatMs` and `maxBuffered` are there for the tests to turn down.
+ * @param {{ shell?: string, port?: number | string | boolean, quiet?: boolean, onQuit?: () => void, heartbeatMs?: number, maxBuffered?: number }} [opts]
  */
-export async function start({ shell = 'none', port, quiet = false, onQuit } = {}) {
+export async function start({ shell = 'none', port, quiet = false, onQuit, heartbeatMs = HEARTBEAT_MS, maxBuffered = MAX_BUFFERED } = {}) {
   process.on('unhandledRejection', (e) => log('unhandledRejection', e));
   process.on('uncaughtException', (e) => log('uncaughtException', e));
   migrateLegacyDirs();
@@ -393,12 +397,24 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
   const clients = new Set();
   let totalConnections = 0;
 
-  const send = (ws, obj) => {
-    if (ws.readyState === 1) ws.send(JSON.stringify(obj));
+  /**
+   * Every event goes to every window. One that cannot keep up (asleep, on a slow tunnel) would hold an
+   * ever-growing queue here; past `maxBuffered` it is dropped instead. It reconnects on its own and
+   * reopens what it shows from a fresh snapshot, which is the clean way to catch up.
+   */
+  const deliver = (ws, raw) => {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    if (ws.bufferedAmount > maxBuffered) {
+      log(`dropping a window that is ${ws.bufferedAmount} bytes behind; it will reconnect`);
+      ws.terminate();
+      return;
+    }
+    ws.send(raw);
   };
+  const send = (ws, obj) => deliver(ws, JSON.stringify(obj));
   const broadcast = (e, d) => {
     const raw = JSON.stringify({ t: 'ev', e, d });
-    for (const ws of clients) if (ws.readyState === 1) ws.send(raw);
+    for (const ws of clients) deliver(ws, raw);
   };
 
   const listChanged = debounce(() => broadcast('sessions.changed', {}), 150);
@@ -520,7 +536,7 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
     });
   }
 
-  const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 * 1024 });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD });
   server.on('upgrade', (req, socket, head) => {
     const url = new URL(req.url, 'http://x');
     if (url.pathname !== '/ws' || !originOk(req) || !hostOk(req) || !fetchSiteOk(req)) {
@@ -531,10 +547,23 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
   });
 
+  // Ping every window; one that has not answered the previous ping is gone, though its socket never said so.
+  const answered = new WeakSet();
+  const heartbeat = setInterval(() => {
+    for (const ws of clients) {
+      if (!answered.delete(ws)) ws.terminate();
+      else ws.ping();
+    }
+  }, heartbeatMs);
+
   wss.on('connection', (ws) => {
     totalConnections++;
     clients.add(ws);
+    answered.add(ws);
+    ws.on('pong', () => answered.add(ws));
     ws.on('close', () => clients.delete(ws));
+    // A broken connection (a bad frame, a reset) is logged; 'close' follows and cleans up.
+    ws.on('error', (e) => log('websocket error', e.message));
     ws.on('message', async (raw) => {
       let msg;
       try {
@@ -613,6 +642,7 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
       } catch {
         /* someone else's lock now */
       }
+      clearInterval(heartbeat);
       for (const ws of clients) ws.close();
       server.close();
       await term.closeAll();
