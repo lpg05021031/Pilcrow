@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { readJson as readJsonFile, writeJson as writeJsonFile, lastAssistantText, fmtCost } from './util.js';
+import { readJson, jsonFile, lastAssistantText, fmtCost } from './util.js';
 import { findRepos, joinNotes, manifestOf, ruleKey, ruleLabel } from './workspace.js';
 import { ACTIVE, MAX_FILES, SUMMARY_MAX, TERMINAL, capRun, changesOf, land, review as reviewRuns, tally } from './runs.js';
 
@@ -146,8 +146,6 @@ export function createDispatcher(deps) {
     slugify = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40),
     slash = (p) => p,
     registry = null, // the repositories registry (REPOSITORIES.md): policy, defaults and notes per folder
-    readJson = readJsonFile,
-    writeJson = writeJsonFile,
   } = deps;
 
   const events = new EventEmitter();
@@ -157,22 +155,13 @@ export function createDispatcher(deps) {
   const timers = new Map(); // runId -> timeout
   const backoffTimers = new Map(); // jobId -> timeout
   const scanCache = new Map(); // root -> { at, result }
-  let saveTimer = null;
+  const saver = file ? jsonFile(file, () => data, SAVE_MS) : null;
   const dirty = new Map(); // jobId -> Set(runId) | 'all'
   let flushTimer = null;
   let started = false;
 
   // ---- persistence and events
-  function persist() {
-    if (!file || saveTimer) return;
-    saveTimer = setTimeout(() => {
-      saveTimer = null;
-      writeJson(file, data);
-    }, SAVE_MS);
-  }
-  function flushNow() {
-    if (file) writeJson(file, data);
-  }
+  const persist = () => saver?.save();
   function summary(job) {
     const counts = { queued: 0, preparing: 0, running: 0, needs_action: 0, done: 0, failed: 0, stopped: 0, skipped: 0 };
     let cost = 0;
@@ -1230,11 +1219,7 @@ export function createDispatcher(deps) {
     backoffTimers.clear();
     clearTimeout(flushTimer);
     flushTimer = null;
-    if (saveTimer) {
-      clearTimeout(saveTimer);
-      saveTimer = null;
-      flushNow(); // what changed since the last save
-    }
+    saver?.flush(); // what changed since the last save
   }
 
   return {

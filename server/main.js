@@ -25,7 +25,7 @@ import * as dispatch from './dispatch.js';
 import * as memory from './memory.js';
 import { repos } from './repos.js';
 import * as helpersMod from './helpers.js';
-import { which, log, xdg, HOME, IS_ROOT, IS_WIN, slash, readJson, writeJson, debounce, expandHome, run, privateDir, migrateLegacyDirs, VERSION, AppError, under } from './util.js';
+import { which, log, xdg, HOME, IS_ROOT, IS_WIN, slash, readJson, writeJson, debounce, expandHome, run, privateDir, migrateLegacyDirs, VERSION, AppError, under, flushSaves } from './util.js';
 
 // Old environment variable names keep working after the rename.
 for (const k of Object.keys(process.env)) if (k.startsWith('RETICLE_') && !('PILCROW_' + k.slice(8) in process.env)) process.env['PILCROW_' + k.slice(8)] = process.env[k];
@@ -688,11 +688,7 @@ export async function start({ shell = 'none', port, quiet = false, onQuit, heart
       dispatch.stop();
       helpersMod.stop();
       sessions.stop();
-      try {
-        store.flush();
-      } catch (e) {
-        log('could not save settings', e);
-      }
+      flushSaves(); // settings, sessions.json, the inbox, schedules, notes: what is waiting goes now
       try {
         const cur = readJson(LOCK, {});
         if (cur.pid === process.pid) fs.rmSync(LOCK, { force: true });

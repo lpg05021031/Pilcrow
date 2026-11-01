@@ -228,10 +228,10 @@ export function privateDir(dir) {
 }
 
 /** Atomic JSON write (temp file + rename). Pilcrow's own files are private to the user (0600). */
-export function writeJson(file, data) {
+export function writeJson(file, data, indent = 2) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const tmp = tempPath(file);
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
+  fs.writeFileSync(tmp, JSON.stringify(data, null, indent), { mode: 0o600 });
   fs.renameSync(tmp, file);
 }
 
@@ -276,6 +276,48 @@ export async function writeJsonAsync(file, data, current = () => true) {
   await fs.promises.writeFile(tmp, text, { mode: 0o600 });
   if (current()) await fs.promises.rename(tmp, file);
   else await fs.promises.rm(tmp, { force: true });
+}
+
+/** Every jsonFile, for flushSaves. */
+const jsonFiles = new Set();
+
+/**
+ * One of Pilcrow's own JSON files, saved off the event loop: save() writes `data()` `ms` after the first
+ * call of a burst (coalesce), and a write that a newer one overtook is dropped rather than renamed over
+ * it. flushSaves() (quitting) writes at once, synchronously, every file with a save waiting or under way.
+ * @param {string} file @param {() => unknown} data @param {number} [ms]
+ */
+export function jsonFile(file, data, ms = 0) {
+  let seq = 0; // writes started; only the newest may land
+  let writing = 0;
+  const save = coalesce(() => {
+    const mine = ++seq;
+    writing++;
+    writeJsonAsync(file, data(), () => mine === seq)
+      .catch((e) => log('could not save', file, e))
+      .finally(() => writing--);
+  }, ms);
+  const f = {
+    save,
+    flush() {
+      if (!save.cancel() && !writing) return;
+      seq++;
+      writeJson(file, data(), 0);
+    },
+  };
+  jsonFiles.add(f);
+  return f;
+}
+
+/** Write now what any jsonFile has waiting (the server is quitting); one that fails does not stop the rest. */
+export function flushSaves() {
+  for (const f of jsonFiles) {
+    try {
+      f.flush();
+    } catch (e) {
+      log('could not save on quit', e);
+    }
+  }
 }
 
 export function debounce(fn, ms) {

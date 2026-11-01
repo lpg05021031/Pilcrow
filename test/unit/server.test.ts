@@ -10,6 +10,7 @@ import { Readable } from 'node:stream';
 import WebSocket from 'ws';
 import { METHODS } from '../../server/main.js';
 import { store } from '../../server/config.js';
+import { flushSaves } from '../../server/util.js';
 import * as term from '../../server/terminal.js';
 import { logSays, serve } from './serve.js';
 
@@ -290,7 +291,7 @@ describe('names that are not settings or sessions', () => {
 
   it('writes the metadata on quit even with a save still waiting', () => {
     store.setMeta('sess-flush', { title: 'kept' });
-    store.flush();
+    flushSaves();
     const file = path.join(process.env.XDG_CONFIG_HOME!, 'pilcrow', 'sessions.json');
     expect(JSON.parse(fs.readFileSync(file, 'utf8'))['sess-flush']).toEqual({ title: 'kept' });
     store.deleteMeta('sess-flush');

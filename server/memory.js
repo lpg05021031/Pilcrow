@@ -6,7 +6,7 @@ import { EventEmitter } from 'node:events';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { store } from './config.js';
 import { resolveClaude } from './claude.js';
-import { xdg, readJson, writeJson, uuid, log, slash, cleanEnv, textOfContent, folderKey } from './util.js';
+import { xdg, readJson, jsonFile, uuid, log, slash, cleanEnv, textOfContent, folderKey } from './util.js';
 
 export const events = new EventEmitter();
 
@@ -15,17 +15,22 @@ const MAX_NOTES = 80;
 const MAX_INJECT_CHARS = 2600;
 const MIN_GAP_MS = 10 * 60e3;
 
-const fileOf = (cwd) => path.join(ROOT, `${folderKey(cwd)}.json`);
-const cache = new Map();
+/** folderKey -> { data, file }: a project's notes, read once, and their file (written off the event loop) */
+const projects = new Map();
 
-function load(cwd) {
+function projectFile(cwd) {
   const k = folderKey(cwd);
-  if (!cache.has(k)) cache.set(k, readJson(fileOf(cwd), { cwd: slash(cwd), notes: [], distills: {} }));
-  return cache.get(k);
+  let p = projects.get(k);
+  if (!p) {
+    const file = path.join(ROOT, `${k}.json`);
+    const entry = { data: readJson(file, { cwd: slash(cwd), notes: [], distills: {} }), file: jsonFile(file, () => entry.data) };
+    projects.set(k, (p = entry));
+  }
+  return p;
 }
-function save(cwd, data) {
-  cache.set(folderKey(cwd), data);
-  writeJson(fileOf(cwd), data);
+const load = (cwd) => projectFile(cwd).data;
+function save(cwd) {
+  projectFile(cwd).file.save();
   events.emit('changed', { cwd: slash(cwd) });
 }
 
@@ -49,7 +54,7 @@ export function add(cwd, { text, sessionId, sessionTitle, kind = 'manual' }) {
   const note = { id: uuid(), at: Date.now(), text: t.slice(0, 600), kind, sessionId: sessionId || null, sessionTitle: sessionTitle || null, pinned: false };
   d.notes.push(note);
   trim(d);
-  save(cwd, d);
+  save(cwd);
   return note;
 }
 
@@ -60,21 +65,21 @@ export function update(cwd, id, patch) {
   if (typeof patch.text === 'string') n.text = patch.text.trim().slice(0, 600);
   if (typeof patch.pinned === 'boolean') n.pinned = patch.pinned;
   n.editedAt = Date.now();
-  save(cwd, d);
+  save(cwd);
   return n;
 }
 
 export function remove(cwd, id) {
   const d = load(cwd);
   d.notes = d.notes.filter((x) => x.id !== id);
-  save(cwd, d);
+  save(cwd);
   return true;
 }
 
 export function clear(cwd) {
   const d = load(cwd);
   d.notes = d.notes.filter((x) => x.pinned);
-  save(cwd, d);
+  save(cwd);
   return true;
 }
 
@@ -217,7 +222,7 @@ ${digest}`;
     d.distills = d.distills || {};
     d.distills[session.id] = { at: Date.now(), added: added.length };
     trim(d);
-    save(cwd, d);
+    save(cwd);
     log('memory distilled', session.id, added.length, 'notes');
     return { added };
   })().finally(() => inflight.delete(session.id));

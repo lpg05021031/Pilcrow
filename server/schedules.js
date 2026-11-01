@@ -7,7 +7,7 @@ import { sessions, bus } from './sessions.js';
 import * as snapshots from './snapshots.js';
 import * as inbox from './inbox.js';
 import { MAX_FILES, SUMMARY_MAX, capRun, changesOf } from './runs.js';
-import { xdg, readJson, writeJson, uuid, log, slash, lastAssistantText } from './util.js';
+import { xdg, readJson, jsonFile, uuid, log, slash, lastAssistantText } from './util.js';
 
 export const events = new EventEmitter();
 
@@ -32,8 +32,10 @@ export function setDispatchRunner(fn) {
   dispatchRunner = fn;
 }
 
+const file = jsonFile(FILE, () => data);
+
 function persist() {
-  writeJson(FILE, data);
+  file.save();
   events.emit('schedules');
 }
 
