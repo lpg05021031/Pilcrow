@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Folder, FolderGit2, Home, CornerLeftUp, ChevronRight, Check, Search } from 'lucide-react';
 import { useStore, call } from '../lib/store';
 import { basename, tildify } from '../lib/format';
 import { useEvent } from './ui/hooks';
 
-interface Browse {
+export interface Browse {
   dir: string;
   display: string;
   parent: string | null;
@@ -72,28 +72,7 @@ export function FolderPicker({ value, onPick }: { value: string; onPick: (dir: s
         </div>
       )}
       {browsing && browse && (
-        <div className="browser fpick-browser">
-          <div className="browser-head">
-            <button className="icon-btn sm" title="Home" aria-label="Home" onClick={() => nav(info?.home || '/')}>
-              <Home size={13} />
-            </button>
-            <button className="icon-btn sm" title="Up one level" aria-label="Up one level" disabled={!browse.parent} onClick={() => browse.parent && nav(browse.parent)}>
-              <CornerLeftUp size={13} />
-            </button>
-            <span className="mono ellipsis grow">{browse.display}</span>
-            {browse.repo && <span className="badge">git</span>}
-          </div>
-          <div className="browser-list">
-            {browse.error && <div className="faint browser-empty">{browse.error}</div>}
-            {browse.dirs.map((d) => (
-              <button key={d.path} className="browser-item" onClick={() => nav(d.path)} onDoubleClick={() => onPick(d.path)}>
-                {d.repo ? <FolderGit2 size={14} /> : <Folder size={14} />}
-                <span className="ellipsis grow">{d.name}</span>
-                <ChevronRight size={13} className="faint" />
-              </button>
-            ))}
-            {!browse.dirs.length && !browse.error && <div className="faint browser-empty">No subfolders</div>}
-          </div>
+        <FolderBrowser browse={browse} nav={nav} onPick={onPick}>
           <div className="fpick-foot">
             <button className="btn sm ghost" onClick={() => setBrowsing(false)}>
               Recent
@@ -103,7 +82,7 @@ export function FolderPicker({ value, onPick }: { value: string; onPick: (dir: s
               Use {basename(browse.dir) || browse.dir}
             </button>
           </div>
-        </div>
+        </FolderBrowser>
       )}
       {!browsing && (
         <div className="fpick-foot">
@@ -123,6 +102,37 @@ export function FolderPicker({ value, onPick }: { value: string; onPick: (dir: s
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** A folder's subfolders under Home and Up: a click goes into one, a double click picks it; `children` close the box. */
+export function FolderBrowser({ browse, nav, onPick, children }: { browse: Browse; nav: (dir: string) => void; onPick: (dir: string) => void; children?: ReactNode }) {
+  const home = useStore((s) => s.info?.home);
+  return (
+    <div className="browser">
+      <div className="browser-head">
+        <button className="icon-btn sm" title="Home" aria-label="Home" onClick={() => nav(home || '/')}>
+          <Home size={13} />
+        </button>
+        <button className="icon-btn sm" title="Up one level" aria-label="Up one level" disabled={!browse.parent} onClick={() => browse.parent && nav(browse.parent)}>
+          <CornerLeftUp size={13} />
+        </button>
+        <span className="mono ellipsis grow">{browse.display}</span>
+        {browse.repo && <span className="badge">git</span>}
+      </div>
+      <div className="browser-list">
+        {browse.error && <div className="faint browser-empty">{browse.error}</div>}
+        {browse.dirs.map((d) => (
+          <button key={d.path} className="browser-item" onClick={() => nav(d.path)} onDoubleClick={() => onPick(d.path)}>
+            {d.repo ? <FolderGit2 size={14} /> : <Folder size={14} />}
+            <span className="ellipsis grow">{d.name}</span>
+            <ChevronRight size={13} className="faint" />
+          </button>
+        ))}
+        {!browse.dirs.length && !browse.error && <div className="faint browser-empty">No subfolders</div>}
+      </div>
+      {children}
     </div>
   );
 }

@@ -349,12 +349,12 @@
   padding: var(--sp-1_5) var(--sp-2);
   border-top: 1px solid var(--hair);
 }
-.fpick-browser {
+.fpick .browser {
   margin: 0;
   border: 0;
   border-radius: 0;
 }
-.fpick-browser .browser-list {
+.fpick .browser-list {
   max-height: 240px;
 }
 

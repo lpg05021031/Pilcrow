@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Folder, FolderGit2, ArrowUp, Home, ChevronRight, GitBranch, CornerLeftUp, FolderOpen, Check, ChevronDown } from 'lucide-react';
+import { ArrowUp, GitBranch, FolderOpen, Check, ChevronDown } from 'lucide-react';
 import { useStore, setDialog, createSession, call } from '../lib/store';
 import type { GitInfo, PermissionMode, Effort } from '../lib/types';
 import { basename, tildify, plural } from '../lib/format';
@@ -10,16 +10,8 @@ import { Collapse } from './ui/Collapse';
 import { Select } from './ui/Select';
 import { MODES } from './composer/Menus';
 import { ModelSelect } from './ModelSelect';
+import { FolderBrowser, type Browse } from './FolderPicker';
 import { errText } from '../lib/format';
-
-interface Browse {
-  dir: string;
-  display: string;
-  parent: string | null;
-  repo: boolean;
-  dirs: { name: string; path: string; repo: boolean }[];
-  error?: string;
-}
 
 export function NewSessionDialog({ spec }: { spec: { cwd?: string; prompt?: string } }) {
   const config = useStore((s) => s.config);
@@ -150,31 +142,7 @@ export function NewSessionDialog({ spec }: { spec: { cwd?: string; prompt?: stri
               ))}
           </div>
         )}
-        {showBrowser && browse && (
-          <div className="browser">
-            <div className="browser-head">
-              <button className="icon-btn sm" title="Home" aria-label="Home" onClick={() => nav(info?.home || '/')}>
-                <Home size={13} />
-              </button>
-              <button className="icon-btn sm" title="Up one level" aria-label="Up one level" disabled={!browse.parent} onClick={() => browse.parent && nav(browse.parent)}>
-                <CornerLeftUp size={13} />
-              </button>
-              <span className="mono ellipsis grow">{browse.display}</span>
-              {browse.repo && <span className="badge">git</span>}
-            </div>
-            <div className="browser-list">
-              {browse.error && <div className="faint browser-empty">{browse.error}</div>}
-              {browse.dirs.map((d) => (
-                <button key={d.path} className="browser-item" onClick={() => nav(d.path)} onDoubleClick={() => (setCwd(d.path), setShowBrowser(false))}>
-                  {d.repo ? <FolderGit2 size={14} /> : <Folder size={14} />}
-                  <span className="ellipsis grow">{d.name}</span>
-                  <ChevronRight size={13} className="faint" />
-                </button>
-              ))}
-              {!browse.dirs.length && !browse.error && <div className="faint browser-empty">No subfolders</div>}
-            </div>
-          </div>
-        )}
+        {showBrowser && browse && <FolderBrowser browse={browse} nav={nav} onPick={(p) => (setCwd(p), setShowBrowser(false))} />}
       </section>
 
       <button className={`ns-disclose${showOptions ? ' open' : ''}`} onClick={() => setShowOptions(!showOptions)} aria-expanded={showOptions}>
