@@ -5,7 +5,9 @@ import { foldingRows, useStore, openSession, setDialog, setTheme, setUi, archive
 import { isBusy, isWorking, type SessionSummary } from '../lib/types';
 import { basename, timeAgo, tildify } from '../lib/format';
 import { fuzzyScore } from '../lib/fuzzy';
-import { Mark, StatusGlyph, useNow } from './ui/bits';
+import { Mark } from './ui/brand';
+import { StatusGlyph } from './ui/bits';
+import { useNow } from './ui/hooks';
 import { MenuButton, Popover, Menu, type Anchor } from './ui/Popover';
 import { Collapse } from './ui/Collapse';
 import { ErrorBoundary } from './ui/ErrorBoundary';

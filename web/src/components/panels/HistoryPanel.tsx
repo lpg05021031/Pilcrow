@@ -6,7 +6,9 @@ import { basename, clock, dirname, plural, duration } from '../../lib/format';
 import { DiffView } from '../Code';
 import { Collapse } from '../ui/Collapse';
 import { revealItem } from '../Transcript';
-import { Spinner, useNow, Mark } from '../ui/bits';
+import { Spinner } from '../ui/bits';
+import { useNow } from '../ui/hooks';
+import { Mark } from '../ui/brand';
 import { Empty, Loading } from '../ui/Empty';
 
 

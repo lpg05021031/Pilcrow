@@ -1,79 +1,17 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
-import { LoaderCircle, Copy, Check } from 'lucide-react';
+// Small controls and indicators shared across the app.
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { LoaderCircle } from 'lucide-react';
 import { isWorking, type SessionStatus } from '../../lib/types';
 import { tokens } from '../../lib/format';
 import { useExitGhost, useCountUp } from '../../lib/motion';
-
-/** The Pilcrow mark: an alignment pilcrow with a safelight core. `tight` crops to the ink so it sits in a row like any other icon. */
-export function Mark({ size = 20, className = '', tight = false }: { size?: number; className?: string; tight?: boolean }) {
-  return (
-    <svg className={`mark ${className}`} width={tight ? Math.round((size * 14) / 16) : size} height={size} viewBox={tight ? '4.5 4 14 16' : '0 0 24 24'} aria-hidden="true">
-      <circle cx="10.6" cy="9.2" r="4.1" fill="var(--accent)" />
-      <rect x="10.6" y="5.1" width="6.6" height="1.9" rx="0.5" fill="currentColor" />
-      <rect x="12.4" y="5.1" width="1.9" height="13.8" rx="0.5" fill="currentColor" />
-      <rect x="15.3" y="5.1" width="1.9" height="13.8" rx="0.5" fill="currentColor" />
-    </svg>
-  );
-}
-
-/** The app icon itself, as a tile: the mark a person sees in the taskbar, so the empty states feel like the app and not a diagram. */
-export function AppIcon({ size = 56, className = '' }: { size?: number; className?: string }) {
-  return (
-    <svg className={`app-icon ${className}`} width={size} height={size} viewBox="0 0 256 256" aria-hidden="true">
-      <rect width="256" height="256" rx="60" fill="#1f1f1f" />
-      <circle cx="105" cy="98" r="43.5" fill="#d97757" className="app-icon-bowl" />
-      <rect x="105" y="55" width="69" height="20.5" rx="4.5" fill="#fafafa" />
-      <rect x="123.5" y="55" width="20.5" height="146" rx="4.5" fill="#fafafa" />
-      <rect x="153" y="55" width="20.5" height="146" rx="4.5" fill="#fafafa" />
-    </svg>
-  );
-}
+import { useInk } from './hooks';
 
 export function Spinner({ size = 14 }: { size?: number }) {
   return <LoaderCircle size={size} className="spin" />;
 }
 
-/** The pilcrow at work: the bowl breathes in Claude's orange while the stems hold still. */
-export function WorkingMark({ size = 16 }: { size?: number }) {
-  return (
-    <svg className="working-mark" width={size} height={size} viewBox="4.5 4 14 16" aria-hidden="true">
-      <circle className="wm-bowl" cx="10.6" cy="9.2" r="4.1" />
-      <g className="wm-stems" fill="currentColor">
-        <rect x="10.6" y="5.1" width="6.6" height="1.9" rx="0.5" />
-        <rect x="12.4" y="5.1" width="1.9" height="13.8" rx="0.5" />
-        <rect x="15.3" y="5.1" width="1.9" height="13.8" rx="0.5" />
-      </g>
-    </svg>
-  );
-}
-
 export function Switch({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label?: string }) {
   return <button type="button" role="switch" aria-checked={on} aria-label={label} className={`switch${on ? ' on' : ''}`} onClick={() => onChange(!on)} />;
-}
-
-type Ink = { left: number; top: number; width: number; height: number };
-
-/**
- * Where the chosen item (`selector`, inside `ref`) sits in its container, for an ink or a thumb that
- * glides to it (the segmented control, the panel tabs, the settings pages): measured when `key`
- * changes, and again whenever the container or the item changes size.
- */
-export function useInk(ref: RefObject<HTMLElement | null>, selector: string, key: unknown): Ink | null {
-  const [ink, setInk] = useState<Ink | null>(null);
-  useLayoutEffect(() => {
-    const measure = () => {
-      const el = ref.current?.querySelector<HTMLElement>(selector);
-      const next = el ? { left: el.offsetLeft, top: el.offsetTop, width: el.offsetWidth, height: el.offsetHeight } : null;
-      setInk((cur) => (cur && next && cur.left === next.left && cur.top === next.top && cur.width === next.width && cur.height === next.height ? cur : next));
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    if (ref.current) ro.observe(ref.current);
-    const on = ref.current?.querySelector(selector);
-    if (on) ro.observe(on);
-    return () => ro.disconnect();
-  }, [ref, selector, key]);
-  return ink;
 }
 
 /**
@@ -215,133 +153,5 @@ export function Resizer({ onResize, side }: { onResize: (dx: number) => void; si
         e.preventDefault();
       }}
     />
-  );
-}
-
-export function useNow(intervalMs = 1000, active = true) {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    if (!active) return;
-    const t = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(t);
-  }, [intervalMs, active]);
-  return now;
-}
-
-/** A keydown listener on the window while `active`, subscribed once; it always calls the latest `onKey`. */
-export function useWindowKey(onKey: (e: KeyboardEvent) => void, active = true) {
-  const latest = useRef(onKey);
-  useLayoutEffect(() => {
-    latest.current = onKey;
-  });
-  useEffect(() => {
-    if (!active) return;
-    const h = (e: KeyboardEvent) => latest.current(e);
-    window.addEventListener('keydown', h);
-    return () => window.removeEventListener('keydown', h);
-  }, [active]);
-}
-
-// Esc closes the innermost layer only: a menu over a dialog, the dialog over the window. Each open
-// layer (dialog, popover, lightbox) is on this stack; one capture listener serves the top of it.
-const layers: { current: () => void }[] = [];
-function onEscapeKey(e: KeyboardEvent) {
-  const top = layers[layers.length - 1];
-  if (e.key !== 'Escape' || !top) return;
-  e.preventDefault();
-  e.stopImmediatePropagation();
-  top.current();
-}
-
-/** Close this layer with Esc while `active`, before anything under it hears the key. */
-export function useEscape(onEscape: () => void, active = true) {
-  const latest = useRef(onEscape);
-  useLayoutEffect(() => {
-    latest.current = onEscape;
-  });
-  useEffect(() => {
-    if (!active) return;
-    if (!layers.length) window.addEventListener('keydown', onEscapeKey, true);
-    layers.push(latest);
-    return () => {
-      layers.splice(layers.indexOf(latest), 1);
-      if (!layers.length) window.removeEventListener('keydown', onEscapeKey, true);
-    };
-  }, [active]);
-}
-
-/** Keyboard activation for a card that is a role="button": Enter or Space on the card itself, not on a control inside it. */
-export function onActivate(run: () => void) {
-  return (e: React.KeyboardEvent) => {
-    if ((e.key !== 'Enter' && e.key !== ' ') || e.target !== e.currentTarget) return;
-    e.preventDefault();
-    e.stopPropagation();
-    run();
-  };
-}
-
-/** Focus an element unless the user is busy elsewhere (a dialog, the palette, another text field). */
-export function focusIfFree(el: HTMLElement | null | undefined) {
-  if (!el) return;
-  const a = document.activeElement as HTMLElement | null;
-  const busy = a && a !== document.body && a !== el && (a.closest('[role="dialog"], .palette, .dialog') || a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable);
-  if (busy || document.querySelector('.palette, .dialog')) return;
-  el.focus();
-}
-
-/** Copy to the clipboard. Falls back to the legacy path when the async API is unavailable or refused. */
-export async function copyText(text: string) {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return;
-    }
-  } catch {
-    /* fall through */
-  }
-  const ta = document.createElement('textarea');
-  ta.value = text;
-  ta.setAttribute('readonly', '');
-  ta.style.cssText = 'position:fixed;opacity:0;pointer-events:none';
-  const prev = document.activeElement as HTMLElement | null;
-  document.body.appendChild(ta);
-  ta.select();
-  const ok = document.execCommand('copy');
-  ta.remove();
-  prev?.focus?.();
-  if (!ok) throw new Error('Copy was blocked');
-}
-
-/** Copy with a check-mark confirmation in place, instead of a toast. */
-export function CopyButton({ text, title = 'Copy', size = 13 }: { text: string; title?: string; size?: number }) {
-  const [done, setDone] = useState(false);
-  return (
-    <button
-      className={`icon-btn sm copy-btn${done ? ' done' : ''}`}
-      title={done ? 'Copied' : title} aria-label={done ? 'Copied' : title}
-      onClick={() =>
-        copyText(text).then(
-          () => {
-            setDone(true);
-            setTimeout(() => setDone(false), 1300);
-          },
-          () => {},
-        )
-      }
-    >
-      {done ? <Check size={size} /> : <Copy size={size} />}
-    </button>
-  );
-}
-
-/** A keyboard shortcut drawn as separate keycaps ("Ctrl+K" → Ctrl K), the same way everywhere. */
-export function Keys({ combo, className = '' }: { combo: string; className?: string }) {
-  const parts = combo === '+' ? ['+'] : combo.split(/\+(?!$)/);
-  return (
-    <span className={`keys ${className}`}>
-      {parts.map((k, i) => (
-        <kbd key={i}>{k}</kbd>
-      ))}
-    </span>
   );
 }

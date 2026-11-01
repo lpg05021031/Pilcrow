@@ -3,7 +3,9 @@ import { Plus, PanelLeftOpen, Play } from 'lucide-react';
 import { useStore, call, openSession, respond, setUi, showDispatch, openJob, runsOf, runsIn, toasted } from '../../lib/store';
 import type { DispatchJob } from '../../lib/types';
 import { cost, duration, plural } from '../../lib/format';
-import { Mark, useNow, onActivate } from '../ui/bits';
+import { Mark } from '../ui/brand';
+import { useNow } from '../ui/hooks';
+import { onActivate } from '../ui/keys';
 import { SegmentBar, askedBy, countsText, elapsedText, groupRequests, jobCostText, jobStateText, type RequestGroup } from './common';
 
 /**

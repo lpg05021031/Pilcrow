@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { ExternalLink, KeyRound, CircleCheck, ClipboardPaste } from 'lucide-react';
 import { useStore, call, setDialog, toast } from '../lib/store';
 import { Dialog } from './ui/Dialog';
-import { Spinner, copyText } from './ui/bits';
+import { Spinner } from './ui/bits';
+import { copyText } from './ui/clipboard';
 
 interface AuthStart {
   authUrl?: string;

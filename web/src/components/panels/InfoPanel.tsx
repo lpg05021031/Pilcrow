@@ -4,7 +4,8 @@ import { useStore, call, toast, confirmAction, setDialog, toasted } from '../../
 import type { SessionSummary, MemoryNote } from '../../lib/types';
 import { tokens, cost, tildify, plural } from '../../lib/format';
 import { modelLabel, useGatewayModels } from '../../lib/models';
-import { contextLabel, copyText, Spinner, Num, RingGauge } from '../ui/bits';
+import { contextLabel, Spinner, Num, RingGauge } from '../ui/bits';
+import { copyText } from '../ui/clipboard';
 import { MODES } from '../composer/Menus';
 import type { McpStatus } from '../../lib/types';
 import { useShallow } from 'zustand/react/shallow';

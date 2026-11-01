@@ -4,7 +4,10 @@ import { useStore, setDialog, setConfig, toast, call, setTheme } from '../lib/st
 import type { AppInfo, Config } from '../lib/types';
 import { tildify } from '../lib/format';
 import { Dialog } from './ui/Dialog';
-import { Switch, copyText, Mark, Seg, useInk } from './ui/bits';
+import { Switch, Seg } from './ui/bits';
+import { copyText } from './ui/clipboard';
+import { Mark } from './ui/brand';
+import { useInk } from './ui/hooks';
 import { Select } from './ui/Select';
 import { MODES } from './composer/Menus';
 import { ModelSelect } from './ModelSelect';

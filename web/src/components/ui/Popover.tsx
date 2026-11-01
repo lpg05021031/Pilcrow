@@ -2,7 +2,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } f
 import { createPortal } from 'react-dom';
 import { Check, type LucideIcon } from 'lucide-react';
 import { reducedMotion } from '../../lib/motion';
-import { useEscape } from './bits';
+import { useEscape } from './keys';
 
 type Placement = 'bottom-start' | 'bottom-end' | 'top-start' | 'top-end';
 

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useWindowKey } from '../ui/bits';
+import { useWindowKey } from '../ui/keys';
 import { CornerDownLeft } from 'lucide-react';
 import type { ToolItem } from '../../lib/transcript';
 import type { PermissionRequest, PermissionSuggestion } from '../../lib/types';

@@ -3,7 +3,7 @@ import { renderMarkdown, asPathRef, extendBlocks, growBlock, openFenceCode, GROW
 import { CHUNK_OPEN, escapeHtml, highlightHtml, PAINT_LINES } from '../lib/highlight';
 import { rpc } from '../lib/rpc';
 import { openFile, toast } from '../lib/store';
-import { copyText } from './ui/bits';
+import { copyText } from './ui/clipboard';
 
 export function resolvePath(p: string, cwd?: string) {
   if (!p) return p;

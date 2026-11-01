@@ -10,7 +10,8 @@ import { Welcome } from './Welcome';
 import { NewSessionDialog } from './NewSessionDialog';
 import { McpAuthDialog } from './McpAuthDialog';
 import { CommandPalette, ShortcutsDialog, ConfirmDialog, Toasts, Lightbox } from './Overlays';
-import { Resizer, useWindowKey } from './ui/bits';
+import { Resizer } from './ui/bits';
+import { useWindowKey } from './ui/keys';
 import { Slot } from './ui/Slot';
 import { ErrorBoundary } from './ui/ErrorBoundary';
 

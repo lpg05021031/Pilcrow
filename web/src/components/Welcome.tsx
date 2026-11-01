@@ -2,7 +2,9 @@ import { useMemo, useRef, useState } from 'react';
 import { ArrowUp, Folder, CircleAlert, ChevronDown, KeyRound, RefreshCw, PanelLeftOpen } from 'lucide-react';
 import { useStore, setDialog, createSession, refreshInfo, toast, setUi } from '../lib/store';
 import { basename, tildify } from '../lib/format';
-import { Spinner, CopyButton, AppIcon } from './ui/bits';
+import { Spinner } from './ui/bits';
+import { CopyButton } from './ui/clipboard';
+import { AppIcon } from './ui/brand';
 
 function greeting(name?: string) {
   const h = new Date().getHours();

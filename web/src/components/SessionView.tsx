@@ -10,7 +10,9 @@ import { FindBar } from './FindBar';
 import { Composer } from './Composer';
 import { MenuButton, Popover } from './ui/Popover';
 import { FolderPicker } from './FolderPicker';
-import { copyText, AppIcon, Leave } from './ui/bits';
+import { copyText } from './ui/clipboard';
+import { AppIcon } from './ui/brand';
+import { Leave } from './ui/bits';
 import { ErrorBoundary } from './ui/ErrorBoundary';
 
 export function useGitInfo(cwd: string | undefined, tick: unknown) {

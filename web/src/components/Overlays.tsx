@@ -7,7 +7,7 @@ import { fuzzyFilter } from '../lib/fuzzy';
 import { basename, timeAgo } from '../lib/format';
 import { Dialog } from './ui/Dialog';
 import { MODES } from './composer/Menus';
-import { Keys, useEscape } from './ui/bits';
+import { Keys, useEscape } from './ui/keys';
 import type { LucideIcon } from 'lucide-react';
 import { SHORTCUTS as K } from '../lib/shortcuts';
 import { Empty } from './ui/Empty';

@@ -3,7 +3,10 @@ import { ArrowUpRight, Bot, Brain, Wrench, MessageSquareQuote, Workflow, PanelLe
 import { useStore, call, openSession, respond, setUi, mergeLive } from '../lib/store';
 import { isWorking, type PermissionRequest, type SessionState, type SessionSummary, type TaskInfo } from '../lib/types';
 import { basename, cost, duration, timeAgo, relPath, plural } from '../lib/format';
-import { ContextRing, Spinner, useNow, Num, WorkingMark, Mark, useWindowKey, onActivate } from './ui/bits';
+import { ContextRing, Spinner, Num } from './ui/bits';
+import { useNow } from './ui/hooks';
+import { WorkingMark, Mark } from './ui/brand';
+import { useWindowKey, onActivate } from './ui/keys';
 import { suggestionLabel, typingElsewhere } from './tools/Permission';
 import { workflowCounts } from '../lib/workflow';
 import { str } from '../lib/tools';

@@ -5,7 +5,7 @@ import type { FileTouch } from '../lib/types';
 import { timeAgo, plural } from '../lib/format';
 import { Popover } from './ui/Popover';
 import { revealItem } from './Transcript';
-import { useNow } from './ui/bits';
+import { useNow } from './ui/hooks';
 import { folders, loadOnce } from '../lib/cache';
 
 type HistoryMap = Record<string, FileTouch[]>;
