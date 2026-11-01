@@ -93,6 +93,8 @@ describe('RPC errors', () => {
       ['helpers.stop', { leadId: 'x' }, 'name'],
       ['helpers.finish', { leadId: 'x' }, 'action'],
       ['helpers.detach', {}, 'id'],
+      ['session.queue.remove', { id: 'x' }, 'uuid'],
+      ['session.queue.update', { id: 'x', uuid: 'u' }, 'text'],
     ];
     for (const [m, p, name] of cases) {
       const res = await rpc(m, p);

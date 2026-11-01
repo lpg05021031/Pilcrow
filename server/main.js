@@ -163,9 +163,19 @@ function rpcMethods({ shell, quit, listChanged }) {
     'session.send': async ({ id, ...rest }) => (await S(id)).send(rest),
     'session.interrupt': async ({ id }) => (await S(id)).interrupt(),
     'session.setCwd': async ({ id, cwd }) => (await S(id)).setCwd(cwd),
-    'session.queue.remove': async ({ id, uuid: u }) => (await S(id)).removeHeld(u),
-    'session.queue.update': async ({ id, uuid: u, text }) => (await S(id)).updateHeld(u, text),
-    'session.queue.sendNow': async ({ id, uuid: u }) => (await S(id)).sendHeldNow(u),
+    'session.queue.remove': async ({ id, uuid: u }) => {
+      str(u, 'uuid');
+      return (await S(id)).removeHeld(u);
+    },
+    'session.queue.update': async ({ id, uuid: u, text }) => {
+      str(u, 'uuid');
+      need(typeof text === 'string', 'text');
+      return (await S(id)).updateHeld(u, text);
+    },
+    'session.queue.sendNow': async ({ id, uuid: u }) => {
+      str(u, 'uuid');
+      return (await S(id)).sendHeldNow(u);
+    },
     'session.setMode': async ({ id, mode }) => (await S(id)).setMode(mode),
     'session.setModel': async ({ id, model }) => (await S(id)).setModel(model),
     'session.setEffort': async ({ id, effort }) => (await S(id)).setEffort(effort),
