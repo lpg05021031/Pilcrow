@@ -1,10 +1,11 @@
 // files.js and the path helpers in util.js: what the editor reads and writes, and which paths count
-// as inside a folder.
+// as inside a folder; and which folders customize.js lets the Skills page remove.
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import * as files from '../../server/files.js';
+import * as customize from '../../server/customize.js';
 import { absolute, under } from '../../server/util.js';
 
 const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'pilcrow-files-')));
@@ -80,5 +81,18 @@ describe('readFile and listDir', () => {
     expect(files.mimeOf('/x/a.pdf')).toBe('application/pdf');
     expect(files.imageMime('/x/a.svg')).toBe('image/svg+xml');
     expect(files.imageMime('/x/a.html')).toBe(null);
+  });
+});
+
+describe('removing a skill', () => {
+  it('removes a folder directly in a skills root, and nothing above, below or beside it', () => {
+    const root = customize.skillRoots().user;
+    const skill = path.join(root, 'tidy');
+    fs.mkdirSync(path.join(skill, 'deeper'), { recursive: true });
+    fs.writeFileSync(path.join(skill, 'SKILL.md'), '---\nname: tidy\n---\n');
+    fs.mkdirSync(root + '-other/x', { recursive: true });
+    for (const dir of [root, path.join(skill, 'deeper'), root + '-other/x', path.join(root, '..', 'skills', '..')]) expect(() => customize.removeSkill({ dir }), dir).toThrow(/Only skills in/);
+    expect(customize.removeSkill({ dir: skill })).toBe(true);
+    expect(fs.existsSync(skill)).toBe(false);
   });
 });

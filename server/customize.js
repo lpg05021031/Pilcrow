@@ -142,8 +142,9 @@ export function listSkills({ cwd } = {}) {
 function assertManagedSkillDir(dir, cwd) {
   const roots = skillRoots(cwd);
   const d = slash(path.resolve(dir));
-  const under = (root) => root && d.startsWith(root + '/') && d.length > root.length + 1 && !d.slice(root.length + 1).includes('/');
-  if (!under(roots.user) && !under(roots.project)) throw new Error('Only skills in ~/.claude/skills or the project’s .claude/skills can be changed here');
+  // a skill is a folder directly in one of the roots (whole path segments, not a prefix of the name)
+  const inRoot = (root) => root && slash(path.dirname(d)) === root;
+  if (!inRoot(roots.user) && !inRoot(roots.project)) throw new Error('Only skills in ~/.claude/skills or the project’s .claude/skills can be changed here');
   return d;
 }
 
