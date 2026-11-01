@@ -14,8 +14,8 @@ export default defineConfig({
     emptyOutDir: true,
     target: 'es2022',
     // The app is served from localhost, so what counts is the JavaScript parsed at start: 720 kB is that
-    // measured size (one chunk, 677 kB; the pages a window may never open load on first use) plus
-    // headroom, and `npm run test:perf` guards the real figure.
+    // size (one chunk, 685 kB on 2026-11-01; the pages a window may never open load on first use) plus
+    // headroom, and `npm run test:perf` measures and guards the real figure on every run.
     chunkSizeWarningLimit: 720,
     rollupOptions: {
       // lucide-react ships "use client" directives; harmless here, so keep the build log clean.
