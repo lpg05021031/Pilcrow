@@ -24,7 +24,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--keep-server", action="store_true", help="leave the server running when the window closes")
     ap.add_argument("--title", default="Pilcrow")
     ap.add_argument(
-        "--lite", action="store_true", help="no animations (set automatically when the system asks for reduced motion)"
+        "--lite",
+        action="store_true",
+        help="no animations (also when the system asks for reduced motion: Windows' Show animations off, macOS's Reduce motion, GNOME's enable-animations off)",
     )
     ap.add_argument(
         "--native-titlebar", action="store_true", help="use the window manager's title bar instead of Pilcrow's"
