@@ -5,15 +5,14 @@ model, the time limit, the worktree and whether it is enabled. ``schedules.save`
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
-from PySide6.QtCore import QSize, Qt, QTime, QTimer, Signal
+from PySide6.QtCore import Qt, QTime, QTimer, Signal
 from PySide6.QtGui import QIntValidator
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -27,7 +26,7 @@ from ..ui.bits import Box, button
 from ..ui.menu import Popover, host_for
 from ..ui.signals import bind
 from .parts import ElideLabel, LayoutButton, Switch, Text, sheet_bg, well_bg, well_line
-from .settings_ui import ModelSelect, Select, input_css, line_edit, styled, text_area
+from .settings_ui import Field, ModelSelect, Select, line_edit, style_field, text_area
 from .sheet import Sheet
 
 Json = Dict[str, Any]
@@ -79,7 +78,7 @@ def _field(title: str, w: QWidget, note: Optional[QWidget] = None) -> QWidget:
     return box
 
 
-class NumInput(QLineEdit):
+class NumInput(Field):
     """``input.sd-num``: a 64px number box (the web's ``<input type=number>``), with a spin box's
     ``value``/``setValue``/``valueChanged`` so the form reads it the same way."""
 
@@ -95,7 +94,7 @@ class NumInput(QLineEdit):
         self.setAccessibleName(name)
         self.setValidator(QIntValidator(lo, hi, self))
         self.setText(str(value))
-        styled(self, lambda t: input_css("#input", t, False, "0 6px"))
+        style_field(self, False, "0 6px")
         self.textChanged.connect(self._typed)
 
     def value(self) -> int:
@@ -117,7 +116,7 @@ class NumInput(QLineEdit):
                 self.valueChanged.emit(v)
 
 
-class TimeInput(QLineEdit):
+class TimeInput(Field):
     """``input.sd-time``: a 112px ``HH:MM`` box (the web's ``<input type=time>``), with ``time``/``setTime``/
     ``timeChanged`` as a QTimeEdit has."""
 
@@ -131,7 +130,7 @@ class TimeInput(QLineEdit):
         self.setAccessibleName(name)
         self.setInputMask("99:99")
         self.setText(t.toString("HH:mm"))
-        styled(self, lambda tk: input_css("#input", tk, False, "0 10px"))
+        style_field(self, False, "0 10px")
         self.textChanged.connect(self._typed)
 
     def time(self) -> QTime:
@@ -649,7 +648,6 @@ class ScheduleDialog(Sheet):
         err = r.get("error")
         nxt = r.get("nextRunAt")
         label = str(r.get("label") or "")
-        t = theme.tokens()
         if err:
             self.preview_lb.set_color("err")
             self.preview_lb.setText(str(err))
@@ -660,7 +658,6 @@ class ScheduleDialog(Sheet):
         else:
             self.preview_lb.set_color("text_3")
             self.preview_lb.setText(label)
-        _ = t
 
     # ---- mode, more
     def set_mode(self, mode: str) -> None:
@@ -758,6 +755,3 @@ def _row(title: str, note: str, control: QWidget) -> QWidget:
     lay.addLayout(col, 1)
     lay.addWidget(control, 0, Qt.AlignmentFlag.AlignVCenter)
     return box
-
-
-_ = (QSize, basename, List)

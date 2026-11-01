@@ -7,8 +7,6 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
-MOCK_PORT = 5331
-
 
 def _ready(c) -> None:
     """Sessions loaded and the boot screen gone (with motion on it fades for 320ms over everything)."""

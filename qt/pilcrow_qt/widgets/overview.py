@@ -9,12 +9,11 @@ state plus ``fleet.state`` polled every 20 s; nothing here needs a transcript lo
 from __future__ import annotations
 
 import math
-import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QEvent, QObject, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QColor, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
@@ -28,11 +27,11 @@ from PySide6.QtWidgets import (
 )
 
 from .. import icons, theme
-from ..lib.fmt import basename, cost, duration, plural, rel_path, time_ago
+from ..lib.fmt import basename, cost, duration, now_ms, plural, rel_path, time_ago
 from ..lib.tools_meta import str_
-from ..lib.workflow import workflow_counts
+from ..lib.workflow import running_workflow, workflow_counts
 from ..store import Runtime, store
-from .dialogs.parts import Badge, Card, ElideLabel, Kbd, LayoutButton, Text, Well, half_hairline, page_column
+from .dialogs.parts import Badge, Card, ElideLabel, Kbd, LayoutButton, Text, Well, half_hairline
 from .transcript.permission import suggestion_label, typing_elsewhere
 from .ui.bits import Box, ContextRing, IconButton, Mark, Spinner, WorkingMark, button, paint_box
 from .ui.signals import bind
@@ -40,10 +39,6 @@ from .ui.signals import bind
 Json = Dict[str, Any]
 FLEET_EVERY_MS = 20_000
 STALE_MS = 45_000
-
-
-def now_ms() -> float:
-    return time.time() * 1000
 
 
 def perm_summary(p: Json, cwd: str) -> Tuple[str, bool, str]:
@@ -79,18 +74,6 @@ def activity_line(st: Json) -> Tuple[str, str, bool]:
     if a.get("kind") == "text":
         return "message-square-quote", str(a.get("label") or ""), False
     return "brain", "Thinking…", True
-
-
-def running_workflow(tasks: Any) -> Optional[Json]:
-    for t in tasks or []:
-        if (
-            isinstance(t, dict)
-            and t.get("type") == "local_workflow"
-            and t.get("status") == "running"
-            and not t.get("ambient")
-        ):
-            return t
-    return None
 
 
 def short_model(m: Any) -> str:
@@ -370,7 +353,7 @@ class WorkingCard(Card):
         self.act.setText(text)
         theme.tint(self.act, fg="text_3" if quiet else "text_2")
         self.live.setToolTip("Quiet for a while" if stale else "Working")
-        wf = running_workflow(st.get("tasks"))
+        wf = running_workflow(st.get("tasks"), ambient=False)
         if wf:
             c = workflow_counts(((wf.get("workflow") or {}).get("agents")) or [])
             total = max(1, c.total)
@@ -796,7 +779,6 @@ class FinishedRow(LayoutButton):
 
 
 def _dot(color: str, size: int):
-    from PySide6.QtGui import QPixmap
 
     pm = QPixmap(size, size)
     pm.fill(Qt.GlobalColor.transparent)
@@ -1152,7 +1134,7 @@ class Overview(QWidget):
 
     def _fit_body(self) -> None:
         vw = self.scroll.viewport().width()
-        self.body.setFixedWidth(max(320, min(page_column(vw), vw)))
+        self.body.setFixedWidth(max(320, min(theme.column_width(vw), vw)))
         content = self.body.width() - 40
         tiles = 2 if content <= 640 else 4
         if tiles != self._laid_tiles:

@@ -9,19 +9,31 @@ hairline round them; a 9px drag handle straddles each seam and takes 1px of the 
 
 from __future__ import annotations
 
+import os
+import sys
 from collections import OrderedDict
 from typing import Optional, Tuple
 
 import shiboken6
-from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QKeySequence, QPainter, QPainterPath, QPen, QShortcut
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QMainWindow, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, QRect, QRectF, QSettings, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QGuiApplication, QKeySequence, QPainter, QPainterPath, QPen, QRegion, QShortcut
+from PySide6.QtWidgets import (
+    QGraphicsOpacityEffect,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QSizePolicy,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from .. import icons, theme
 from ..canvas.clock import Tween
 from ..store import store
+from .dialogs.parts import ElideLabel
 from .sidebar import Sidebar
-from .ui.bits import Mark, Row, label
+from .ui.bits import label
 from .ui.signals import bind
 
 TAB_KEYS = {"1": "changes", "2": "files", "3": "terminal", "4": "preview", "5": "tasks", "6": "history", "7": "info"}
@@ -419,7 +431,6 @@ class MainWindow(QMainWindow):
 
 def fit_size(want_w: int = 1480, want_h: int = 940) -> Tuple[int, int]:
     """The default window size, clamped to the primary screen's available area with a margin."""
-    from PySide6.QtGui import QGuiApplication
 
     screen = QGuiApplication.primaryScreen()
     if screen is None:
@@ -430,7 +441,6 @@ def fit_size(want_w: int = 1480, want_h: int = 940) -> Tuple[int, int]:
 
 def _settings():
     """QSettings when the application has a name (the real app); tests run without persistence."""
-    from PySide6.QtCore import QCoreApplication, QSettings
 
     if not QCoreApplication.organizationName():
         return None
@@ -459,14 +469,11 @@ def save_geometry(win: QMainWindow) -> None:
 def apply_windows_frame(win: QMainWindow) -> None:
     """Windows: the native title bar in the theme's colours (dark mode, caption, border, text) and
     rounded corners on Windows 11 — through DWM, like the WebView2 shell does. A no-op elsewhere."""
-    import sys
 
     if sys.platform != "win32":
         return
     try:
-        import ctypes
-
-        from PySide6.QtGui import QColor
+        import ctypes  # Windows only
 
         hwnd = int(win.winId())
         dwm = ctypes.windll.dwmapi
@@ -491,8 +498,6 @@ def apply_windows_frame(win: QMainWindow) -> None:
 
 
 def custom_titlebar() -> bool:
-    import os
-    import sys
 
     pref = os.environ.get("PILCROW_TITLEBAR", "").lower()
     if pref in ("custom", "native"):
@@ -558,7 +563,7 @@ class Shell(QWidget):
         super().resizeEvent(e)
         self.place()
 
-    def paintEvent(self, _e) -> None:
+    def paintEvent(self, e) -> None:
         # box-shadow 0 1px 2px: black at 18% on dark, 4% on light, blurred over the ground
         t = theme.tokens()
         strength = 0.18 if t.dark else 0.04
@@ -567,6 +572,8 @@ class Shell(QWidget):
             if card is None or card.isHidden():
                 continue
             r = card.geometry().adjusted(0, Card.TOP, 0, 0)
+            if r.adjusted(2, 2, -2, -2).contains(e.rect()):
+                continue  # a repaint inside the sheet: the shadow is outside it
             for d, k in ((1, 0.75), (2, 0.36), (3, 0.17)):
                 c = QColor(0, 0, 0, int(255 * strength * k))
                 p.fillRect(QRect(r.left() + 1, r.bottom() + d, r.width() - 2, 1), c)
@@ -625,10 +632,14 @@ class _CardFrame(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
 
-    def paintEvent(self, _e) -> None:
+    def paintEvent(self, e) -> None:
         t = theme.tokens()
         r = self._card.sheet_rect()
         radius = Card.RADIUS
+        # what it draws lies along the edges: a repaint inside them (a breathing mark, a streamed
+        # line) has nothing here to draw over
+        if e.region().subtracted(QRegion(r.adjusted(radius, radius, -radius, -radius))).isEmpty():
+            return
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         outside = QPainterPath()
@@ -739,14 +750,6 @@ class Resizer(QWidget):
 # ---------------------------------------------------------------- bars and the boot screen
 
 
-class _ElideLabel(QLabel):
-    """A label a layout may squeeze: its text is elided to the room it gets (OfflineBar._fit), so its
-    full text must not become the sheet's minimum width."""
-
-    def minimumSizeHint(self) -> QSize:
-        return QSize(0, super().minimumSizeHint().height())
-
-
 class OfflineBar(QWidget):
     """``.offline``: the line across the top of the sheet while the background process is away."""
 
@@ -759,31 +762,19 @@ class OfflineBar(QWidget):
         lay.addStretch(1)
         self.ico = QLabel()
         lay.addWidget(self.ico)
-        self.text = _ElideLabel()
+        # one centred line: a notice wider than the bar ends in … rather than wrapping or widening it
+        self.text = ElideLabel()
+        self.text.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Preferred)
         self.text.setFont(theme.font_ui(theme.FS_SMALL))
         theme.tint(self.text, fg="text_2")
         lay.addWidget(self.text)
         lay.addStretch(1)  # centred, like the web's justify-content: center
-        self._full = ""
         bind(theme.theme.changed, self, lambda _t: self._paint())
         self._paint()
         self.set_text("Lost the connection to Pilcrow's background process. Reconnecting…")
 
     def set_text(self, text: str) -> None:
-        self._full = text
-        self._fit()
-
-    def _fit(self) -> None:
-        # One centred line; a notice wider than the bar is elided rather than wrapped or cut.
-        room = self.width() - 14 * 2 - 14 - 8
-        fm = QFontMetrics(self.text.font())
-        self.text.setText(
-            fm.elidedText(self._full, Qt.TextElideMode.ElideRight, max(40, room)) if room > 0 else self._full
-        )
-
-    def resizeEvent(self, e) -> None:
-        super().resizeEvent(e)
-        self._fit()
+        self.text.setText(text)
 
     def _paint(self) -> None:
         t = theme.tokens()
@@ -905,13 +896,9 @@ class Boot(QWidget):
         if store.reduced_motion:
             self.hide()
             return
-        from PySide6.QtWidgets import QGraphicsOpacityEffect
 
         eff = QGraphicsOpacityEffect(self)
         self.setGraphicsEffect(eff)
         self._fade_t = Tween(eff.setOpacity, self.hide, ms=320, curve=theme.ease_exit)
         self._fade_t.jump(1.0)
         self._fade_t.go(0.0)
-
-
-_ = (QEvent, Mark, Row)

@@ -9,14 +9,14 @@ import re
 from typing import Any, List, Optional, Tuple
 
 from PySide6.QtCore import QByteArray, QRect, Qt
-from PySide6.QtGui import QColor, QPainter, QPixmap, QTextDocument
+from PySide6.QtGui import QColor, QPainter, QPixmap, QTextCursor, QTextDocument
 
 from ... import markdown, theme
 from ...lib.fmt import rel_path
 from ...lib.transcript_model import UserItem
 from ...store import ConfirmSpec, store
-from ..paint import Measurer, PaintState, doc_height, doc_pos_at, draw_doc, rounded
-from ..scene import GRADE_EXACT, Block, Target
+from ..paint import FULL, Measurer, PaintState, doc_height, doc_pos_at, draw_doc, rounded, selection
+from ..scene import Block, Target
 
 BUBBLE_LINE = markdown.px(theme.FS_BODY * 1.55)
 
@@ -226,8 +226,6 @@ class UserBlock(Block):
             color = QColor(t.text_3 if self.queued else t.text)
             sels = None
             if st.selection is not None:
-                from ..paint import FULL, selection
-
                 sbg = theme.blend(t.selection, bg_s)
                 a, b = (0, self.doc.characterCount()) if st.selection == FULL else st.selection
                 sels = [selection(self.doc, a, b, sbg)]
@@ -278,6 +276,9 @@ class UserBlock(Block):
             )
         return Target("row", "row", (0, 0, self.h_width or 0, self.h))
 
+    def hover_rect(self, target: Target) -> Tuple[int, int, int, int]:
+        return (0, 0, self.h_width or 0, self.h)  # the actions under the bubble show on any hover
+
     def cursor_for(self, target: Target) -> Optional[Any]:
         if target.kind in ("button", "image"):
             return Qt.CursorShape.PointingHandCursor
@@ -320,7 +321,6 @@ class UserBlock(Block):
     def selected_text(self, a: Optional[int], b: Optional[int]) -> str:
         if self.doc is None or a is None or b is None:
             return self.item.text
-        from PySide6.QtGui import QTextCursor
 
         cur = QTextCursor(self.doc)
         cur.setPosition(min(a, b))
@@ -388,6 +388,3 @@ class UserBlock(Block):
             )
 
         store.call("session.rewind", {"id": sid, "messageId": item.uuid, "dryRun": True}).then(dry)
-
-
-_ = GRADE_EXACT

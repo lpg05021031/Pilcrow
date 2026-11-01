@@ -15,8 +15,10 @@ from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Tuple
 
 from .fenwick import Fenwick
 
-if TYPE_CHECKING:  # pragma: no cover
-    from .paint import Measurer
+if TYPE_CHECKING:  # pragma: no cover - the types only: this module never imports Qt
+    from PySide6.QtGui import QPainter
+
+    from .paint import Measurer, PaintState
 
 GRADE_ESTIMATE, GRADE_FAST, GRADE_EXACT = 0, 1, 2
 Path = Tuple[int, ...]
@@ -64,7 +66,6 @@ class Block:
         "grade",
         "h_width",
         "warm",
-        "last_seen",
         "indent",
         "scene",
     )
@@ -81,7 +82,6 @@ class Block:
         self.grade = GRADE_ESTIMATE
         self.h_width = 0
         self.warm = False
-        self.last_seen = 0
         self.indent = 0
         self.scene: Optional[Scene] = None
 
@@ -112,7 +112,7 @@ class Block:
         self.warm = False
 
     # ---- painting and interaction (block coordinates: origin at the block's top-left)
-    def paint(self, p: Any, x: int, y: int, w: int, st: Any) -> None:
+    def paint(self, p: QPainter, x: int, y: int, w: int, st: PaintState) -> None:
         """Draw the block with its top-left at (x, y) and width ``w`` (viewport coordinates)."""
 
     def hit(self, x: int, y: int) -> Optional[Target]:
@@ -120,6 +120,11 @@ class Block:
 
     def targets(self) -> List[Target]:
         return []
+
+    def hover_rect(self, target: Target) -> Tuple[int, int, int, int]:
+        """The part of the block whose picture depends on the pointer being on ``target`` (block
+        coordinates): the target's own rect, unless the block lights up more of itself on hover."""
+        return target.rect
 
     def activate(self, target: Target, view: Any) -> None:
         pass
@@ -252,6 +257,11 @@ class Group(Block):
     def measure(self, width: int, m: Measurer) -> int:
         self.warm = True
         return self.h
+
+    def head_text(self) -> str:
+        """What the head says (the name a screen reader gives a group that opens and closes); the
+        group's own text unless its text is its content."""
+        return self.text()
 
     # ---- margins: a headless group shows its children's margins to its siblings
     def mt(self) -> int:
@@ -475,7 +485,9 @@ class Scene:
         self.root.scene = self
         self.by_key: Dict[str, Block] = {}
         self.width = 0
-        self.frame = 0
+        #: a conversation still arriving: the view shows ``skeleton`` alone, nothing to scroll
+        self.loading = False
+        self.skeleton: Optional[Block] = None
         #: block → the offset into it from which the picture may have moved (its own height, a gap
         #: above it, a child added or removed, a reveal); the view turns these into repaints
         self.dirty: Dict[Block, int] = {}
@@ -546,12 +558,6 @@ class Scene:
         cur = self.dirty.get(b)
         if cur is None or offset < cur:
             self.dirty[b] = offset
-
-    @property
-    def dirty_from(self) -> Optional[int]:
-        """The lowest scene y from which the picture may have moved (None when nothing changed)."""
-        ys = [b.y() + off for b, off in self.dirty.items() if b.scene is self]
-        return min(ys) if ys else None
 
     def note_block(self, b: Block) -> None:
         self.dirty_rects.append((0, b.y(), self.width or 1, b.h))

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import base64
 import math
+import os
 import re
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -32,6 +33,7 @@ from PySide6.QtCore import (
     QEvent,
     QIODevice,
     QMimeData,
+    QMimeDatabase,
     QPoint,
     QPointF,
     QRect,
@@ -184,22 +186,6 @@ def model_label(value: str, gateway: List[Json], aliases: Optional[List[Json]] =
     return short_model(value) if re.search(r"claude-", value, re.I) else value
 
 
-def model_options(gateway: List[Json]) -> List[Json]:
-    """Options for model pickers: Default, then the gateway's own models (Claude Code's aliases are not offered)."""
-    out: List[Json] = [{"value": "", "label": "Default", "hint": "Claude Code's configured model"}]
-    for m in gateway:
-        name = m.get("displayName")
-        out.append(
-            {
-                "value": m["id"],
-                "label": _trim_claude(str(name)) if name else m["id"],
-                "hint": m["id"] if name else None,
-                "mono": True,
-            }
-        )
-    return out
-
-
 def effort_name(level: str) -> str:
     return "Extra high" if level == "xhigh" else level[:1].upper() + level[1:]
 
@@ -219,8 +205,7 @@ def column_width(pane_width: int) -> int:
     (app.css ``.main --col``), the golden section that Claude's own desktop app settles on. The
     composer resolves it against the ``.composer-wrap`` content box, 20px in from each side."""
     avail = max(0, pane_width - 40)
-    col = max(640.0, min(0.618 * avail, avail - 48.0))
-    return int(round(min(col, 1080.0, max(avail, 0))))
+    return min(theme.column_width(avail), avail)
 
 
 # ---------------------------------------------------------------- the box (.composer)
@@ -1994,9 +1979,6 @@ class Composer(QWidget):
             self.add_files(paths)
 
     def add_files(self, paths: List[str]) -> None:
-        import os
-
-        from PySide6.QtCore import QMimeDatabase
 
         db = QMimeDatabase()
         for path in paths:

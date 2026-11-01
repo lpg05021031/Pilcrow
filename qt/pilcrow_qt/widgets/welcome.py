@@ -8,6 +8,7 @@ column is the golden section of the pane (``--col``), the box 640px wide, the ic
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import List, Optional
 
@@ -18,7 +19,7 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QPlainTextEdit, QPushButton, 
 from .. import icons, theme
 from ..lib.fmt import basename, tildify
 from ..store import store
-from .dialogs.parts import Keys, LayoutButton, Text, page_column
+from .dialogs.parts import Keys, LayoutButton, Text
 from .ui.bits import Box, IconButton, Spinner, paint_box
 from .ui.signals import bind
 
@@ -33,7 +34,6 @@ def greeting(name: Optional[str], hour: Optional[int] = None) -> str:
     if not name:
         return part
     # An OS login like "tester" reads better as a name; leave real names ("Lin Wei-Ting") alone.
-    import re
 
     shown = name[0].upper() + name[1:] if re.match(r"^[a-z][a-z0-9._-]*$", name) else name
     return f"{part}, {shown}"
@@ -41,7 +41,7 @@ def greeting(name: Optional[str], hour: Optional[int] = None) -> str:
 
 def column(width: int) -> int:
     """``--col`` in the welcome: the pane less its 24px padding."""
-    return page_column(width, 24)
+    return theme.column_width(width - 48)
 
 
 class AppIcon(QWidget):
@@ -130,7 +130,7 @@ class SendButton(QPushButton):
         self.setStyleSheet("QPushButton { background: transparent; border: none; padding: 0; }")
         self._ready = False
         self._busy = False
-        self.spinner = Spinner(14, self)
+        self.spinner = Spinner(14, parent=self)
         self.spinner.move(9, 9)
         self.spinner.hide()
         bind(theme.theme.changed, self, lambda _t: self.update())

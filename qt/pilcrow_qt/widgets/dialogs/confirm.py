@@ -8,7 +8,7 @@ from typing import Optional
 from PySide6.QtWidgets import QCheckBox, QLabel, QVBoxLayout, QWidget
 
 from ... import theme
-from ...store import ConfirmSpec, store
+from ...store import ConfirmSpec
 from ..ui.bits import Check, button
 from .parts import Well
 from .sheet import Sheet
@@ -61,5 +61,3 @@ class ConfirmDialog(Sheet):
 
     def submit(self) -> None:
         self.confirm()
-
-    _ = store

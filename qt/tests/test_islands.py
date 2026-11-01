@@ -5,8 +5,6 @@ from __future__ import annotations
 
 from harness import app_client, mock_server
 
-MOCK_PORT = 5434
-
 
 def _send(c, sid: str, text: str) -> None:
     c.call("session.send", {"id": sid, "text": text})

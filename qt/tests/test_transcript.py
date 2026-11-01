@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 from harness import app_client, mock_server
 
-MOCK_PORT = 5341
 MOCK_LONG = 120
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -98,7 +97,7 @@ def test_login_shows_bubbles_text_and_closed_folds(app_client):
     from pilcrow_qt.canvas.blocks.prose import TextGroup
     from pilcrow_qt.canvas.blocks.tool import ToolBlock
     from pilcrow_qt.canvas.blocks.user import UserBlock
-    from pilcrow_qt.canvas.view import column_width
+    from pilcrow_qt.theme import column_width
 
     win, tr = _mount(c, "sess-login")
     try:
@@ -298,5 +297,56 @@ def test_find_counts_and_reveals(app_client):
         assert tr.view.needle == ""
         _shot(c, win, "transcript")
     finally:
+        if win is not c.win:
+            win.close()
+
+
+def test_a_screen_reader_hears_every_row_of_a_long_conversation_once_and_in_words(app_client):
+    """Walk the whole of a long conversation a screen at a time, every fold open: each row the list
+    hands assistive technology has a role and a name in words, never an internal key; a group with
+    no head of its own is not a row (its rows are), so no row repeats what the row around it says."""
+    import re
+
+    from PySide6.QtGui import QAccessible
+
+    from pilcrow_qt.canvas.scene import Group
+
+    c = app_client
+    win, tr = _mount(c, "sess-long")
+    try:
+        c.store.set_ui(view="verbose")
+        c.sleep(300)
+        vb = tr.verticalScrollBar()
+        vb.setValue(0)
+        c.sleep(150)
+        iface = QAccessible.queryAccessibleInterface(tr.view.viewport())
+        # what the old list said for headless groups: W-toolu_m-00080:flat, P-t-34, s-toolu_m-00080
+        keyish = re.compile(r"toolu_|:flat\b|^[A-Za-z]-\S+$|^(tool|text|thinking|note|flat|agent-children):")
+        keys = set(tr.scene.by_key)
+        seen = {}
+        while True:
+            for i in range(iface.childCount()):
+                it = iface.child(i)
+                b = tr.scene.block(it._key)
+                name, role = it.text(QAccessible.Text.Name), it.role()
+                assert name and name not in keys and not keyish.search(name), (b.key, name)
+                assert not (isinstance(b, Group) and b.head_h == 0), b.key
+                assert role == (QAccessible.Role.Button if isinstance(b, Group) else QAccessible.Role.ListItem)
+                seen[b.key] = (b, name)
+            if vb.value() >= vb.maximum():
+                break
+            vb.setValue(vb.value() + tr.view.viewport().height() // 2)
+            c.sleep(60)
+        assert len(seen) > 300, len(seen)
+        kinds = {type(b).__name__ for b, _n in seen.values()}
+        assert {"UserBlock", "ProseBlock", "FoldGroup", "ToolBlock"} <= kinds, kinds
+        for b, name in seen.values():
+            g = b.parent
+            while g is not None:
+                if g.key in seen:
+                    assert seen[g.key][1] != name, (b.key, g.key, name)  # said once, by the row itself
+                g = g.parent
+    finally:
+        c.store.set_ui(view="normal")
         if win is not c.win:
             win.close()

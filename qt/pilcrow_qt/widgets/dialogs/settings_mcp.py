@@ -7,7 +7,6 @@ import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QStackedWidget, QWidget
 
 from ... import icons, theme
@@ -631,6 +630,3 @@ class ToolsSheet(Sheet):
                 bl.addWidget(label(str(t["description"]), tone="muted", size="small", wrap=True))
             self.list_lay.addWidget(box)
         self.schedule_relayout()
-
-
-_ = Qt

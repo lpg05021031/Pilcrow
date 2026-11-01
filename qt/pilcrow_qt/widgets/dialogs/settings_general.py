@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 
 from ... import theme
@@ -91,7 +92,6 @@ class Rows(QWidget):
     def paintEvent(self, e) -> None:
         # ``.set-row + .set-row { box-shadow: 0 -1px 0 var(--hair) }``: the line sits just above the row
         super().paintEvent(e)
-        from PySide6.QtGui import QPainter
 
         t = theme.tokens()
         p = QPainter(self)

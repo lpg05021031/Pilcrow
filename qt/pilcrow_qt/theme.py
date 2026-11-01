@@ -16,10 +16,11 @@ change and a repaint, not a re-parse of every widget's style.
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional, Tuple, Union
 
-from PySide6.QtCore import QEasingCurve, QObject, Signal
+from PySide6.QtCore import QEasingCurve, QObject, QPointF, QStandardPaths, Signal
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -435,10 +436,20 @@ def ease_exit() -> QEasingCurve:
     return c
 
 
-def _pt(x: float, y: float):
-    from PySide6.QtCore import QPointF
-
+def _pt(x: float, y: float) -> QPointF:
     return QPointF(x, y)
+
+
+def column_width(box: float) -> int:
+    """``--col: clamp(640px, min(61.8%, 100% - 48px), 1080px)`` (app.css) resolved against a box this
+    wide: the golden-section reading column every page and the composer share."""
+    return int(max(640.0, min(box * 0.618, box - 48.0, 1080.0)))
+
+
+def breath(now: float, period: float, low: float) -> float:
+    """``@keyframes breathe``: an opacity that eases from ``low`` up to 1 and back once a ``period``
+    (seconds), on a cosine; ``now`` is ``time.monotonic()``, so every mark breathes in step."""
+    return low + (1.0 - low) * (0.5 - 0.5 * math.cos((now % period) / period * 2 * math.pi))
 
 
 # ---------------------------------------------------------------- fonts
@@ -538,9 +549,6 @@ def stylesheet() -> str:
 def _arrow_files() -> Tuple[str, str]:
     """The chevron for QComboBox in each theme's faint colour, written once to the cache folder (QSS
     takes a file). The stylesheet picks one by the combo's ``dark`` property (set by :func:`repolish`)."""
-    import os
-
-    from PySide6.QtCore import QStandardPaths
 
     d = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.CacheLocation) or os.path.join(
         os.path.expanduser("~"), ".cache", "pilcrow"

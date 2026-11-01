@@ -4,7 +4,7 @@ for every repository that asks the same thing), so most jobs are never opened.""
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QEvent, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter
@@ -12,14 +12,14 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QVBoxLay
 
 from ... import theme
 from ...lib.fmt import cost as fmt_cost
-from ...lib.fmt import duration, plural
+from ...lib.fmt import duration, now_ms, plural
 from ...store import store
-from ..dialogs.parts import Card, Text, half_hairline, page_column
+from ..dialogs.parts import Card, Text, half_hairline
 from ..overview import EmptyNote, SectionHead
-from ..ui.bits import IconButton, LayoutButton, Mark, button
+from ..ui.bits import IconButton, LayoutButton, button
 from ..ui.signals import bind
 from .cards import CanaryRow, RequestRow
-from .common import SegmentBar, counts_text, elapsed_text, group_requests, job_cost_text, job_state_text, now_ms
+from .common import SegmentBar, counts_text, elapsed_text, group_requests, job_cost_text, job_state_text
 
 Json = Dict[str, Any]
 
@@ -299,7 +299,7 @@ class Board(QWidget):
     def eventFilter(self, obj, e) -> bool:
         if obj is self.scroll.viewport() and e.type() == QEvent.Type.Resize:
             vw = self.scroll.viewport().width()
-            self.body.setFixedWidth(max(320, min(page_column(vw), vw)))
+            self.body.setFixedWidth(max(320, min(theme.column_width(vw), vw)))
         return False
 
     # ---- data
@@ -440,6 +440,3 @@ class Board(QWidget):
     @property
     def focus_index(self) -> int:
         return self._focus
-
-
-_ = (Callable, Mark)

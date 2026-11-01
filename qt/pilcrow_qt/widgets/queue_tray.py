@@ -161,14 +161,15 @@ class QueueItem(QWidget):
         super().__init__(tray)
         self.tray, self.h = tray, h
         self._editing = editing
-        t = theme.tokens()
         lay = QHBoxLayout(self)
         lay.setContentsMargins(8, 5, 6, 5)
         lay.setSpacing(8)
         num = QLabel(str(n))
         num.setFixedWidth(18)
         num.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
-        num.setStyleSheet(f"color: {t.text_4}; font-size: 11px; font-weight: 600; margin-top: 3px;")
+        num.setFont(theme.font_ui(11, 600))
+        num.setContentsMargins(0, 3, 0, 0)
+        theme.tint(num, fg="text_4")
         lay.addWidget(num)
         if editing:
             self.edit = _QueueEdit(str(h.get("text") or ""), lambda text: tray.save(h, text), tray.cancel_edit)

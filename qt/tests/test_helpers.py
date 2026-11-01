@@ -9,7 +9,6 @@ import time
 
 from harness import app_client, mock_server
 
-MOCK_PORT = 5433
 HOME = "/home/tester"
 
 

@@ -11,12 +11,15 @@ import time
 from functools import lru_cache
 from typing import Any, Callable, List, Optional, Tuple
 
-from PySide6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QObject, QPointF, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QGuiApplication, QImage, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QCheckBox, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QWidget
 
 from ... import icons, theme
+from ...canvas.clock import clock
 from ...canvas.pixels import hline, pen_width, snap, vline
+from ...lib.fmt import tokens as fmt_tokens
+from ...store import store
 from .button import Btn
 from .signals import bind
 
@@ -94,25 +97,55 @@ def button(
 
 
 class IconButton(QPushButton):
-    """A quiet square button with only an icon (``.icon-btn``): a fill under the pointer, and kept
-    while ``active``. The icon is painted in text-2 (or ``color``), text under the pointer."""
+    """A quiet square button with only an icon (``.icon-btn``, ``.icon-btn.sm``): a fill under the
+    pointer, kept while ``active``. The icon (``size`` px) is painted in ``color`` (text-2 unless
+    given), text under the pointer. ``box`` is the square (the icon and 6px around unless given),
+    ``width`` a wider one; ``over`` the surface the fill lies on. With ``reveal`` it keeps its place
+    but shows nothing until ``set_shown(True)`` (the buttons that appear when the row around them is
+    hovered). ``last_modifiers`` are the keys held at the last press (Shift+click for options)."""
 
     def __init__(
-        self, name: str, tooltip: str = "", size: int = 15, color: str = "", parent: Optional[QWidget] = None
+        self,
+        name: str,
+        tooltip: str = "",
+        size: int = 15,
+        color: str = "",
+        parent: Optional[QWidget] = None,
+        *,
+        box: int = 0,
+        width: int = 0,
+        over: str = "canvas",
+        reveal: bool = False,
     ) -> None:
         super().__init__(parent)
-        self._name, self._size, self._color = name, size, color
+        self._name, self._size, self._color, self._over, self._reveal = name, size, color, over, reveal
+        self._shown = not reveal
         self._active = False
         self._hover = False
+        self.last_modifiers = Qt.KeyboardModifier.NoModifier
         self.setFlat(True)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedSize(size + 12, size + 12)
+        box = box or size + 12
+        self.setFixedSize(width or box, box)
         self.setIconSize(QSize(size, size))
         if tooltip:
             self.setToolTip(tooltip)
             self.setAccessibleName(tooltip)
         bind(theme.theme.changed, self, lambda _t: self.update())
+
+    @property
+    def shown(self) -> bool:
+        return self._shown
+
+    def set_shown(self, on: bool) -> None:
+        if self._shown != on:
+            self._shown = on
+            self.update()
+
+    def mousePressEvent(self, e) -> None:
+        self.last_modifiers = e.modifiers()
+        super().mousePressEvent(e)
 
     def set_icon_name(self, name: str) -> None:
         self._name = name
@@ -134,14 +167,17 @@ class IconButton(QPushButton):
         super().leaveEvent(e)
 
     def paintEvent(self, _e) -> None:
+        if not self._shown:
+            return
         t = theme.tokens()
         lit = (self._hover and self.isEnabled()) or self._active
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         if lit:
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(theme.blend(t.fill_2, t.canvas))
-            p.drawRoundedRect(QRectF(self.rect()), theme.R2, theme.R2)
+            p.setBrush(theme.blend(t.fill_2, getattr(t, self._over)))
+            r = min(theme.R2, self.width() / 2)
+            p.drawRoundedRect(QRectF(self.rect()), r, r)
         if not self.isEnabled():
             p.setOpacity(0.45)
         color = t.text if lit else (self._color or t.text_2)
@@ -405,12 +441,13 @@ class Mark(QWidget):
 
     def paintEvent(self, _e) -> None:
         p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        _draw_mark(p, QRectF(0, 0, self._size, self._size), theme.tokens(), ink=self._color or None)
+        draw_mark(p, QRectF(0, 0, self._size, self._size), theme.tokens(), ink=self._color or None)
 
 
-def _draw_mark(p: QPainter, r: QRectF, t: theme.Tokens, bowl_alpha: float = 1.0, ink: Optional[str] = None) -> None:
-    """Geometry from the brand SVG (viewBox 4.5 4 14 16): bowl at (10.6, 9.2) r 4.1, bar and two stems."""
+def draw_mark(p: QPainter, r: QRectF, t: theme.Tokens, bowl_alpha: float = 1.0, ink: Optional[str] = None) -> None:
+    """The pilcrow ¶ drawn into ``r``, for widgets and canvas blocks alike. Geometry from the brand SVG
+    (viewBox 4.5 4 14 16): bowl at (10.6, 9.2) r 4.1, a bar and two stems."""
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
     s = r.height() / 16.0
     x0, y0 = r.x() - 4.5 * s, r.y() - 4 * s
     bowl = QColor(t.accent)
@@ -425,39 +462,61 @@ def _draw_mark(p: QPainter, r: QRectF, t: theme.Tokens, bowl_alpha: float = 1.0,
     p.drawRoundedRect(QRectF(x0 + 15.3 * s, y0 + 5.1 * s, 1.9 * s, 13.8 * s), rx, rx)
 
 
-class WorkingMark(QWidget):
+class Indicator(QWidget):
+    """A small painted widget that moves (a breathing dot, a turning arc). It repaints on the one
+    clock (``canvas/clock``), and only while it is live, shown and motion is allowed: it subscribes
+    on show and leaves on hide, so a hidden tab or a scrolled-away row costs nothing. ``moving``
+    says whether to paint the animated look or the resting one."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._live = False
+        bind(theme.theme.changed, self, lambda _t: self.update())
+
+    @property
+    def moving(self) -> bool:
+        return self._live and not store.reduced_motion
+
+    def set_live(self, on: bool) -> None:
+        if on != self._live:
+            self._live = on
+            self._arm()
+        self.update()
+
+    def _arm(self) -> None:
+        if self.moving and self.isVisible():
+            clock.subscribe(self)
+        else:
+            clock.unsubscribe(self)
+
+    def showEvent(self, e) -> None:
+        super().showEvent(e)
+        self._arm()
+
+    def hideEvent(self, e) -> None:
+        super().hideEvent(e)
+        clock.unsubscribe(self)
+
+    def tick(self, _now: float) -> None:
+        self.update()
+
+
+class WorkingMark(Indicator):
     """The breathing ¶ that marks work under way: the bowl brightens and dims on a slow sine."""
 
     def __init__(self, size: int = 15, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._size = size
         self.setFixedSize(size, size)
-        self._t0 = time.monotonic()
-        self._timer = QTimer(self)
-        self._timer.setInterval(50)
-        self._timer.timeout.connect(self.update)
-        bind(theme.theme.changed, self, lambda _t: self.update())
-
-    def showEvent(self, e) -> None:
-        from ...store import store
-
-        if not store.reduced_motion:
-            self._timer.start()
-        super().showEvent(e)
-
-    def hideEvent(self, e) -> None:
-        self._timer.stop()
-        super().hideEvent(e)
+        self.set_live(True)
 
     def paintEvent(self, _e) -> None:
         p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        phase = (time.monotonic() - self._t0) % 1.8 / 1.8
-        alpha = 0.55 + 0.45 * (0.5 - 0.5 * math.cos(phase * 2 * math.pi))
-        _draw_mark(p, QRectF(0, 0, self._size, self._size), theme.tokens(), bowl_alpha=alpha)
+        alpha = theme.breath(time.monotonic(), 1.8, 0.55) if self.moving else 1.0
+        draw_mark(p, QRectF(0, 0, self._size, self._size), theme.tokens(), bowl_alpha=alpha)
 
 
-class StatusGlyph(QWidget):
+class StatusGlyph(Indicator):
     """The small status dot of a session row: breathing orange while working, amber when it needs you,
     red on error, a dot when unread."""
 
@@ -467,23 +526,11 @@ class StatusGlyph(QWidget):
         self._status = ""
         self._pending = 0
         self._unread = False
-        self._t0 = time.monotonic()
-        self._timer = QTimer(self)
-        self._timer.setInterval(60)
-        self._timer.timeout.connect(self.update)
-        bind(theme.theme.changed, self, lambda _t: self.update())
 
     def set_state(self, status: str, pending: int = 0, unread: bool = False) -> None:
         self._status, self._pending, self._unread = status, pending, unread
-        from ...store import store
-
-        live = status in ("running", "starting") and not store.reduced_motion
-        if live and not self._timer.isActive():
-            self._timer.start()
-        elif not live:
-            self._timer.stop()
         self.setVisible(bool(status in ("running", "starting", "requires_action", "error") or pending or unread))
-        self.update()
+        self.set_live(status in ("running", "starting"))
 
     def paintEvent(self, _e) -> None:
         t = theme.tokens()
@@ -498,8 +545,8 @@ class StatusGlyph(QWidget):
             c = QColor(t.err)
         elif self._status in ("running", "starting"):
             c = QColor(t.accent)
-            phase = (time.monotonic() - self._t0) % 1.6 / 1.6
-            c.setAlphaF(0.5 + 0.5 * (0.5 - 0.5 * math.cos(phase * 2 * math.pi)))
+            if self.moving:
+                c.setAlphaF(theme.breath(time.monotonic(), 1.6, 0.5))
         elif self._unread:
             c = QColor(t.accent)
             r = 2.5
@@ -509,27 +556,23 @@ class StatusGlyph(QWidget):
         p.drawEllipse(QPointF(8, 8), r, r)
 
 
-class Spinner(QWidget):
-    """A thin arc that turns: for places still loading."""
+class Spinner(Indicator):
+    """A thin arc that turns once a second, in a token's colour: for places still loading."""
 
-    def __init__(self, size: int = 14, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, size: int = 14, tone: str = "text_3", parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._size = size
+        self._tone = tone
         self.setFixedSize(size, size)
-        self._t0 = time.monotonic()
-        self._timer = QTimer(self)
-        self._timer.setInterval(40)
-        self._timer.timeout.connect(self.update)
-        self._timer.start()
+        self.set_live(True)
 
     def paintEvent(self, _e) -> None:
-        t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor(t.text_3), 1.6)
+        pen = QPen(QColor(getattr(theme.tokens(), self._tone)), 1.6)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         p.setPen(pen)
-        ang = int(((time.monotonic() - self._t0) % 1.0) * 360)
+        ang = int((time.monotonic() % 1.0) * 360)
         p.drawArc(QRectF(1.5, 1.5, self._size - 3, self._size - 3), -ang * 16, 270 * 16)
 
 
@@ -561,7 +604,6 @@ class ContextRing(QWidget):
 
 
 def context_label(used: int, total: int) -> str:
-    from ...lib.fmt import tokens as fmt_tokens
 
     return f"{fmt_tokens(used)} of {fmt_tokens(total)}"
 
@@ -603,14 +645,6 @@ class Clickable(QObject):
 
 def copy_text(text: str) -> None:
     QGuiApplication.clipboard().setText(text)
-
-
-def expanding(w: QWidget, h: bool = True, v: bool = False) -> QWidget:
-    w.setSizePolicy(
-        QSizePolicy.Policy.Expanding if h else QSizePolicy.Policy.Preferred,
-        QSizePolicy.Policy.Expanding if v else QSizePolicy.Policy.Preferred,
-    )
-    return w
 
 
 class LayoutButton(QPushButton):

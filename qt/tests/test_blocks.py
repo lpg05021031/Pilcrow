@@ -191,7 +191,7 @@ def test_user_bubble_is_the_webs_size(app):
 
 
 def test_column_width_is_the_golden_section_of_the_pane():
-    from pilcrow_qt.canvas.view import column_width
+    from pilcrow_qt.theme import column_width
 
     assert column_width(1212) == 749
     assert column_width(1202) == 742  # the web's pane at 1480 wide: text from x=499 to 1241

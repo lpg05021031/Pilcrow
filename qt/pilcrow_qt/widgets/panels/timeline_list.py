@@ -22,6 +22,8 @@ from ...canvas.paint import Measurer, PaintState, rounded
 from ...canvas.scene import Block, Scene, Target
 from ...canvas.view import CanvasView
 from ...lib.fmt import plural
+from ...store import store
+from ..ui.bits import draw_mark
 
 Json = Dict[str, Any]
 ROW_PAD = (4, 5, 6, 5)
@@ -123,7 +125,6 @@ class StepBlock(NodeBlock):
         return nd.hstack(*parts, spacing=6, stretch=[1], pad=ROW_PAD, valign="top")
 
     def _jump(self, _t: Target, _view: Any) -> None:
-        from ...store import store
 
         store.toast("That step is not in the conversation view.", "info")
 
@@ -232,8 +233,6 @@ class NowBlock(NodeBlock):
         )
 
     def _paint_mark(self, p: QPainter, r: QRect, st: PaintState) -> None:
-        from ...canvas.blocks.misc import draw_mark
-
         draw_mark(p, QRectF(r.x() + 2, r.y() + 4, 14, 14), st.t, 1.0, st.t.text if self.chosen else st.t.text_2)
 
     def paint(self, p: QPainter, x: int, y: int, w: int, st: PaintState) -> None:
@@ -345,6 +344,3 @@ class TimelineList(CanvasView):
         b: Optional[Block] = self.now if n is None else next((r for r in self.rows if r.n == n), None)
         if b is not None:
             self.scroll_to_block(b, 0.3)
-
-    def detail_widget(self) -> Optional[QWidget]:
-        return self.detail.widget if self.detail is not None and self.detail.alive else None

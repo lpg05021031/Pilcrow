@@ -47,6 +47,7 @@ class Btn(QPushButton):
         self._on = False
         self.pad_left: Optional[int] = None  # overrides the variant's left padding (a negative CSS margin)
         self.override: Dict[str, float] = {}  # per-instance geometry (h, px, gap, fs, fw, r) over the variant's
+        self.look: Dict[str, theme.Fill] = {}  # per-instance colours over the variant's (``set_look``)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
         self.setFlat(True)
@@ -98,6 +99,31 @@ class Btn(QPushButton):
 
     def set_icon_at_end(self, end: bool) -> None:
         self._icon_end = end
+        self.update()
+
+    def set_look(
+        self,
+        fg: theme.Fill,
+        hover_fg: theme.Fill = None,
+        bg: theme.Fill = None,
+        hover_bg: theme.Fill = None,
+        on_fg: theme.Fill = None,
+        on_bg: theme.Fill = None,
+        line: theme.Fill = None,
+        on_line: theme.Fill = None,
+    ) -> None:
+        """Colours of its own (token specs, see ``theme.Fill``) in place of the kind's: the ink and the
+        fill at rest, under the pointer, and on (``set_on`` or checked); a hairline at rest and on."""
+        self.look = {
+            "fg": fg,
+            "hover_fg": hover_fg,
+            "bg": bg,
+            "hover_bg": hover_bg,
+            "on_fg": on_fg,
+            "on_bg": on_bg,
+            "line": line,
+            "on_line": on_line,
+        }
         self.update()
 
     def set_on(self, on: bool) -> None:
@@ -152,6 +178,19 @@ class Btn(QPushButton):
         t = theme.tokens()
         k = self.kind
         hover = self._hover and self.isEnabled()
+        if self.look:
+            lk = self.look
+            on = self._on or self.isChecked()
+
+            def pick(state: str) -> Optional[QColor]:
+                spec = lk.get(f"on_{state}") if on else None
+                if spec is None and hover:
+                    spec = lk.get(f"hover_{state}")
+                return theme.resolve(spec if spec is not None else lk.get(state), t)
+
+            fg = pick("fg") if self.isEnabled() else QColor(t.text_4)
+            line = theme.resolve(lk.get("on_line") if on and lk.get("on_line") is not None else lk.get("line"), t)
+            return pick("bg"), fg or QColor(t.text), 1.0, line
         if k == "primary":
             if not self.isEnabled():
                 return theme.blend(t.fill_2, t.canvas), QColor(t.text_4), 1.0, None
@@ -242,3 +281,13 @@ class Btn(QPushButton):
                 Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
                 self.text(),
             )
+
+
+def text_button(text: str, fs: float, fw: int = 400, fg: theme.Fill = "text", hover_fg: theme.Fill = "text_2") -> Btn:
+    """A line of words that is a button (``border: none; background: transparent; text-align:
+    left; padding: 0``): ``fg`` at rest, ``hover_fg`` under the pointer."""
+    b = Btn(text, kind="link")
+    b.pad_left = 0
+    b.override.update(fs=fs, fw=fw, px=0, h=18 if fs <= theme.FS_SMALL else 20)
+    b.set_look(fg, hover_fg)
+    return b

@@ -6,8 +6,6 @@ from harness import app_client, mock_server
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 
-MOCK_PORT = 5421
-
 
 def _welcome(c):
     c.wait_until(lambda: c.store.config is not None and c.store.info is not None, 10, "config and info")

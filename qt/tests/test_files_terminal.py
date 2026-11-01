@@ -7,8 +7,6 @@ from typing import Dict, List, Optional, Tuple
 
 from harness import ROOT, app_client, mock_server
 
-MOCK_PORT = 5401
-
 TREE: Dict[str, List[dict]] = {
     "/proj": [
         {"name": "src", "path": "/proj/src", "type": "dir", "size": 0},

@@ -9,6 +9,7 @@ Composer stacked. The git information behind the crumbs and the diffstat is refr
 from __future__ import annotations
 
 import math
+import re
 import time
 from typing import Any, Dict, List, Optional
 
@@ -27,12 +28,12 @@ from PySide6.QtWidgets import (
 from .. import icons, theme
 from ..canvas.transcript import Transcript
 from ..lib.fmt import basename, cost, duration, err_text, plural, tildify
-from ..store import ConfirmSpec, store
+from ..lib.workflow import running_workflow
+from ..store import VIEW_MODES, ConfirmSpec, store
 from .composer import Composer, LayoutButton
 from .folder_picker import FolderPicker
 from .mcp_notice import McpNotice
-from .sidebar import IconBtn
-from .ui.bits import Box, Mark, button, copy_text, hairline, label, paint_box
+from .ui.bits import Box, IconButton, Indicator, Mark, button, copy_text, hairline, label, paint_box
 from .ui.button import Btn
 from .ui.menu import Popover, host_for, show_menu
 from .ui.signals import bind
@@ -55,13 +56,6 @@ EXAMPLES = [
     "Write tests for the module I changed last",
     "Review my uncommitted changes",
 ]
-
-
-def running_workflow(tasks: Optional[List[Json]]) -> Optional[str]:
-    for t in tasks or []:
-        if t.get("type") == "local_workflow" and t.get("status") == "running":
-            return str(t.get("workflowName") or t.get("description") or "workflow")
-    return None
 
 
 HELPER_TONE = {
@@ -323,7 +317,7 @@ class SessionView(QWidget):
         hl.setContentsMargins(20, 0, 10, 0)
         hl.setSpacing(12)
         # .icon-btn.head-sidebar: 28px, shown only while the sidebar is hidden
-        self.side_btn = IconBtn("panel-left-open", "Show sidebar (Ctrl+B)", 16, 28)
+        self.side_btn = IconButton("panel-left-open", "Show sidebar (Ctrl+B)", 16, "text_3", box=28, over="chrome")
         self.side_btn.clicked.connect(lambda: store.set_ui(sidebar=True))
         hl.addWidget(self.side_btn)
 
@@ -370,10 +364,10 @@ class SessionView(QWidget):
         self.diffstat.hide()
         self.diffstat.clicked.connect(self._toggle_changes)
         al.addWidget(self.diffstat)
-        self.panel_btn = IconBtn("panel-right", "Side panel (Ctrl+\\)", 16, 28)
+        self.panel_btn = IconButton("panel-right", "Side panel (Ctrl+\\)", 16, "text_3", box=28, over="chrome")
         self.panel_btn.clicked.connect(lambda: store.set_ui(panel=not store.ui.panel))
         al.addWidget(self.panel_btn)
-        self.menu_btn = IconBtn("ellipsis", "Session actions", 16, 28)
+        self.menu_btn = IconButton("ellipsis", "Session actions", 16, "text_3", box=28, over="chrome")
         self.menu_btn.clicked.connect(self.open_menu)
         al.addWidget(self.menu_btn)
         hl.addWidget(actions)
@@ -511,7 +505,10 @@ class SessionView(QWidget):
             # the lead itself is quiet, its helpers are not: live work, in the accent
             self.pill.set_status("leading", f"{len(active_helpers)} of {plural(len(helpers), 'helper')}")
         else:
-            self.pill.set_status(status, running_workflow(tasks) if status == "running" else None)
+            wf = running_workflow(tasks) if status == "running" else None
+            self.pill.set_status(
+                status, str(wf.get("workflowName") or wf.get("description") or "workflow") if wf else None
+            )
         self.helpers_bar.sync(helpers, (r.get("lead") if r else None) or {})
         helper = r.get("helper") if r and isinstance(r.get("helper"), dict) else None
         if helper and helper.get("leadId"):
@@ -685,7 +682,6 @@ class SessionView(QWidget):
             },
             {"separator": True},
         ]
-        from ..store import VIEW_MODES
 
         for v in VIEW_MODES:
             items.append(
@@ -918,7 +914,6 @@ class StatusPill(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.status = ""
-        self._t0 = time.monotonic()
         self.setFixedHeight(22)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(4, 0, 4, 0)
@@ -977,30 +972,20 @@ class StatusPill(QWidget):
         self.dot.update()
 
 
-class _Dot(QWidget):
+class _Dot(Indicator):
+    """The status pill's dot, breathing while the session works."""
+
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.color = ""
         self.setFixedSize(6, 6)
-        self._t0 = time.monotonic()
-        self._timer = QTimer(self)
-        self._timer.setInterval(60)
-        self._timer.timeout.connect(self.update)
-
-    def set_live(self, on: bool) -> None:
-        if on and not store.reduced_motion:
-            self._timer.start()
-        else:
-            self._timer.stop()
-        self.update()
 
     def paintEvent(self, _e) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         c = QColor(self.color or theme.tokens().text_3)
-        if self._timer.isActive():
-            phase = (time.monotonic() - self._t0) % 1.2 / 1.2
-            c.setAlphaF(0.45 + 0.55 * (0.5 - 0.5 * math.cos(phase * 2 * math.pi)))
+        if self.moving:
+            c.setAlphaF(theme.breath(time.monotonic(), 1.2, 0.45))
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(c)
         p.drawEllipse(QPointF(3, 3), 3, 3)
@@ -1085,7 +1070,6 @@ class ErrorBar(QWidget):
         self.host = host
 
     def set_error(self, error: str) -> None:
-        import re
 
         self._error = error
         self.text.setText(error.split("\n")[0])

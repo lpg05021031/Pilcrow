@@ -1,14 +1,12 @@
-"""How a turn's work folds: the work fold (one line that opens to chapters or steps), chapters (what
-Claude said along the way as headings, the steps under them), runs of steps with quiet reads folded
-into "Explored", and the flat list of rows a stretch of plain items becomes.
+"""How a turn's work folds: the work fold (one line that opens to its steps), runs of steps with
+quiet reads folded into "Explored", and the flat list of rows a stretch of plain items becomes.
 
-The pure helpers (what is quiet, how chapters are cut, the summary words) are the ones in
-widgets/transcript/folds.py; this module gives them groups and blocks instead of widgets.
+The pure helpers (what is quiet, the summary words) are the ones in lib/folds.py; this
+module gives them groups and blocks.
 """
 
 from __future__ import annotations
 
-import math
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -18,26 +16,23 @@ from PySide6.QtGui import QColor, QPainter
 from ... import theme
 from ...lib.fmt import duration
 from ...lib.folds import (
-    Chapter,
     ExploreSeg,
-    ItemGroup,
     ToolSeg,
-    chapters_of,
     explore_label,
     group_items,
     is_quiet,
     live_label,
-    tally,
     work_summary,
 )
 from ...lib.folds import (
     StepsGroup as StepsSpec,
 )
-from ...lib.transcript_model import Item, ToolItem
+from ...lib.transcript_model import Item, ToolItem, UserItem
 from ...lib.units import Unit, WorkUnit
 from ...store import store
 from ...widgets.transcript.ctx import ToolCtx
-from ..paint import Measurer, PaintState, doc_height, draw_doc, rounded
+from ...widgets.ui.bits import draw_mark
+from ..paint import Measurer, PaintState
 from ..pixels import vline
 from ..scene import Block, Group, Target
 from .base import chevron, paint_head_tint
@@ -47,7 +42,6 @@ from .misc import (
     NoticeBlock,
     ResultBlock,
     compact_label,
-    draw_mark,
     notice_mode,
     result_notice,
 )
@@ -72,9 +66,9 @@ def make_row(item: Item, ctx: ToolCtx, in_work: bool, sid: str) -> Block:
     k = item.kind
     if k == "user":
         # a note Pilcrow wrote (a helper's news to its lead) is drawn apart from the person's messages
-        if getattr(item, "note", ""):
+        if isinstance(item, UserItem) and item.note:
             return NoteBlock(item, sid)
-        if getattr(item, "from_", ""):
+        if isinstance(item, UserItem) and item.from_:
             return FromLeadBlock(item, sid)
         return UserBlock(item, sid, ctx.cwd)
     if k == "text":
@@ -347,7 +341,7 @@ class Steps(Group):
     MT = 6
     MB = 6
     COLLAPSE_AT = 10
-    __slots__ = ("_expand_ref", "ctx", "expanded", "items", "live_run", "sid")
+    __slots__ = ("ctx", "expanded", "items", "live_run", "sid")
 
     def __init__(self, items: List[ToolItem], ctx: ToolCtx, sid: str, key: str, live: bool = False) -> None:
         super().__init__(key, head_h=0, open_=True)
@@ -415,7 +409,6 @@ class Steps(Group):
                 return b.sync(s.items, ctx) if isinstance(b, Explore) else []
             return sync_row(b, s.item, ctx)
 
-        self._expand_ref = None
         return reconcile(self, keys, make, update)
 
     def _expand(self) -> None:
@@ -429,199 +422,11 @@ class Steps(Group):
             vline(p, x + 8, y + 14, self.h - 28, theme.blend(st.t.hair_2, st.t.canvas))
 
 
-# ---------------------------------------------------------------- chapters
-
-
-class ChapterGroup(Group):
-    """A heading (what Claude said) with its steps under it, a rail down the side."""
-
-    KIND = "chapter"
-    CHILD_INDENT = 24
-    __slots__ = (
-        "_title_rev",
-        "_title_src",
-        "ch",
-        "ctx",
-        "flat",
-        "last",
-        "sid",
-        "state",
-        "tally_failed",
-        "tally_text",
-        "title_doc",
-    )
-
-    def __init__(self, ch: Chapter, ctx: ToolCtx, sid: str, last: bool, state: Dict[str, bool]) -> None:
-        super().__init__(ch.key, head_h=24, pad_top=2, pad_bottom=2 if last else 12, open_=False)
-        self.shaped = True
-        self.ch = ch
-        self.ctx = ctx
-        self.sid = sid
-        self.last = last
-        self.state = state  # remembered toggles, shared by the fold
-        self.title_doc = None
-        self._title_src = ""
-        self._title_rev = -1
-        self.tally_text = ""
-        self.tally_failed = 0
-        self.flat = Flat(self._steps(ch), ctx, sid, in_work=True, key=f"{ch.key}:flat", live=self.live)
-        self.append(self.flat)
-        self.sync(ch, ctx, last)
-        self.set_open(self.wants_open)
-
-    @staticmethod
-    def _steps(ch: Chapter) -> List[Item]:
-        return ([ch.thought] if ch.thought is not None else []) + list(ch.steps)
-
-    @property
-    def waiting(self) -> bool:
-        return any(it.kind == "tool" and it.id in self.ctx.pending for it in self.ch.steps)
-
-    @property
-    def live(self) -> bool:
-        ch = self.ch
-        return any(
-            (it.kind == "tool" and it.status in ("running", "streaming")) or (it.kind == "thinking" and it.streaming)
-            for it in ch.steps
-        ) or bool(ch.title and ch.title.streaming)
-
-    @property
-    def wants_open(self) -> bool:
-        if self.ch.key in self.state:
-            return self.state[self.ch.key]
-        return self.ctx.view == "verbose" or self.waiting or self.live
-
-    def sync(self, ch: Chapter, ctx: ToolCtx, last: bool) -> List[Block]:
-        self.ch, self.ctx, self.last = ch, ctx, last
-        t = tally(ch.steps)
-        self.tally_text = t.text + (f" · {duration(t.ms)}" if t.ms > 1500 else "")
-        self.tally_failed = t.failed
-        self.sig = (ch.title.rev if ch.title else None, self.tally_text, self.live, last)
-        self.set_chrome(pad_bottom=2 if last else 12)
-        changed = self.flat.sync(self._steps(ch), ctx, self.live)
-        if ch.title is not None and ch.title.rev != self._title_rev:
-            self._title_rev = ch.title.rev
-            self.title_doc = None
-            changed.append(self)
-        want = self.wants_open
-        if want != self.open and self.ch.key not in self.state:
-            self.open = want
-            self.set_reveal(1.0 if want else 0.0)
-        return changed
-
-    def measure(self, width: int, m: Measurer) -> int:
-        self.warm = True
-        avail = max(60, width - 24 - 120)
-        if self.ch.title is not None:
-            src = self.ch.title.text
-            if self.title_doc is None or self._title_src != src or int(self.title_doc.textWidth()) != avail:
-                self.title_doc = m.markdown_doc(
-                    src, avail, compact=True, quiet=True, streaming=bool(self.ch.title.streaming), cwd=self.ctx.cwd
-                )
-                self._title_src = src
-            self.set_chrome(head_h=max(24, doc_height(self.title_doc) + 4))
-        else:
-            self.set_chrome(head_h=24)
-        return self.h
-
-    def estimate(self, width: int, m: Measurer) -> int:
-        return self.h
-
-    def cool(self) -> None:
-        self.title_doc = None
-        self.warm = False
-
-    def paint(self, p: QPainter, x: int, y: int, w: int, st: PaintState) -> None:
-        t = st.t
-        hover = st.hover is not None and st.hover.kind == "head"
-        # the rail: a dot, and a line down to the next chapter
-        if not self.last:
-            vline(p, x + 7, y + 18, self.h - 18 + 12, theme.blend(t.hair_2, t.canvas))
-        c = QColor(t.err if self.tally_failed else t.accent if self.live else t.text_4)
-        if self.live:
-            phase = (st.now % 1.4) / 1.4
-            c.setAlphaF(0.55 + 0.45 * (0.5 - 0.5 * math.cos(phase * 2 * math.pi)))
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(c)
-        p.drawEllipse(QRectF(x + 3.5, y + 9, 7, 7))
-        hx = x + 24
-        if hover:
-            paint_head_tint(p, QRect(hx - 6, y, w - 24 + 6, self.head_h), st)
-        tally_f = st.m.font(theme.FS_MICRO)
-        tw = st.m.text_w(self.tally_text, tally_f) if self.ch.steps else 0
-        if self.ch.title is not None and self.title_doc is not None:
-            clip = QRect(hx, y + 2, w - 24 - int(tw) - 40, self.head_h - 2)
-            if st.clip is not None:
-                clip = clip.intersected(st.clip)
-            draw_doc(p, self.title_doc, hx, y + 2, clip, QColor(t.text if (hover or self.open) else t.text_2))
-        else:
-            f = st.m.font(theme.FS_UI)
-            label = "Steps" if any(it.kind == "tool" for it in self.ch.steps) else "Thinking"
-            st.m.draw_text(p, hx, y + (24 - st.m.line_h(f)) / 2, label, f, QColor(t.text_3))
-        if self.ch.steps:
-            right = x + w
-            chevron(p, right - 12, y + 6, 12, self.reveal, QColor(t.text_4), st, 1.0 if (hover or self.open) else 0.6)
-            tx = right - 12 - 12 - tw
-            st.m.draw_text(p, tx, y + 4, self.tally_text, tally_f, QColor(t.text_4))
-            if self.tally_failed:
-                pass  # the count is in the text; failure is read from the rail's red dot
-
-    def hit(self, x: int, y: int) -> Optional[Target]:
-        if y < self.head_h:
-            return Target("head", "chapter", (24, 0, (self.h_width or 0) - 24, self.head_h))
-        return None
-
-    def cursor_for(self, target: Target) -> Optional[Any]:
-        return Qt.CursorShape.PointingHandCursor
-
-    def activate(self, target: Target, view: Any) -> None:
-        self.state[self.ch.key] = not self.open
-        view.toggle_group(self, not self.open)
-
-    def text(self) -> str:
-        return self.ch.title.text if self.ch.title is not None else ""
-
-    def live_(self) -> bool:
-        return self.live
-
-    def tick(self, now: float) -> Optional[Tuple[int, int, int, int]]:
-        return (0, 0, 24, self.head_h) if self.live else None
-
-    @property
-    def static(self) -> bool:
-        return not self.live
-
-
-class Chapters(Group):
-    KIND = "chapters"
-    __slots__ = ("ctx", "sid", "state")
-
-    def __init__(self, items: List[Item], ctx: ToolCtx, sid: str, state: Dict[str, bool], key: str) -> None:
-        super().__init__(key, head_h=0, pad_top=2, pad_bottom=2, open_=True)
-        self.shaped = True
-        self.ctx = ctx
-        self.sid = sid
-        self.state = state
-        self.sync(items, ctx)
-
-    def sync(self, items: List[Item], ctx: ToolCtx, live: bool = False) -> List[Block]:
-        self.ctx = ctx
-        chapters = chapters_of(items)
-        n = len(chapters)
-        return reconcile(
-            self,
-            [ch.key for ch in chapters],
-            lambda i: ChapterGroup(chapters[i], ctx, self.sid, i == n - 1, self.state),
-            lambda b, i: b.sync(chapters[i], ctx, i == n - 1) if isinstance(b, ChapterGroup) else [],
-        )
-
-
 # ---------------------------------------------------------------- the work fold
 
 
 class FoldGroup(Group):
-    """One line for a stretch of work; opens to its chapters. Live while the turn runs: the mark
+    """One line for a stretch of work; opens to its steps. Live while the turn runs: the mark
     breathes and the line says what Claude is doing."""
 
     KIND = "fold"
@@ -629,17 +434,17 @@ class FoldGroup(Group):
     MB = 14
     CHILD_INDENT = 14
     HEAD = 30
-    __slots__ = ("_mode", "ctx", "inner", "sid", "state", "summary", "unit")
+    __slots__ = ("_second", "ctx", "inner", "sid", "state", "summary", "unit")
 
     def __init__(self, unit: WorkUnit, ctx: ToolCtx, sid: str, state: Dict[str, bool]) -> None:
         super().__init__(unit.key, head_h=self.HEAD, pad_top=6, pad_bottom=4, open_=False)
         self.unit = unit
         self.ctx = ctx
         self.sid = sid
-        self.state = state  # fold and chapter toggles the person made, per key
+        self.state = state  # the fold toggles the person made, per key
         self.summary = work_summary(unit.work)
-        self.inner: Optional[Group] = None
-        self._mode = ""
+        self.inner: Optional[Flat] = None
+        self._second = -1  # the elapsed second last painted
         self.shaped = False  # the inside is built the first time it is needed (opened, revealed, found)
         self.sync(unit, ctx)
         self.set_open(self.wants_open)
@@ -656,8 +461,8 @@ class FoldGroup(Group):
         unit = getattr(self, "unit", None)  # not there yet while Group.__init__ runs
         if unit is None:
             return 0
-        # a fair guess at the inside until it is built: a row per step, a heading per paragraph
-        return sum(40 if it.kind == "text" else 28 for it in unit.work if it.kind != "thinking") + 8
+        # a fair guess at the inside until it is built: a row per step
+        return sum(28 for it in unit.work if it.kind != "thinking") + 8
 
     @property
     def waiting(self) -> bool:
@@ -686,21 +491,12 @@ class FoldGroup(Group):
                 self.set_reveal(1.0)
             changed.append(self)
             return changed
-        chapters = chapters_of(unit.work)
-        mode = "flat" if (len(chapters) == 1 and chapters[0].title is None) else "chapters"
-        if mode != self._mode or self.inner is None:
-            if self.inner is not None:
-                self.truncate(0)
-            self._mode = mode
-            self.inner = (
-                Flat(unit.work, ctx, self.sid, in_work=True, key=f"{self.key}:flat", live=unit.live)
-                if mode == "flat"
-                else Chapters(unit.work, ctx, self.sid, self.state, f"{self.key}:chapters")
-            )
+        if self.inner is None:
+            self.inner = Flat(unit.work, ctx, self.sid, in_work=True, key=f"{self.key}:flat", live=unit.live)
             self.append(self.inner)
             changed.append(self.inner)
         else:
-            changed.extend(self.inner.sync(unit.work, ctx, unit.live))  # type: ignore[union-attr]
+            changed.extend(self.inner.sync(unit.work, ctx, unit.live))
         want = self.wants_open
         if want != self.open and self.key not in self.state:
             self.open = want
@@ -735,9 +531,9 @@ class FoldGroup(Group):
         live = self.unit.live
         cx = x
         if live:
-            phase = ((st.now) % 1.8) / 1.8
-            alpha = 0.55 + 0.45 * (0.5 - 0.5 * math.cos(phase * 2 * math.pi))
-            draw_mark(p, QRectF(x, y + (self.HEAD - 16) / 2, 16, 16), t, alpha)
+            draw_mark(p, QRectF(x, y + (self.HEAD - 16) / 2, 16, 16), t, theme.breath(st.now, 1.8, 0.55))
+            if st.clip is not None and st.clip.right() < x + 26 and st.clip.bottom() < y + self.HEAD:
+                return  # a frame of the breathing mark alone (``tick``)
             cx += 20 + 6
         f = st.m.font(theme.FS_UI, 500 if live else 400)
         doing = live_label(self.unit.work) if live else None
@@ -784,11 +580,6 @@ class FoldGroup(Group):
         self.state[self.key] = now
         view.toggle_group(self, now)
 
-    def open_now(self) -> None:
-        self.state[self.key] = True
-        self.open = True
-        self.set_reveal(1.0)
-
     def text(self) -> str:
         return self.summary.text
 
@@ -796,7 +587,14 @@ class FoldGroup(Group):
         return bool(self.unit.live)
 
     def tick(self, now: float) -> Optional[Tuple[int, int, int, int]]:
-        return (0, 0, 100000, self.HEAD) if self.unit.live else None
+        """The breathing mark each frame; the whole head when the elapsed figure moves on a second."""
+        if not self.unit.live:
+            return None
+        s = int(self._elapsed() // 1000)
+        if s != self._second:
+            self._second = s
+            return (0, 0, 100000, self.HEAD)
+        return (0, 0, 20, self.HEAD)
 
     @property
     def static(self) -> bool:
@@ -824,6 +622,3 @@ def unit_group_key(unit: Unit) -> str:
     the shape rides in the key."""
     fold = isinstance(unit, WorkUnit) and any(it.kind == "tool" for it in unit.work)
     return unit.key if fold else unit.key + (":flat" if isinstance(unit, WorkUnit) else "")
-
-
-_ = (ItemGroup, rounded)

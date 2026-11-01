@@ -1,6 +1,6 @@
 """Run the benchmarks against the current client and write the numbers.
 
-    python qt/tests/bench/run.py [--heavy 600] [--mixed 2000] [--port 5360] [--only a,b] [--out test/out/bench.json]
+    python qt/tests/bench/run.py [--heavy 600] [--mixed 2000] [--only a,b] [--out test/out/bench.json]
 
 ``--heavy`` is the number of turns in the heavy conversation (prose with code and tables, 300-line
 command outputs, 48-line diffs, thinking, sub-agents, failures); ``--mixed`` the plain one. The
@@ -34,7 +34,6 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--heavy", type=int, default=600)
     ap.add_argument("--mixed", type=int, default=2000)
-    ap.add_argument("--port", type=int, default=5360)
     ap.add_argument("--only", default="")
     ap.add_argument("--out", default=str(ROOT / "test" / "out" / "bench.json"))
     ap.add_argument("--label", default="")
@@ -42,13 +41,14 @@ def main() -> int:
     faulthandler.dump_traceback_later(900, repeat=True, file=sys.stderr)
 
     from bench.scenarios import SCENARIOS, Ctx
-    from harness import Client, start_mock
+    from harness import Client, free_port, start_mock
 
     names = [n for n in args.only.split(",") if n] or list(SCENARIOS)
-    mock = start_mock(args.port, 0)
+    port = free_port()
+    mock = start_mock(port, 0)
     results = {"label": args.label, "heavy_turns": args.heavy, "mixed_turns": args.mixed, "scenarios": {}}
     try:
-        c = Client(args.port)
+        c = Client(port)
         c.wait_until(lambda: c.store.sessions_loaded, 20, "sessions")
         t0 = time.perf_counter()
         gen_h = c.call("mock.generate", {"id": "sess-heavy", "turns": args.heavy, "shape": "heavy"}, timeout=120)

@@ -1,8 +1,10 @@
 """One clock for everything that moves.
 
-A single QTimer: 33 ms while only indicators are live (breathing marks, spinners, rails, elapsed
-counters), 16 ms while a tween runs, stopped when nothing subscribes. Subscribers are weak
-references with a ``tick(now)`` method that returns the rectangle to repaint (or None).
+A single QTimer: 50 ms while only indicators are live (breathing marks, spinners, rails, elapsed
+counters: a breath of 1.2–1.8 s reads the same at 20 frames a second as at 30, for two thirds of the
+repaints), 16 ms while a tween runs, stopped when nothing subscribes. Subscribers are weak
+references with a ``tick(now)`` method: the canvas views (each repaints its live blocks' rects) and
+the indicator widgets of ``widgets/ui/bits.Indicator`` (each repaints itself while shown).
 
 ``Tween`` animates one number on the clock with a QEasingCurve and calls back each frame; it is what
 the reveal of a fold, the easing of the scroll position and the composer's springs run on, so a frame
@@ -19,7 +21,7 @@ from PySide6.QtCore import QEasingCurve, QObject, Qt, QTimer
 
 from ..store import store
 
-SLOW_MS = 33
+SLOW_MS = 50
 FAST_MS = 16
 
 

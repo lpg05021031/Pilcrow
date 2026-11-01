@@ -4,12 +4,11 @@ sessions, so a result can be continued by hand."""
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional
 
 from PySide6.QtCore import QEvent, QRectF, QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QColor, QGuiApplication, QPainter, QRadialGradient
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
@@ -22,18 +21,14 @@ from PySide6.QtWidgets import (
 )
 
 from .. import icons, theme
-from ..lib.fmt import basename, cost, duration, plural, tildify, time_ago
+from ..lib.fmt import basename, cost, duration, now_ms, plural, tildify, time_ago
 from ..store import ConfirmSpec, store
-from .dialogs.parts import Badge, Card, ElideLabel, LayoutButton, Switch, Text, hint, page_column
+from .dialogs.parts import Badge, Card, ElideLabel, LayoutButton, Switch, Text, hint
 from .ui.bits import Box, IconButton, Mark, Pill, Spinner, button
 from .ui.menu import show_menu
 from .ui.signals import bind
 
 Json = Dict[str, Any]
-
-
-def now_ms() -> float:
-    return time.time() * 1000
 
 
 def clock(ms: float) -> str:
@@ -386,7 +381,6 @@ class HelpersCard(Card):
         super().leaveEvent(e)
 
     def copy_md(self) -> None:
-        from PySide6.QtGui import QGuiApplication
 
         def got(md: Any) -> None:
             QGuiApplication.clipboard().setText(str(md or ""))
@@ -556,7 +550,6 @@ class DispatchCard(Card):
         super().leaveEvent(e)
 
     def copy_md(self) -> None:
-        from PySide6.QtGui import QGuiApplication
 
         def got(md: Any) -> None:
             QGuiApplication.clipboard().setText(str(md or ""))
@@ -751,7 +744,6 @@ class EmptyHero(QWidget):
         t = theme.tokens()
         if not t.dark or self.mark is None:
             return
-        from PySide6.QtGui import QRadialGradient
 
         c = self.mark.geometry().center()
         cx, cy = c.x() + 0.5, c.y() + 12.5
@@ -875,7 +867,7 @@ class InboxPage(QWidget):
     def eventFilter(self, obj, e) -> bool:
         if obj is self.scroll.viewport() and e.type() == QEvent.Type.Resize:
             vw = self.scroll.viewport().width()
-            self.body.setFixedWidth(max(320, min(page_column(vw), vw)))
+            self.body.setFixedWidth(max(320, min(theme.column_width(vw), vw)))
             self._place(1 if self.body.width() - 40 <= 760 else 2)
         return False
 

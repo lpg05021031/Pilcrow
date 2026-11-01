@@ -18,11 +18,12 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QEasingCurve, QEvent, QObject, QPoint, QRect, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QColor, QFontMetrics, QPainter, QTextLayout
 from PySide6.QtWidgets import QApplication, QFrame, QLabel, QMainWindow, QSizePolicy, QVBoxLayout, QWidget
 
 from ... import icons, theme
 from ...canvas.clock import Tween
+from ..dialogs.parts import Keys, web_font
 from .bits import Hairline, paint_box
 from .signals import bind
 
@@ -47,6 +48,9 @@ def host_for(w: Optional[QWidget]) -> Optional[QWidget]:
     if isinstance(win, QMainWindow) and win.centralWidget() is not None:
         return win.centralWidget()
     return win
+
+
+_EASE = theme.ease()  # one curve for every row of every menu: it is read, never changed
 
 
 class Popover(QFrame):
@@ -180,8 +184,6 @@ class MenuRow(QWidget):
             self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.kbd: Optional[QWidget] = None
         if it.get("kbd"):
-            from ..dialogs.parts import Keys
-
             self.kbd = Keys(str(it["kbd"]), bare=True, parent=self)
             self._kbd_w = self.kbd.sizeHint().width()
         self.setMinimumHeight(30)
@@ -196,12 +198,10 @@ class MenuRow(QWidget):
         return str(self.it.get("hint") or "")
 
     def _hint_font(self):
-        from ..dialogs.parts import web_font
 
         return web_font(theme.font_mono(11.5) if self.it.get("mono") else theme.font_ui(theme.FS_SMALL))
 
     def _label_font(self):
-        from ..dialogs.parts import web_font
 
         return web_font(theme.font_ui(theme.FS_UI))
 
@@ -214,7 +214,6 @@ class MenuRow(QWidget):
     def _wrap(self, width: int) -> List[str]:
         if not self.hint:
             return []
-        from PySide6.QtGui import QTextLayout
 
         lay = QTextLayout(self.hint, self._hint_font())
         lay.beginLayout()
@@ -248,7 +247,6 @@ class MenuRow(QWidget):
         super().resizeEvent(e)
 
     def sizeHint(self) -> QSize:
-        from PySide6.QtGui import QFontMetrics
 
         fm = QFontMetrics(self._label_font())
         w = (
@@ -268,7 +266,6 @@ class MenuRow(QWidget):
             self.update()
 
     def paintEvent(self, _e) -> None:
-        from PySide6.QtGui import QPainter
 
         t = theme.tokens()
         it = self.it
@@ -412,7 +409,7 @@ class Menu(QWidget):
     def row_reveal(self, order: int) -> float:
         """How far row ``order`` has eased in: each starts ``STAGGER_MS`` after the one above it."""
         elapsed = self.reveal.value * self._span - STAGGER_MS * min(order, 10)
-        return theme.ease().valueForProgress(max(0.0, min(1.0, elapsed / ROW_MS)))
+        return _EASE.valueForProgress(max(0.0, min(1.0, elapsed / ROW_MS)))
 
     def _repaint_rows(self) -> None:
         for r in self.rows:

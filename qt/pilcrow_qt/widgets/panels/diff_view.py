@@ -478,10 +478,6 @@ class DiffGrid(QWidget):
         return self._rows
 
     @property
-    def shown_rows(self) -> List[Row]:
-        return self._rows[: self._limit()]
-
-    @property
     def columns(self) -> int:
         """Code columns: two side by side in split mode, one otherwise."""
         return 2 if self._mode == "split" else 1
@@ -514,10 +510,6 @@ class DiffGrid(QWidget):
             ed = self._extras.get(key)
             if isinstance(ed, CommentEditor):
                 ed.edit.setFocus()
-
-    def row_rect(self, i: int) -> QRect:
-        g = self._geom[i]
-        return QRect(0, g.y, self.width(), g.h)
 
     def row_tint(self, i: int) -> Optional[QColor]:
         """The background a row is painted with (None for plain context), for tests and tooling."""

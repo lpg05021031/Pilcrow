@@ -12,7 +12,6 @@ and the public methods the rest of the client uses (``set_empty``, ``open_find``
 
 from __future__ import annotations
 
-import time
 from collections import OrderedDict
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -23,16 +22,19 @@ from PySide6.QtWidgets import QPushButton, QVBoxLayout, QWidget
 
 from .. import icons, theme
 from ..lib.tools_meta import tool_meta
-from ..lib.transcript_model import Item, TranscriptModel
+from ..lib.transcript_model import Item, NoticeItem, TranscriptModel
 from ..lib.units import Unit, group_turns, live_turn_folds
 from ..store import store
 from ..widgets.transcript.ctx import ToolCtx
+from ..widgets.transcript.permission import PermissionCard
 from ..widgets.ui.bits import paint_box
 from ..widgets.ui.signals import bind
-from .blocks.fold import sync_unit_group, unit_group, unit_group_key
+from .blocks.fold import reconcile, sync_unit_group, unit_group, unit_group_key
 from .blocks.island import IslandBlock
 from .blocks.misc import SkeletonBlock, WorkingBlock
-from .scene import GRADE_EXACT, Block, Group, Scene
+from .find_bar import FindBar
+from .paint import find_ranges
+from .scene import Block, Group, Scene
 from .view import CanvasView
 
 BUSY = ("running", "starting", "requires_action")
@@ -43,7 +45,7 @@ def _boundary(items: List[Item]) -> int:
     """Index just after the last user message (or compaction / divider): items before it are settled."""
     for i in range(len(items) - 1, -1, -1):
         it = items[i]
-        if it.kind == "user" or it.kind == "compact" or (it.kind == "notice" and getattr(it, "tag", None) == "divider"):
+        if it.kind == "user" or it.kind == "compact" or (isinstance(it, NoticeItem) and it.tag == "divider"):
             return i
     return 0
 
@@ -58,7 +60,6 @@ class OrphanIsland(IslandBlock):
         super().__init__(f"orphan:{perm.get('requestId')}", self._make)
 
     def _make(self) -> QWidget:
-        from ..widgets.transcript.permission import PermissionCard
 
         return PermissionCard(self.perm, self.ctx, None, stale=False)
 
@@ -208,8 +209,6 @@ class TranscriptScene(Scene):
             if ui < resync_from:
                 return []
             return sync_unit_group(blk, units[ui], ctx)  # type: ignore[arg-type]
-
-        from .blocks.fold import reconcile
 
         changed.extend(reconcile(self.root, keys, make, update, settled=head_n + resync_from))
         self.shapes_stale = False
@@ -435,8 +434,6 @@ class Transcript(QWidget):
             if not blk.warm or blk.h_width != v.col_w:
                 v._exact(blk)
             if needle and k >= 0 and isinstance(blk, Group) and blk.children:
-                from .paint import find_ranges
-
                 for c in blk.children:
                     if not c.warm or c.h_width != v.col_w:
                         v._exact(c)
@@ -464,7 +461,6 @@ class Transcript(QWidget):
     def _needle_index(self, blk: Block, item_id: str, needle: str, k: int) -> int:
         """The match's index within the block that paints it (a text's k-th match counted across
         its paragraphs becomes the j-th of one paragraph)."""
-        from .paint import find_ranges
 
         g = self.scene.block_for_item(item_id)
         if g is blk or not isinstance(g, Group):
@@ -480,8 +476,6 @@ class Transcript(QWidget):
         store.set_find_open(True)
         self.find_requested.emit()
         if self.find_bar is None:
-            from .find_bar import FindBar
-
             bar = FindBar(self, on_close=self._close_find, parent=self)
             self.find_bar = bar
             self._place_find()
@@ -590,6 +584,3 @@ class Transcript(QWidget):
 
     def keyPressEvent(self, e) -> None:
         self.view.keyPressEvent(e)
-
-
-_ = (GRADE_EXACT, time)

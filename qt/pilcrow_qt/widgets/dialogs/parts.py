@@ -4,10 +4,12 @@ labels that elide. Everything paints from the theme tokens and follows a theme c
 from __future__ import annotations
 
 import math
+import time
 from typing import Dict, List, Optional
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QFontMetricsF, QPainter, QPalette
+from PySide6.QtCore import Qt as _Qt
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QFontMetricsF, QPainter, QPalette, QTextLayout, QTextOption
 from PySide6.QtWidgets import QAbstractButton, QFrame, QHBoxLayout, QLabel, QSizePolicy, QWidget
 
 from ... import theme
@@ -247,13 +249,6 @@ class ElideLabel(QLabel):
         )
 
 
-def page_column(width: int, padding: int = 0) -> int:
-    """``--col`` as the web resolves it inside a pane: clamp(640px, min(61.8%, 100% - 48px), 1080px) of
-    the pane less ``padding`` on each side (the welcome pads 24px; the control room and inbox none)."""
-    inner = width - 2 * padding
-    return max(640, min(int(round(inner * 0.618)), inner - 48, 1080))
-
-
 def half_hairline(surface: str) -> QWidget:
     """A 0.5px CSS hairline (``.ovr + .ovr``, ``.cust-row``): one pixel of the hair at half strength."""
 
@@ -284,21 +279,6 @@ def field_label(text: str) -> QLabel:
     return lb
 
 
-def styled(lb: QLabel, color: str = "", size: float = 0, weight: int = 0, mono: bool = False) -> QLabel:
-    """Give a label an explicit colour (a token name or a literal), size and weight (for the handful of
-    one-off styles)."""
-    if color:
-        theme.tint(lb, fg=color)
-    f = theme.font_mono() if mono else lb.font()
-    if size:
-        f.setPixelSize(max(1, int(size + 0.5)))
-    if weight:
-        f.setWeight(theme._weight(weight))
-    if mono or size or weight:
-        lb.setFont(f)
-    return lb
-
-
 # ---------------------------------------------------------------- the scrim
 # The web dims the page under a sheet and blurs it (``.scrim``: the scrim colour over blur(10px)). On a
 # machine without a GPU a real blur of the whole window is too slow for an opening dialog, so the page
@@ -318,9 +298,6 @@ class Backdrop:
         self.ms = 0.0
         if host is None or _BLUR_OK is False or host.width() < 2 or host.height() < 2:
             return
-        import time
-
-        from PySide6.QtCore import Qt as _Qt
 
         t0 = time.perf_counter()
         try:
@@ -347,11 +324,6 @@ class Backdrop:
         if self.pixmap is not None and not self.pixmap.isNull():
             p.drawPixmap(0, 0, self.pixmap)
         p.fillRect(w.rect(), theme.qcolor(t.scrim))
-
-
-def blur_enabled() -> Optional[bool]:
-    """Whether the blurred backdrop is on (None until the first sheet measured it)."""
-    return _BLUR_OK
 
 
 # ---------------------------------------------------------------- text laid out like the browser
@@ -477,7 +449,6 @@ class Text(QWidget):
         if known is not None:
             self._lines, self._laid_w = known, width
             return known
-        from PySide6.QtGui import QTextLayout, QTextOption
 
         lay = QTextLayout(self._text, self.qfont())
         opt = QTextOption()

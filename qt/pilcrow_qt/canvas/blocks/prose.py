@@ -16,7 +16,7 @@ import re
 import time
 from typing import Any, List, Optional, Tuple
 
-from PySide6.QtCore import QRect, QRectF, Qt, QTimer
+from PySide6.QtCore import QPointF, QRect, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter, QTextCursor, QTextDocument, QTextTable
 
 from ... import markdown, theme
@@ -34,7 +34,7 @@ from ..paint import (
     table_rect,
     well_rects,
 )
-from ..scene import GRADE_EXACT, GRADE_FAST, Block, Group, Target
+from ..scene import GRADE_EXACT, Block, Group, Target
 
 COPY_W, COPY_H = 56, 20  # the Copy at a well's corner: room for "Copied" in micro text, 8px sides
 COPIED_FOR = 1.2  # seconds the corner says "Copied"
@@ -310,7 +310,6 @@ class ProseBlock(Block):
 
 
 def _pt(x: int, y: int):
-    from PySide6.QtCore import QPointF
 
     return QPointF(x, y)
 
@@ -417,6 +416,3 @@ class TextGroup(Group):
     @property
     def static(self) -> bool:
         return not self.item.streaming
-
-
-_ = (GRADE_FAST, Tuple)

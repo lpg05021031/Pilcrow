@@ -17,7 +17,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 if sys.platform == "win32":
     os.environ.setdefault("QT_QPA_FONTDIR", os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"))
 
-from PySide6.QtCore import QCoreApplication, QPoint, Qt  # noqa: E402
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, QPoint, Qt  # noqa: E402
 from PySide6.QtGui import QGuiApplication  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
@@ -262,7 +262,9 @@ def test_accessibility_lists_the_blocks_on_screen(view):
     iface = QAccessible.queryAccessibleInterface(v.viewport())
     assert iface is not None and iface.role() == QAccessible.Role.List
     n = iface.childCount()
-    assert n == len([b for b in v.visible_blocks() if b.h > 0 and (b.text() or hasattr(b, "children"))]) and n >= 3
+    from pilcrow_qt.canvas.a11y import describe
+
+    assert n == len([b for b in v.visible_blocks() if b.h > 0 and describe(b) is not None]) and n >= 3
     names = [iface.child(i).text(QAccessible.Text.Name) for i in range(n)]
     assert names[0] == "Please look at the parser."
     assert any("reads lines" in s for s in names)
@@ -345,8 +347,8 @@ def test_accessibility_forgets_what_is_gone(app):
     v.show()
     pump(30)
     lst = QAccessible.queryAccessibleInterface(v.viewport())
-    items = {lst.child(i)._key: lst.child(i) for i in range(lst.childCount())}  # each group and its paragraph
-    assert len(items) == 6
+    items = {lst.child(i)._key: lst.child(i) for i in range(lst.childCount())}  # each paragraph, not its group
+    assert sorted(items) == ["text:g0:0", "text:g1:0", "text:g2:0"]
     # a dropped block's item goes at the next prune
     v.begin()
     try:
@@ -354,8 +356,8 @@ def test_accessibility_forgets_what_is_gone(app):
     finally:
         v.end()
     lst._prune()
-    assert sorted(lst._items) == ["text:g0", "text:g0:0"]
-    assert not shiboken6.isValid(items["text:g2"]) and shiboken6.isValid(items["text:g0"])
+    assert sorted(lst._items) == ["text:g0:0"]
+    assert not shiboken6.isValid(items["text:g2:0"]) and shiboken6.isValid(items["text:g0:0"])
     # the view's list goes once Qt has let go of it with the viewport
     v.close()
     v.deleteLater()
@@ -382,4 +384,79 @@ def test_dragging_over_words_selects_them(view):
     pump(20)
     text = v.selected_text()
     assert text.startswith("The parser") and len(text) < 40
+    v.clear_selection()
+
+
+class _Damage(QObject):
+    """The area each paint of the viewport covers (the region Qt asks it to repaint)."""
+
+    def __init__(self, vp) -> None:
+        super().__init__()
+        self.areas: List[int] = []
+        vp.installEventFilter(self)
+
+    def eventFilter(self, _obj, e) -> bool:
+        if e.type() == QEvent.Type.Paint:
+            self.areas.append(sum(r.width() * r.height() for r in e.region()))
+        return False
+
+
+def test_hover_repaints_the_targets_and_a_drag_the_rows_it_changed(view):
+    """DESIGN §8.1, §8.3: a hover repaints the old and the new target's rects, not the rows; a
+    selection drag repaints the rows whose selection changed, and the rows outside it still paint
+    from the pixmap cache."""
+    from pilcrow_qt.canvas.blocks.prose import ProseBlock
+    from pilcrow_qt.canvas.blocks.tool import ToolBlock
+    from pilcrow_qt.canvas.blocks.user import UserBlock
+
+    v = view
+    vp = v.viewport()
+    v.clear_selection()
+    pump(30)
+    card = _blocks(v, ToolBlock)[0]
+    cr = v.block_rect(card)
+    dmg = _Damage(vp)
+    # onto the card's head from the words above it, then along it: the head, once
+    QTest.mouseMove(vp, QPoint(cr.left() + 40, cr.top() - 30))
+    pump(20)
+    dmg.areas.clear()
+    QTest.mouseMove(vp, QPoint(cr.left() + 40, cr.top() + 8))
+    pump(20)
+    head = (cr.width() + 16) * card.head_h
+    assert dmg.areas and sum(dmg.areas) <= head, (dmg.areas, head)
+    dmg.areas.clear()
+    QTest.mouseMove(vp, QPoint(cr.left() + 200, cr.top() + 8))  # the same target: nothing to repaint
+    pump(20)
+    assert sum(dmg.areas) == 0, dmg.areas
+    # onto a link in the paragraph: its look does not change under the pointer, so nothing repaints
+    para = _blocks(v, ProseBlock)[0]
+    pr = v.block_rect(para)
+    lx = next(x for x in range(0, pr.width(), 2) if (t := para.hit(x, 10)) is not None and t.kind == "link")
+    dmg.areas.clear()
+    QTest.mouseMove(vp, QPoint(pr.left() + lx + 2, pr.top() + 10))
+    pump(20)
+    assert v.hover is not None and v.hover[1].kind == "link" and sum(dmg.areas) <= head, dmg.areas
+    # a drag inside the paragraph repaints the paragraph and nothing else
+    QTest.mousePress(
+        vp, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(pr.left() + 2, pr.top() + 10)
+    )
+    pump(20)
+    dmg.areas.clear()
+    user = _blocks(v, UserBlock)[0]
+    painted: list = []
+    real = UserBlock.paint
+    UserBlock.paint = lambda self, *a: (painted.append(self.key), real(self, *a))[1]
+    try:
+        for x in (40, 80, 120, 160):
+            QTest.mouseMove(vp, QPoint(pr.left() + x, pr.top() + 10))
+            pump(20)
+        v.viewport().repaint()  # the whole viewport: what is not selected comes from the cache
+    finally:
+        UserBlock.paint = real
+        QTest.mouseRelease(
+            vp, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(pr.left() + 160, pr.top() + 10)
+        )
+    moves = dmg.areas[:-1]
+    assert moves and max(moves) <= vp.width() * para.h, (moves, vp.width() * para.h)
+    assert user.key not in painted, "an unselected row paints from its cached pixmap"
     v.clear_selection()

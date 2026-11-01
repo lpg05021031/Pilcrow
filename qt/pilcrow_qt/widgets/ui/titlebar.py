@@ -19,7 +19,7 @@ from PySide6.QtGui import QMouseEvent
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 from ... import theme
-from ..sidebar import IconBtn
+from .bits import IconButton
 
 HEIGHT = 38
 EDGE = 6  # px from the window edge where a press starts a resize
@@ -39,9 +39,9 @@ class TitleBar(QWidget):
         self.title = QLabel(window.windowTitle() or "Pilcrow")
         self.title.setObjectName("titlebar-title")
         lay.addWidget(self.title, 1)
-        self.min_btn = IconBtn("minus", "Minimise", 14, 26, width=32)
-        self.max_btn = IconBtn("square", "Maximise", 12, 26, width=32)
-        self.close_btn = IconBtn("x", "Close", 15, 26, width=32)
+        self.min_btn = IconButton("minus", "Minimise", 14, "text_3", box=26, width=32, over="chrome")
+        self.max_btn = IconButton("square", "Maximise", 12, "text_3", box=26, width=32, over="chrome")
+        self.close_btn = IconButton("x", "Close", 15, "text_3", box=26, width=32, over="chrome")
         self.min_btn.clicked.connect(window.showMinimized)
         self.max_btn.clicked.connect(self.toggle_max)
         self.close_btn.clicked.connect(window.close)

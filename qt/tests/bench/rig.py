@@ -34,7 +34,7 @@ sys.path.insert(0, str(ROOT / "qt"))
 sys.path.insert(0, str(ROOT / "qt" / "tests"))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QCoreApplication, QEvent, QObject, QPoint, QPointF, Qt  # noqa: E402
+from PySide6.QtCore import QCoreApplication, QEvent, QEventLoop, QObject, QPoint, QPointF, Qt, QTimer  # noqa: E402
 from PySide6.QtGui import QColor, QImage, QWheelEvent  # noqa: E402
 from PySide6.QtTest import QTest  # noqa: E402
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
@@ -357,6 +357,16 @@ def pump(
     out.wall = time.perf_counter() - wall0
     out.cpu = time.process_time() - cpu0
     return out
+
+
+def idle_cpu(seconds: float) -> float:
+    """The process's CPU share, in percent of one core, over ``seconds`` of a real event loop: the
+    client's timers and paints alone (``pump``'s polling would be most of the cost itself)."""
+    loop = QEventLoop()
+    QTimer.singleShot(int(seconds * 1000), loop.quit)
+    cpu0, wall0 = time.process_time(), time.perf_counter()
+    loop.exec()
+    return round((time.process_time() - cpu0) / (time.perf_counter() - wall0) * 100, 1)
 
 
 def settle(ms: int = 300) -> None:

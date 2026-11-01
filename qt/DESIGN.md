@@ -44,7 +44,9 @@ qt/pilcrow_qt/canvas/
   grow.py         the growers: a fence, a list, a table, a paragraph being written grow in place
   nodes.py        the mini-layout (columns, rows, text, icons, boxes) the card bodies are built from
   view.py         CanvasView(QAbstractScrollArea): commit and anchor, prefetch, the paint loop,
-                  hit testing, hover, focus, selection, islands, pixel scrolling, the scroll easing
+                  islands, pixel scrolling, the scroll easing
+  input.py        ViewInput, the view's other half: hit testing, hover, clicks, focus, selection and
+                  copy, the context menu, links
   a11y.py         the viewport as an accessible list of its blocks; the events the view sends
   find_bar.py     Ctrl+F over the whole conversation
   blocks/
@@ -55,7 +57,7 @@ qt/pilcrow_qt/canvas/
     thinking.py   ThinkingBlock (head, peek, body)
     tool.py       ToolBlock (head), AgentChildren, the permission and special islands
     bodies.py     the card bodies per tool, built as node trees; codehtml.py: code and diffs
-    fold.py       FoldGroup (work fold head), Chapters, ChapterGroup, Explore, Steps, Flat
+    fold.py       FoldGroup (work fold head), Explore, Steps, Flat
     misc.py       notices, dividers, results, the working line, SkeletonBlock
     note.py       a helper's note in a lead's conversation
     island.py     IslandBlock (a real QWidget placed by the engine)
@@ -63,7 +65,7 @@ qt/pilcrow_qt/canvas/
 ```
 
 `fenwick.py`, `estimate.py`, `anchor.py`, `scene.py` import nothing from Qt. `paint.py` and the
-blocks paint with QtGui. `view.py` is the QtWidgets file; the panels' lists (the Timeline, a
+blocks paint with QtGui. `view.py` and `input.py` are the QtWidgets files; the panels' lists (the Timeline, a
 dispatch job's rows, the target picker) are scenes of their own blocks on the same view.
 
 ## 2. Data structures
@@ -85,22 +87,24 @@ class Block:
         "key",        # stable identity: item id, unit key, or "<item>:<part>"
         "rev",        # the item rev this block was last synced from
         "sig",        # visual signature: what paint depends on; equal → no repaint
+        "gen",        # moves on when the block is rebuilt with rev and sig unchanged (§6.3)
         "parent",     # the Group that holds it (None for the root)
         "index",      # position in the parent's children (kept in sync by the parent)
         "h",          # current height used for layout
+        "gap",        # the room above it inside its parent (the collapsed margins)
         "grade",      # 0 estimated · 1 fast-measured · 2 exact
         "h_width",    # the width the height was measured for
         "warm",       # documents / static text are materialised
-        "last_seen",  # frame counter of the last paint (for cooling)
         "indent",     # nesting indent in px (agent children)
-        "focusables", # tuple of target ids, in tab order
+        "scene",      # the Scene it is in (None once dropped)
     )
-    def estimate(self, ctx) -> int
-    def fast_measure(self, width, ctx) -> int
-    def measure(self, width, ctx) -> int         # exact; materialises what it needs
+    def estimate(self, width, m) -> int
+    def fast_measure(self, width, m) -> int
+    def measure(self, width, m) -> int           # exact; materialises what it needs
     def cool(self) -> None                        # drop documents, pixmaps; keep h
-    def paint(self, p, rect, st) -> None
-    def hit(self, pt) -> Optional[Target]         # pt in block coordinates
+    def paint(self, p, x, y, w, st) -> None       # top-left at (x, y), w wide, viewport coordinates
+    def hit(self, x, y) -> Optional[Target]       # block coordinates
+    def hover_rect(self, target) -> rect          # what a hover on target changes (§8.1)
     def activate(self, target, view) -> None
     def cursor_for(self, target) -> Qt.CursorShape
     def tooltip_for(self, target) -> str
@@ -108,7 +112,7 @@ class Block:
     def text_pos_at(self, pt) -> Optional[int]    # for selection; None where there is no text
     def selected_text(self, a, b) -> str          # a..b positions, or whole when a is None
     def live(self) -> bool                        # wants clock ticks
-    def tick(self, now) -> Optional[QRect]        # rect to repaint on a tick, or None
+    def tick(self, now) -> Optional[rect]         # rect to repaint on a tick, or None
 ```
 
 `sig` is a tuple the block builds from the item (status, text length, result presence, error flag,
@@ -134,10 +138,11 @@ group clips its content from the bottom, as the web's height transition does. Gr
 always open (an ItemsUnit, a tool body group with no head) have `head_h = 0`, `reveal = 1`.
 
 Kinds of group: `UnitGroup` (one unit of the conversation: a stretch of plain items or a work
-fold), `FoldGroup` (the work fold with its head), `ChapterGroup`, `ExploreGroup`, `StepsGroup`,
+fold), `FoldGroup` (the work fold with its head), `ExploreGroup`, `StepsGroup`,
 `ToolBodyGroup` (a tool card's body, incl. an agent's children as nested blocks), `IslandGroup`.
-Depth is at most four: root → UnitGroup/FoldGroup → ChapterGroup/StepsGroup → ToolBodyGroup →
-(agent children) blocks.
+Depth is at most four: root → UnitGroup/FoldGroup → StepsGroup → ToolBodyGroup → (agent children)
+blocks. A work fold holds steps only: `group_turns` ends a stretch of work at every paragraph Claude
+writes, so a fold never holds a paragraph to make a heading of (`test_lib_units` proves it).
 
 ### 2.4 Scene
 
@@ -260,7 +265,7 @@ A person's scroll and a resize step measure exactly under an 8 ms deadline: what
 exactly, the rest shows as placeholder bars for a frame or two while the drain finishes it. A
 commit from the model (new output, a toggle) has no deadline: what it shows must be right.
 
-Shapes are lazy twice over: a work fold builds its inside (chapters, steps, cards) the first time it
+Shapes are lazy twice over: a work fold builds its inside (steps, cards) the first time it
 is opened, revealed by a search, or scrolled into view while open, and carries a guess (a row per
 step) until then; a finished text splits into its paragraphs the first time it comes near the
 screen, and is one estimate until then. Opening a 600-turn conversation builds its units and
@@ -296,7 +301,7 @@ Heads (verb · target · meta) are `QStaticText`s cached on the block — glyph 
 drawn in one call. Icons are `icons.pixmap` (already cached).
 
 The decorations QTextDocument cannot draw (the inline-code pill, the rule beside a quote, the code
-well, table hairlines, the rail of a chapter, the breathing mark) are painted from the layout's
+well, table hairlines, the rail of a fold, the breathing mark) are painted from the layout's
 geometry by the functions ported from `items.py` (`_pills`, `table_rect`, `_table_rules`,
 `_block_height`). The padding hacks for QTextBrowser (U+202F pads, negative viewport margins) go:
 the pill and the first-line leading are drawn by the painter at the right place.
@@ -351,9 +356,11 @@ the find bar are children of the view, not of the viewport, and stay put.
 
 ### 6.5 Dirty rectangles
 
-A streamed token: `update(block_rect)`. A tick on a spinner: `update(14×14)`. A fold frame:
-`update(fold_top … bottom)`. A hover: `update(old_target_rect ∪ new_target_rect)`. A resize or a
-theme change: `update()`. Qt merges the region.
+A streamed token: `update(block_rect)`. A tick on a breathing mark: `update(20 × line)`, the whole
+line only when its figure (the elapsed seconds) changes. A fold frame: `update(fold_top … bottom)`.
+A hover: `update(old_hover_rect ∪ new_hover_rect)` (§8.1). A selection drag: the rows between the
+old edge and the new (§8.3). A resize or a theme change: `update()`. Qt merges the region, and the
+paint loop skips every block outside it.
 
 ### 6.6 Robustness
 
@@ -403,8 +410,8 @@ Cost per update: O(live turn), typically under 0.5 ms.
 
 ### 7.2 Shapes
 
-The shape of a work fold (chapters, "Explored" runs, steps) uses the pure helpers that exist today
-(`chapters_of`, `group_items`, `is_quiet`, `tally`, `work_summary`). A **cold** UnitGroup does not
+The shape of a work fold ("Explored" runs, steps) uses the pure helpers of `lib/folds.py`
+(`group_items`, `is_quiet`, `work_summary`). A **cold** UnitGroup does not
 compute its shape: its height is the fold head's fixed height when closed, or the sum of its items'
 estimates when open. The shape is computed when the group warms, and marked stale (not recomputed)
 when the view mode changes, so a view-mode switch costs O(warm groups) — about ten milliseconds —
@@ -452,11 +459,17 @@ a plain document painted through a clip, bottom-aligned.
 ### 8.1 Hit testing and hover
 
 `CanvasView.hit(pos)`: root descent to the UnitGroup, recursive descent to the leaf, then the
-block's `hit(local)` returns a `Target(kind, id, rect)` or None. Hover state is `(block key,
-target id)`; on change, the old and new target rects are invalidated, the cursor set from
-`cursor_for`, the tooltip timer armed (`QToolTip.showText` after 600 ms at rest). Chevrons and
-"Open in Files" buttons occupy reserved space and are painted at alpha 0 when not hovered: no
-geometry depends on hover.
+block's `hit(local)` returns a `Target(kind, id, rect)` or None. Hover state is `(block, target)`;
+on change, the old and the new target's `hover_rect` are invalidated (`Block.hover_rect`: the
+target's own rect, widened by the 8px a head's tint reaches past the column; a block that lights up
+more of itself on any hover says so — the user bubble's actions, a result's details, a helper
+card's head — and a target whose look does not change, a link in prose or a thought's words, says
+nothing), the cursor is set from `cursor_for`, the tooltip timer armed (`QToolTip.showText` after
+600 ms at rest). A hovered block paints directly (not from its pixmap) inside that clip. Chevrons
+and "Open in Files" buttons occupy reserved space and are not painted until hovered: no geometry
+depends on hover. Bench `hover_sweep`: 7.6 kpx repainted per pointer move over a heavy conversation
+(8.6 kpx when the whole block was invalidated); `test_canvas_input` pins a head, a link and a move
+inside one target.
 
 ### 8.2 Activation and focus
 
@@ -470,7 +483,11 @@ copies. Focus survives scrolling (it is a key, not a widget).
 
 `Selection(anchor=(path, pos), focus=(path, pos))`. On press the view records the text position
 under the pointer (`text_pos_at`, on the block under the pointer whether or not it named a target);
-on drag it updates the focus and invalidates the blocks whose selection changed. Positions come
+on drag it updates the focus and invalidates the rows between the old focus and the new, both
+included (the anchor's row too when the focus crossed it, since it lies between): a drag inside one
+paragraph repaints that paragraph, and every row outside the selection keeps painting from its
+pixmap. Bench `select_drag`: 24 kpx per pointer move and a p95 turn of 1.1 ms over a heavy
+conversation (203 kpx and 4.4 ms when every move repainted the viewport). Positions come
 from `paint.doc_pos_at`: a fuzzy hit test with a check that the answer lies on a line holding the
 point, since the leading above a line of fixed height is otherwise answered with the end of the
 document. `PaintState.selection_for(block)` gives `(a, b)`, `FULL` or `None`; text blocks
@@ -482,11 +499,11 @@ all, Copy link / path.
 
 ### 8.4 Groups opening and closing
 
-`view.toggle(group)`: `group.open = not open`; if `reduced_motion`, `reveal` jumps; otherwise a
-`QVariantAnimation` on `reveal` (spring curves from `theme.py`, 240–420 ms by content height, the
+`view.toggle_group(group)`: `group.open = not open`; if `reduced_motion`, `reveal` jumps; otherwise
+a `clock.Tween` on `reveal` (spring curves from `theme.py`, 240–420 ms by content height, the
 `ease_exit` curve when closing) whose each frame is a mutation: one Fenwick update on each level up
 to the root, anchor correction, `update(from group's y)`. The chevron angle is `90° × reveal`.
-Fold state is stored per key in the Scene (replacing `turn_open` / `chapter_open`).
+Fold state is stored per key in the Scene (replacing `turn_open`).
 
 ### 8.5 Find
 
@@ -543,18 +560,30 @@ Scene syncs when shown (O(live turn)). Switching costs one paint.
 `store._load_session` pushes the snapshot into the model in slices of 300 messages per event-loop
 turn (a zero timer chain), under the loading skeleton; the Scene is built when the model is complete
 (blocks are small: ~16,000 in a few hundred milliseconds, spread over slices as well). The first
-paint needs only the last screen's blocks exact. `orjson` parses the messages when it is installed
-(it is optional, not in requirements.txt); the standard library does otherwise.
+paint needs only the last screen's blocks exact. The snapshot arrives as one WebSocket message and is
+parsed on the GUI thread: `orjson` (in requirements.txt) when it is installed, the standard library
+otherwise. Parsing on another thread would buy nothing in CPython: both parsers hold the GIL for the
+whole parse, so the GUI thread would wait the same time for the lock. The parse is therefore the
+floor of the longest turn while opening: with the standard library, 5.6 ms for the 1.1 MB snapshot
+of 120 heavy turns and 38 ms for the 5.7 MB one of 600; the longest turns measured (bench
+`open_cold`) are 43 ms / 26 ms at 120 heavy / 200 mixed turns and 60 ms / 69 ms at 600 / 2,000.
 
 ## 9. The clock
 
-`clock.py`: one `QTimer` for every animation in the process, 33 ms while only indicators are live
-(breathing marks, spinners, rails, elapsed counters), 16 ms while an animation runs (a fold's
+`clock.py`: one `QTimer` for every animation in the process, 50 ms while only indicators are live
+(breathing marks, spinners, rails, elapsed counters: a 1.2–1.8 s breath reads the same at 20 frames
+a second, for two thirds of the repaints of 30), 16 ms while an animation runs (a fold's
 reveal, the scroll easing, the composer's springs, a menu's rows unfolding, the window's handles
 and tab underline), stopped when nothing subscribes. The other `QTimer`s in the widgets are not
-animations: debounces, toasts that expire, polling, a deferred layout. Subscribers are weak references with a `tick(now)` that returns the rect to
-repaint. The canvas subscribes once and fans out to its live blocks on screen; off-screen live blocks
-do not tick. An elapsed counter repaints its meta rectangle; its width is reserved for "99m 59s".
+animations: debounces, toasts that expire, polling, a deferred layout, the terminal's cursor blink.
+Subscribers are weak references with a `tick(now)`. The canvas subscribes once and fans out to its
+live blocks on screen; off-screen live blocks do not tick; a live block's tick returns the rect to
+repaint (its breathing mark, the whole line when its elapsed figure changes). The widgets that move
+are `ui/bits.Indicator`s (the working mark, the status glyph and dot, spinners, the sidebar's row
+glyph, the to-do box, the dispatch bar): one subscribes on show while it is live and leaves on hide,
+and a tick is its `update()`. The card frame and the shell skip a repaint that falls inside the
+sheet, where they draw nothing. Bench `idle`, a finished conversation that looks busy: 5.2 % of a
+core on separate timers at 33–60 ms → 2.6–3.2 % on the clock (quiet: 0.0–0.6 %).
 
 ## 10. The side panel and the sidebar
 
@@ -579,10 +608,13 @@ diffs by path and updates cards in place.
 
 ### 10.3 Panel disclosure
 
-`Collapse` is reimplemented on the clock: it measures its body at the real width before animating
-(so the target height is right), animates a clip height instead of `maximumHeight` where the body is
-a painted widget, and falls back to the current behaviour for widget bodies in the dialogs where
-trees are tiny.
+`Collapse` (the panels' and the dialogs' widget disclosures) runs on the clock and measures its body
+at the real width before animating, so the reveal lands where the content ends. It animates its own
+`maximumHeight`: each frame relays the body at the clipped height and moves what follows it, so a
+frame costs a layout pass of the panel. The bench's `tasks_fold_toggle` (the Tasks tab's workflow
+card, opened and closed three times) measures it: 77 layout requests and 1,570 paints per toggle,
+the longest turn 8 ms — under a frame, which is why it stays. The conversation's folds do not work
+this way: they are one number in a Fenwick tree and paint through a clip (§8.4).
 
 The Changes tab's file cards are built for 4 ms a turn of the event loop (`DiffView.BUDGET_MS`),
 the first ones on the page before the rest exist, and the list is pinned to the height of its cards
@@ -644,7 +676,7 @@ Back-of-envelope from before the work; the measurements are in `PERF.md` §5 and
 Phases 1 and 2 have landed (2.10.0): `canvas/` with Fenwick, Scene, anchor, estimate, clock, paint,
 nodes, the prose / user / thinking / notice / result / working blocks, streaming append, the pixmap
 cache, pixel scrolling, follow and "Latest", the remembered place, islands for the empty card; the
-work folds (`FoldGroup`, `ChapterGroup`, `Explore`, `Steps`, `Flat`), `ToolBlock` with every body
+work folds (`FoldGroup`, `Explore`, `Steps`, `Flat`), `ToolBlock` with every body
 painter (Bash, Read, Edit/Write diff, Notebook, Grep/Glob, Todo, Task, Agent with nested children,
 Web, Workflow, generic/MCP, errors with fixes), the permission / question / plan islands, orphans.
 `canvas.transcript.Transcript` replaced `widgets.transcript.view.Transcript` behind the same public
@@ -698,7 +730,11 @@ popovers, toasts, the find bar, the Latest pill and the sheets' frames (`ui/bits
 (delivered to every widget through a class palette, since a stylesheet stops a window handing its
 palette down), the tints, a polish of the native fields, combos and scrollbars whose rules read the
 palette (`theme.repolish`, a few microseconds each), and `changed` for the painters — 124–146 ms on
-the 600-turn conversation with the Changes panel open, 30 ms in the small test window.
+the 600-turn conversation with the Changes panel open, 30 ms in the small test window. No
+per-widget stylesheet names a colour either: labels are tinted, badges, key caps, the segmented
+control and a sheet's fields paint their boxes (`settings_ui.paint_field`), text buttons and chips
+are `Btn`s with a look of their own (`Btn.set_look`); `test_theme` reads every `setStyleSheet` in the
+package and the names it is built from for a literal colour or an interpolated token.
 
 ## 14. Tests
 

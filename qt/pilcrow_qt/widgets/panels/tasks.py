@@ -8,7 +8,6 @@ friends); each widget's docstring names its rule."""
 from __future__ import annotations
 
 import html
-import math
 import re
 import time
 from datetime import datetime
@@ -23,7 +22,7 @@ from ...canvas.pixels import hline, vline
 from ...lib.fmt import duration, plural, short_model, time_ago, tokens
 from ...lib.workflow import WorkflowCounts, agent_state, parse_workflow_meta, workflow_columns, workflow_counts
 from ...store import store
-from ..ui.bits import Clickable, Pill, Spinner
+from ..ui.bits import Clickable, Indicator, Pill, Spinner
 from ..ui.collapse import Collapse
 from ..ui.signals import bind
 from .right_panel import Btn, Card, EmptyState, Refresher, Section, elide, lbl
@@ -152,7 +151,7 @@ class Bar(QWidget):
             x += w
 
 
-class TodoBox(QWidget):
+class TodoBox(Indicator):
     """The 15px circle before a to-do (``.todo-box``): a hairline ring, a breathing dot while in
     progress, a tick on a filled disc when done."""
 
@@ -160,20 +159,7 @@ class TodoBox(QWidget):
         super().__init__(parent)
         self.status = status
         self.setFixedSize(15, 15)
-        self._t0 = time.monotonic()
-        self._timer = QTimer(self)
-        self._timer.setInterval(50)
-        self._timer.timeout.connect(self.update)
-        bind(theme.theme.changed, self, lambda _t: self.update())
-
-    def showEvent(self, e) -> None:
-        if self.status == "in_progress" and not store.reduced_motion:
-            self._timer.start()
-        super().showEvent(e)
-
-    def hideEvent(self, e) -> None:
-        self._timer.stop()
-        super().hideEvent(e)
+        self.set_live(status == "in_progress")
 
     def paintEvent(self, _e) -> None:
         t = theme.tokens()
@@ -190,29 +176,10 @@ class TodoBox(QWidget):
         if self.status == "in_progress":
             p.setPen(Qt.PenStyle.NoPen)
             dot = QColor(t.text)
-            if self._timer.isActive():  # @keyframes breathe: 1.4s ease-in-out between 0.45 and 1
-                phase = (time.monotonic() - self._t0) % 1.4 / 1.4
-                dot.setAlphaF(0.45 + 0.55 * (0.5 + 0.5 * math.cos(phase * 2 * math.pi)))
+            if self.moving:  # @keyframes breathe: 1.4s ease-in-out between 0.45 and 1
+                dot.setAlphaF(theme.breath(time.monotonic(), 1.4, 0.45))
             p.setBrush(dot)
             p.drawEllipse(QPointF(7.5, 7.5), 2.5, 2.5)
-
-
-class TintSpinner(Spinner):
-    """The shared spinner in a token's colour (``.wf-mark.running`` is the accent)."""
-
-    def __init__(self, size: int = 12, tone: str = "text_3", parent: Optional[QWidget] = None) -> None:
-        super().__init__(size, parent)
-        self._tone = tone
-
-    def paintEvent(self, _e) -> None:
-        t = theme.tokens()
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor(getattr(t, self._tone)), 1.6)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        p.setPen(pen)
-        ang = int(((time.monotonic() - self._t0) % 1.0) * 360)
-        p.drawArc(QRectF(1.5, 1.5, self._size - 3, self._size - 3), -ang * 16, 270 * 16)
 
 
 class StateMark(QWidget):
@@ -227,7 +194,7 @@ class StateMark(QWidget):
         if st == "running":
             lay = QHBoxLayout(self)
             lay.setContentsMargins(1, 2, 1, 2)
-            lay.addWidget(TintSpinner(12, "accent_text"))
+            lay.addWidget(Spinner(12, "accent_text"))
         bind(theme.theme.changed, self, lambda _t: self.update())
 
     def paintEvent(self, _e) -> None:

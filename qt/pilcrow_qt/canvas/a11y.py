@@ -1,9 +1,12 @@
 """Accessibility for the canvas: the viewport reads as a list, the blocks on screen as its items.
 
 Qt asks the factory for an interface when a screen reader (or a test) queries the viewport; the
-list interface walks the view's visible blocks and hands out one item interface per block: its name
-a one-line summary (the fold line, the card's head, a paragraph's first line), its value the whole
-text, its rect on screen, and a Press action where the block has a head that opens and closes it.
+list interface walks the view's visible blocks and hands out one item interface per block that has
+something to say (:func:`describe`): a group with a head (a work fold, a card, a thought) is a
+Button named by its head line, with a Press action that opens and closes it; a row of words (a
+paragraph, a message, a notice) is a ListItem named by its first line, its value the whole text; a
+group with no head of its own is only its rows, and a block with no words is left out, so nothing
+is read twice and no internal key is ever a name.
 The view tells assistive technology what changed through :func:`announce` (the focus ring moved, a
 fold opened) and :func:`blocks_changed` (rows arrived); both cost one ``isActive()`` call when
 nothing is listening. Nothing here is built unless something asks.
@@ -11,7 +14,7 @@ nothing is listening. Nothing here is built unless something asks.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import shiboken6
 from PySide6.QtCore import QObject, QPoint, QRect
@@ -24,6 +27,8 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QAccessibleWidget, QWidget
 
+from .scene import Group
+
 NAME_MAX = 120  # a name is what a screen reader says on arrival; the rest is the value
 
 _installed = False
@@ -33,6 +38,18 @@ _lists: Dict[int, CanvasListAccessible] = {}  # by id(viewport): the interfaces 
 def _summary(text: str) -> str:
     line = next((s.strip() for s in text.splitlines() if s.strip()), "")
     return line if len(line) <= NAME_MAX else line[: NAME_MAX - 1].rstrip() + "…"
+
+
+def describe(b: Any) -> Optional[Tuple[QAccessible.Role, str]]:
+    """The role and the name a block is read with, or None when it is not read at all (a group with
+    no head: its rows are; a block with no words)."""
+    if isinstance(b, Group):
+        if b.head_h <= 0:
+            return None
+        name = _summary(b.head_text())
+        return (QAccessible.Role.Button, name) if name else None
+    name = _summary(b.text())
+    return (QAccessible.Role.ListItem, name) if name else None
 
 
 def _forget(iface: QAccessibleInterface) -> None:
@@ -88,10 +105,12 @@ class BlockAccessible(QAccessibleInterface, QAccessibleActionInterface):
         b = self._block()
         if b is None:
             return ""
+        d = describe(b)
         if t == QAccessible.Text.Name:
-            return _summary(b.text()) or b.key
+            return d[1] if d is not None else ""
         if t == QAccessible.Text.Value:
-            return b.text()
+            # a group's content is read by its own rows; a row's value is all its words
+            return (d[1] if d is not None else "") if isinstance(b, Group) else b.text()
         return ""
 
     def setText(self, _t: QAccessible.Text, _text: str) -> None:
@@ -106,10 +125,8 @@ class BlockAccessible(QAccessibleInterface, QAccessibleActionInterface):
         return QRect(view.viewport().mapToGlobal(r.topLeft()), r.size())
 
     def role(self) -> QAccessible.Role:
-        b = self._block()
-        if b is not None and hasattr(b, "children") and b.children:
-            return QAccessible.Role.Button  # a fold or a card: its head opens and closes it
-        return QAccessible.Role.ListItem
+        d = describe(self._block())
+        return d[0] if d is not None else QAccessible.Role.ListItem
 
     def state(self) -> QAccessible.State:
         s = QAccessible.State()
@@ -119,7 +136,7 @@ class BlockAccessible(QAccessibleInterface, QAccessibleActionInterface):
         if view is not None and view.focus is not None and view.focus[0] == self._key:
             s.focused = True
         b = self._block()
-        if b is not None and hasattr(b, "children") and b.children:
+        if isinstance(b, Group) and b.head_h > 0:
             s.expandable = True
             s.expanded = bool(b.open)
             s.collapsed = not b.open
@@ -169,7 +186,7 @@ class CanvasListAccessible(QAccessibleWidget):
         view = self.view
         if view is None:
             return []
-        return [b.key for b in view.visible_blocks() if b.h > 0 and (b.text() or hasattr(b, "children"))]
+        return [b.key for b in view.visible_blocks() if b.h > 0 and describe(b) is not None]
 
     def _item(self, key: str) -> BlockAccessible:
         it = self._items.get(key)
@@ -206,7 +223,7 @@ class CanvasListAccessible(QAccessibleWidget):
             return None
         local = self._viewport.mapFromGlobal(QPoint(x, y))
         found = view.scene.leaf_at(view.scene_y(local.y()))
-        return self._item(found[0].key) if found is not None else None
+        return self._item(found[0].key) if found is not None and describe(found[0]) is not None else None
 
     def text(self, t: QAccessible.Text) -> str:
         if t == QAccessible.Text.Name:

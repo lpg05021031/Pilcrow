@@ -7,8 +7,6 @@ import time
 import pytest
 from harness import app_client, mock_server
 
-MOCK_PORT = 5361
-
 
 @pytest.fixture(autouse=True)
 def _settled_socket():

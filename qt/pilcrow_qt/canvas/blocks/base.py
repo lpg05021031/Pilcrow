@@ -2,16 +2,15 @@
 
 from __future__ import annotations
 
-import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from PySide6.QtCore import QRect, QRectF, Qt
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtCore import QRect, Qt
+from PySide6.QtGui import QColor, QFont, QPainter
 
 from ... import theme
 from ..nodes import Node
 from ..paint import Measurer, PaintState, rounded
-from ..scene import GRADE_EXACT, Block, Target
+from ..scene import Block, Target
 
 Handler = Callable[[Target, Any], None]
 
@@ -139,14 +138,44 @@ def chevron(
     p.setOpacity(1.0)
 
 
-def elapsed_text(ms: float) -> str:
-    from ...lib.fmt import duration
-
-    return duration(ms)
-
-
-def now_ms() -> float:
-    return time.time() * 1000
+#: what a head shows at its right, in reading order: (kind, text, colour). Kinds: ``badge`` (a
+#: tinted pill; the colour is ``err``, ``info`` or empty), ``mono`` (a diffstat figure), ``strong``
+#: (a word in 600, "Failed"), anything else a micro figure (a duration, a count)
+MetaPart = Tuple[str, str, Any]
 
 
-_ = (QRectF, GRADE_EXACT)
+def _meta_font(kind: str, st: PaintState) -> QFont:
+    if kind == "badge":
+        return st.m.font(11, 600)
+    if kind == "mono":
+        return st.m.font(11.5, 400, True)
+    return st.m.font(theme.FS_MICRO, 600 if kind == "strong" else 400)
+
+
+def meta_width(st: PaintState, parts: List[MetaPart]) -> int:
+    """The room the figures at the right of a head take (``paint_meta``)."""
+    w = 0
+    for kind, text, _tone in parts:
+        tw = int(st.m.text_w(text, _meta_font(kind, st)))
+        w += tw + (14 + 8 if kind == "badge" else 5 if kind == "mono" else 8)
+    return w
+
+
+def paint_meta(p: QPainter, right: int, y: int, head_h: int, st: PaintState, parts: List[MetaPart]) -> None:
+    """The figures at the right of a head, right-aligned at ``right`` and centred on its line."""
+    t = st.t
+    x = right
+    for kind, text, tone in reversed(parts):
+        f = _meta_font(kind, st)
+        ty = y + (head_h - st.m.line_h(f)) / 2
+        if kind == "badge":
+            bw = int(st.m.text_w(text, f)) + 14
+            x -= bw
+            fg, bg = {"err": (t.err, t.err_wash), "info": (t.info, t.info_wash)}.get(tone, (t.text_2, t.fill_2))
+            rounded(p, QRect(x, y + (head_h - 19) // 2, bw, 19), theme.blend(bg, t.canvas), None, 9)
+            st.m.draw_text(p, x + 7, ty, text, f, QColor(fg))
+            x -= 8
+            continue
+        x -= st.m.text_w(text, f)
+        st.m.draw_text(p, x, ty, text, f, QColor(tone))
+        x -= 5 if kind == "mono" else 8

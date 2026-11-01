@@ -6,8 +6,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional
 
-from PySide6.QtCore import QRect, QRectF, Qt, QTimer
-from PySide6.QtGui import QClipboard, QGuiApplication, QPainter
+from PySide6.QtCore import QRect, QRectF, Qt, QTimer, QUrl
+from PySide6.QtGui import QClipboard, QDesktopServices, QGuiApplication, QPainter
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from ... import theme
@@ -18,7 +18,7 @@ from ...canvas.paint import Measurer, PaintState, rounded
 from ...canvas.scene import Block, Scene, Target
 from ...canvas.view import CanvasView
 from ...lib.fmt import cost as fmt_cost
-from ...lib.fmt import plural
+from ...lib.fmt import now_ms, plural
 from ...store import ConfirmSpec, store
 from ..dialogs.parts import Text
 from ..dialogs.settings_ui import text_area
@@ -36,7 +36,6 @@ from .common import (
     elapsed_text,
     group_requests,
     job_cost_text,
-    now_ms,
     paint_glyph,
 )
 
@@ -195,7 +194,7 @@ class RunBlock(NodeBlock):
             QRectF(r.x() + 2, r.y() + 2, 14, 14),
             state,
             st.t,
-            self.list.breath0 if self.live() else None,
+            self.live(),
         )
 
     def paint(self, p: QPainter, x: int, y: int, w: int, st: PaintState) -> None:
@@ -214,9 +213,6 @@ class RunBlock(NodeBlock):
 
     def activate(self, target: Target, view: Any) -> None:
         if target.kind == "link" and target.id == "pr":
-            from PySide6.QtCore import QUrl
-            from PySide6.QtGui import QDesktopServices
-
             QDesktopServices.openUrl(QUrl(str(self.run.get("pr") or "")))
             return
         super().activate(target, view)
@@ -284,7 +280,6 @@ class RunList(CanvasView):
         self.gutter = 8
         self.pad_top, self.pad_bottom = 4, 12
         self.follow.following = False
-        self.breath0 = now_ms() / 1000
         self.head = HeadBlock()
         self.setAccessibleName("Runs")
 
@@ -838,6 +833,3 @@ class JobView(QWidget):
                 ),
             )
         )
-
-
-_ = (Callable, Optional)

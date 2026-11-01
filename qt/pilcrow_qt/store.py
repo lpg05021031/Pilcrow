@@ -9,6 +9,7 @@ frame per session, coalesced).
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
@@ -282,7 +283,6 @@ class Store(QObject):
 
     def _humanize(self, text: str, level: str, action: Optional[Dict[str, Any]]) -> tuple:
         """Known failure texts said in plain words, with the way out attached."""
-        import re
 
         if level != "error":
             return text, action

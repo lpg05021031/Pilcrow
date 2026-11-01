@@ -654,25 +654,6 @@ class ImageView(QScrollArea):
             )
 
 
-class SegButtons(Row):
-    """A small segmented control of icon buttons (the ``Seg`` in ui/bits.tsx)."""
-
-    changed = Signal(str)
-
-    def __init__(self, options: List[Dict[str, str]], parent: Optional[QWidget] = None) -> None:
-        super().__init__(0, (0, 0, 2, 0), parent)
-        self._btns: Dict[str, IconButton] = {}
-        for o in options:
-            b = IconButton(o["icon"], o["title"], 13)
-            b.clicked.connect(lambda _c=False, v=o["value"]: self.changed.emit(v))
-            self._btns[o["value"]] = b
-            self.add(b)
-
-    def set_value(self, v: str) -> None:
-        for k, b in self._btns.items():
-            b.set_active(k == v)
-
-
 # ---------------------------------------------------------------- the panel
 
 

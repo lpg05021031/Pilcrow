@@ -422,7 +422,6 @@ def test_ask_body_answers_through_respond(app, respond):
     }
     _isl, body_w = special(item, perm)
     assert isinstance(body_w, AskBody) and body_w.live
-    labels = [lb.text() for lb in body_w.findChildren(type(body_w.findChildren(QWidget)[0]))] if False else None
     assert "Claude has 2 questions" in [lb.text() for lb in _labels(body_w)]
     assert not body_w.send_btn.isEnabled()
     body_w.rows[0][0].toggled.emit()  # React
@@ -446,7 +445,6 @@ def test_ask_body_answers_through_respond(app, respond):
             },
         )
     ]
-    _ = labels
 
 
 def _labels(w: QWidget) -> List[QWidget]:
