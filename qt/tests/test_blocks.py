@@ -401,6 +401,28 @@ def test_a_node_body_lays_out_from_its_own_edge(app):
     assert nb.root.x == 4 and nb.root.w == 596
 
 
+def test_a_markdown_body_finds_its_links_once_and_keeps_their_ids_through_a_reflow(app, monkeypatch):
+    """A screen reader asks a row for its targets once per child: a Markdown body reads its links
+    from the document once per layout, and a link keeps its id when a reflow moves the body, so the
+    focus stays on it."""
+    from pilcrow_qt.canvas import nodes as nd
+    from pilcrow_qt.canvas.blocks.base import NodeBlock
+
+    calls = []
+    doc_links = nd.doc_links
+    monkeypatch.setattr(nd, "doc_links", lambda doc: calls.append(1) or doc_links(doc))
+    note = "The prompt the fetch was given, long enough to wrap onto another line when the body narrows. "
+    nb = NodeBlock(
+        "nb", lambda m: nd.vstack(nd.note(note * 2), nd.Markdown("See [a](https://a.b) and [c](https://c.d)."))
+    )
+    nb.measure(742, measurer())
+    first = nb.targets()
+    assert [t.name for t in first] == ["a", "c"] and nb.targets() == first and len(calls) == 1
+    nb.measure(400, measurer())  # the note wraps once more: the body moves down
+    moved = nb.targets()
+    assert moved == first and moved[0].rect[1] > first[0].rect[1] and len(calls) == 2
+
+
 def test_number_gutters_fit_their_widest_number(app):
     from pilcrow_qt.canvas.blocks.codehtml import code_html, gutter_width
 

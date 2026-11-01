@@ -393,7 +393,7 @@ class Text(Node):
 class Markdown(Node):
     """A Markdown text as a document with its decorations (code wells, pills, quotes, tables)."""
 
-    __slots__ = ("src", "compact", "quiet", "cwd", "streaming", "line_h", "_doc", "color", "_nat")
+    __slots__ = ("src", "compact", "quiet", "cwd", "streaming", "line_h", "_doc", "color", "_nat", "_links")
 
     def __init__(
         self,
@@ -417,6 +417,7 @@ class Markdown(Node):
         self.color = color
         self._doc: Optional[QTextDocument] = None
         self._nat = -1  # the natural width, once asked
+        self._links: Optional[List[Target]] = None  # its links where it was last laid out
 
     @property
     def doc(self) -> Optional[QTextDocument]:
@@ -430,6 +431,7 @@ class Markdown(Node):
 
     def layout(self, x: int, y: int, w: int, m: Measurer) -> int:
         self.x, self.y, self.w = x, y, w
+        self._links = None
         if not self.src:
             self.h = 0
             return 0
@@ -450,17 +452,22 @@ class Markdown(Node):
         draw_doc(p, self._doc, ox + self.x, oy + self.y, clip, color, sels or None)
 
     def targets(self) -> Iterator[Target]:
-        """Its links, each with (href, cwd) for ``NodeBlock.activate`` to open."""
+        """Its links, each with (href, cwd) for ``NodeBlock.activate`` to open. A link's id is this
+        node and the link's place in its text, so a reflow that moves the node keeps it."""
         if self._doc is None:
             return
-        for at, href, words, (x, y, w, h) in doc_links(self._doc):
-            yield Target("link", f"{self.x},{self.y}:{at}", (self.x + x, self.y + y, w, h), (href, self.cwd), words)
+        if self._links is None:  # a screen reader asks once per child: the document is read once
+            self._links = [
+                Target("link", f"{id(self)}:{at}", (self.x + x, self.y + y, w, h), (href, self.cwd), words)
+                for at, href, words, (x, y, w, h) in doc_links(self._doc)
+            ]
+        yield from self._links
 
     def text(self) -> str:
         return self.src
 
     def cool(self) -> None:
-        self._doc = None
+        self._doc = self._links = None
         self._nat = -1
 
 
