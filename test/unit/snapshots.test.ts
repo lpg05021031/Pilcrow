@@ -115,7 +115,7 @@ describe('forgetting a session', () => {
   const blob = (text: string) => execFileSync('git', ['hash-object', '--stdin'], { input: text, encoding: 'utf8' }).trim();
   const has = (sha: string) => git('cat-file', '--batch-check', '--batch-all-objects').includes(sha);
 
-  it('takes its steps, its ref and the objects only it reached; the last session takes the shadow repository', async () => {
+  it('takes its steps, its ref and the objects only it reached; the last session leaves the shadow repository empty', async () => {
     edit('only this session\n');
     await tool();
     const other = { id: 'other', cwd: session.cwd };
@@ -135,7 +135,9 @@ describe('forgetting a session', () => {
     expect(has(blob('the other session\n'))).toBe(true);
 
     await snapshots.forget(session.cwd, 'other');
-    expect(fs.existsSync(shadowOf(session.cwd))).toBe(false);
+    expect(git('for-each-ref', '--format=%(refname)')).toBe('');
+    expect(git('count-objects', '-v')).toMatch(/^count: 0$/m);
+    expect(fs.readdirSync(shadowOf(session.cwd)).filter((f) => f.startsWith('steps-'))).toEqual([]);
     edit('again\n');
     expect(await snapshots.record(other, { kind: 'start', label: 'Session started' })).toMatchObject({ n: 1 });
   });

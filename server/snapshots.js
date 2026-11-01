@@ -344,19 +344,16 @@ export async function folderSteps(cwd) {
  * Drop a session's timeline when the session is removed: its steps, its ref, and the objects only it
  * reached. The shadow repository never packs on its own (gc.auto = 0, so no packing in the middle of a
  * turn); this is when it is packed and pruned, in the folder's queue, where every git process that
- * writes it runs. The last session of a folder takes the whole shadow repository with it.
+ * writes it runs. The shadow repository itself stays, a few files once it is empty: removing tens of
+ * thousands of loose objects from the event loop stalls it for up to a second, and the folder is
+ * likely to be used again.
  */
 export function forget(cwd, sid) {
   cache.delete(sid);
   const dir = cwd && dirOf(cwd);
   if (!dir || !fs.existsSync(path.join(dir, 'HEAD'))) return Promise.resolve();
   return serial(cwd, async () => {
-    fs.rmSync(stepsFile(cwd, sid), { force: true });
-    if (!fs.readdirSync(dir).some((f) => f.startsWith('steps-'))) {
-      ready.delete(cwd);
-      fs.rmSync(dir, { recursive: true, force: true });
-      return;
-    }
+    await fs.promises.rm(stepsFile(cwd, sid), { force: true });
     // Run from the shadow repository: the folder itself may be gone (a removed worktree).
     await sg(cwd, ['update-ref', '-d', `refs/sessions/${sid}`], { cwd: dir });
     await sg(cwd, ['gc', '--quiet', '--prune=now'], { cwd: dir });
