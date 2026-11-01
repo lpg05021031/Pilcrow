@@ -313,7 +313,7 @@ if (-not $SkipSignatureCheck) {
     $sig = Get-AuthenticodeSignature -FilePath $dll
     $subject = ''
     if ($sig.SignerCertificate) { $subject = $sig.SignerCertificate.Subject }
-    if ($sig.Status -ne 'Valid' -or $subject -notmatch 'O=Microsoft Corporation') {
+    if ($sig.Status -ne 'Valid' -or $subject -notmatch '(^|, )O=Microsoft Corporation(,|$)') {
       Fail ("WebView2 DLL 的數位簽章不是有效的 Microsoft 簽章：`n$dll`n狀態：$($sig.Status)，簽署者：$subject`n`n" +
             "這通常代表檔案被改過或下載不完整；請刪除 $SdkDir 重新取得。確認來源沒問題但離線驗章失敗時，可加 -SkipSignatureCheck。")
     }
@@ -742,6 +742,9 @@ namespace Pilcrow
             try
             {
                 CoreWebView2EnvironmentOptions envOpts = new CoreWebView2EnvironmentOptions();
+                // The window only ever shows the local server (OnNavigating sends everything else to the system
+                // browser, which has its own SmartScreen); with the feature on, WebView2 would send each local URL
+                // to Microsoft's reputation service.
                 envOpts.AdditionalBrowserArguments = "--disable-features=msSmartScreenProtection";
                 string rt = string.IsNullOrEmpty(o.RuntimeFolder) ? null : o.RuntimeFolder;
                 CoreWebView2Environment env = await CoreWebView2Environment.CreateAsync(rt, o.UserDataDir, envOpts);
@@ -1393,7 +1396,8 @@ $launch = [ordered]@{
 
 if ($Install) {
   New-AppShortcut $StartMenuLink $HostExe
-  if (-not $NoDesktop) { New-AppShortcut $DesktopLink $HostExe }
+  # Defender 的「受控資料夾存取」開著時，桌面可能拒絕寫入；開始功能表的捷徑照常建立。
+  if (-not $NoDesktop) { try { New-AppShortcut $DesktopLink $HostExe } catch { Log "桌面捷徑建立失敗（$($_.Exception.Message)）；開始功能表的捷徑可用" } }
   Write-Host "已建立捷徑：開始功能表「Pilcrow」$(if (-not $NoDesktop) { '、桌面「Pilcrow」' })，直接指向 $HostExe" -ForegroundColor Green
 }
 if ($SkipLaunch) { exit 0 }

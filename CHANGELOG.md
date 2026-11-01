@@ -59,6 +59,12 @@
   WebView2 外殼也明確要圓角。Windows 安裝檔多了 `-Qt`：PySide6 裝進安裝目錄下的 venv，捷徑與 `pilcrow-qt` 指令
   直接開 Qt 視窗（由 venv 的 pythonw 啟動，不經 PowerShell、不開主控台），伺服器由視窗自己找到或拉起來，輸出寫到
   `%LOCALAPPDATA%\Pilcrow\state\qt-server.log`（之前接 pipe 沒人讀，Linux 上寫滿會把伺服器卡住）。
+   **安裝檔資安檢視**：兩個安裝檔逐行檢視過一遍（README「安全性」有整理）。Windows 安裝檔的使用者 PATH 改成照登錄檔原樣
+   編輯（REG_EXPAND_SZ、`%VAR%` 不展開，之前 `SetEnvironmentVariable` 會把整條 PATH 展開後寫回成純字串）並廣播
+   WM_SETTINGCHANGE；內附的外殼腳本也驗 SHA-256；zip 內的路徑拒絕 `..` 與絕對路徑；關掉舊伺服器前確認該 pid 是 node
+   （Linux 同）；桌面捷徑被「受控資料夾存取」擋下時改為警告而非中止；說明裡不再建議 `[scriptblock]::Create` 這種繞過
+   執行原則的寫法，改為 `Unblock-File`；WebView2 DLL 的簽章檢查比對完整的 `O=Microsoft Corporation` 欄位；
+   `make-installers.py` 會驗證 Windows 安裝檔整份是純 ASCII。
 
 - **2.11.0**：**Dispatch：一份 brief、一組 repo、一個 job**（設計與現況見 `DISPATCH.md`）。伺服器新增 `server/dispatch_core.js`
   與 `server/dispatch.js`：掃描資料夾找 repo（分支、未提交、遠端、大小、CLAUDE.md，以及 package.json / go.mod /

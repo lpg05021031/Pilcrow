@@ -1001,7 +1001,7 @@ esac
 exit 0
 PILCROW_EOF_1032691f99
   wrote=$((wrote + 1))
-  # ---- CHANGELOG.md (54526 bytes)
+  # ---- CHANGELOG.md (55342 bytes)
   cat > "$D"/'CHANGELOG.md' <<'PILCROW_EOF_06572a96a5'
 # 版本紀錄
 
@@ -1064,6 +1064,12 @@ PILCROW_EOF_1032691f99
   WebView2 外殼也明確要圓角。Windows 安裝檔多了 `-Qt`：PySide6 裝進安裝目錄下的 venv，捷徑與 `pilcrow-qt` 指令
   直接開 Qt 視窗（由 venv 的 pythonw 啟動，不經 PowerShell、不開主控台），伺服器由視窗自己找到或拉起來，輸出寫到
   `%LOCALAPPDATA%\Pilcrow\state\qt-server.log`（之前接 pipe 沒人讀，Linux 上寫滿會把伺服器卡住）。
+   **安裝檔資安檢視**：兩個安裝檔逐行檢視過一遍（README「安全性」有整理）。Windows 安裝檔的使用者 PATH 改成照登錄檔原樣
+   編輯（REG_EXPAND_SZ、`%VAR%` 不展開，之前 `SetEnvironmentVariable` 會把整條 PATH 展開後寫回成純字串）並廣播
+   WM_SETTINGCHANGE；內附的外殼腳本也驗 SHA-256；zip 內的路徑拒絕 `..` 與絕對路徑；關掉舊伺服器前確認該 pid 是 node
+   （Linux 同）；桌面捷徑被「受控資料夾存取」擋下時改為警告而非中止；說明裡不再建議 `[scriptblock]::Create` 這種繞過
+   執行原則的寫法，改為 `Unblock-File`；WebView2 DLL 的簽章檢查比對完整的 `O=Microsoft Corporation` 欄位；
+   `make-installers.py` 會驗證 Windows 安裝檔整份是純 ASCII。
 
 - **2.11.0**：**Dispatch：一份 brief、一組 repo、一個 job**（設計與現況見 `DISPATCH.md`）。伺服器新增 `server/dispatch_core.js`
   與 `server/dispatch.js`：掃描資料夾找 repo（分支、未提交、遠端、大小、CLAUDE.md，以及 package.json / go.mod /
@@ -70230,7 +70236,7 @@ wider than the column even at its narrowest still breaks a code span rather than
 column. Raw HTML in a reply shows as its text, as the web shows it.
 PILCROW_EOF_0bad3c1577
   wrote=$((wrote + 1))
-  # ---- README.md (27059 bytes)
+  # ---- README.md (28752 bytes)
   cat > "$D"/'README.md' <<'PILCROW_EOF_b335630551'
 # Pilcrow — Claude Code 桌面版（Linux / Windows）
 
@@ -70552,6 +70558,21 @@ Pilcrow 是設計給「一人一台」的開發機：
 > 同一台主機有多個使用者同時登入時（共用伺服器），其他使用者也連得到 `127.0.0.1` 上的服務。
 > Pilcrow 沒有為這種情況加上登入驗證，請在自己的機器上使用。
 
+**安裝檔**（`pilcrow-install.sh`、`pilcrow-windows.ps1`）是可以整份讀的純文字，沒有混淆、沒有下載再執行：
+
+- 程式碼以文字直接寫在檔案裡；只有建置好的介面、字型與（Windows）外殼腳本以 base64 內附，寫出前先比對 SHA-256，
+  不符就停下來什麼都不裝。Windows 安裝檔整份是純 ASCII（`make-installers.py` 會檢查），沒有任何非 ASCII 字元或
+  `[char]` 拼字之類的寫法；Linux 安裝檔的中文只在訊息裡
+- 全程以目前使用者身分執行，不需要也不會要求管理員權限：Linux 寫 `~/pilcrow`（或 `--dir`）、`~/.local/share/applications`、
+  `~/.local/bin`；Windows 寫 `%LOCALAPPDATA%\Programs\Pilcrow`、`%LOCALAPPDATA%\Pilcrow`、兩個捷徑，並把 `bin` 加進
+  使用者 PATH（照登錄檔原樣編輯，`%VAR%` 不展開）。不碰系統資料夾、不建服務或排程、不改其他登錄檔
+- 網路只有 npm / pip 向你設定的 registry 抓套件（Windows 的 WebView2 DLL 從 `pywebview` wheel 取出後驗 Microsoft
+  簽章）；Electron 只在 `-Electron` / 預設 Linux 流程時才下載。要離線審閱 Windows 的 payload，把 `$payload`
+  區塊 base64 解碼就是一個 zip
+- Windows 上會看到的防毒互動：安裝檔是自解壓的 PowerShell 腳本，Defender 掃完整份內容才執行（幾秒）；桌面外殼
+  `PilcrowHost.exe` 是在你的機器上由 Windows 內建的 C# 編譯器產生的未簽署程式，第一次啟動時 Defender 的雲端
+  查詢可能多等一兩秒；開了「受控資料夾存取」時桌面捷徑可能被擋（開始功能表的捷徑照常建立，或用 `-NoDesktop`）
+
 ## 修改介面（開發者）
 
 這個 repo 就是開發樹。安裝後的資料夾裡也有同一份原始碼（`web/src`、`server/`）但沒有建置工具；
@@ -70669,10 +70690,10 @@ Windows 版跟 Linux 版是同一套程式與介面。安裝檔只有一個：`p
 powershell -NoProfile -ExecutionPolicy Bypass -File .\pilcrow-windows.ps1
 ```
 
-如果執行原則封鎖 PowerShell 腳本檔，改用這行（直接執行內容，效果一樣）：
+從瀏覽器存下來的檔案帶有「來自網際網路」標記；若 PowerShell 在 RemoteSigned 原則下拒絕執行，先清掉標記：
 
 ```powershell
-& ([scriptblock]::Create((Get-Content -Raw .\pilcrow-windows.ps1)))
+Unblock-File .\pilcrow-windows.ps1
 ```
 
 選項：`-Dir <路徑>`（預設 `%LOCALAPPDATA%\Programs\Pilcrow`）、`-NoDesktop`、`-NoLaunch`（裝完不開視窗）、
@@ -137190,7 +137211,7 @@ pilcrow_sums_all() {
 f48041ec758e132812e82b858fa03244a5f209e98e5b88c1613756b885087ea7  .gitignore
 481fa9450c1acf9cf6a110ab88e3749efa3ca8a3008f4060cd44d29737c74098  assets/icon.svg
 c0a0f73a7de2705a12a997b70b9c85bd2ea7549965fc29bbba4d80471336bd07  bin/pilcrow
-cb3750f0257fdd4eb1b8b3eb437591ecd3f02b99b2f7f5d02f4dea126cb6b27c  CHANGELOG.md
+56f4abb898ff8fd9dfa4bf993b694e7ad87fb6df10b7c176eb73dac8c0cf918b  CHANGELOG.md
 2ea634dfdb541b609c8168e17740853b0953c8be3c447179b767f653080933b4  electron/main.cjs
 ac2ffb7c9c0854f8be9d2daf77c7457f007364b16a5a02b1829459c428e80615  electron/preload.cjs
 325bf86a65baab6a0c611c0c0808e94eb612ef6e40f414dc488ccd754dd34177  package-lock.json
@@ -137464,7 +137485,7 @@ ef79f838c5d830f377af7d3f26e171424b08e184226afb95dd5769b2cec6f90e  qt/requirement
 b1176090cd5629fa02fdf8b64cbc7be6d84a0f9bf600fc68190de45e235b4377  qt/REVIEW.md
 ff4a3907a01e1340260df3c5d65193aafd970cd99f2c759e6f6959cc8a991b33  qt/ruff.toml
 88cc44e1fb4adfc93906cd895c8ea048ee39bc818568d6fe3c3b20b814607c49  qt/UX.md
-6ad9b4c027a8b496cc6f5fb5cb0255b9118da981559145b843fbd19a1350f155  README.md
+a925dbc6daecf1abce96a9145be4936520ae34c172bec893aaa77cac35a10a37  README.md
 1895aa441bfdbbb656f26ad56b8829db437b07ab7230627bd22206f4e9f3af7d  scripts/electron.sh
 05fa80c68ab928b887a1a771afd8550c82b4c9ea214e3ad8e240e25885ef3fdc  scripts/install-desktop.sh
 880d9487abbd67833a92409b429ce2d752d22fc1b533bc5e9ceb0680793d218f  scripts/make-icon.mjs
@@ -137600,7 +137621,8 @@ pilcrow_retire_reticle() {
   step "移除舊名稱 Reticle 的安裝（設定與對話會自動搬到 Pilcrow）"
   if [ -f "$lock" ]; then
     local pid; pid="$(sed -n 's/.*"pid"[^0-9]*\([0-9]*\).*/\1/p' "$lock" | head -1)"
-    [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+    # the lock file can be stale and the pid reused: only a node process is stopped
+    if [ -n "$pid" ] && [ "$(ps -o comm= -p "$pid" 2>/dev/null)" = node ]; then kill "$pid" 2>/dev/null || true; fi
   fi
   rm -f "$HOME/.local/bin/reticle" "${XDG_DATA_HOME:-$HOME/.local/share}/applications/reticle.desktop" "${XDG_DATA_HOME:-$HOME/.local/share}/applications/reticle-desktop.desktop" 2>/dev/null || true
   rm -f "${XDG_DATA_HOME:-$HOME/.local/share}"/icons/hicolor/*/apps/reticle.png "${XDG_DATA_HOME:-$HOME/.local/share}"/icons/hicolor/scalable/apps/reticle.svg 2>/dev/null || true
