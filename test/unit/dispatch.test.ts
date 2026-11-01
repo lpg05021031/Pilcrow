@@ -8,7 +8,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import * as git from '../../server/git.js';
-import { createDispatcher, forecastFrom, groupHunks, levelsOf, manifestOf, renderBrief, ruleKey } from '../../server/dispatch_core.js';
+import { createDispatcher, forecastFrom, levelsOf, renderBrief } from '../../server/dispatch_core.js';
+import { groupHunks, manifestOf, ruleKey } from '../../server/workspace.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const g = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...args], { cwd, stdio: 'pipe' }).toString();

@@ -11,7 +11,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
-import { findRepos, groupHunks, ruleKey, ruleLabel, TERMINAL, ACTIVE } from './dispatch_core.js';
+import { TERMINAL, ACTIVE } from './dispatch_core.js';
+import { findRepos, groupHunks, ruleKey, ruleLabel } from './workspace.js';
 import { absolute, fmtCost, textOfContent, under } from './util.js';
 
 export const STATES = ['queued', 'preparing', 'running', 'needs_action', 'done', 'failed', 'stopped', 'skipped'];
@@ -970,11 +971,11 @@ import { z } from 'zod';
 import { store } from './config.js';
 import { sessions, bus, extensions } from './sessions.js';
 import * as git from './git.js';
-import { pushInbox, updateInbox } from './schedules.js';
+import * as inbox from './inbox.js';
 import { repos } from './repos.js';
 import { log, slash, run, which } from './util.js';
 
-export const helpers = createHelpers({ sessions, bus, store, git, registry: repos, pushInbox, updateInbox, which, run, log, slash });
+export const helpers = createHelpers({ sessions, bus, store, git, registry: repos, pushInbox: inbox.push, updateInbox: inbox.update, which, run, log, slash });
 export const events = helpers.events;
 
 /** Wire the instance into sessions.js: the MCP server, the permission decisions, the state fields. */

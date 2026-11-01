@@ -28,7 +28,7 @@ let quitting = false;
 // After an update the previous version may still be running; replace it (when idle) instead of focusing it.
 (async () => {
   try {
-    const mod = await import(pathToFileURL(path.join(ROOT, 'server', 'main.js')).href);
+    const mod = await import(pathToFileURL(path.join(ROOT, 'server', 'cli.js')).href);
     const existing = await mod.existingInstance();
     if (existing) await mod.retireOutdated(existing);
   } catch {

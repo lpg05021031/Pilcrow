@@ -1,23 +1,21 @@
-// Scheduled sessions: a prompt that runs in a folder on a cadence while nobody is watching, and an
-// inbox that collects what each run produced. The server is always on, so this needs no cron.
+// Scheduled sessions: a prompt that runs in a folder on a cadence while nobody is watching; what each
+// run produced lands in the inbox (inbox.js). The server is always on, so this needs no cron.
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { store } from './config.js';
 import { sessions, bus } from './sessions.js';
 import * as snapshots from './snapshots.js';
+import * as inbox from './inbox.js';
 import { xdg, readJson, writeJson, uuid, log, slash, lastAssistantText } from './util.js';
 
 export const events = new EventEmitter();
 
 const FILE = path.join(xdg('config'), 'schedules.json');
-const INBOX = path.join(xdg('state'), 'inbox.json');
-const MAX_INBOX = 400;
 const MAX_PARALLEL = 2;
 const DEFAULT_MAX_MIN = 45;
 
 // Read in start(), not at import: importing this module must not touch the person's files.
 let data = { schedules: [] };
-let inbox = { items: [] };
 const running = new Map(); // scheduleId -> { sessionId | jobId, startedAt, timer }
 /** How a schedule of kind 'dispatch' runs: (playbookId, { scheduleId, name, unattended }) → job summary. Set by main.js. */
 let dispatchRunner = null;
@@ -28,10 +26,6 @@ export function setDispatchRunner(fn) {
 function persist() {
   writeJson(FILE, data);
   events.emit('schedules');
-}
-function saveInbox() {
-  writeJson(INBOX, inbox);
-  events.emit('inbox');
 }
 
 // ---------------------------------------------------------------- cadence
@@ -302,9 +296,7 @@ function finishRun(s, session, entry, status, reason) {
     read: false,
     manual: Boolean(store.getMeta(session.id)?.scheduled?.manual),
   };
-  inbox.items.unshift(item);
-  if (inbox.items.length > MAX_INBOX) inbox.items.length = MAX_INBOX;
-  saveInbox();
+  inbox.push(item);
   s.lastStatus = status;
   persist();
   bus.emit('list-changed');
@@ -317,7 +309,6 @@ let ticker = null;
 export function start() {
   if (ticker) return;
   data = readJson(FILE, data);
-  inbox = readJson(INBOX, inbox);
   const tick = async () => {
     const now = Date.now();
     for (const s of data.schedules) {
@@ -336,8 +327,7 @@ export function start() {
           log('schedule failed to start', s.name, e?.message);
           s.lastRunAt = now;
           s.lastStatus = 'failed';
-          inbox.items.unshift({ id: uuid(), scheduleId: s.id, scheduleName: s.name, sessionId: null, cwd: s.cwd, startedAt: now, endedAt: now, durationMs: 0, status: 'failed', reason: e?.message || 'Could not start', summary: '', cost: 0, files: [], read: false });
-          saveInbox();
+          inbox.push({ scheduleId: s.id, scheduleName: s.name, sessionId: null, cwd: s.cwd, startedAt: now, endedAt: now, durationMs: 0, status: 'failed', reason: e?.message || 'Could not start', summary: '', cost: 0, files: [] });
           persist();
         }
       }
@@ -352,24 +342,6 @@ export function stop() {
   ticker = null;
 }
 
-// ---------------------------------------------------------------- inbox
-
-export function inboxList() {
-  return { items: inbox.items, unread: inbox.items.filter((i) => !i.read).length };
-}
-
-export function markRead(ids) {
-  for (const i of inbox.items) if (!ids || ids.includes(i.id)) i.read = true;
-  saveInbox();
-  return inboxList().unread;
-}
-
-export function removeItem(id) {
-  inbox.items = inbox.items.filter((i) => i.id !== id);
-  saveInbox();
-  return true;
-}
-
 /** A dispatch job started by a schedule ended: the schedule's record moves on (the report is the job's own inbox item). */
 export function noteDispatchFinished(scheduleId, status) {
   const s = data.schedules.find((x) => x.id === scheduleId);
@@ -377,21 +349,4 @@ export function noteDispatchFinished(scheduleId, status) {
   if (!s) return;
   s.lastStatus = status;
   persist();
-}
-
-/** A later change to an item that is already in the inbox (a report's prose arriving). */
-export function updateInbox(id, patch) {
-  const it = inbox.items.find((i) => i.id === id);
-  if (!it) return false;
-  for (const [k, v] of Object.entries(patch || {})) if (v !== undefined) it[k] = v;
-  saveInbox();
-  return true;
-}
-
-/** Another module's result (a dispatch job's report) lands in the same inbox. */
-export function pushInbox(item) {
-  inbox.items.unshift({ read: false, ...item, id: item.id || uuid() });
-  if (inbox.items.length > MAX_INBOX) inbox.items.length = MAX_INBOX;
-  saveInbox();
-  return item.id;
 }

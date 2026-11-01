@@ -7,7 +7,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import * as git from '../../server/git.js';
-import { createRegistry, normalizeWord, joinNotes, DIGEST_MAX } from '../../server/repos.js';
+import { createRegistry, normalizeWord, DIGEST_MAX } from '../../server/repos.js';
+import { joinNotes } from '../../server/workspace.js';
 import { createDispatcher } from '../../server/dispatch_core.js';
 import { EventEmitter } from 'node:events';
 

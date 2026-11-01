@@ -10,7 +10,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
-import { findRepos, manifestOf } from './dispatch_core.js';
+import { findRepos, manifestOf } from './workspace.js';
 import { absolute, under } from './util.js';
 
 export const POLICIES = ['allowed', 'ask', 'never'];
@@ -329,8 +329,6 @@ export function createRegistry(deps) {
 
   return { events, list, get, containing, policyFor, defaultsFor, notesFor, resolve, nearest, promptFor, save, remove, register, refresh, scan, annotate };
 }
-
-export { joinNotes } from './dispatch_core.js';
 
 // ---------------------------------------------------------------- the server's instance
 import { store } from './config.js';
