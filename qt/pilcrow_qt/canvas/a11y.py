@@ -26,7 +26,7 @@ class BlockAccessible(QAccessibleInterface):
         self._key = key
 
     # ---- identity
-    def isValid(self) -> bool:  # noqa: N802
+    def isValid(self) -> bool:
         view = self._owner.view
         return view is not None and view.scene.block(self._key) is not None
 
@@ -42,13 +42,13 @@ class BlockAccessible(QAccessibleInterface):
     def child(self, _index: int) -> Optional[QAccessibleInterface]:
         return None
 
-    def childCount(self) -> int:  # noqa: N802
+    def childCount(self) -> int:
         return 0
 
-    def indexOfChild(self, _child: QAccessibleInterface) -> int:  # noqa: N802
+    def indexOfChild(self, _child: QAccessibleInterface) -> int:
         return -1
 
-    def childAt(self, _x: int, _y: int) -> Optional[QAccessibleInterface]:  # noqa: N802
+    def childAt(self, _x: int, _y: int) -> Optional[QAccessibleInterface]:
         return None
 
     # ---- what it says
@@ -61,7 +61,7 @@ class BlockAccessible(QAccessibleInterface):
             return type(b).__name__ if b is not None else ""
         return ""
 
-    def setText(self, _t: QAccessible.Text, _text: str) -> None:  # noqa: N802
+    def setText(self, _t: QAccessible.Text, _text: str) -> None:
         pass
 
     def rect(self) -> QRect:
@@ -117,7 +117,7 @@ class CanvasListAccessible(QAccessibleWidget):
             it = self._items[key] = BlockAccessible(self, key)
         return it
 
-    def childCount(self) -> int:  # noqa: N802
+    def childCount(self) -> int:
         return len(self._keys())
 
     def child(self, index: int) -> Optional[QAccessibleInterface]:
@@ -126,12 +126,12 @@ class CanvasListAccessible(QAccessibleWidget):
             return self._item(keys[index])
         return None
 
-    def indexOfChild(self, child: QAccessibleInterface) -> int:  # noqa: N802
+    def indexOfChild(self, child: QAccessibleInterface) -> int:
         key = getattr(child, "_key", None)
         keys = self._keys()
         return keys.index(key) if key in keys else -1
 
-    def childAt(self, x: int, y: int) -> Optional[QAccessibleInterface]:  # noqa: N802
+    def childAt(self, x: int, y: int) -> Optional[QAccessibleInterface]:
         view = self.view
         if view is None:
             return None

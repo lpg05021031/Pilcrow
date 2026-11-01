@@ -114,7 +114,7 @@ def table(runs: List[Tuple[str, Json]]) -> str:
                 continue
             try:
                 v = getter(s)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 v = None
             cells.append(fmt(v) if v is not None else "—")
         lines.append(f"| {scenario} | {label} | " + " | ".join(cells) + " |")

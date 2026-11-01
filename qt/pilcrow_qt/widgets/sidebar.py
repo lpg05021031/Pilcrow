@@ -521,23 +521,23 @@ class NavButton(QAbstractButton):
         self.setAccessibleName(text)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         fm = QFontMetrics(theme.font_ui(theme.FS_UI))
         # +2: a fitted button elides on Linux when the room equals the advance exactly (rounding)
         return QSize(PAD + 15 + self._gap + fm.horizontalAdvance(self._text) + 2 + PAD, self.height())
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         return self.sizeHint() if self._fit else QSize(PAD + 15 + PAD, self.height())
 
-    def mousePressEvent(self, e) -> None:  # noqa: N802
+    def mousePressEvent(self, e) -> None:
         self.last_modifiers = e.modifiers()
         super().mousePressEvent(e)
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         self.update()
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self.update()
         super().leaveEvent(e)
 
@@ -551,7 +551,7 @@ class NavButton(QAbstractButton):
             self._count, self._count_tone = n, tone
             self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         hover = self.underMouse()
         h = self.height()
@@ -649,19 +649,19 @@ class IconBtn(QAbstractButton):
         self._name = name
         self.update()
 
-    def mousePressEvent(self, e) -> None:  # noqa: N802
+    def mousePressEvent(self, e) -> None:
         self.last_modifiers = e.modifiers()
         super().mousePressEvent(e)
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         self.update()
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self.update()
         super().leaveEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         if self._reveal and not self._shown:
             return
         t = theme.tokens()
@@ -683,11 +683,11 @@ class _HoverWrap(QWidget):
 
     revealed = Signal(bool)
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         self.revealed.emit(True)
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self.revealed.emit(False)
         super().leaveEvent(e)
 
@@ -729,24 +729,24 @@ class SearchRow(QWidget):
         theme.tint(self.edit, fg="text_2" if self.edit.hasFocus() else "text_3", placeholder="text_3")
         self.update()
 
-    def eventFilter(self, obj, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj, e: QEvent) -> bool:
         if obj is self.edit and e.type() in (QEvent.Type.FocusIn, QEvent.Type.FocusOut):
             self._paint()
         return False
 
-    def mousePressEvent(self, e) -> None:  # noqa: N802
+    def mousePressEvent(self, e) -> None:
         self.edit.setFocus(Qt.FocusReason.MouseFocusReason)
         super().mousePressEvent(e)
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         self.update()
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self.update()
         super().leaveEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         fill = "fill_2" if self.edit.hasFocus() else "fill_1" if self.underMouse() else ""
         if not fill:
             return
@@ -765,7 +765,7 @@ class _SearchEdit(QLineEdit):
             return True
         return super().event(e)
 
-    def keyPressEvent(self, e) -> None:  # noqa: N802
+    def keyPressEvent(self, e) -> None:
         if e.key() == Qt.Key.Key_Escape:
             self.clear()
             e.accept()
@@ -780,7 +780,7 @@ class _Pages(QWidget):
         super().__init__(parent)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.fillRect(0, 4, self.width(), 1, theme.blend(t.hair, t.chrome))
@@ -859,12 +859,12 @@ class GroupHead(QWidget):
     def set_collapsed(self, collapsed: bool) -> None:
         self.btn.set_collapsed(collapsed)
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         self.btn.set_revealed(True)
         self.add.set_shown(True)
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self.btn.set_revealed(False)
         self.add.set_shown(False)
         super().leaveEvent(e)
@@ -885,7 +885,7 @@ class _GroupToggle(QAbstractButton):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         return QSize(PAD * 2 + 16, HEAD_H)
 
     def set_revealed(self, on: bool) -> None:
@@ -917,15 +917,15 @@ class _GroupToggle(QAbstractButton):
         self._angle = float(v)
         self.update()
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         self.update()
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self.update()
         super().leaveEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -965,11 +965,11 @@ class MoreButton(QPushButton):
         )
         theme.tint(self, fg="text_3")
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         theme.tint(self, fg="text")
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         theme.tint(self, fg="text_3")
         super().leaveEvent(e)
 
@@ -1083,7 +1083,7 @@ class SessionRow(QWidget):
         self.title.refresh()
         QWidget.update(self)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         fill = "fill_2" if self._active else "fill_1" if (self._hover or self._menu_open) else ""
         if not fill:
             return
@@ -1094,20 +1094,20 @@ class SessionRow(QWidget):
         p.drawRoundedRect(QRectF(self.rect()), theme.R2, theme.R2)
 
     # ---- interaction
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         self._hover = True
         self.end.set_hover(True)
         self._paint()
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self._hover = False
         if not self._menu_open:
             self.end.set_hover(False)
         self._paint()
         super().leaveEvent(e)
 
-    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, e) -> None:
         if (
             e.button() == Qt.MouseButton.LeftButton
             and self.rename_edit is None
@@ -1116,7 +1116,7 @@ class SessionRow(QWidget):
             store.open_session(self.sid)
         super().mouseReleaseEvent(e)
 
-    def contextMenuEvent(self, e) -> None:  # noqa: N802
+    def contextMenuEvent(self, e) -> None:
         if self.rename_edit is not None:
             return
         self._menu_opened(show_menu_at(self._items(), e.globalPos(), self, 210))
@@ -1229,7 +1229,7 @@ class _ElideLabel(QLabel):
             self.setTextFormat(Qt.TextFormat.PlainText)
             self.setText(text)
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         self.refresh()
 
@@ -1319,7 +1319,7 @@ class _RowEnd(QWidget):
         self.glyph.setVisible(not self._quiet and not self._hover)
         self.menu.setVisible(self._hover)
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         self.menu.move(self.width() - 24, 0)
 
@@ -1349,16 +1349,16 @@ class _RowGlyph(QWidget):
             self._timer.stop()
         self.update()
 
-    def hideEvent(self, e) -> None:  # noqa: N802
+    def hideEvent(self, e) -> None:
         self._timer.stop()
         super().hideEvent(e)
 
-    def showEvent(self, e) -> None:  # noqa: N802
+    def showEvent(self, e) -> None:
         if self._status in ("running", "starting") and not store.reduced_motion:
             self._timer.start()
         super().showEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)

@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (
 from ... import icons, theme
 from ...canvas.pixels import hline
 from ...store import store
-from ..ui.bits import Hairline, IconButton  # noqa: F401 - Hairline is re-exported to the panels
+from ..ui.bits import Hairline, IconButton  # Hairline is re-exported to the panels
 from ..ui.button import Btn  # noqa: F401 - re-exported to the panels
 from ..ui.signals import bind
 
@@ -69,7 +69,7 @@ class Text(QLabel):
         self._lh = line_height
         self.setTextFormat(Qt.TextFormat.RichText)
 
-    def setText(self, text: str) -> None:  # noqa: N802
+    def setText(self, text: str) -> None:
         self._plain = text
         if self._rich:
             super().setText(f'<p style="line-height:{int(self._lh * 100)}%; margin:0">{html.escape(text)}</p>')
@@ -190,24 +190,24 @@ class Seg(QWidget):
         i = int((x - 2) // 27)
         return i if 0 <= i < len(self.options) else -1
 
-    def mouseMoveEvent(self, e) -> None:  # noqa: N802
+    def mouseMoveEvent(self, e) -> None:
         i = self._index_at(e.position().x())
         if i != self._hover:
             self._hover = i
             self.setToolTip(self.options[i].get("title", "") if i >= 0 else "")
             self.update()
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self._hover = -1
         self.update()
         super().leaveEvent(e)
 
-    def mousePressEvent(self, e) -> None:  # noqa: N802
+    def mousePressEvent(self, e) -> None:
         i = self._index_at(e.position().x())
         if e.button() == Qt.MouseButton.LeftButton and i >= 0 and self.options[i]["value"] not in self.disabled:
             self.changed.emit(self.options[i]["value"])
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -263,7 +263,7 @@ class Refresher(QObject):
         if visible_only:
             owner.installEventFilter(self)
 
-    def eventFilter(self, obj, e) -> bool:  # noqa: N802
+    def eventFilter(self, obj, e) -> bool:
         if obj is self._owner and e.type() == QEvent.Type.Show and self.stale:
             self.now()
         return False
@@ -409,7 +409,7 @@ class Card(QWidget):
         self.bg, self.ring, self.radius = bg, ring, radius
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -485,7 +485,7 @@ class TabButton(QAbstractButton):
         """(left, right) padding: 0 8px, or 0 10px 0 8px for the chosen tab of a narrow panel."""
         return (8, 10) if (self._on and self._narrow) else (8, 8)
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         if not self.shows_label:
             return QSize(34, 30)
         fm = QFontMetrics(self._font())
@@ -495,17 +495,17 @@ class TabButton(QAbstractButton):
             w += 6 + max(16, QFontMetrics(theme.font_ui(10.5, 600)).horizontalAdvance(str(self._count)) + 8)
         return QSize(w, 30)
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         self._hover = True
         self.update()
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self._hover = False
         self.update()
         super().leaveEvent(e)
 
-    def paintEvent(self, _e: QPaintEvent) -> None:  # noqa: N802
+    def paintEvent(self, _e: QPaintEvent) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -590,7 +590,7 @@ class TabStrip(QWidget):
         if b is not None:
             b.set_count(n)
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         narrow = self.narrow
         for b in self.buttons.values():
             b.set_narrow(narrow)
@@ -624,7 +624,7 @@ class TabStrip(QWidget):
         self._ink = r
         self.update()
 
-    def paintEvent(self, _e: QPaintEvent) -> None:  # noqa: N802
+    def paintEvent(self, _e: QPaintEvent) -> None:
         t = theme.tokens()
         p = QPainter(self)
         hline(p, 0, self.height() - 1, self.width(), theme.blend(t.hair, t.canvas))
@@ -663,7 +663,7 @@ class RightPanel(QWidget):
     def _paint(self) -> None:
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         # painted, not styled: a stylesheet on the panel would re-polish every widget under it on each
         # theme switch
         QPainter(self).fillRect(self.rect(), theme.qcolor(theme.tokens().canvas))
@@ -745,7 +745,7 @@ class RightPanel(QWidget):
                 w = PreviewPanel(sid, cwd)
             else:
                 return placeholder(f"No such tab: {tab}")
-        except Exception as e:  # noqa: BLE001 — a tab that cannot load must not take the panel down
+        except Exception as e:  # a tab that cannot load must not take the panel down
             print(f"[panel] {tab} is not available: {e!r}")
             return placeholder(f"The {tab} tab is not available in this build.")
         set_session = getattr(w, "set_session", None)

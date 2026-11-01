@@ -67,7 +67,7 @@ class Popover(QFrame):
         host.installEventFilter(self)
         QApplication.instance().installEventFilter(self)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         bg = QColor(popover_bg(t))
         p = QPainter(self)
@@ -126,7 +126,7 @@ class Popover(QFrame):
     def is_open(self) -> bool:
         return not self._closed
 
-    def eventFilter(self, obj: QObject, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj: QObject, e: QEvent) -> bool:
         if self._closed:
             return False
         t = e.type()
@@ -231,19 +231,19 @@ class MenuRow(QWidget):
     def height_for(self, width: int) -> int:
         return int(round(self.height_for_f(width)))
 
-    def hasHeightForWidth(self) -> bool:  # noqa: N802
+    def hasHeightForWidth(self) -> bool:
         return True
 
-    def heightForWidth(self, w: int) -> int:  # noqa: N802
+    def heightForWidth(self, w: int) -> int:
         return self.height_for(w)
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         self._hint_lines = self._wrap(self.width())
         if self.kbd is not None:
             self.kbd.move(self.width() - self.PAD_X - self._kbd_w, self.PAD_Y)
         super().resizeEvent(e)
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         from PySide6.QtGui import QFontMetrics
 
         fm = QFontMetrics(self._label_font())
@@ -255,7 +255,7 @@ class MenuRow(QWidget):
         )
         return QSize(w, self.height_for(max(w, 200)))
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         return QSize(60, 30)
 
     def set_active(self, on: bool) -> None:
@@ -263,7 +263,7 @@ class MenuRow(QWidget):
             self._active = on
             self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         from PySide6.QtGui import QPainter
 
         t = theme.tokens()
@@ -303,12 +303,12 @@ class MenuRow(QWidget):
                 )
                 y += self.HINT_LH
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         if not self.disabled:
             self.entered.emit()
         super().enterEvent(e)
 
-    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, e) -> None:
         if e.button() == Qt.MouseButton.LeftButton and not self.disabled:
             self.chosen.emit()
 
@@ -361,21 +361,21 @@ class Menu(QWidget):
                 out.append(part.height_for_f(w))  # type: ignore[union-attr]
         return out
 
-    def hasHeightForWidth(self) -> bool:  # noqa: N802
+    def hasHeightForWidth(self) -> bool:
         return True
 
-    def heightForWidth(self, w: int) -> int:  # noqa: N802
+    def heightForWidth(self, w: int) -> int:
         hs = self._heights(w)
         return int(round(sum(hs) + self.GAP * max(0, len(hs) - 1)))
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         w = max((p.sizeHint().width() for p in self.parts), default=120)
         return QSize(w, self.heightForWidth(w))
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         return QSize(60, 0)
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         w = self.width()
         y = 0.0
         for part, it, h in zip(self.parts, self.items, self._heights(w)):
@@ -430,7 +430,7 @@ class MenuPopover(Popover):
         if callable(fn):
             fn()
 
-    def keyPressEvent(self, e) -> None:  # noqa: N802
+    def keyPressEvent(self, e) -> None:
         k = e.key()
         if k == Qt.Key.Key_Down:
             self.menu.step(1)

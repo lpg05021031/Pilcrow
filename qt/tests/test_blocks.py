@@ -278,7 +278,7 @@ def test_code_well_carries_a_copy_at_its_corner(app):
     v = View()
     b.activate(t, v)
     assert v.copied == "const a = 1;"
-    assert b._copied[0] == 0  # noqa: SLF001 - the corner says "Copied" for a moment
+    assert b._copied[0] == 0  # the corner says "Copied" for a moment
 
 
 def test_a_written_thought_is_quiet_markdown(app):
@@ -290,12 +290,12 @@ def test_a_written_thought_is_quiet_markdown(app):
     blk = ThinkingBlock(done)
     body = blk.children[0]
     body.measure(700, m)
-    assert body._md and "`" not in body.doc.toPlainText()  # noqa: SLF001
+    assert body._md and "`" not in body.doc.toPlainText()
     assert body.selected_text(None, None).startswith("Plan:\nread a.ts")
     live = ThinkingItem(id="th2", text="still `thinking`", streaming=True, start_ts=0)
     blk2 = ThinkingBlock(live)
     blk2.children[0].measure(700, m)
-    assert not blk2.children[0]._md and "`" in blk2.children[0].doc.toPlainText()  # noqa: SLF001
+    assert not blk2.children[0]._md and "`" in blk2.children[0].doc.toPlainText()
 
 
 def test_a_node_body_lays_out_from_its_own_edge(app):

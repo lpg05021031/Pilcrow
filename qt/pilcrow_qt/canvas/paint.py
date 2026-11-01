@@ -622,7 +622,7 @@ class Measurer:
             tokens = markdown.parse_tokens(src, streaming) if src else []
             b = build.Builder(doc, m, self.tokens, self, width, cwd, streaming, line_height)
             b.run(tokens)
-        except Exception as ex:  # noqa: BLE001 - a builder failure must not take the row down
+        except Exception as ex:  # a builder failure must not take the row down
             global _build_failed
             if not _build_failed:
                 _build_failed = True
@@ -659,7 +659,7 @@ class Measurer:
             body = markdown.render_html(
                 src, streaming=streaming, base_dir=cwd or None, compact=compact or quiet, width=width, m=m
             )
-        except Exception:  # noqa: BLE001 - a Markdown failure must not take the row down
+        except Exception:  # a Markdown failure must not take the row down
             body = f"<p>{html.escape(src)}</p>"
         body = link_paths(body)
         doc = self._doc(self.font(m.base), width, tab_font=self.code_font())

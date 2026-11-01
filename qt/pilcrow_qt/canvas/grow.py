@@ -687,6 +687,6 @@ def start(
         if cls.accepts(src):
             try:
                 return cls(src, m, width, compact, quiet, cwd, line_h)
-            except Exception:  # noqa: BLE001 - a grower that cannot build falls back to the render
+            except Exception:  # a grower that cannot build falls back to the render
                 return None
     return None

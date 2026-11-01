@@ -71,7 +71,7 @@ def _make_transcript(session_id: str, cwd: str) -> QWidget:
         from ..canvas.transcript import Transcript
 
         return Transcript(session_id, cwd)
-    except Exception as e:  # noqa: BLE001 — the transcript is built separately; this page must not depend on it
+    except Exception as e:  # the transcript is built separately; this page must not depend on it
         print(f"[session_view] transcript unavailable, using a placeholder: {e!r}")
         return _TranscriptPlaceholder()
 
@@ -165,7 +165,7 @@ class HelperChip(QPushButton):
     def text(self) -> str:  # type: ignore[override]
         return self._text
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         st = str(self.h.get("state") or "")
         p = QPainter(self)
@@ -237,10 +237,10 @@ class HelpersBar(QWidget):
         self.hide()
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         return QSize(240, self.H)
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         return QSize(0, self.H)
 
     def sync(self, helpers: List[Json], lead: Json) -> None:
@@ -322,11 +322,11 @@ class HelpersBar(QWidget):
             self.more.hide()
         self._shown = shown
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         self._place()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.fillRect(self.rect(), QColor(t.canvas))
@@ -492,7 +492,7 @@ class SessionView(QWidget):
     def open_find(self) -> None:
         self.transcript.open_find()
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         # The web's container queries: under 560px the crumbs go, the title keeps the room.
         narrow = self.width() < 560
@@ -828,13 +828,13 @@ class _TitleLabel(QLabel):
 
     double_clicked = Signal()
 
-    def mouseDoubleClickEvent(self, _e) -> None:  # noqa: N802
+    def mouseDoubleClickEvent(self, _e) -> None:
         self.double_clicked.emit()
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         return QSize(40, super().minimumSizeHint().height())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         p = QPainter(self)
         p.setFont(self.font())
         p.setPen(self.palette().color(self.foregroundRole()))
@@ -858,13 +858,13 @@ class _TitleEdit(QLineEdit):
         self.setAccessibleName("Session title")
         self.returnPressed.connect(lambda: self._finish(True))
 
-    def keyPressEvent(self, e) -> None:  # noqa: N802
+    def keyPressEvent(self, e) -> None:
         if e.key() == Qt.Key.Key_Escape:
             self._finish(False)
             return
         super().keyPressEvent(e)
 
-    def focusOutEvent(self, e) -> None:  # noqa: N802
+    def focusOutEvent(self, e) -> None:
         super().focusOutEvent(e)
         self._finish(True)
 
@@ -1048,7 +1048,7 @@ class _Dot(QWidget):
             self._timer.stop()
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         c = QColor(self.color or theme.tokens().text_3)
@@ -1083,7 +1083,7 @@ class Diffstat(LayoutButton):
         bind(theme.theme.changed, self, lambda _t: self._paint())
         self._paint()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         bg = self.look_on if self._on else self.look_hover if (self.underMouse() and self.isEnabled()) else self.look_bg
         p = QPainter(self)
@@ -1170,10 +1170,10 @@ class _Example(QPushButton):
         self.setAccessibleName(text)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         return QSize(QFontMetrics(theme.font_ui(theme.FS_UI)).horizontalAdvance(self.text()) + 28, 32)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         hover = self.underMouse() and self.isEnabled()
         p = QPainter(self)

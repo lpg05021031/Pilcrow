@@ -564,7 +564,7 @@ class AddMcpSheet(Sheet):
                 self.url.setText(str(c.get("url") or ""))
                 self.headers.setPlainText("\n".join(f"{k}: {v}" for k, v in (c.get("headers") or {}).items()))
             self._toggle_mode()
-        except Exception as e:  # noqa: BLE001 — whatever was pasted, say why it did not parse
+        except Exception as e:  # whatever was pasted, say why it did not parse
             store.toast(f"Could not read that JSON: {err_text(e)}", "error")
 
     def submit(self) -> None:

@@ -322,13 +322,13 @@ class PermissionCard(QWidget):
         elif key == ("3" if self.allow_always else "2"):
             self.deny()
 
-    def keyPressEvent(self, e) -> None:  # noqa: N802
+    def keyPressEvent(self, e) -> None:
         if e.key() == Qt.Key.Key_Escape and self.feedback_row.isVisible():
             self.hide_note()
             return
         super().keyPressEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         # A request that lost its tool row keeps a card of its own (`.perm.orphan`).
         if not self.orphan:
             return

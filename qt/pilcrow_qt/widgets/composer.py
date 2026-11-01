@@ -441,7 +441,7 @@ class KbdChip(QWidget):
         self.setFixedSize(max(h, fm.horizontalAdvance(text) + 10), h)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         p = QPainter(self)
         paint_kbd(p, 0, 0, self._text, self._small)
 
@@ -517,16 +517,16 @@ class ComposerBox(QWidget):
             self.body.setContentsMargins(self.PAD_X, self.PAD_TOP - lift, self.PAD_X, self.pad_bottom + lift)
         self.update()
 
-    def mousePressEvent(self, e) -> None:  # noqa: N802
+    def mousePressEvent(self, e) -> None:
         if self.focus_target is not None and e.button() == Qt.MouseButton.LeftButton:
             self.focus_target()
         super().mousePressEvent(e)
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         self.geometry_changed.emit()
 
-    def moveEvent(self, e) -> None:  # noqa: N802
+    def moveEvent(self, e) -> None:
         super().moveEvent(e)
         self.geometry_changed.emit()
 
@@ -547,7 +547,7 @@ class ComposerBox(QWidget):
         halo.setAlphaF(halo.alphaF() * max(0.0, min(1.0, t)))
         return _lerp(idle, focus, t), halo
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         tk = theme.tokens()
         t = self.focus_t.value
         r = self.card_rect()
@@ -719,7 +719,7 @@ class ComposerEdit(QTextEdit):
         lines = max(1, int(round(doc.documentLayout().documentSize().height() / line)))
         return int(math.ceil(lines * line))
 
-    def inputMethodEvent(self, e) -> None:  # noqa: N802
+    def inputMethodEvent(self, e) -> None:
         self._composing = bool(e.preeditString())
         super().inputMethodEvent(e)
 
@@ -734,22 +734,22 @@ class ComposerEdit(QTextEdit):
             return True
         return super().event(e)
 
-    def keyPressEvent(self, e: QKeyEvent) -> None:  # noqa: N802
+    def keyPressEvent(self, e: QKeyEvent) -> None:
         handle = getattr(self._owner, "handle_key", None)
         if handle is not None and handle(e):
             e.accept()
             return
         super().keyPressEvent(e)
 
-    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, e) -> None:
         super().mouseReleaseEvent(e)
         self._call("detect_popup")
 
-    def focusInEvent(self, e) -> None:  # noqa: N802
+    def focusInEvent(self, e) -> None:
         super().focusInEvent(e)
         self._call("refresh_foot")
 
-    def focusOutEvent(self, e) -> None:  # noqa: N802
+    def focusOutEvent(self, e) -> None:
         super().focusOutEvent(e)
         self._call("refresh_foot")
         close = getattr(self._owner, "close_popup_if_unfocused", None)
@@ -762,10 +762,10 @@ class ComposerEdit(QTextEdit):
             fn(*args)
 
     # ---- paste and drop
-    def canInsertFromMimeData(self, src: QMimeData) -> bool:  # noqa: N802
+    def canInsertFromMimeData(self, src: QMimeData) -> bool:
         return src.hasImage() or src.hasUrls() or super().canInsertFromMimeData(src)
 
-    def insertFromMimeData(self, src: QMimeData) -> None:  # noqa: N802
+    def insertFromMimeData(self, src: QMimeData) -> None:
         if src.hasImage() and hasattr(self._owner, "add_image"):
             self._owner.add_image(QImage(src.imageData()), "pasted image")
             return
@@ -777,18 +777,18 @@ class ComposerEdit(QTextEdit):
         super().insertFromMimeData(src)
         self.apply_line_height()
 
-    def dragEnterEvent(self, e) -> None:  # noqa: N802
+    def dragEnterEvent(self, e) -> None:
         if e.mimeData().hasUrls() or e.mimeData().hasImage():
             self._call("set_dragging", True)
             e.acceptProposedAction()
             return
         super().dragEnterEvent(e)
 
-    def dragLeaveEvent(self, e) -> None:  # noqa: N802
+    def dragLeaveEvent(self, e) -> None:
         self._call("set_dragging", False)
         super().dragLeaveEvent(e)
 
-    def dropEvent(self, e) -> None:  # noqa: N802
+    def dropEvent(self, e) -> None:
         self._call("set_dragging", False)
         super().dropEvent(e)
 
@@ -908,25 +908,25 @@ class ChipButton(LayoutButton):
         theme.tint(self.text_lb, fg=name)
         self.update()
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         super().enterEvent(e)
         self.hover_t.go(1.0)
         self._paint()
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         super().leaveEvent(e)
         self.hover_t.go(0.0)
         self._paint()
 
-    def mousePressEvent(self, e) -> None:  # noqa: N802
+    def mousePressEvent(self, e) -> None:
         self._pressed = True
         super().mousePressEvent(e)
 
-    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, e) -> None:
         self._pressed = False
         super().mouseReleaseEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -998,10 +998,10 @@ class SendButton(QPushButton):
             self._retarget()
         self.update()
 
-    def sizeHint(self):  # noqa: N802
+    def sizeHint(self):
         return QSize(32, 33)
 
-    def minimumSizeHint(self):  # noqa: N802
+    def minimumSizeHint(self):
         return QSize(32, 33)
 
     def launch(self) -> None:
@@ -1029,27 +1029,27 @@ class SendButton(QPushButton):
         else:
             self.bg_t.go(1.0)
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         super().enterEvent(e)
         self._hover = True
         self._retarget()
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         super().leaveEvent(e)
         self._hover = False
         self._retarget()
 
-    def mousePressEvent(self, e) -> None:  # noqa: N802
+    def mousePressEvent(self, e) -> None:
         self._pressed = True
         self.update()
         super().mousePressEvent(e)
 
-    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, e) -> None:
         self._pressed = False
         self.update()
         super().mouseReleaseEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -1162,17 +1162,17 @@ class CtxButton(LayoutButton):
         theme.tint(self.num, fg="err" if self._hot else ("text" if self.underMouse() else "text_3"))
         self.update()
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         super().enterEvent(e)
         self.hover_t.go(1.0)
         self._paint()
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         super().leaveEvent(e)
         self.hover_t.go(0.0)
         self._paint()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         if self.hover_t.value <= 0:
             return
         t = theme.tokens()
@@ -1249,7 +1249,7 @@ class FootHints(QWidget):
             return ""
         return " ".join("↵" if k == "icon" else v for k, v in self.segments())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         op = self.opacity.value
         if op <= 0.003:
             return
@@ -1327,7 +1327,7 @@ class _Ghost(QWidget):
         self.t = Tween(self, theme.T_EXIT, theme.ease_exit, lambda _v: self.update())
         self.t.go(1.0, on_done=self.deleteLater)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         k = self.t.value
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
@@ -1347,7 +1347,7 @@ class _TextRef:
     def text(self) -> str:
         return self._t
 
-    def setText(self, t: str) -> None:  # noqa: N802
+    def setText(self, t: str) -> None:
         self._t = t
 
 
@@ -1489,13 +1489,13 @@ class SuggestPopup(_FloatingPanel):
         return i if 0 <= i < len(self.items) else -1
 
     # ---- events
-    def mouseMoveEvent(self, e) -> None:  # noqa: N802
+    def mouseMoveEvent(self, e) -> None:
         i = self.row_at(e.position())
         if i >= 0 and i != self.index and self.on_hover:
             self.on_hover(i)
         self.setCursor(Qt.CursorShape.PointingHandCursor if i >= 0 else Qt.CursorShape.ArrowCursor)
 
-    def mousePressEvent(self, e) -> None:  # noqa: N802
+    def mousePressEvent(self, e) -> None:
         if not self.panel_rect().contains(e.position()):
             self.forward_press(e)
             return
@@ -1503,7 +1503,7 @@ class SuggestPopup(_FloatingPanel):
         if i >= 0 and self.on_pick:
             self.on_pick(self.items[i])
 
-    def wheelEvent(self, e) -> None:  # noqa: N802
+    def wheelEvent(self, e) -> None:
         over = self.ROW * len(self.items) - self.list_height()
         if over <= 0:
             return
@@ -1512,7 +1512,7 @@ class SuggestPopup(_FloatingPanel):
         e.accept()
 
     # ---- paint
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -1711,7 +1711,7 @@ class MenuPopup(_FloatingPanel):
             fn()
 
     # ---- events
-    def eventFilter(self, obj: QObject, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj: QObject, e: QEvent) -> bool:
         et = e.type()
         if et == QEvent.Type.MouseButtonPress and isinstance(e, QMouseEvent):
             gp = e.globalPosition().toPoint()
@@ -1758,32 +1758,32 @@ class MenuPopup(_FloatingPanel):
                 return -1 if it.get("separator") or it.get("heading") or it.get("disabled") else i
         return -1
 
-    def mouseMoveEvent(self, e) -> None:  # noqa: N802
+    def mouseMoveEvent(self, e) -> None:
         i = self.row_at(e.position())
         if i != self.active:
             self.active = i
             self.update()
         self.setCursor(Qt.CursorShape.PointingHandCursor if i >= 0 else Qt.CursorShape.ArrowCursor)
 
-    def mousePressEvent(self, e) -> None:  # noqa: N802
+    def mousePressEvent(self, e) -> None:
         if not self.panel_rect().contains(e.position()):
             self.close_menu()
             self.forward_press(e)
             return
 
-    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, e) -> None:
         i = self.row_at(e.position())
         if i >= 0:
             self.pick(i)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         super().leaveEvent(e)
         if self.active >= 0:
             self.active = -1
             self.update()
 
     # ---- paint
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -1881,7 +1881,7 @@ class RoundX(QPushButton):
         self.setStyleSheet("QPushButton { border: none; background: transparent; }")
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -1897,11 +1897,11 @@ class RoundX(QPushButton):
             ink = t.text if self.underMouse() else t.text_3
         p.drawPixmap(QPointF(3.5, 3.5), icons.pixmap("x", ink, 11))
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         super().enterEvent(e)
         self.update()
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         super().leaveEvent(e)
         self.update()
 
@@ -1913,7 +1913,7 @@ class _Pops(QWidget):
         super().__init__(parent)
         self.pop_t = Tween(self, theme.SPRING_SNAPPY_T, theme.spring_snappy, lambda _v: self.update())
 
-    def showEvent(self, e) -> None:  # noqa: N802
+    def showEvent(self, e) -> None:
         super().showEvent(e)
         if self.pop_t.value == 0.0 and not self.pop_t.running:
             self.pop_t.go(1.0)
@@ -1941,15 +1941,15 @@ class ImageChip(_Pops):
         self.x.hide()
         self.x.clicked.connect(on_remove)
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         super().enterEvent(e)
         self.x.show()
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         super().leaveEvent(e)
         self.x.hide()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -1982,7 +1982,7 @@ class FileChip(_Pops):
         self.x.clicked.connect(on_remove)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -2045,7 +2045,7 @@ class QueueTray(QFrame):
         self.head_ico.setPixmap(icons.pixmap("clock-3", t.accent_text, 12))
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -2103,7 +2103,7 @@ class QueueAttach(QWidget):
         fm = QFontMetrics(theme.font_ui(11))
         self.setFixedSize(6 + 11 + 3 + fm.horizontalAdvance(text) + 6, 18)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -2186,20 +2186,20 @@ class QueueItem(QWidget):
         lay.addWidget(self.actions, 0, Qt.AlignmentFlag.AlignTop)
         self.setMouseTracking(True)
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         super().enterEvent(e)
         self.now.show()
         self.x.show()
         self.update()
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         super().leaveEvent(e)
         if not self._editing:
             self.now.hide()
             self.x.hide()
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         if not (self.underMouse() or self._editing):
             return
         t = theme.tokens()
@@ -2230,7 +2230,7 @@ class _QueueEdit(QPlainTextEdit):
         self.moveCursor(QTextCursor.MoveOperation.End)
         self.setAccessibleName("Queued message")
 
-    def keyPressEvent(self, e: QKeyEvent) -> None:  # noqa: N802
+    def keyPressEvent(self, e: QKeyEvent) -> None:
         if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and not (e.modifiers() & Qt.KeyboardModifier.ShiftModifier):
             self._finish(self.toPlainText())
             return
@@ -2241,7 +2241,7 @@ class _QueueEdit(QPlainTextEdit):
             return
         super().keyPressEvent(e)
 
-    def focusOutEvent(self, e) -> None:  # noqa: N802
+    def focusOutEvent(self, e) -> None:
         super().focusOutEvent(e)
         self._finish(self.toPlainText())
 
@@ -2276,7 +2276,7 @@ class GhostHint(QWidget):
     def text(self) -> str:
         return self._text
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -2307,7 +2307,7 @@ class DropHint(QWidget):
         self.raise_()
         self.fade.go(1.0)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -2331,7 +2331,7 @@ class FadeOverlay(QWidget):
         self.setFixedHeight(self.HEIGHT)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         g = QLinearGradient(0, 0, 0, self.height())
@@ -2652,24 +2652,24 @@ class Composer(QWidget):
             self.fade.raise_()
         self._place_popup()
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         self._apply_column()
         self.mode_btn.set_compact(self.width() < 420)
         self._autosize()
         self._place_overlays()
 
-    def moveEvent(self, e) -> None:  # noqa: N802
+    def moveEvent(self, e) -> None:
         super().moveEvent(e)
         self._place_overlays()
 
-    def showEvent(self, e) -> None:  # noqa: N802
+    def showEvent(self, e) -> None:
         super().showEvent(e)
         if self.fade is not None:
             self.fade.show()
         self._place_overlays()
 
-    def hideEvent(self, e) -> None:  # noqa: N802
+    def hideEvent(self, e) -> None:
         self.popup.hide()
         self.menu.close_menu()
         if self.fade is not None:

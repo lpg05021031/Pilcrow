@@ -4,7 +4,7 @@ update in place, the review foot, the finish, the report in the inbox, and the s
 
 from __future__ import annotations
 
-from harness import app_client, mock_server  # noqa: F401
+from harness import app_client, mock_server
 from PySide6.QtCore import Qt
 
 MOCK_PORT = 5431

@@ -101,7 +101,7 @@ class NumInput(QLineEdit):
     def value(self) -> int:
         return self._value
 
-    def setValue(self, v: int) -> None:  # noqa: N802
+    def setValue(self, v: int) -> None:
         v = max(self.lo, min(self.hi, int(v)))
         if v != self._value:
             self._value = v
@@ -137,7 +137,7 @@ class TimeInput(QLineEdit):
     def time(self) -> QTime:
         return self._time
 
-    def setTime(self, t: QTime) -> None:  # noqa: N802
+    def setTime(self, t: QTime) -> None:
         if t != self._time:
             self._time = t
             self.timeChanged.emit(t)
@@ -203,13 +203,13 @@ class FolderButton(LayoutButton):
     def text(self) -> str:
         return self._value
 
-    def setText(self, v: str) -> None:  # noqa: N802
+    def setText(self, v: str) -> None:
         if v != self._value:
             self._value = v
             self._paint()
             self.textChanged.emit(v)
 
-    def open(self) -> None:  # noqa: A003
+    def open(self) -> None:
         if self._pop is not None and self._pop.is_open:
             self._pop.dismiss()
             return

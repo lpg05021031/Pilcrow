@@ -337,7 +337,7 @@ class TranscriptModel:
                     self._bump(first)
             elif t == "conversation_reset":
                 self._add(NoticeItem(id=_nid("n"), level="info", text="Conversation cleared", tag="divider"), None)
-        except Exception:  # noqa: BLE001 - one bad message must not take the transcript down
+        except Exception:  # one bad message must not take the transcript down
             log.exception("transcript push failed: %r", m)
 
     def refresh_inputs(self) -> bool:

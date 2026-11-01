@@ -248,7 +248,7 @@ class Where(QObject):
         self.other: Dict[str, int] = {}
         self.layouts: Dict[str, int] = {}
 
-    def eventFilter(self, obj, e) -> bool:  # noqa: N802
+    def eventFilter(self, obj, e) -> bool:
         t = e.type()
         if t == QEvent.Type.Paint:
             for k, w in self.regions.items():

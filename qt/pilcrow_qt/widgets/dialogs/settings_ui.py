@@ -143,12 +143,12 @@ class ElidedLabel(QLabel):
         if text:
             self.setToolTip(text)
 
-    def setText(self, text: str) -> None:  # noqa: N802
+    def setText(self, text: str) -> None:
         super().setText(text)
         if not self.toolTip():
             self.setToolTip(text)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         p = QPainter(self)
         p.setPen(self.palette().color(self.foregroundRole()))
         p.setFont(self.font())
@@ -263,16 +263,14 @@ class Select(QPushButton):
         self._paint()
 
     # ---- the QComboBox-shaped item API
-    def addItem(  # noqa: N802
-        self, text: str, data: Any = None, hint: str = "", icon: str = "", mono: bool = False
-    ) -> None:
+    def addItem(self, text: str, data: Any = None, hint: str = "", icon: str = "", mono: bool = False) -> None:
         self.items.append({"label": text, "value": data, "hint": hint, "icon": icon, "mono": mono, "disabled": False})
         if self._index < 0:
             self.setCurrentIndex(0)
         elif len(self.items) - 1 == self._index:
             self._show_current()
 
-    def setItemData(self, i: int, value: Any, role: Any = None) -> None:  # noqa: N802
+    def setItemData(self, i: int, value: Any, role: Any = None) -> None:
         if 0 <= i < len(self.items):
             self.items[i]["hint"] = str(value or "")
             if i == self._index:
@@ -285,22 +283,22 @@ class Select(QPushButton):
     def count(self) -> int:
         return len(self.items)
 
-    def itemText(self, i: int) -> str:  # noqa: N802
+    def itemText(self, i: int) -> str:
         return str(self.items[i]["label"]) if 0 <= i < len(self.items) else ""
 
-    def itemData(self, i: int) -> Any:  # noqa: N802
+    def itemData(self, i: int) -> Any:
         return self.items[i]["value"] if 0 <= i < len(self.items) else None
 
-    def findData(self, value: Any) -> int:  # noqa: N802
+    def findData(self, value: Any) -> int:
         return next((i for i, it in enumerate(self.items) if it["value"] == value), -1)
 
-    def findText(self, text: str) -> int:  # noqa: N802
+    def findText(self, text: str) -> int:
         return next((i for i, it in enumerate(self.items) if it["label"] == text), -1)
 
-    def currentIndex(self) -> int:  # noqa: N802
+    def currentIndex(self) -> int:
         return self._index
 
-    def setCurrentIndex(self, i: int) -> None:  # noqa: N802
+    def setCurrentIndex(self, i: int) -> None:
         i = i if 0 <= i < len(self.items) else (0 if self.items else -1)
         changed = i != self._index
         self._index = i
@@ -308,10 +306,10 @@ class Select(QPushButton):
         if changed:
             self.currentIndexChanged.emit(i)
 
-    def currentData(self) -> Any:  # noqa: N802
+    def currentData(self) -> Any:
         return self.items[self._index]["value"] if 0 <= self._index < len(self.items) else None
 
-    def currentText(self) -> str:  # noqa: N802
+    def currentText(self) -> str:
         return self.itemText(self._index)
 
     def text(self) -> str:
@@ -345,7 +343,7 @@ class Select(QPushButton):
         self._show_current()
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         surface = sheet_bg(t)
         lit = self.underMouse() or self.property("open") == "true"
@@ -359,7 +357,7 @@ class Select(QPushButton):
         paint_box(p, QRectF(self.rect()), bg, line, theme.R2)
 
     # ---- the popup
-    def showPopup(self) -> None:  # noqa: N802
+    def showPopup(self) -> None:
         if self._popover is not None and self._popover.is_open:
             return
         host = host_for(self)
@@ -400,7 +398,7 @@ class Select(QPushButton):
         self._popover = None
         set_prop(self, "open", "false")
 
-    def hidePopup(self) -> None:  # noqa: N802
+    def hidePopup(self) -> None:
         if self._popover is not None:
             self._popover.dismiss()
 
@@ -414,7 +412,7 @@ class Select(QPushButton):
     def popup(self) -> Optional[Popover]:
         return self._popover if self._popover is not None and self._popover.is_open else None
 
-    def keyPressEvent(self, e: QKeyEvent) -> None:  # noqa: N802
+    def keyPressEvent(self, e: QKeyEvent) -> None:
         pop = self.popup
         if pop is not None:
             m = getattr(pop, "menu", None)
@@ -751,7 +749,7 @@ class RadioRow(QPushButton):
         self.check.setPixmap(icons.pixmap("check", t.text, 14) if on else icons.pixmap("check", "transparent", 14))
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         if self.isChecked():
             bg = theme.over(theme.qcolor(t.fill_2), well_bg(t))
@@ -815,10 +813,10 @@ class FolderChip(QPushButton):
         self._font = theme.font_ui(theme.FS_SMALL)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         return QSize(QFontMetrics(self._font).horizontalAdvance(self.text()) + 20, 24)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         surface = sheet_bg(t)
         on = self.property("on") == "true"
@@ -854,7 +852,7 @@ class Flow(QWidget):
         self._items = []
         self._relayout()
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         self._relayout()
         super().resizeEvent(e)
 
@@ -882,14 +880,14 @@ def folder_picker(value: str, on_pick: Callable[[str], None]) -> Optional[QWidge
     ``(value, on_pick)``; None when it is not there yet, so callers fall back to a path field + QFileDialog."""
     try:
         from ..folder_picker import FolderPicker  # noqa: WPS433 — optional, lands with another module
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
     for make in (lambda: FolderPicker(value, on_pick), lambda: FolderPicker(value=value, on_pick=on_pick)):
         try:
             w = make()
         except TypeError:
             continue
-        except Exception as e:  # noqa: BLE001 — a broken picker must not take the dialog down
+        except Exception as e:  # a broken picker must not take the dialog down
             print(f"[dialogs] FolderPicker failed: {e!r}")
             return None
         return w if isinstance(w, QWidget) else None
@@ -1005,18 +1003,18 @@ class _ContentScroll(QScrollArea):
         self.setWidget(content)
         content.installEventFilter(self)
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         w = self.widget()
         if w is None:
             return super().sizeHint()
         s = w.sizeHint()
         return QSize(s.width(), s.height())
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         w = self.widget()
         return QSize(w.minimumSizeHint().width() if w is not None else 0, 0)
 
-    def eventFilter(self, obj: QObject, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj: QObject, e: QEvent) -> bool:
         if obj is self.widget() and e.type() in (QEvent.Type.LayoutRequest, QEvent.Type.Resize):
             self.updateGeometry()
         return super().eventFilter(obj, e)
@@ -1128,7 +1126,7 @@ class Sheet(QDialog):
         self.foot_line.show()
 
     # ---- showing and closing
-    def open(self) -> None:  # noqa: A003
+    def open(self) -> None:
         if self.key:
             old = _open.get(self.key)
             if old is not None and old is not self:
@@ -1171,10 +1169,10 @@ class Sheet(QDialog):
         if reset and self.key and store.dialogs.get(self.key):
             store.set_dialog(self.key, False if self.key == "settings" else None)
 
-    def reject(self) -> None:  # noqa: D102 — QDialog's Escape path
+    def reject(self) -> None:  # QDialog's Escape path
         self.dismiss()
 
-    def accept(self) -> None:  # noqa: D102
+    def accept(self) -> None:
         if self.on_submit:
             self.on_submit()
 
@@ -1201,7 +1199,7 @@ class Sheet(QDialog):
     def schedule_relayout(self) -> None:
         self._relayout_timer.start()
 
-    def eventFilter(self, obj: QObject, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj: QObject, e: QEvent) -> bool:
         if obj is self.parentWidget() and e.type() == QEvent.Type.Resize:
             self.relayout()
         elif obj is self.frame and e.type() == QEvent.Type.LayoutRequest:
@@ -1209,7 +1207,7 @@ class Sheet(QDialog):
         return super().eventFilter(obj, e)
 
     # ---- painting and input
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         p = QPainter(self)
         bd = getattr(self, "backdrop", None)
         if bd is not None:
@@ -1217,12 +1215,12 @@ class Sheet(QDialog):
         else:
             p.fillRect(self.rect(), theme.qcolor(theme.tokens().scrim))
 
-    def mousePressEvent(self, e) -> None:  # noqa: N802
+    def mousePressEvent(self, e) -> None:
         if not self.frame.geometry().contains(e.position().toPoint()):
             self.dismiss()
         e.accept()
 
-    def event(self, e: QEvent) -> bool:  # noqa: D102
+    def event(self, e: QEvent) -> bool:
         if e.type() == QEvent.Type.ShortcutOverride and isinstance(e, QKeyEvent):
             if e.key() == Qt.Key.Key_Escape or (
                 e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and e.modifiers() & Qt.KeyboardModifier.ControlModifier
@@ -1231,7 +1229,7 @@ class Sheet(QDialog):
                 return True
         return super().event(e)
 
-    def keyPressEvent(self, e: QKeyEvent) -> None:  # noqa: N802
+    def keyPressEvent(self, e: QKeyEvent) -> None:
         if e.key() == Qt.Key.Key_Escape:
             self.dismiss()
             e.accept()

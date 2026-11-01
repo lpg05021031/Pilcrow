@@ -153,7 +153,7 @@ class TickSlider(QSlider):
     def track_w(self) -> int:
         return max(1, self.width() - 2 * self.pad)
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         self._pos = scrub_positions(self._steps, self._now, self.track_w)
 
@@ -175,14 +175,14 @@ class TickSlider(QSlider):
     def dragging(self) -> bool:
         return self._drag
 
-    def mousePressEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+    def mousePressEvent(self, e: QMouseEvent) -> None:
         if e.button() == Qt.MouseButton.LeftButton:
             self._drag = True
             self.setValue(self.nearest(e.position().x()))
             self.update()
             e.accept()
 
-    def mouseMoveEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+    def mouseMoveEvent(self, e: QMouseEvent) -> None:
         i = self.nearest(e.position().x())
         if self._drag:
             self.setValue(i)
@@ -192,18 +192,18 @@ class TickSlider(QSlider):
             self.update()
         e.accept()
 
-    def mouseReleaseEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, e: QMouseEvent) -> None:
         self._drag = False
         self.update()
         e.accept()
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self._hover = -1
         self.hovered.emit(-1)
         self.update()
         super().leaveEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -337,7 +337,7 @@ class Scrubber(QWidget):
             left = int(x - w / 2)
         self.label.move(int(left), 6)
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         self._relabel()
 
@@ -417,7 +417,7 @@ class FileCard(QWidget):
         super().__init__(parent)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setPen(Qt.PenStyle.NoPen)
@@ -480,7 +480,7 @@ class StepDetail(QWidget):
             )
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -668,7 +668,7 @@ class HistoryPanel(QWidget):
 
         store.call("timeline.steps", {"id": self.sid}, quiet=True).then(ok).catch(bad)
 
-    def showEvent(self, e) -> None:  # noqa: N802
+    def showEvent(self, e) -> None:
         # Shown again: ask whether the timeline is on now and pick up steps missed while hidden.
         if self.meta is not None:
             self._load()
@@ -707,7 +707,7 @@ class HistoryPanel(QWidget):
         nxt = max(0, min(len(steps), idx + d))
         self.pick(None if nxt >= len(steps) else int(steps[nxt].get("n") or 0))
 
-    def keyPressEvent(self, e: QKeyEvent) -> None:  # noqa: N802
+    def keyPressEvent(self, e: QKeyEvent) -> None:
         k = e.key()
         if k == Qt.Key.Key_Left:
             self.move(-1)

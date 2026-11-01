@@ -63,7 +63,7 @@ class ToolBodyBlock(NodeBlock):
         self.handlers = {}
         try:
             node = (build_reports if self.part == "reports" else build_body)(self.item, self.ctx, self, m)
-        except Exception as ex:  # noqa: BLE001 - a body that cannot be built must not take the card down
+        except Exception as ex:  # a body that cannot be built must not take the card down
             print(f"[canvas] body of {self.item.name} failed: {ex!r}")
             node = nd.note(f"Could not show this step: {ex!r}")
         return node or nd.Column()

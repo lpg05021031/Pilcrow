@@ -142,7 +142,6 @@ class Column(Container):
             h = c.layout(x + pl, cy, inner, m)
             if h <= 0 and not c.hidden:
                 cy -= 0 if first else self.spacing  # an empty child takes no gap
-                first = first  # noqa: PLW0127 - keep "first" as it was
                 continue
             cy += h
             first = False

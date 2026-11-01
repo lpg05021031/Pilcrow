@@ -245,7 +245,7 @@ class Browser(QFrame):
         lay.addWidget(self.list)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         bg = well_bg(t)
         p = QPainter(self)
@@ -307,7 +307,7 @@ class _ListArea(QScrollArea):
         self.lay.setSpacing(0)
         self.setWidget(host)
 
-    def sizeHint(self):  # noqa: N802
+    def sizeHint(self):
         w = self.widget()
         h = w.sizeHint().height() if w is not None else 0
         return QSize(super().sizeHint().width(), min(self.maximumHeight(), h))
@@ -326,7 +326,7 @@ class _Foot(QWidget):
         self.lay.setSpacing(6)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         QPainter(self).fillRect(0, 0, self.width(), 1, theme.blend(t.hair, t.raised))
 
@@ -354,7 +354,7 @@ class _Row(QPushButton):
         self.lay.addWidget(lb)
         return lb
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         if self.underMouse() and self.isEnabled():
             bg = theme.blend(t.fill_2, t.raised)
@@ -374,7 +374,7 @@ class _Row(QPushButton):
         self.lay.addWidget(lb, stretch)
         return lb
 
-    def mouseDoubleClickEvent(self, e) -> None:  # noqa: N802
+    def mouseDoubleClickEvent(self, e) -> None:
         if self.double_clicked is not None:
             self.double_clicked()
         else:

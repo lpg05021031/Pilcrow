@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional, Tuple
 
-from harness import ROOT, app_client, mock_server  # noqa: F401
+from harness import ROOT, app_client, mock_server
 
 MOCK_PORT = 5401
 

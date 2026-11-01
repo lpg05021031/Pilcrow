@@ -3,7 +3,7 @@ the button family, the segmented control, headings, empty states, and the tab st
 
 from __future__ import annotations
 
-from harness import app_client, mock_server  # noqa: F401
+from harness import app_client, mock_server
 from PySide6.QtGui import QFontInfo, QFontMetrics
 
 MOCK_PORT = 5393

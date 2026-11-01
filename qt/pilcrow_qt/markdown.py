@@ -268,7 +268,7 @@ def _md() -> MarkdownIt:
     try:
         md.enable("table")
         md.enable("strikethrough")
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     return md
 
@@ -522,7 +522,7 @@ def fence_sources(src: str) -> List[str]:
         return []
     try:
         tokens = parser().parse(src)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return []
     return [tok.content.rstrip("\n") for tok in tokens if tok.type in ("fence", "code_block")]
 
@@ -1038,7 +1038,7 @@ def split_pieces(src: str, base: int = 0) -> List[Piece]:
         return [(src, False, base)]
     try:
         tokens = parser().parse(src)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return [(src, False, base)]
     lines = src.split("\n")
     starts = [0]

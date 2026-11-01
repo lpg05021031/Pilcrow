@@ -52,7 +52,7 @@ class Card(QFrame):
     def _paint(self) -> None:
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         bg = mix(t.accent_wash, t.raised, 0.3) if self._tone == "needs" else QColor(t.raised)
         if self._focused:
@@ -71,7 +71,7 @@ class Well(QFrame):
         self._radius = radius
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         paint_box(p, QRectF(self.rect()), QColor(t.inset), theme.blend(t.hair, t.inset), self._radius)
@@ -110,7 +110,7 @@ class Kbd(QLabel):
         theme.tint(self, fg="text_4" if bare else "text_3")
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, e) -> None:  # noqa: N802
+    def paintEvent(self, e) -> None:
         if not self._bare:
             t = theme.tokens()
             p = QPainter(self)
@@ -164,10 +164,10 @@ class Switch(QAbstractButton):
         self.toggled.connect(lambda _c: self.update())
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         return QSize(34, 20)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -243,10 +243,10 @@ class ElideLabel(QLabel):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.setMinimumWidth(24)
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         return QSize(24, super().minimumSizeHint().height())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         p = QPainter(self)
         p.setFont(self.font())
         p.setPen(self.palette().color(QPalette.ColorRole.WindowText))
@@ -346,7 +346,7 @@ class Backdrop:
             self.pixmap = small.scaled(
                 pm.size(), _Qt.AspectRatioMode.IgnoreAspectRatio, _Qt.TransformationMode.SmoothTransformation
             )
-        except Exception:  # noqa: BLE001 — no snapshot, no blur
+        except Exception:  # no snapshot, no blur
             self.pixmap = None
         self.ms = (time.perf_counter() - t0) * 1000
         if _BLUR_OK is None:
@@ -435,7 +435,7 @@ class Text(QWidget):
     def text(self) -> str:
         return self._text
 
-    def setText(self, text: str) -> None:  # noqa: N802
+    def setText(self, text: str) -> None:
         if text != self._text:
             # one line as wide as before (a clock, a count): the layout need not run again
             same_box = not self._wrap and self._advance(text) == self._advance(self._text)
@@ -446,7 +446,7 @@ class Text(QWidget):
                 self.updateGeometry()
             self.update()
 
-    def setAlignment(self, a: Qt.AlignmentFlag) -> None:  # noqa: N802
+    def setAlignment(self, a: Qt.AlignmentFlag) -> None:
         self._align = a
         self.update()
 
@@ -510,24 +510,24 @@ class Text(QWidget):
         self._lines, self._laid_w = lines, width
         return lines
 
-    def hasHeightForWidth(self) -> bool:  # noqa: N802
+    def hasHeightForWidth(self) -> bool:
         return self._wrap
 
-    def heightForWidth(self, w: int) -> int:  # noqa: N802
+    def heightForWidth(self, w: int) -> int:
         n = max(1, len(self._layout(w))) if self._text else 0
         return int(round(n * self.line_px()))
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         fm = QFontMetricsF(self.qfont())
         w = int(math.ceil(fm.horizontalAdvance(self._text))) + 1
         return QSize(w, int(round(self.line_px())) if self._text or not self._wrap else 0)
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         if self._wrap:
             return QSize(24, int(round(self.line_px())) if self._text else 0)
         return self.sizeHint()
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         if self._wrap:
             self._layout(self.width())
             h = self.heightForWidth(self.width())
@@ -535,7 +535,7 @@ class Text(QWidget):
                 self.updateGeometry()
         super().resizeEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         if not self._text:
             return
         t = theme.tokens()

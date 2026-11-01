@@ -3,7 +3,7 @@ size is not known until the next reply (server/usage.js; the mock plays the same
 
 from __future__ import annotations
 
-from harness import app_client, mock_server  # noqa: F401
+from harness import app_client, mock_server
 
 MOCK_PORT = 5435
 

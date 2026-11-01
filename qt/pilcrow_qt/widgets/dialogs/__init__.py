@@ -79,7 +79,7 @@ def _route_other(window: QWidget, key: str, value: Any) -> None:
         from . import registry
 
         routes = registry.ROUTES
-    except Exception:  # noqa: BLE001 — not built yet, or half-landed
+    except Exception:  # not built yet, or half-landed
         pass
     fn = routes.get(key)
     if fn is None:

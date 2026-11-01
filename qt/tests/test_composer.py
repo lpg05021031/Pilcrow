@@ -6,7 +6,7 @@ from __future__ import annotations
 import time
 
 import pytest
-from harness import app_client, mock_server  # noqa: F401
+from harness import app_client, mock_server
 
 MOCK_PORT = 5371
 

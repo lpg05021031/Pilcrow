@@ -247,7 +247,7 @@ class CanvasView(QAbstractScrollArea):
         finally:
             self._own = was
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         self.begin()
         try:
@@ -258,7 +258,7 @@ class CanvasView(QAbstractScrollArea):
         self._place_islands()
         self.viewport().update()
 
-    def viewportEvent(self, e) -> bool:  # noqa: N802
+    def viewportEvent(self, e) -> bool:
         if e.type() == QEvent.Type.Leave:
             self._set_hover(None)
         elif e.type() == QEvent.Type.ContextMenu:
@@ -266,15 +266,15 @@ class CanvasView(QAbstractScrollArea):
             return True
         return super().viewportEvent(e)
 
-    def focusInEvent(self, e) -> None:  # noqa: N802
+    def focusInEvent(self, e) -> None:
         super().focusInEvent(e)
         self._update_focus_rect()
 
-    def focusOutEvent(self, e) -> None:  # noqa: N802
+    def focusOutEvent(self, e) -> None:
         super().focusOutEvent(e)
         self._update_focus_rect()
 
-    def focusNextPrevChild(self, next_: bool) -> bool:  # noqa: N802
+    def focusNextPrevChild(self, next_: bool) -> bool:
         """Tab moves over the targets on screen before it leaves the view."""
         if self.hasFocus() and self._focus_step(1 if next_ else -1):
             return True
@@ -435,7 +435,7 @@ class CanvasView(QAbstractScrollArea):
         if not self._silent:
             self._rehover()
 
-    def scrollContentsBy(self, dx: int, dy: int) -> None:  # noqa: N802
+    def scrollContentsBy(self, dx: int, dy: int) -> None:
         if not self._silent:
             self.viewport().scroll(0, dy)
 
@@ -467,11 +467,11 @@ class CanvasView(QAbstractScrollArea):
         self.follow_ease.stop()
         self._set_value(vb.value() + r.top() - int(vh * fraction))
 
-    def wheelEvent(self, e) -> None:  # noqa: N802
+    def wheelEvent(self, e) -> None:
         self._last_user_scroll = time.monotonic()
         super().wheelEvent(e)
 
-    def keyPressEvent(self, e) -> None:  # noqa: N802
+    def keyPressEvent(self, e) -> None:
         k = e.key()
         vb = self.verticalScrollBar()
         vh = self.viewport().height()
@@ -644,7 +644,7 @@ class CanvasView(QAbstractScrollArea):
             )
 
     # ---------------------------------------------------------------- painting
-    def paintEvent(self, e) -> None:  # noqa: N802
+    def paintEvent(self, e) -> None:
         self.frame += 1
         self.scene.frame = self.frame
         vp = self.viewport()
@@ -741,7 +741,7 @@ class CanvasView(QAbstractScrollArea):
             b.paint(p, rect.x(), rect.y(), rect.width(), st)
             if st.focus is not None and self.hasFocus():
                 self._paint_focus_ring(p, rect, st)
-        except Exception as ex:  # noqa: BLE001 - one row's painter must not blank the frame
+        except Exception as ex:  # one row's painter must not blank the frame
             if not getattr(b, "_paint_failed", False):
                 print(f"[canvas] {b.key} could not paint: {ex!r}")
                 try:
@@ -779,7 +779,7 @@ class CanvasView(QAbstractScrollArea):
             bst.caching = True
             try:
                 b.paint(pp, 0, 0, rect.width(), bst)
-            except Exception as ex:  # noqa: BLE001
+            except Exception as ex:
                 print(f"[canvas] {b.key} could not paint: {ex!r}")
             pp.end()
             self.m.pixmaps.put(key, pm)
@@ -879,7 +879,7 @@ class CanvasView(QAbstractScrollArea):
         if tip:
             QToolTip.showText(self.viewport().mapToGlobal(self._tip_pos), tip, self.viewport())
 
-    def mouseMoveEvent(self, e) -> None:  # noqa: N802
+    def mouseMoveEvent(self, e) -> None:
         pos = e.position().toPoint()
         self._tip_pos = pos
         if self._selecting and self.selection is not None:
@@ -887,7 +887,7 @@ class CanvasView(QAbstractScrollArea):
             return
         self._set_hover(self.hit(pos))
 
-    def mousePressEvent(self, e) -> None:  # noqa: N802
+    def mousePressEvent(self, e) -> None:
         if e.button() != Qt.MouseButton.LeftButton:
             super().mousePressEvent(e)
             return
@@ -918,7 +918,7 @@ class CanvasView(QAbstractScrollArea):
                 self.selection = Selection(b.key, p0)
                 self._selecting = True
 
-    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, e) -> None:
         if e.button() != Qt.MouseButton.LeftButton:
             super().mouseReleaseEvent(e)
             return
@@ -936,7 +936,7 @@ class CanvasView(QAbstractScrollArea):
         if pressed is not None and hit is not None and pressed[0] is hit[0] and pressed[1] == hit[1]:
             self.activate(hit[0], hit[1])
 
-    def mouseDoubleClickEvent(self, e) -> None:  # noqa: N802
+    def mouseDoubleClickEvent(self, e) -> None:
         pos = e.position().toPoint()
         hit = self.hit(pos)
         if hit is not None and hit[1].kind not in ("text", "row"):

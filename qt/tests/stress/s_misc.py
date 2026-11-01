@@ -12,9 +12,9 @@ from PySide6.QtTest import QTest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from core import Probe, Session, app, assistant, pump, timed, tool_result, tool_use, user  # noqa: E402
+from core import Probe, Session, app, assistant, pump, timed, tool_result, tool_use, user
 
-from pilcrow_qt.store import store  # noqa: E402
+from pilcrow_qt.store import store
 
 
 def run_hover() -> str:

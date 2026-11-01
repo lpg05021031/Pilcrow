@@ -205,11 +205,11 @@ class RunCard(Card):
         self._render()
         self.x_btn.setVisible(False)  # ``.run-x { opacity: 0 }`` until the card is hovered
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         self.x_btn.setVisible(True)
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self.x_btn.setVisible(False)
         super().leaveEvent(e)
 
@@ -227,7 +227,7 @@ class RunCard(Card):
             lambda _r: store.toast(f"Running {name} now", "info")
         )
 
-    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, e) -> None:
         if e.button() == Qt.MouseButton.LeftButton:
             self._on_read()
         super().mouseReleaseEvent(e)
@@ -377,11 +377,11 @@ class HelpersCard(Card):
         lay.addLayout(main, 1)
         self.x_btn.setVisible(False)
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         self.x_btn.setVisible(True)
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self.x_btn.setVisible(False)
         super().leaveEvent(e)
 
@@ -547,11 +547,11 @@ class DispatchCard(Card):
         lay.addLayout(main, 1)
         self.x_btn.setVisible(False)
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         self.x_btn.setVisible(True)
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self.x_btn.setVisible(False)
         super().leaveEvent(e)
 
@@ -564,7 +564,7 @@ class DispatchCard(Card):
 
         store.call("dispatch.export", {"id": self.it.get("jobId")}).then(got)
 
-    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, e) -> None:
         if e.button() == Qt.MouseButton.LeftButton:
             self._on_read()
         super().mouseReleaseEvent(e)
@@ -671,7 +671,7 @@ class ScheduleCard(Card):
             )
         return None
 
-    def paintEvent(self, e) -> None:  # noqa: N802
+    def paintEvent(self, e) -> None:
         super().paintEvent(e)
         pr = self.progress()
         running = bool(self.s.get("running"))
@@ -747,7 +747,7 @@ class EmptyHero(QWidget):
 
     mark: Optional[QWidget] = None
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         if not t.dark or self.mark is None:
             return
@@ -864,15 +864,15 @@ class InboxPage(QWidget):
         self.load()
 
     # ---- lifecycle
-    def showEvent(self, e) -> None:  # noqa: N802
+    def showEvent(self, e) -> None:
         super().showEvent(e)
         self._clock.start()
 
-    def hideEvent(self, e) -> None:  # noqa: N802
+    def hideEvent(self, e) -> None:
         self._clock.stop()
         super().hideEvent(e)
 
-    def eventFilter(self, obj, e) -> bool:  # noqa: N802
+    def eventFilter(self, obj, e) -> bool:
         if obj is self.scroll.viewport() and e.type() == QEvent.Type.Resize:
             vw = self.scroll.viewport().width()
             self.body.setFixedWidth(max(320, min(page_column(vw), vw)))

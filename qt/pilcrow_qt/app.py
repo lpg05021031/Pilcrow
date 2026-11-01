@@ -34,7 +34,7 @@ def _hello(url: str, timeout: float = 1.5) -> Optional[dict]:
         with urllib.request.urlopen(url.rstrip("/") + "/api/hello", timeout=timeout) as r:
             j = json.loads(r.read().decode("utf-8"))
             return j if j.get("app") == "pilcrow" else None
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
 
 
@@ -43,7 +43,7 @@ def existing_server() -> Optional[str]:
     lock = _state_dir() / "instance.json"
     try:
         info = json.loads(lock.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
     port = info.get("port")
     if not port:
@@ -85,9 +85,9 @@ class ServerProcess:
         try:
             log_dir.mkdir(parents=True, exist_ok=True)
             self.log_path = log_dir / "qt-server.log"
-            self.log = open(self.log_path, "a", encoding="utf-8", errors="replace")  # noqa: SIM115
+            self.log = open(self.log_path, "a", encoding="utf-8", errors="replace")
         except OSError:
-            self.log_path, self.log = None, open(os.devnull, "w")  # noqa: SIM115
+            self.log_path, self.log = None, open(os.devnull, "w")
         flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
         self.proc = subprocess.Popen(
             [self.node, str(main_js), "--shell=none"],
@@ -121,7 +121,7 @@ class ServerProcess:
             try:
                 self.proc.terminate()
                 self.proc.wait(timeout=5)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 self.proc.kill()
         if self.log is not None:
             try:
@@ -193,7 +193,7 @@ def _crash_log() -> None:
     try:
         log_dir = _state_dir().parent / "pilcrow-host" if sys.platform != "win32" else _state_dir()
         log_dir.mkdir(parents=True, exist_ok=True)
-        f = open(log_dir / "qt-crash.log", "a", encoding="utf-8")  # noqa: SIM115 - kept open for the process's life
+        f = open(log_dir / "qt-crash.log", "a", encoding="utf-8")  # kept open for the process's life
         f.write(f"\n--- {time.strftime('%Y-%m-%d %H:%M:%S')} pilcrow_qt started (pid {os.getpid()})\n")
         f.flush()
         faulthandler.enable(file=f, all_threads=True)

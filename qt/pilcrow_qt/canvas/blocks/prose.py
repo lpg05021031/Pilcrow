@@ -144,7 +144,7 @@ class ProseBlock(Block):
         cur.beginEditBlock()
         try:
             return g.finish()
-        except Exception:  # noqa: BLE001
+        except Exception:
             return False
         finally:
             cur.endEditBlock()
@@ -157,7 +157,7 @@ class ProseBlock(Block):
         cur.beginEditBlock()
         try:
             return g.grow(self._doc_src, self.src)
-        except Exception:  # noqa: BLE001 - a grower that trips falls back to the render
+        except Exception:  # a grower that trips falls back to the render
             return False
         finally:
             cur.endEditBlock()

@@ -62,7 +62,7 @@ class Call(QObject):
 def _safely(fn: Callable, arg: Any) -> None:
     try:
         fn(arg)
-    except Exception as e:  # noqa: BLE001 — a handler must never take the socket down
+    except Exception as e:  # a handler must never take the socket down
         print(f"[rpc] handler failed: {e!r}")
 
 

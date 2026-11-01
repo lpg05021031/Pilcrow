@@ -11,7 +11,7 @@ import time
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtGui import QWheelEvent
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))  # noqa: E402
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from core import Probe, Session, app, assistant, pump, timed, tool_result, tool_use, user
 

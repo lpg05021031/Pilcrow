@@ -147,7 +147,7 @@ class FindBar(QWidget):
         self.transcript.set_needle(needle, item_id, k)
 
     # ---- keys
-    def eventFilter(self, obj, e) -> bool:  # noqa: N802
+    def eventFilter(self, obj, e) -> bool:
         if obj is self.field and e.type() == QEvent.Type.KeyPress:
             if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
                 self.step(-1 if e.modifiers() & Qt.KeyboardModifier.ShiftModifier else 1)
@@ -170,7 +170,7 @@ class FindBar(QWidget):
         self._paint_count()
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         bg = _glass(t)
         p = QPainter(self)

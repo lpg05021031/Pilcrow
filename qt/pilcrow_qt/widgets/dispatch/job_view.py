@@ -462,13 +462,13 @@ class JobView(QWidget):
         self._stale = False
 
     # ---- lifecycle
-    def showEvent(self, e) -> None:  # noqa: N802
+    def showEvent(self, e) -> None:
         super().showEvent(e)
         self._tick_timer.start()
         if self._stale:
             self.refresh()
 
-    def hideEvent(self, e) -> None:  # noqa: N802
+    def hideEvent(self, e) -> None:
         self._tick_timer.stop()
         super().hideEvent(e)
 

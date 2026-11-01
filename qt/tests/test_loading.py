@@ -228,7 +228,7 @@ def test_cards_added_later_leave_the_ones_already_placed_alone(app):
     seen = []
 
     class F(QObject):
-        def eventFilter(self, obj, ev):  # noqa: N802
+        def eventFilter(self, obj, ev):
             if obj in watched and ev.type() in (QEvent.Type.Move, QEvent.Type.Resize):
                 seen.append((type(obj).__name__, ev.type().name))
             return False

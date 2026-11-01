@@ -65,7 +65,7 @@ def main() -> int:
             t = time.perf_counter()
             try:
                 r = fn(ctx)
-            except Exception as e:  # noqa: BLE001 - one scenario failing must not lose the others
+            except Exception as e:  # one scenario failing must not lose the others
                 traceback.print_exc()
                 r = {"error": repr(e)}
             r["_seconds"] = round(time.perf_counter() - t, 1)

@@ -36,7 +36,7 @@ class Hairline(QWidget):
             self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         c = theme.over(theme.qcolor(t.hair), theme.resolve(self._over, t))
@@ -122,17 +122,17 @@ class IconButton(QPushButton):
             self._active = on
             self.update()
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         self._hover = True
         self.update()
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self._hover = False
         self.update()
         super().leaveEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         lit = (self._hover and self.isEnabled()) or self._active
         p = QPainter(self)
@@ -159,14 +159,14 @@ class Check(QCheckBox):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         fm = self.fontMetrics()
         return QSize(self.BOX + self.GAP + fm.horizontalAdvance(self.text()) + 2, max(self.BOX + 4, fm.height() + 4))
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         return self.sizeHint()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -239,17 +239,17 @@ class Box(QFrame):
             setattr(self, k, v)
         self.update()
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         self._hover = True
         self.update()
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self._hover = False
         self.update()
         super().leaveEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         bg = theme.resolve(self.hover if (self._hover and self.hover is not None) else self.bg, t)
         p = QPainter(self)
@@ -278,7 +278,7 @@ class Pill(QLabel):
             setattr(self, k, v)
         self.update()
 
-    def paintEvent(self, e) -> None:  # noqa: N802
+    def paintEvent(self, e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         paint_box(
@@ -298,7 +298,7 @@ class Mark(QWidget):
         self.setFixedSize(size, size)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         _draw_mark(p, QRectF(0, 0, self._size, self._size), theme.tokens(), ink=self._color or None)
@@ -333,18 +333,18 @@ class WorkingMark(QWidget):
         self._timer.timeout.connect(self.update)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def showEvent(self, e) -> None:  # noqa: N802
+    def showEvent(self, e) -> None:
         from ...store import store
 
         if not store.reduced_motion:
             self._timer.start()
         super().showEvent(e)
 
-    def hideEvent(self, e) -> None:  # noqa: N802
+    def hideEvent(self, e) -> None:
         self._timer.stop()
         super().hideEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         phase = (time.monotonic() - self._t0) % 1.8 / 1.8
@@ -380,7 +380,7 @@ class StatusGlyph(QWidget):
         self.setVisible(bool(status in ("running", "starting", "requires_action", "error") or pending or unread))
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -417,7 +417,7 @@ class Spinner(QWidget):
         self._timer.timeout.connect(self.update)
         self._timer.start()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -442,7 +442,7 @@ class ContextRing(QWidget):
         self.used, self.total = used, total
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -489,7 +489,7 @@ class Clickable(QObject):
         w.installEventFilter(self)
         w.setCursor(Qt.CursorShape.PointingHandCursor)
 
-    def eventFilter(self, obj: QObject, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj: QObject, e: QEvent) -> bool:
         if obj is self._w and e.type() == QEvent.Type.MouseButtonRelease and e.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit()
             return True
@@ -542,7 +542,7 @@ class LayoutButton(QPushButton):
         self.look_bg, self.look_hover, self.look_on, self.look_line, self.look_radius = bg, hover, on, line, radius
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         if self.look_active and self.look_on is not None:
             bg = self.look_on
@@ -555,10 +555,10 @@ class LayoutButton(QPushButton):
         p = QPainter(self)
         paint_box(p, QRectF(self.rect()), theme.resolve(bg, t), theme.resolve(self.look_line, t), self.look_radius)
 
-    def sizeHint(self):  # noqa: N802
+    def sizeHint(self):
         lay = self.layout()
         return lay.sizeHint() if lay is not None else super().sizeHint()
 
-    def minimumSizeHint(self):  # noqa: N802
+    def minimumSizeHint(self):
         lay = self.layout()
         return lay.minimumSize() if lay is not None else super().minimumSizeHint()

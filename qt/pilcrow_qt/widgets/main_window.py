@@ -150,7 +150,7 @@ class MainWindow(QMainWindow):
     def show_fatal(self, text: str) -> None:
         self.boot.set_fatal(text)
 
-    def eventFilter(self, obj, e) -> bool:  # noqa: N802
+    def eventFilter(self, obj, e) -> bool:
         if obj is self.main and e.type() in (QEvent.Type.Move, QEvent.Type.Resize, QEvent.Type.Show):
             self._place_title()
         return super().eventFilter(obj, e)
@@ -160,7 +160,7 @@ class MainWindow(QMainWindow):
         if self.titlebar is not None:
             self.titlebar.set_text_x(self.main.mapTo(self, QPoint(0, 0)).x() + 21)
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         self.boot.setGeometry(self.centralWidget().rect())
         if self.toasts is not None:
             self.toasts.reposition()
@@ -234,14 +234,14 @@ class MainWindow(QMainWindow):
         )
         self.setWindowTitle(f"{f'({waiting}) ' if waiting else ''}{head}{self._title}")
 
-    def showEvent(self, e) -> None:  # noqa: N802
+    def showEvent(self, e) -> None:
         super().showEvent(e)
         if not getattr(self, "_framed", False):
             self._framed = True
             apply_windows_frame(self)
             bind(theme.theme.changed, self, lambda _t: apply_windows_frame(self))
 
-    def closeEvent(self, e) -> None:  # noqa: N802
+    def closeEvent(self, e) -> None:
         save_geometry(self)
         super().closeEvent(e)
 
@@ -435,7 +435,7 @@ def restore_geometry(win: QMainWindow) -> None:
     if g is not None:
         try:
             win.restoreGeometry(g)
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
 
 
@@ -475,7 +475,7 @@ def apply_windows_frame(win: QMainWindow) -> None:
         put(34, colorref(t.chrome))  # DWMWA_BORDER_COLOR
         put(36, colorref(t.text))  # DWMWA_TEXT_COLOR
         put(33, 2)  # DWMWA_WINDOW_CORNER_PREFERENCE = DWMWCP_ROUND (Windows 11; ignored before)
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
 
@@ -543,11 +543,11 @@ class Shell(QWidget):
                 self.panel_resizer.raise_()
         self.update()
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         self.place()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         # box-shadow 0 1px 2px: black at 18% on dark, 4% on light, blurred over the ground
         t = theme.tokens()
         strength = 0.18 if t.dark else 0.04
@@ -586,17 +586,17 @@ class Card(QWidget):
     def sheet_rect(self) -> QRect:
         return self.rect().adjusted(0, self.TOP, 0, 0)
 
-    def childEvent(self, e) -> None:  # noqa: N802
+    def childEvent(self, e) -> None:
         super().childEvent(e)
         frame = getattr(self, "_frame", None)
         if frame is not None and e.type() == QEvent.Type.ChildAdded and e.child() is not frame:
             frame.raise_()
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         self._frame.setGeometry(self.rect())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setPen(Qt.PenStyle.NoPen)
@@ -614,7 +614,7 @@ class _CardFrame(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         r = self._card.sheet_rect()
         radius = Card.RADIUS
@@ -680,18 +680,18 @@ class Resizer(QWidget):
         self._shown = float(v)
         self.update()
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         self._delay.start()
         super().enterEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self._delay.stop()
         if not self.dragging:
             self._fade(0.0)
         super().leaveEvent(e)
 
     # ---- dragging
-    def mousePressEvent(self, e) -> None:  # noqa: N802
+    def mousePressEvent(self, e) -> None:
         if e.button() == Qt.MouseButton.LeftButton:
             self.dragging = True
             self._last_x = e.globalPosition().x()
@@ -701,7 +701,7 @@ class Resizer(QWidget):
             return
         super().mousePressEvent(e)
 
-    def mouseMoveEvent(self, e) -> None:  # noqa: N802
+    def mouseMoveEvent(self, e) -> None:
         if self.dragging:
             x = e.globalPosition().x()
             dx = int(round(x - self._last_x))
@@ -712,7 +712,7 @@ class Resizer(QWidget):
             return
         super().mouseMoveEvent(e)
 
-    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, e) -> None:
         if self.dragging and e.button() == Qt.MouseButton.LeftButton:
             self.dragging = False
             self.released.emit()
@@ -723,7 +723,7 @@ class Resizer(QWidget):
             return
         super().mouseReleaseEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         if self._shown <= 0:
             return
         t = theme.tokens()
@@ -745,7 +745,7 @@ class _ElideLabel(QLabel):
     """A label a layout may squeeze: its text is elided to the room it gets (OfflineBar._fit), so its
     full text must not become the sheet's minimum width."""
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         return QSize(0, super().minimumSizeHint().height())
 
 
@@ -783,7 +783,7 @@ class OfflineBar(QWidget):
             fm.elidedText(self._full, Qt.TextElideMode.ElideRight, max(40, room)) if room > 0 else self._full
         )
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         self._fit()
 
@@ -792,7 +792,7 @@ class OfflineBar(QWidget):
         self.ico.setPixmap(icons.pixmap("wifi-off", t.text_2, 14))
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.fillRect(self.rect(), theme.blend(t.fill_1, t.canvas))

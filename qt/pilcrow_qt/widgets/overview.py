@@ -64,7 +64,7 @@ def typing_elsewhere() -> bool:
             return bool(impl(fw))
         except TypeError:
             return bool(impl())
-    except Exception:  # noqa: BLE001 — not there yet, or a different shape: use the local rule
+    except Exception:  # not there yet, or a different shape: use the local rule
         pass
     if fw is None:
         return False
@@ -81,7 +81,7 @@ def suggestion_label(s: Json, cwd: str = "") -> str:
         from .transcript.permission import suggestion_label as impl  # type: ignore[import-not-found]
 
         return str(impl(s, cwd))
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
     dest = {
         "session": "for this session",
@@ -219,7 +219,7 @@ class Tile(LayoutButton):
         self._tone, self._sub, self._live = tone, sub, live
         self._paint()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         line = theme.blend(t.hair_3 if self.underMouse() else t.hair_2, t.canvas)
@@ -325,7 +325,7 @@ class WorkflowBar(QWidget):
         self.done, self.running, self.error = done, running, error
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -471,7 +471,7 @@ class WorkingCard(Card):
         self.quiet.setText(f"quiet for {duration(now - float(last))}" if stale else "")
         self.quiet.setVisible(stale)
 
-    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, e) -> None:
         if e.button() == Qt.MouseButton.LeftButton:
             store.open_session(self.sid)
 
@@ -606,7 +606,7 @@ class NeedsCard(Card):
         theme.tint(self.decided_lb, fg="ok")
         self.decided_ico.setPixmap(icons.pixmap("circle-check", t.ok, 14))
 
-    def paintEvent(self, e) -> None:  # noqa: N802
+    def paintEvent(self, e) -> None:
         super().paintEvent(e)
         # the rail: a 3px accent (ok once answered) down the left edge
         t = theme.tokens()
@@ -884,7 +884,7 @@ class SpendBars(QWidget):
         self.buckets = list(b)
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -1032,7 +1032,7 @@ class _KeyWatch(QObject):
         else:
             app.removeEventFilter(self)
 
-    def eventFilter(self, _obj: QObject, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, _obj: QObject, e: QEvent) -> bool:
         try:
             return self._page.key_event(e)
         except RuntimeError:  # the page is gone; the filter is on its way out with it
@@ -1199,14 +1199,14 @@ class Overview(QWidget):
         self.load_fleet()
 
     # ---- lifecycle
-    def showEvent(self, e) -> None:  # noqa: N802
+    def showEvent(self, e) -> None:
         super().showEvent(e)
         self._tick_timer.start()
         self._fleet_timer.start()
         self._keys.watch(True)
         self.load_fleet()
 
-    def hideEvent(self, e) -> None:  # noqa: N802
+    def hideEvent(self, e) -> None:
         self._tick_timer.stop()
         self._fleet_timer.stop()
         self._keys.watch(False)
@@ -1437,7 +1437,7 @@ class Overview(QWidget):
     def focus_index(self) -> int:
         return self._focus
 
-    def eventFilter(self, obj: QObject, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj: QObject, e: QEvent) -> bool:
         if obj is self.scroll.viewport() and e.type() == QEvent.Type.Resize:
             self._fit_body()
         return False

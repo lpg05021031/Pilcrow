@@ -144,7 +144,7 @@ class DiagnosticsPage(QWidget):
         try:
             copy_text(diagnostics_text(self.info))
             store.toast("Diagnostics copied", "success")
-        except Exception:  # noqa: BLE001 — no clipboard on this display
+        except Exception:  # no clipboard on this display
             store.toast("Could not copy to the clipboard", "error")
 
     def _recheck(self) -> None:

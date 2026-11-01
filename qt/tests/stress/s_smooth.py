@@ -39,7 +39,7 @@ class Frames(QObject):
         self.w = w
         w.installEventFilter(self)
 
-    def eventFilter(self, obj, e) -> bool:  # noqa: N802
+    def eventFilter(self, obj, e) -> bool:
         if e.type() == QEvent.Type.Paint:
             self.times.append(time.perf_counter())
         return False
@@ -190,7 +190,7 @@ def run_window() -> str:
         app_ = QApplication.instance()
 
         class F(QObject):
-            def eventFilter(self, obj, e) -> bool:  # noqa: N802
+            def eventFilter(self, obj, e) -> bool:
                 if e.type() == QEvent.Type.Paint and hasattr(obj, "isWidgetType") and obj.isWidgetType():
                     for name, w in watched.items():
                         if obj is w or (name != "window" and w.isAncestorOf(obj)):

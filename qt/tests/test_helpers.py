@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import time
 
-from harness import app_client, mock_server  # noqa: F401
+from harness import app_client, mock_server
 
 MOCK_PORT = 5433
 HOME = "/home/tester"
@@ -194,7 +194,7 @@ def test_helper_updates_touch_only_the_bar(app_client):
             self.who: dict = {}
             self.layouts: list = []
 
-        def eventFilter(self, obj, e) -> bool:  # noqa: N802
+        def eventFilter(self, obj, e) -> bool:
             t = e.type()
             if t == QEvent.Type.Paint:
                 for key, w in (("viewport", viewport), ("bar", bar), ("sidebar", sidebar), ("composer", v.composer)):
