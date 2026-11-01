@@ -83,10 +83,48 @@ if (launch.executablePath) console.log(`(using ${launch.executablePath})`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const results = [];
 
+/**
+ * Wait until the page holds still: no change to the DOM and no finite animation running, for five
+ * frames in a row, counted from now (at most `timeout`). What a fixed pause stood in for, measured.
+ */
+async function settled(page, timeout = 8000) {
+  await page.evaluate(() => {
+    const w = window;
+    if (!w.__still) {
+      w.__still = { n: 0, dirty: false };
+      new MutationObserver(() => (w.__still.dirty = true)).observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+      const tick = () => {
+        const s = w.__still;
+        const moving = document.getAnimations().some((a) => a.playState === 'running' && a.effect?.getComputedTiming().iterations !== Infinity);
+        s.n = s.dirty || moving ? 0 : s.n + 1;
+        s.dirty = false;
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }
+    w.__still.n = 0;
+  });
+  await page.waitForFunction(() => window.__still.n >= 5, null, { timeout, polling: 30 });
+}
+
+
 async function fresh() {
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 }, reducedMotion: 'no-preference' });
   const page = await context.newPage();
   page.on('pageerror', (e) => console.error('   page error:', e.message));
+  // How many times the window has had the session list back (sessions.list over its socket).
+  page.__listed = 0;
+  page.on('websocket', (ws) => {
+    const asked = new Set();
+    ws.on('framesent', (f) => {
+      const m = JSON.parse(f.payload);
+      if (m.m === 'sessions.list' || m.m === 'sessions.refresh') asked.add(m.id);
+    });
+    ws.on('framereceived', (f) => {
+      const m = JSON.parse(f.payload);
+      if (m.t === 'res' && asked.delete(m.id)) page.__listed++;
+    });
+  });
   await page.goto(URL_);
   await page.waitForSelector('.sidebar .side-row', { timeout: 20_000 });
   return { context, page };
@@ -95,7 +133,7 @@ async function fresh() {
 async function open(page, sid) {
   await page.click(`[data-sid="${sid}"] .side-row-main`);
   await page.waitForFunction(() => document.querySelector('.transcript .units')?.children.length > 0 || document.querySelector('.session-empty'), null, { timeout: 15_000 });
-  await sleep(500); // let the landing passes settle
+  await settled(page); // the landing passes
 }
 
 const transcript = (page) => page.evaluate(() => {
@@ -110,9 +148,9 @@ async function wheelUp(page, ticks = 6, dy = 600) {
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   for (let i = 0; i < ticks; i++) {
     await page.mouse.wheel(0, -dy);
-    await sleep(40);
+    await sleep(40); // a hand's pace between notches, not a wait for anything
   }
-  await sleep(300);
+  await settled(page);
 }
 
 async function send(page, text) {
@@ -122,10 +160,13 @@ async function send(page, text) {
   await ta.press('Enter');
 }
 
-/** Wait for the turn to end: the status pill leaves and no fold is live. */
+/**
+ * Wait for the turn to end: the session's row in the sidebar is idle again (no glyph that says it is
+ * working or waiting), the status pill has left, no fold is live, and the page has settled.
+ */
 async function turnDone(page, timeout = 30_000) {
-  await page.waitForFunction(() => !document.querySelector('.session-head .status-pill') && !document.querySelector('.work.live'), null, { timeout });
-  await sleep(300);
+  await page.waitForFunction(() => !document.querySelector('.session-head .status-pill') && !document.querySelector('.work.live') && !document.querySelector('.side-row.active .glyph.running, .side-row.active .glyph.needs'), null, { timeout, polling: 50 });
+  await settled(page);
 }
 
 function expect(cond, what) {
@@ -177,9 +218,10 @@ test('permission: the card opens the fold, 1 allows, the turn goes on', async ({
   await open(page, 'sess-tests');
   await send(page, 'please ask permission before you run a command');
   await page.waitForSelector('.perm', { timeout: 15_000 });
-  expect(await page.locator('.perm .btn', { hasText: 'Allow' }).first().isVisible(), 'the Allow button is not visible');
-  expect((await page.locator('.work.open').count()) >= 1, 'the fold with the waiting tool did not open');
-  expect(await page.locator('.session-head .status-pill', { hasText: 'Needs you' }).isVisible(), 'the status pill does not say Needs you');
+  // The card, the fold around it and the pill arrive in the same frames, not necessarily the same one.
+  await page.waitForFunction(() => [...document.querySelectorAll('.perm .btn')].some((b) => b.textContent.includes('Allow') && b.getBoundingClientRect().height > 0), null, { timeout: 5000 }).catch(() => expect(false, 'the Allow button is not visible'));
+  await page.waitForFunction(() => document.querySelectorAll('.work.open').length >= 1, null, { timeout: 5000 }).catch(() => expect(false, 'the fold with the waiting tool did not open'));
+  await page.waitForFunction(() => document.querySelector('.session-head .status-pill')?.textContent.includes('Needs you'), null, { timeout: 5000 }).catch(() => expect(false, 'the status pill does not say Needs you'));
   // The composer has focus and is empty: a lone "1" answers the prompt.
   await page.locator('.composer-input').click();
   await page.keyboard.press('1');
@@ -195,6 +237,7 @@ test('permission: Deny tells Claude so', async ({ page }) => {
   await send(page, 'run a dangerous command');
   await page.waitForSelector('.perm', { timeout: 15_000 });
   await page.locator('.perm .btn', { hasText: 'Deny' }).click();
+  await page.waitForSelector('.perm', { state: 'detached', timeout: 5000 }); // the answer was taken
   await turnDone(page);
   const last = await page.locator('.msg-assistant').last().innerText();
   expect(/did not run it/.test(last), `after denying, Claude should say so: ${last}`);
@@ -233,7 +276,7 @@ test('archive: the row folds away and the other rows keep their DOM', async ({ p
   await row.locator('.side-row-menu').click();
   await page.getByRole('menuitem', { name: 'Archive' }).click();
   await page.waitForSelector('[data-sid="sess-site"]', { state: 'detached', timeout: 5000 });
-  await sleep(400);
+  await settled(page);
   const after = await page.evaluate(() => [...document.querySelectorAll('.side-list [data-sid]')].map((r) => ({ id: r.dataset.sid, kept: r.__probe === true })));
   const lost = after.filter((r) => !r.kept).map((r) => r.id);
   expect(lost.length === 0, `rows were re-created on archive: ${lost.join(', ')}`);
@@ -245,8 +288,11 @@ test('sidebar order: a list refresh keeps the order; sending moves the session u
   await open(page, 'sess-login');
   const order = () => page.evaluate(() => [...document.querySelectorAll('.side-list [data-sid]')].map((r) => r.dataset.sid));
   const a = await order();
+  const listed = page.__listed;
   await ctl.call('session.rename', { id: 'sess-old', title: 'Old archived exploration' }); // a refresh that moves nothing
-  await sleep(500);
+  for (let t = Date.now(); page.__listed === listed && Date.now() - t < 5000; ) await sleep(20);
+  expect(page.__listed > listed, 'the window did not fetch the list again');
+  await settled(page);
   const b = await order();
   expect(a.join() === b.join(), `the order changed on a plain refresh:\n${a.join(' ')}\n${b.join(' ')}`);
   expect(a.indexOf('sess-tests') > 0, 'sess-tests should not start at the top');
@@ -254,7 +300,7 @@ test('sidebar order: a list refresh keeps the order; sending moves the session u
   await open(page, 'sess-tests');
   await send(page, 'hello there');
   await turnDone(page);
-  await sleep(300);
+  await page.waitForFunction(() => document.querySelector('.side-list [data-sid]')?.getAttribute('data-sid') === 'sess-tests', null, { timeout: 5000 }).catch(() => {}); // checked below, with the order
   const c = await order();
   expect(c[0] === 'sess-tests', `sending a message should move the session to the top of its group: ${c.join(' ')}`);
 });
@@ -274,7 +320,7 @@ test('a 400-turn conversation opens in under a second and draws only what is nea
   await page.waitForFunction(() => document.querySelector('.transcript .units')?.children.length > 0, null, { timeout: 5000 });
   const ms = Date.now() - t0;
   expect(ms < 1000, `took ${ms}ms to open`);
-  await sleep(600);
+  await settled(page);
   const far = await page.locator('.page.far').count();
   const drawn = await page.locator('.page:not(.far)').count();
   expect(far > 20, `expected most pages to be stand-ins, far=${far} drawn=${drawn}`);
@@ -289,7 +335,7 @@ test('Latest appears when new rows arrive while you are up, and leaves when you 
   expect((await page.locator('.jump').count()) === 0, 'Latest is showing at the live end');
   await wheelUp(page);
   expect(!(await atBottom(page)), 'still at the bottom after scrolling up');
-  await sleep(400);
+  await settled(page);
   expect((await page.locator('.jump').count()) === 0, 'Latest should wait for something new to point at');
   // Something new at the live end (sent from another window, say) is what Latest offers the way to.
   await ctl.call('session.send', { id: 'sess-long', text: 'a message from another window' });
@@ -312,7 +358,7 @@ test('sending from up in the history returns to the live end and follows the rep
   const samples = [];
   for (let i = 0; i < 8; i++) {
     samples.push((await transcript(page)).fromBottom);
-    await sleep(150);
+    await sleep(150); // samples across the reply as it streams: the spacing is the observation, not a wait
   }
   expect(samples.every((d) => d < 80), `the view did not follow the streaming reply: ${samples.join(', ')}`);
   await turnDone(page);
@@ -337,7 +383,7 @@ test('typing in the composer does not move the conversation', async ({ page }) =
   for (let i = 0; i < 6; i++) {
     await page.keyboard.type(`line ${i + 1} of a longer message`);
     await page.keyboard.press('Shift+Enter');
-    await sleep(120);
+    await settled(page);
     seen.push(await gap());
   }
   const drift = seen.map((g) => Math.abs(g.gap - g0.gap));
@@ -383,7 +429,7 @@ test('switching away and back lands on the same spot', async ({ page }) => {
   expect(before.fromBottom > 300, 'not far enough up to tell');
   await open(page, 'sess-login');
   await open(page, 'sess-long');
-  await sleep(600);
+  await page.waitForFunction((top) => Math.abs(document.querySelector('.transcript').scrollTop - top) < 80, before.top, { timeout: 5000 }).catch(() => {}); // asserted below
   const after = await transcript(page);
   expect(Math.abs(after.top - before.top) < 80, `scrolled to ${after.top}, was at ${before.top}`);
   expect((await page.locator('.jump').count()) === 1, 'Latest should offer the way back down');
@@ -409,7 +455,7 @@ test('changes: a file past the diff budget says so in one line and opens in File
 test('control room: tiles fit their row and sit below the header', async ({ page }) => {
   await page.locator('.side-page', { hasText: 'Control room' }).click();
   await page.waitForSelector('.ov-stats', { timeout: 5000 });
-  await sleep(400);
+  await settled(page);
   const r = await page.evaluate(() => {
     const head = document.querySelector('.ov-head').getBoundingClientRect();
     const stats = document.querySelector('.ov-stats').getBoundingClientRect();
@@ -540,7 +586,7 @@ test('workflow: the Tasks tab draws the run live and settled, and the card in th
   expect((await page.locator('.wfd-name').first().innerText()) === 'review-changes', 'the run is named from its meta');
   await page.waitForFunction(() => document.querySelectorAll('.wfa').length >= 3, null, { timeout: 20_000 });
   await page.waitForFunction(() => document.body.innerText.includes('Five findings confirmed'), null, { timeout: 40_000 });
-  await sleep(600);
+  await page.waitForFunction(() => document.querySelector('.wfd-sub')?.textContent.startsWith('7 of 8 agents done'), null, { timeout: 5000 }).catch(() => {}); // asserted next
   expect((await page.locator('.wfd-sub').first().innerText()).startsWith('7 of 8 agents done'), 'the figures settled');
   expect((await page.locator('.wfd.completed').count()) === 1, 'the card says completed');
   await page.click('.icon-btn[title="Close panel"]');

@@ -69,7 +69,30 @@ function findBrowser() {
   process.exit(2);
 }
 const browser = await chromium.launch({ headless: !args.includes('--headed'), ...findBrowser() });
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * Wait until the page holds still: no change to the DOM and no finite animation running, for five
+ * frames in a row, counted from now (at most `timeout`). What a fixed pause stood in for, measured.
+ */
+async function settled(page, timeout = 8000) {
+  await page.evaluate(() => {
+    const w = window;
+    if (!w.__still) {
+      w.__still = { n: 0, dirty: false };
+      new MutationObserver(() => (w.__still.dirty = true)).observe(document.documentElement, { subtree: true, childList: true, attributes: true, characterData: true });
+      const tick = () => {
+        const s = w.__still;
+        const moving = document.getAnimations().some((a) => a.playState === 'running' && a.effect?.getComputedTiming().iterations !== Infinity);
+        s.n = s.dirty || moving ? 0 : s.n + 1;
+        s.dirty = false;
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }
+    w.__still.n = 0;
+  });
+  await page.waitForFunction(() => window.__still.n >= 5, null, { timeout, polling: 30 });
+}
 
 async function fresh(opts = {}) {
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 }, reducedMotion: 'no-preference', ...opts });
@@ -82,7 +105,7 @@ async function fresh(opts = {}) {
 async function open(page, sid) {
   await page.click(`[data-sid="${sid}"] .side-row-main`);
   await page.waitForFunction(() => document.querySelector('.transcript .units')?.children.length > 0 || document.querySelector('.session-empty'), null, { timeout: 15_000 });
-  await sleep(500);
+  await settled(page);
 }
 function expect(cond, what) {
   if (!cond) throw new Error(what);
@@ -167,7 +190,8 @@ test('an informational sheet starts on itself; Esc in a menu over a dialog close
   expect(next.role === 'menuitemradio' && next.label !== at.label, `ArrowDown moves the focus to the next item (${at.label} → ${next.label})`);
   expect(await page.locator('.menu-item.active').count(), 'the keyboard lights the row it moved to');
   await page.keyboard.press('Escape');
-  await sleep(300);
+  await page.waitForSelector('.popover [role="menu"]', { state: 'detached', timeout: 3000 });
+  await settled(page);
   expect(await page.locator('.settings').count(), 'Esc closed the menu, not Settings');
   at = await focused(page);
   expect(at.label === 'Default effort' || at.role === null, `the focus is back on the menu's button (${JSON.stringify(at)})`);
@@ -235,30 +259,32 @@ test('every control on the main screens has a name a screen reader can say', asy
   await scan('session');
   for (const k of [1, 2, 5, 6, 7]) {
     await page.keyboard.press(`Alt+${k}`);
-    await sleep(700);
+    await settled(page);
     await scan(`panel tab ${k}`);
   }
   await page.keyboard.press('Control+,');
   await page.waitForSelector('.settings');
   for (const t of ['General', 'Repositories', 'Claude Code', 'Skills', 'MCP servers', 'Memory', 'Diagnostics']) {
     await page.click(`.settings-nav button:text-is("${t}")`);
-    await sleep(500);
+    await settled(page);
     await scan(`settings ${t}`);
   }
   await page.keyboard.press('Escape');
-  await sleep(300);
+  await page.waitForSelector('.settings', { state: 'detached', timeout: 3000 });
   await page.keyboard.press('Control+Shift+N');
   await page.waitForSelector('.dialog');
   await page.click('.ns-disclose');
-  await sleep(500);
+  await settled(page);
   await scan('new session');
   await page.keyboard.press('Escape');
-  await sleep(300);
+  await page.waitForSelector('.dialog', { state: 'detached', timeout: 3000 });
   await page.keyboard.press('Control+Shift+O');
-  await sleep(800);
+  await page.waitForSelector('.ov-stats', { timeout: 5000 });
+  await settled(page);
   await scan('control room');
   await page.click('.side-page:has-text("Inbox")');
-  await sleep(800);
+  await page.waitForSelector('.inbox-rail-h', { timeout: 5000 });
+  await settled(page);
   await scan('inbox');
   await page.click('.inbox-rail-h button:has-text("New")');
   await page.waitForSelector('.dialog');
@@ -290,7 +316,7 @@ test('light theme: no surface is left dark', async ({ page }) => {
   };
   let n = await sample('session');
   await page.keyboard.press('Alt+1');
-  await sleep(600);
+  await settled(page);
   n += await sample('changes');
   await page.locator('.composer .cbtn.mode').click();
   await page.waitForSelector('.popover');
@@ -301,10 +327,12 @@ test('light theme: no surface is left dark', async ({ page }) => {
   n += await sample('settings');
   await page.keyboard.press('Escape');
   await page.evaluate(() => window.__pilcrowToast('A light toast', 'info'));
-  await sleep(300);
+  await page.waitForSelector('.toast', { timeout: 3000 });
+  await settled(page);
   n += await sample('toast');
   await page.keyboard.press('Control+Shift+O');
-  await sleep(800);
+  await page.waitForSelector('.ov-stats', { timeout: 5000 });
+  await settled(page);
   n += await sample('control room');
   expect(n > 20, `sampled enough surfaces (${n})`);
   expect(!dark.length, `dark surfaces in the light theme:\n${dark.join('\n')}`);
@@ -325,7 +353,8 @@ test('reduced motion: nothing waits, menus and dialogs open at once, the app sti
     expect(timing.length >= 4 && timing.every(([d, t]) => d === 0 && t < 0.01), `menu rows neither wait nor play (${JSON.stringify(timing)})`);
     await page.keyboard.press('Escape');
     await page.keyboard.press('Control+Shift+O');
-    await sleep(500);
+    await page.waitForSelector('.ov-stats', { timeout: 5000 });
+    await settled(page);
     const inline = await page.evaluate(() => [...document.querySelectorAll('[style*="animation-delay"]')].map((el) => getComputedStyle(el).animationDelay));
     expect(inline.every((d) => parseFloat(d) === 0), `inline stagger delays are cancelled (${inline.join(', ')})`);
     await page.keyboard.press('Control+k');
