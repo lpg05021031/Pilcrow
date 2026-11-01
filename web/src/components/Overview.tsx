@@ -25,11 +25,14 @@ const order = (i: number) => ({ '--i': i }) as React.CSSProperties;
  */
 export function Overview() {
   const sessions = useStore((s) => s.sessions);
-  const rt = useStore((s) => s.rt);
   const unread = useStore((s) => s.unread);
   const sidebar = useStore((s) => s.ui.sidebar);
   const [fleet, setFleet] = useState<Fleet | null>(null);
   const now = useNow(1000, true);
+  // Every session's runtime changes with each streamed frame of every session at work; the cards read
+  // only what session.state carries. So they read a snapshot taken on the clock's tick, and at once
+  // when a row's status or waiting count changes (the session list only changes then).
+  const rt = useMemo(() => useStore.getState().rt, [now, sessions, fleet]); // eslint-disable-line react-hooks/exhaustive-deps -- the deps are when to take the snapshot
   const [focus, setFocus] = useState(-1); // keyboard focus; none until the keys are used
   const box = useRef<HTMLDivElement>(null);
 

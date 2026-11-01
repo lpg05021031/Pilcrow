@@ -458,7 +458,11 @@ export class TranscriptModel {
         this.unsettled.delete(it);
       } else this.unsettled.delete(it);
     }
-    if (all) this.drafts.clear();
+    // With nothing left in flight no stream event can refer to these messages again: let them go.
+    if (all || !this.unsettled.size) {
+      this.drafts.clear();
+      this.ordinals.clear();
+    }
   }
 
   private onResult(m: RawMsg) {
