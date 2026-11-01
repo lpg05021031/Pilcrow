@@ -48,13 +48,16 @@ export const costLog = {
 bus.setMaxListeners(50);
 
 // Messages that only matter while they happen; they are forwarded but not kept in the transcript.
-const TRANSIENT_SYSTEM = new Set(['thinking_tokens', 'hook_started', 'hook_progress', 'hook_response', 'status', 'session_state_changed', 'background_tasks_changed', 'task_progress', 'commands_changed', 'files_persisted']);
+const TRANSIENT_SYSTEM = new Set(['thinking_tokens', 'hook_started', 'hook_progress', 'hook_response', 'status', 'session_state_changed', 'background_tasks_changed', 'commands_changed', 'files_persisted']);
+// …and those the state carries (`tasks`), so the windows get them from there: a workflow's progress is
+// the whole run again on every tick, and no client reads the raw message.
+const STATE_ONLY_SYSTEM = new Set(['task_progress']);
 const OUTBOX_MS = 16; // messages reach the clients in one batch per frame
-const STATE_SOON_MS = 120; // a stream of small state changes: at most one full state this often
+const STATE_SOON_MS = 250; // a stream of small state changes (a workflow's agents): at most one state this often
 const DRAIN_MS = 50; // after a turn ends, before the next held message goes in
 const REAP_EVERY_MS = 60_000;
 const STDERR_TAIL = 8000; // characters of Claude Code's stderr kept for an error report
-const TASK_PROMPT_MAX = 4000;
+const TASK_PROMPT_MAX = 200; // no view shows a task's prompt; enough to tell tasks apart in a log
 const MAX_TOOL_USES = 400;
 const MAX_TASKS = 100; // finished tasks kept for the panel; running ones always stay
 const MCP_AUTH_POLL_MS = 2000; // after an MCP sign-in starts, look for the server's reconnect this often…
@@ -103,10 +106,16 @@ function titleFromPrompt(p) {
  * list is usually cumulative, one entry per agent/phase index; keep the latest per index, and the
  * log in order, so the UI can draw the whole run from one object.
  */
-const WF_PREVIEW = 600;
+// Each field is cut to what the workflow view shows of it, since the whole run goes to every window with
+// every state: an agent's prompt, result and error in a box of about ten lines, what it is doing on one
+// line, and the log a line each.
+const WF_CAPS = { promptPreview: 600, resultPreview: 600, error: 600, lastToolSummary: 120 };
+const WF_LOG_LINE = 300;
+const WF_LOGS = 200;
+const cut = (s, n) => (s.length > n ? s.slice(0, n) + '…' : s);
 function trimWf(a) {
   const o = { ...a };
-  for (const k of ['promptPreview', 'resultPreview', 'error', 'lastToolSummary']) if (typeof o[k] === 'string' && o[k].length > WF_PREVIEW) o[k] = o[k].slice(0, WF_PREVIEW) + '…';
+  for (const [k, n] of Object.entries(WF_CAPS)) if (typeof o[k] === 'string') o[k] = cut(o[k], n);
   delete o.promptFramed;
   return o;
 }
@@ -121,13 +130,13 @@ function mergeWorkflowProgress(t, list) {
     } else if (it.type === 'workflow_phase' && Number.isInteger(it.index) && it.index >= 0 && it.index < 200) {
       wf.phases[it.index] = { index: it.index, title: typeof it.title === 'string' ? it.title.slice(0, 200) : `Phase ${it.index + 1}`, kind: it.kind };
     } else if (it.type === 'workflow_log' && typeof it.message === 'string') {
-      logs.push(it.message.slice(0, 1000));
+      logs.push(cut(it.message, WF_LOG_LINE));
     }
   }
   if (logs.length) {
     const same = logs.length >= wf.logs.length && wf.logs.every((m, i) => m.message === logs[i]);
     if (same) wf.logs = logs.map((message, i) => ({ at: wf.logs[i]?.at || Date.now(), message }));
-    else for (const message of logs) if (wf.logs.length < 300) wf.logs.push({ at: Date.now(), message });
+    else for (const message of logs) if (wf.logs.length < WF_LOGS) wf.logs.push({ at: Date.now(), message });
   }
   // Agents may arrive without their phase ever being announced; give them one so the graph has a column.
   for (const a of wf.agents) {
@@ -200,9 +209,15 @@ class Session {
     return this.status === 'running' || this.status === 'requires_action' || this.status === 'starting';
   }
 
-  state() {
+  /**
+   * What the windows draw the session from. `full` adds what stays put for a process's life (what
+   * Claude Code said at init, its commands and models): session.open and the state sent when those
+   * arrive carry it, the routine updates leave it out, and the windows keep a key's last value when
+   * an update leaves it out (store.ts onState, the Qt store's _on_state).
+   */
+  state(full = false) {
     const init = this.init;
-    return {
+    const st = {
       id: this.id,
       status: this.status,
       live: Boolean(this.q),
@@ -229,6 +244,10 @@ class Session {
       queued: [...this.queuedUuids],
       held: this.held.map((h) => ({ uuid: h.uuid, text: h.text, images: h.images.length, files: h.files.map((f) => f.name), at: h.at, note: h.note || null, from: h.from || null })),
       ...Object.assign({}, ...extensions.state.map((fn) => fn(this) || {})),
+    };
+    if (!full) return st;
+    return {
+      ...st,
       init: init
         ? {
             version: init.claude_code_version,
@@ -250,16 +269,17 @@ class Session {
     };
   }
 
-  emitState() {
+  /** @param {boolean} [full] with the part that changes only when Claude Code (re)starts (state()) */
+  emitState(full = false) {
     if (this._stateSoon) {
       clearTimeout(this._stateSoon);
       this._stateSoon = null;
     }
-    bus.emit('state', this.state());
+    bus.emit('state', this.state(full));
   }
 
-  /** State for a stream of small changes (a workflow's agents reporting): at most one every 120 ms,
-   *  so sixty agents do not mean sixty full states a second to every client. */
+  /** State for a stream of small changes (a workflow's agents reporting): at most one every
+   *  STATE_SOON_MS, so sixty agents do not mean sixty states a second to every window. */
   emitStateSoon() {
     if (this._stateSoon) return;
     this._stateSoon = setTimeout(() => {
@@ -323,7 +343,7 @@ class Session {
 
   async snapshot() {
     await this.loadHistory();
-    return { state: this.state(), messages: this.messages, inflight: this.inflight };
+    return { state: this.state(true), messages: this.messages, inflight: this.inflight };
   }
 
   /** Start Claude Code for this session once, even when several requests arrive together. */
@@ -514,6 +534,7 @@ class Session {
       }
       case 'system':
         this.onSystem(msg);
+        if (STATE_ONLY_SYSTEM.has(msg.subtype)) return;
         if (TRANSIENT_SYSTEM.has(msg.subtype)) {
           this.out(msg);
           return;
@@ -593,7 +614,7 @@ class Session {
         this.init = msg;
         if (msg.permissionMode) this.mode = msg.permissionMode;
         if (this.status === 'starting') this.status = 'running';
-        this.emitState();
+        this.emitState(true);
         if (!this.commands) this.refreshCapabilities();
         this.scheduleMcpRefresh(1500);
         break;
@@ -652,7 +673,7 @@ class Session {
         break;
       case 'commands_changed':
         this.commands = msg.commands;
-        this.emitState();
+        this.emitState(true);
         break;
       default:
         break;
@@ -666,7 +687,7 @@ class Session {
       const [commands, models] = await Promise.all([q.supportedCommands().catch(() => null), q.supportedModels().catch(() => null)]);
       if (commands) this.commands = commands;
       if (models) this.models = models;
-      this.emitState();
+      this.emitState(true);
     } catch (e) {
       log('capabilities failed', e?.message);
     }

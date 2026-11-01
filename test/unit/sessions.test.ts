@@ -1,11 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- the server module is plain JavaScript */
 // sessions.js against a fake Agent SDK: the queue of messages typed while Claude works, the permission
 // flow, how a process ends (on purpose, by failing, past a bad message), the idle reaper letting go of
-// transcripts, the cap on finished tasks, and one timeline step per settled turn.
+// transcripts, the cap on finished tasks, one timeline step per settled turn, and what one window is
+// sent during a streamed turn and a workflow's progress storm (bytes per second, the longest stall).
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 
 const sdk = vi.hoisted(() => {
   /** A Claude Code process as the SDK's query() returns it, driven by the test. */
@@ -233,5 +235,119 @@ describe('the timeline', () => {
     q.emit(result(id));
     await until(() => toolSteps().length === 1);
     expect(toolSteps()[0][1]).toEqual({ kind: 'tool', tool: 'Edit, Bash', toolUseId: 'e1', label: 'a.txt and 1 more' });
+  });
+});
+
+describe('what one window receives', () => {
+  // Budgets for one person's machine: a window on a slow tunnel keeps up, and the server stays responsive.
+  // The workflow is the worst case: sixty agents with every preview at its cap, re-sent with each state.
+  const TURN_BYTES_PER_SEC = 96 * 1024;
+  const WORKFLOW_BYTES_PER_SEC = 512 * 1024;
+  const STALL_MS = 50;
+  const TICK_MS = 4;
+
+  /** Count what the server would broadcast (main.js sends every bus event to every window as JSON). */
+  function measure() {
+    const out = { bytes: 0, states: 0, stateBytes: 0 };
+    const add = (d: any, isState = false) => {
+      const n = JSON.stringify(d).length;
+      out.bytes += n;
+      if (isState) {
+        out.states++;
+        out.stateBytes += n;
+      }
+    };
+    const onState = (d: any) => add(d, true);
+    const onOther = (d: any) => add(d);
+    bus.on('state', onState);
+    bus.on('msgs', onOther);
+    const loop = monitorEventLoopDelay({ resolution: 1 });
+    loop.enable();
+    const t0 = performance.now();
+    return {
+      out,
+      stop() {
+        bus.off('state', onState);
+        bus.off('msgs', onOther);
+        loop.disable();
+        return { ...out, seconds: (performance.now() - t0) / 1000, stallMs: loop.max / 1e6 };
+      },
+    };
+  }
+
+  /** A live session whose Claude Code reports what a real one with plugins and skills does. */
+  async function heavy() {
+    const { id } = await sessions.create({ cwd });
+    const s: any = sessions.find(id);
+    await s.send({ text: 'go' });
+    const q: any = sdk.queries.at(-1)!;
+    const many = (n: number, f: (i: number) => any) => Array.from({ length: n }, (_, i) => f(i));
+    q.supportedCommands = async () => many(80, (i) => ({ name: `command-${i}`, description: 'A command from a plugin that does something useful with a long description '.repeat(2), argumentHint: '[args]' }));
+    q.supportedModels = async () => many(12, (i) => ({ value: `model-${i}`, displayName: `Model ${i}`, description: 'A model with a description of what it is good at' }));
+    q.emit({ ...init(id), tools: many(80, (i) => `mcp__server__tool_number_${i}`), slash_commands: many(80, (i) => `command-${i}`), agents: many(20, (i) => `agent-${i}`), skills: many(40, (i) => `skill-${i}`), plugins: many(10, (i) => ({ name: `plugin-${i}`, path: `/home/me/.claude/plugins/cache/plugin-${i}` })), mcp_servers: many(6, (i) => ({ name: `server-${i}`, status: 'connected' })) });
+    await until(() => s.commands?.length === 80);
+    return { id, s, q };
+  }
+
+  const pace = async (n: number, each: (i: number) => void) => {
+    for (let i = 0; i < n; i++) {
+      each(i);
+      await new Promise((r) => setTimeout(r, TICK_MS));
+    }
+  };
+
+  it('sends what stays put for a process (init, commands, models) once, not with every state', async () => {
+    const seen: any[] = [];
+    const on = (d: any) => seen.push(d);
+    bus.on('state', on);
+    const { id, s } = await heavy();
+    await s.setEffort('high'); // a routine update
+    bus.off('state', on);
+    const mine = seen.filter((d) => d.id === id);
+    const full = mine.filter((d) => 'init' in d);
+    expect(full.length).toBeGreaterThanOrEqual(1); // when init arrives, and when the commands and models do
+    expect(full.at(-1).commands).toHaveLength(80);
+    expect(mine.at(-1)).toMatchObject({ effort: 'high' });
+    expect(mine.at(-1)).not.toHaveProperty('init');
+    expect(mine.at(-1)).not.toHaveProperty('commands');
+    const snap = await s.snapshot();
+    expect(snap.state.init.tools).toHaveLength(80);
+    expect(snap.state.models).toHaveLength(12);
+  });
+
+  it('a streamed turn stays under its byte rate and never stalls the loop', async () => {
+    const { id, s, q } = await heavy();
+    const m = measure();
+    const ev = (event: any) => ({ type: 'stream_event', session_id: id, parent_tool_use_id: null, event });
+    q.emit(ev({ type: 'message_start', message: { id: 'm1' } }));
+    await pace(250, (i) => {
+      q.emit(ev({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: `word ${i} of a long streamed answer, ` } }));
+      if (i % 50 === 49) q.emit({ type: 'system', subtype: 'status', session_id: id, status: null });
+    });
+    q.emit(said(id, 'the whole answer'), result(id));
+    await until(() => s.status === 'idle');
+    const r = m.stop();
+    console.log(`turn: ${Math.round(r.bytes / r.seconds / 1024)} KB/s to one window, ${r.states} states averaging ${Math.round(r.stateBytes / r.states)} bytes, longest stall ${r.stallMs.toFixed(1)} ms`);
+    expect(r.bytes / r.seconds).toBeLessThan(TURN_BYTES_PER_SEC);
+    expect(r.stallMs).toBeLessThan(STALL_MS);
+  });
+
+  it('a workflow of sixty agents reporting at once stays under its byte rate and never stalls the loop', async () => {
+    const { id, s, q } = await heavy();
+    q.emit({ type: 'system', subtype: 'task_started', session_id: id, task_id: 'wf', task_type: 'local_workflow', description: 'review', prompt: 'p'.repeat(4000) });
+    const text = (n: number, i: number) => `agent ${i}: `.padEnd(n, 'the agent is looking at a file and says what it found. ');
+    const logs: any[] = [];
+    const m = measure();
+    await pace(250, (t) => {
+      if (t % 3 === 0) logs.push({ type: 'workflow_log', message: text(900, t) });
+      const agents = Array.from({ length: 60 }, (_, i) => ({ type: 'workflow_agent', index: i, label: `reviewer ${i}`, phaseIndex: i % 3, state: 'progress', promptPreview: text(600, i), resultPreview: t > 200 ? text(600, i) : undefined, lastToolSummary: text(300, t), lastToolName: 'Read', model: 'claude-test' }));
+      q.emit({ type: 'system', subtype: 'task_progress', session_id: id, task_id: 'wf', description: 'review', summary: `tick ${t}`, workflow_progress: [...agents, ...logs] });
+    });
+    await new Promise((r) => setTimeout(r, 200)); // the last coalesced state
+    const r = m.stop();
+    console.log(`workflow: ${Math.round(r.bytes / r.seconds / 1024)} KB/s to one window, ${r.states} states averaging ${Math.round(r.stateBytes / r.states)} bytes, longest stall ${r.stallMs.toFixed(1)} ms`);
+    expect(s.tasks.get('wf').workflow.agents).toHaveLength(60);
+    expect(r.bytes / r.seconds).toBeLessThan(WORKFLOW_BYTES_PER_SEC);
+    expect(r.stallMs).toBeLessThan(STALL_MS);
   });
 });
