@@ -15,6 +15,15 @@ const EXCLUDES = ['.git/', 'node_modules/', '.venv/', 'venv/', '__pycache__/', '
 const MAX_STEPS = 600;
 const MAX_CACHED = 50; // sessions whose steps stay in memory (the most recently used)
 const SLOW_MS = 12_000;
+/** A folder switched off for a reason that can pass (an index lock, a slow index, git failing) is tried
+ *  again this long after; one unsuitable as such (the home folder) stays off. */
+const RETRY_AFTER_MS = 10 * 60e3;
+/** An index.lock older than this was left by a git process that died (killed, a crash, a quit): every
+ *  git process on a folder's index runs in that folder's queue, so none of ours can still be writing it. */
+const STALE_LOCK_MS = 5000;
+/** How long quitting waits for the steps being taken (drain): a quit never cuts one short unless it hangs. */
+const DRAIN_MS = 5000;
+const ADD = ['add', '-A', '--ignore-errors', '--', '.'];
 
 /** Tools whose completion may have changed files. MCP tools are opaque, so they count too. */
 export const FILE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'Bash', 'PowerShell']);
@@ -23,8 +32,9 @@ const dirOf = (cwd) => path.join(ROOT, folderKey(cwd));
 const stepsFile = (cwd, sid) => path.join(dirOf(cwd), `steps-${sid}.json`);
 
 const ready = new Map(); // cwd -> Promise<boolean>
-const queues = new Map(); // cwd -> Promise chain, so two sessions in one folder never race
-const disabled = new Map(); // cwd -> reason
+const queues = new Map(); // cwd -> Promise chain, so two git processes never share a folder's index
+/** @type {Map<string, { reason: string, until: number }>} cwd -> why its timeline is off, and until when */
+const disabled = new Map();
 const cache = new Map(); // sid -> steps[], least recently used first
 
 function sg(cwd, args, opts = {}) {
@@ -45,15 +55,54 @@ function unsuitable(cwd) {
   return null;
 }
 
+function switchOff(cwd, reason, until = Date.now() + RETRY_AFTER_MS) {
+  disabled.set(cwd, { reason, until });
+  log('timeline off for', cwd, reason);
+}
+
+/** Whether the folder's timeline is off now; past its time it is on again, to be tried afresh. */
+function isOff(cwd) {
+  const off = disabled.get(cwd);
+  if (off && Date.now() >= off.until) {
+    disabled.delete(cwd);
+    ready.delete(cwd);
+  }
+  return disabled.has(cwd);
+}
+
+/** Run `fn` after whatever is queued for this folder (a failure does not hold up the next). */
+function serial(cwd, fn) {
+  const p = (queues.get(cwd) || Promise.resolve()).then(fn);
+  queues.set(cwd, p.catch(() => null));
+  return p;
+}
+
+/** Wait (at most `ms`) for the steps being taken: quitting must not leave one half done. */
+export function drain(ms = DRAIN_MS) {
+  return Promise.race([Promise.all(queues.values()), new Promise((r) => setTimeout(r, ms).unref())]);
+}
+
+/** `git add` of the whole folder, once more after taking away an index.lock a dead git left behind. */
+async function addAll(cwd) {
+  const add = await sg(cwd, ADD);
+  if (add.code === 0 || !/Unable to create .*index\.lock/.test(add.stderr)) return add;
+  const lock = path.join(dirOf(cwd), 'index.lock');
+  const age = Date.now() - (fs.statSync(lock, { throwIfNoEntry: false })?.mtimeMs ?? Date.now());
+  if (age < STALE_LOCK_MS) return add;
+  log('timeline: removing a stale index.lock', cwd, `${Math.round(age / 1000)}s old`);
+  fs.rmSync(lock, { force: true });
+  return sg(cwd, ADD);
+}
+
 async function ensure(cwd) {
-  if (disabled.has(cwd)) return false;
+  if (isOff(cwd)) return false;
   if (!ready.has(cwd)) {
     ready.set(
       cwd,
       (async () => {
         const why = unsuitable(cwd);
         if (why) {
-          disabled.set(cwd, why);
+          switchOff(cwd, why, Infinity);
           return false;
         }
         const dir = dirOf(cwd);
@@ -61,7 +110,7 @@ async function ensure(cwd) {
           privateDir(ROOT);
           const r = await run('git', ['init', '-q', '--bare', dir], { timeout: 20_000 });
           if (r.code !== 0) {
-            disabled.set(cwd, 'git init failed: ' + r.stderr.trim());
+            switchOff(cwd, 'git init failed: ' + r.stderr.trim());
             return false;
           }
           fs.writeFileSync(path.join(dir, 'config'), `[core]\n\tbare = false\n\trepositoryformatversion = 0\n\tfilemode = false\n\tlogallrefupdates = false\n[gc]\n\tauto = 0\n`);
@@ -117,17 +166,11 @@ async function statsBetween(cwd, from, to) {
  * @param {{ id: string, cwd: string }} session
  * @param {StepInput} what
  */
-export function record(session, { kind, tool, toolUseId, label, uuid: msgUuid, onlyIfChanged }) {
-  const cwd = session.cwd;
-  const prev = queues.get(cwd) || Promise.resolve();
-  const p = prev
-    .then(() => take(session, { kind, tool, toolUseId, label, uuid: msgUuid, onlyIfChanged }))
-    .catch((e) => {
-      log('timeline failed', session.id, e?.message);
-      return null;
-    });
-  queues.set(cwd, p);
-  return p;
+export function record(session, what) {
+  return serial(session.cwd, () => take(session, what)).catch((e) => {
+    log('timeline failed', session.id, e?.message);
+    return null;
+  });
 }
 
 /** @param {{ id: string, cwd: string }} session @param {StepInput} what */
@@ -136,15 +179,14 @@ async function take(session, { kind, tool, toolUseId, label, uuid: msgUuid, only
   const sid = session.id;
   if (!(await ensure(cwd))) return null;
   const t0 = Date.now();
-  const add = await sg(cwd, ['add', '-A', '--ignore-errors', '--', '.']);
+  const add = await addAll(cwd);
   if (add.code !== 0 && !/warning/i.test(add.stderr)) {
     log('timeline add failed', sid, add.stderr.trim().slice(0, 300));
-    if (/fatal: (not a git repository|Unable to create)/.test(add.stderr)) disabled.set(cwd, add.stderr.trim().slice(0, 120));
+    if (/fatal: (not a git repository|Unable to create)/.test(add.stderr)) switchOff(cwd, add.stderr.trim().slice(0, 120));
     return null;
   }
   if (Date.now() - t0 > SLOW_MS) {
-    disabled.set(cwd, `indexing this folder takes too long (${Math.round((Date.now() - t0) / 1000)}s)`);
-    log('timeline disabled for', cwd, disabled.get(cwd));
+    switchOff(cwd, `indexing this folder takes too long (${Math.round((Date.now() - t0) / 1000)}s)`);
     return null;
   }
   const wt = await sg(cwd, ['write-tree']);
@@ -201,7 +243,8 @@ function publicStep(s) {
 
 export function steps(session) {
   const cwd = session.cwd;
-  return { cwd: slash(cwd), enabled: !disabled.has(cwd), reason: disabled.get(cwd) || null, steps: loadSteps(cwd, session.id).map(publicStep) };
+  const off = isOff(cwd);
+  return { cwd: slash(cwd), enabled: !off, reason: off ? disabled.get(cwd)?.reason || null : null, steps: loadSteps(cwd, session.id).map(publicStep) };
 }
 
 function find(session, n) {
@@ -216,8 +259,10 @@ export async function diff(session, { from, to }) {
   if (!a) return { files: [] };
   let r;
   if (to === undefined || to === null || to === 'now') {
-    await sg(cwd, ['add', '-A', '--ignore-errors', '--', '.']);
-    r = await sg(cwd, ['diff', '--no-ext-diff', '--find-renames', '-U3', '--cached', a, '--']);
+    r = await serial(cwd, async () => {
+      await addAll(cwd);
+      return sg(cwd, ['diff', '--no-ext-diff', '--find-renames', '-U3', '--cached', a, '--']);
+    });
   } else {
     const b = typeof to === 'number' ? find(session, to)?.commit : to;
     if (!b) return { files: [] };
@@ -257,22 +302,24 @@ export async function restore(session, { n, paths }) {
   const target = find(session, n);
   if (!target?.commit) throw new Error('That point in the timeline has no snapshot.');
   const cur = await record(session, { kind: 'restore', label: 'Before restoring', onlyIfChanged: true });
-  if (paths?.length) {
-    const inTarget = new Set((await sg(cwd, ['ls-tree', '-r', '--name-only', target.commit, '--', ...paths])).stdout.split('\n').filter(Boolean));
-    const have = paths.filter((p) => inTarget.has(p));
-    if (have.length) {
-      const r = await sg(cwd, ['checkout', '-f', target.commit, '--', ...have]);
-      if (r.code !== 0) throw new Error(r.stderr.trim() || 'git checkout failed');
+  await serial(cwd, async () => {
+    if (paths?.length) {
+      const inTarget = new Set((await sg(cwd, ['ls-tree', '-r', '--name-only', target.commit, '--', ...paths])).stdout.split('\n').filter(Boolean));
+      const have = paths.filter((p) => inTarget.has(p));
+      if (have.length) {
+        const r = await sg(cwd, ['checkout', '-f', target.commit, '--', ...have]);
+        if (r.code !== 0) throw new Error(r.stderr.trim() || 'git checkout failed');
+      }
+      for (const p of paths) {
+        if (inTarget.has(p)) continue;
+        const abs = path.join(cwd, p);
+        if (under(path.resolve(cwd), abs) && abs !== path.resolve(cwd)) fs.rmSync(abs, { force: true });
+      }
+    } else {
+      const r = await sg(cwd, ['read-tree', '--reset', '-u', target.commit]);
+      if (r.code !== 0) throw new Error(r.stderr.trim() || 'git read-tree failed');
     }
-    for (const p of paths) {
-      if (inTarget.has(p)) continue;
-      const abs = path.join(cwd, p);
-      if (under(path.resolve(cwd), abs) && abs !== path.resolve(cwd)) fs.rmSync(abs, { force: true });
-    }
-  } else {
-    const r = await sg(cwd, ['read-tree', '--reset', '-u', target.commit]);
-    if (r.code !== 0) throw new Error(r.stderr.trim() || 'git read-tree failed');
-  }
+  });
   const after = await record(session, { kind: 'restore', label: paths?.length ? `Restored ${paths.length === 1 ? paths[0] : paths.length + ' files'} from step ${n}` : `Restored everything to step ${n}` });
   return { ok: true, safety: cur ? publicStep(cur) : null, step: after ? publicStep(after) : null };
 }

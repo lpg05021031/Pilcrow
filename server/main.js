@@ -678,8 +678,8 @@ export async function start({ shell = 'none', port, quiet = false, onQuit, heart
   let stopping = null;
   /**
    * Stop everything, once. What is pending is written before the first await, so even a caller that
-   * cannot wait has it on disk; the promise settles when the terminals' processes are gone, and the
-   * quit paths wait for it before they exit. Dispatch and helpers let go of the sessions first, so the
+   * cannot wait has it on disk; the promise settles when the terminals' processes are gone and the
+   * timeline steps under way are taken (snapshots.drain), and the quit paths wait for it before they exit. Dispatch and helpers let go of the sessions first, so the
    * processes closing here read as a restart to them (their runs resume as stopped), not as failures.
    */
   const stop = () =>
@@ -702,7 +702,7 @@ export async function start({ shell = 'none', port, quiet = false, onQuit, heart
       clearInterval(heartbeat);
       for (const ws of clients) ws.close();
       server.close();
-      await term.closeAll();
+      await Promise.all([term.closeAll(), snapshots.drain()]);
     })());
   return { url, port: actualPort, stop, busy: () => sessions.busy(), connections: () => totalConnections };
 }
