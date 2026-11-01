@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ArrowUpRight, Bot, Brain, Wrench, MessageSquareQuote, Workflow, PanelLeftOpen, Hourglass, CircleCheck, CircleAlert, Activity, CircleDollarSign } from 'lucide-react';
-import { useStore, call, openSession, respond, setUi, mergeLive } from '../lib/store';
+import { useStore, call, openSession, respond, setUi, mergeLive, ALLOW_ONCE, DECLINE } from '../lib/store';
 import { isWorking, type PermissionRequest, type SessionState, type SessionSummary, type TaskInfo } from '../lib/types';
 import { basename, cost, duration, timeAgo, relPath, plural } from '../lib/format';
 import { ContextRing, Spinner, Num } from './ui/bits';
@@ -309,9 +309,9 @@ function NeedsCard({ s, st, first, focused, now }: { s: SessionSummary; st?: Par
       setBusy(false);
     }
   };
-  const allow = () => decide({ behavior: 'allow', decisionClassification: 'user_temporary' });
+  const allow = () => decide(ALLOW_ONCE);
   const always = () => decide({ behavior: 'allow', updatedPermissions: perm?.suggestions, decisionClassification: 'user_permanent' });
-  const deny = () => decide({ behavior: 'deny', message: 'The user declined this action.', decisionClassification: 'user_reject' });
+  const deny = () => decide(DECLINE);
   // a helper's request can be answered for every helper of its lead at once (HELPERS.md §5.6)
   const helperOf = s.helper || null;
   const allowAllHelpers = async () => {

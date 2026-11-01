@@ -3,7 +3,7 @@ import { useWindowKey } from '../ui/keys';
 import { CornerDownLeft } from 'lucide-react';
 import type { ToolItem } from '../../lib/transcript';
 import type { PermissionRequest, PermissionSuggestion } from '../../lib/types';
-import { respond, toast } from '../../lib/store';
+import { ALLOW_ONCE, DECLINE, respond, toast } from '../../lib/store';
 import { relPath } from '../../lib/format';
 import type { ToolCtx } from './ToolCard';
 import { str } from '../../lib/tools';
@@ -108,10 +108,10 @@ export function PermissionCard({ perm, item, ctx, stale = false }: { perm: Permi
       setBusy(false);
     }
   };
-  const allow = () => decide({ behavior: 'allow', decisionClassification: 'user_temporary' });
+  const allow = () => decide(ALLOW_ONCE);
   const always = () => decide({ behavior: 'allow', updatedPermissions: perm.suggestions, decisionClassification: 'user_permanent' });
   const deny = () => {
-    decide({ behavior: 'deny', message: feedback.trim() ? `The user declined and said: ${feedback.trim()}` : 'The user declined this action.', decisionClassification: 'user_reject' });
+    decide(feedback.trim() ? { ...DECLINE, message: `The user declined and said: ${feedback.trim()}` } : DECLINE);
     if (feedback.trim()) toast('Sent your note to Claude', 'info');
   };
 

@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowLeft, Pause, Play, Square, Ellipsis, GitCommitHorizontal, GitPullRequestArrow, ExternalLink, RotateCw, BookMarked, CalendarClock, ClipboardPaste, Trash, CircleDollarSign } from 'lucide-react';
-import { useStore, call, openSession, respond, confirmAction, toast, showDispatch, openJob, runsIn, loadPlaybooks, setDialog, showPage, toasted } from '../../lib/store';
+import { useStore, call, openSession, respond, ALLOW_ONCE, DECLINE, confirmAction, toast, showDispatch, openJob, runsIn, loadPlaybooks, setDialog, showPage, toasted } from '../../lib/store';
 import { TERMINAL, type DispatchJob, type DispatchReview, type DispatchRun, type Playbook } from '../../lib/types';
 import { cost, duration, plural } from '../../lib/format';
 import { Switch } from '../ui/bits';
 import { useNow } from '../ui/hooks';
 import { copyText } from '../ui/clipboard';
 import { MenuButton } from '../ui/Popover';
-import { ACTIVE, Glyph, STATE_WORD, askedBy, clockMmss, elapsedText, groupRequests, jobCostText, type RequestGroup } from './common';
+import { ACTIVE, Glyph, RequestAnswers, STATE_WORD, askedBy, clockMmss, elapsedText, groupRequests, jobCostText, type RequestGroup } from './common';
 
 /**
  * A job's view: the header with its state and controls, the brief and the plan, the canary waiting
@@ -342,13 +342,8 @@ function CanaryCard({ job, runs }: { job: DispatchJob; runs: DispatchRun[] }) {
 
 /** A request group (`.ovc.needs`): the tool as the title, who asked under it, how long it has waited, what it asks in the well, the answers. */
 function RequestCard({ jobId, group, now }: { jobId: string; group: RequestGroup; now: number }) {
-  const first = group.asks[0];
   const [tool, ...rest] = group.label.split(': ');
   const what = rest.join(': ');
-  const allowOne = () => first && respond(first.run.sessionId || '', first.pending.requestId, { behavior: 'allow', decisionClassification: 'user_temporary' });
-  const allowAll = () => call('dispatch.allow', { id: jobId, key: group.key });
-  const denyOne = () => first && respond(first.run.sessionId || '', first.pending.requestId, { behavior: 'deny', message: 'The user declined this action.', decisionClassification: 'user_reject' });
-  const open = () => first?.run.sessionId && openSession(first.run.sessionId);
   return (
     <article className="ovc needs dp-ask">
       <span className="ovc-rail" aria-hidden="true" />
@@ -363,23 +358,7 @@ function RequestCard({ jobId, group, now }: { jobId: string; group: RequestGroup
         <span className="ovc-perm-what mono">{what || group.label}</span>
       </div>
       <div className="ovc-actions">
-        {group.interactive ? (
-          <button className="btn sm primary" onClick={open}>
-            Open to respond
-          </button>
-        ) : (
-          <>
-            <button className="btn sm primary" onClick={allowOne}>
-              Allow
-            </button>
-            <button className="btn sm" onClick={allowAll} title="Answer every run of this job that asks the same thing, now and later">
-              Allow for all{group.asks.length > 1 ? ` · ${group.asks.length}` : ''}
-            </button>
-            <button className="btn sm ghost" onClick={denyOne}>
-              Deny
-            </button>
-          </>
-        )}
+        <RequestAnswers jobId={jobId} group={group} />
       </div>
     </article>
   );
@@ -388,7 +367,7 @@ function RequestCard({ jobId, group, now }: { jobId: string; group: RequestGroup
 function RunRow({ run, jobId, now, runs }: { run: DispatchRun; jobId: string; now: number; runs: DispatchRun[] }) {
   const open = () => (run.sessionId ? openSession(run.sessionId) : toast('This run has no session yet.', 'info'));
   const pending = run.pending?.[0];
-  const answer = (allow: boolean) => pending && run.sessionId && respond(run.sessionId, pending.requestId, allow ? { behavior: 'allow', decisionClassification: 'user_temporary' } : { behavior: 'deny', message: 'The user declined this action.', decisionClassification: 'user_reject' });
+  const answer = (allow: boolean) => pending && run.sessionId && respond(run.sessionId, pending.requestId, allow ? ALLOW_ONCE : DECLINE);
   const elapsed = run.startedAt ? clockMmss((run.endedAt || now) - run.startedAt) : '—';
   let nowText = '';
   let nowClass = '';

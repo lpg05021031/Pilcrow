@@ -842,6 +842,9 @@ export const setMode = (id: string, mode: PermissionMode) => call('session.setMo
 export const setModel = (id: string, model: string) => call('session.setModel', { id, model });
 export const setEffort = (id: string, effort: Effort) => call('session.setEffort', { id, effort });
 export const respond = (id: string, requestId: string, decision: PermissionDecision) => call('session.permission', { id, requestId, decision });
+/** Allow this once, and decline: the answers every card gives a request. */
+export const ALLOW_ONCE: PermissionDecision = { behavior: 'allow', decisionClassification: 'user_temporary' };
+export const DECLINE: PermissionDecision = { behavior: 'deny', message: 'The user declined this action.', decisionClassification: 'user_reject' };
 
 export async function renameSession(id: string, title: string) {
   await call('session.rename', { id, title });

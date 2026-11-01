@@ -1,12 +1,12 @@
 import { useMemo } from 'react';
 import { Plus, PanelLeftOpen, Play } from 'lucide-react';
-import { useStore, call, openSession, respond, setUi, showDispatch, openJob, runsOf, runsIn, toasted } from '../../lib/store';
+import { useStore, call, openSession, setUi, showDispatch, openJob, runsOf, runsIn, toasted } from '../../lib/store';
 import type { DispatchJob } from '../../lib/types';
 import { cost, duration, plural } from '../../lib/format';
 import { Mark } from '../ui/brand';
 import { useNow } from '../ui/hooks';
 import { onActivate } from '../ui/keys';
-import { SegmentBar, askedBy, countsText, elapsedText, groupRequests, jobCostText, jobStateText, type RequestGroup } from './common';
+import { RequestAnswers, SegmentBar, askedBy, countsText, elapsedText, groupRequests, jobCostText, jobStateText, type RequestGroup } from './common';
 
 /**
  * The board: every job at a glance. The control room's discipline: sections appear only when they
@@ -98,36 +98,15 @@ export function Board() {
 
 /** A request waiting on a job, as one line in a well (`.ovc-well`): the tool, what it asks, who asked, the answers. */
 function RequestRow({ jobId, group }: { jobId: string; group: RequestGroup }) {
-  const first = group.asks[0];
   const [tool, ...rest] = group.label.split(': ');
   const what = rest.join(': ');
-  const allowOne = () => first && respond(first.run.sessionId || '', first.pending.requestId, { behavior: 'allow', decisionClassification: 'user_temporary' });
-  const allowAll = () => call('dispatch.allow', { id: jobId, key: group.key });
-  const denyOne = () => first && respond(first.run.sessionId || '', first.pending.requestId, { behavior: 'deny', message: 'The user declined this action.', decisionClassification: 'user_reject' });
-  const open = () => first?.run.sessionId && openSession(first.run.sessionId);
   return (
     <div className="ovc-well dp-ask" onClick={(e) => e.stopPropagation()}>
       <span className="ovc-perm-tool">{what ? tool : group.label}</span>
       {what && <span className="ovc-perm-what mono ellipsis">{what}</span>}
       <span className="dp-ask-who faint">{askedBy(group.names)}</span>
       <span className="grow" />
-      {group.interactive ? (
-        <button className="btn sm primary" onClick={open}>
-          Open to respond
-        </button>
-      ) : (
-        <>
-          <button className="btn sm primary" onClick={allowOne}>
-            Allow
-          </button>
-          <button className="btn sm" onClick={allowAll} title="Answer every run of this job that asks the same thing, now and later">
-            Allow for all{group.asks.length > 1 ? ` · ${group.asks.length}` : ''}
-          </button>
-          <button className="btn sm ghost" onClick={denyOne}>
-            Deny
-          </button>
-        </>
-      )}
+      <RequestAnswers jobId={jobId} group={group} />
     </div>
   );
 }
