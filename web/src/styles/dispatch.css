@@ -193,7 +193,7 @@
   font-weight: 600;
   letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: var(--text-4);
+  color: var(--text-3);
   padding: var(--sp-1_5) var(--sp-2) var(--sp-2);
   border-bottom: 1px solid var(--hair);
 }

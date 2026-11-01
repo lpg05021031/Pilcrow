@@ -112,10 +112,13 @@
   --fill-2: rgba(255, 255, 255, 0.15);
   --fill-3: rgba(255, 255, 255, 0.2);
 
+  /* Text, primary to faintest. --text-2 and --text-3 meet WCAG AA (4.5:1) as small text on every
+     surface they are used on, fills included; --text-4 is for marks that are not text (dots, rails,
+     rings) and for disabled controls, and meets the 3:1 asked of those. */
   --text: #ededed;
   --text-2: #9c9c9c;
-  --text-3: #878787;
-  --text-4: #6b6b6b;
+  --text-3: #8c8c8c;
+  --text-4: #707070;
 
   /* elevation: a card is a lighter surface with a hairline; it never casts a shadow on dark */
   --card: var(--raised);
@@ -231,9 +234,9 @@
   --fill-3: rgba(0, 0, 0, 0.145);
 
   --text: #1a1a1a;
-  --text-2: #666666;
-  --text-3: #878787;
-  --text-4: #a3a3a3;
+  --text-2: #636363;
+  --text-3: #717171;
+  --text-4: #8f8f8f;
 
   /* elevation: on a white page a card needs a soft shadow to exist at all */
   --card: #ffffff;

@@ -122,7 +122,7 @@
   text-align: center;
   font-size: var(--fs-small);
   line-height: 1.5;
-  color: var(--text-4);
+  color: var(--text-3);
   animation: fade var(--t-slow) var(--ease) 700ms both;
 }
 .boot-line.long {
@@ -267,7 +267,7 @@ body.resizing iframe {
 }
 .side-kbd {
   font-size: var(--fs-micro);
-  color: var(--text-4);
+  color: var(--text-3);
   opacity: 0;
   transition: opacity var(--t-fast);
 }
@@ -476,7 +476,7 @@ body.resizing iframe {
 }
 .side-time {
   font-size: var(--fs-micro);
-  color: var(--text-4);
+  color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
 .side-row-menu {
@@ -967,7 +967,7 @@ body.resizing iframe {
   align-items: center;
   justify-content: center;
   font-size: var(--fs-micro);
-  color: var(--text-4);
+  color: var(--text-3);
   opacity: 0;
   transition: opacity var(--t-med);
 }
@@ -1226,7 +1226,7 @@ body.resizing iframe {
 .menu-item kbd {
   background: none;
   box-shadow: none;
-  color: var(--text-4);
+  color: var(--text-3);
 }
 .menu-sep {
   height: 1px;
@@ -1597,7 +1597,7 @@ button.chip:hover {
   border-radius: var(--r-2);
   font-size: var(--fs-small);
   font-weight: 500;
-  color: var(--text-3);
+  color: var(--text-2);
 }
 .seg button:hover:not(:disabled) {
   color: var(--text);
@@ -1788,7 +1788,9 @@ button.chip:hover {
   background: var(--fill-2);
   color: var(--text);
 }
-.pal-item.active svg {
+.pal-item.active svg,
+.pal-item.active .pal-hint,
+.pal-item.active kbd {
   color: var(--text);
 }
 .pal-label {
@@ -2246,7 +2248,7 @@ button.chip:hover {
   width: 26px;
   height: 26px;
   border-radius: var(--r-2);
-  color: var(--text-4);
+  color: var(--text-3);
   opacity: 0;
 }
 .side-new-wrap:hover .side-new-opts,
@@ -2306,7 +2308,7 @@ button.chip:hover {
   font-size: var(--fs-ui);
 }
 .fpick-search input::placeholder {
-  color: var(--text-4);
+  color: var(--text-3);
 }
 .fpick-list {
   padding: var(--sp-1_5);
@@ -2338,7 +2340,7 @@ button.chip:hover {
 }
 .fpick-path {
   font-size: var(--fs-micro);
-  color: var(--text-4);
+  color: var(--text-3);
   max-width: 160px;
 }
 .fpick-check {
@@ -2412,7 +2414,7 @@ button.chip:hover {
   margin-top: 3px;
   font-size: var(--fs-micro);
   font-weight: 600;
-  color: var(--text-4);
+  color: var(--text-3);
   text-align: center;
 }
 .queue-text {
@@ -2521,7 +2523,7 @@ button.chip:hover {
   color: var(--text);
 }
 .ns-disclose-chev {
-  color: var(--text-4);
+  color: var(--text-3);
   transform: rotate(-90deg);
 }
 .ns-disclose.open .ns-disclose-chev {
@@ -2710,14 +2712,14 @@ html[data-os='win'] .msg-bubble {
   height: 18px;
   padding: 0 5px;
   border-radius: 9px;
-  background: var(--fill-2);
+  background: var(--fill-1);
   font-size: var(--fs-micro);
-  color: var(--text-3);
+  color: var(--text-2);
 }
 .cust-group-hint {
   margin-left: auto;
   font-size: var(--fs-micro-plus);
-  color: var(--text-4);
+  color: var(--text-3);
   max-width: 48%;
 }
 .cust-empty,
@@ -3119,7 +3121,7 @@ html[data-os='win'] .msg-bubble {
   text-overflow: ellipsis;
 }
 .ov-tile-sub {
-  color: var(--text-4);
+  color: var(--text-3);
 }
 
 /* ---- sections */
@@ -3148,7 +3150,7 @@ html[data-os='win'] .msg-bubble {
   height: 20px;
   padding: 0 var(--sp-1_5);
   border-radius: var(--r-3);
-  background: var(--fill-2);
+  background: var(--fill-1);
   font-size: var(--fs-micro);
   font-weight: 600;
   color: var(--text-2);
@@ -3186,13 +3188,13 @@ html[data-os='win'] .msg-bubble {
   padding: var(--sp-3_5) var(--sp-4);
   border-radius: 12px;
   background: var(--fill-1);
-  color: var(--text-3);
+  color: var(--text-2);
   font-size: var(--fs-small);
   line-height: 1.5;
 }
 .ov-empty > svg {
   flex: none;
-  color: var(--text-4);
+  color: var(--text-3);
 }
 
 /* ---- cards */
@@ -3396,7 +3398,7 @@ html[data-os='win'] .msg-bubble {
   justify-content: center;
 }
 .ovr-ok {
-  color: var(--text-4);
+  color: var(--text-3);
 }
 .ovr-main {
   display: grid;
@@ -3418,7 +3420,7 @@ html[data-os='win'] .msg-bubble {
   display: inline-flex;
   gap: var(--sp-2_5);
   font-size: var(--fs-micro);
-  color: var(--text-4);
+  color: var(--text-3);
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
@@ -3470,7 +3472,7 @@ html[data-os='win'] .msg-bubble {
   display: flex;
   justify-content: space-between;
   font-size: var(--fs-tiny);
-  color: var(--text-4);
+  color: var(--text-3);
 }
 .spend-top {
   display: grid;
@@ -3669,7 +3671,7 @@ html[data-os='win'] .msg-bubble {
   margin-left: auto;
   flex: none;
   font-size: var(--fs-micro);
-  color: var(--text-4);
+  color: var(--text-3);
   white-space: nowrap;
 }
 .run-sum {
@@ -3878,7 +3880,7 @@ html[data-os='win'] .msg-bubble {
   padding: 0 5px;
   border-radius: var(--r-5);
   font-size: var(--fs-tiny);
-  color: var(--text-4);
+  color: var(--text-3);
 }
 .touches:hover,
 .touches.on {
@@ -3929,10 +3931,10 @@ html[data-os='win'] .msg-bubble {
 }
 .touches-sub {
   font-size: var(--fs-micro);
-  color: var(--text-4);
+  color: var(--text-3);
 }
 .touches-go {
-  color: var(--text-4);
+  color: var(--text-3);
 }
 
 /* ================================================================ project memory */
@@ -3957,6 +3959,9 @@ html[data-os='win'] .msg-bubble {
   flex: 1;
   display: grid;
   gap: var(--sp-0_5);
+}
+.mem-settings .hint {
+  color: var(--text-2); /* on the group's fill, the faintest text would fall under 4.5:1 */
 }
 .mem-setting-title {
   font-weight: 550;

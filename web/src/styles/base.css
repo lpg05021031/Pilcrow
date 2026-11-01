@@ -99,6 +99,16 @@ svg {
   outline-offset: 2px;
   border-radius: var(--r-1);
 }
+/* A field drawn borderless inside a row of its own hides its outline; the row carries the focus. */
+.pal-input:focus-within,
+.findbar:focus-within,
+.ask-other:focus-within,
+.fpick-search:focus-within,
+.side-search:focus-within,
+.history:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: -2px;
+}
 
 /* Scrollbars: a slim overlay-style thumb with no track, no arrows, that darkens on hover.
    Only the -webkit- rules are used: once `scrollbar-color` is set, Chromium ignores them and falls
@@ -152,9 +162,9 @@ kbd {
   font-family: var(--font-ui);
   font-size: var(--fs-micro);
   font-weight: 500;
-  color: var(--text-3);
+  color: var(--text-2);
   border-radius: var(--r-1);
-  background: var(--fill-2);
+  background: var(--fill-1);
   box-shadow: inset 0 -1px 0 var(--hair);
 }
 
@@ -442,7 +452,7 @@ kbd {
 }
 .num-add.zero,
 .num-del.zero {
-  color: var(--text-4);
+  color: var(--text-3);
 }
 
 .spin {

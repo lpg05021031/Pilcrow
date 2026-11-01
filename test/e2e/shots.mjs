@@ -83,6 +83,17 @@ const key = async (k, wait = 500) => {
 
 try {
   await page.goto(URL_);
+  // The theme the app shows is the saved setting (the mock's says dark): change the setting itself.
+  await page.evaluate(
+    (theme) =>
+      new Promise((ok) => {
+        const ws = new WebSocket(`ws://${location.host}/ws`);
+        ws.onopen = () => ws.send(JSON.stringify({ t: 'req', id: 1, m: 'config.set', p: { theme } }));
+        ws.onmessage = () => (ws.close(), ok());
+      }),
+    THEME,
+  );
+  await page.reload();
   await page.waitForSelector('[data-sid]', { timeout: 15_000 });
   await sleep(1200);
   await shot('welcome');

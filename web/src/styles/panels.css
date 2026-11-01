@@ -355,7 +355,7 @@
   color: var(--text-3);
 }
 .tree-row > .lucide-chevron-right {
-  color: var(--text-4);
+  color: var(--text-3);
 }
 .tree-err {
   font-size: var(--fs-micro-plus);
@@ -899,7 +899,7 @@
   justify-content: space-between;
   padding: var(--sp-0_5) var(--sp-1) 0;
   font-size: var(--fs-tiny);
-  color: var(--text-4);
+  color: var(--text-3);
 }
 
 .tl-list {
@@ -1013,7 +1013,7 @@
   display: flex;
   gap: var(--sp-2);
   font-size: var(--fs-micro);
-  color: var(--text-4);
+  color: var(--text-3);
 }
 .tl-stat {
   display: inline-flex;
@@ -1258,7 +1258,7 @@
 }
 .stat-k {
   font-size: var(--fs-micro);
-  color: var(--text-3);
+  color: var(--text-2);
   white-space: nowrap;
 }
 .stat-v {
