@@ -355,7 +355,7 @@ test('the / and @ lists are listboxes the arrows walk; a lit row keeps its words
   await page.waitForSelector('.suggest', { state: 'detached', timeout: 3000 });
 });
 
-test('a lit row in a menu and the open session in the sidebar set their faint words in --text', async ({ page }) => {
+test('a lit row in a menu, the open session in the sidebar and the chosen mode set their faint words in --text', async ({ page }) => {
   await open(page, 'sess-login');
   const side = await inks(page, '.side-row.active .side-row-meta, .side-row.active .side-time', '--text');
   expect(side.got.length && side.got.every((c) => c === side.want), `the open session's folder and time (${JSON.stringify(side)})`);
@@ -367,6 +367,12 @@ test('a lit row in a menu and the open session in the sidebar set their faint wo
   const menu = await inks(page, '.menu-item.active .menu-hint, .menu-item.active kbd', '--text');
   expect(menu.got.length && menu.got.every((c) => c === menu.want), `the lit menu row's hint (${JSON.stringify(menu)})`);
   await page.keyboard.press('Escape');
+  await page.keyboard.press('Control+Shift+N');
+  await page.waitForSelector('.dialog');
+  await page.click('.ns-disclose');
+  await page.waitForSelector('.radio-row.on .radio-hint');
+  const mode = await inks(page, '.radio-row.on .radio-hint', '--text');
+  expect(mode.got.length && mode.got.every((c) => c === mode.want), `the chosen mode's hint (${JSON.stringify(mode)})`);
 });
 
 test('messages sent while Claude works wait in a named queue, each with named actions', async ({ page }) => {

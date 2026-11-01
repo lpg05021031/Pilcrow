@@ -564,6 +564,14 @@ test('answer cards: the question and the plan open with the dot, carry key boxes
   await page.keyboard.press('1');
   await page.waitForSelector('.ask-opt.on', { timeout: 5_000 });
   expect((await page.locator('.ask-opt.on .ask-opt-label').innerText()) === 'Compact', '1 picked the first option');
+  const ink = await page.evaluate(() => {
+    const probe = document.body.appendChild(document.createElement('span'));
+    probe.style.color = 'var(--text)';
+    const want = getComputedStyle(probe).color;
+    probe.remove();
+    return { got: getComputedStyle(document.querySelector('.ask-opt.on .ask-opt-desc')).color, want };
+  });
+  expect(ink.got === ink.want, `the chosen option's description is in --text on its fill, as tokens.css asks of a lit row (${JSON.stringify(ink)})`);
   await page.click('.ask-actions .btn.primary');
   await page.waitForFunction(() => document.body.innerText.includes('Compact it is.'), null, { timeout: 20_000 });
   await page.click('text=Asked you a question');

@@ -1538,6 +1538,10 @@ html:not([data-engine='webkit']) .page:last-child > .unit:nth-last-child(-n + 3)
   color: var(--text-3);
   line-height: 1.45;
 }
+/* on the chosen row's fill --text-3 falls short of 4.5:1 (tokens.css) */
+.ask-opt.on .ask-opt-desc {
+  color: var(--text);
+}
 .ask-other {
   align-items: center;
   cursor: text;
