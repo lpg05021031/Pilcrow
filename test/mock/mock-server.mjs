@@ -6,14 +6,17 @@
 //   node test/mock/mock-server.mjs [port]        default 5300
 //   MOCK_LONG=400                                add a conversation with that many turns
 //
-// The tests drive it through the same socket with a few extra methods (mock.*), see below.
+// The tests drive it through the same socket with a few extra methods (mock.*), see below. Imported
+// (test/unit/mock.test.ts), it serves nothing and exports its handlers, to check their answers' shapes
+// against the real server's.
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { EventEmitter } from 'node:events';
 import { WebSocketServer } from 'ws';
-import { METHODS } from '../../server/main.js';
+import { METHODS, errorOf } from '../../server/main.js';
+import { AppError } from '../../server/util.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DIST = path.join(ROOT, 'web', 'dist');
@@ -1423,7 +1426,7 @@ const config = { theme: 'dark', fontSize: 14.5, sendKey: 'enter', claudeBinary: 
 const configDefaults = JSON.parse(JSON.stringify(config)); // what mock.reset puts back
 const S = (id) => {
   const s = sessions.get(id);
-  if (!s) throw new Error('Unknown session: ' + id);
+  if (!s) throw new AppError('not_found', 'Unknown session: ' + id);
   return s;
 };
 const listSessions = () => [...sessions.values()].map((s) => s.summary()).sort((a, b) => (b.lastModified || 0) - (a.lastModified || 0) || (a.id < b.id ? -1 : 1));
@@ -1630,12 +1633,28 @@ const methods = {
   },
   'timeline.steps': ({ id }) => ({ cwd: S(id).cwd, enabled: false, reason: 'Timeline is off in the mock', steps: [] }),
   'models.gateway': () => ({ ok: true, base: 'https://gateway.example.com', url: 'https://gateway.example.com/v1/models', models: [{ id: 'claude-mock-1', displayName: 'Claude Mock 1', created: null }, { id: 'claude-mock-fast', displayName: 'Claude Mock Fast', created: null }], fetchedAt: Date.now() }),
-  'git.info': ({ cwd }) => ({ isRepo: true, root: cwd, branch: 'main', head: 'abc1234', changed: 2, untracked: 1, insertions: 14, deletions: 3 }),
-  'git.diff': () => [],
-  'git.branches': () => ({ current: 'main', branches: ['main'] }),
+  // The same shapes as server/git.js (test/unit/mock.test.ts holds them side by side).
+  'git.info': ({ cwd }) => ({ isRepo: true, root: cwd, branch: 'main', head: 'abc1234def56', upstream: 'origin/main', ahead: 0, behind: 0, changed: 1, untracked: 1, isWorktree: false, mainRoot: cwd, insertions: 3, deletions: 1 }),
+  'git.diff': ({ cwd, base }) => ({
+    isRepo: true,
+    root: cwd,
+    base: base || 'HEAD',
+    baseRef: base || 'HEAD',
+    branch: 'main',
+    files: [
+      { path: 'NOTES.md', oldPath: null, status: 'A', binary: false, additions: 1, deletions: 0, hunks: [{ oldStart: 0, oldLines: 0, newStart: 1, newLines: 1, header: '', lines: [{ t: '+', s: 'Ship the lexer fix first.', n: 1 }] }], truncated: false, untracked: true },
+      { path: 'src/lexer.ts', oldPath: 'src/lexer.ts', status: 'M', binary: false, additions: 2, deletions: 1, hunks: [{ oldStart: 10, oldLines: 3, newStart: 10, newLines: 4, header: 'export function lex(src: string) {', lines: [{ t: ' ', s: '  let i = 0;', o: 10, n: 10 }, { t: '-', s: '  while (i < src.length - 1) {', o: 11 }, { t: '+', s: '  while (i < src.length) {', n: 11 }, { t: '+', s: '    // the last character is a token too', n: 12 }, { t: ' ', s: '    const c = src[i];', o: 12, n: 13 }] }], truncated: false },
+    ],
+    truncated: 0,
+    error: null,
+  }),
+  'git.branches': () => ({ current: 'main', list: [{ name: 'main', when: '2 hours ago' }, { name: 'pilcrow/lexer-fix', when: '3 days ago' }] }),
   'git.log': () => [],
   'fs.list': ({ dir }) => ({ dir, entries: [] }),
-  'fs.browse': ({ dir }) => ({ dir, parent: null, dirs: [], files: [] }),
+  'fs.browse': ({ dir }) => {
+    const d = dir || HOME;
+    return { dir: d, display: d.startsWith(HOME) ? '~' + d.slice(HOME.length) : d, parent: d === '/' ? null : path.posix.dirname(d), repo: d === PROJ, dirs: [], home: HOME };
+  },
   'fs.index': () => ['web/src/lib/store.ts', 'web/src/lib/transcript.ts', 'server/main.js', 'README.md'],
   'fs.read': ({ path: p }) => ({ path: p, size: 10, mtime: Date.now(), text: '// mock file\n' }),
   'term.list': () => [],
@@ -1750,13 +1769,17 @@ wss.on('connection', (ws) => {
       const r = await fn(m.p || {});
       send({ t: 'res', id: m.id, ok: true, r: r === undefined ? null : r });
     } catch (e) {
-      send({ t: 'res', id: m.id, ok: false, e: { code: 'failed', message: e?.message || String(e) } });
+      send({ t: 'res', id: m.id, ok: false, e: errorOf(e) });
     }
   });
   ws.send(JSON.stringify({ t: 'ev', e: 'hello', d: { version: VERSION } }));
 });
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log(`Pilcrow mock server: http://127.0.0.1:${PORT}/  (${sessions.size} sessions${LONG ? `, one with ${LONG} turns` : ''})`);
-});
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => process.exit(0));
+export { methods };
+
+if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
+  server.listen(PORT, '127.0.0.1', () => {
+    console.log(`Pilcrow mock server: http://127.0.0.1:${PORT}/  (${sessions.size} sessions${LONG ? `, one with ${LONG} turns` : ''})`);
+  });
+  for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => process.exit(0));
+}

@@ -394,9 +394,9 @@ export const METHODS = Object.freeze(Object.keys(rpcMethods({})));
 /**
  * What the client is told when a method fails: the message it shows, and a code it can act on.
  * A bug (TypeError and its kind) is 'internal'; an error a module threw on purpose to say no, with
- * a message for the person, is 'failed'.
+ * a message for the person, is 'failed'. The mock server answers through it too.
  */
-function errorOf(e) {
+export function errorOf(e) {
   const message = e?.message || String(e);
   if (e instanceof AppError) return { code: e.code, message };
   if (e?.code === 'ENOENT') return { code: 'not_found', message };

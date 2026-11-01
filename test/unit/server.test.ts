@@ -104,7 +104,7 @@ describe('RPC errors', () => {
     expect(made.ok).toBe(true);
     await rpc('dispatch.save', { id: made.r.id, brief: 'better' });
     const got = (await rpc('dispatch.get', { id: made.r.id })).r.job;
-    expect([got.brief, got.targets.map((t: any) => t.name)]).toEqual(['better', ['a']]);
+    expect([got.brief, got.targets.map((t: { name: string }) => t.name)]).toEqual(['better', ['a']]);
     await rpc('dispatch.remove', { id: made.r.id });
   });
 
