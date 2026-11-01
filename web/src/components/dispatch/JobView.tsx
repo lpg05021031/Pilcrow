@@ -5,7 +5,7 @@ import { TERMINAL, type DispatchJob, type DispatchReview, type DispatchRun, type
 import { cost, duration, plural } from '../../lib/format';
 import { Switch } from '../ui/bits';
 import { useNow } from '../ui/hooks';
-import { copyText } from '../ui/clipboard';
+import { copy } from '../ui/clipboard';
 import { MenuButton } from '../ui/Popover';
 import { ACTIVE, Glyph, RequestAnswers, STATE_WORD, askedBy, clockMmss, elapsedText, groupRequests, jobCostText, type RequestGroup } from './common';
 
@@ -121,9 +121,7 @@ export function JobView({ id }: { id: string }) {
       icon: ClipboardPaste,
       onSelect: async () => {
         const md = await call<string>('dispatch.export', { id }).catch(() => null);
-        if (md) {
-          await copyText(md).then(() => toast('Report copied as Markdown.', 'info'), () => toast('Could not copy to the clipboard', 'error'));
-        }
+        if (md) await copy(md, 'Report');
       },
     },
     ...(job.state === 'running' && job.capReached

@@ -1,11 +1,11 @@
 import { useRef, useState } from 'react';
 import { Copy, CircleCheck, CircleAlert, RefreshCw } from 'lucide-react';
-import { useStore, setDialog, setConfig, toast, call, setTheme } from '../lib/store';
+import { useStore, setDialog, setConfig, call, setTheme } from '../lib/store';
 import type { AppInfo, Config } from '../lib/types';
 import { tildify } from '../lib/format';
 import { Dialog } from './ui/Dialog';
 import { Switch, Seg } from './ui/bits';
-import { copyText } from './ui/clipboard';
+import { copy } from './ui/clipboard';
 import { Mark } from './ui/brand';
 import { useInk } from './ui/hooks';
 import { Select } from './ui/Select';
@@ -209,7 +209,7 @@ function Diagnostics({ info }: { info: AppInfo | null }) {
         ))}
       </div>
       <div className="row">
-        <button className="btn sm" onClick={() => copyText(text).then(() => toast('Diagnostics copied', 'success'), () => toast('Could not copy to the clipboard', 'error'))}>
+        <button className="btn sm" onClick={() => copy(text, 'Diagnostics')}>
           <Copy size={13} /> Copy diagnostics
         </button>
         <button className="btn sm ghost" onClick={() => call<AppInfo>('app.info').then(setFresh)}>

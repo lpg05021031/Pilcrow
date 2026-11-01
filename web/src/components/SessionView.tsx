@@ -10,7 +10,7 @@ import { FindBar } from './FindBar';
 import { Composer } from './Composer';
 import { MenuButton, Popover, useAnchor } from './ui/Popover';
 import { FolderPicker } from './FolderPicker';
-import { copyText } from './ui/clipboard';
+import { copy } from './ui/clipboard';
 import { AppIcon } from './ui/brand';
 import { Leave } from './ui/bits';
 import { ErrorBoundary } from './ui/ErrorBoundary';
@@ -122,7 +122,7 @@ export function SessionView({ session }: { session: SessionSummary }) {
     { separator: true },
     ...VIEW_MODES.map((v) => ({ label: `${v.label} view`, hint: v.hint, checked: v.id === view, onSelect: () => setUi({ view: v.id }) })),
     { separator: true },
-    { label: 'Copy session ID', icon: Copy, onSelect: () => copyText(id).then(() => toast('Session ID copied', 'success'), () => toast('Could not copy to the clipboard', 'error')) },
+    { label: 'Copy session ID', icon: Copy, onSelect: () => copy(id, 'Session ID') },
     ...(spent > 0 ? [{ label: `Cost so far ${cost(spent)}`, icon: CircleDollarSign, onSelect: () => setUi({ panel: true, panelTab: 'info' }) }] : []),
     { separator: true },
     ...(live ? [{ label: 'Stop Claude Code process', hint: 'It restarts on your next message', icon: Power, onSelect: () => call('session.close', { id }) }] : []),

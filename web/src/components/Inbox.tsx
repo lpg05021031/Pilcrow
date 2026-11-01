@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Play, Ellipsis, Pencil, Trash, CircleCheck, CircleAlert, CircleStop, ArrowUpRight, RotateCw, X, PanelLeftOpen, Check, MailOpen, Pause, Send, ClipboardPaste } from 'lucide-react';
 import { useStore, call, openSession, setUi, toast, confirmAction, openJob, setDialog, toasted } from '../lib/store';
-import { copyText } from './ui/clipboard';
+import { copy } from './ui/clipboard';
 import type { InboxItem, Schedule } from '../lib/types';
 import { basename, clock, cost, duration, timeAgo, plural, tildify } from '../lib/format';
 import { MenuButton } from './ui/Popover';
@@ -240,11 +240,9 @@ function HelpersCard({ it, index, onRead, onRemove }: { it: InboxItem; index: nu
       .split('\n')
       .map((l) => l.replace(/^[#*\s]+|[*\s]+$/g, ''))
       .find((l) => l && !/^handoff\b/i.test(l)) || '';
-  const copy = async () => {
+  const copyMd = async () => {
     const md = await call<string>('helpers.export', { leadId: it.leadId }).catch(() => null);
-    if (md) {
-      await copyText(md).then(() => toast('Copied as Markdown.', 'info'), () => toast('Could not copy to the clipboard', 'error'));
-    }
+    if (md) await copy(md, 'Handoffs');
   };
   return (
     <article className={`run dp-report${it.read ? '' : ' unread'} ${it.status}`} onClick={onRead} style={stagger(Math.min(index, 6))}>
@@ -291,7 +289,7 @@ function HelpersCard({ it, index, onRead, onRemove }: { it: InboxItem; index: nu
         <div className="run-foot">
           {it.cost > 0 && <span className="tnum">{cost(it.cost)}</span>}
           <div className="grow" />
-          <button className="btn xs ghost" onClick={(e) => (e.stopPropagation(), copy())} title="The helpers' handoffs as Markdown, to the clipboard">
+          <button className="btn xs ghost" onClick={(e) => (e.stopPropagation(), copyMd())} title="The helpers' handoffs as Markdown, to the clipboard">
             <ClipboardPaste size={11} /> Copy Markdown
           </button>
           {it.leadId && (
@@ -316,11 +314,9 @@ function DispatchCard({ it, index, onRead, onRemove }: { it: InboxItem; index: n
   const prs = targets.filter((t) => t.pr).length;
   const Icon = it.status === 'completed' ? CircleCheck : CircleAlert;
   const line = `${done} of ${plural(targets.length, 'repository', 'repositories')} done${landed ? ` · ${landed} committed` : ''}${prs ? ` · ${plural(prs, 'pull request')}` : ''}${it.reason ? ` · ${it.reason}` : ''}`;
-  const copy = async () => {
+  const copyMd = async () => {
     const md = await call<string>('dispatch.export', { id: it.jobId }).catch(() => null);
-    if (md) {
-      await copyText(md).then(() => toast('Report copied as Markdown.', 'info'), () => toast('Could not copy to the clipboard', 'error'));
-    }
+    if (md) await copy(md, 'Report');
   };
   return (
     <article className={`run dp-report${it.read ? '' : ' unread'} ${it.status}`} onClick={onRead} style={stagger(Math.min(index, 6))}>
@@ -369,7 +365,7 @@ function DispatchCard({ it, index, onRead, onRemove }: { it: InboxItem; index: n
           {it.cost > 0 && <span className="tnum">{cost(it.cost)}</span>}
           {rep?.rules?.length ? <span className="faint ellipsis">allowed for every repository: {rep.rules.map((r) => r.label || r.key).join('; ')}</span> : null}
           <div className="grow" />
-          <button className="btn xs ghost" onClick={(e) => (e.stopPropagation(), copy())} title="The report as Markdown, to the clipboard">
+          <button className="btn xs ghost" onClick={(e) => (e.stopPropagation(), copyMd())} title="The report as Markdown, to the clipboard">
             <ClipboardPaste size={11} /> Copy Markdown
           </button>
           {it.jobId && (

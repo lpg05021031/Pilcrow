@@ -3,7 +3,7 @@ import { ExternalLink, KeyRound, CircleCheck, ClipboardPaste } from 'lucide-reac
 import { useStore, call, setDialog, toast } from '../lib/store';
 import { Dialog } from './ui/Dialog';
 import { Spinner } from './ui/bits';
-import { copyText } from './ui/clipboard';
+import { copy } from './ui/clipboard';
 
 interface AuthStart {
   authUrl?: string;
@@ -87,7 +87,7 @@ export function McpAuthDialog({ spec }: { spec: { sessionId: string; name: strin
       footer={
         <>
           {start?.authUrl && !done && (
-            <button className="btn sm ghost" onClick={() => copyText(start.authUrl || '').then(() => toast('Link copied', 'success'), () => toast('Could not copy to the clipboard', 'error'))}>
+            <button className="btn sm ghost" onClick={() => copy(start.authUrl || '', 'Link')}>
               Copy link
             </button>
           )}

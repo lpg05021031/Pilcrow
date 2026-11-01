@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Gauge, Plug, Cpu, FolderGit2, Copy, RefreshCw, ChevronRight, FolderOpen, Trash, Wrench, Globe, BookMarked, Sparkles } from 'lucide-react';
+import { Gauge, Plug, Cpu, FolderGit2, RefreshCw, ChevronRight, FolderOpen, Trash, Wrench, Globe, BookMarked, Sparkles } from 'lucide-react';
 import { useStore, call, toast, confirmAction, setDialog, toasted } from '../../lib/store';
 import type { SessionSummary, MemoryNote } from '../../lib/types';
 import { tokens, cost, tildify, plural } from '../../lib/format';
 import { modelLabel, useGatewayModels } from '../../lib/models';
 import { contextLabel, Spinner, Num, RingGauge } from '../ui/bits';
-import { copyText } from '../ui/clipboard';
+import { CopyButton } from '../ui/clipboard';
 import { MODES } from '../composer/Menus';
 import type { McpStatus } from '../../lib/types';
 import { useShallow } from 'zustand/react/shallow';
@@ -148,9 +148,7 @@ export function InfoPanel({ session, cwd }: { session: SessionSummary; cwd: stri
           <span>Session ID</span>
           <span className="mono row">
             <span className="ellipsis">{session.id.slice(0, 13)}…</span>
-            <button className="icon-btn sm" onClick={() => copyText(session.id).then(() => toast('Copied', 'success'), () => toast('Could not copy to the clipboard', 'error'))} title="Copy session ID" aria-label="Copy session ID">
-              <Copy size={12} />
-            </button>
+            <CopyButton text={session.id} title="Copy session ID" size={12} />
           </span>
           <span>Folder</span>
           <span className="mono ellipsis" title={cwd}>

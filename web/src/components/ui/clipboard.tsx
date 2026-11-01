@@ -26,6 +26,11 @@ export async function copyText(text: string) {
   if (!ok) throw new Error('Copy was blocked');
 }
 
+const refused = () => toast('Could not copy to the clipboard', 'error');
+
+/** Copy, and say so in a toast: "<what> copied", or that the system refused. */
+export const copy = (text: string, what: string) => copyText(text).then(() => toast(`${what} copied`, 'success'), refused);
+
 /** Copy with a check-mark confirmation in place, instead of a toast; a copy the system refused says so in one. */
 export function CopyButton({ text, title = 'Copy', size = 13 }: { text: string; title?: string; size?: number }) {
   const [done, setDone] = useState(false);
@@ -39,7 +44,7 @@ export function CopyButton({ text, title = 'Copy', size = 13 }: { text: string; 
             setDone(true);
             setTimeout(() => setDone(false), 1300);
           },
-          () => toast('Could not copy to the clipboard', 'error'),
+          refused,
         )
       }
     >
