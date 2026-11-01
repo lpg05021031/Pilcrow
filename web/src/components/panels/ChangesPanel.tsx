@@ -82,7 +82,7 @@ export function ChangesPanel({ session, cwd }: { session: SessionSummary; cwd: s
   const fsRev = useStore((s) => s.fsRev);
   useEffect(() => {
     if (fsRev) load();
-  }, [fsRev]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fsRev]); // eslint-disable-line react-hooks/exhaustive-deps -- files changed outside Claude: reload, with the load of the moment
   useEffect(() => {
     if (Date.now() - lastLoad.current < 2500) return;
     const t = setTimeout(load, 1200);

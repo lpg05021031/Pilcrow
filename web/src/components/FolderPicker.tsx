@@ -39,7 +39,7 @@ export function FolderPicker({ value, onPick }: { value: string; onPick: (dir: s
   };
   useEffect(() => {
     if (browsing && !browse) nav(value || info?.home || '/');
-  }, [browsing]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [browsing]); // eslint-disable-line react-hooks/exhaustive-deps -- starts browsing once, where the value points; later moves browse on their own
 
   return (
     <div className="fpick">

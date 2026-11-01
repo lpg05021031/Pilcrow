@@ -84,7 +84,7 @@ export function Overview() {
   }, [ordered, focus]);
   useEffect(() => {
     box.current?.querySelector<HTMLElement>(`[data-card="${ordered[focus]?.id}"]`)?.scrollIntoView({ block: 'nearest' });
-  }, [focus]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [focus]); // eslint-disable-line react-hooks/exhaustive-deps -- scrolls when the keyboard focus moves, to the card it moved to
 
   const totalCost = fleet?.today.cost || 0;
   const median = useMemo(() => {
@@ -442,7 +442,7 @@ function Spend({ fleet, byId, now }: { fleet: Fleet; byId: Record<string, Sessio
       if (i >= 0 && i < n) out[i] += e.delta;
     }
     return out;
-  }, [fleet.spend, Math.floor(now / 60e3)]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fleet.spend, Math.floor(now / 60e3)]); // eslint-disable-line react-hooks/exhaustive-deps -- buckets move with the spend and once a minute, not every second
   const hour = buckets.reduce((a, b) => a + b, 0);
   const max = Math.max(...buckets, 0.0001);
   const top = fleet.today.perSession.slice(0, 5);

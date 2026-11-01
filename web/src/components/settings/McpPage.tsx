@@ -70,7 +70,7 @@ export function McpPage() {
   };
   useEffect(() => {
     load();
-  }, [cwd]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cwd]); // eslint-disable-line react-hooks/exhaustive-deps -- loads per folder; load() reads the session state of the moment
 
   const servers = useMemo(() => {
     const n = q.trim().toLowerCase();

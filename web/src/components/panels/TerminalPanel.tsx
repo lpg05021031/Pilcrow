@@ -75,7 +75,7 @@ export function TerminalPanel({ session, cwd, visible }: { session: SessionSumma
 
   useEffect(() => {
     if (visible && !(perSession.get(session.id) || []).length && info?.terminal.pty !== false) create();
-  }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps -- a first terminal opens the first time the tab is shown, not again on each render
 
   useEffect(
     () =>

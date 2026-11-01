@@ -61,7 +61,7 @@ export function Collapse({ open, className = '', children, onDone }: { open: boo
         onDone?.();
       };
     }
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps -- animates on open and close only; onDone is read at the end of the animation
 
   if (!mounted) return null;
   return (

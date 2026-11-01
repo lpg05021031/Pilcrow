@@ -58,7 +58,7 @@ export function McpAuthDialog() {
       }, 900);
       return () => clearTimeout(t);
     }
-  }, [status, start]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [status, start]); // eslint-disable-line react-hooks/exhaustive-deps -- reacts to the sign-in completing; close and the name are the same for the dialog's life
 
   const submitPasted = async () => {
     const url = pasted.trim();

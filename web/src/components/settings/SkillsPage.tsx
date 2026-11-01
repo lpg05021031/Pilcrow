@@ -40,7 +40,7 @@ export function SkillsPage() {
   };
   useEffect(() => {
     load();
-  }, [cwd]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [cwd]); // eslint-disable-line react-hooks/exhaustive-deps -- loads per folder; load() is a fresh closure each render
 
   const filter = (list: SkillInfo[]) => {
     const n = q.trim().toLowerCase();
@@ -55,7 +55,7 @@ export function SkillsPage() {
             { id: 'plugin', title: 'From plugins', hint: 'Installed with a plugin; edit them there', items: filter(data.plugin), editable: false },
           ]
         : [],
-    [data, q, info?.home], // eslint-disable-line react-hooks/exhaustive-deps
+    [data, q, info?.home], // eslint-disable-line react-hooks/exhaustive-deps -- filter() is a fresh closure over q, which is listed
   );
   const total = data ? data.user.length + data.project.length + data.plugin.length : 0;
 

@@ -186,7 +186,7 @@ function Scrubber({ steps, sel, onPick, now }: { steps: TimelineStep[]; sel: num
     const over = raw[raw.length - 1] - 96;
     if (over > 0) for (let i = 0; i < raw.length; i++) raw[i] = Math.max(0, raw[i] - over * (i / Math.max(1, raw.length - 1)));
     return raw;
-  }, [steps, Math.floor(now / 15_000)]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [steps, Math.floor(now / 15_000)]); // eslint-disable-line react-hooks/exhaustive-deps -- positions move with the steps and every 15 s of the clock, not every second
   const xAt = (i: number) => (i >= n ? 100 : pos[i] ?? 0);
   const nearest = (clientX: number) => {
     const r = ref.current!.getBoundingClientRect();

@@ -188,7 +188,7 @@ export function Editor({ path, doc, onChange, onSave, line, nonce }: { path: str
       v.destroy();
       view.current = null;
     };
-  }, [path]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [path]); // eslint-disable-line react-hooks/exhaustive-deps -- one editor per file; the document and handlers are read at creation and kept current through refs
 
   // External reloads replace the document.
   useEffect(() => {

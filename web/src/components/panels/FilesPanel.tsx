@@ -77,12 +77,12 @@ export function FilesPanel({ session, cwd, visible }: { session: SessionSummary;
         update((s) => ({ ...s, tabs: s.tabs.map((t) => (t.path === path ? { ...t, loading: false, error: errText(e) } : t)) }));
       }
     },
-    [cwd], // eslint-disable-line react-hooks/exhaustive-deps
+    [cwd], // eslint-disable-line react-hooks/exhaustive-deps -- update() is a fresh closure each render over the same perCwd entry
   );
 
   useEffect(() => {
     if (fileOpen) openTab(fileOpen.path, fileOpen.line);
-  }, [fileOpen?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fileOpen?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps -- each request to open a file (a new nonce) opens it once
 
   // Pick up edits Claude makes to open files (only when there are no unsaved local edits). The tab
   // stays mounted when another one is chosen; hidden, it does nothing, and catches up once when shown.

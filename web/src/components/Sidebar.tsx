@@ -391,6 +391,6 @@ function useFlip(list: React.RefObject<HTMLElement | null>, data: unknown, layou
       }
     }
     last.current = next;
-  }, [data, ...layoutDeps]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [data, ...layoutDeps]); // eslint-disable-line react-hooks/exhaustive-deps -- the deps are the layout inputs, spread; the measure reads the DOM itself
 }
 

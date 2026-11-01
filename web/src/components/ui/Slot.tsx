@@ -75,7 +75,7 @@ export function Slot({ open, side, className = '', children }: { open: boolean; 
         }
       } else setMounted(false);
     };
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps -- animates on open and close only; the elements are read as they are then
 
   if (!mounted) return null;
   return (

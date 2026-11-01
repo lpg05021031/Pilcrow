@@ -35,7 +35,7 @@ export function PreviewPanel({ session }: { session: SessionSummary }) {
   const [draft, setDraft] = useState(url || 'http://localhost:3000');
   const [nonce, setNonce] = useState(0);
   const frame = useRef<HTMLIFrameElement>(null);
-  const detected = useMemo(() => findUrls(session.id), [session.id, rev]); // eslint-disable-line react-hooks/exhaustive-deps
+  const detected = useMemo(() => findUrls(session.id), [session.id, rev]); // eslint-disable-line react-hooks/exhaustive-deps -- the model mutates in place; rev marks a change
 
   const go = (u: string) => {
     let v = u.trim();

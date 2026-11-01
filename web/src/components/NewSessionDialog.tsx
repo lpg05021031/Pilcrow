@@ -50,10 +50,9 @@ export function NewSessionDialog() {
 
   useEffect(() => {
     if (!showBrowser) return;
-    call<Browse>('fs.browse', { dir: browse?.dir || cwd || info?.home }, { quiet: true })
-      .then(setBrowse)
-      .catch(() => {});
-  }, [showBrowser]); // eslint-disable-line react-hooks/exhaustive-deps
+    // A folder that cannot be listed leaves the browser as it was; the path field still works.
+    call<Browse>('fs.browse', { dir: browse?.dir || cwd || info?.home }, { quiet: true }).then(setBrowse, () => {});
+  }, [showBrowser]); // eslint-disable-line react-hooks/exhaustive-deps -- lists the folder once, when the browser opens; later moves browse on their own
 
   useEffect(() => {
     setError('');
