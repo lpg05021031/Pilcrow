@@ -19,7 +19,6 @@ from ... import icons, theme
 from ...canvas.clock import clock
 from ...canvas.pixels import hline, pen_width, snap, vline
 from ...lib.fmt import tokens as fmt_tokens
-from ...store import store
 from .button import Btn
 from .signals import bind
 
@@ -52,6 +51,27 @@ class Hairline(QWidget):
 
 def hairline(vertical: bool = False, over: theme.Fill = "canvas") -> Hairline:
     return Hairline(vertical, over)
+
+
+class IconLabel(QWidget):
+    """A tinted Lucide icon that repaints from the tokens when the theme changes."""
+
+    def __init__(self, name: str, color: str = "text_2", size: int = 14, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._name, self._color, self._size = name, color, size
+        self.setFixedSize(size, size)
+        bind(theme.theme.changed, self, lambda _t: self.update())
+
+    def set(self, name: str, color: Optional[str] = None) -> None:
+        self._name = name
+        if color:
+            self._color = color
+        self.update()
+
+    def paintEvent(self, _e) -> None:
+        p = QPainter(self)
+        pm = icons.pixmap(self._name, getattr(theme.tokens(), self._color), self._size)
+        p.drawPixmap(0, 0, pm)
 
 
 def tone(lb: QWidget, name: str) -> QWidget:
@@ -475,7 +495,7 @@ class Indicator(QWidget):
 
     @property
     def moving(self) -> bool:
-        return self._live and not store.reduced_motion
+        return self._live and not clock.reduced_motion
 
     def set_live(self, on: bool) -> None:
         if on != self._live:
@@ -604,7 +624,6 @@ class ContextRing(QWidget):
 
 
 def context_label(used: int, total: int) -> str:
-
     return f"{fmt_tokens(used)} of {fmt_tokens(total)}"
 
 

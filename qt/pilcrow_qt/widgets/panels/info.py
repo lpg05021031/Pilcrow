@@ -7,7 +7,6 @@ and app.css (``.mem-peek``, ``.chip``)."""
 
 from __future__ import annotations
 
-import re
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QRect, QRectF, QSize, Qt
@@ -15,7 +14,8 @@ from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
 from ... import icons, theme
-from ...lib.fmt import cost, short_model, tildify, tokens
+from ...lib.fmt import cost, tildify, tokens
+from ...lib.models import model_label
 from ...store import ConfirmSpec, store
 from ..ui.bits import Box, ContextRing, Spinner, copy_text
 from ..ui.menu import show_menu_at
@@ -41,18 +41,6 @@ CAT_TONES = {
     "Custom agents": "think",
     "Skills": "warn",
 }
-
-
-def model_label(value: str, aliases: Optional[List[Json]] = None) -> str:
-    """A short name for a model value: the endpoint's display name, Claude Code's alias name, or a tidied ID."""
-    gw = store.gateway_models if isinstance(store.gateway_models, dict) else {}
-    for m in gw.get("models") or []:
-        if m.get("id") == value and m.get("displayName"):
-            return re.sub(r"^Claude\s+", "", str(m["displayName"]), flags=re.I)
-    for a in aliases or []:
-        if a.get("value") == value and a.get("displayName"):
-            return str(a["displayName"])
-    return short_model(value) if re.search(r"claude-", value, re.I) else value
 
 
 def cat_tone(c: Json) -> Optional[str]:
@@ -534,7 +522,8 @@ class InfoPanel(QWidget):
         # Claude Code (.kv)
         s = Section("Claude Code")
         model_id = str(st.get("activeModel") or st.get("model") or "")
-        name = model_label(model_id, st.get("models") or None) if model_id else "Default"
+        gw = store.gateway_models if isinstance(store.gateway_models, dict) else {}
+        name = model_label(model_id, gw.get("models") or [], st.get("models") or []) if model_id else "Default"
         model_w = QWidget()
         ml = QHBoxLayout(model_w)
         ml.setContentsMargins(0, 0, 0, 0)

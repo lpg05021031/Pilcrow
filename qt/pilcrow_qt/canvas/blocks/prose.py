@@ -311,7 +311,6 @@ class ProseBlock(Block):
 
 
 def _pt(x: int, y: int):
-
     return QPointF(x, y)
 
 

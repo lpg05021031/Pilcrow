@@ -18,6 +18,7 @@ from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
 
 from . import theme as theme_mod
+from .canvas.clock import clock
 from .lib.fmt import err_text, set_home
 from .lib.transcript_model import TranscriptModel
 from .rpc import Call, RpcError, rpc
@@ -184,7 +185,6 @@ class Store(QObject):
         self.timeline: Dict[str, List[Json]] = {}
         self.lightbox: Optional[str] = None
         self.find_open = False
-        self.reduced_motion = False
         self.models: Dict[str, TranscriptModel] = {}
         self._dirty: set = set()
         self._flush_timer = QTimer(self)
@@ -207,6 +207,16 @@ class Store(QObject):
         self._ui_save_timer.timeout.connect(self._save_ui)
 
     # ---------------------------------------------------------------- models
+    @property
+    def reduced_motion(self) -> bool:
+        """No animations (``--lite``, ``PILCROW_LITE``, or the system's own setting): kept by the
+        clock everything that moves runs on."""
+        return clock.reduced_motion
+
+    @reduced_motion.setter
+    def reduced_motion(self, on: bool) -> None:
+        clock.reduced_motion = on
+
     def get_model(self, sid: str) -> TranscriptModel:
         m = self.models.get(sid)
         if m is None:

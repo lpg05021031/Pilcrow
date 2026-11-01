@@ -15,7 +15,7 @@ import difflib
 import re
 import time
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 from PySide6.QtCore import QEvent, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetricsF, QKeyEvent, QLinearGradient, QMouseEvent, QPainter, QPen
@@ -456,7 +456,7 @@ class DiffGrid(QWidget):
         self._toks: Dict[int, List[Tok]] = {}
         self._geom: List[_Geom] = []
         self._extra_rects: List[Tuple[QRect, str]] = []
-        self._extras: Dict[str, QWidget] = {}
+        self._extras: Dict[str, Union[CommentEditor, CommentCard]] = {}
         self._key_lines: Dict[str, Json] = {}
         self._cols: Dict[str, int] = {}
         self._content_w = 0
@@ -710,8 +710,9 @@ class DiffGrid(QWidget):
                 del self._extras[key]
         for key in wanted:
             if key in self._extras:
-                if not isinstance(self._extras[key], CommentEditor):
-                    self._extras[key].text.setText(self._comments.get(key, ""))  # type: ignore[attr-defined]
+                w = self._extras[key]
+                if isinstance(w, CommentCard):
+                    w.text.setText(self._comments.get(key, ""))
                 continue
             if key == self._editing:
                 ed = CommentEditor(self._comments.get(key, ""), self)

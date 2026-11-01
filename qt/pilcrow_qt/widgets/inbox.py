@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import icons, theme
-from ..lib.fmt import basename, cost, duration, now_ms, plural, tildify, time_ago
+from ..lib.fmt import basename, clock, cost, duration, now_ms, plural, tildify, time_ago
 from ..store import ConfirmSpec, store
 from .dialogs.parts import Badge, Card, ElideLabel, LayoutButton, Switch, Text, hint
 from .ui.bits import Box, IconButton, Mark, Pill, Spinner, button
@@ -29,10 +29,6 @@ from .ui.menu import show_menu
 from .ui.signals import bind
 
 Json = Dict[str, Any]
-
-
-def clock(ms: float) -> str:
-    return datetime.fromtimestamp(ms / 1000).strftime("%H:%M")
 
 
 def day_label(ms: float, now: float) -> str:
@@ -381,7 +377,6 @@ class HelpersCard(Card):
         super().leaveEvent(e)
 
     def copy_md(self) -> None:
-
         def got(md: Any) -> None:
             QGuiApplication.clipboard().setText(str(md or ""))
             store.toast("Markdown copied", "success")
@@ -550,7 +545,6 @@ class DispatchCard(Card):
         super().leaveEvent(e)
 
     def copy_md(self) -> None:
-
         def got(md: Any) -> None:
             QGuiApplication.clipboard().setText(str(md or ""))
             store.toast("Report copied as Markdown.", "info")

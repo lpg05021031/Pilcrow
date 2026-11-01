@@ -447,7 +447,6 @@ class PermissionIsland(IslandBlock):
         super().__init__(f"perm:{item.id}", self._make)
 
     def _make(self):
-
         return PermissionCard(self.perm, self.ctx, self.item, stale=False)
 
     def update(self, perm: Json, ctx: ToolCtx, item: ToolItem) -> None:
@@ -470,7 +469,6 @@ class SpecialIsland(IslandBlock):
         self.rev = item.rev
 
     def _make(self):
-
         if self.item.name == "AskUserQuestion":
             return AskBody(self.item, self.ctx, self.perm)
         return PlanBody(self.item, self.ctx, self.perm)

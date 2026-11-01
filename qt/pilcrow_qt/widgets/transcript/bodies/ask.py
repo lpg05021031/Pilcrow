@@ -19,7 +19,6 @@ from ..permission import key_badge, perm_button, typing_elsewhere
 from .common import (
     Badge,
     Hairline,
-    IconLabel,
     Json,
     NeedsDot,
     Row,
@@ -199,7 +198,7 @@ class AskBody(QWidget):
             bl.addWidget(ql)
             ans = Row(spacing=6)
             if answered.get(qt):
-                ans.add(IconLabel("check", "ok", 13))
+                ans.add(bits.IconLabel("check", "ok", 13))
                 ans.add(bits.label(answered[qt], wrap=True), 1)
                 self.answers.append(answered[qt])
             else:

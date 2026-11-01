@@ -20,7 +20,7 @@ from .. import icons, theme
 from ..lib.fmt import basename, tildify
 from ..store import store
 from .dialogs.parts import Keys, LayoutButton, Text
-from .ui.bits import Box, IconButton, Spinner, paint_box
+from .ui.bits import Box, IconButton, IconLabel, Spinner, paint_box
 from .ui.signals import bind
 
 ICON = 72
@@ -496,15 +496,11 @@ class Welcome(QWidget):
 
 def _notice(text: str) -> QFrame:
     """``.notice.error``: a line with a warning icon on a red wash."""
-    t = theme.tokens()
     f = Box(bg="err_wash/canvas", radius=theme.R3)
     f.setObjectName("notice")
     lay = QHBoxLayout(f)
     lay.setContentsMargins(14, 10, 14, 10)
     lay.setSpacing(10)
-    ico = QWidget()
-    ico.setFixedSize(14, 14)
-    lay.addWidget(ico, 0, Qt.AlignmentFlag.AlignTop)
-    ico.paintEvent = lambda _e, w=ico: QPainter(w).drawPixmap(0, 0, icons.pixmap("circle-alert", t.err, 14))  # type: ignore[method-assign]
+    lay.addWidget(IconLabel("circle-alert", "err", 14), 0, Qt.AlignmentFlag.AlignTop)
     lay.addWidget(Text(text, theme.FS_UI, 400, "text", 1.45))
     return f

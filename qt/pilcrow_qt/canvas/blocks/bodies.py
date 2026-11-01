@@ -828,7 +828,6 @@ def agent_top(item: ToolItem, ctx: ToolCtx, block: ToolBodyBlock) -> nd.Node:
 
         def load(_t: Target, view: Any) -> None:
             def ok(msgs: Any) -> None:
-
                 mdl = TranscriptModel()
                 mdl.push_all(msgs or [])
                 block.state["loaded"] = mdl

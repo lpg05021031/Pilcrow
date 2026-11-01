@@ -1070,7 +1070,6 @@ class ErrorBar(QWidget):
         self.host = host
 
     def set_error(self, error: str) -> None:
-
         self._error = error
         self.text.setText(error.split("\n")[0])
         if re.search(r"Settings|not found|No Claude Code", error, re.I):

@@ -779,7 +779,6 @@ class FinishedRow(LayoutButton):
 
 
 def _dot(color: str, size: int):
-
     pm = QPixmap(size, size)
     pm.fill(Qt.GlobalColor.transparent)
     p = QPainter(pm)
@@ -821,6 +820,25 @@ class SpendBars(QWidget):
         p.drawRect(QRectF(0, 29.2 * sy, 120 * sx, 0.8 * sy))
 
 
+class ShareBar(QWidget):
+    """A session's share of the top one's spend: an 88 × 4 track and its fill, the first in the accent."""
+
+    def __init__(self, share: float, first: bool) -> None:
+        super().__init__()
+        self.share, self.first = share, first
+        self.setFixedSize(88, 4)
+
+    def paintEvent(self, _e) -> None:
+        t = theme.tokens()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(theme.blend(t.fill_2, t.raised))
+        p.drawRoundedRect(QRectF(0, 0, 88, 4), 2, 2)
+        p.setBrush(QColor(t.accent if self.first else t.text_4))
+        p.drawRoundedRect(QRectF(0, 0, 88 * max(0.0, min(1.0, self.share)), 4), 2, 2)
+
+
 class SpendRow(LayoutButton):
     """One of the sessions that cost the most today: title, a bar against the top one, the amount."""
 
@@ -829,8 +847,6 @@ class SpendRow(LayoutButton):
     ) -> None:
         super().__init__(parent)
         self.sid = sid
-        self.share = share
-        self.first = first
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip("Open the session")
         self.setAccessibleName("Open the session")
@@ -841,22 +857,10 @@ class SpendRow(LayoutButton):
         lay.setSpacing(10)
         self.title = Text(title, theme.FS_MICRO, 400, "text_2", wrap=False)
         lay.addWidget(self.title, 1)
-        self.bar = QWidget()
-        self.bar.setFixedSize(88, 4)
-        self.bar.paintEvent = self._paint_bar  # type: ignore[method-assign]
+        self.bar = ShareBar(share, first)
         lay.addWidget(self.bar)
         self.amount = Text(cost(amount), theme.FS_MICRO, 400, "text_2", wrap=False)
         lay.addWidget(self.amount)
-
-    def _paint_bar(self, _e) -> None:
-        t = theme.tokens()
-        p = QPainter(self.bar)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(theme.blend(t.fill_2, t.raised))
-        p.drawRoundedRect(QRectF(0, 0, 88, 4), 2, 2)
-        p.setBrush(QColor(t.accent if self.first else t.text_4))
-        p.drawRoundedRect(QRectF(0, 0, 88 * max(0.0, min(1.0, self.share)), 4), 2, 2)
 
 
 class Spend(Card):

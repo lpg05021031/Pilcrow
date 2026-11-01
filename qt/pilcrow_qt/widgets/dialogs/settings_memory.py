@@ -177,7 +177,6 @@ class MemoryPage(QWidget):
         self.load()
 
     def eventFilter(self, obj, e) -> bool:
-
         if obj is self.draft and e.type() == QEvent.Type.KeyPress:
             if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and e.modifiers() & Qt.KeyboardModifier.ControlModifier:
                 self.add()
@@ -431,7 +430,6 @@ class NoteRow(Panel):
         self.edit.installEventFilter(self)
 
     def eventFilter(self, obj, e) -> bool:
-
         if obj is self.edit and e.type() == QEvent.Type.KeyPress:
             if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and e.modifiers() & Qt.KeyboardModifier.ControlModifier:
                 self.commit()

@@ -70,8 +70,9 @@ from PySide6.QtWidgets import (
 
 from .. import icons, theme
 from ..canvas.clock import Tween
-from ..lib.fmt import bytes_, short_model, tildify
+from ..lib.fmt import bytes_, tildify
 from ..lib.fuzzy import fuzzy_filter
+from ..lib.models import ALIASES, model_label, trim_claude
 from ..store import store
 from .queue_tray import QueueTray
 from .suggest import SuggestPopup, word_match
@@ -129,13 +130,6 @@ BUILTIN_COMMANDS: List[Json] = [
     {"name": "model", "description": "Change the model"},
 ]
 
-#: Aliases Claude Code always understands; used until a session has reported its own list (lib/models.ts).
-ALIASES: List[Json] = [
-    {"value": "opus", "displayName": "Opus", "description": "Most capable"},
-    {"value": "sonnet", "displayName": "Sonnet", "description": "Fast and capable"},
-    {"value": "haiku", "displayName": "Haiku", "description": "Fastest"},
-]
-
 EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"]
 MAX_IMAGE = 8 * 1024 * 1024
 MAX_TEXT = 400 * 1024
@@ -148,14 +142,6 @@ FIELD_MIN = 50
 _drafts: Dict[str, str] = {}
 _histories: Dict[str, List[str]] = {}
 _file_index_cache: Dict[str, Tuple[float, List[str]]] = {}
-
-
-# ---------------------------------------------------------------- lib/models.ts
-
-
-def _trim_claude(s: str) -> str:
-    """ "Claude Opus 5.5 (1M context)" → "Opus 5.5 (1M context)": every model here is Claude; the chip is small."""
-    return re.sub(r"^Claude\s+", "", s, flags=re.I)
 
 
 def gateway_state() -> Json:
@@ -173,17 +159,6 @@ def gateway_state() -> Json:
         "error": error,
         "base": g.get("base") or None,
     }
-
-
-def model_label(value: str, gateway: List[Json], aliases: Optional[List[Json]] = None) -> str:
-    """A short, human name for a model value: the endpoint's display name, Claude Code's alias name, or a tidied ID."""
-    for m in gateway:
-        if m.get("id") == value and m.get("displayName"):
-            return _trim_claude(str(m["displayName"]))
-    for a in aliases if aliases is not None else ALIASES:
-        if a.get("value") == value and a.get("displayName"):
-            return str(a["displayName"])
-    return short_model(value) if re.search(r"claude-", value, re.I) else value
 
 
 def effort_name(level: str) -> str:
@@ -1923,7 +1898,7 @@ class Composer(QWidget):
                 name = m.get("displayName")
                 items.append(
                     {
-                        "label": _trim_claude(str(name)) if name else m["id"],
+                        "label": trim_claude(str(name)) if name else m["id"],
                         "hint": m["id"] if name else None,
                         "mono": True,
                         "checked": current == m["id"],
@@ -1979,7 +1954,6 @@ class Composer(QWidget):
             self.add_files(paths)
 
     def add_files(self, paths: List[str]) -> None:
-
         db = QMimeDatabase()
         for path in paths:
             name = os.path.basename(path)

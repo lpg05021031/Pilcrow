@@ -791,7 +791,6 @@ class Measurer:
 
     # ---- estimation
     def estimate_markdown(self, src: str, width: int, compact: bool = False) -> int:
-
         return estimate_markdown(src, width, self.metrics_compact if compact else self.metrics)
 
 

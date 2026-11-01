@@ -60,7 +60,6 @@ class OrphanIsland(IslandBlock):
         super().__init__(f"orphan:{perm.get('requestId')}", self._make)
 
     def _make(self) -> QWidget:
-
         return PermissionCard(self.perm, self.ctx, None, stale=False)
 
 

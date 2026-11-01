@@ -266,7 +266,6 @@ def _crash_log() -> None:
         faulthandler.enable(file=f, all_threads=True)
 
         def hook(exc_type, exc, tb) -> None:
-
             traceback.print_exception(exc_type, exc, tb, file=f)
             f.flush()
             traceback.print_exception(exc_type, exc, tb)

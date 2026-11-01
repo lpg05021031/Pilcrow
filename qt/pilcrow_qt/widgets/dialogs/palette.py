@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QScrollAre
 from ... import icons, theme
 from ...lib.fmt import basename, time_ago
 from ...lib.fuzzy import fuzzy_filter
+from ...lib.shortcuts import SHORTCUTS as K
 from ...store import store
 from ..ui.bits import hairline
 from ..ui.signals import bind
@@ -216,7 +217,7 @@ class CommandPalette(Sheet):
                 "Actions",
                 s.quick_new_session,
                 "In the current folder, with your defaults",
-                "Ctrl+N",
+                K["newSession"].keys,
             ),
             Cmd(
                 "new-opts",
@@ -225,7 +226,7 @@ class CommandPalette(Sheet):
                 "Actions",
                 lambda: s.set_dialog("newSession", {}),
                 "Folder, worktree, permissions, model",
-                "Ctrl+Shift+N",
+                K["newSessionWith"].keys,
             ),
             Cmd(
                 "side",
@@ -234,7 +235,7 @@ class CommandPalette(Sheet):
                 "Actions",
                 lambda: s.set_ui(sidebar=not s.ui.sidebar),
                 "",
-                "Ctrl+B",
+                K["sidebar"].keys,
             ),
             Cmd(
                 "panel",
@@ -243,9 +244,9 @@ class CommandPalette(Sheet):
                 "Actions",
                 lambda: s.set_ui(panel=not s.ui.panel),
                 "",
-                "Ctrl+\\",
+                K["panel"].keys,
             ),
-            Cmd("view", "Cycle view: Normal → Thinking → Verbose", "eye", "Actions", s.cycle_view, "", "Ctrl+O"),
+            Cmd("view", "Cycle view: Normal → Thinking → Verbose", "eye", "Actions", s.cycle_view, "", K["view"].keys),
             Cmd(
                 "overview",
                 "Control room",
@@ -253,7 +254,7 @@ class CommandPalette(Sheet):
                 "Actions",
                 lambda: s.show_page("overview"),
                 "Every session at a glance; answer prompts in place",
-                "Ctrl+Shift+O",
+                K["overview"].keys,
             ),
             Cmd(
                 "skills",
@@ -275,12 +276,12 @@ class CommandPalette(Sheet):
         if active_id:
             sid = active_id
             out += [
-                Cmd("find", "Find in the conversation", "search", "Actions", find, "", "Ctrl+F"),
-                Cmd("changes", "Show changes", "git-compare", "Actions", panel("changes"), "", "Alt+1"),
-                Cmd("files", "Show files", "folder-tree", "Actions", panel("files"), "", "Alt+2"),
-                Cmd("term", "Open terminal", "square-terminal", "Actions", panel("terminal"), "", "Alt+3"),
-                Cmd("preview", "Preview a web app", "app-window", "Actions", panel("preview"), "", "Alt+4"),
-                Cmd("tasks", "Show tasks", "list-checks", "Actions", panel("tasks"), "", "Alt+5"),
+                Cmd("find", "Find in the conversation", "search", "Actions", find, "", K["find"].keys),
+                Cmd("changes", "Show changes", "git-compare", "Actions", panel("changes"), "", K["tabs"].combos[0]),
+                Cmd("files", "Show files", "folder-tree", "Actions", panel("files"), "", K["tabs"].combos[1]),
+                Cmd("term", "Open terminal", "square-terminal", "Actions", panel("terminal"), "", K["tabs"].combos[2]),
+                Cmd("preview", "Preview a web app", "app-window", "Actions", panel("preview"), "", K["tabs"].combos[3]),
+                Cmd("tasks", "Show tasks", "list-checks", "Actions", panel("tasks"), "", K["tabs"].combos[4]),
                 Cmd(
                     "history",
                     "Show the timeline",
@@ -288,10 +289,18 @@ class CommandPalette(Sheet):
                     "Actions",
                     panel("history"),
                     "Every step that changed files; restore from any point",
-                    "Alt+6",
+                    K["tabs"].combos[5],
                 ),
-                Cmd("info", "Session details and context usage", "info", "Actions", panel("info"), "", "Alt+7"),
-                Cmd("stop", "Stop Claude", "circle-stop", "Actions", lambda: s.interrupt(sid), "", "Esc"),
+                Cmd(
+                    "info",
+                    "Session details and context usage",
+                    "info",
+                    "Actions",
+                    panel("info"),
+                    "",
+                    K["tabs"].combos[6],
+                ),
+                Cmd("stop", "Stop Claude", "circle-stop", "Actions", lambda: s.interrupt(sid), "", K["stop"].keys),
                 Cmd(
                     "compact",
                     "Compact the conversation",
@@ -328,7 +337,15 @@ class CommandPalette(Sheet):
                 lambda: s.set_ui(show_archived=not s.ui.show_archived),
             ),
             Cmd("refresh", "Reload session list", "refresh-cw", "Actions", lambda: s.refresh_sessions(True)),
-            Cmd("settings", "Settings", "settings", "Actions", lambda: s.set_dialog("settings", True), "", "Ctrl+,"),
+            Cmd(
+                "settings",
+                "Settings",
+                "settings",
+                "Actions",
+                lambda: s.set_dialog("settings", True),
+                "",
+                K["settings"].keys,
+            ),
             Cmd(
                 "keys",
                 "Keyboard shortcuts",
@@ -336,9 +353,9 @@ class CommandPalette(Sheet):
                 "Actions",
                 lambda: s.set_dialog("shortcuts", True),
                 "",
-                "Ctrl+/",
+                K["shortcuts"].keys,
             ),
-            Cmd("quit", "Quit Pilcrow", "power", "Actions", lambda: _quit(win), "Stops all sessions", "Ctrl+Q"),
+            Cmd("quit", "Quit Pilcrow", "power", "Actions", lambda: _quit(win), "Stops all sessions", K["quit"].keys),
         ]
         return out
 

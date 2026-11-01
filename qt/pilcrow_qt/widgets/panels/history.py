@@ -6,7 +6,6 @@ put files back the way they were there. Measurements are panels.css's ``.tl-*`` 
 from __future__ import annotations
 
 import time
-from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
@@ -14,36 +13,16 @@ from PySide6.QtGui import QColor, QKeyEvent, QMouseEvent, QPainter, QPen
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QScrollArea, QSlider, QVBoxLayout, QWidget
 
 from ... import icons, theme
-from ...lib.fmt import basename, duration, err_text, plural
+from ...lib.fmt import basename, clock, duration, err_text, plural
 from ...store import ConfirmSpec, store
 from ..ui.bits import Clickable, Pill, Spinner
 from ..ui.collapse import Collapse
 from ..ui.signals import bind
 from .diff_view import DiffView, Num
 from .right_panel import Btn, EmptyState, Hairline, Refresher, Toolbar, elide, lbl
+from .timeline_list import TimelineList, step_title
 
 Json = Dict[str, Any]
-
-
-def _clock(ms: float) -> str:
-    return datetime.fromtimestamp(ms / 1000).strftime("%H:%M")
-
-
-def _clock_s(ms: float) -> str:
-    return datetime.fromtimestamp(ms / 1000).strftime("%H:%M:%S")
-
-
-def step_title(s: Json) -> str:
-    kind = s.get("kind")
-    if kind == "message":
-        return str(s.get("label") or "Message sent")
-    if kind == "start":
-        return str(s.get("label") or "Session started")
-    if kind == "external":
-        return "Changed outside the conversation"
-    if kind == "restore":
-        return str(s.get("label") or "Restored")
-    return str(s.get("label") or s.get("tool") or "Step")
 
 
 def off_reason(reason: Optional[str]) -> str:
@@ -291,9 +270,9 @@ class Scrubber(QWidget):
         self._quiet = False
         if steps:
             first = float(steps[0].get("at") or 0)
-            self.first.setText(_clock(first))
+            self.first.setText(clock(first))
             self.note.setText("pauses shortened" if now - first > 4 * 60e3 else "")
-        self.now.setText(f"now · {_clock(now)}")
+        self.now.setText(f"now · {clock(now)}")
         self._relabel()
 
     def _index(self, sel: Optional[int]) -> int:
@@ -311,7 +290,7 @@ class Scrubber(QWidget):
     def _relabel(self) -> None:
         i = self._hover if self._hover >= 0 else self.slider.value()
         s = self.steps[i] if i < len(self.steps) else None
-        self.label.setText(f"{_clock_s(float(s.get('at') or 0))} · {step_title(s)}" if s else "Now")
+        self.label.setText(f"{clock(float(s.get('at') or 0), True)} · {step_title(s)}" if s else "Now")
         self.label.adjustSize()
         x = self.slider.x_at(i)
         pct = (x - 20) / max(1, self.width() - 40) * 100
@@ -631,8 +610,6 @@ class HistoryPanel(QWidget):
         self.empty.hide()
         lay.addWidget(self.empty)
         # the steps: a list on the canvas engine (one block per step, the detail as an island)
-        from .timeline_list import TimelineList
-
         self.list = TimelineList(session_id, cwd, self.pick)
         self.list.hide()
         lay.addWidget(self.list, 1)

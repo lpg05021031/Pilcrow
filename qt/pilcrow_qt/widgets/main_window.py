@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 import sys
 from collections import OrderedDict
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 import shiboken6
 from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, QRect, QRectF, QSettings, Qt, QTimer, Signal
@@ -30,13 +30,12 @@ from PySide6.QtWidgets import (
 
 from .. import icons, theme
 from ..canvas.clock import Tween
-from ..store import store
+from ..lib.shortcuts import SHORTCUTS
+from ..store import PANEL_TABS, store
 from .dialogs.parts import ElideLabel
 from .sidebar import Sidebar
 from .ui.bits import label
 from .ui.signals import bind
-
-TAB_KEYS = {"1": "changes", "2": "files", "3": "terminal", "4": "preview", "5": "tasks", "6": "history", "7": "info"}
 
 GROUND_PAD = 8  # .app { padding: 0 8px 8px 0 }
 SESSION_VIEWS_KEPT = 8  # conversations kept built behind the one on screen
@@ -355,37 +354,36 @@ class MainWindow(QMainWindow):
 
     # ---- shortcuts (App.tsx)
     def _install_shortcuts(self) -> None:
-        def sc(keys: str, fn) -> None:
-            s = QShortcut(QKeySequence(keys), self)
-            s.setContext(Qt.ShortcutContext.ApplicationShortcut)
-            s.activated.connect(fn)
-
-        sc("Ctrl+K", lambda: store.set_dialog("palette", not store.dialogs.get("palette")))
-        sc("Ctrl+N", store.quick_new_session)
-        sc("Ctrl+Shift+N", lambda: store.set_dialog("newSession", {}))
-        sc("Ctrl+B", lambda: store.set_ui(sidebar=not store.ui.sidebar))
-        sc("Ctrl+O", store.cycle_view)
-        sc("Ctrl+=", lambda: store.zoom(1))
-        sc("Ctrl++", lambda: store.zoom(1))
-        sc("Ctrl+-", lambda: store.zoom(-1))
-        sc("Ctrl+0", lambda: store.zoom(0))
-        sc("Ctrl+Shift+O", lambda: store.show_page("session" if store.page == "overview" else "overview"))
-        sc(
-            "Ctrl+Shift+D",
-            lambda: store.show_page("session") if store.page == "dispatch" else store.show_dispatch(None),
-        )
-        sc("Ctrl+\\", lambda: store.set_ui(panel=not store.ui.panel))
-        sc("Ctrl+,", lambda: store.set_dialog("settings", True))
-        sc("Ctrl+Q", self._quit)
-        sc("Ctrl+/", lambda: store.set_dialog("shortcuts", True))
-        sc("Ctrl+F", self._find)
-        for k, tab in TAB_KEYS.items():
-            sc(f"Alt+{k}", lambda t=tab: self._toggle_tab(t))
-        sc("Ctrl+Alt+Up", lambda: self._step_session(-1))
-        sc("Ctrl+Alt+Down", lambda: self._step_session(1))
-        esc = QShortcut(QKeySequence("Escape"), self)
-        esc.setContext(Qt.ShortcutContext.WindowShortcut)
-        esc.activated.connect(self._escape)
+        """The window's keys, from the one table (``lib/shortcuts``): each entry this window runs gets a
+        QShortcut per key sequence, told which of them fired (Alt+1 … 7, the two arrows)."""
+        run: Dict[str, Callable[[int], None]] = {
+            "palette": lambda _i: store.set_dialog("palette", not store.dialogs.get("palette")),
+            "newSession": lambda _i: store.quick_new_session(),
+            "newSessionWith": lambda _i: store.set_dialog("newSession", {}),
+            "find": lambda _i: self._find(),
+            "sidebar": lambda _i: store.set_ui(sidebar=not store.ui.sidebar),
+            "panel": lambda _i: store.set_ui(panel=not store.ui.panel),
+            "view": lambda _i: store.cycle_view(),
+            "tabs": lambda i: self._toggle_tab(PANEL_TABS[i]),
+            "overview": lambda _i: store.show_page("session" if store.page == "overview" else "overview"),
+            "dispatch": lambda _i: (
+                store.show_page("session") if store.page == "dispatch" else store.show_dispatch(None)
+            ),
+            "nextSession": lambda i: self._step_session(1 if i else -1),
+            "zoom": lambda i: store.zoom((1, 1, -1, 0)[i]),
+            "stop": lambda _i: self._escape(),
+            "settings": lambda _i: store.set_dialog("settings", True),
+            "shortcuts": lambda _i: store.set_dialog("shortcuts", True),
+            "quit": lambda _i: self._quit(),
+        }
+        for name, fn in run.items():
+            for i, keys in enumerate(SHORTCUTS[name].sequences):
+                s = QShortcut(QKeySequence(keys), self)
+                # Esc stops Claude only in this window (a dialog's own Esc closes the dialog)
+                s.setContext(
+                    Qt.ShortcutContext.WindowShortcut if name == "stop" else Qt.ShortcutContext.ApplicationShortcut
+                )
+                s.activated.connect(lambda fn=fn, i=i: fn(i))
 
     def _toggle_tab(self, tab: str) -> None:
         if not store.active_id:
@@ -499,7 +497,6 @@ def apply_windows_frame(win: QMainWindow) -> None:
 
 
 def custom_titlebar() -> bool:
-
     pref = os.environ.get("PILCROW_TITLEBAR", "").lower()
     if pref in ("custom", "native"):
         return pref == "custom"

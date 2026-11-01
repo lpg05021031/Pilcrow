@@ -74,6 +74,8 @@ class RunBlock(NodeBlock):
     """One run: glyph and state, repository, branch, elapsed, files, cost, what it does now, and the
     actions its state allows (Allow / Deny, Retry / Open, Stop)."""
 
+    __slots__ = ("list", "now_ms", "run")
+
     KIND = "run"
     MT = 0
     MB = 0
@@ -238,6 +240,8 @@ def paint_rule(p: QPainter, x: int, y: int, w: int, st: PaintState) -> None:
 
 class HeadBlock(NodeBlock):
     """The column titles, in the rows' own cells, so they stand over their columns."""
+
+    __slots__ = ()
 
     KIND = "run-head"
 

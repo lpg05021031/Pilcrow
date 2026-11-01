@@ -95,7 +95,6 @@ class ViewInput:
         return QRect(br.x() + x - 8, br.y() + y, w + 16, h)
 
     def _rehover(self) -> None:
-
         gp = self.viewport().mapFromGlobal(QCursor.pos()) if self.underMouse() else None
         if gp is not None and self.viewport().rect().contains(gp):
             self._set_hover(self.hit(gp))
@@ -204,7 +203,6 @@ class ViewInput:
 
     # ---------------------------------------------------------------- the context menu
     def _context_menu(self, e) -> None:
-
         show_menu_at(self.context_items(e.pos()), e.globalPos(), self, 230)
 
     def context_items(self, pos: QPoint) -> List[Dict[str, Any]]:
@@ -445,7 +443,6 @@ class ViewInput:
 
     # ---------------------------------------------------------------- links
     def open_link(self, href: str, cwd: str) -> None:
-
         if href.startswith("pilcrow-path://"):
             q = parse_qs(urlparse(href).query)
             path = unquote(q.get("p", [""])[0])

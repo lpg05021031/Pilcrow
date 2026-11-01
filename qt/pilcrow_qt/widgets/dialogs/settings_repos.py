@@ -477,7 +477,6 @@ class RepoRow(Panel):
 
     # ---- data in
     def sync(self, e: Json, force: bool = False) -> None:
-
         snap = json.dumps(e, sort_keys=True, default=str)
         if snap == self._snapshot and not force:
             return
