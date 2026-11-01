@@ -88,7 +88,7 @@ export function ghost(el: HTMLElement, { duration = 220, className = 'leaving', 
     copy.style.height = `${rect.height}px`;
     copy.style.margin = '0';
     copy.style.transform = 'none';
-    copy.style.zIndex = String(Math.max(2000, zIndexOf(el)));
+    copy.style.zIndex = 'var(--z-ghost)';
   }
   copy.style.pointerEvents = 'none';
   copy.classList.add(className);
@@ -182,14 +182,6 @@ export function useFlipRows(ref: RefObject<HTMLElement | null>, selector: string
     }
     last.current = next;
   }, [deps]); // eslint-disable-line react-hooks/exhaustive-deps
-}
-
-function zIndexOf(el: HTMLElement) {
-  for (let n: HTMLElement | null = el; n; n = n.parentElement) {
-    const z = parseInt(getComputedStyle(n).zIndex, 10);
-    if (!Number.isNaN(z)) return z;
-  }
-  return 0;
 }
 
 const LATIN = /[A-Za-z0-9_'’-]/;

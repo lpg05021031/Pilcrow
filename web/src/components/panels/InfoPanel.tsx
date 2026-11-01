@@ -273,19 +273,20 @@ export function InfoPanel({ session, cwd }: { session: SessionSummary; cwd: stri
   );
 }
 
+// Two categories past the semantic colours borrow the terminal palette's, which has a value per theme.
 const CAT_COLORS: Record<string, string> = {
   'System prompt': 'var(--text-3)',
   'System tools': 'var(--info)',
   'MCP tools': 'var(--plan)',
   'Memory files': 'var(--ok)',
   Messages: 'var(--accent)',
-  'Custom agents': '#c9a2f2',
-  Skills: '#e6c08a',
+  'Custom agents': 'var(--ansi-magenta)',
+  Skills: 'var(--ansi-yellow)',
 };
 
 function catColor(c: { name: string; kind: string }) {
   if (c.kind === 'free') return 'transparent';
-  if (c.kind === 'buffer') return 'var(--line-2)';
+  if (c.kind === 'buffer') return 'var(--hair-2)';
   return CAT_COLORS[c.name] || 'var(--text-2)';
 }
 
