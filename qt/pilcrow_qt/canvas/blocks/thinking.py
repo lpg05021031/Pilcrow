@@ -242,12 +242,6 @@ class ThinkingBlock(Group):
     def text(self) -> str:
         return self.item.text
 
-    def live(self) -> bool:
-        return bool(self.item.streaming)
-
-    def tick(self, now: float) -> Optional[Tuple[int, int, int, int]]:
-        return (0, 0, 100000, HEAD_H) if self.item.streaming else None
-
     @property
     def static(self) -> bool:
         return not self.item.streaming

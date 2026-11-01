@@ -47,7 +47,8 @@ qt/pilcrow_qt/canvas/
                   islands, pixel scrolling, the scroll easing
   input.py        ViewInput, the view's other half: hit testing, hover, clicks, focus, selection and
                   copy, the context menu, links
-  a11y.py         the viewport as an accessible list of its blocks; the events the view sends
+  a11y.py         the viewport as an accessible list of its blocks and their targets; the events
+                  the view sends
   find_bar.py     Ctrl+F over the whole conversation
   blocks/
     base.py       NodeBlock: a block painted from a node tree
@@ -357,15 +358,19 @@ the find bar are children of the view, not of the viewport, and stay put.
 ### 6.5 Dirty rectangles
 
 A streamed token: `update(block_rect)`. A tick on a breathing mark: `update(20 × line)`, the whole
-line only when its figure (the elapsed seconds) changes. A fold frame: `update(fold_top … bottom)`.
+line only when its figure (the elapsed seconds) changes; a running tool card's turning status mark
+the same (`ToolBlock.tick`); a body's spinner its own rectangle (`NodeBlock.tick` is the union of
+its live nodes' `live_rect`). Nothing else ticks: a streaming thought has nothing that moves on the
+clock (its words arrive as commits), and a card awaiting a decision does not move. A fold frame: `update(fold_top … bottom)`.
 A hover: `update(old_hover_rect ∪ new_hover_rect)` (§8.1). A selection drag: the rows between the
 old edge and the new (§8.3). A resize or a theme change: `update()`. Qt merges the region, and the
 paint loop skips every block outside it.
 
 ### 6.6 Robustness
 
-Each `paint_block` call is guarded: an exception in one block's painter logs once and paints a faint
-"could not draw this row" marker in its rect; the rest of the frame is unaffected. (In PySide6 an
+Each `paint_block` call is guarded: an exception in one block's painter logs once (the block's
+`paint_failed` slot) and paints a faint "could not draw this row" marker in its rect; the rest of
+the frame is unaffected (`test_a_painter_that_raises_logs_once_and_the_rest_of_the_frame_paints`). (In PySide6 an
 exception that escapes `paintEvent` aborts the whole paint: a blank frame.)
 
 ### 6.7 Rules on the device grid
@@ -552,8 +557,11 @@ well, folded by the head like a tool body.
 
 Each `SessionView` keeps its `TranscriptCanvas`, whose Scene is retained; `MainWindow` keeps the
 last eight `SessionView`s in its `QStackedWidget` and switches with `setCurrentWidget`. A hidden
-Scene is not synced on every update: `rt_changed` for a hidden session sets `stale = True`; the
-Scene syncs when shown (O(live turn)). Switching costs one paint.
+view does no work for what it cannot show: `rt_changed` for a hidden session sets `stale = True`
+and the Scene syncs when shown (O(live turn)); a theme or text-scale change marks a hidden
+`CanvasView` stale and it re-measures its screen when shown (`showEvent`); its prefetch drain does
+nothing while it is hidden. Switching costs one paint. (A theme switch with five sessions retained:
+55–56 ms to the first paint, median of six, against 70–76 ms when every retained view re-measured.)
 
 ### 8.9 Opening
 
@@ -646,7 +654,8 @@ scenarios.
   cache is keyed by exactly those.
 - I4 No document or pixmap exists for a block farther than six screens from the viewport.
 - I5 No QLayout and no QWidget inside the scene except `IslandBlock` widgets; no `setStyleSheet`
-  anywhere in `canvas/`.
+  anywhere in `canvas/` (the find bar's field takes the application stylesheet's
+  `QLineEdit[quiet="flush"]`).
 - I6 The only timers are the clock and the animations; nothing re-places the scroll position later.
 - I7 Painting never raises out of `paintEvent`.
 
@@ -694,7 +703,10 @@ and a third click the block; Ctrl+A selects all; the right-click menu offers cop
 the link under the pointer and the card's file; Ctrl+= / Ctrl+- / Ctrl+0 scale the conversation's
 text (prose, code in prose, bubbles, thoughts; the chrome keeps its size), remembered in the ui
 state; `canvas/a11y.py` exposes the viewport to assistive technology as a list of the blocks on
-screen (a fold or a card reads as a button).
+screen (a fold or a card reads as a button), each row named by its words as they read (the laid-out
+document, not the Markdown), the targets Tab visits inside a row as its children (Buttons and
+Links with their own names and a Press action; focus moving to one announces it), and the words a
+streamed row gains announced once a second.
 
 Phase 4 — the rest of the window (2.10.0): the Timeline is a list on the engine
 (`panels/timeline_list.py`: a block per step, the picked step's detail as an island); hidden panel

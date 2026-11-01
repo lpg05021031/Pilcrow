@@ -397,12 +397,13 @@ class ToolBlock(Group):
         return f"{self.meta.verb} {self.meta.target}".strip()
 
     def live(self) -> bool:
-        return self.item.status in ("running", "streaming") or self.awaiting
+        """Running: its status mark turns on the clock (a card awaiting a decision does not move)."""
+        return self.item.status in ("running", "streaming")
 
     def tick(self, now: float) -> Optional[Tuple[int, int, int, int]]:
         """The turning status mark each frame; the whole head when the elapsed figure moves on a second."""
         it = self.item
-        if it.status not in ("running", "streaming"):
+        if not self.live():
             return None
         s = int((time.time() * 1000 - it.start_ts) // 1000) if it.start_ts else 0
         if s != self._second:
