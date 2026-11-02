@@ -20,14 +20,17 @@ the mode and model menus are ``ui.menu`` menus opened over the card.
 
 from __future__ import annotations
 
+import atexit
 import base64
 import math
 import os
 import re
 import time
+import weakref
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
+import shiboken6
 from PySide6.QtCore import (
     QBuffer,
     QEvent,
@@ -199,6 +202,20 @@ def _in_overlay(w: Optional[QWidget]) -> bool:
     return False
 
 
+#: the boxes' watches on the application, taken off at interpreter exit (see tooltip.install)
+_WATCHES: weakref.WeakSet[_PressElsewhere] = weakref.WeakSet()
+
+
+def _drop_watches() -> None:
+    app = QApplication.instance()
+    for w in list(_WATCHES):
+        if app is not None and shiboken6.isValid(w) and shiboken6.isValid(app):
+            app.removeEventFilter(w)
+
+
+atexit.register(_drop_watches)
+
+
 class _PressElsewhere(QObject):
     """The web's blur: a press anywhere in the window outside the composer takes the focus off it, also
     where nothing takes the focus instead (the conversation, a label, the empty sidebar), so the focus
@@ -208,6 +225,7 @@ class _PressElsewhere(QObject):
     def __init__(self, box: ComposerBox) -> None:
         super().__init__(box)
         self.box = box
+        _WATCHES.add(self)
 
     def eventFilter(self, obj, e) -> bool:
         if e.type() != QEvent.Type.MouseButtonPress or not isinstance(obj, QWidget):
@@ -251,6 +269,7 @@ class ComposerBox(QWidget):
         app = QApplication.instance()
         if app is not None:
             bind(app.focusChanged, self, self._on_focus_changed)
+            bind(app.aboutToQuit, self, lambda: app.removeEventFilter(self._press_watch))
         bind(theme.theme.changed, self, lambda _t: self.update())
 
     # ---- state

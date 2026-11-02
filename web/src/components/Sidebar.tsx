@@ -47,11 +47,12 @@ export function Sidebar() {
     if (!q.trim()) list = list.filter((s) => (!s.scheduled && !s.dispatch) || s.id === activeId);
     if (q.trim()) list = list.filter((s) => fuzzyScore(q, `${s.title} ${basename(s.project || s.cwd)}`));
     // A lead's helpers sit under it, indented (HELPERS.md §6.3); a helper whose lead is not listed stays
-    // where its folder puts it.
+    // where its folder puts it. The open one stays under its lead too: pulled out into its folder's
+    // project, the helper on screen looked unrelated to its lead.
     const listed = new Set(list.map((s) => s.id));
     const helperMap = new Map<string, SessionSummary[]>();
     for (const s of list) {
-      if (s.helper && listed.has(s.helper.leadId) && s.id !== activeId) {
+      if (s.helper && listed.has(s.helper.leadId)) {
         const under = helperMap.get(s.helper.leadId) || [];
         helperMap.set(s.helper.leadId, [...under, s]);
       }

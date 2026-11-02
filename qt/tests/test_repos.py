@@ -50,9 +50,10 @@ def test_settings_lists_edits_and_scans(app_client):
     c.wait_until(lambda: _entry(c, "api")["policy"] == "allowed", 5, "policy saved")
     # an alias typed and entered becomes a chip; a clicked chip goes
     web.alias_edit.setText("shop")
-    web.alias_edit.returnPressed.emit()
+    web.alias_edit.editingFinished.emit()  # Enter, or leaving the field
     c.wait_until(lambda: "shop" in _entry(c, "web")["aliases"], 5, "alias saved")
     c.wait_until(lambda: [b.text() for b in web.aliases._items] == ["order FE", "storefront", "shop"], 5, "chips")
+    assert web.saved_lb.isVisible() and web.saved_lb.text() == "Saved", "a save says so where it happened"
     web.aliases._items[2].click()
     c.wait_until(lambda: _entry(c, "web")["aliases"] == ["order FE", "storefront"], 5, "alias removed")
     # the rest opens in place
@@ -166,4 +167,35 @@ def test_a_row_lines_up_its_names_field_and_its_settings(app_client):
     sw = web.worktree.mapTo(web, QPoint(0, 0)).x()
     about = web.about.mapTo(web, QPoint(0, 0)).x()
     assert sw == about, "the switch starts the control column, like the fields"
+    _close(c)
+
+
+def test_a_name_typed_and_left_is_kept_and_an_added_folder_stays_closed(app_client):
+    """There is no Save button: a name typed into the alias field is kept when the field is left (another
+    page, another field), not only on Enter. Adding a repository closes the folder chooser at once and
+    leaves the new entry closed, in view, marked Added — its details are for later."""
+    from PySide6.QtWidgets import QApplication
+
+    c = app_client
+    s = _settings(c)
+    page = s.page
+    c.wait_until(lambda: len(page.rows) == 3, 5, "rows")
+    api = page.rows[_entry(c, "api")["id"]]
+    api.alias_edit.setFocus()
+    c.wait_until(lambda: QApplication.focusWidget() is api.alias_edit, 3, "focused")
+    api.alias_edit.setText("gateway")
+    page.filter.show()
+    page.filter.setFocus()  # the person moves on without pressing Enter
+    c.wait_until(lambda: "gateway" in _entry(c, "api")["aliases"], 5, "kept on leaving the field")
+    page.filter.hide()
+    # add: the chooser closes at once, the entry is made and stays closed
+    page.start_add()
+    assert page.add_box.isVisible()
+    page._add_path(f"{HOME}/code/docs")
+    assert not page.add_box.isVisible(), "the chooser goes as soon as a folder is picked"
+    c.wait_until(lambda: any(e.get("path") == f"{HOME}/code/docs" for e in c.store.repos), 5, "registered")
+    c.wait_until(lambda: len(page.rows) == 4, 5, "the row")
+    row = page.rows[next(e["id"] for e in c.store.repos if e.get("path") == f"{HOME}/code/docs")]
+    c.wait_until(lambda: row.saved_lb.isVisible(), 3, "marked")
+    assert row.saved_lb.text() == "Added" and not row.open and not row.detail.isVisible()
     _close(c)
