@@ -189,7 +189,8 @@ class IconButton(QPushButton):
             p.drawRoundedRect(QRectF(self.rect()), r, r)
         if not self.isEnabled():
             p.setOpacity(0.45)
-        color = t.text if lit else (self._color or t.text_2)
+        # ``color`` is a token name ("text_3"), a fill spec or a literal: resolved like every tint
+        color = QColor(t.text) if lit else (theme.resolve(self._color, t) or QColor(t.text_2))
         px = self.iconSize().width()
         pm = icons.pixmap(self._name, color, px)
         p.drawPixmap((self.width() - px) // 2, (self.height() - px) // 2, pm)

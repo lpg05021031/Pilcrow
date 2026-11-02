@@ -215,3 +215,20 @@ def test_screenshot(app_client):
     c.wait_until(lambda: len(_rows(c)) >= 5, 10, "rows")
     _ready(c)
     assert c.shot("sidebar").exists()
+
+
+def test_icon_buttons_paint_their_glyph_from_a_token_name(app_client):
+    """The foot's archive and appearance buttons (and every IconButton given "text_3") must paint: a
+    token name is resolved to its colour, not handed to the icon painter as a literal."""
+    c = app_client
+    from PySide6.QtGui import QColor
+
+    sb = c.win.sidebar
+    for w in (sb.archive_btn, sb.theme_btn, sb.collapse_btn):
+        img = w.grab().toImage()
+        colours = {img.pixel(x, y) for x in range(img.width()) for y in range(img.height())}
+        assert len(colours) > 1, f"{w.accessibleName()} painted nothing"
+        bg = QColor(img.pixel(0, 0))
+        assert any(abs(QColor(px).lightness() - bg.lightness()) > 40 for px in colours), (
+            "the glyph stands off its ground"
+        )
