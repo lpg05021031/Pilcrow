@@ -66828,7 +66828,7 @@ PILCROW_EOF_9434997cf0
 """Shared building blocks (web/src/components/ui): buttons, marks, hairlines, popovers, collapse."""
 PILCROW_EOF_46c7bca5ef
   wrote=$((wrote + 1))
-  # ---- qt/pilcrow_qt/widgets/ui/bits.py (26800 bytes)
+  # ---- qt/pilcrow_qt/widgets/ui/bits.py (27080 bytes)
   cat > "$D"/'qt/pilcrow_qt/widgets/ui/bits.py' <<'PILCROW_EOF_0ee4e256a0'
 """Small shared widgets (a port of web/src/components/ui/bits.tsx).
 
@@ -67021,7 +67021,13 @@ class IconButton(QPushButton):
             p.drawRoundedRect(QRectF(self.rect()), r, r)
         if not self.isEnabled():
             p.setOpacity(0.45)
-        color = t.text if lit else (self._color or t.text_2)
+        # ``color`` is a token name ("text_3"), a fill spec or a literal: resolved like every tint
+        if lit:
+            color = QColor(t.text)
+        elif self._color:
+            color = theme.resolve(self._color, t)
+        else:
+            color = QColor(t.text_2)  # an invalid QColor is truthy in PySide: no `or` fallback here
         px = self.iconSize().width()
         pm = icons.pixmap(self._name, color, px)
         p.drawPixmap((self.width() - px) // 2, (self.height() - px) // 2, pm)
@@ -140513,7 +140519,7 @@ b3eaedbe4aabd10a508272f1f26eff3074205f349012b5945789fd93698913cd  qt/pilcrow_qt/
 bb125af50e7feecfe1c2d880e90b2fba0c422152227609aa6b41bbfb5f64e09d  qt/pilcrow_qt/widgets/transcript/ctx.py
 e1be079cc145bcf19c91f20d215375fdde2fdf4175026b4fd0d9fef2e0a5bbc6  qt/pilcrow_qt/widgets/transcript/permission.py
 928b7036c037610811647da9abf3a2ddef59814d0ea2c85deeac5cc131d93501  qt/pilcrow_qt/widgets/ui/__init__.py
-9f68de4eacf51480ceb1cc071142d43e4c567ed345831ba70de181925fe53a19  qt/pilcrow_qt/widgets/ui/bits.py
+b24885f86b042c1a27798da4525af5134cf33007570ba6bce6a9fdbc28ff1247  qt/pilcrow_qt/widgets/ui/bits.py
 a2a23ba879316f699feb2a346b56047ff27a83dd13a90d0df848bbe46962a659  qt/pilcrow_qt/widgets/ui/button.py
 74bed3c3d0db02c5917848b47ce4724ded420a1dc6a67cb5ee75d603d4abe908  qt/pilcrow_qt/widgets/ui/collapse.py
 a1844e50002853d5881b463bc296bd7910d10b4b471ad3df3a4acb85a38697fb  qt/pilcrow_qt/widgets/ui/menu.py
