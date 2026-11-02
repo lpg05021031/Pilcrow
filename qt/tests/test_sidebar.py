@@ -280,3 +280,54 @@ def test_a_deleted_session_does_not_come_back_with_a_late_list(app_client, monke
     c.sleep(100)
     assert "sess-tests" not in [s.get("id") for s in c.store.sessions]
     assert "sess-tests" not in [r.sid for r in _rows(c)]
+
+
+def _click(w, c) -> None:
+    """A press and a release at the middle of ``w``, as a mouse makes them (separately, so a menu that
+    closes on the press is caught: the release then finds no row to pick)."""
+    p = w.rect().center()
+    QTest.mouseMove(w, p)
+    QTest.mousePress(w, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, p)
+    c.sleep(20)
+    QTest.mouseRelease(w, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, p)
+    c.sleep(150)
+
+
+def _menu_row(c, label: str):
+    from pilcrow_qt.widgets.ui.menu import MenuPopover, MenuRow
+
+    pops = [p for p in c.win.findChildren(MenuPopover) if p.isVisible()]
+    assert len(pops) == 1, "the row's menu is open"
+    return next(r for r in pops[0].findChildren(MenuRow) if r.label.startswith(label))
+
+
+def test_the_row_menu_picks_with_the_mouse_and_delete_deletes(app_client):
+    """Every pick from a row's menu with the mouse: the press on a menu row used to travel on to the
+    window behind the menu, read as a press outside, and close the menu before the release, so no
+    item did anything (Delete among them)."""
+    from PySide6.QtWidgets import QAbstractButton
+
+    c = app_client
+    c.wait_until(lambda: len(_rows(c)) >= 5, 10, "rows")
+    _ready(c)
+
+    def row(sid):
+        return next(r for r in _rows(c) if r.sid == sid)
+
+    r = row("sess-site")
+    QTest.mouseMove(r, r.rect().center())
+    c.sleep(100)
+    _click(r.menu_btn, c)
+    _click(_menu_row(c, "Pin to top"), c)
+    c.wait_until(lambda: any(s.get("id") == "sess-site" and s.get("pinned") for s in c.store.sessions), 5, "pinned")
+
+    r = row("sess-tests")
+    QTest.mouseMove(r, r.rect().center())
+    c.sleep(100)
+    _click(r.menu_btn, c)
+    _click(_menu_row(c, "Delete"), c)
+    c.wait_until(lambda: bool(c.store.dialogs.get("confirm")), 3, "the confirm dialog")
+    btn = next(b for b in c.win.findChildren(QAbstractButton) if b.isVisible() and b.text() == "Delete session")
+    _click(btn, c)
+    c.wait_until(lambda: "sess-tests" not in [s.get("id") for s in c.store.sessions], 5, "deleted")
+    assert "sess-tests" not in [s["id"] for s in c.call("sessions.list")], "gone on the server too"
