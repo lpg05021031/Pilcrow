@@ -323,8 +323,9 @@ class TaskRow(Card):
         self._paint_icon()
         bind(theme.theme.changed, self, lambda _t: self._paint_icon())
 
-    def update(self, t: Json) -> None:
-        """The same task, a step further: the title and the live line follow without a rebuild."""
+    def sync(self, t: Json) -> None:
+        """The same task, a step further: the title and the live line follow without a rebuild. (Not
+        ``update``: that is QWidget's repaint, which the card calls on a theme switch with no task.)"""
         if t == self.task:
             return
         self.task = t
@@ -1072,7 +1073,7 @@ class TasksPanel(QWidget):
             for row in self._rows:
                 t = by_id.get(row.task.get("id"))
                 if t is not None:
-                    row.update(t)
+                    row.sync(t)
             for card in self._wf_cards:
                 t = by_id.get(card.task.get("id"))
                 if t is not None:

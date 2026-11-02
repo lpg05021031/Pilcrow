@@ -375,5 +375,12 @@ def test_a_finished_command_is_one_line_however_long_its_text(app_client):
     )
     assert len(super(type(huge.title), huge.title).text()) <= 400, "a panel never measures a whole script"
     assert "\n" not in super(type(huge.sub), huge.sub).text()
+    # a theme switch repaints the rows (the card's update() is QWidget's, not a task sync)
+    from pilcrow_qt import theme
+
+    theme.theme.apply(False)
+    theme.theme.apply(True)
+    app_client.sleep(30)
     for r in (short, long, huge):
         r.close()
+        r.deleteLater()
