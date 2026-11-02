@@ -709,6 +709,17 @@ class CanvasView(ViewInput, QAbstractScrollArea):
             if b.live():
                 live.append(b)
         p.end()
+        # A paint covers only its damage (a hovered head, a blit's strip): a live block outside it is
+        # still on screen and still moving, so it stays on the clock. Dropping it here froze a running
+        # card's mark and seconds until something else happened to repaint its row.
+        top, bottom = scroll - self.pad_top, scroll - self.pad_top + vp.height()
+        painted = set(map(id, live))
+        for b in self._live:
+            if id(b) in painted or b.scene is not self.scene or not b.live():
+                continue
+            by = b.y()
+            if by < bottom and by + b.h > top:
+                live.append(b)
         self._live = live
         if live:
             clock.subscribe(self)

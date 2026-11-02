@@ -746,3 +746,41 @@ def test_a_hidden_view_leaves_the_theme_work_until_it_is_shown(app):
     finally:
         theme.theme.apply(True)
         v.close()
+
+
+def test_a_running_card_keeps_ticking_after_a_hover_elsewhere(app):
+    """A repaint that covers only another row (the pointer onto a finished card's head) must not take
+    the running card off the clock: its mark and its seconds keep moving."""
+    from test_tool_blocks import block, make
+
+    from pilcrow_qt.canvas.blocks.prose import TextGroup
+    from pilcrow_qt.canvas.clock import clock
+    from pilcrow_qt.canvas.scene import Scene
+    from pilcrow_qt.canvas.view import CanvasView
+
+    scene = Scene()
+    v = CanvasView(scene)
+    v.resize(760, 600)
+    para = TextGroup(TextItem(id="t0", text="Some words to fill a paragraph. " * 6, streaming=False, ts=0))
+    done = block(make("Read", {"file_path": "/p/a.ts"}, "1→x"))
+    running = block(make("Bash", {"command": "sleep 10"}))
+    v.begin()
+    for b in (para, done, running):
+        scene.root.append(b)
+    v.end()
+    v.show()
+    pump(200)
+
+    def on_clock() -> bool:
+        return any(r() is v for r in clock._subs)
+
+    assert running in v._live and on_clock()
+    r = v.block_rect(done)
+    QTest.mouseMove(v.viewport(), QPoint(r.left() + 40, r.top() + 8))
+    pump(80)
+    assert v.hover is not None and v.hover[0] is done, "the pointer is on the finished card"
+    second = running._second
+    pump(1500)
+    assert on_clock() and running in v._live, "still on the clock"
+    assert running._second != second, "the elapsed second moved on"
+    v.close()
