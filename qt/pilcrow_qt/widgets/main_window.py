@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 
 from .. import icons, theme
 from ..canvas.clock import Tween
+from ..canvas.view import scrolling as canvas_scrolling
 from ..lib.shortcuts import SHORTCUTS
 from ..store import PANEL_TABS, store
 from .dialogs.parts import ElideLabel
@@ -284,6 +285,11 @@ class MainWindow(QMainWindow):
         session = store.active_session()
         if session is None or store.page != "session" or self.panel_host.isVisible():
             return
+        if canvas_scrolling():
+            # idle by the clock, not by the person: building the panel takes tens of milliseconds (more
+            # on Windows), and on a scroll's frame it is the first scroll up a history that stutters
+            self._idle_panel.start()
+            return
         if self.panel is not None:
             self.panel.set_session(session)
             return
@@ -303,6 +309,9 @@ class MainWindow(QMainWindow):
         panel = self.panel
         if panel is None or not shiboken6.isValid(panel):
             return
+        if canvas_scrolling():
+            QTimer.singleShot(300, self, self._warm_panel)  # the off-screen paint waits for the scroll
+            return
         # A grab lays a hidden widget out as if it were shown, and the window's row would make room
         # for the closed panel's sheet: the conversation narrowed and widened again (two reflows,
         # two whole repaints) on every warm-up. The row is held still while the panel is grabbed.
@@ -318,7 +327,9 @@ class MainWindow(QMainWindow):
         step = lexer_warmer(store.active_id or "")
 
         def warm() -> None:
-            if step():
+            if canvas_scrolling():
+                QTimer.singleShot(300, self, warm)
+            elif step():
                 QTimer.singleShot(0, self, warm)
 
         QTimer.singleShot(0, self, warm)

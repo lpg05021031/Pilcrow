@@ -39,12 +39,25 @@ FAR_SCREENS = 6  # cool beyond this many
 PREFETCH_BUDGET = 0.004
 FLING_BUDGET = 0.002
 OPEN_BUDGET = 0.014  # measuring a fold's children before it opens, so the reveal runs on true heights
+SCROLL_QUIET = 0.15  # s after a person's last scroll before big off-screen blocks are measured
 SCROLL_BUDGET = 0.008  # exact measuring on a person's scroll or a resize step; the rest follows in the drain
 BLIT_SIDE = 4  # px at each side of the viewport a seam's handle may lie over (4 of its 9)
 BLIT_FOOT = 48  # px at its bottom other widgets lie over: the composer's fade (44), the Latest pill (18 + 30)
 WARM_MAX = 600  # warm blocks kept before the far ones are cooled regardless of movement
 
 _measurer: Optional[Measurer] = None
+_scrolled_at = 0.0  # the last time a person scrolled any conversation (``scrolling``)
+
+
+def scrolling(within: float = 0.6) -> bool:
+    """Whether a person scrolled a conversation in the last ``within`` seconds: work that can wait
+    (building the closed side panel, warming caches) waits, so it never lands on a scroll's frame."""
+    return time.monotonic() - _scrolled_at < within
+
+
+def _note_scroll() -> None:
+    global _scrolled_at
+    _scrolled_at = time.monotonic()
 
 
 def measurer() -> Measurer:
@@ -407,6 +420,7 @@ class CanvasView(ViewInput, QAbstractScrollArea):
             self.follow_ease.stop()
             self.follow.on_user_scroll(v, prev, vb.maximum())
             self._last_user_scroll = time.monotonic()
+            _note_scroll()
             if self.follow.following:
                 self._grew = False
             if self.on_user_scrolled is not None:
@@ -470,6 +484,7 @@ class CanvasView(ViewInput, QAbstractScrollArea):
 
     def wheelEvent(self, e) -> None:
         self._last_user_scroll = time.monotonic()
+        _note_scroll()
         super().wheelEvent(e)
 
     def keyPressEvent(self, e) -> None:
@@ -580,6 +595,12 @@ class CanvasView(ViewInput, QAbstractScrollArea):
         y1 = y0 + vh
         near0, near1 = y0 - NEAR_SCREENS * vh, y1 + NEAR_SCREENS * vh
         more = False
+        # while a person scrolls, a big block off screen waits: its measure cannot be cut short (a long
+        # reply with code costs tens of milliseconds to lay out and highlight, more on Windows) and on
+        # a scroll's frame it is a stutter; it is measured when the scrolling pauses, or when it comes
+        # on screen. Small ones go on as before, within the budget.
+        busy = scrolling(SCROLL_QUIET)
+        held = False
         self.begin()
         try:
             # nearest first: alternate rings below and above the viewport
@@ -591,6 +612,9 @@ class CanvasView(ViewInput, QAbstractScrollArea):
                     if i < len(ring):
                         b = ring[i]
                         if isinstance(b, Group) and b.children and b.shaped and b.h_width == self.col_w:
+                            continue
+                        if busy and b.h > vh // 2:
+                            held = True
                             continue
                         self._exact(b)
                 if time.perf_counter() - t0 > budget:
@@ -634,6 +658,9 @@ class CanvasView(ViewInput, QAbstractScrollArea):
                     self._warm.discard(b)
         if more:
             self._prefetch.start()
+        elif held:
+            # come back once the scrolling has paused (not at once: that would spin while it goes on)
+            QTimer.singleShot(int(SCROLL_QUIET * 1000) + 20, self, self._prefetch.start)
         else:
             self._drained = (
                 self.scene_y(0),
