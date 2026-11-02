@@ -179,6 +179,31 @@ def test_turn_shows_live_fold_then_done(app_client):
             win.close()
 
 
+def test_a_message_stands_clear_of_the_reply_above_and_the_first_sits_at_the_top(app_client):
+    """transcript.css: a sent message is .msg-user's 26px under the last reply's footer (the footer's
+    20px below it collapses into that), and the first one only .transcript-inner's 6px under the
+    column's top padding, the hidden loading skeleton above it taking no room."""
+    c = app_client
+    win, tr = _mount(c, "sess-tests")
+    try:
+        c.call("mock.pace", {"ms": 0})
+        c.store.send_message("sess-tests", "Thanks, now add one for escapes")
+        sc = tr.scene
+        users = lambda: [(b, y) for b, y in sc.leaves_between(0, 10**7) if b.KIND == "user"]  # noqa: E731
+        c.wait_until(lambda: c.store.rt["sess-tests"].status == "idle" and len(users()) >= 2, 20, "the second turn")
+        c.sleep(500)
+        leaves = [(b, y) for b, y in sc.leaves_between(0, 10**7) if b.h]
+        (first, fy), (second, sy) = users()[:2]
+        assert fy == 6, f"the first message under the column's top: {fy}"
+        above = [(b, y) for b, y in leaves if y + b.h <= sy and b.KIND not in ("flat",)]
+        last, ly = above[-1]
+        assert last.KIND == "result", [b.KIND for b, _ in above[-3:]]
+        assert sy - (ly + last.h) == 26, f"footer to the next message: {sy - (ly + last.h)}"
+    finally:
+        if win is not c.win:
+            win.close()
+
+
 def test_long_opens_at_bottom_with_most_of_the_history_cold(app_client):
     c = app_client
     from pilcrow_qt.canvas.blocks.user import UserBlock

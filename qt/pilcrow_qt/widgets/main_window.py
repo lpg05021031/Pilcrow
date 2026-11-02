@@ -15,7 +15,7 @@ from collections import OrderedDict
 from typing import Callable, Dict, List, Optional, Tuple
 
 import shiboken6
-from PySide6.QtCore import QCoreApplication, QEvent, QPoint, QPointF, QRect, QRectF, QSettings, Qt, QTimer, Signal
+from PySide6.QtCore import QCoreApplication, QEvent, QPointF, QRect, QRectF, QSettings, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QGuiApplication, QKeySequence, QPainter, QPainterPath, QPen, QRegion, QShortcut
 from PySide6.QtWidgets import (
     QGraphicsOpacityEffect,
@@ -54,11 +54,12 @@ class MainWindow(QMainWindow):
         self.resize(*fit_size())
         self.setMinimumSize(900, 560)
 
-        central = QWidget()
+        rounded = custom_titlebar()
+        central = Ground(self, rounded)  # the ground: sidebar and shell are chrome, the sheets canvas
         central.setObjectName("shell")
-        central.setAutoFillBackground(True)
-        theme.tint(central, bg="chrome")  # the ground: sidebar and shell are chrome, the sheets canvas
-        central.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        if rounded:
+            # our own frame has rounded top corners: the window is see-through outside the ground
+            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setCentralWidget(central)
         col = QVBoxLayout(central)
         col.setContentsMargins(0, 0, 0, 0)
@@ -81,8 +82,6 @@ class MainWindow(QMainWindow):
         row.addWidget(self.sidebar)
 
         self.main = Card("main")
-        if self.titlebar is not None:
-            self.main.installEventFilter(self)  # the title follows the sheet's left edge
         ml = self.main.body_layout
         self.offline = OfflineBar()
         self.offline.hide()
@@ -168,15 +167,10 @@ class MainWindow(QMainWindow):
     def show_fatal(self, text: str) -> None:
         self.boot.set_fatal(text)
 
-    def eventFilter(self, obj, e) -> bool:
-        if obj is self.main and e.type() in (QEvent.Type.Move, QEvent.Type.Resize, QEvent.Type.Show):
-            self._place_title()
-        return super().eventFilter(obj, e)
-
-    def _place_title(self) -> None:
-        # The session header's text starts 21px into the sheet (its 1px border + 20px padding).
-        if self.titlebar is not None:
-            self.titlebar.set_text_x(self.main.mapTo(self, QPoint(0, 0)).x() + 21)
+    def changeEvent(self, e) -> None:
+        if e.type() == QEvent.Type.WindowStateChange:
+            self.centralWidget().update()  # the ground's corners square off when maximised
+        super().changeEvent(e)
 
     def resizeEvent(self, e) -> None:
         self.boot.setGeometry(self.centralWidget().rect())
@@ -519,6 +513,30 @@ def _no_line(parent: QWidget) -> QWidget:
 
 
 # ---------------------------------------------------------------- the ground, the sheets, the seams
+
+
+class Ground(QWidget):
+    """The window's ground, in chrome. With our own frame (``rounded``) the window is translucent and
+    the ground is painted in its shape: the top corners rounded unless the window is maximised (the
+    title bar paints the same shape over its strip); otherwise it is a plain fill."""
+
+    def __init__(self, win: QWidget, rounded: bool, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._win = win
+        self._rounded = rounded
+        if not rounded:
+            self.setAutoFillBackground(True)
+            theme.tint(self, bg="chrome")
+        bind(theme.theme.changed, self, lambda _t: self.update())
+
+    def paintEvent(self, _e) -> None:
+        if not self._rounded:
+            return
+        from .ui.titlebar import corner_radius, rounded_top
+
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.fillPath(rounded_top(self.width(), self.height(), corner_radius(self._win)), QColor(theme.tokens().chrome))
 
 
 class Shell(QWidget):

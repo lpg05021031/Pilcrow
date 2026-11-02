@@ -72,6 +72,9 @@ def _thumb(src: str) -> QPixmap:
 
 class UserBlock(Block):
     KIND = "user"
+    # .msg-user's margin-top: a new message stands clear of the reply above it (the turn's footer
+    # keeps 20px below itself; the larger of the two is the gap, as the web's margins collapse)
+    MT = 26
     __slots__ = ("item", "sid", "cwd", "doc", "bubble", "thumbs", "chips", "attach_h", "queued", "busy", "_html")
 
     def __init__(self, item: UserItem, sid: str, cwd: str) -> None:

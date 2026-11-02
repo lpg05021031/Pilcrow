@@ -269,6 +269,7 @@ class ResultBlock(Block):
     """✱ duration · tokens · cost; the detail and "Fork from here" show while the pointer is on the row."""
 
     KIND = "result"
+    MB = 20  # .turn-foot's unit margin-bottom: the turn ends here, and the next message's margin wins if larger
     __slots__ = ("item", "sid", "_fork_rect")
 
     def __init__(self, item: ResultItem, sid: str) -> None:
@@ -286,11 +287,11 @@ class ResultBlock(Block):
         return changed
 
     def estimate(self, width: int, m: Measurer) -> int:
-        return 8 + 20 + 20
+        return 8 + 20
 
     def measure(self, width: int, m: Measurer) -> int:
         self.warm = True
-        return 8 + 20 + 20
+        return 8 + 20
 
     def _detail(self) -> str:
         it = self.item
@@ -466,6 +467,7 @@ class WorkingBlock(Block):
 
 class SkeletonBlock(Block):
     KIND = "skeleton"
+    LEAD = True
     __slots__ = ("shown",)
 
     def __init__(self) -> None:

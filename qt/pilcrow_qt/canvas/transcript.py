@@ -94,6 +94,9 @@ class TranscriptScene(Scene):
         self._synced_settled = 0
         self.working = WorkingBlock(sid)
         self.skeleton = SkeletonBlock()
+        # .transcript-inner > :first-child: the first message sits 6px under the column's top padding,
+        # not a reply's distance from nothing
+        self.root.first_gap = 6
         self.empty: Optional[EmptyIsland] = None
         self.orphans: OrderedDict[str, OrphanIsland] = OrderedDict()
         self.stale = True
