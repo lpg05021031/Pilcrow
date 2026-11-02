@@ -332,6 +332,7 @@ class Transcript(QWidget):
         lay.addWidget(self.view)
         self.jump = latest_pill(self)
         self.jump.hide()
+        self._jump_on = False
         # at once, not eased: the person asked for the end, and a long ease behind a growing reply
         # was still on its way when they looked
         self.jump.clicked.connect(lambda: self.scroll_to_bottom(animate=False))
@@ -538,6 +539,11 @@ class Transcript(QWidget):
 
     # ---- overlays
     def _on_latest(self, show: bool) -> None:
+        # asked on every commit, so every frame of a fling: only a change of state touches the widget
+        # (sizing, placing and raising it each frame was a layout pass and a restack per frame)
+        if show == self._jump_on:
+            return
+        self._jump_on = show
         if show:
             self._place_jump()
             self.jump.show()
