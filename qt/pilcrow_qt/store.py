@@ -12,7 +12,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Set
 
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtGui import QGuiApplication
@@ -197,6 +197,7 @@ class Store(QObject):
         self._list_timer.timeout.connect(self._fetch_sessions)
         self._list_force = False
         self._list_waiters: List[Callable[[], None]] = []
+        self._deleted: Set[str] = set()  # sessions deleted from here: a list read before the delete may still land
         self._buffered: Dict[str, List[Json]] = {}
         self._opening: set = set()
         self._toast_seq = 0
@@ -716,6 +717,8 @@ class Store(QObject):
             prev = {s.get("id"): s for s in self.sessions}
             out: List[Json] = []
             for s in fresh:
+                if s.get("id") in self._deleted:
+                    continue
                 p = prev.get(s.get("id"))
                 out.append(p if p is not None and _same_summary(p, s) else s)
             self.sessions = out
@@ -896,19 +899,34 @@ class Store(QObject):
         return self.call("session.rename", {"id": sid, "title": title}).then(lambda _r: self.refresh_sessions(True))
 
     def delete_session(self, sid: str, remove_worktree: bool = False, remove_helpers: bool = False) -> Call:
+        # gone from the list at once: the server waits for the session's process to end before it
+        # answers, and a list read before the delete may still land after it (``_fetch_sessions``)
+        ids = {sid}
+        if remove_helpers:
+            ids.update(
+                str(s.get("id"))
+                for s in self.sessions
+                if isinstance(s.get("helper"), dict) and str(s["helper"].get("leadId")) == sid
+            )
+        self._deleted |= ids
+        self.sessions = [s for s in self.sessions if str(s.get("id")) not in ids]
+        self.sessions_changed.emit(self.sessions)
+        if self.active_id in ids:
+            self.active_id = None
+            self.active_changed.emit(None)
+
         def done(_r: Any) -> None:
-            self.models.pop(sid, None)
-            self.rt.pop(sid, None)
-            if self.active_id == sid:
-                self.active_id = None
-                self.active_changed.emit(None)
-            self.sessions = [s for s in self.sessions if s.get("id") != sid]
-            self.sessions_changed.emit(self.sessions)
+            for i in ids:
+                self.models.pop(i, None)
+                self.rt.pop(i, None)
             self.refresh_sessions(True)
 
-        return self.call(
-            "session.delete", {"id": sid, "removeWorktree": remove_worktree, "removeHelpers": remove_helpers}
-        ).then(done)
+        def failed(_e: Any) -> None:
+            self._deleted -= ids  # it is still there: show it again
+            self.refresh_sessions(True)
+
+        c = self.call("session.delete", {"id": sid, "removeWorktree": remove_worktree, "removeHelpers": remove_helpers})
+        return c.then(done).catch(failed)
 
     def archive_session(self, sid: str, archived: bool) -> Call:
         return self.call("session.archive", {"id": sid, "archived": archived}).then(

@@ -848,3 +848,19 @@ def test_a_running_label_shimmers_on_the_strip_it_ticks(app):
         clock.reduced_motion = was
     done = ThinkingBlock(ThinkingItem(id="t2", text="hm", streaming=False, start_ts=0, end_ts=1000))
     assert not done.live() and done.tick(0.0) is None
+    # the folded group a turn's commands sit in ("Running npm test…"): what most often shows while one runs
+    from pilcrow_qt.canvas.blocks.fold import FoldGroup
+    from pilcrow_qt.lib.units import WorkUnit
+
+    item = make("Bash", {"command": "npm test", "description": "Run the tests"})
+    fold = FoldGroup(WorkUnit(key="w1", work=[item], live=True), ctx(), "sess", {})
+    fold.h = fold.HEAD
+    assert fold.live()
+    clock.reduced_motion = False
+    try:
+        assert words(head(fold, 0.2), 26) != words(head(fold, 1.0), 26), "the light moved over the group's label"
+        fold.tick(0.0)  # the second's whole-head repaint
+        r = fold.tick(0.0)
+        assert r is not None and 26 < r[2] < 640 and r[3] == fold.HEAD, r
+    finally:
+        clock.reduced_motion = was
