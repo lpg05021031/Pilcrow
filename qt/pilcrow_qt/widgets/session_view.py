@@ -513,18 +513,19 @@ class SessionView(QWidget):
         helper = r.get("helper") if r and isinstance(r.get("helper"), dict) else None
         if helper and helper.get("leadId"):
             if self.lead_crumb is None:
-                self.lead_crumb = CrumbButton("Open the lead session")
+                # a link up to the lead: the arrow says where it goes, no chevron (it is not a chooser)
+                self.lead_crumb = CrumbButton("Open the lead session", icon="corner-left-up", chevron=False)
                 self.lead_crumb.clicked.connect(lambda: self._lead_id and store.open_session(self._lead_id))
                 self.crumbs.layout().addWidget(self.lead_crumb)
             self._lead_id = str(helper.get("leadId"))
-            self.lead_crumb.set_text(f"helper of {helper.get('leadTitle') or 'a lead session'}")
+            self.lead_crumb.set_text(f"Lead · {helper.get('leadTitle') or 'a lead session'}")
             self.lead_crumb.show()
         elif self.lead_crumb is not None:
             self.lead_crumb.hide()
         d = s.get("dispatch") if isinstance(s.get("dispatch"), dict) else None
         if d and d.get("jobId"):
             if self.job_crumb is None:
-                self.job_crumb = CrumbButton("Open the job")
+                self.job_crumb = CrumbButton("Open the job", icon="corner-left-up", chevron=False)
                 self.job_crumb.clicked.connect(lambda: self._job_id and store.open_job(self._job_id))
                 self.crumbs.layout().addWidget(self.job_crumb)
             self._job_id = str(d.get("jobId"))
@@ -858,10 +859,16 @@ class Crumb(QWidget):
 class CrumbButton(LayoutButton):
     """The folder crumb while the folder can still be changed (``.crumb-btn``): a quiet button with a chevron."""
 
-    def __init__(self, tooltip: str, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self, tooltip: str, parent: Optional[QWidget] = None, icon: str = "folder", chevron: bool = True
+    ) -> None:
+        """``icon`` leads the words; ``chevron`` says it opens a chooser (the folder) rather than going
+        somewhere (the lead of a helper, the job of a run)."""
         super().__init__(parent)
         self._on = False
         self._text = ""
+        self._icon = icon
+        self._chevron = chevron
         self.setFlat(True)
         self.setFixedHeight(22)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -900,8 +907,10 @@ class CrumbButton(LayoutButton):
         t = theme.tokens()
         name = "text" if self._on else "text_2"
         color = getattr(t, name)
-        self.ico.setPixmap(icons.pixmap("folder", color, 12))
-        self.chev.setPixmap(icons.pixmap("chevron-down", color, 11))
+        self.ico.setPixmap(icons.pixmap(self._icon, color, 12))
+        self.chev.setVisible(self._chevron)
+        if self._chevron:
+            self.chev.setPixmap(icons.pixmap("chevron-down", color, 11))
         self.lb.setText(QFontMetrics(self.lb.font()).elidedText(self._text, Qt.TextElideMode.ElideRight, 220))
         theme.tint(self.lb, fg=name)
         self.look_active = self._on

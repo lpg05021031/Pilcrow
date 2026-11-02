@@ -331,20 +331,23 @@ test('a 400-turn conversation opens in under a second and draws only what is nea
   await page.waitForFunction(() => { const el = document.querySelector('.transcript'); return el.scrollHeight - el.scrollTop - el.clientHeight < 60; }, null, { timeout: 4000 });
 });
 
-test('Latest appears when new rows arrive while you are up, and leaves when you go back', async ({ page }) => {
+test('Latest shows whenever the end is out of view, and goes straight there', async ({ page }) => {
   await ctl.call('mock.pace', { ms: 0 });
   await open(page, 'sess-long');
   expect((await page.locator('.jump').count()) === 0, 'Latest is showing at the live end');
   await wheelUp(page);
   expect(!(await atBottom(page)), 'still at the bottom after scrolling up');
-  await settled(page);
-  expect((await page.locator('.jump').count()) === 0, 'Latest should wait for something new to point at');
-  // Something new at the live end (sent from another window, say) is what Latest offers the way to.
+  // Up in the history, the end out of view: Latest offers the way down at once, new rows or not.
+  await page.waitForSelector('.jump', { timeout: 3000 });
+  // Something new at the live end (sent from another window, say) does not drag the reader down.
   await ctl.call('session.send', { id: 'sess-long', text: 'a message from another window' });
-  await page.waitForSelector('.jump', { timeout: 5000 });
+  await page.waitForSelector('.msg-user:has-text("a message from another window")', { state: 'attached', timeout: 5000 });
   expect(!(await atBottom(page)), 'new rows must not drag the reader down');
+  expect((await page.locator('.jump').count()) === 1, 'Latest is still offered');
+  // A click lands at the end at once (no ease to wait for), and Latest goes.
   await page.locator('.jump').click();
-  await page.waitForFunction(() => { const el = document.querySelector('.transcript'); return el.scrollHeight - el.scrollTop - el.clientHeight < 60; }, null, { timeout: 4000 });
+  const fromBottom = await page.evaluate(() => { const el = document.querySelector('.transcript'); return el.scrollHeight - el.scrollTop - el.clientHeight; });
+  expect(fromBottom < 60, `not at the end right after the click: ${fromBottom}px above it`);
   await page.waitForSelector('.jump', { state: 'detached', timeout: 3000 });
 });
 

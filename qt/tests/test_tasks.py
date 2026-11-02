@@ -349,3 +349,38 @@ def test_the_mock_workflow_runs_through_the_panel_and_the_card(app_client):
     wf_item = next(it for it in items if it.kind == "tool" and it.name == "Workflow")
     assert wf_item.status == "done"
     assert c.shot("tasks-workflow-mock").exists()
+
+
+def test_a_finished_command_is_one_line_however_long_its_text(app_client):
+    """A background command's title is its description, which can be the whole script (a heredoc, a
+    multi-line command): the row shows it on one line, cut with an ellipsis, the whole text in the
+    tooltip, and stays as tall as any other finished row."""
+    from pilcrow_qt.widgets.panels.tasks import TaskRow
+
+    script = "python - <<'EOF'\nimport os, sys\nfor k in range(3):\n    print(k)\nEOF"
+    short = TaskRow({"id": "t0", "type": "local_bash", "status": "completed", "description": "npm test"}, "s", True)
+    long = TaskRow({"id": "t1", "type": "local_bash", "status": "completed", "description": script}, "s", True)
+    for r in (short, long):
+        r.resize(320, r.sizeHint().height())
+        r.show()
+    app_client.sleep(30)
+    assert long.sizeHint().height() == short.sizeHint().height(), "one line, like the short one"
+    assert "\n" not in super(type(long.title), long.title).text()
+    assert long.title.text() == script, "text() keeps the words it was given"
+    assert long.title.toolTip().startswith("python - <<'EOF'") and "print(k)" in long.title.toolTip()
+    huge = TaskRow(
+        {"id": "t2", "type": "local_bash", "status": "failed", "description": "x " * 20000, "summary": "y\n" * 500},
+        "s",
+        True,
+    )
+    assert len(super(type(huge.title), huge.title).text()) <= 400, "a panel never measures a whole script"
+    assert "\n" not in super(type(huge.sub), huge.sub).text()
+    # a theme switch repaints the rows (the card's update() is QWidget's, not a task sync)
+    from pilcrow_qt import theme
+
+    theme.theme.apply(False)
+    theme.theme.apply(True)
+    app_client.sleep(30)
+    for r in (short, long, huge):
+        r.close()
+        r.deleteLater()

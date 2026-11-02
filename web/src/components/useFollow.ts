@@ -271,6 +271,9 @@ export function useFollow({ sessionId, model, loaded, rev, extra, onScrolled }: 
       // also fall when a page above takes its real, smaller height, and that is not a reader leaving.
       atBottom.current = false;
     }
+    // "Latest" whenever the end is out of view and the view is not following it there — not only
+    // once new output arrives.
+    if (!atBottom.current && !nearBottom) setShowJump(true);
     lastSet.current = Math.max(lastSet.current, el.scrollTop);
     if (el.scrollTop < lastSet.current - 2) lastSet.current = el.scrollTop;
     onScrolled?.(el.scrollTop > 4);
@@ -309,6 +312,12 @@ export function useFollow({ sessionId, model, loaded, rev, extra, onScrolled }: 
     atBottom.current = true;
     setShowJump(false);
     markReading(false);
+    // At once, not eased: the person asked for the end. The follow then keeps a streaming reply in view.
+    const el = scroller.current;
+    if (el) {
+      el.scrollTop = el.scrollHeight - el.clientHeight;
+      lastSet.current = el.scrollTop;
+    }
     follow();
   });
   // Your own message goes to the end of the conversation, and so do you.

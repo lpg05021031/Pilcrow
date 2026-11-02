@@ -338,6 +338,10 @@ def test_tooltips_are_painted_pills_not_the_platforms_square_window(mock_server)
         assert tip is not None and tip.isVisible()
         assert tooltip.visible_text() == "Hide sidebar (Ctrl+B)" and tip.keys == ["Ctrl", "B"]
         assert tip.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        # the window's child, so Qt makes it a transient of the window: a parentless tooltip is a toplevel
+        # of its own on Wayland (a window popping up, in the window switcher)
+        assert tip.parentWidget() is c.win and tip.isWindow()
+        assert tip.windowHandle() is not None and tip.windowHandle().transientParent() is c.win.windowHandle()
         img = tip.grab().toImage()
         body_x, body_y = tooltip.SHADOW, tooltip.SHADOW
         assert img.pixelColor(body_x, body_y).alpha() < 255, "the pill's corner is rounded off"

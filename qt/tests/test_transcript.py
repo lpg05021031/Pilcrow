@@ -239,6 +239,7 @@ def test_scrolling_up_stops_following_and_sent_jumps_back(app_client):
         c.sleep(400)
         assert not tr.view.follow.following
         assert abs(vb.value() - target) < 400, (vb.value(), target)  # rows near it were measured; the view stayed put
+        assert tr.jump.isVisible(), "the end is out of view: Latest shows, new output or not"
         assert all(b.warm for b in tr.view.visible_blocks() if not hasattr(b, "children"))
         # new output while up shows "Latest"
         model = c.store.get_model("sess-long")
@@ -449,6 +450,32 @@ def test_a_scroll_in_the_window_blits_and_repaints_only_what_it_uncovers(app_cli
         whole = vp.width() * vp.height()
         assert tr.jump.isVisible(), "the pill stayed for the last four steps"
         assert len(areas) >= 4 and max(areas) < whole // 2, (areas, whole)
+    finally:
+        if win is not c.win:
+            win.close()
+
+
+def test_latest_shows_whenever_the_end_is_out_of_view_and_jumps_there_at_once(app_client):
+    """A little way up a finished conversation is enough for "Latest" (it used to wait for new output and
+    half a screen of distance); near the end it goes; a click lands on the end in the same frame, not
+    after an ease, and the view follows from there."""
+    c = app_client
+    win, tr = _mount(c, "sess-long")
+    try:
+        c.sleep(300)
+        vb = tr.verticalScrollBar()
+        vp_h = tr.view.viewport().height()
+        vb.setValue(vb.maximum() - vp_h // 4)  # a quarter of a screen up: the last lines are just below
+        c.sleep(150)
+        assert not tr.view.follow.following and tr.jump.isVisible()
+        tr.jump.click()
+        assert vb.value() == vb.maximum(), "at the end at once"
+        assert tr.view.follow.following
+        c.sleep(150)
+        assert not tr.jump.isVisible()
+        vb.setValue(vb.maximum() - 20)  # a nudge: still within reach of the end
+        c.sleep(100)
+        assert not tr.jump.isVisible()
     finally:
         if win is not c.win:
             win.close()

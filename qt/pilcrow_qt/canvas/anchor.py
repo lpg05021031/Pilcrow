@@ -33,8 +33,11 @@ class Follow:
         """Where the view should be after content changed: the end while following, else unchanged."""
         return maximum if self.following else current
 
-    def shows_latest(self, value: int, maximum: int, viewport_h: int, grew: bool) -> bool:
-        """The "Latest" pill: not following, and the end is at least a screen away (or content arrived)."""
+    def shows_latest(self, value: int, maximum: int, viewport_h: int = 0, grew: bool = False) -> bool:
+        """The "Latest" pill: whenever the end of the conversation (the reply streaming in, or the last
+        result) is out of view and the view is not on its way there. It used to wait for new content
+        and half a screen of distance, so a reader a little way up, or up in a finished conversation,
+        had no way down but the wheel. (``viewport_h`` and ``grew`` are no longer part of the answer.)"""
         if self.following:
             return False
-        return (maximum - value) > max(NEAR_END, viewport_h // 2) and grew
+        return (maximum - value) > NEAR_END

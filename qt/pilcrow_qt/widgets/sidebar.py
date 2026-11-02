@@ -47,6 +47,7 @@ ROW_META_H = 47  # a row with the project / branch line: 13px and 11px lines at 
 HEAD_H = 24  # .side-group-head, .side-section-label
 GROUP_GAP = 14  # .side-group margin-top
 PAD = 8  # the rows' horizontal padding
+GUIDE_X = PAD + 5  # the line that joins a lead's helpers, under the lead's first letter
 GUTTER = 10  # .side-top / .side-list / .side-foot horizontal padding
 
 
@@ -104,12 +105,14 @@ def listing(sessions: List[Json], active: Optional[str], show_archived: bool, q:
             jobs.setdefault(str(d["jobId"]), []).append(s)
     lst = [s for s in lst if not (isinstance(s.get("dispatch"), dict) and s.get("id") != active)]
     # A lead's helpers sit under it, indented, not among the projects (HELPERS.md §6.3); a helper
-    # whose lead is not listed stays where its folder puts it.
+    # whose lead is not listed stays where its folder puts it. The one on screen stays under its lead
+    # too: the rows under a lead are never folded away (unlike a job's runs), and pulling the open helper
+    # out into its folder's project is what made the lead and helper look unrelated.
     listed = {str(s.get("id")) for s in lst}
     helpers: Dict[str, List[Json]] = {}
     for s in lst:
         h = s.get("helper")
-        if isinstance(h, dict) and str(h.get("leadId")) in listed and s.get("id") != active:
+        if isinstance(h, dict) and str(h.get("leadId")) in listed:
             helpers.setdefault(str(h["leadId"]), []).append(s)
     nested = {str(s.get("id")) for hs in helpers.values() for s in hs}
     lst = [s for s in lst if str(s.get("id")) not in nested]
@@ -925,6 +928,7 @@ class SessionRow(QWidget):
         self.sid = sid
         self.s: Json = {}
         self._active = False
+        self._indent = False
         self._unread = False
         self._hover = False
         self._menu_open = False
@@ -968,6 +972,7 @@ class SessionRow(QWidget):
         lay = self.layout()
         if lay is not None:
             lay.setContentsMargins(PAD + (18 if indent else 0), 0, 4, 0)  # a helper sits under its lead
+        self._indent = indent
         self.s = s
         self._active, self._unread, self._show_project = active, unread, show_project
         self._q = q
@@ -1015,13 +1020,21 @@ class SessionRow(QWidget):
 
     def paintEvent(self, _e) -> None:
         fill = "fill_2" if self._active else "fill_1" if (self._hover or self._menu_open) else ""
-        if not fill:
+        indent = self._indent
+        if not fill and not indent:
             return
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(_fill(fill))
-        p.drawRoundedRect(QRectF(self.rect()), theme.R2, theme.R2)
+        r = QRectF(self.rect())
+        if indent:
+            # a helper under its lead: the tree's guide down the left, and the row's fill starts after it,
+            # so the line from the lead stays unbroken past the row that is open
+            p.fillRect(QRectF(GUIDE_X, 0, 1, self.height()), _fill("hair_2"))
+            r.setLeft(GUIDE_X + 6)
+        if fill:
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(_fill(fill))
+            p.drawRoundedRect(r, theme.R2, theme.R2)
 
     # ---- interaction
     def enterEvent(self, e) -> None:

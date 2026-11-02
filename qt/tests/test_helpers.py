@@ -8,6 +8,7 @@ from __future__ import annotations
 import time
 
 from harness import app_client, mock_server
+from PySide6.QtCore import QPoint
 
 HOME = "/home/tester"
 
@@ -109,7 +110,15 @@ def test_a_lead_and_its_helpers(app_client):
     c.open(web)
     hv = c.win.session_view
     c.wait_until(lambda: hv.lead_crumb is not None and hv.lead_crumb.isVisible(), 5, "the helper's crumb")
-    assert hv.lead_crumb.text() == "helper of Invoice download"
+    assert hv.lead_crumb.text() == "Lead · Invoice download"
+    # open, the helper stays under its lead in the sidebar (it used to leave for its folder's project)
+    c.wait_until(lambda: web in c.win.sidebar._rows, 5, "the helper's row")
+    srows = c.win.sidebar._rows
+    assert srows[web].layout().contentsMargins().left() > srows[sid].layout().contentsMargins().left()
+    order = [w for w in c.win.sidebar.findChildren(type(srows[sid])) if w.isVisible()]
+    order.sort(key=lambda w: w.mapTo(c.win.sidebar, QPoint(0, 0)).y())
+    i = order.index(srows[sid])
+    assert srows[web] in order[i + 1 : i + 3], "right under the lead"
     assert any(it.kind == "user" and it.from_ == "lead" for it in _items(c, web)), "the brief came from the lead"
     assert "Detach from lead" in [i.get("label") for i in hv.menu_items()]
     # deleting the lead offers to take its helpers along

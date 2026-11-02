@@ -332,7 +332,10 @@ class Transcript(QWidget):
         lay.addWidget(self.view)
         self.jump = latest_pill(self)
         self.jump.hide()
-        self.jump.clicked.connect(self.scroll_to_bottom)
+        self._jump_on = False
+        # at once, not eased: the person asked for the end, and a long ease behind a growing reply
+        # was still on its way when they looked
+        self.jump.clicked.connect(lambda: self.scroll_to_bottom(animate=False))
         self.find_bar: Optional[QWidget] = None
         self._scrolled_cb: Optional[Callable[[bool], None]] = None
         self._empty_widget: Optional[QWidget] = None
@@ -390,8 +393,8 @@ class Transcript(QWidget):
                 return i
         return 0
 
-    def scroll_to_bottom(self) -> None:
-        self.view.scroll_to_bottom()
+    def scroll_to_bottom(self, animate: bool = True) -> None:
+        self.view.scroll_to_bottom(animate)
         self.scene.saved = None
         self.scene.saved_following = True
 
@@ -536,6 +539,11 @@ class Transcript(QWidget):
 
     # ---- overlays
     def _on_latest(self, show: bool) -> None:
+        # asked on every commit, so every frame of a fling: only a change of state touches the widget
+        # (sizing, placing and raising it each frame was a layout pass and a restack per frame)
+        if show == self._jump_on:
+            return
+        self._jump_on = show
         if show:
             self._place_jump()
             self.jump.show()

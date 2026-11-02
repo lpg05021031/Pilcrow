@@ -22,7 +22,7 @@ import time
 from typing import Callable, Dict, List, Optional
 
 from PySide6.QtCore import QEvent, QObject, QRect, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPaintEvent, QPen
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPaintEvent, QPalette, QPen
 from PySide6.QtWidgets import (
     QAbstractButton,
     QHBoxLayout,
@@ -67,14 +67,33 @@ class Text(QLabel):
         self._plain = ""
         self._rich = False
         self._lh = 1.45
+        self._one_line = False  # set by elide(): one line, cut with an ellipsis
+        self._auto_tip = ""  # the tooltip setText put there (one the caller set is left alone)
 
     def set_leading(self, line_height: float) -> None:
         self._rich = True
         self._lh = line_height
         self.setTextFormat(Qt.TextFormat.RichText)
 
+    def set_one_line(self) -> None:
+        self._one_line = True
+        self.setWordWrap(False)
+        self.setText(self._plain)
+
     def setText(self, text: str) -> None:
         self._plain = text
+        if self._one_line:
+            # a title that may be a whole command or script: its words on one line, at most what a
+            # panel can show (the eliding then measures a few hundred characters, not a heredoc)
+            shown = _one_line(text)
+            super().setText(shown)
+            # the whole text as the tooltip, unless the caller set a tooltip of its own
+            if not self.toolTip() or self.toolTip() == self._auto_tip:
+                full = text.strip()
+                tip = (full[:600] + ("…" if len(full) > 600 else "")) if (full != shown or len(shown) > 60) else ""
+                self._auto_tip = tip
+                self.setToolTip(tip)
+            return
         if self._rich:
             super().setText(f'<p style="line-height:{int(self._lh * 100)}%; margin:0">{html.escape(text)}</p>')
         else:
@@ -86,6 +105,27 @@ class Text(QLabel):
 
     def text(self) -> str:
         return self._plain
+
+    def paintEvent(self, e) -> None:
+        if not self._one_line:
+            super().paintEvent(e)
+            return
+        p = QPainter(self)
+        r = self.contentsRect()
+        fm = QFontMetrics(self.font())
+        p.setFont(self.font())
+        p.setPen(self.palette().color(QPalette.ColorRole.WindowText))
+        shown = fm.elidedText(super().text(), Qt.TextElideMode.ElideRight, r.width())
+        p.drawText(r, int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter), shown)
+
+
+#: how much of a one-line title is kept: far more than a panel shows, far less than a long command
+ONE_LINE_MAX = 400
+
+
+def _one_line(text: str) -> str:
+    t = " ".join(text.split())
+    return t if len(t) <= ONE_LINE_MAX else t[:ONE_LINE_MAX]
 
 
 def lbl(
@@ -135,9 +175,13 @@ def set_rich(lb: QLabel, text: str, line_height: float = 1.45) -> None:
 
 
 def elide(lb: QLabel) -> QLabel:
-    """Let a label give way to its column instead of widening it (``.ellipsis``)."""
+    """``.ellipsis``: one line that gives way to its column instead of widening it, cut with an
+    ellipsis, the whole text in its tooltip. A task's title can be a whole command or script: shown
+    as it is, a finished heredoc filled the panel line by line."""
     lb.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
     lb.setMinimumWidth(0)
+    if isinstance(lb, Text) and not lb._rich:
+        lb.set_one_line()
     return lb
 
 

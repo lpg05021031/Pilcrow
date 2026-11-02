@@ -12,6 +12,7 @@ places that show one themselves (the conversation canvas).
 
 from __future__ import annotations
 
+import atexit
 import re
 from typing import List, Optional, Tuple
 
@@ -45,14 +46,23 @@ def _split(text: str) -> Tuple[str, List[str], str]:
     return m.group(1), keys, note
 
 
-class Tip(QWidget):
-    """The one tooltip window."""
+#: a tooltip window: no frame, no shadow of the window manager's, never takes the focus
+TIP_FLAGS = (
+    Qt.WindowType.ToolTip
+    | Qt.WindowType.FramelessWindowHint
+    | Qt.WindowType.NoDropShadowWindowHint
+    | Qt.WindowType.WindowDoesNotAcceptFocus
+)
 
-    def __init__(self) -> None:
-        super().__init__(
-            None,
-            Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint,
-        )
+
+class Tip(QWidget):
+    """The tooltip window of one top-level window. It is that window's child: Qt makes it a transient of
+    the window, which a tooltip has to be — on Wayland a parentless one is a toplevel of its own (a
+    window popping up, with an entry in the window switcher), and some X11 window managers treat it the
+    same way."""
+
+    def __init__(self, host: Optional[QWidget] = None) -> None:
+        super().__init__(host, TIP_FLAGS)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
@@ -187,11 +197,16 @@ def _live_tip() -> Optional[Tip]:
     return None
 
 
-def _the_tip() -> Tip:
+def _the_tip(host: Optional[QWidget] = None) -> Tip:
+    """The tip, belonging to ``host`` (the anchor's top-level window): made for it, or moved to it when
+    the last one showed over another window."""
     global _tip
     tip = _live_tip()
     if tip is None:
-        tip = _tip = Tip()
+        tip = _tip = Tip(host)
+    elif host is not None and tip.parentWidget() is not host:
+        tip.hide()
+        tip.setParent(host, TIP_FLAGS)
     return tip
 
 
@@ -200,7 +215,7 @@ def show_text(rect: QRect, text: str, anchor: Optional[QWidget] = None) -> None:
     if not text.strip():
         hide_text()
         return
-    tip = _the_tip()
+    tip = _the_tip(anchor.window() if anchor is not None else QApplication.activeWindow())
     tip.anchor = anchor
     tip.set_text(text)
     screen = QGuiApplication.screenAt(rect.center()) or QGuiApplication.primaryScreen()
@@ -259,10 +274,23 @@ _filter: Optional[_Filter] = None
 
 
 def install(app: Optional[QApplication] = None) -> None:
-    """Take over every tooltip in the application (once)."""
+    """Take over every tooltip in the application (once). The filter comes off when the application
+    quits and again at interpreter exit (before PySide's own shutdown, atexit being last in, first out):
+    a Python filter still on the application while the interpreter is torn down is called by Qt's last
+    events and crashes the process."""
     global _filter
     app = app or QApplication.instance()  # type: ignore[assignment]
     if app is None or _filter is not None:
         return
     _filter = _Filter(app)
     app.installEventFilter(_filter)
+    app.aboutToQuit.connect(uninstall)
+    atexit.register(uninstall)
+
+
+def uninstall() -> None:
+    global _filter
+    f, _filter = _filter, None
+    app = QApplication.instance()
+    if f is not None and app is not None and shiboken6.isValid(f) and shiboken6.isValid(app):
+        app.removeEventFilter(f)

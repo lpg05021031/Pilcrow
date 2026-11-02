@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QSizePolicy, QWidget
 
 from ... import icons, theme
@@ -244,14 +244,28 @@ class ReposPage(QWidget):
         self._show_box(self.add_box)
 
     def _add_path(self, path: str) -> None:
+        """A folder was picked: the chooser goes away at once and the entry is made with the folder's
+        name. It stays closed — its names, notes and defaults are there to fill in later, not a form
+        that opens on the person — and is brought into view with a "Saved" mark."""
+        self._show_box(None)
+
         def ok(e: Json) -> None:
-            self._show_box(None)
             store.toast(f"Registered {e.get('name')}", "success")
-            row = self.rows.get(str(e.get("id")))
+            eid = str(e.get("id"))
+            if eid not in self.rows:
+                self.sync()  # the entry may answer before repos.changed does
+            row = self.rows.get(eid)
             if row is not None:
-                row.set_open(True)
+                row.note_saved("Added")
+                self._reveal(row)
 
         store.call("repos.save", {"path": path}).then(ok).catch(lambda e: store.toast(err_text(e), "error"))
+
+    def _reveal(self, row: QWidget) -> None:
+        """Scroll the settings page so ``row`` is in view (after the layout has placed it)."""
+        scroll = getattr(self.sheet, "page_scroll", None)
+        if scroll is not None:
+            QTimer.singleShot(0, lambda: scroll.ensureWidgetVisible(row, 0, 40))
 
     def start_scan(self) -> None:
         self.scan_found = []
@@ -372,8 +386,15 @@ class RepoRow(Panel):
         self.locate_btn.hide()
         hl.addWidget(self.locate_btn)
         self.policy = Seg(POLICIES, str(e.get("policy") or "ask"), small=True, name=f"Policy for {e.get('name')}")
-        self.policy.changed.connect(lambda v: _save(self.eid, {"policy": v}))
+        self.policy.changed.connect(lambda v: self._save({"policy": v}))
         hl.addWidget(self.policy)
+        self.saved_lb = Text("Saved", theme.FS_MICRO, 500, "ok", wrap=False)
+        self.saved_lb.hide()
+        self._saved_timer = QTimer(self)
+        self._saved_timer.setSingleShot(True)
+        self._saved_timer.setInterval(1800)
+        self._saved_timer.timeout.connect(self.saved_lb.hide)
+        hl.addWidget(self.saved_lb)
         self.trash = IconButton("trash", "Remove from the registry", 13)
         self.trash.clicked.connect(self.remove)
         hl.addWidget(self.trash)
@@ -388,7 +409,9 @@ class RepoRow(Panel):
         al.addWidget(self.aliases, 1)
         self.alias_edit = line_edit("add a name you use for it…", name=f"Add an alias for {e.get('name')}")
         self.alias_edit.setFixedSize(200, 26)
-        self.alias_edit.returnPressed.connect(self.add_alias)
+        # saved on Enter and when the field is left (another field, another page, the sheet closed):
+        # a name typed and not entered was lost before
+        self.alias_edit.editingFinished.connect(self.add_alias)
         self.aliases.set_tail(self.alias_edit)
         self.lay.addWidget(arow)
 
@@ -532,6 +555,20 @@ class RepoRow(Panel):
         self.facts.setText(_facts_text(e))
         self.facts.setToolTip(_facts_text(e))
 
+    def note_saved(self, text: str = "Saved") -> None:
+        """Every change is saved as it is made (there is no Save button): say so where it happened."""
+        self.saved_lb.setText(text)
+        self.saved_lb.show()
+        self._saved_timer.start()
+
+    def _save(self, patch: Json, then: Optional[Any] = None) -> None:
+        def ok(e: Json) -> None:
+            self.note_saved()
+            if then:
+                then(e)
+
+        _save(self.eid, patch, ok)
+
     def set_open(self, on: bool) -> None:
         self.open = on
         self.detail.setVisible(on)
@@ -542,7 +579,7 @@ class RepoRow(Panel):
     # ---- data out
     def _changed(self, key: str, value: Any) -> None:
         if value != (self.e.get(key) or ""):
-            _save(self.eid, {key: value})
+            self._save({key: value})
 
     def _default(self, key: str, value: Any) -> None:
         d = dict(self.e.get("defaults") or {})
@@ -556,24 +593,24 @@ class RepoRow(Panel):
         else:
             d.pop(key, None)
         if d != (self.e.get("defaults") or {}):
-            _save(self.eid, {"defaults": d})
+            self._save({"defaults": d})
 
     def add_alias(self) -> None:
         a = self.alias_edit.text().strip()
         if not a:
             return
         self.alias_edit.setText("")
-        _save(self.eid, {"aliases": [*(self.e.get("aliases") or []), a]})
+        self._save({"aliases": [*(self.e.get("aliases") or []), a]})
 
     def remove_alias(self, a: str) -> None:
-        _save(self.eid, {"aliases": [x for x in (self.e.get("aliases") or []) if x != a]})
+        self._save({"aliases": [x for x in (self.e.get("aliases") or []) if x != a]})
 
     def add_dep(self, did: str) -> None:
         if did:
-            _save(self.eid, {"deps": [*(self.e.get("deps") or []), did]})
+            self._save({"deps": [*(self.e.get("deps") or []), did]})
 
     def remove_dep(self, did: str) -> None:
-        _save(self.eid, {"deps": [x for x in (self.e.get("deps") or []) if x != did]})
+        self._save({"deps": [x for x in (self.e.get("deps") or []) if x != did]})
 
     def start_rename(self) -> None:
         self.name_btn.hide()
@@ -588,7 +625,7 @@ class RepoRow(Panel):
         self.name_edit.hide()
         self.name_btn.show()
         if text and text != self.e.get("name"):
-            _save(self.eid, {"name": text})
+            self._save({"name": text})
         else:
             self.name_edit.setText(str(self.e.get("name") or ""))
 
@@ -604,7 +641,7 @@ class RepoRow(Panel):
             self.locate_box.hide()
             self.page.sheet.schedule_relayout()
 
-        _save(self.eid, {"path": path}, ok)
+        self._save({"path": path}, ok)
 
     def remove(self) -> None:
         def go(_c: bool) -> None:
@@ -629,7 +666,7 @@ class RepoRow(Panel):
         if obj is getattr(self, "notes", None) and ev.type() == QEvent.Type.FocusOut:
             text = self.notes.toPlainText().strip()
             if text != (self.e.get("notes") or ""):
-                _save(self.eid, {"notes": text})
+                self._save({"notes": text})
         return super().eventFilter(obj, ev)
 
 
