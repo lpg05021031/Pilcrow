@@ -76,6 +76,12 @@ const closing = new WeakSet();
 /** Set once the server is quitting (SessionManager.stop): from then on nothing starts a process, not
  *  a held message draining nor a request that lands while the others close. */
 let quitting = false;
+/** Sessions deleted while this server runs. A process that was still closing can write its transcript
+ *  back after the file was removed, and a list read before the delete can land after it: neither may
+ *  bring the session back into the list or reopen it. */
+const removed = new Set();
+const REMOVE_WAIT_MS = 5000; // how long a delete waits for the session's process to end
+const RECHECK_MS = 1500; // and when it looks again for a transcript written back
 
 /**
  * MCP sign-in calls that newer Claude Code builds have and the SDK's types do not list yet; each is
@@ -1086,6 +1092,7 @@ class SessionManager {
   async get(id) {
     let s = this.sessions.get(id);
     if (s) return s;
+    if (removed.has(id)) throw new AppError('not_found', 'This session was deleted.');
     const meta = store.getMeta(id) || {};
     let cwd = meta.cwd;
     let persisted = Boolean(await history.findTranscriptFile(id));
@@ -1147,7 +1154,7 @@ class SessionManager {
     const hist = await history.listHistory();
     const out = new Map();
     const metaAll = store.meta;
-    for (const h of hist) out.set(h.sessionId, this.rowOf(h.sessionId, metaAll[h.sessionId] || {}, h));
+    for (const h of hist) if (!removed.has(h.sessionId)) out.set(h.sessionId, this.rowOf(h.sessionId, metaAll[h.sessionId] || {}, h));
     // …and the sessions created here that have not reached disk yet
     for (const [id, meta] of Object.entries(metaAll)) if (!out.has(id) && meta.cwd && this.sessions.has(id)) out.set(id, this.rowOf(id, meta, null));
     for (const s of this.sessions.values()) {
@@ -1193,11 +1200,25 @@ class SessionManager {
   }
 
   async remove(id, { removeWorktree = false } = {}) {
+    removed.add(id);
     const s = this.sessions.get(id);
     const meta = store.getMeta(id) || {};
-    if (s) s.close();
+    const dir = meta.cwd || s?.cwd;
     this.sessions.delete(id);
-    await history.remove(id, meta.cwd || s?.cwd);
+    if (s) {
+      // let the process end before its transcript goes: one still closing writes the file back
+      const running = s.q ? s.consumed : null;
+      s.close();
+      if (running) await Promise.race([running.catch(() => {}), new Promise((r) => setTimeout(r, REMOVE_WAIT_MS))]);
+    }
+    await history.remove(id, dir);
+    // and if it wrote the file back anyway (it outlived the wait), remove that too
+    setTimeout(() => {
+      history
+        .findTranscriptFile(id)
+        .then((f) => (f ? history.remove(id, dir) : undefined))
+        .catch(() => {});
+    }, RECHECK_MS).unref?.();
     void snapshots.forget(meta.cwd || s?.cwd, id); // packing the shadow repository is not waited for
     if (removeWorktree && meta.worktree) await git.removeWorktree({ repoRoot: meta.worktree.repoRoot, dir: meta.worktree.path, branch: meta.worktree.branch, deleteBranch: true });
     store.deleteMeta(id);

@@ -460,6 +460,8 @@ function sameSummary(a: SessionSummary, b: SessionSummary) {
 }
 
 let listWaiters: (() => void)[] = [];
+/** Sessions deleted from here: a list read before the delete can land after it and must not bring them back. */
+const deletedIds = new Set<string>();
 /** Re-fetch the session list (debounced; `force` re-reads the transcripts on disk). Resolves once the list is set. */
 export function refreshSessions(force = false): Promise<void> {
   if (listTimer) clearTimeout(listTimer);
@@ -472,7 +474,7 @@ export function refreshSessions(force = false): Promise<void> {
         const fresh = await rpc.call<SessionSummary[]>(force ? 'sessions.refresh' : 'sessions.list');
         // Keep the row objects that did not change, so only the rows that did re-render.
         const prev = new Map(get().sessions.map((s) => [s.id, s]));
-        const sessions = fresh.map((s) => {
+        const sessions = fresh.filter((s) => !deletedIds.has(s.id)).map((s) => {
           const p = prev.get(s.id);
           return p && sameSummary(p, s) ? p : s;
         });
@@ -887,9 +889,11 @@ async function foldRow(id: string): Promise<() => void> {
 
 export async function deleteSession(id: string, removeWorktree = false, removeHelpers = false) {
   const unfold = await foldRow(id);
+  deletedIds.add(id);
   try {
     await call('session.delete', { id, removeWorktree, removeHelpers });
   } catch (e) {
+    deletedIds.delete(id);
     unfold();
     throw e;
   }

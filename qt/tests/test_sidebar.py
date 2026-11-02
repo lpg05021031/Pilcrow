@@ -249,3 +249,34 @@ def test_icon_button_without_a_colour_paints_in_text_2(app_client):
     brightest = max(inked, key=lambda c: c.lightness())
     assert abs(brightest.lightness() - want.lightness()) < 30, f"glyph {brightest.name()} vs text-2 {want.name()}"
     b.deleteLater()
+
+
+def test_a_deleted_session_does_not_come_back_with_a_late_list(app_client, monkeypatch):
+    """A list read before the delete that lands after it (or a server that still lists the session for a
+    moment) does not put the row back: the row goes at once and stays gone."""
+    from pilcrow_qt import store as store_mod
+    from pilcrow_qt.rpc import Call
+
+    c = app_client
+    c.wait_until(lambda: len(_rows(c)) >= 5, 10, "rows")
+    _ready(c)
+    stale = [dict(s) for s in c.store.sessions]
+    assert any(s.get("id") == "sess-tests" for s in stale)
+    c.store.delete_session("sess-tests")
+    assert "sess-tests" not in [s.get("id") for s in c.store.sessions], "gone from the list at once"
+    c.wait_until(lambda: "sess-tests" not in [r.sid for r in _rows(c)], 5, "row gone")
+
+    real = store_mod.rpc.call
+
+    def call(method, params=None):
+        if method in ("sessions.list", "sessions.refresh"):
+            late = Call(method)
+            late._resolve([dict(s) for s in stale])  # the list as it was before the delete
+            return late
+        return real(method, params)
+
+    monkeypatch.setattr(store_mod.rpc, "call", call)
+    c.store.refresh_sessions(True)
+    c.sleep(100)
+    assert "sess-tests" not in [s.get("id") for s in c.store.sessions]
+    assert "sess-tests" not in [r.sid for r in _rows(c)]

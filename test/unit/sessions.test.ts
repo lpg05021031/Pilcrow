@@ -61,7 +61,7 @@ const sdk = vi.hoisted(() => {
       return [];
     }
   }
-  return { FakeQuery, queries: [] as FakeQuery[], transcript: [] as any[] };
+  return { FakeQuery, queries: [] as FakeQuery[], transcript: [] as any[], listed: [] as any[], deleted: [] as { id: string; at: number }[] };
 });
 
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
@@ -71,11 +71,11 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
     return q;
   },
   getSessionMessages: async () => sdk.transcript.map((m) => ({ ...m })),
-  listSessions: async () => [],
+  listSessions: async () => sdk.listed.map((x) => ({ ...x })),
   getSubagentMessages: async () => [],
   listSubagents: async () => [],
   renameSession: async () => {},
-  deleteSession: async () => {},
+  deleteSession: async (id: string) => void sdk.deleted.push({ id, at: Date.now() }),
   forkSession: async () => ({}),
 }));
 vi.mock('../../server/claude.js', () => ({ resolveClaude: async () => ({ path: '/bin/true' }) }));
@@ -242,6 +242,28 @@ describe('the timeline', () => {
     const { id } = await live();
     await sessions.remove(id);
     expect(snapshots.forget).toHaveBeenCalledWith(cwd, id);
+  });
+});
+
+describe('deleting a session', () => {
+  it('waits for its process to end before the transcript goes, and does not list or reopen it after', async () => {
+    const { id, s, q } = await live();
+    // a process that takes a while to end (it may write its transcript as it goes)
+    let ended = 0;
+    q.close = () => void setTimeout(() => ((ended = Date.now()), q.end()), 80);
+    // the transcript is on disk, and a stale read of the list (or a file written back) still has it
+    sdk.listed.push({ sessionId: id, summary: 'doomed', lastModified: Date.now(), cwd });
+    await sessions.remove(id);
+    const del = sdk.deleted.find((d) => d.id === id);
+    expect(del).toBeTruthy();
+    expect(ended).toBeGreaterThan(0);
+    expect(del!.at).toBeGreaterThanOrEqual(ended);
+    expect(s.q).toBeNull();
+    const { invalidateList } = await import('../../server/history.js');
+    invalidateList();
+    expect((await sessions.list()).some((r: any) => r.id === id)).toBe(false);
+    await expect(sessions.get(id)).rejects.toThrow(/deleted/);
+    sdk.listed.length = 0;
   });
 });
 

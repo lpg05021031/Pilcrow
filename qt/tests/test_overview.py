@@ -207,3 +207,30 @@ def test_inbox_page(app_client):
     assert card.x_btn.shown
     card.x_btn.click()  # inbox.remove is quiet on the mock, which does not know it
     assert [r.it["id"] for r in ib.run_cards] == ["i2"]
+
+
+def test_one_column_at_every_width_and_rows_are_kept(app_client):
+    """The four figures stay four across and the working sessions one list at any width; a refresh
+    (which runs on every runtime change) keeps the rows it has instead of building them again."""
+    c = app_client
+    c.call("mock.pace", {"ms": 600})
+    c.store.send_message("sess-site", "please look at the parser and fix the comment, then run the tests")
+    c.store.send_message("sess-login", "start helpers for the api and the web")
+    ov = _overview(c)
+    c.wait_until(lambda: len(ov.working_cards) >= 2, 10, "two working rows")
+    rows = dict(ov.working_cards)
+    finished = list(ov.finished_rows)
+    for _ in range(5):
+        ov.refresh()
+    assert all(ov.working_cards[k] is v for k, v in rows.items()), "working rows kept"
+    assert all(a is b for a, b in zip(finished, ov.finished_rows)), "finished rows kept"
+    for w in (1500, 1000, 760, 640):
+        c.win.resize(w, 900)
+        c.sleep(150)
+        ys = {t.mapTo(ov, QPoint(0, 0)).y() for t in ov.tiles}
+        assert len(ys) == 1, f"the figures on one line at {w}"
+        xs = {r.mapTo(ov, QPoint(0, 0)).x() for r in ov.working_cards.values()}
+        assert len(xs) == 1, f"the working sessions in one column at {w}"
+        for r in ov.working_cards.values():
+            assert r.width() <= ov.body.width(), w
+    c.call("mock.pace", {"ms": 0})

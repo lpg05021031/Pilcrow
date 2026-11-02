@@ -17,7 +17,6 @@ from PySide6.QtGui import QColor, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QFrame,
-    QGridLayout,
     QHBoxLayout,
     QLabel,
     QScrollArea,
@@ -33,7 +32,7 @@ from ..lib.workflow import running_workflow, workflow_counts
 from ..store import Runtime, store
 from .dialogs.parts import Badge, Card, ElideLabel, Kbd, LayoutButton, Text, Well, half_hairline
 from .transcript.permission import suggestion_label, typing_elsewhere
-from .ui.bits import Box, ContextRing, IconButton, Mark, Spinner, WorkingMark, button, paint_box
+from .ui.bits import Box, ContextRing, IconButton, Mark, Spinner, WorkingMark, button
 from .ui.signals import bind
 
 Json = Dict[str, Any]
@@ -89,75 +88,80 @@ def short_model(m: Any) -> str:
 
 
 class Tile(LayoutButton):
-    """One figure about the fleet (``.ov-tile``). Clicking it scrolls to the matching section."""
+    """One figure about the fleet in the stat strip: a quiet label over the figure. Clicking it scrolls to
+    the matching section. Always one of four across, whatever the width (no reflow into a grid)."""
 
     def __init__(self, icon: str, label: str, on_click: Callable[[], None], parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self._icon = icon
         self._tone = ""
         self._live = False
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAccessibleName(label)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setFixedHeight(68)
+        self.setMinimumWidth(0)
+        self.setFixedHeight(58)
         self.clicked.connect(on_click)
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(13, 0, 13, 0)
-        lay.setSpacing(12)
-        self.ico_box = Box(radius=10)
-        self.ico_box.setFixedSize(34, 34)
-        il = QHBoxLayout(self.ico_box)
-        il.setContentsMargins(0, 0, 0, 0)
-        self.ico = QLabel()
-        self.ico.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        il.addWidget(self.ico, 0, Qt.AlignmentFlag.AlignCenter)
-        self.mark = WorkingMark(18)
-        self.mark.hide()
-        il.addWidget(self.mark, 0, Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(self.ico_box)
-        col = QVBoxLayout()
-        col.setContentsMargins(0, 0, 0, 0)
-        col.setSpacing(1)
-        self.value = Text("0", theme.FS_DISPLAY, 600, "text", 1.1, wrap=False, letter_spacing=-0.02)
-        col.addWidget(self.value)
+        self.set_look(hover="fill_1/raised", radius=10)
+        col = QVBoxLayout(self)
+        col.setContentsMargins(14, 9, 10, 9)
+        col.setSpacing(2)
         krow = QHBoxLayout()
         krow.setContentsMargins(0, 0, 0, 0)
-        krow.setSpacing(0)
+        krow.setSpacing(6)
+        self.mark = WorkingMark(11)
+        self.mark.hide()
+        krow.addWidget(self.mark, 0, Qt.AlignmentFlag.AlignVCenter)
         self.key = Text(label, theme.FS_MICRO, 400, "text_3", wrap=False)
-        self.key.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-        krow.addWidget(self.key)
-        self.sub = Text("", theme.FS_MICRO, 400, "text_4", wrap=False)
-        krow.addWidget(self.sub, 1)
+        self.key.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        krow.addWidget(self.key, 1)
         col.addLayout(krow)
-        lay.addLayout(col, 1)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
+        vrow = QHBoxLayout()
+        vrow.setContentsMargins(0, 0, 0, 0)
+        vrow.setSpacing(6)
+        self.value = Text("0", theme.FS_TITLE, 600, "text", 1.25, wrap=False, letter_spacing=-0.01)
+        vrow.addWidget(self.value)
+        self.sub = Text("", theme.FS_MICRO, 400, "text_4", wrap=False)
+        self.sub.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+        vrow.addWidget(self.sub, 1, Qt.AlignmentFlag.AlignBottom)
+        col.addLayout(vrow)
         self._label = label
-        self._sub = ""
-        self._paint()
 
     def set_value(self, text: str, tone: str = "", sub: str = "", live: bool = False) -> None:
+        if (text, tone, sub, live) == (self.value.text(), self._tone, self.sub.text(), self._live):
+            return  # refresh runs on every runtime change: touch nothing that did not change
         self.value.setText(text)
-        self._tone, self._sub, self._live = tone, sub, live
-        self._paint()
+        self._tone, self._live = tone, live
+        self.value.set_color("accent_text" if tone == "accent" else "text")
+        self.sub.setText(sub)
+        self.mark.setVisible(live)
 
-    def paintEvent(self, _e) -> None:
+
+class StatStrip(Card):
+    """``.ov-stats``: the four figures in one card, split by hairlines, four across at every width."""
+
+    def __init__(self, tiles: List[Tile], parent: Optional[QWidget] = None) -> None:
+        super().__init__(12, parent)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(3, 3, 3, 3)
+        lay.setSpacing(0)
+        for i, tl in enumerate(tiles):
+            if i:
+                lay.addWidget(_VRule())
+            lay.addWidget(tl, 1)
+
+
+class _VRule(QWidget):
+    """A hairline between two figures, inset from the card's top and bottom."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setFixedWidth(1)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+
+    def paintEvent(self, _e: Any) -> None:
         t = theme.tokens()
         p = QPainter(self)
-        line = theme.blend(t.hair_3 if self.underMouse() else t.hair_2, t.canvas)
-        paint_box(p, QRectF(self.rect()), QColor(t.raised), line, 14)
-
-    def _paint(self) -> None:
-        t = theme.tokens()
-        accent = self._tone == "accent"
-        self.ico_box.set_look(bg="accent_wash/raised" if accent else "fill_1/raised")
-        self.ico.setPixmap(
-            icons.pixmap(self._icon, t.accent_text if accent else (t.text if self._live else t.text_2), 16)
-        )
-        self.ico.setVisible(not self._live)
-        self.mark.setVisible(self._live)
-        self.value.set_color("accent_text" if accent else "text")
-        self.key.setText(self._label)
-        self.sub.setText(f" · {self._sub}" if self._sub else "")
+        p.fillRect(0, 12, 1, max(0, self.height() - 24), theme.blend(t.hair, t.raised))
 
 
 class SectionHead(QWidget):
@@ -198,6 +202,26 @@ class EmptyNote(Box):
             lay.addWidget(ico, 0, Qt.AlignmentFlag.AlignVCenter)
         self.text = Text(text, theme.FS_SMALL, 400, "text_3", 1.5)
         lay.addWidget(self.text, 1)
+
+
+class QuietLine(QWidget):
+    """An empty section in the control room: one quiet line with its icon, no box around it."""
+
+    def __init__(self, text: str, icon: str, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(2, 2, 0, 2)
+        lay.setSpacing(8)
+        self._icon = icon
+        self.ico = QLabel()
+        lay.addWidget(self.ico, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.text = Text(text, theme.FS_SMALL, 400, "text_3", wrap=False)
+        lay.addWidget(self.text, 1)
+        bind(theme.theme.changed, self, lambda _t: self._paint())
+        self._paint()
+
+    def _paint(self) -> None:
+        self.ico.setPixmap(icons.pixmap(self._icon, theme.tokens().text_4, 14))
 
 
 class CardHead(QWidget):
@@ -269,90 +293,111 @@ def _micro(text: str = "") -> QLabel:
     return lb
 
 
-class WorkingCard(Card):
-    """A session at work (``.ovc.busy``): what it is doing, the workflow if one runs, elapsed, cost, context."""
+class WorkingRow(LayoutButton):
+    """A session at work, one row of the Working list (``.ovr.busy``): the turning mark; the title with
+    the turn's figures at the right; what it is doing now; where it works, and how long it has been quiet;
+    the workflow's progress when one runs. One column at every width: nothing reflows on a resize."""
 
     def __init__(self, sid: str, parent: Optional[QWidget] = None) -> None:
-        super().__init__(14, parent)
+        super().__init__(parent)
         self.sid = sid
+        self._st: Json = {}
+        self._focused = False
+        self._fig = ("", "")  # (cost and agents, elapsed): the figures line is set when either changes
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setAccessibleName("Open the session")
-        self._st: Json = {}
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(15, 13, 15, 12)
-        lay.setSpacing(9)
-        row = QHBoxLayout()
-        row.setSpacing(10)
-        self.head = CardHead()
-        row.addWidget(self.head, 1)
-        self.live = WorkingMark(15)
+        self.setAutoDefault(False)
+        self.clicked.connect(lambda: store.open_session(self.sid))
+        self.set_look(hover="fill_1/raised", on="fill_1/raised", radius=8)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(10, 10, 12, 10)
+        lay.setSpacing(10)
+        self.live = WorkingMark(14)
+        self.live.setFixedSize(18, 18)
         self.live.setToolTip("Working")
-        row.addWidget(self.live, 0, Qt.AlignmentFlag.AlignTop)
-        lay.addLayout(row)
+        lay.addWidget(self.live, 0, Qt.AlignmentFlag.AlignTop)
+        col = QVBoxLayout()
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(3)
+        top = QHBoxLayout()
+        top.setSpacing(10)
+        self.title = ElideLabel()
+        self.title.setFont(theme.font_ui(theme.FS_UI, 560))
+        theme.tint(self.title, fg="text")
+        top.addWidget(self.title, 1)
+        self.figures = _micro()
+        self.figures.setToolTip("This turn so far · cost so far")
+        top.addWidget(self.figures)
+        self.ring = ContextRing(13)
+        top.addWidget(self.ring, 0, Qt.AlignmentFlag.AlignVCenter)
+        col.addLayout(top)
         act = QHBoxLayout()
-        act.setSpacing(8)
+        act.setSpacing(7)
         self.act_ico = QLabel()
+        self.act_ico.setFixedWidth(13)
         act.addWidget(self.act_ico)
         self.act = ElideLabel()
         self.act.setFont(theme.font_ui(theme.FS_SMALL))
         act.addWidget(self.act, 1)
-        lay.addLayout(act)
+        col.addLayout(act)
+        where = QHBoxLayout()
+        where.setSpacing(10)
+        self.proj = ElideLabel()
+        self.proj.setFont(theme.font_ui(theme.FS_MICRO))
+        theme.tint(self.proj, fg="text_3")
+        where.addWidget(self.proj, 1)
+        self.quiet = _micro()
+        self.quiet.setToolTip("No output for a while")
+        where.addWidget(self.quiet)
+        col.addLayout(where)
         self.wf_row = QWidget()
         wl = QHBoxLayout(self.wf_row)
-        wl.setContentsMargins(0, 0, 0, 0)
+        wl.setContentsMargins(0, 3, 0, 0)
         wl.setSpacing(7)
         self.wf_ico = QLabel()
         wl.addWidget(self.wf_ico)
         self.wf_name = ElideLabel()
         self.wf_name.setProperty("fs", "micro")
+        self.wf_name.setMaximumWidth(220)
         wl.addWidget(self.wf_name)
         self.wf_bar = WorkflowBar()
         wl.addWidget(self.wf_bar, 1)
         self.wf_n = _micro()
         wl.addWidget(self.wf_n)
         self.wf_row.hide()
-        lay.addWidget(self.wf_row)
-        foot = QHBoxLayout()
-        foot.setSpacing(12)
-        self.elapsed = _micro()
-        self.elapsed.setToolTip("This turn so far")
-        foot.addWidget(self.elapsed)
-        self.agents_ico = QLabel()
-        self.agents_ico.setToolTip("Sub-agents running")
-        foot.addWidget(self.agents_ico)
-        self.agents = _micro()
-        self.agents.setToolTip("Sub-agents running")
-        foot.addWidget(self.agents)
-        self.cost = _micro()
-        self.cost.setToolTip("Cost so far")
-        foot.addWidget(self.cost)
-        foot.addStretch(1)
-        self.quiet = _micro()
-        foot.addWidget(self.quiet)
-        self.ring = ContextRing(14)
-        foot.addWidget(self.ring)
-        lay.addLayout(foot)
+        col.addWidget(self.wf_row)
+        lay.addLayout(col, 1)
+        self.head = CardHead()  # the title and where-line text, shared with the waiting cards
+        self.head.hide()
         self._quiet_act = True
         bind(theme.theme.changed, self, lambda _t: self._paint_text())
         self._paint_text()
+
+    def set_focused(self, on: bool) -> None:
+        if on != self._focused:
+            self._focused = on
+            self.look_active = on
+            self.update()
 
     def _paint_text(self) -> None:
         t = theme.tokens()
         theme.tint(self.act, fg="text_3" if self._quiet_act else "text_2")
         self.wf_ico.setPixmap(icons.pixmap("workflow", t.text_3, 12))
-        self.agents_ico.setPixmap(icons.pixmap("bot", t.text_3, 12))
 
     def update_from(self, s: Json, st: Json, now: float, hot: bool) -> None:
         self._st = st
         self.head.update_from(s, st)
+        if self.title.text() != self.head.title.text():
+            self.title.setText(self.head.title.text())
+        if self.proj.text() != self.head.proj.text():
+            self.proj.setText(self.head.proj.text())
         ico, text, quiet = activity_line(st)
-        stale = bool(st.get("lastActivity")) and now - float(st.get("lastActivity") or 0) > STALE_MS
-        self._quiet_act = quiet
-        t = theme.tokens()
-        self.act_ico.setPixmap(icons.pixmap(ico, t.text_3, 13))
-        self.act.setText(text)
-        theme.tint(self.act, fg="text_3" if quiet else "text_2")
-        self.live.setToolTip("Quiet for a while" if stale else "Working")
+        if (ico, text, quiet) != getattr(self, "_act_was", None):
+            self._act_was = (ico, text, quiet)
+            self._quiet_act = quiet
+            self.act_ico.setPixmap(icons.pixmap(ico, theme.tokens().text_3, 13))
+            self.act.setText(text)
+            theme.tint(self.act, fg="text_3" if quiet else "text_2")
         wf = running_workflow(st.get("tasks"), ambient=False)
         if wf:
             c = workflow_counts(((wf.get("workflow") or {}).get("agents")) or [])
@@ -360,21 +405,23 @@ class WorkingCard(Card):
             self.wf_name.setText(str(wf.get("workflowName") or "Workflow"))
             self.wf_bar.set_shares(c.done / total, c.running / total, c.error / total)
             self.wf_n.setText(f"{c.done}/{c.total}")
-        self.wf_row.setVisible(bool(wf))
+        if self.wf_row.isVisibleTo(self) != bool(wf):
+            self.wf_row.setVisible(bool(wf))
         agents = sum(
             1
             for x in st.get("tasks") or []
             if isinstance(x, dict) and x.get("status") == "running" and x.get("type") == "local_agent"
         )
-        self.agents.setText(str(agents) if agents else "")
-        self.agents.setVisible(agents > 0)
-        self.agents_ico.setVisible(agents > 0)
         u = st.get("usage") or {}
         c_usd = float(u.get("costUsd") or 0)
-        self.cost.setText(cost(c_usd) + ("  above median" if hot else "") if c_usd > 0 else "")
-        self.cost.setToolTip("Well above the median session today" if hot else "Cost so far")
-        self.cost.setVisible(c_usd > 0)
-        theme.tint(self.cost, fg="accent_text" if hot else "text_3")
+        parts = []
+        if c_usd > 0:
+            parts.append(cost(c_usd) + (" · above median" if hot else ""))
+        if agents:
+            parts.append(plural(agents, "agent"))
+        self._fig = (" · ".join(parts), self._fig[1])
+        theme.tint(self.figures, fg="accent_text" if hot else "text_3")
+        self.figures.setToolTip("Well above the median session today" if hot else "This turn so far · cost so far")
         cw = int(u.get("contextWindow") or 0)
         self.ring.set_values(int(u.get("contextTokens") or 0), cw)
         self.ring.setVisible(cw > 0)
@@ -385,16 +432,16 @@ class WorkingCard(Card):
         st = self._st
         started = st.get("turnStartedAt")
         elapsed = now - float(started) if started else 0
-        self.elapsed.setText(duration(elapsed) if elapsed > 1000 else "")
-        self.elapsed.setVisible(elapsed > 1000)
+        self._fig = (self._fig[0], duration(elapsed) if elapsed > 1000 else "")
+        fig = " · ".join(x for x in (self._fig[1], self._fig[0]) if x)
+        if self.figures.text() != fig:
+            self.figures.setText(fig)
         last = st.get("lastActivity")
         stale = bool(last) and now - float(last) > STALE_MS
-        self.quiet.setText(f"quiet for {duration(now - float(last))}" if stale else "")
-        self.quiet.setVisible(stale)
-
-    def mouseReleaseEvent(self, e) -> None:
-        if e.button() == Qt.MouseButton.LeftButton:
-            store.open_session(self.sid)
+        q = f"quiet for {duration(now - float(last))}" if stale else ""
+        if self.quiet.text() != q:
+            self.quiet.setText(q)
+        self.live.setToolTip("Quiet for a while" if stale else "Working")
 
 
 class KeyButton(LayoutButton):
@@ -795,7 +842,7 @@ class SpendBars(QWidget):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setFixedHeight(42)
+        self.setFixedHeight(30)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.buckets: List[float] = [0.0] * 12
 
@@ -869,10 +916,10 @@ class Spend(Card):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(12, parent)
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(16, 14, 16, 14)
-        lay.setSpacing(14)
+        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setSpacing(12)
         hour = QVBoxLayout()
-        hour.setSpacing(8)
+        hour.setSpacing(6)
         top = QHBoxLayout()
         self.hour_lb = Text("Last hour", theme.FS_MICRO, 400, "text_3", wrap=False)
         top.addWidget(self.hour_lb)
@@ -938,6 +985,20 @@ class Spend(Card):
 # ---------------------------------------------------------------- the page
 
 
+def _relay(lay: QVBoxLayout, rows: List[QWidget]) -> None:
+    """Put ``rows`` in ``lay`` in this order with a half hairline between each two; the rows are kept
+    (only the hairlines are made anew), so a list that changes order costs no widget churn."""
+    while lay.count():
+        w = lay.takeAt(0).widget()
+        if w is not None and w not in rows:
+            w.deleteLater()  # a hairline
+    for i, r in enumerate(rows):
+        if i:
+            lay.addWidget(half_hairline("raised"))
+        lay.addWidget(r)
+        r.show()
+
+
 class _KeyWatch(QObject):
     """An app-wide event filter owned by the page: it is removed with its owner."""
 
@@ -972,11 +1033,8 @@ class Overview(QWidget):
         self._focus = -1  # keyboard focus; none until the keys are used
         self.ordered: List[str] = []
         self.needs_cards: Dict[str, NeedsCard] = {}
-        self.working_cards: Dict[str, WorkingCard] = {}
+        self.working_cards: Dict[str, WorkingRow] = {}
         self.finished_rows: List[FinishedRow] = []
-        self._laid_cols = 0
-        self._laid_tiles = 0
-        self._laid_two = 0
         self.now = now_ms()
         self._alive = {"on": True}
         self.destroyed.connect(lambda: self._alive.__setitem__("on", False))
@@ -1021,20 +1079,14 @@ class Overview(QWidget):
         self.scroll.viewport().installEventFilter(self)
         root.addWidget(self.scroll, 1)
 
-        # the four tiles
-        stats = QWidget()
-        sl = QGridLayout(stats)
-        sl.setContentsMargins(0, 0, 0, 0)
-        sl.setSpacing(10)
-        self.stats_grid = sl
+        # the four figures, in one strip
         self.tile_working = Tile("activity", "Working", lambda: self.jump(self._first_section()))
         self.tile_needs = Tile("hourglass", "Needs you", lambda: self.jump(self._first_section()))
         self.tile_finished = Tile("circle-check", "Finished today", lambda: self.jump(self.finished_sec))
         self.tile_spent = Tile("circle-dollar-sign", "Spent today", lambda: self.jump(self.spend_sec))
         self.tiles = [self.tile_working, self.tile_needs, self.tile_finished, self.tile_spent]
-        for i, tl in enumerate(self.tiles):
-            sl.addWidget(tl, 0, i)
-        bl.addWidget(stats)
+        self.stats = StatStrip(self.tiles)
+        bl.addWidget(self.stats)
 
         # needs you
         self.needs_sec = QWidget()
@@ -1056,20 +1108,16 @@ class Overview(QWidget):
         wl.setSpacing(10)
         self.working_head = SectionHead("Working")
         wl.addWidget(self.working_head)
-        self.working_grid_host = QWidget()
-        self.working_grid = QGridLayout(self.working_grid_host)
-        self.working_grid.setContentsMargins(0, 0, 0, 0)
-        self.working_grid.setSpacing(10)
-        wl.addWidget(self.working_grid_host)
+        self.working_list = Card(12)
+        self.working_lay = QVBoxLayout(self.working_list)
+        self.working_lay.setContentsMargins(4, 4, 4, 4)
+        self.working_lay.setSpacing(0)
+        wl.addWidget(self.working_list)
+        self._working_order: List[str] = []
         self.working_sec.hide()  # shown while something works: the tile and the header say when nothing does
         bl.addWidget(self.working_sec)
 
-        # finished today | spend (one column under 760px of content, like the web)
-        two = QWidget()
-        tl2 = QGridLayout(two)
-        tl2.setContentsMargins(0, 0, 0, 0)
-        tl2.setSpacing(28)
-        self.two_grid = tl2
+        # finished today, then spend
         self.finished_sec = QWidget()
         fl = QVBoxLayout(self.finished_sec)
         fl.setContentsMargins(0, 0, 0, 0)
@@ -1081,10 +1129,11 @@ class Overview(QWidget):
         self.finished_lay.setContentsMargins(4, 4, 4, 4)
         self.finished_lay.setSpacing(0)
         fl.addWidget(self.finished_list)
-        self.finished_empty = EmptyNote("No sessions have finished today.", icon="circle-check")
+        self.finished_empty = QuietLine("Nothing has finished today.", "circle-check")
         fl.addWidget(self.finished_empty)
-        self.finished_sec.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        tl2.addWidget(self.finished_sec, 0, 0)
+        self._finished_by: Dict[str, FinishedRow] = {}
+        self._finished_order: List[str] = []
+        bl.addWidget(self.finished_sec)
         self.spend_sec = QWidget()
         spl = QVBoxLayout(self.spend_sec)
         spl.setContentsMargins(0, 0, 0, 0)
@@ -1097,11 +1146,8 @@ class Overview(QWidget):
         spl.addWidget(self.spend)
         self.spend_spinner = Spinner(14)
         spl.addWidget(self.spend_spinner)
-        self.spend_sec.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        tl2.addWidget(self.spend_sec, 1, 0)
-        bl.addWidget(two)
+        bl.addWidget(self.spend_sec)
         bl.addStretch(1)
-        self._place_two(1)
 
         # live state: the store for sessions and runtimes, fleet.state for the rest, a clock for elapsed times
         self._tick_timer = QTimer(self)
@@ -1137,44 +1183,10 @@ class Overview(QWidget):
         super().hideEvent(e)
 
     def _fit_body(self) -> None:
+        """The conversation's column width, centred; everything inside is one column, so a resize only
+        changes how much of each line shows."""
         vw = self.scroll.viewport().width()
         self.body.setFixedWidth(max(320, min(theme.column_width(vw), vw)))
-        content = self.body.width() - 40
-        tiles = 2 if content <= 640 else 4
-        if tiles != self._laid_tiles:
-            self._laid_tiles = tiles
-            while self.stats_grid.count():
-                self.stats_grid.takeAt(0)
-            for i, tl in enumerate(self.tiles):
-                self.stats_grid.addWidget(tl, i // tiles, i % tiles)
-        self._place_two(1 if content <= 760 else 2)
-        if self._cols() != self._laid_cols and self.working_cards:
-            self.refresh()
-
-    def _place_two(self, cols: int) -> None:
-        """``.ov-two``: finished | spend side by side (3fr / minmax(260px, 2fr)), or stacked under 760px."""
-        if cols == self._laid_two:
-            return
-        self._laid_two = cols
-        g = self.two_grid
-        while g.count():
-            g.takeAt(0)
-        if cols == 2:
-            g.addWidget(self.finished_sec, 0, 0)
-            g.addWidget(self.spend_sec, 0, 1)
-            g.setColumnStretch(0, 3)
-            g.setColumnStretch(1, 2)
-            self.spend_sec.setMinimumWidth(260)
-        else:
-            g.addWidget(self.finished_sec, 0, 0)
-            g.addWidget(self.spend_sec, 1, 0)
-            g.setColumnStretch(0, 1)
-            g.setColumnStretch(1, 0)
-            self.spend_sec.setMinimumWidth(0)
-
-    def _cols(self) -> int:
-        """``.ov-grid``: repeat(auto-fill, minmax(290px, 1fr)) with a 10px gap."""
-        return max(1, (self.body.width() - 40 + 10) // 300)
 
     # ---- data
     def load_fleet(self) -> None:
@@ -1276,37 +1288,39 @@ class Overview(QWidget):
         for sid in list(self.working_cards):
             if sid not in keep:
                 self.working_cards.pop(sid).deleteLater()
-        while self.working_grid.count():
-            self.working_grid.takeAt(0)
-        cols = self._laid_cols = self._cols()
-        for i, s in enumerate(working):
+        order = [str(s.get("id")) for s in working]
+        for s in working:
             sid = str(s.get("id"))
-            card = self.working_cards.get(sid)
-            if card is None:
-                card = self.working_cards[sid] = WorkingCard(sid)
+            row = self.working_cards.get(sid)
+            if row is None:
+                row = self.working_cards[sid] = WorkingRow(sid)
             mine = next((float(p.get("cost") or 0) for p in per if str(p.get("id")) == sid), 0.0)
             hot = median > 0 and mine > median * 3 and len(per) >= 4
-            card.update_from(s, self.state_of(sid), self.now, hot)
-            card.set_focused(sid == focus_id)
-            self.working_grid.addWidget(card, i // cols, i % cols)
+            row.update_from(s, self.state_of(sid), self.now, hot)
+            row.set_focused(sid == focus_id)
+        if order != self._working_order:
+            self._working_order = order
+            _relay(self.working_lay, [self.working_cards[sid] for sid in order])
         self.working_sec.setVisible(bool(working))
 
-        # finished today
+        # finished today: the rows are kept by session and laid out again only when the list changes
         self.finished_head.count.set_count(len(finished))
-        while self.finished_lay.count():
-            w = self.finished_lay.takeAt(0).widget()
-            if w is not None:
-                w.deleteLater()
-        self.finished_rows = []
-        for i, s in enumerate(finished):
+        keep = {str(s.get("id")) for s in finished}
+        for sid in list(self._finished_by):
+            if sid not in keep:
+                self._finished_by.pop(sid).deleteLater()
+        order = [str(s.get("id")) for s in finished]
+        for s in finished:
             sid = str(s.get("id"))
-            if i:
-                self.finished_lay.addWidget(half_hairline("raised"))
-            row = FinishedRow(sid)
+            row = self._finished_by.get(sid)
+            if row is None:
+                row = self._finished_by[sid] = FinishedRow(sid)
             row.update_from(s, self.state_of(sid), bool(store.unread.get(sid)), self.now)
             row.set_focused(sid == focus_id)
-            self.finished_rows.append(row)
-            self.finished_lay.addWidget(row)
+        if order != self._finished_order:
+            self._finished_order = order
+            _relay(self.finished_lay, [self._finished_by[sid] for sid in order])
+        self.finished_rows = [self._finished_by[sid] for sid in order]
         self.finished_list.setVisible(bool(finished))
         self.finished_empty.setVisible(not finished)
 

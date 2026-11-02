@@ -35,7 +35,7 @@ from ...widgets.ui.bits import draw_mark
 from ..paint import Measurer, PaintState
 from ..pixels import vline
 from ..scene import Block, Group, Target
-from .base import chevron, paint_head_tint
+from .base import chevron, draw_shimmer, paint_head_tint
 from .misc import (
     CommandOutputBlock,
     DividerBlock,
@@ -437,7 +437,7 @@ class FoldGroup(Group):
     MB = 14
     CHILD_INDENT = 14
     HEAD = 30
-    __slots__ = ("_second", "ctx", "inner", "sid", "state", "summary", "unit")
+    __slots__ = ("_label_end", "_second", "ctx", "inner", "sid", "state", "summary", "unit")
 
     def __init__(self, unit: WorkUnit, ctx: ToolCtx, sid: str, state: Dict[str, bool]) -> None:
         self.unit = unit  # read by content_h() while Group.__init__ sets the first height
@@ -448,6 +448,7 @@ class FoldGroup(Group):
         self.summary = work_summary(unit.work)
         self.inner: Optional[Flat] = None
         self._second = -1  # the elapsed second last painted
+        self._label_end = 0  # where the live label ends: the shimmer's frame (``tick``)
         self.shaped = False  # the inside is built the first time it is needed (opened, revealed, found)
         self.sync(unit, ctx)
         self.set_open(self.wants_open)
@@ -539,8 +540,13 @@ class FoldGroup(Group):
         doing = live_label(self.unit.work) if live else None
         text = f"{doing}…" if doing else self.summary.text
         color = QColor(t.text_2 if hover else t.text_3)
-        st.m.draw_text(p, cx, y + (self.HEAD - st.m.line_h(f)) / 2, text, f, color)
+        if live:
+            # what is running now, with the light passing over it (the web's .shimmer)
+            draw_shimmer(p, cx, y + (self.HEAD - st.m.line_h(f)) / 2, text, f, QColor(t.text_2), st)
+        else:
+            st.m.draw_text(p, cx, y + (self.HEAD - st.m.line_h(f)) / 2, text, f, color)
         cx += st.m.text_w(text, f) + 6
+        self._label_end = int(cx - x)
         if self.summary.failed:
             fail = f"· {self.summary.failed} failed"
             st.m.draw_text(p, cx, y + (self.HEAD - st.m.line_h(f)) / 2, fail, st.m.font(theme.FS_UI), QColor(t.err))
@@ -594,7 +600,8 @@ class FoldGroup(Group):
         if s != self._second:
             self._second = s
             return (0, 0, 100000, self.HEAD)
-        return (0, 0, 20, self.HEAD)
+        # the breathing mark and the label the light passes over: not the chevron or the figures at the right
+        return (0, 0, max(20, self._label_end), self.HEAD)
 
     @property
     def static(self) -> bool:
