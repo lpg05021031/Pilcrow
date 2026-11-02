@@ -72,9 +72,10 @@ def test_needs_card_answers_in_place(app_client):
     assert "npm run build" in card.what.text()
     assert card.note.text() == "Rebuild from scratch"
     assert card.allow_btn.isVisible() and card.allow_btn.property("kind") == "primary"
-    assert card.allow_btn.kbd.text() == "1"
-    assert card.always_btn.isVisible() and card.always_btn.kbd.text() == "2"
-    assert card.deny_btn.kbd.text() == "3"
+    # the keys answer the first row; the buttons say so in their tooltips, not on key caps
+    assert not card.allow_btn.kbd.isVisible() and card.allow_btn.toolTip().endswith("· 1")
+    assert card.always_btn.isVisible() and card.always_btn.toolTip().endswith("· 2")
+    assert card.deny_btn.toolTip().endswith("· 3")
     assert ov.tile_needs.value.text() == "1"
     assert "1 waiting for you" in ov.summary.text()
     c.sleep(80)

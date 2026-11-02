@@ -30,7 +30,7 @@ from ..lib.fmt import basename, cost, duration, now_ms, plural, rel_path, time_a
 from ..lib.tools_meta import str_
 from ..lib.workflow import running_workflow, workflow_counts
 from ..store import Runtime, store
-from .dialogs.parts import Badge, Card, ElideLabel, Kbd, LayoutButton, Text, Well, half_hairline
+from .dialogs.parts import Badge, Card, ElideLabel, Kbd, LayoutButton, Text, half_hairline
 from .transcript.permission import suggestion_label, typing_elsewhere
 from .ui.bits import Box, ContextRing, IconButton, Mark, Spinner, WorkingMark, button
 from .ui.signals import bind
@@ -484,24 +484,34 @@ class KeyButton(LayoutButton):
         self.kbd.setVisible(bool(n))
 
 
-class NeedsCard(Card):
-    """A session waiting on you (``.ovc.needs``): the request in a well, and the answer buttons."""
+class NeedsCard(QFrame):
+    """A session waiting on you, one row of the Needs-you list: who is asking and since when, what they
+    ask on a line of its own, and the answers. The same quiet grammar as the Working list: no coloured
+    rail or wash, no key caps; the one strong colour is the default answer. (The 1/2/3 keys still answer
+    the first row; each button says its key in its tooltip.)"""
 
     def __init__(self, sid: str, parent: Optional[QWidget] = None) -> None:
-        super().__init__(14, parent)
+        super().__init__(parent)
         self.sid = sid
-        self.set_tone("needs")
         self._perm: Optional[Json] = None
         self._first = False
         self._busy = False
         self._decided = ""
+        self._focused = False
         self._allow_always = False
         self._cwd = ""
         self._job: str = ""  # the dispatch job this session runs for, if any
         self._helper: Optional[Json] = None  # the lead this session helps, if any
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(19, 13, 15, 12)
-        lay.setSpacing(9)
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(10, 11, 12, 12)
+        lay.setSpacing(10)
+        self.mark = QLabel()
+        self.mark.setFixedSize(18, 18)
+        self.mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(self.mark, 0, Qt.AlignmentFlag.AlignTop)
+        col = QVBoxLayout()
+        col.setContentsMargins(0, 0, 0, 0)
+        col.setSpacing(3)
         row = QHBoxLayout()
         row.setSpacing(10)
         self.head = CardHead()
@@ -511,10 +521,12 @@ class NeedsCard(Card):
         self.open_btn = IconButton("arrow-up-right", "Open the session", 14)
         self.open_btn.clicked.connect(lambda: store.open_session(self.sid))
         row.addWidget(self.open_btn, 0, Qt.AlignmentFlag.AlignTop)
-        lay.addLayout(row)
-        self.well = Well(8)
+        col.addLayout(row)
+        col.addSpacing(5)
+        # what is asked: the tool's name, quiet, and the command or path as it is
+        self.well = QWidget()
         wl = QHBoxLayout(self.well)
-        wl.setContentsMargins(10, 8, 10, 8)
+        wl.setContentsMargins(0, 0, 0, 0)
         wl.setSpacing(8)
         self.tool = QLabel()
         wl.addWidget(self.tool, 0, Qt.AlignmentFlag.AlignTop)
@@ -522,11 +534,12 @@ class NeedsCard(Card):
         self.what.setWordWrap(True)
         self.what.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         wl.addWidget(self.what, 1)
-        lay.addWidget(self.well)
+        col.addWidget(self.well)
         self.note = _micro()
         self.note.setWordWrap(True)
         self.note.hide()
-        lay.addWidget(self.note)
+        col.addWidget(self.note)
+        col.addSpacing(6)
         actions = QHBoxLayout()
         actions.setSpacing(6)
         self.allow_btn = KeyButton("Allow", "primary")
@@ -559,30 +572,41 @@ class NeedsCard(Card):
         self.decided_lb = QLabel()
         actions.addWidget(self.decided_lb)
         actions.addStretch(1)
-        lay.addLayout(actions)
+        col.addLayout(actions)
+        lay.addLayout(col, 1)
         bind(theme.theme.changed, self, lambda _t: self._paint_extra())
         self._paint_extra()
+
+    def set_focused(self, on: bool) -> None:
+        if on != self._focused:
+            self._focused = on
+            self.update()
+
+    def set_tone(self, _tone: str) -> None:
+        """The answered state shows in the words at the foot, not in a tint over the row."""
+        self.update()
 
     def _paint_extra(self) -> None:
         t = theme.tokens()
         self.wait.setFont(theme.font_ui(theme.FS_MICRO))
         self.wait.setContentsMargins(0, 2, 0, 0)
-        theme.tint(self.wait, fg="accent_text")
-        self.tool.setFont(theme.font_ui(theme.FS_SMALL, 600))
-        theme.tint(self.tool, fg="text_2")
+        theme.tint(self.wait, fg="text_3")
+        self.tool.setFont(theme.font_ui(theme.FS_SMALL))
+        theme.tint(self.tool, fg="text_3")
         self.decided_lb.setFont(theme.font_ui(theme.FS_SMALL))
-        theme.tint(self.decided_lb, fg="ok")
+        theme.tint(self.decided_lb, fg="text_2")
         self.decided_ico.setPixmap(icons.pixmap("circle-check", t.ok, 14))
+        self.mark.setPixmap(icons.pixmap("hourglass", t.text_2, 14))
 
     def paintEvent(self, e) -> None:
         super().paintEvent(e)
-        # the rail: a 3px accent (ok once answered) down the left edge
-        t = theme.tokens()
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(t.ok if self._decided else t.accent))
-        p.drawRoundedRect(QRectF(0, 12, 3, self.height() - 24), 1.5, 1.5)
+        if self._focused:
+            t = theme.tokens()
+            p = QPainter(self)
+            p.setRenderHint(QPainter.RenderHint.Antialiasing)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(theme.blend(t.fill_1, t.raised))
+            p.drawRoundedRect(QRectF(self.rect()), 8, 8)
 
     @property
     def perm(self) -> Optional[Json]:
@@ -609,24 +633,25 @@ class NeedsCard(Card):
         self._allow_always = bool(perm and not perm.get("suppressAlwaysAllowRule") and perm.get("suggestions"))
         if perm:
             text, mono, note = perm_summary(perm, self._cwd)
-            self.tool.setText(str(perm.get("displayName") or perm.get("toolName") or ""))
+            name = str(perm.get("displayName") or perm.get("toolName") or "")
+            self.tool.setText({"AskUserQuestion": "Question", "ExitPlanMode": "Plan"}.get(name, name))
             self.what.setText(text)
-            self.what.setFont(theme.font_mono(12) if mono else theme.font_ui(theme.FS_SMALL))
+            self.what.setFont(theme.font_mono(12) if mono else theme.font_ui(theme.FS_UI))
             theme.tint(self.what, fg="text")
             self.note.setText(note)
             self.note.setVisible(bool(note))
             more = len(pending) - 1
             self.more.setText(f"+{more} more waiting" if more > 0 else "")
             self.more.setVisible(more > 0 and not interactive and not self._decided)
-            if self._allow_always:
-                self.always_btn.setToolTip(suggestion_label(perm["suggestions"][0], self._cwd))
             default_no = bool(perm.get("defaultToNo"))
             self.allow_btn.set_kind("" if default_no else "primary")
             self.deny_btn.set_kind("primary" if default_no else "ghost")
             keys = first and not interactive
-            self.allow_btn.set_key(1 if keys and not default_no else None)
-            self.always_btn.set_key(2 if keys else None)
-            self.deny_btn.set_key((3 if self._allow_always else 2) if keys else None)
+            self.allow_btn.setToolTip("Allow · 1" if keys and not default_no else "Allow this once")
+            self.deny_btn.setToolTip(f"Deny · {3 if self._allow_always else 2}" if keys else "Deny")
+            if self._allow_always:
+                tip = suggestion_label(perm["suggestions"][0], self._cwd)
+                self.always_btn.setToolTip(f"{tip} · 2" if keys else tip)
             tool = perm.get("toolName")
             self.open_primary.setText(
                 "Answer the question"
@@ -1093,11 +1118,14 @@ class Overview(QWidget):
         nl = QVBoxLayout(self.needs_sec)
         nl.setContentsMargins(0, 0, 0, 0)
         nl.setSpacing(10)
-        self.needs_head = SectionHead("Needs you", glyph=True, end_text="Press 1, 2 or 3 to answer the first")
+        self.needs_head = SectionHead("Needs you")
         nl.addWidget(self.needs_head)
-        self.needs_lay = QVBoxLayout()
-        self.needs_lay.setSpacing(10)
-        nl.addLayout(self.needs_lay)
+        self.needs_list = Card(12)
+        self.needs_lay = QVBoxLayout(self.needs_list)
+        self.needs_lay.setContentsMargins(4, 4, 4, 4)
+        self.needs_lay.setSpacing(0)
+        nl.addWidget(self.needs_list)
+        self._needs_order: List[str] = []
         self.needs_sec.hide()
         bl.addWidget(self.needs_sec)
 
@@ -1270,8 +1298,6 @@ class Overview(QWidget):
         for sid in list(self.needs_cards):
             if sid not in keep:
                 self.needs_cards.pop(sid).deleteLater()
-        while self.needs_lay.count():
-            self.needs_lay.takeAt(0)
         for i, s in enumerate(needs):
             sid = str(s.get("id"))
             card = self.needs_cards.get(sid)
@@ -1279,7 +1305,10 @@ class Overview(QWidget):
                 card = self.needs_cards[sid] = NeedsCard(sid)
             card.update_from(s, self.state_of(sid), i == 0, self.now)
             card.set_focused(sid == focus_id)
-            self.needs_lay.addWidget(card)
+        order = [str(s.get("id")) for s in needs]
+        if order != self._needs_order:
+            self._needs_order = order
+            _relay(self.needs_lay, [self.needs_cards[sid] for sid in order])
         self.needs_sec.setVisible(bool(needs))
 
         # working
