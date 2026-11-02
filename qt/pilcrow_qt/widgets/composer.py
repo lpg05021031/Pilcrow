@@ -34,6 +34,7 @@ from PySide6.QtCore import (
     QIODevice,
     QMimeData,
     QMimeDatabase,
+    QObject,
     QPoint,
     QPointF,
     QRect,
@@ -73,7 +74,7 @@ from ..lib.fuzzy import fuzzy_filter
 from ..lib.models import ALIASES, model_label, trim_claude
 from ..store import store
 from .queue_tray import QueueTray
-from .suggest import SuggestPopup, word_match
+from .suggest import SuggestPopup, _FloatingPanel, word_match
 from .ui.bits import ContextRing, LayoutButton, context_label, draw_box_shadow, paint_kbd, reveal_on_hover, rounded_path
 from .ui.button import Btn
 from .ui.menu import MenuPopover, close_menus, show_menu
@@ -186,6 +187,42 @@ def column_width(pane_width: int) -> int:
 # ---------------------------------------------------------------- the box (.composer)
 
 
+def _in_overlay(w: Optional[QWidget]) -> bool:
+    """Inside a menu, a popover or the composer's suggestion list: in-window panels that work with the
+    composer, so a press there keeps its focus (and its halo)."""
+    from .ui.menu import Popover
+
+    while w is not None:
+        if isinstance(w, (Popover, _FloatingPanel)):
+            return True
+        w = w.parentWidget()
+    return False
+
+
+class _PressElsewhere(QObject):
+    """The web's blur: a press anywhere in the window outside the composer takes the focus off it, also
+    where nothing takes the focus instead (the conversation, a label, the empty sidebar), so the focus
+    halo goes away with the first click outside rather than only on the few controls that take focus.
+    Installed on the application only while the box has the focus."""
+
+    def __init__(self, box: ComposerBox) -> None:
+        super().__init__(box)
+        self.box = box
+
+    def eventFilter(self, obj, e) -> bool:
+        if e.type() != QEvent.Type.MouseButtonPress or not isinstance(obj, QWidget):
+            return False
+        box = self.box
+        if obj is box or box.isAncestorOf(obj) or obj.window() is not box.window() or _in_overlay(obj):
+            return False
+        # a press the box did not take travels on to its parents: judge by where the pointer is
+        if box.rect().contains(box.mapFromGlobal(e.globalPosition().toPoint())):
+            return False
+        # after the press has been handled: if what was pressed took the focus, nothing is left to do
+        QTimer.singleShot(0, box.blur_if_focused)
+        return False
+
+
 class ComposerBox(QWidget):
     """The composer card (``.composer``): raised, a hairline ring, a soft shadow; on focus-within the
     ring brightens, an orange halo appears, the shadow deepens and the card rises a pixel, all on the
@@ -210,6 +247,7 @@ class ComposerBox(QWidget):
         self.body.setContentsMargins(self.PAD_X, self.PAD_TOP, self.PAD_X, pad_bottom)
         self.body.setSpacing(0)
         self.focus_t = Tween(self._on_focus_frame, ms=theme.SPRING_SOFT_T, curve=theme.spring_soft)
+        self._press_watch = _PressElsewhere(self)
         app = QApplication.instance()
         if app is not None:
             bind(app.focusChanged, self, self._on_focus_changed)
@@ -244,8 +282,21 @@ class ComposerBox(QWidget):
         if focused == self._focused:
             return
         self._focused = focused
+        app = QApplication.instance()
+        if app is not None:
+            # while focused, watch for a press elsewhere (see _PressElsewhere); idle otherwise
+            if focused:
+                app.installEventFilter(self._press_watch)
+            else:
+                app.removeEventFilter(self._press_watch)
         self.focus_t.go(1.0 if focused else 0.0)
         self.focus_changed.emit(focused)
+
+    def blur_if_focused(self) -> None:
+        """Let go of the keyboard focus if it is still inside the box (a press elsewhere did not take it)."""
+        fw = QApplication.focusWidget()
+        if fw is not None and (fw is self or self.isAncestorOf(fw)):
+            fw.clearFocus()
 
     def _on_focus_frame(self, t: float) -> None:
         lift = 1 if t > 0.5 and not self._dragging else 0

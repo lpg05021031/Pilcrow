@@ -391,6 +391,32 @@ def test_a_written_thought_is_quiet_markdown(app):
     assert not blk2.children[0]._md and "`" in blk2.children[0].doc.toPlainText()
 
 
+def test_a_thought_sits_on_the_step_grid_and_an_empty_one_takes_no_room(app):
+    """In an open fold a thought is a step row like the tools around it: its icon in the 18px column,
+    its words at 28 (a tool head's ``x + 28``), 28px tall. A finished thought with no words kept is not
+    shown at all (the web's ``return null``), so it cannot open onto nothing; a private one keeps its
+    head but has nothing to open."""
+    from pilcrow_qt.canvas.blocks import thinking as th
+    from pilcrow_qt.canvas.blocks.thinking import ThinkingBlock
+    from pilcrow_qt.lib.transcript_model import ThinkingItem
+
+    m = measurer()
+    assert th.TEXT_X == 28 and th.HEAD_H == 28 and th.ICON_X == 2
+    words = ThinkingBlock(ThinkingItem(id="t1", text="a plan", streaming=False, start_ts=0, end_ts=1000))
+    words.measure(700, m)
+    assert words.h == 28 and words.hit(40, 10) is not None and words.can_open
+
+    empty = ThinkingBlock(ThinkingItem(id="t2", text="", streaming=False, start_ts=0, end_ts=1000), "verbose")
+    assert empty.estimate(700, m) == 0
+    empty.measure(700, m)
+    assert empty.h == 0 and not empty.open, "verbose would open every thought, but this one has nothing"
+    assert empty.hit(40, 10) is None
+
+    private = ThinkingBlock(ThinkingItem(id="t3", text="", streaming=False, start_ts=0, end_ts=1000, redacted=True))
+    private.measure(700, m)
+    assert private.h == 28 and private.hit(40, 10) is None and not private.can_open
+
+
 def test_a_node_body_lays_out_from_its_own_edge(app):
     from pilcrow_qt.canvas import nodes as nd
     from pilcrow_qt.canvas.blocks.base import NodeBlock

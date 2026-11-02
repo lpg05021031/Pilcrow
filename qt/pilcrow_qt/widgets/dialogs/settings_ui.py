@@ -779,8 +779,16 @@ class Flow(QWidget):
     def __init__(self, spacing: int = 6, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._items: List[QWidget] = []
+        self._tail: Optional[QWidget] = None
         self._spacing = spacing
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+    def set_tail(self, w: QWidget) -> None:
+        """A widget that always follows the items (a field that adds one) and that ``clear`` keeps."""
+        w.setParent(self)
+        w.show()
+        self._tail = w
+        self._relayout()
 
     def add(self, w: QWidget) -> QWidget:
         w.setParent(self)
@@ -803,16 +811,27 @@ class Flow(QWidget):
         width = max(1, self.width())
         x = y = 0
         line_h = 0
-        for w in self._items:
-            s = w.sizeHint()
+        row_items: List[QWidget] = []
+        rows: List[Tuple[List[QWidget], int]] = []
+        for w in self._items + ([self._tail] if self._tail is not None else []):
+            s = w.size() if w is self._tail else w.sizeHint()
             if x and x + s.width() > width:
+                rows.append((row_items, line_h))
+                row_items = []
                 x = 0
                 y += line_h + self._spacing
                 line_h = 0
             w.setGeometry(x, y, s.width(), s.height())
+            row_items.append(w)
             x += s.width() + self._spacing
             line_h = max(line_h, s.height())
-        h = y + line_h if self._items else 0
+        rows.append((row_items, line_h))
+        # items of different heights on one line share its middle
+        for items, lh in rows:
+            for w in items:
+                g = w.geometry()
+                w.move(g.x(), g.y() + (lh - g.height()) // 2)
+        h = y + line_h if (self._items or self._tail is not None) else 0
         if h != self.height():
             self.setFixedHeight(h)
             self.updateGeometry()

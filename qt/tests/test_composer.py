@@ -437,3 +437,33 @@ def test_screenshot(app_client):
     v.composer.edit.setFocus()
     c.sleep(300)
     assert c.shot("composer").exists()
+
+
+def test_a_press_anywhere_outside_takes_the_focus_and_the_halo_off(app_client):
+    """As in the web, any press outside the composer ends its focus, also on parts of the window that do
+    not take the focus themselves (the conversation, the session's header, the sidebar's empty space);
+    a press inside it keeps it."""
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    c = app_client
+    v = _open(c)
+    comp = v.composer
+    win = c.win
+
+    def focus_then_press(w, at=None) -> bool:
+        comp.edit.setFocus()
+        c.wait_until(lambda: comp.box.focused, 3, "focused")
+        QTest.mouseClick(w, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at or QPoint(5, 5))
+        c.sleep(30)
+        return comp.box.focused
+
+    vp = v.transcript.view.viewport()
+    assert not focus_then_press(vp, QPoint(vp.width() - 10, 4)), "the conversation"
+    assert not focus_then_press(v.header if hasattr(v, "header") else v, QPoint(200, 10)), "the header"
+    side = win.sidebar
+    assert not focus_then_press(side, QPoint(side.width() // 2, side.height() - 60)), "the sidebar's empty space"
+    c.wait_until(lambda: comp.box.focus_t.value < 0.01, 3, "the halo gone")
+    # inside the composer: still focused
+    assert focus_then_press(comp.bar, QPoint(comp.bar.width() // 2, comp.bar.height() // 2)), "the composer's bar"
+    comp.edit.clearFocus()

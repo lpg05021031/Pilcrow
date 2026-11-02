@@ -383,12 +383,13 @@ class RepoRow(Panel):
         al = QHBoxLayout(arow)
         al.setContentsMargins(26, 0, 0, 0)
         al.setSpacing(6)
+        # .rp-aliases: the chips, then the field right after them, wrapping together
         self.aliases = Flow(6)
         al.addWidget(self.aliases, 1)
         self.alias_edit = line_edit("add a name you use for it…", name=f"Add an alias for {e.get('name')}")
-        self.alias_edit.setFixedWidth(200)
+        self.alias_edit.setFixedSize(200, 26)
         self.alias_edit.returnPressed.connect(self.add_alias)
-        al.addWidget(self.alias_edit)
+        self.aliases.set_tail(self.alias_edit)
         self.lay.addWidget(arow)
 
         self.locate_box = QWidget()
@@ -646,16 +647,24 @@ def _field(title: str, control: QWidget, hint_text: str, top: bool = False) -> Q
         ll.addWidget(Text(hint_text, theme.FS_MICRO, 400, "text_3", 1.4))
     ll.addStretch(1)
     lay.addWidget(left, 0, Qt.AlignmentFlag.AlignTop if top else Qt.AlignmentFlag.AlignVCenter)
+    v = Qt.AlignmentFlag.AlignTop if top else Qt.AlignmentFlag.AlignVCenter
+    if control.maximumWidth() < 1000:
+        # a control of a fixed size (the worktree switch) sits at the start of its column; the box
+        # layout would otherwise spread the spare width around it and the label with it
+        lay.addWidget(control, 0, v)
+        lay.addStretch(1)
+        return w
     control.setSizePolicy(QSizePolicy.Policy.Expanding, control.sizePolicy().verticalPolicy())
-    lay.addWidget(control, 1, Qt.AlignmentFlag.AlignTop if top else Qt.AlignmentFlag.AlignVCenter)
+    lay.addWidget(control, 1, v)
     return w
 
 
 def _alias_chip(text: str, on_remove: Any) -> QPushButton:
     """``.chip``: one of the person's names, removed by a click."""
     b = Btn(text, tooltip=f"Remove “{text}”")
-    b.override.update(h=20, px=8, fs=11, fw=600, r=9)
-    b.set_look("text_2", "err", bg="fill_1/raised", hover_bg="err_wash/raised")
+    b.override.update(h=22, px=9, fs=11, fw=600, r=11)
+    # the row is fill-1 over raised: the chip is a step up from it, with a hairline
+    b.set_look("text_2", "err", bg="fill_2/raised", hover_bg="err_wash/raised", line="hair_2/raised")
     b.setAutoDefault(False)
     b.setAccessibleName(f"Remove alias {text}")
     b.clicked.connect(lambda _checked=False, fn=on_remove: fn())  # clicked carries a bool the callback must not get
