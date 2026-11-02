@@ -638,8 +638,9 @@ class ChipButton(LayoutButton):
         lay.addWidget(self.ico)
         self.text_lb = QLabel()
         self.text_lb.setFont(theme.font_ui(theme.FS_SMALL, 500))
-        self.text_lb.setVisible(not icon_only)
         lay.addWidget(self.text_lb)
+        if icon_only:
+            self.text_lb.hide()  # hidden once parented: a parentless label shown is a window of its own
         self.sub_lb = QLabel()
         self.sub_lb.setFont(theme.font_ui(theme.FS_SMALL))
         theme.tint(self.sub_lb, fg="text_3")
@@ -648,8 +649,9 @@ class ChipButton(LayoutButton):
         # the chevron is painted (it rotates); this keeps its place: 12px less the -2px margin
         self.chev = QLabel()
         self.chev.setFixedSize(10, 12)
-        self.chev.setVisible(self._chevron)
         lay.addWidget(self.chev)
+        if not self._chevron:
+            self.chev.hide()
         if icon_only:
             self.setFixedWidth(30)
             lay.setAlignment(Qt.AlignmentFlag.AlignCenter)

@@ -378,3 +378,76 @@ def test_folder_picker_rows_keep_name_and_path_together(mock_server):
         fp.close()
     finally:
         c.close()
+
+
+def test_nothing_flashes_a_window_of_its_own(mock_server):
+    """No widget is shown before it has a parent: shown alone, a widget is a window of its own for a
+    moment, which the person sees as a window flashing (Settings, a page switch, the side panel). A tour
+    of the screens records every top-level window shown besides the main one; there must be none, but
+    the tooltip (a transient of the window). Settings keeps one size across its sections."""
+    from PySide6.QtCore import QEvent, QObject
+    from PySide6.QtWidgets import QApplication, QWidget
+
+    c = Client(mock_server)
+    shown = []
+
+    class Watch(QObject):
+        def eventFilter(self, obj, e) -> bool:
+            if (
+                e.type() == QEvent.Type.Show
+                and isinstance(obj, QWidget)
+                and obj.isWindow()
+                and obj is not c.win
+                and obj.objectName() != "pilcrow-tip"
+            ):
+                shown.append((step, type(obj).__name__))
+            return False
+
+    w = Watch()
+    step = "boot"
+    try:
+        _ready(c)
+        QApplication.instance().installEventFilter(w)
+        store = c.store
+        sizes = set()
+        tour = [("open session", lambda: c.open("sess-tests"))]
+        tour += [
+            (f"settings {s}", lambda s=s: store.set_dialog("settings", s))
+            for s in ("general", "repos", "claude", "skills", "mcp", "memory", "diagnostics")
+        ]
+        tour += [
+            ("close settings", lambda: store.set_dialog("settings", None)),
+            ("control room", lambda: store.show_page("overview")),
+            ("inbox", lambda: store.show_page("inbox")),
+            ("dispatch", lambda: store.show_dispatch(None)),
+            ("another session", lambda: c.open("sess-login")),
+            ("new session", lambda: store.set_dialog("newSession", {})),
+            ("close new session", lambda: store.set_dialog("newSession", None)),
+            ("palette", lambda: store.set_dialog("palette", True)),
+            ("close palette", lambda: store.set_dialog("palette", None)),
+        ]
+        tour += [
+            (f"panel {t}", lambda t=t: store.set_ui(panel=True, panel_tab=t))
+            for t in ("changes", "files", "tasks", "history", "info")
+        ]
+        tour += [("light", lambda: __import__("pilcrow_qt.theme", fromlist=["theme"]).theme.apply(False))]
+        for step, fn in tour:
+            fn()
+            c.sleep(250)
+            if step.startswith("settings "):
+                from pilcrow_qt.widgets.dialogs.settings import SettingsSheet
+
+                sheets = [s for s in c.win.findChildren(SettingsSheet) if s.isVisible()]
+                if sheets:
+                    sizes.add(
+                        (
+                            sheets[0].card.width() if hasattr(sheets[0], "card") else sheets[0].width(),
+                            sheets[0].layout_w.height(),
+                        )
+                    )
+        assert shown == [], shown
+        assert len(sizes) == 1, f"Settings changed size between sections: {sizes}"
+    finally:
+        QApplication.instance().removeEventFilter(w)
+        __import__("pilcrow_qt.theme", fromlist=["theme"]).theme.apply(True)
+        c.close()

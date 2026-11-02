@@ -29,12 +29,14 @@ SECTIONS: List[Tuple[str, str]] = [
     ("memory", "Memory"),
     ("diagnostics", "Diagnostics"),
 ]
-WIDE = ("repos", "skills", "mcp", "memory")
+#: one size for every section: the sheet used to be narrower and shorter on some (General, Claude Code,
+#: Diagnostics) and wider and taller on others, so it jumped as the person moved between them
+WIDTH = 860
 
 
 class SettingsSheet(Sheet):
     def __init__(self, window: QWidget, page: str = "general") -> None:
-        super().__init__(window, "settings", "Settings", 720, body_margins=(0, 0, 0, 0))
+        super().__init__(window, "settings", "Settings", WIDTH, body_margins=(0, 0, 0, 0))
         self.body.setSpacing(0)
         self.section = ""
         self.page: Optional[QWidget] = None
@@ -121,7 +123,7 @@ class SettingsSheet(Sheet):
             old.deleteLater()
         self.page = self._build(sid)
         self.page_lay.insertWidget(0, self.page)
-        self._width = 860 if sid in WIDE else 720
+        self._width = WIDTH
         self.page_scroll.verticalScrollBar().setValue(0)
         self.schedule_relayout()
 
@@ -130,8 +132,7 @@ class SettingsSheet(Sheet):
         if host is None:
             return
         h = host.height()
-        wide = self.section in WIDE
-        self.layout_w.setFixedHeight(min(620, int(h * 0.78)) if wide else min(480, int(h * 0.64)))
+        self.layout_w.setFixedHeight(min(620, int(h * 0.78)))
         super().relayout()
 
     def _build(self, sid: str) -> QWidget:

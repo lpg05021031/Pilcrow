@@ -377,8 +377,8 @@ class Board(QWidget):
                 line = self.lines.get(jid)
                 if line is None:
                     line = self.lines[jid] = FinishedLine(jid)
-                line.show()
                 self.finished_lay.addWidget(line)
+                line.show()
             self._fin_order = fin_ids
         for j in b["finished"]:
             jid = str(j.get("id"))

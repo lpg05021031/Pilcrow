@@ -72,6 +72,54 @@ def set_line_height(doc: QTextDocument, px: int) -> None:
     cur.mergeBlockFormat(bf)
 
 
+def _ink_band(raw: Any, gi: int, base: float, own: str) -> Optional[Tuple[float, float]]:
+    """(top, bottom) of one glyph as the eye weighs it: the document's own font by its capital band
+    (so a line of lowercase sits where one of capitals does, and descenders do not count), a fallback
+    font (Chinese) by its outline."""
+    if raw.familyName() == own:
+        return base - raw.capHeight(), base
+    r = raw.pathForGlyph(gi).boundingRect()
+    if r.isEmpty():
+        return None
+    return base + r.top(), base + r.bottom()
+
+
+def cap_centre_shift(doc: QTextDocument, box_h: float) -> int:
+    """Whole pixels to move a document's text so its words sit in the middle of a box ``box_h`` tall
+    that holds it (a bubble's text area): from the top of the first line's words to the foot of the last
+    line's, measured as drawn (``_ink_band``). Qt's line boxes leave them a pixel or two low — more for
+    Chinese, whose fallback font draws lower than the Latin one — where CSS's even half-leading centres
+    them. Whole pixels: text is placed on the pixel grid, a fraction would be lost. Negative is up.
+    Called once per layout, not per paint."""
+    dl = doc.documentLayout()
+    dl.documentSize()  # lines exist once the document is laid out (it is lazy)
+    own = doc.defaultFont().family()
+
+    def band(block: Any, line_i: int) -> Optional[Tuple[float, float]]:
+        lay = block.layout()
+        if lay is None or lay.lineCount() == 0:
+            return None
+        line = lay.lineAt(min(line_i, lay.lineCount() - 1) if line_i >= 0 else lay.lineCount() - 1)
+        oy = dl.blockBoundingRect(block).top()
+        top: Optional[float] = None
+        bottom: Optional[float] = None
+        for run in line.glyphRuns():
+            raw = run.rawFont()
+            for gi, pos in zip(run.glyphIndexes(), run.positions()):
+                b = _ink_band(raw, gi, oy + pos.y(), own)
+                if b is None:
+                    continue
+                top = b[0] if top is None else min(top, b[0])
+                bottom = b[1] if bottom is None else max(bottom, b[1])
+        return (top, bottom) if top is not None and bottom is not None else None
+
+    first = band(doc.firstBlock(), 0)
+    last = band(doc.lastBlock(), -1)
+    if first is None or last is None:
+        return 0
+    return int(round(box_h / 2 - (first[0] + last[1]) / 2))
+
+
 def tidy_doc(doc: QTextDocument) -> None:
     """No margin above the first block or under the last; the empty paragraph QTextDocument leaves
     after a code block's table takes no room."""

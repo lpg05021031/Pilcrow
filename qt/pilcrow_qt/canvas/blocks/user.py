@@ -16,7 +16,7 @@ from ... import markdown, theme
 from ...lib.fmt import rel_path
 from ...lib.transcript_model import UserItem
 from ...store import ConfirmSpec, store
-from ..paint import FULL, Measurer, PaintState, doc_height, doc_pos_at, draw_doc, rounded, selection
+from ..paint import FULL, Measurer, PaintState, cap_centre_shift, doc_height, doc_pos_at, draw_doc, rounded, selection
 from ..scene import Block, Target
 
 BUBBLE_LINE = markdown.px(theme.FS_BODY * 1.55)
@@ -75,7 +75,7 @@ class UserBlock(Block):
     # .msg-user's margin-top: a new message stands clear of the reply above it (the turn's footer
     # keeps 20px below itself; the larger of the two is the gap, as the web's margins collapse)
     MT = 26
-    __slots__ = ("item", "sid", "cwd", "doc", "bubble", "thumbs", "chips", "attach_h", "queued", "busy", "_html")
+    __slots__ = ("item", "sid", "cwd", "doc", "bubble", "thumbs", "chips", "attach_h", "queued", "busy", "_html", "_dy")
 
     def __init__(self, item: UserItem, sid: str, cwd: str) -> None:
         super().__init__(f"user:{item.id}")
@@ -84,6 +84,7 @@ class UserBlock(Block):
         self.cwd = cwd
         self.doc: Optional[QTextDocument] = None
         self._html = ""
+        self._dy = 0  # the words moved to sit centred in the bubble (cap_centre_shift)
         self.bubble = QRect()  # in block coordinates
         self.thumbs: List[Tuple[QRect, QPixmap, str]] = []
         self.chips: List[Tuple[QRect, str]] = []
@@ -171,6 +172,9 @@ class UserBlock(Block):
             text_w = inner_w
         bw = inner_w + 2 * PAD_W
         bh = (text_h if it.text else 0) + self.attach_h + 2 * PAD_H
+        # the words optically centred in the grey: capitals in the middle of the line, as the web's even
+        # half-leading puts them (Qt's line box sits them a pixel or two low or high, by the font)
+        self._dy = cap_centre_shift(self.doc, text_h) if (self.doc is not None and it.text) else 0
         self.bubble = QRect(width - bw, 0, bw, bh)
         # attachments and thumbs are right-aligned inside the bubble
         shift = inner_w - (
@@ -230,8 +234,9 @@ class UserBlock(Block):
             st.m.draw_text(p, rr.x() + 28, rr.y() + (26 - st.m.line_h(f_small)) / 2, name, f_small, QColor(t.text))
         if self.doc is not None and it.text:
             tx = br.x() + PAD_W
-            ty = br.y() + PAD_H + self.attach_h
-            clip = QRect(tx, ty, br.width() - 2 * PAD_W, br.height() - 2 * PAD_H - self.attach_h)
+            ty = br.y() + PAD_H + self.attach_h + self._dy
+            # clipped to the bubble, not the text box: the centring may move the words into the padding
+            clip = QRect(tx, br.y() + 1, br.width() - 2 * PAD_W, br.height() - 2)
             if st.clip is not None:
                 clip = clip.intersected(st.clip)
             color = QColor(t.text_3 if self.queued else t.text)
@@ -326,7 +331,7 @@ class UserBlock(Block):
         if self.doc is None or not self.bubble.contains(x, y):
             return None
         lx = x - self.bubble.x() - PAD_W
-        ly = y - self.bubble.y() - PAD_H - self.attach_h
+        ly = y - self.bubble.y() - PAD_H - self.attach_h - self._dy
         return doc_pos_at(self.doc, lx, ly)
 
     def selected_text(self, a: Optional[int], b: Optional[int]) -> str:

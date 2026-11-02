@@ -134,14 +134,18 @@ class NoticeBlock(NodeBlock):
                 nd.Button("Less" if self.open else "More", "more", kind="link") if len(it.text) > len(first) else None
             )
             return nd.hstack(
-                nd.Icon("info", "text_3", 12), nd.vstack(body, more, spacing=2), spacing=8, stretch=[1], valign="top"
+                nd.Icon("info", "text_3", 12, box=19),
+                nd.vstack(body, more, spacing=2),
+                spacing=8,
+                stretch=[1],
+                valign="top",
             )
         if mode in ("task", "retry-ok"):
             warn = it.level == "warning"
             icon = ("circle-alert" if warn else "circle-check") if mode == "task" else "info"
             color = ("accent_text" if warn else "ok") if mode == "task" else "text_3"
             return nd.hstack(
-                nd.Icon(icon, color, 12),
+                nd.Icon(icon, color, 12, box=19),  # centred on the first line of the words
                 nd.Text(it.text, theme.FS_SMALL, 400, "text_3", wrap=True, line_h=19),
                 spacing=8,
                 stretch=[1],
@@ -180,7 +184,8 @@ class NoticeBlock(NodeBlock):
                     )
                 )
             col.add(nd.Button("Hide details" if self.open else "Details", "more", kind="link"))
-        inner = nd.hstack(nd.Icon(icon, color, 14), col, spacing=10, stretch=[1], valign="top")
+        # the icon centred on the first line of the words (20px), not set at its top
+        inner = nd.hstack(nd.Icon(icon, color, 14, box=20), col, spacing=10, stretch=[1], valign="top")
         # the wash is painted by a Surface with a blended colour name: resolve here
         surf = nd.Surface(inner, None, None, theme.R3, (14, 10, 14, 10))
         return _Washed(surf, theme.blend(bg, t.canvas))

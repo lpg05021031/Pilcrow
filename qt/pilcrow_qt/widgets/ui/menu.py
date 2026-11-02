@@ -65,6 +65,7 @@ class Popover(QFrame):
         self._min_width = min_width
         self._closed = False
         self._anchor: Optional[QWidget] = None
+        self._placement = "bottom-start"
         self.setObjectName("popover")
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.lay = QVBoxLayout(self)
@@ -87,9 +88,11 @@ class Popover(QFrame):
     # ---- placing
     def open_at(self, anchor: QWidget, placement: str = "bottom-start") -> None:
         """Below (or above, when there is no room) an anchor widget, 6px away, like the web."""
-        self._anchor = anchor
-        tl = anchor.mapTo(self._host, QPoint(0, 0))
-        self._place(QRect(tl, anchor.size()), placement)
+        self._anchor, self._placement = anchor, placement
+        self._place(self._anchor_rect(anchor), placement)
+
+    def _anchor_rect(self, anchor: QWidget) -> QRect:
+        return QRect(anchor.mapTo(self._host, QPoint(0, 0)), anchor.size())
 
     def open_at_point(self, pos: QPoint) -> None:
         """At a point in the host's coordinates (context menus)."""
@@ -109,6 +112,8 @@ class Popover(QFrame):
             top = min(vh - h - 8, a.bottom() + 1 + gap)
         left = max(8, min(left, vw - w - 8))
         self.setGeometry(left, top, w, h)
+        if self.isVisible():
+            return
         self.show()
         self.raise_()
         self.setFocus(Qt.FocusReason.PopupFocusReason)
@@ -139,6 +144,12 @@ class Popover(QFrame):
         t = e.type()
         if obj is self._host and t == QEvent.Type.Resize:
             self.dismiss()
+            return False
+        if t == QEvent.Type.Move and self._anchor is not None and isinstance(obj, QWidget):
+            # the anchor's card moved (the composer drops its 1px focus lift when the menu takes the
+            # focus): follow it, so the menu stays 6px off its button
+            if obj is self._anchor or obj.isAncestorOf(self._anchor):
+                self._place(self._anchor_rect(self._anchor), self._placement)
             return False
         if t == QEvent.Type.MouseButtonPress:
             # the widget the press is delivered to is the one under the pointer; widgetAt() is not
