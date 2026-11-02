@@ -40,8 +40,8 @@ class SetRow(QWidget):
         self.title = Text(title, theme.FS_UI, 500)
         ll.addWidget(self.title)
         self.hint = Text(hint_text, theme.FS_SMALL, 400, "text_3", 1.5)
-        self.hint.setVisible(bool(hint_text))
         ll.addWidget(self.hint)
+        self.hint.setVisible(bool(hint_text))  # once it has a parent: shown alone it would be a window
         ll.addStretch(1)
         left.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         lay.addWidget(left, 1)

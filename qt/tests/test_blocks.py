@@ -190,6 +190,76 @@ def test_user_bubble_is_the_webs_size(app):
     assert abs(long.estimate(742, m) - long.h) <= 22 * 2
 
 
+def _ink_rows(b, w: int):
+    """(bubble top, bubble bottom, first ink row, last ink row) of a painted bubble."""
+    from pilcrow_qt.canvas.paint import PaintState
+
+    m = measurer()
+    b.set_height(b.measure(w, m), 0, w)
+    img = QImage(w, b.h + 4, QImage.Format.Format_ARGB32)
+    img.fill(QColor(theme.tokens().canvas))
+    p = QPainter(img)
+    st = PaintState(m)
+    st.now = 0
+    st.needle = ""
+    b.paint(p, 0, 0, w, st.for_block(None, None, None, None))
+    p.end()
+    br = b.bubble
+    bg = img.pixelColor(br.right() - 3, br.center().y()).lightness()
+    xs = range(br.x() + 8, br.right() - 8)
+    ink = [
+        y for y in range(br.y() + 1, br.bottom()) if any(abs(img.pixelColor(x, y).lightness() - bg) > 40 for x in xs)
+    ]
+    return br.y(), br.bottom(), ink[0], ink[-1]
+
+
+@pytest.mark.parametrize("text", ["Fix it now", "對話框送出的訊息", "Fix it\nand then run it"])
+def test_the_words_sit_in_the_middle_of_the_bubble(app, text):
+    """The words are centred in the grey bubble as drawn — capitals for Latin, the outline for Chinese
+    (whose fallback font draws lower) — not left a pixel or two low by Qt's line box."""
+    from pilcrow_qt.canvas.blocks.user import UserBlock
+
+    top, bottom, a, z = _ink_rows(UserBlock(UserItem(id="c", uuid="c", text=text), "s", "/p"), 742)
+    above, below = a - top, bottom - z
+    assert abs(above - below) <= 1, (text, above, below)
+
+
+def test_a_notice_centres_its_words_and_icon_in_the_wash(app):
+    from pilcrow_qt.canvas.blocks.misc import NoticeBlock
+    from pilcrow_qt.canvas.paint import PaintState
+    from pilcrow_qt.lib.transcript_model import NoticeItem
+
+    m = measurer()
+    w = 700
+    b = NoticeBlock(NoticeItem(id="n", text="The session ended with an error.", level="error"))
+    b.set_height(b.measure(w, m), 0, w)
+    img = QImage(w, b.h + 4, QImage.Format.Format_ARGB32)
+    canvas = QColor(theme.tokens().canvas)
+    img.fill(canvas)
+    p = QPainter(img)
+    st = PaintState(m)
+    st.now = 0
+    st.needle = ""
+    b.paint(p, 0, 0, w, st.for_block(None, None, None, None))
+    p.end()
+    xr = w - 20
+    wash = [y for y in range(img.height()) if img.pixelColor(xr, y) != canvas]
+    top, bottom = wash[0], wash[-1]
+    bg = img.pixelColor(xr, (top + bottom) // 2).lightness()
+
+    def ink(x0: int, x1: int):
+        ys = [
+            y
+            for y in range(top + 1, bottom)
+            if any(abs(img.pixelColor(x, y).lightness() - bg) > 40 for x in range(x0, x1))
+        ]
+        return (ys[0] + ys[-1]) / 2
+
+    box = (top + bottom) / 2
+    assert abs(ink(4, 34) - box) <= 0.5  # the icon
+    assert abs(ink(40, 400) - box) <= 0.5  # the words (no descenders in this line)
+
+
 def test_an_attached_image_is_decoded_once_across_resizes_and_rewarms(app, monkeypatch):
     """The thumbnail does not depend on the width: a resize step or a re-warm re-measures the
     bubble without decoding and scaling the image again."""

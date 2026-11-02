@@ -34,7 +34,10 @@ class Collapse(QWidget):
         self._lay = QVBoxLayout(self)
         self._lay.setContentsMargins(0, 0, 0, 0)
         self._lay.setSpacing(0)
-        self.setVisible(open_)
+        # hidden when closed; when open it shows with the parent it is added to. (setVisible(True) here,
+        # before it has a parent, made it a window of its own for a moment: a flash on screen.)
+        if not open_:
+            self.hide()
         if open_:
             self._ensure_body()
 

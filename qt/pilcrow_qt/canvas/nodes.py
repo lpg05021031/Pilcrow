@@ -22,6 +22,7 @@ from ..lib.fmt import truncate
 from .paint import (
     Measurer,
     PaintState,
+    cap_centre_shift,
     doc_height,
     doc_links,
     draw_doc,
@@ -285,6 +286,7 @@ class Text(Node):
         "max_h",
         "align",
         "_nat",
+        "_dy",
     )
 
     def __init__(
@@ -311,6 +313,7 @@ class Text(Node):
         self._doc: Optional[QTextDocument] = None
         self._font: Optional[QFont] = None
         self._nat = -1  # the natural width, once asked (it depends on the words and the font alone)
+        self._dy = 0  # wrapped words moved to sit centred in their lines (cap_centre_shift)
 
     def font(self, m: Measurer) -> QFont:
         if self._font is None:
@@ -345,6 +348,7 @@ class Text(Node):
                     self._doc = m.plain_doc(self._text, w, f)
                     if self.line_h:
                         set_line_height(self._doc, self.line_h)
+                self._dy = cap_centre_shift(self._doc, doc_height(self._doc))
             self.h = doc_height(self._doc)
             if self.max_h and self.h > self.max_h:
                 self.h = self.max_h
@@ -362,7 +366,7 @@ class Text(Node):
             if st.clip is not None:
                 clip = clip.intersected(st.clip)
             sels = find_selections(self._doc, st)
-            draw_doc(p, self._doc, ox + self.x, oy + self.y, clip, color, sels or None)
+            draw_doc(p, self._doc, ox + self.x, oy + self.y + self._dy, clip, color, sels or None)
             return
         shown = st.m.elide(self._text, f, self.w)
         tw = st.m.text_w(shown, f)
@@ -535,24 +539,27 @@ class Surface(Node):
 
 
 class Icon(Node):
-    __slots__ = ("name", "color", "size", "alpha")
+    """An icon; ``box`` is the height of the line it stands beside (a top-aligned row of text), and the
+    icon is centred on that line rather than set at its top."""
 
-    def __init__(self, name: str, color: Any = "text_2", size: int = 14, alpha: float = 1.0) -> None:
+    __slots__ = ("name", "color", "size", "alpha", "box")
+
+    def __init__(self, name: str, color: Any = "text_2", size: int = 14, alpha: float = 1.0, box: int = 0) -> None:
         super().__init__()
-        self.name, self.color, self.size, self.alpha = name, color, size, alpha
+        self.name, self.color, self.size, self.alpha, self.box = name, color, size, alpha, box
 
     def natural_w(self, m: Measurer) -> int:
         return self.size
 
     def layout(self, x: int, y: int, w: int, m: Measurer) -> int:
-        self.x, self.y, self.w, self.h = x, y, w, self.size
+        self.x, self.y, self.w, self.h = x, y, w, max(self.size, self.box)
         return self.h
 
     def paint(self, p: QPainter, ox: int, oy: int, st: PaintState) -> None:
         pm = st.m.icon(self.name, st.m.color(self.color), self.size)
         if self.alpha < 1.0:
             p.setOpacity(self.alpha)
-        p.drawPixmap(ox + self.x, oy + self.y, pm)
+        p.drawPixmap(ox + self.x, oy + self.y + (self.h - self.size) // 2, pm)
         if self.alpha < 1.0:
             p.setOpacity(1.0)
 
