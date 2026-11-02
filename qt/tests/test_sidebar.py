@@ -232,3 +232,20 @@ def test_icon_buttons_paint_their_glyph_from_a_token_name(app_client):
         assert any(abs(QColor(px).lightness() - bg.lightness()) > 40 for px in colours), (
             "the glyph stands off its ground"
         )
+
+
+def test_icon_button_without_a_colour_paints_in_text_2(app_client):
+    """The default (no colour given) is text-2, not black: most IconButtons pass none."""
+    from PySide6.QtGui import QColor
+
+    from pilcrow_qt import theme
+    from pilcrow_qt.widgets.ui.bits import IconButton
+
+    b = IconButton("x", "Dismiss", 13)
+    b.resize(25, 25)
+    img = b.grab().toImage()
+    want = QColor(theme.tokens().text_2)
+    inked = [QColor(img.pixel(x, y)) for x in range(img.width()) for y in range(img.height())]
+    brightest = max(inked, key=lambda c: c.lightness())
+    assert abs(brightest.lightness() - want.lightness()) < 30, f"glyph {brightest.name()} vs text-2 {want.name()}"
+    b.deleteLater()

@@ -190,7 +190,12 @@ class IconButton(QPushButton):
         if not self.isEnabled():
             p.setOpacity(0.45)
         # ``color`` is a token name ("text_3"), a fill spec or a literal: resolved like every tint
-        color = QColor(t.text) if lit else (theme.resolve(self._color, t) or QColor(t.text_2))
+        if lit:
+            color = QColor(t.text)
+        elif self._color:
+            color = theme.resolve(self._color, t)
+        else:
+            color = QColor(t.text_2)  # an invalid QColor is truthy in PySide: no `or` fallback here
         px = self.iconSize().width()
         pm = icons.pixmap(self._name, color, px)
         p.drawPixmap((self.width() - px) // 2, (self.height() - px) // 2, pm)
