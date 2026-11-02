@@ -81,6 +81,13 @@ class Popover(QFrame):
         p = QPainter(self)
         paint_box(p, QRectF(self.rect()), bg, theme.over(theme.qcolor(t.hair_2), bg), theme.R3)
 
+    def mousePressEvent(self, e) -> None:
+        """A press on the popover stays in it. Left unaccepted (on a label, the padding, a row that
+        acts on release) Qt hands it on to the parent, the host window: the outside-press check below
+        then saw it arrive outside and closed the popover under the pointer, so no row could be
+        picked with the mouse."""
+        e.accept()
+
     def set_content(self, w: QWidget) -> QWidget:
         self.lay.addWidget(w)
         return w
@@ -326,6 +333,11 @@ class MenuRow(QWidget):
         if not self.disabled:
             self.entered.emit()
         super().enterEvent(e)
+
+    def mousePressEvent(self, e) -> None:
+        # taken here: a press left unaccepted travels up to the popover's host, which reads as a press
+        # outside the menu and closes it before the release can pick the row
+        e.accept()
 
     def mouseReleaseEvent(self, e) -> None:
         if e.button() == Qt.MouseButton.LeftButton and not self.disabled:
