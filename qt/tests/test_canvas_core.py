@@ -173,7 +173,9 @@ def test_follow_state():
     f.following = False
     assert f.target(1200, 955) == 955
     assert f.shows_latest(100, 1200, 700, grew=True)
-    assert not f.shows_latest(100, 1200, 700, grew=False)
+    assert f.shows_latest(100, 1200, 700, grew=False), "the end out of view is enough, new content or not"
+    assert f.shows_latest(1100, 1200, 700), "a little way up: the end is still out of view"
+    assert not f.shows_latest(1150, 1200, 700), "within reach of the end: no pill"
 
 
 def test_estimates_scale_with_text_and_calibrate():
