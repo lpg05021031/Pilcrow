@@ -63,8 +63,11 @@ def test_a_lead_and_its_helpers(app_client):
     web_chip = next(ch for ch in v.helpers_bar.chips if ch.h.get("name") == "web")
     api_chip = next(ch for ch in v.helpers_bar.chips if ch.h.get("name") == "api")
     # the chips follow the lead's state, which reaches the bar on the next frame
-    c.wait_until(lambda: web_chip.text().startswith("web · needs you"), 5, "web's chip")
-    c.wait_until(lambda: api_chip.h.get("state") == "done" and api_chip.text().startswith("api · done"), 5, "api")
+    # name · the repository it works in · state (the repository is said when it is not the name)
+    c.wait_until(lambda: web_chip.text().startswith("web · web-ui · needs you"), 5, "web's chip")
+    c.wait_until(
+        lambda: api_chip.h.get("state") == "done" and api_chip.text().startswith("api · api-gateway · done"), 5, "api"
+    )
     assert c.shot("helpers-lead-bar").exists()
     # the control room: the card says whose helper asked, and Allow for all helpers answers it
     c.store.show_page("overview")
@@ -111,6 +114,14 @@ def test_a_lead_and_its_helpers(app_client):
     hv = c.win.session_view
     c.wait_until(lambda: hv.lead_crumb is not None and hv.lead_crumb.isVisible(), 5, "the helper's crumb")
     assert hv.lead_crumb.text() == "Lead · Invoice download"
+    # the lead's brief is a card of its own: the assignment, where the helper works, on the plan's wash
+    from pilcrow_qt.canvas.blocks.note import FromLeadBlock
+
+    briefs = [b for b in hv.transcript.view.scene.root.walk() if isinstance(b, FromLeadBlock)]
+    assert briefs, "the brief is drawn as the lead's card"
+    hd = briefs[0].head()
+    assert hd["verb"] == "Brief from the lead" and hd["target"] == "Invoice download"
+    assert [m[1] for m in hd["meta"]] == ["web-ui", "pilcrow/web"], hd["meta"]
     # open, the helper stays under its lead in the sidebar (it used to leave for its folder's project)
     c.wait_until(lambda: web in c.win.sidebar._rows, 5, "the helper's row")
     srows = c.win.sidebar._rows
@@ -238,7 +249,7 @@ def test_helper_updates_touch_only_the_bar(app_client):
         "lists": len(lists),
         "ms": [round(x, 2) for x in costs],
     }
-    assert v.helpers_bar.chips[0].text().startswith("helper-0 · running · "), "the chips followed"
+    assert v.helpers_bar.chips[0].text().startswith("helper-0 · repo0 · running · "), "the chips followed"
     assert cnt.paints["bar"] > 0, "the chips repainted"
     assert cnt.paints["viewport"] == 0, report
     assert cnt.paints["sidebar"] == 0, report

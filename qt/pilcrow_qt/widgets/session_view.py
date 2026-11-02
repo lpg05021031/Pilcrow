@@ -81,6 +81,7 @@ class HelperChip(QPushButton):
         super().__init__(parent)
         self.h: Json = {}
         self._text = ""
+        self._name = self._where = self._state = ""
         self._key: Optional[tuple] = None
         self.w = 0
         self.setAutoDefault(False)
@@ -100,8 +101,24 @@ class HelperChip(QPushButton):
             extra = f"+{int(h.get('add') or 0)} −{int(h.get('del') or 0)}"
         elif st in ("queued", "skipped", "stopped", "failed") and h.get("reason"):
             extra = str(h.get("reason"))
-        text = f"{h.get('name')} · {word}" + (f" · {extra}" if extra else "")
-        tip = " · ".join(x for x in (str(h.get("lastLine") or ""), str(h.get("cwd") or "")) if x)
+        name = str(h.get("name") or "")
+        # the repository it works in, when that is not already its name: a lead's helpers are often
+        # in other repositories, and the bar is where the person looks to see who is where
+        folder = str(h.get("folder") or h.get("cwd") or "")
+        repo = basename(folder) if folder else ""
+        self._name = name
+        self._where = f" · {repo}" if repo and repo != name else ""
+        self._state = f" · {word}" + (f" · {extra}" if extra else "")
+        text = name + self._where + self._state
+        tip = "\n".join(
+            x
+            for x in (
+                str(h.get("lastLine") or ""),
+                tildify(folder, str((store.info or {}).get("home") or "")),
+                str(h.get("branch") or ""),
+            )
+            if x
+        )
         key = (st, text, tip)
         if key == self._key:
             return False
@@ -110,7 +127,7 @@ class HelperChip(QPushButton):
         self.setAccessibleName(text)
         self.setToolTip(tip)
         fm = QFontMetrics(theme.font_ui(theme.FS_SMALL, 500))
-        self.w = min(280, 9 + 8 + 7 + fm.horizontalAdvance(text) + 16)
+        self.w = min(320, 9 + 8 + 7 + fm.horizontalAdvance(text) + 16)
         self.update()
         return True
 
@@ -134,16 +151,18 @@ class HelperChip(QPushButton):
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.setPen(QColor(t.text_4))
         p.drawEllipse(QRectF(9, 7, 8, 8))
-        p.setPen(QColor(t.text))
         f = theme.font_ui(theme.FS_SMALL, 500)
         p.setFont(f)
         fm = QFontMetrics(f)
-        avail = self.width() - 24 - 10
-        p.drawText(
-            QRect(24, 0, avail, self.height()),
-            Qt.AlignmentFlag.AlignVCenter,
-            fm.elidedText(self._text, Qt.TextElideMode.ElideRight, avail),
-        )
+        x, right = 24, self.width() - 10
+        # the name in the ink, where it works quieter, the state after; the last that fits is elided
+        for seg, ink in ((self._name, t.text), (self._where, t.text_3), (self._state, t.text_2)):
+            if not seg or x >= right:
+                continue
+            shown = fm.elidedText(seg, Qt.TextElideMode.ElideRight, right - x)
+            p.setPen(QColor(ink))
+            p.drawText(QRect(x, 0, right - x, self.height()), Qt.AlignmentFlag.AlignVCenter, shown)
+            x += fm.horizontalAdvance(shown)
         p.end()
 
 

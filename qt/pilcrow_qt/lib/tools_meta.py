@@ -149,8 +149,9 @@ def tool_meta(name: str, tool_input: Optional[ToolInput], cwd: Optional[str] = N
         else:
             target = s("name")
             where = s("repo") or (_short(s("cwd"), cwd) if s("cwd") else "")
-            if tool == "start" and where:
-                target = f"{target} in {where}"
+            # "api → web-ui": sent to another repository; nothing when the name already says it
+            if tool == "start" and where and where != target:
+                target = f"{target} → {where}"
         return ToolMeta(icon, verb, target)
     if name.startswith("mcp__"):
         parts = name.split("__")

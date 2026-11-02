@@ -795,3 +795,56 @@ def test_screenshot_of_every_card_kind(app):
     view.viewport().grab().save(str(path))
     assert path.exists()
     view.close()
+
+
+def test_a_running_label_shimmers_on_the_strip_it_ticks(app):
+    """A running command's words carry a band of light that moves with the clock (the web's .shimmer);
+    each frame repaints the mark and the words, not the head's meta or the body; nothing moves when the
+    person asks for less motion. A streaming thought's "Thinking" does the same."""
+    import time
+
+    from PySide6.QtGui import QColor, QImage, QPainter
+
+    from pilcrow_qt import theme
+    from pilcrow_qt.canvas.blocks.thinking import ThinkingBlock
+    from pilcrow_qt.canvas.clock import clock
+    from pilcrow_qt.canvas.paint import PaintState
+    from pilcrow_qt.lib.transcript_model import ThinkingItem
+
+    m = measurer()
+
+    def head(b, now: float) -> QImage:
+        b.measure(640, m) if not b.h else None
+        img = QImage(640, 30, QImage.Format.Format_ARGB32_Premultiplied)
+        img.fill(QColor(theme.tokens().canvas))
+        p = QPainter(img)
+        st = PaintState(m)
+        st.now = now
+        st.needle = ""
+        b.paint(p, 0, 0, 640, st.for_block(None, None, None, None))
+        p.end()
+        return img
+
+    was = clock.reduced_motion
+    clock.reduced_motion = False  # the suite runs with less motion; this test is about the motion
+
+    def words(img: QImage, x0: int = 28, x1: int = 200) -> QImage:
+        return img.copy(x0, 0, x1 - x0, 30)  # the label only: the turning mark is left of it
+
+    card = block(make("Bash", {"command": "npm test", "description": "Run the tests"}))
+    assert words(head(card, 0.2)) != words(head(card, 1.0)), "the light moved over the words"
+    card.tick(time.monotonic())  # the second's whole-head repaint
+    strip = card.tick(time.monotonic())
+    assert strip is not None and 20 < strip[2] < 640, strip
+    thought = ThinkingBlock(ThinkingItem(id="t", text="hm", streaming=True, start_ts=0))
+    assert thought.live()
+    assert words(head(thought, 0.2)) != words(head(thought, 1.0))
+    r = thought.tick(0.0)
+    assert r is not None and r[3] == 28 and r[2] < 200, r
+    clock.reduced_motion = True
+    try:
+        assert words(head(card, 0.2)) == words(head(card, 1.0)), "still, with reduced motion"
+    finally:
+        clock.reduced_motion = was
+    done = ThinkingBlock(ThinkingItem(id="t2", text="hm", streaming=False, start_ts=0, end_ts=1000))
+    assert not done.live() and done.tick(0.0) is None

@@ -376,3 +376,54 @@ def test_the_composers_switches_say_what_they_do(app_client):
         "send a failing verify back to the agent once",
         "open pull requests with gh after committing",
     } <= words
+
+
+def test_the_target_list_keeps_its_scrolling_to_itself(app_client):
+    """A list of repositories that scrolls keeps its wheel and touchpad events, also at its ends (passed
+    on, the composer's page moved the list under the pointer and the two took turns: the rows twitched);
+    one too short to scroll lets the page have them."""
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtWidgets import QApplication
+
+    c = app_client
+    store = c.store
+    store.show_dispatch(None)
+    c.wait_until(lambda: c.win.dispatch is not None and store.jobs_loaded, 5, "board")
+    page = c.win.dispatch
+    page.board.new_btn.click()
+    c.wait_until(lambda: page.composer is not None and page.composer.isVisible(), 5, "composer")
+    picker = page.composer.targets
+    c.wait_until(lambda: picker.repos is not None, 10, "scan")
+    lst = picker.list
+    vp = lst.viewport()
+
+    def wheel(dy: int, phase=Qt.ScrollPhase.ScrollUpdate) -> bool:
+        pos = QPointF(vp.width() / 2, vp.height() / 2)
+        ev = QWheelEvent(
+            pos,
+            QPointF(vp.mapToGlobal(pos.toPoint())),
+            QPoint(0, dy),
+            QPoint(0, dy * 3),
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+            phase,
+            False,
+        )
+        ev.ignore()
+        QApplication.sendEvent(vp, ev)  # a wheel reaches the list through its viewport
+        return ev.isAccepted()
+
+    if lst.verticalScrollBar().maximum() == 0:
+        assert not wheel(-40), "nothing to scroll: the page may have it"
+    base = list(picker.repos)
+    picker.repos = [dict(base[i % len(base)], path=f"/x/r{i:02d}", name=f"repo-{i:02d}") for i in range(40)]
+    picker._rebuild()
+    c.sleep(100)
+    vb = lst.verticalScrollBar()
+    assert vb.maximum() > 0
+    vb.setValue(vb.maximum())
+    assert wheel(-40), "at the end, still the list's"
+    assert wheel(-40, Qt.ScrollPhase.ScrollMomentum), "and the momentum after it"
+    vb.setValue(0)
+    assert wheel(40), "at the top too"

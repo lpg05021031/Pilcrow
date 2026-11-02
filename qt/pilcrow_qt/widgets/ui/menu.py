@@ -141,7 +141,13 @@ class Popover(QFrame):
             self.dismiss()
             return False
         if t == QEvent.Type.MouseButtonPress:
-            w = QApplication.widgetAt(e.globalPosition().toPoint()) if hasattr(e, "globalPosition") else None
+            # the widget the press is delivered to is the one under the pointer; widgetAt() is not
+            # reliable everywhere (Wayland, offscreen), and a press on the menu's own button then read
+            # as outside: the menu closed on the press and the click opened it again
+            # (the window's own copy of the press comes first and is not a widget: the widget's follows)
+            if not isinstance(obj, QWidget):
+                return False
+            w = obj
             inside = w is not None and (self.isAncestorOf(w) or w is self)
             on_anchor = (
                 w is not None and self._anchor is not None and (w is self._anchor or self._anchor.isAncestorOf(w))
@@ -479,6 +485,11 @@ def show_menu(
     ``above`` placement ``top-*`` (the composer's menus open over the card)."""
     host = host_for(anchor)
     if host is None:
+        return None
+    # the button of the menu on screen, pressed again: it closes the menu (a press on the anchor does
+    # not count as outside, so without this the click closed the menu and opened it again)
+    if any(m._anchor is anchor and m.is_open for m in _current):
+        close_menus()
         return None
     close_menus()
     m = MenuPopover(host, items, width)

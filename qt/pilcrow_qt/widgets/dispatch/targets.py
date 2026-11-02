@@ -152,6 +152,16 @@ class TargetList(CanvasView):
         self.blocks: Dict[str, TargetBlock] = {}
         self.setAccessibleName("Repositories")
 
+    def wheelEvent(self, e) -> None:
+        """``overscroll-behavior: contain``: a list that scrolls keeps its wheel and touchpad events,
+        also at its ends and through a touchpad's momentum. Passed on to the composer's page there,
+        the page moved the list under the pointer and the next events landed on the list again, so
+        list and page took turns and the rows twitched. A list too short to scroll lets the page have
+        them."""
+        super().wheelEvent(e)
+        if self.verticalScrollBar().maximum() > 0:
+            e.accept()
+
     def sync(self, repos: List[Json]) -> None:
         pk = self.picker
         keys = [f"tgt:{r.get('path')}" for r in repos]
