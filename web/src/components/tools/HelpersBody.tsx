@@ -178,7 +178,7 @@ export function HelperNote({ item, ctx }: { item: UserItem; ctx: ToolCtx }) {
   const { parts } = useMemo(() => parseNotes(item.text), [item.text]);
   const list = parts.length ? parts : [{ name: 'note', state: '', body: item.text }];
   return (
-    <div className="msg-notes" id={`msg-${item.uuid}`}>
+    <div className="msg-notes" id={`msg-${item.uuid || item.id}`}>
       {list.map((p, k) => {
         const h = helpers?.find((x) => x.name === p.name);
         const files = p.files && p.files !== '0';
@@ -228,7 +228,7 @@ export function FromLead({ item, ctx }: { item: UserItem; ctx: ToolCtx }) {
     brief = i < 0 ? '' : item.text.slice(i + 2).trim();
   }
   return (
-    <SessionCard id={`msg-${item.uuid}`} glyph={<CornerDownRight size={14} />} verb="From the lead" target={lead?.leadTitle || 'the lead session'} openTip="Open the lead session" onOpen={lead ? () => openSession(lead.leadId) : undefined}>
+    <SessionCard id={`msg-${item.uuid || item.id}`} glyph={<CornerDownRight size={14} />} verb="From the lead" target={lead?.leadTitle || 'the lead session'} openTip="Open the lead session" onOpen={lead ? () => openSession(lead.leadId) : undefined}>
       {brief && (
         <div className="tool-well">
           <Markdown text={brief} cwd={ctx.cwd} className="md-compact" />

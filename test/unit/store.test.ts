@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyConfigUi, dismissToast, evictModels, KEEP_CHARS, memo, models, modelSize, samePending, setDialog, toast, useStore } from '../../web/src/lib/store';
-import { TranscriptModel, findInItems, type Item } from '../../web/src/lib/transcript';
+import { TranscriptModel, findInItems, findText, type Item } from '../../web/src/lib/transcript';
 import { isBusy, isWorking, type Config } from '../../web/src/lib/types';
 
 // The store's own logic, without a window: what toasts collapse into, which conversations stay in
@@ -150,23 +150,47 @@ describe('isBusy and isWorking', () => {
 describe('findInItems', () => {
   const user = (text: string, rev = 0): Item => ({ kind: 'user', id: 'u' + text, uuid: 'uu', rev, text, images: [], files: [] });
   const text = (t: string): Item => ({ kind: 'text', id: 't' + t, rev: 0, text: t, streaming: false });
-  const tool: Item = { kind: 'tool', id: 'x', rev: 0, name: 'Bash', input: {}, inputJson: '', inputDone: true, status: 'done', children: [], startTs: 0, parentId: null, result: { text: 'module module', images: [], isError: false } };
+  const tool: Item = { kind: 'tool', id: 'x', rev: 0, name: 'Bash', input: { command: 'npm test -- module' }, inputJson: '', inputDone: true, status: 'done', children: [], startTs: 0, parentId: null, result: { text: 'module module', images: [], isError: false } };
+  const notice: Item = { kind: 'notice', id: 'n', rev: 0, level: 'error', text: 'Module not found' };
+  const ask: Item = { kind: 'tool', id: 'q', rev: 0, name: 'AskUserQuestion', input: { questions: [{ question: 'which module?' }] }, inputJson: '', inputDone: true, status: 'done', children: [], startTs: 0, parentId: null };
 
-  it('finds every match in what the person and Claude said, in order, case aside; not in a step\'s output', () => {
-    const items = [user('Fix the Module'), tool, text('module one, MODULE two')];
+  it('finds every match in the conversation as it reads, in order, case aside: words, a step\'s head and output, notices', () => {
+    const items = [user('Fix the Module'), tool, text('module one, MODULE two'), notice, ask];
     expect(findInItems(items, 'module').map((h) => [h.item.id, h.k])).toEqual([
       ['uFix the Module', 0],
+      ['x', 0], // the command, in the step's head (its target)
+      ['x', 1], // its output
+      ['x', 2],
       ['tmodule one, MODULE two', 0],
       ['tmodule one, MODULE two', 1],
+      ['n', 0],
     ]);
     expect(findInItems(items, 'module', 2)).toHaveLength(2);
     expect(findInItems(items, '')).toEqual([]);
   });
 
-  it('an item that changed is read again', () => {
+  it('reads Claude\'s words through the given projection (Markdown as it reads, not its source)', () => {
+    const md = text('see [the docs](https://example.com/module) and **bold**');
+    expect(findInItems([md], 'module')).toHaveLength(1); // the raw source holds the URL
+    const plain = (s: string) => s.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/\*\*/g, '');
+    expect(findInItems([md], 'module', 100, (it) => findText(it, plain))).toHaveLength(0);
+    expect(findInItems([md], '**', 100, (it) => findText(it, plain))).toHaveLength(0);
+  });
+
+  it('an item that changed is read again, a step when its result arrives', () => {
     const u = user('abc');
     expect(findInItems([u], 'x')).toHaveLength(0);
     Object.assign(u, { text: 'x x', rev: 1 });
     expect(findInItems([u], 'x')).toHaveLength(2);
+    const t: Item = { ...tool, id: 'y', status: 'running', result: undefined } as Item;
+    expect(findInItems([t], 'module')).toHaveLength(1);
+    Object.assign(t, { status: 'done', result: { text: 'module', images: [], isError: false } });
+    expect(findInItems([t], 'module')).toHaveLength(2);
+  });
+
+  it('a step whose head is its description still finds its command', () => {
+    const t: Item = { ...tool, id: 'z', input: { command: 'npx vitest run', description: 'Run the unit tests' } } as Item;
+    expect(findInItems([t], 'vitest')).toHaveLength(1);
+    expect(findInItems([t], 'unit tests')).toHaveLength(1);
   });
 });

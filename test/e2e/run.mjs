@@ -393,6 +393,29 @@ test('typing in the composer does not move the conversation', async ({ page }) =
   expect(seen.every((g) => g.fromBottom < 4), `the view left the live end while typing: ${seen.map((g) => g.fromBottom).join(', ')}`);
 });
 
+test('find reaches a step\'s output: the fold and the card open, and the match is the one painted', async ({ page }) => {
+  await open(page, 'sess-tests');
+  // "Tests 8 passed" is only in the Bash step's output, folded away inside the turn's work
+  expect((await page.locator('.tool.open[data-tool="Bash"]').count()) === 0, 'the step starts closed');
+  await page.keyboard.press('Control+f');
+  await page.waitForSelector('.findbar', { timeout: 3000 });
+  await page.locator('.findbar input').fill('8 passed');
+  await page.waitForFunction(() => document.querySelector('.findbar-count')?.textContent === '1 of 1', null, { timeout: 8000 });
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => {
+    const r = [...(CSS.highlights.get('find-current') || [])][0];
+    const box = r?.getBoundingClientRect();
+    return box && box.height > 0 && /8 passed/i.test(r.toString()) && r.startContainer.parentElement?.closest('.tool.open[data-tool="Bash"]');
+  }, null, { timeout: 5000 });
+  // the command in the step's head is found too, and counted as painted
+  await page.locator('.findbar input').fill('npx vitest');
+  await page.waitForFunction(() => /^\d+ of \d+$/.test(document.querySelector('.findbar-count')?.textContent || ''), null, { timeout: 5000 });
+  const n = await page.evaluate(() => Number((document.querySelector('.findbar-count')?.textContent || '').split(' of ')[1]));
+  const painted = await page.evaluate(() => [...(CSS.highlights.get('find') || [])].length);
+  expect(n >= 1 && painted === n, `counted ${n}, painted ${painted}`);
+  await page.keyboard.press('Escape');
+});
+
 test('find counts matches across the whole conversation without drawing it, and stepping to one draws only its page', async ({ page }) => {
   await open(page, 'sess-long');
   const drawn = () => page.locator('.page:not(.far)').count();

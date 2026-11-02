@@ -93,7 +93,7 @@ function UserMessage({ item, ctx }: { item: UserItem; ctx: ToolCtx }) {
     }
   };
   return (
-    <div className={`msg-user${queued ? ' queued' : ''}`} lang={langOf(item.text)} id={`msg-${item.uuid}`}>
+    <div className={`msg-user${queued ? ' queued' : ''}`} lang={langOf(item.text)} id={`msg-${item.uuid || item.id}`}>
       <div className="msg-bubble">
         {(item.images.length > 0 || item.files.length > 0) && (
           <div className="msg-attachments">
@@ -168,14 +168,14 @@ function Notice({ item }: { item: NoticeItem }) {
   const [open, setOpen] = useState(false);
   if (item.tag === 'divider' || item.tag === 'interrupt') {
     return (
-      <div className={`divider ${item.tag}`}>
+      <div className={`divider ${item.tag}`} id={`notice-${item.id}`}>
         <span>{item.text}</span>
       </div>
     );
   }
   if (item.tag === 'task') {
     return (
-      <div className={`cli-info task ${item.level}`}>
+      <div className={`cli-info task ${item.level}`} id={`notice-${item.id}`}>
         {item.level === 'warning' ? <CircleAlert size={12} /> : <CircleCheck size={12} />}
         <div className="grow">{item.text}</div>
       </div>
@@ -183,7 +183,7 @@ function Notice({ item }: { item: NoticeItem }) {
   }
   if (item.tag === 'retry-ok') {
     return (
-      <div className="cli-info info">
+      <div className="cli-info info" id={`notice-${item.id}`}>
         <Info size={12} />
         <div className="grow">{item.text}</div>
       </div>
@@ -192,7 +192,7 @@ function Notice({ item }: { item: NoticeItem }) {
   if (item.tag === 'cli-info') {
     const first = item.text.split(/(?<=\.)\s/)[0];
     return (
-      <div className={`cli-info ${item.level}`}>
+      <div className={`cli-info ${item.level}`} id={`notice-${item.id}`}>
         <Info size={12} />
         <div className="grow">
           {open ? <Markdown text={item.text} className="md-compact" /> : <span>{first}</span>}
@@ -207,7 +207,7 @@ function Notice({ item }: { item: NoticeItem }) {
   }
   const Icon = item.level === 'error' ? CircleAlert : item.level === 'warning' ? TriangleAlert : Info;
   return (
-    <div className={`notice ${item.level}`}>
+    <div className={`notice ${item.level}`} id={`notice-${item.id}`}>
       <Icon size={14} />
       <div className="grow">
         <div>
@@ -240,7 +240,7 @@ function Compact({ item }: { item: CompactItem }) {
 
 function CommandOutput({ item, ctx }: { item: CommandOutputItem; ctx: ToolCtx }) {
   return (
-    <div className="cmd-output">
+    <div className="cmd-output" id={`co-${item.id}`}>
       <div className="cmd-output-head">
         <TermIcon size={12} /> Command output
       </div>
