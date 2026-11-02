@@ -133,7 +133,12 @@ class Tokens:
     ansi_bright_white: str
 
     def color(self, name: str) -> QColor:
-        """A token as a QColor (``rgba()`` strings included)."""
+        """A token as a QColor (``rgba()`` strings included); ``"a/b"`` is token a laid over token b,
+        as ``resolve`` reads it (a wash on an inset well)."""
+        if "/" in name:
+            c = resolve(name, self)
+            if c is not None:
+                return c
         return qcolor(getattr(self, name))
 
     def ansi(self, var: str) -> Optional[str]:

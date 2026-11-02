@@ -233,3 +233,29 @@ def test_folder_chip_opens_the_picker_in_a_popover(app_client):
     assert pop.width() == 380 and pop.styleSheet() == ""  # painted from the tokens, no colours in a stylesheet
     v.pick_folder()  # the chip again closes it
     assert not pop.is_open
+
+
+def test_the_header_menu_button_closes_its_menu_on_a_second_click(app_client):
+    """The "…" button opens the session menu and, pressed again, closes it (a press on the button is not
+    "outside" the menu, so the click used to close it and open it again)."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    from pilcrow_qt.widgets.ui.menu import open_menu
+
+    c = app_client
+    v = _open(c)
+    btn = v.menu_btn
+    QTest.mouseClick(btn, Qt.MouseButton.LeftButton)
+    c.sleep(80)
+    m = open_menu()
+    assert m is not None and m.is_open
+    QTest.mouseClick(btn, Qt.MouseButton.LeftButton)
+    c.sleep(80)
+    assert open_menu() is None and not m.is_open, "the second click closes it"
+    QTest.mouseClick(btn, Qt.MouseButton.LeftButton)
+    c.sleep(80)
+    assert open_menu() is not None, "and a third opens it again"
+    from pilcrow_qt.widgets.ui.menu import close_menus
+
+    close_menus()

@@ -24,7 +24,7 @@ from ...widgets.transcript.permission import PermissionCard
 from ..paint import Measurer, PaintState, rounded
 from ..pixels import vline
 from ..scene import Block, Group, Target
-from .base import MetaPart, chevron, meta_width, paint_head_tint, paint_meta, paint_needs_frame
+from .base import MetaPart, chevron, draw_shimmer, meta_width, paint_head_tint, paint_meta, paint_needs_frame
 from .bodies import ToolBodyBlock
 from .island import IslandBlock
 
@@ -87,6 +87,7 @@ class ToolBlock(Group):
     KIND = "tool"
     CHILD_INDENT = 28
     __slots__ = (
+        "_label_end",
         "_loaded_items",
         "_meta_rects",
         "_second",
@@ -122,6 +123,7 @@ class ToolBlock(Group):
         self._loaded_items: Optional[List[Item]] = None
         self._meta_rects: Dict[str, QRect] = {}
         self._second = -1  # the elapsed second the head last showed while it runs
+        self._label_end = 0  # where the head's words end: what a running card's shimmer repaints
         self._tsig: Any = None  # the workflow task's progress the body last showed
         self.shaped = True
         self.append(self.body)
@@ -250,8 +252,13 @@ class ToolBlock(Group):
         # verb · target
         cx = x + 28
         fv = st.m.font(theme.FS_UI)
+        running = self.live() and not self.awaiting
         if meta.verb:
-            st.m.draw_text(p, cx, y + (head_h - st.m.line_h(fv)) / 2, meta.verb, fv, QColor(t.text_3))
+            vy = y + (head_h - st.m.line_h(fv)) / 2
+            if running:
+                draw_shimmer(p, cx, vy, meta.verb, fv, QColor(t.text_3), st)
+            else:
+                st.m.draw_text(p, cx, vy, meta.verb, fv, QColor(t.text_3))
             cx += st.m.text_w(meta.verb, fv) + 7
         struck = it.status in ("denied", "interrupted")
         ft = st.m.font(12.5 if meta.mono else theme.FS_UI, 400, meta.mono)
@@ -263,8 +270,14 @@ class ToolBlock(Group):
         open_w = (13 + 7) if self.file else 0
         avail = max(40, (x + w) - cx - meta_w - chev_w - open_w - 8)
         shown = st.m.elide(meta.target, ft, int(avail))
-        st.m.draw_text(p, cx, y + (head_h - st.m.line_h(ft)) / 2, shown, ft, QColor(t.text_3 if struck else t.text))
+        ty = y + (head_h - st.m.line_h(ft)) / 2
+        if running:
+            # what is running, a shade down, with the light passing over it (the web's .shimmer)
+            draw_shimmer(p, cx, ty, shown, ft, QColor(t.text_2), st)
+        else:
+            st.m.draw_text(p, cx, ty, shown, ft, QColor(t.text_3 if struck else t.text))
         cx += st.m.text_w(shown, ft) + 7
+        self._label_end = int(cx - x)
         # the chevron is always there, quiet; brighter on hover or when open
         chevron(
             p,
@@ -409,7 +422,8 @@ class ToolBlock(Group):
         if s != self._second:
             self._second = s
             return (0, 0, 100000, self.head_h)
-        return (0, 0, 20, self.head_h)
+        # the turning mark and the label the light passes over: not the meta at the right, not the body
+        return (0, 0, max(20, self._label_end), self.head_h)
 
     @property
     def static(self) -> bool:

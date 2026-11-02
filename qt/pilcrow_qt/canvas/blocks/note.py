@@ -4,8 +4,10 @@ A note to a lead — a helper finished, failed, was stopped or needs the person 
 tool's: a state dot in the status column, "Helper finished" as the verb, the helper's name as the
 target, its figures at the right, Open on hover, and the handoff in an inset well under the head that
 folds like a tool body. A brief or a message from the lead in a helper's conversation is the same card
-with "From the lead" as the verb and the lead's title as the target; the standing instructions every
-helper gets are folded under the brief, since they are for the model.
+with "Brief from the lead" (the assignment) or "Message from the lead" (what it sends later) as the
+verb, the lead's title as the target and, on a brief, the repository and branch the helper works on;
+the lead's words sit on a well washed in the plan colour, and the standing instructions every helper
+gets are folded under the brief, since they are for the model.
 """
 
 from __future__ import annotations
@@ -62,9 +64,11 @@ def _cwd_of(sid: str) -> str:
     return str((rt.st.get("cwd") if rt else "") or "")
 
 
-def _well(text: str, cwd: str) -> nd.Node:
-    """Prose from another session, on the inset well a tool's result sits on."""
-    return nd.Surface(nd.Markdown(text, compact=True, cwd=cwd), "inset", "light:hair", theme.R3, (12, 10, 12, 10))
+def _well(text: str, cwd: str, tint: str = "") -> nd.Node:
+    """Prose from another session, on the inset well a tool's result sits on; ``tint`` washes it in a
+    tone (the lead's instructions in the plan colour: an assignment, not a result)."""
+    bg = f"{tint}/inset" if tint else "inset"
+    return nd.Surface(nd.Markdown(text, compact=True, cwd=cwd), bg, "light:hair", theme.R3, (12, 10, 12, 10))
 
 
 # ---------------------------------------------------------------- the head, as a tool card draws it
@@ -328,11 +332,12 @@ class FromLeadBlock(_Card):
     fold under it."""
 
     KIND = "from-lead"
-    __slots__ = ("item", "state")
+    __slots__ = ("item", "state", "_where_cache")
 
     def __init__(self, item: UserItem, sid: str) -> None:
         self.item = item
         self.state: Dict[str, Any] = {}
+        self._where_cache: Optional[Tuple[str, str]] = None
         super().__init__(f"from:{item.id}", sid, has_body=bool(item.text.strip()))
         self.body.on("toggle:hdr", self._toggle_hdr)
         self.sig = item.rev
@@ -358,11 +363,10 @@ class FromLeadBlock(_Card):
         header, brief = self._split()
         col = nd.vstack(spacing=8)
         if brief:
-            col.add(_well(brief, _cwd_of(self.sid)))
+            col.add(_well(brief, _cwd_of(self.sid), "plan_wash"))
         if header:
-            col.add(
-                nd.Toggle("Standing instructions for a helper", "hdr", nd.note(header), bool(self.state.get("hdr")))
-            )
+            # what every helper is told, for the model rather than the person: folded, quiet
+            col.add(nd.Toggle("Standing instructions", "hdr", nd.note(header), bool(self.state.get("hdr"))))
         return col
 
     def _toggle_hdr(self, _t: Target, view: Any) -> None:
@@ -376,8 +380,33 @@ class FromLeadBlock(_Card):
         return h if isinstance(h, dict) else {}
 
     def head(self) -> Dict[str, Any]:
+        """ "Brief from the lead" for the assignment that started the helper (it opens with the standing
+        instructions), "Message from the lead" for what the lead sends later; the brief says at the
+        right where the helper works (its repository, its worktree's branch)."""
         title = str(self._lead().get("leadTitle") or "the lead session")
-        return {"icon": "corner-down-right", "verb": "From the lead", "target": title, "meta": []}
+        brief = self.item.text.startswith(HELPER_HEADER_PREFIX)
+        meta: List[MetaPart] = []
+        if brief:
+            t = theme.tokens()
+            repo, branch = self._where()
+            if repo:
+                meta.append(("text", repo, t.text_3))
+            if branch:
+                meta.append(("mono", branch, t.plan))
+        verb = "Brief from the lead" if brief else "Message from the lead"
+        return {"icon": "corner-down-right", "verb": verb, "target": title, "meta": meta}
+
+    def _where(self) -> Tuple[str, str]:
+        """(repository, branch) of this helper's session, looked up once: the head is painted often,
+        and the session list is searched, not indexed. Kept once found; a helper does not move."""
+        if self._where_cache is None:
+            s = store.session(self.sid)
+            if s is None:
+                return "", ""  # not listed yet: ask again next time
+            wt = s.get("worktree") if isinstance(s.get("worktree"), dict) else {}
+            folder = str(wt.get("repoRoot") or s.get("project") or s.get("cwd") or "")
+            self._where_cache = (folder.rstrip("/").rsplit("/", 1)[-1] if folder else "", str(wt.get("branch") or ""))
+        return self._where_cache
 
     def open_target(self) -> Optional[str]:
         lead = self._lead().get("leadId")

@@ -27,7 +27,7 @@ from ..paint import (
 )
 from ..pixels import vline
 from ..scene import Block, Group, Target
-from .base import chevron, paint_head_tint
+from .base import chevron, draw_shimmer, paint_head_tint
 
 HEAD_H = 28  # a step row's height (``.tool-head``), so a thought lines up with the steps around it
 #: the step grid: an 18px icon column, the words at 28 (the tool rows' ``x + 2`` icon and ``x + 28`` text)
@@ -132,7 +132,7 @@ class ThinkingBlock(Group):
     """The head and, under it, the thought."""
 
     KIND = "thinking"
-    __slots__ = ("item", "view_mode", "user_open", "peek_doc", "_peek_src", "_peek_w")
+    __slots__ = ("item", "view_mode", "user_open", "peek_doc", "_peek_src", "_peek_w", "_label_w")
 
     def __init__(self, item: ThinkingItem, view_mode: str = "normal") -> None:
         super().__init__(f"thinking:{item.id}", head_h=HEAD_H, pad_top=4, pad_bottom=6, open_=False)
@@ -142,6 +142,7 @@ class ThinkingBlock(Group):
         self.peek_doc: Optional[QTextDocument] = None
         self._peek_src = ""
         self._peek_w = 0
+        self._label_w = 0
         self.shaped = True
         self.append(ThinkingBody(self))
         self.set_open(self.wants_open)
@@ -237,7 +238,13 @@ class ThinkingBlock(Group):
         # the step grid: the icon centred in the 18px column, the words at 28
         p.drawPixmap(x + ICON_X, y + (HEAD_H - 14) // 2, st.m.icon("sparkles", QColor(t.think), 14))
         color = QColor(t.text_2 if (hover or self.item.streaming) else t.text_3)
-        st.m.draw_text(p, x + TEXT_X, y + (HEAD_H - st.m.line_h(f)) / 2, title, f, color)
+        ty = y + (HEAD_H - st.m.line_h(f)) / 2
+        if self.item.streaming:
+            # "Thinking", with light moving across it while the thought arrives
+            draw_shimmer(p, x + TEXT_X, ty, title, f, QColor(t.text_3), st)
+        else:
+            st.m.draw_text(p, x + TEXT_X, ty, title, f, color)
+        self._label_w = TEXT_X + tw + 4
         if can_open:
             chevron(
                 p,
@@ -258,6 +265,13 @@ class ThinkingBlock(Group):
             full = doc_height(self.peek_doc)
             off = max(0, full - ph)
             draw_doc(p, self.peek_doc, x + TEXT_X, y + HEAD_H + 2 - off, clip, QColor(t.text_3))
+
+    def live(self) -> bool:
+        return bool(self.item.streaming)
+
+    def tick(self, now: float) -> Optional[Tuple[int, int, int, int]]:
+        """The shimmer's frame: the label only, not the peek or the thought under it."""
+        return (0, 0, self._label_w or 200, HEAD_H) if self.item.streaming else None
 
     def hit(self, x: int, y: int) -> Optional[Target]:
         if y < HEAD_H and self.can_open:

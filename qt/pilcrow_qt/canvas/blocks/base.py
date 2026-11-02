@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from PySide6.QtCore import QRect, Qt
-from PySide6.QtGui import QColor, QFont, QPainter
+from PySide6.QtCore import QPointF, QRect, Qt
+from PySide6.QtGui import QBrush, QColor, QFont, QLinearGradient, QPainter, QPen
 
 from ... import theme
+from ..clock import clock
 from ..nodes import Node
 from ..paint import Measurer, PaintState, rounded
 from ..scene import Block, Target
@@ -109,6 +110,37 @@ def paint_needs_frame(p: QPainter, rect: QRect, st: PaintState) -> None:
     """The card of a step that waits on the person (a permission, a question, a plan): raised, with
     the accent ring 1.5 px wide — the one signal, shared with the composer's border and the pill."""
     rounded(p, rect, QColor(st.t.raised), QColor(st.t.accent_ring), NEEDS_R, width=1.5)
+
+
+#: one sweep of the shimmer across a live label, in seconds (the web's ``.shimmer``)
+SHIMMER_PERIOD = 1.8
+
+
+def draw_shimmer(p: QPainter, x: float, y: float, text: str, font: QFont, base: QColor, st: PaintState) -> int:
+    """A live label (Thinking, a running command): its words in ``base`` with a band of light moving
+    across them. Two passes over one cached line of text and a gradient, on the clock's 20 Hz tick, over
+    the label's rectangle only (the block's ``tick`` asks for no more). Still, when motion is reduced.
+    Returns the label's width."""
+    st.m.draw_text(p, x, y, text, font, base)
+    w = int(st.m.text_w(text, font))
+    if clock.reduced_motion or w <= 0:
+        return w
+    band = max(36.0, w * 0.45)
+    phase = (st.now % SHIMMER_PERIOD) / SHIMMER_PERIOD
+    cx = x - band + (w + 2 * band) * phase
+    glow = QColor(st.t.text)
+    clear = QColor(glow)
+    clear.setAlpha(0)
+    g = QLinearGradient(cx - band / 2, 0, cx + band / 2, 0)
+    g.setColorAt(0.0, clear)
+    g.setColorAt(0.5, glow)
+    g.setColorAt(1.0, clear)
+    p.setFont(font)
+    p.setPen(QPen(QBrush(g), 1))
+    # drawText, not the cached static text: a static text keeps the pen it was laid out with, and the
+    # gradient (the band of light) would not reach it
+    p.drawText(QPointF(x, y + st.m.fm(font).ascent()), text)
+    return w
 
 
 def paint_head_tint(p: QPainter, rect: QRect, st: PaintState, strength: str = "fill_1") -> None:

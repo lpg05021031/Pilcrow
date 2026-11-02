@@ -15,7 +15,7 @@ from PySide6.QtCore import QRect, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
 
 from ... import theme
-from ...lib.fmt import duration, plural, rel_path, truncate
+from ...lib.fmt import basename, duration, plural, rel_path, tildify, truncate
 from ...lib.fmt import tokens as fmt_tokens
 from ...lib.tools_meta import HELPER_RING, HELPER_TONE, helper_text_tone, helper_word, str_
 from ...lib.transcript_model import ToolItem, TranscriptModel
@@ -373,6 +373,35 @@ def _helper_row(h: Json, block: ToolBodyBlock, tid: str) -> nd.Node:
     return nd.Row(parts, 8, (0, 0, 0, 0), [3] if line else [], "center", 24)
 
 
+def _helper_where(data: Json, ctx: ToolCtx, block: ToolBodyBlock) -> nd.Node:
+    """Where a started helper went: the repository (its folder, by name, the path beside it), the branch
+    of its worktree, what it waits for, Open. No state word: this card records the start, and a state
+    copied from that moment ("running" long after it finished) only contradicted the bar above, which
+    follows the helper live."""
+    folder = str(data.get("folder") or data.get("cwd") or "")
+    parts: List[nd.Node] = [nd.Painted(_folder_icon, 14, 14)]
+    parts.append(nd.Text(basename(folder) or folder, theme.FS_UI, 600, "text", wrap=False))
+    shown = tildify(folder, str((store.info or {}).get("home") or ""))
+    grow: List[int] = []
+    if shown and shown != basename(folder):
+        grow.append(len(parts))  # the path gives way first when the row is narrow
+        parts.append(nd.Text(shown, theme.FS_MICRO, 400, "text_3", mono=True, wrap=False))
+    wt = data.get("worktree") if isinstance(data.get("worktree"), dict) else {}
+    if wt.get("branch"):
+        parts.append(nd.Badge(str(wt["branch"]), "plan"))
+    if data.get("queuedBehind"):
+        parts.append(nd.faint("after " + ", ".join(str(x) for x in data["queuedBehind"]), theme.FS_MICRO))
+    hid = str(data.get("id") or "")
+    if hid:
+        parts.append(nd.Button("Open", "open", kind="ghost", size="xs"))
+        block.on("open", lambda _t, _v, sid=hid: store.open_session(sid))
+    return nd.Row(parts, 8, (0, 0, 0, 0), grow, "center", 24)
+
+
+def _folder_icon(p: QPainter, r: QRect, st: PaintState) -> None:
+    p.drawPixmap(r.x(), r.y(), st.m.icon("folder-git-2", QColor(st.t.text_3), 14))
+
+
 def helpers_body(item: ToolItem, ctx: ToolCtx, block: ToolBodyBlock) -> nd.Node:
     tool = item.name[len("mcp__helpers__") :]
     i = item.input or {}
@@ -395,15 +424,7 @@ def helpers_body(item: ToolItem, ctx: ToolCtx, block: ToolBodyBlock) -> nd.Node:
             )
             block.on("toggle:brief", block.toggle_state("brief"))
         if data:
-            meta = nd.hstack(spacing=8)
-            wt = data.get("worktree") if isinstance(data.get("worktree"), dict) else {}
-            if wt.get("branch"):
-                meta.add(nd.Badge(str(wt["branch"]), "plan"))
-            if data.get("queuedBehind"):
-                meta.add(nd.faint("waits for " + ", ".join(str(x) for x in data["queuedBehind"]), theme.FS_MICRO))
-            if meta.children:
-                col.add(meta)
-            col.add(_helper_row(data, block, "open"))
+            col.add(_helper_where(data, ctx, block))
         elif r is None:
             col.add(nd.faint("Starting…"))
     elif tool in ("wait", "list"):
@@ -440,7 +461,8 @@ def helpers_body(item: ToolItem, ctx: ToolCtx, block: ToolBodyBlock) -> nd.Node:
             col.add(nd.faint("Reading…"))
     elif tool == "send":
         if str_(i, "text"):
-            col.add(nd.Surface(nd.note(str_(i, "text")), "inset", "hair", theme.R2, (12, 10, 12, 10)))
+            # what the lead told it, on the same plan-washed well the helper sees it on
+            col.add(nd.Surface(nd.note(str_(i, "text")), "plan_wash/inset", "hair", theme.R2, (12, 10, 12, 10)))
         if data:
             col.add(nd.faint(f"delivered {data.get('delivered') or 'now'}", theme.FS_MICRO))
     elif tool == "stop":

@@ -1007,7 +1007,7 @@ const hLeadRules = new Map();
 const hNoteBuf = new Map();
 const hOf = (leadId) => [...hAll.values()].filter((h) => h.leadId === leadId).sort((a, b) => a.startedAt - b.startedAt);
 const hByName = (leadId, name) => hOf(leadId).find((h) => h.name === name) || null;
-const hPublic = (h) => ({ name: h.name, id: h.id, cwd: h.cwd, branch: h.worktree?.branch || null, worktree: h.worktree?.path || null, state: h.state, since: h.startedAt, elapsedMs: (h.endedAt || Date.now()) - h.startedAt, cost: Math.round(h.cost * 10000) / 10000, files: h.files.length, add: h.add, del: h.del, pending: h.pending, lastLine: h.lastLine, after: h.after, reason: h.reason || undefined, finished: h.finished || undefined, commit: h.commit || undefined, pr: h.pr || undefined });
+const hPublic = (h) => ({ name: h.name, id: h.id, cwd: h.cwd, folder: h.folder || h.cwd, branch: h.worktree?.branch || null, worktree: h.worktree?.path || null, state: h.state, since: h.startedAt, elapsedMs: (h.endedAt || Date.now()) - h.startedAt, cost: Math.round(h.cost * 10000) / 10000, files: h.files.length, add: h.add, del: h.del, pending: h.pending, lastLine: h.lastLine, after: h.after, reason: h.reason || undefined, finished: h.finished || undefined, commit: h.commit || undefined, pr: h.pr || undefined });
 const H_CAPS = { total: 8, parallel: 3, maxMinutes: 30, costUsd: 0 };
 function hExtra(s) {
   const out = {};
@@ -1055,7 +1055,7 @@ async function hStart(lead, args) {
   else h.reason = `waits for ${waiting.join(', ')}`;
   hPump(lead.id);
   hEmit(lead.id);
-  return { name, id, state: h.state, cwd: h.cwd, worktree: s.worktree ? { path: s.worktree.path, branch: s.worktree.branch } : null, ...(h.state === 'queued' ? { queuedBehind: waiting } : {}) };
+  return { name, id, state: h.state, cwd: h.cwd, folder, worktree: s.worktree ? { path: s.worktree.path, branch: s.worktree.branch } : null, ...(h.state === 'queued' ? { queuedBehind: waiting } : {}) };
 }
 function hLaunch(h) {
   h.launched = true;

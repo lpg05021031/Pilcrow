@@ -165,6 +165,7 @@ export function createHelpers(deps) {
       name: h.name,
       id: h.id,
       cwd: h.cwd,
+      folder: h.folder || h.worktree?.repoRoot || h.cwd, // the repository it works on (cwd is its worktree)
       branch: h.worktree?.branch || null,
       worktree: h.worktree?.path || null,
       state: h.state,
@@ -325,7 +326,7 @@ export function createHelpers(deps) {
       pump(leadId); // a dependency that already failed skips it now, not at the next event
     }
     emitLead(leadId);
-    return { name: h.name, id: h.id, state: h.state, cwd: h.cwd, worktree: h.worktree ? { path: h.worktree.path, branch: h.worktree.branch } : null, ...(h.state === 'queued' && queuedBehind.length ? { queuedBehind } : {}), ...(h.reason && h.state !== 'queued' ? { reason: h.reason } : {}) };
+    return { name: h.name, id: h.id, state: h.state, cwd: h.cwd, folder: h.folder || h.cwd, worktree: h.worktree ? { path: h.worktree.path, branch: h.worktree.branch } : null, ...(h.state === 'queued' && queuedBehind.length ? { queuedBehind } : {}), ...(h.reason && h.state !== 'queued' ? { reason: h.reason } : {}) };
   }
 
   /** Send the brief: the header, the brief, what the helpers it waited for did. */
