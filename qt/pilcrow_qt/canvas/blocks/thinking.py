@@ -29,7 +29,11 @@ from ..pixels import vline
 from ..scene import Block, Group, Target
 from .base import chevron, paint_head_tint
 
-HEAD_H = 26
+HEAD_H = 28  # a step row's height (``.tool-head``), so a thought lines up with the steps around it
+#: the step grid: an 18px icon column, the words at 28 (the tool rows' ``x + 2`` icon and ``x + 28`` text)
+ICON_X, TEXT_X = 2, 28
+#: the thought under its head: the rule under the icon, the words in the text column
+RULE_X = 9
 PEEK_LINES = 4.9
 BODY_SIZE = 13.5
 BODY_LINE = int(BODY_SIZE * 1.65 + 0.5)
@@ -47,7 +51,9 @@ class ThinkingBody(Block):
         self._md = False  # the document is Markdown (a finished thought), not plain text
 
     def estimate(self, width: int, m: Measurer) -> int:
-        return m.fast_height(self.owner.item.text, width - 15, m.font(BODY_SIZE), BODY_LINE) + 8
+        if not self.owner.item.text:
+            return 0
+        return m.fast_height(self.owner.item.text, width - TEXT_X, m.font(BODY_SIZE), BODY_LINE) + 8
 
     def measure(self, width: int, m: Measurer) -> int:
         text = self.owner.item.text
@@ -55,11 +61,12 @@ class ThinkingBody(Block):
             self.doc = None
             return 0
         md = not self.owner.item.streaming
-        if self.doc is None or self._src != text or self._md != md or int(self.doc.textWidth()) != width - 15:
+        tw = width - TEXT_X
+        if self.doc is None or self._src != text or self._md != md or int(self.doc.textWidth()) != tw:
             if md:
-                self.doc = m.markdown_doc(text, width - 15, quiet=True, size=BODY_SIZE)
+                self.doc = m.markdown_doc(text, tw, quiet=True, size=BODY_SIZE)
             else:
-                self.doc = m.plain_doc(text, width - 15, m.font(BODY_SIZE))
+                self.doc = m.plain_doc(text, tw, m.font(BODY_SIZE))
                 set_line_height(self.doc, BODY_LINE)
             self._src, self._md = text, md
         self.warm = True
@@ -73,18 +80,18 @@ class ThinkingBody(Block):
     def paint(self, p: QPainter, x: int, y: int, w: int, st: PaintState) -> None:
         if self.doc is None:
             return
-        vline(p, x + 1, y + 2, self.h - 6, theme.blend(st.t.hair_2, st.t.canvas))
-        clip = QRect(x + 15, y + 2, w - 15, self.h - 4)
+        vline(p, x + RULE_X, y + 2, self.h - 6, theme.blend(st.t.hair_2, st.t.canvas))
+        clip = QRect(x + TEXT_X, y + 2, w - TEXT_X, self.h - 4)
         if st.clip is not None:
             clip = clip.intersected(st.clip)
         if self._md:
-            paint_decor(p, self.doc, x + 15, y + 2, clip, st.t)
+            paint_decor(p, self.doc, x + TEXT_X, y + 2, clip, st.t)
         sels = None
         if st.selection is not None:
             bg = theme.blend(st.t.selection, st.t.canvas)
             a, b = (0, self.doc.characterCount()) if st.selection == FULL else st.selection
             sels = [selection(self.doc, a, b, bg)]
-        draw_doc(p, self.doc, x + 15, y + 2, clip, QColor(st.t.text_2), sels)
+        draw_doc(p, self.doc, x + TEXT_X, y + 2, clip, QColor(st.t.text_2), sels)
 
     def text(self) -> str:
         return self.owner.item.text
@@ -92,7 +99,7 @@ class ThinkingBody(Block):
     def text_pos_at(self, x: int, y: int) -> Optional[int]:
         if self.doc is None:
             return None
-        return doc_pos_at(self.doc, x - 15, y - 2)
+        return doc_pos_at(self.doc, x - TEXT_X, y - 2)
 
     def selected_text(self, a: Optional[int], b: Optional[int]) -> str:
         if self.doc is None or not self._md:
@@ -142,9 +149,22 @@ class ThinkingBlock(Group):
 
     @property
     def wants_open(self) -> bool:
+        if not self.item.text:
+            return False  # nothing to show under the head
         if self.user_open is not None:
             return self.user_open
         return self.view_mode in ("thinking", "verbose")
+
+    @property
+    def hidden(self) -> bool:
+        """A finished thought with no words kept (the transcript stores only its signature): the web
+        shows nothing for it, and neither do we — a head that opens onto nothing is a dead end."""
+        it = self.item
+        return not it.text and not it.streaming and not it.redacted
+
+    @property
+    def can_open(self) -> bool:
+        return bool(self.item.text)
 
     @property
     def peeking(self) -> bool:
@@ -176,17 +196,24 @@ class ThinkingBlock(Group):
             return 0
         text = self.item.text[-320:]
         if self.peek_doc is None or self._peek_src != text or self._peek_w != width:
-            self.peek_doc = m.plain_doc(text, max(40, width - 15), m.font(BODY_SIZE))
+            self.peek_doc = m.plain_doc(text, max(40, width - TEXT_X), m.font(BODY_SIZE))
             set_line_height(self.peek_doc, BODY_LINE)
             self._peek_src, self._peek_w = text, width
         return min(doc_height(self.peek_doc), int(PEEK_LINES * BODY_LINE)) + 6
 
     def measure(self, width: int, m: Measurer) -> int:
         self.warm = True
-        self.set_chrome(head_h=HEAD_H + self.peek_height(width, m))
+        if self.hidden:
+            if self.open:
+                self.set_open(False)
+            self.set_chrome(head_h=0, pad_top=0, pad_bottom=0)
+            return self.h
+        self.set_chrome(head_h=HEAD_H + self.peek_height(width, m), pad_top=4, pad_bottom=6)
         return self.h
 
     def estimate(self, width: int, m: Measurer) -> int:
+        if self.hidden and self.head_h:
+            self.set_chrome(head_h=0, pad_top=0, pad_bottom=0)
         return self.h
 
     def cool(self) -> None:
@@ -201,33 +228,39 @@ class ThinkingBlock(Group):
         f = st.m.font(theme.FS_UI, 500 if self.item.streaming else 400)
         title = self.title(time.time())
         tw = int(st.m.text_w(title, f))
+        if self.hidden:
+            return
+        can_open = self.can_open
+        hover = hover and can_open
         if hover:
-            paint_head_tint(p, QRect(x - 6, y, 13 + 7 + tw + 7 + 13 + 9 + 12, HEAD_H), st)
-        p.drawPixmap(x, y + (HEAD_H - 13) // 2, st.m.icon("sparkles", QColor(t.think), 13))
+            paint_head_tint(p, QRect(x - 6, y, TEXT_X + tw + 7 + 13 + 12, HEAD_H), st)
+        # the step grid: the icon centred in the 18px column, the words at 28
+        p.drawPixmap(x + ICON_X, y + (HEAD_H - 14) // 2, st.m.icon("sparkles", QColor(t.think), 14))
         color = QColor(t.text_2 if (hover or self.item.streaming) else t.text_3)
-        st.m.draw_text(p, x + 20, y + (HEAD_H - st.m.line_h(f)) / 2, title, f, color)
-        chevron(
-            p,
-            x + 20 + tw + 7,
-            y + (HEAD_H - 13) // 2,
-            13,
-            self.reveal,
-            QColor(t.text_3),
-            st,
-            1.0 if (hover or self.open) else 0.55,
-        )
+        st.m.draw_text(p, x + TEXT_X, y + (HEAD_H - st.m.line_h(f)) / 2, title, f, color)
+        if can_open:
+            chevron(
+                p,
+                x + TEXT_X + tw + 7,
+                y + (HEAD_H - 13) // 2,
+                13,
+                self.reveal,
+                QColor(t.text_3),
+                st,
+                1.0 if (hover or self.open) else 0.55,
+            )
         if self.peeking and self.peek_doc is not None and self.head_h > HEAD_H:
             ph = self.head_h - HEAD_H - 6
-            clip = QRect(x + 15, y + HEAD_H + 2, w - 15, ph)
+            clip = QRect(x + TEXT_X, y + HEAD_H + 2, w - TEXT_X, ph)
             if st.clip is not None:
                 clip = clip.intersected(st.clip)
             # the tail of the thought: bottom-aligned inside the peek box
             full = doc_height(self.peek_doc)
             off = max(0, full - ph)
-            draw_doc(p, self.peek_doc, x + 15, y + HEAD_H + 2 - off, clip, QColor(t.text_3))
+            draw_doc(p, self.peek_doc, x + TEXT_X, y + HEAD_H + 2 - off, clip, QColor(t.text_3))
 
     def hit(self, x: int, y: int) -> Optional[Target]:
-        if y < HEAD_H:
+        if y < HEAD_H and self.can_open:
             return Target("head", "thinking", (0, 0, self.h_width or 0, HEAD_H))
         return None
 
@@ -235,7 +268,7 @@ class ThinkingBlock(Group):
         return Qt.CursorShape.PointingHandCursor if target.kind == "head" else None
 
     def activate(self, target: Target, view: Any) -> None:
-        if target.kind == "head":
+        if target.kind == "head" and self.can_open:
             self.user_open = not self.open
             view.toggle_group(self, self.user_open)
 

@@ -13,10 +13,10 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from PySide6.QtCore import QPoint, QRect, Qt
 from PySide6.QtGui import QAccessible, QCursor, QGuiApplication, QTextCursor
-from PySide6.QtWidgets import QToolTip
 
 from ..lib.fmt import resolve_path
 from ..store import store
+from ..widgets.ui import tooltip
 from ..widgets.ui.menu import show_menu_at
 from . import a11y
 from .paint import FULL
@@ -81,7 +81,7 @@ class ViewInput:
         vp.setCursor(cursor if cursor is not None else Qt.CursorShape.ArrowCursor)
         self.hovered_block.emit(hit[0] if hit is not None else None)
         self._tip_timer.stop()
-        QToolTip.hideText()
+        tooltip.hide_text()
         if hit is not None and hit[0].tooltip_for(hit[1]):
             self._tip_timer.start()
 
@@ -107,7 +107,9 @@ class ViewInput:
         b, t = self.hover
         tip = b.tooltip_for(t)
         if tip:
-            QToolTip.showText(self.viewport().mapToGlobal(self._tip_pos), tip, self.viewport())
+            # beside the pointer, as a small box around it: the tip goes under it, not over it
+            at = self.viewport().mapToGlobal(self._tip_pos)
+            tooltip.show_text(QRect(at.x() - 6, at.y() - 10, 12, 20), tip, self.viewport())
 
     def mouseMoveEvent(self, e) -> None:
         pos = e.position().toPoint()

@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 from .. import icons, theme
 from ..lib.fmt import basename, tildify
 from ..store import store
-from .dialogs.parts import well_bg
+from .dialogs.parts import ElideLabel, well_bg
 from .ui.bits import IconButton, Pill, button, hairline, label, paint_box
 from .ui.signals import bind
 
@@ -135,8 +135,7 @@ class FolderPicker(QWidget):
                 row = _Row(on=p == self.value)
                 row.add_icon("folder", t.text_3, 14)
                 row.add_text(basename(p), t.text, theme.FS_UI)
-                path = row.add_text(tildify(p, home), t.text_4, 11, mono=True, stretch=1)
-                path.setMaximumWidth(160)
+                row.add_text(tildify(p, home), t.text_4, 11, mono=True, stretch=1)
                 if p == self.value:
                     row.add_icon("check", t.accent_text, 13)
                 row.setToolTip(p)
@@ -349,7 +348,8 @@ class _Row(QPushButton):
     def add_icon(self, name: str, color: str, size: int) -> QLabel:
         lb = QLabel()
         lb.setPixmap(icons.pixmap(name, color, size))
-        self.lay.addWidget(lb)
+        lb.setFixedSize(size, size)  # an icon keeps its own width: spare room goes to the stretching text
+        self.lay.addWidget(lb, 0, Qt.AlignmentFlag.AlignVCenter)
         return lb
 
     def paintEvent(self, _e) -> None:
@@ -364,11 +364,16 @@ class _Row(QPushButton):
         paint_box(p, QRectF(self.rect()), bg, None, theme.R2)
 
     def add_text(self, text: str, color: str, size: float, mono: bool = False, stretch: int = 0) -> QLabel:
-        lb = QLabel(text)
+        """Words in the row: at their own width, or (``stretch``) taking the rest of it, cut with an
+        ellipsis when they do not fit."""
+        lb: QLabel = ElideLabel(text) if stretch else QLabel(text)
         lb.setFont(theme.font_mono(size) if mono else theme.font_ui(size))
+        lb.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         theme.tint(lb, fg=color)
         if stretch:
             lb.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        else:
+            lb.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
         self.lay.addWidget(lb, stretch)
         return lb
 

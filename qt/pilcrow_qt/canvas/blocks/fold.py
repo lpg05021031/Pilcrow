@@ -248,8 +248,9 @@ class MoreBlock(Block):
         hover = st.hover is not None
         f = st.m.font(theme.FS_UI)
         color = QColor(st.t.text if hover else st.t.text_3)
-        p.drawPixmap(x, y + 7, st.m.icon("layers", color, 14))
-        st.m.draw_text(p, x + 20, y + (28 - st.m.line_h(f)) / 2, st.m.elide(self.label, f, w - 24), f, color)
+        # on the step grid with the rows around it: the icon in the 18px column, the words at 28
+        p.drawPixmap(x + 2, y + 7, st.m.icon("layers", color, 14))
+        st.m.draw_text(p, x + 28, y + (28 - st.m.line_h(f)) / 2, st.m.elide(self.label, f, w - 32), f, color)
 
     def hit(self, x: int, y: int) -> Optional[Target]:
         return Target("button", "more", (0, 0, self.h_width or 0, 28))

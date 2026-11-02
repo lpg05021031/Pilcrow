@@ -138,3 +138,32 @@ def test_mentions_picker_menu_and_sidebar(app_client):
     assert picker.chips_of(f"{HOME}/code/legacy-api")[0] == "legacy-api"
     assert picker.notes_of(f"{HOME}/code/web-ui") == "pnpm, not npm. The ESLint config lives in config/eslint.cjs."
     assert c.shot("dispatch-picker-registered").exists()
+
+
+def test_a_row_lines_up_its_names_field_and_its_settings(app_client):
+    """The alias field follows the chips on their line (not pushed to the far edge), the chips stand
+    out from the row, and every setting's label sits in the same 150px column, the worktree switch's
+    included (a fixed-size control used to spread the spare width around it, label and all)."""
+    from PySide6.QtCore import QPoint
+
+    c = app_client
+    s = _settings(c)
+    page = s.page
+    c.wait_until(lambda: len(page.rows) == 3, 5, "rows")
+    web = page.rows[_entry(c, "web")["id"]]
+    chips = web.aliases._items
+    edit = web.alias_edit
+    last = chips[-1]
+    assert edit.parent() is web.aliases and edit.x() == last.x() + last.width() + 6, "the field right after the chips"
+    assert abs(edit.geometry().center().y() - last.geometry().center().y()) <= 1, "on one line, centred"
+    web.set_open(True)
+    c.sleep(150)
+    lefts = ["About", "Mode", "Worktree", "Base branch"]
+    from pilcrow_qt.widgets.dialogs.parts import Text
+
+    xs = {t.text(): t.mapTo(web, QPoint(0, 0)).x() for t in web.detail.findChildren(Text) if t.text() in lefts}
+    assert set(xs) == set(lefts) and len(set(xs.values())) == 1, xs
+    sw = web.worktree.mapTo(web, QPoint(0, 0)).x()
+    about = web.about.mapTo(web, QPoint(0, 0)).x()
+    assert sw == about, "the switch starts the control column, like the fields"
+    _close(c)

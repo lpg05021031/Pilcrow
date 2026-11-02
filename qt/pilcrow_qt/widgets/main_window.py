@@ -34,6 +34,7 @@ from ..lib.shortcuts import SHORTCUTS
 from ..store import PANEL_TABS, store
 from .dialogs.parts import ElideLabel
 from .sidebar import Sidebar
+from .ui import tooltip
 from .ui.bits import label
 from .ui.signals import bind
 
@@ -49,6 +50,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self._title = title
         self.setWindowTitle(title)
+        tooltip.install()  # painted tips with rounded corners, not the platform's square window
         # 1480×940 where it fits; smaller on a small screen (a 1366×768 laptop, a 125 % 1080p display), so the
         # panel and the composer are on screen from the first frame rather than after a resize
         self.resize(*fit_size())

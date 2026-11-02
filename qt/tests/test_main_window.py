@@ -315,3 +315,62 @@ def test_edge_resize_cursor_shows_over_any_child(mock_server):
         while QGuiApplication.overrideCursor() is not None:
             QGuiApplication.restoreOverrideCursor()
         c.close()
+
+
+def test_tooltips_are_painted_pills_not_the_platforms_square_window(mock_server):
+    """A control's tooltip is our own window: translucent, so its corners are see-through around the
+    rounded pill (the platform's tooltip window is square whatever the stylesheet rounds), with the
+    shortcut as keycaps; it goes away when the pointer leaves the control."""
+    c = Client(mock_server)
+    try:
+        _ready(c)
+        from PySide6.QtCore import QEvent, Qt
+        from PySide6.QtGui import QHelpEvent
+        from PySide6.QtWidgets import QApplication
+
+        from pilcrow_qt.widgets.ui import tooltip
+        from pilcrow_qt.widgets.ui.bits import IconButton
+
+        btn = next(b for b in c.win.sidebar.findChildren(IconButton) if b.isVisible() and "(Ctrl+B)" in b.toolTip())
+        QApplication.sendEvent(btn, QHelpEvent(QEvent.Type.ToolTip, QPoint(4, 4), btn.mapToGlobal(QPoint(4, 4))))
+        c.sleep(30)
+        tip = tooltip._live_tip()
+        assert tip is not None and tip.isVisible()
+        assert tooltip.visible_text() == "Hide sidebar (Ctrl+B)" and tip.keys == ["Ctrl", "B"]
+        assert tip.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        img = tip.grab().toImage()
+        body_x, body_y = tooltip.SHADOW, tooltip.SHADOW
+        assert img.pixelColor(body_x, body_y).alpha() < 255, "the pill's corner is rounded off"
+        pad = img.pixelColor(body_x + 3, img.height() // 2)  # the pill's padding, left of the words
+        assert pad.alpha() == 255 and pad.lightness() < 80, "a dark pill"
+        # under the control, not over it
+        assert tip.y() + tooltip.SHADOW >= btn.mapToGlobal(QPoint(0, btn.height())).y()
+        QApplication.sendEvent(btn, QEvent(QEvent.Type.Leave))
+        assert not tip.isVisible()
+    finally:
+        c.close()
+
+
+def test_folder_picker_rows_keep_name_and_path_together(mock_server):
+    """A recent folder's row reads icon, name, path from the left: the icon keeps its own width and the
+    name follows it, instead of the spare width spreading them across the row."""
+    c = Client(mock_server)
+    try:
+        _ready(c)
+        from pilcrow_qt.widgets.folder_picker import FolderPicker, _Row
+
+        fp = FolderPicker("/home/tester/code/pilcrow", lambda _p: None)
+        fp.resize(380, 300)
+        fp.show()
+        c.sleep(80)
+        rows = [r for r in fp.findChildren(_Row) if r.isVisible()]
+        assert rows
+        row = rows[0]
+        items = [row.lay.itemAt(i).widget() for i in range(row.lay.count()) if row.lay.itemAt(i).widget()]
+        icon, name, path = items[0], items[1], items[2]
+        assert icon.width() == 14
+        assert name.x() == icon.x() + icon.width() + row.lay.spacing(), "the name right after the icon"
+        assert path.x() == name.x() + name.width() + row.lay.spacing(), "the path right after the name"
+        fp.close()
+    finally:
+        c.close()
