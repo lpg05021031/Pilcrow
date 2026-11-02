@@ -259,18 +259,59 @@ def test_custom_title_bar_is_one_surface_with_the_sidebar(mock_server):
         from pilcrow_qt.widgets.ui.bits import Mark
 
         assert not tb.findChildren(Mark), "no mark in the bar: the sidebar's brand row has it"
-        col = lambda: c.win.main.mapTo(c.win, QPoint(0, 0)).x() + 21  # noqa: E731 - the sheet's text column
-        title_x = lambda: tb.title.mapTo(c.win, QPoint(0, 0)).x()  # noqa: E731
-        assert title_x() == col() > 200, "the title starts where the session header's text does"
-        c.store.set_ui(sidebar=False)
-        c.sleep(80)
-        assert title_x() == col() < 40, "with the sidebar hidden it moves to the left edge"
-        c.store.set_ui(sidebar=True, sidebar_w=360)
-        c.sleep(80)
-        assert title_x() == col() > 360, "and it follows the sidebar's width"
-        c.store.set_ui(sidebar_w=268)
-        c.sleep(80)
-        assert tb.title.text().endswith("Pilcrow")
+        from PySide6.QtWidgets import QLabel
+
+        assert not [lb for lb in tb.findChildren(QLabel) if lb.text()], (
+            "no title: the session's name is in the sheet's header"
+        )
+        # the top corners are rounded (outside them the window is see-through), the bottom ones are not
+        w, h = img.width(), img.height()
+        assert img.pixelColor(0, 0).alpha() == 0 and img.pixelColor(w - 1, 0).alpha() == 0, "rounded top corners"
+        assert img.pixelColor(0, h - 1).alpha() == 255 and img.pixelColor(w - 1, h - 1).alpha() == 255, "square bottom"
+        assert _rgb(img, 12, 12) == chrome, "the chrome fills the corner inside the curve"
         assert c.shot("titlebar").exists()
     finally:
+        c.close()
+
+
+def test_edge_resize_cursor_shows_over_any_child(mock_server):
+    """The resize cursor follows the pointer along every edge, also where a child takes the moves (the
+    sidebar's rows, the conversation), and leaves as soon as the pointer is off the edge."""
+    os.environ["PILCROW_TITLEBAR"] = "custom"
+    try:
+        c = Client(mock_server)
+    finally:
+        os.environ.pop("PILCROW_TITLEBAR", None)
+    try:
+        _ready(c)
+        c.sleep(200)
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QGuiApplication
+        from PySide6.QtTest import QTest
+
+        win = c.win
+        w, h = win.width(), win.height()
+
+        def shape_at(x: int, y: int):
+            QTest.mouseMove(win.windowHandle(), QPoint(x, y))
+            c.sleep(20)
+            cur = QGuiApplication.overrideCursor()
+            return cur.shape() if cur is not None else None
+
+        assert win.childAt(3, 400) is not None, "the sidebar is under the left edge"
+        assert shape_at(3, 400) == Qt.CursorShape.SizeHorCursor
+        assert shape_at(w - 3, h // 2) == Qt.CursorShape.SizeHorCursor
+        assert shape_at(w // 2, h - 2) == Qt.CursorShape.SizeVerCursor
+        assert shape_at(w // 2, 2) == Qt.CursorShape.SizeVerCursor
+        assert shape_at(4, 4) == Qt.CursorShape.SizeFDiagCursor
+        assert shape_at(w - 4, h - 4) == Qt.CursorShape.SizeFDiagCursor
+        assert shape_at(w - 4, 4) == Qt.CursorShape.SizeBDiagCursor
+        assert shape_at(w // 2, h // 2) is None, "off the edge: no override, the child's own cursor"
+        assert shape_at(3, 400) == Qt.CursorShape.SizeHorCursor
+        win.showMaximized()
+        c.sleep(80)
+        assert QGuiApplication.overrideCursor() is None, "maximised: no edges"
+    finally:
+        while QGuiApplication.overrideCursor() is not None:
+            QGuiApplication.restoreOverrideCursor()
         c.close()

@@ -6,23 +6,46 @@ the title, the window buttons, dragging by the bar, double-click to maximise, an
 the window's edges through the platform (``startSystemMove`` / ``startSystemResize``, which work on
 X11 and Wayland alike).
 
-It is one surface with the sidebar: the same chrome, no line under it, the title starting where the
-conversation sheet's text does (it follows the sidebar's width and hiding; see ``set_text_x``), the window buttons as quiet as the sidebar's own icons.
+It is one surface with the sidebar: the same chrome, no line under it, no title (the session's name is
+in the sheet's own header), the window buttons as quiet as the sidebar's own icons. Its top corners
+are rounded while the window is not maximised: the window is translucent (``RoundedFrame``) and the
+bar and the ground paint the chrome inside that shape.
 """
 
 from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import QEvent, QObject, QPoint, QRect, Qt
-from PySide6.QtGui import QMouseEvent
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QWidget
+from PySide6.QtCore import QEvent, QObject, QPointF, Qt
+from PySide6.QtGui import QColor, QCursor, QGuiApplication, QMouseEvent, QPainter, QPainterPath
+from PySide6.QtWidgets import QHBoxLayout, QWidget
 
 from ... import theme
+from ..ui.signals import bind
 from .bits import IconButton
 
 HEIGHT = 38
-EDGE = 6  # px from the window edge where a press starts a resize
+EDGE = 6  # px from the window edge where a press starts a resize (8 at a corner, which is harder to hit)
+CORNER = 8
+RADIUS = 10  # the window's top corners
+
+
+def rounded_top(w: float, h: float, r: float) -> QPainterPath:
+    """A rectangle with its two top corners rounded by ``r``."""
+    p = QPainterPath()
+    p.moveTo(0, h)
+    p.lineTo(0, r)
+    p.quadTo(0, 0, r, 0)
+    p.lineTo(w - r, 0)
+    p.quadTo(w, 0, w, r)
+    p.lineTo(w, h)
+    p.closeSubpath()
+    return p
+
+
+def corner_radius(win: QWidget) -> int:
+    """The top corners' radius: none while maximised or full screen (the window meets the screen's edges)."""
+    return 0 if (win.isMaximized() or win.isFullScreen()) else RADIUS
 
 
 class TitleBar(QWidget):
@@ -30,15 +53,12 @@ class TitleBar(QWidget):
         super().__init__(parent)
         self._win = window
         self.setObjectName("titlebar")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFixedHeight(HEIGHT)
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(18, 0, 6, 0)
+        lay.setContentsMargins(18, 0, 8, 0)
         self._lay = lay
         lay.setSpacing(9)
-        self.title = QLabel(window.windowTitle() or "Pilcrow")
-        self.title.setObjectName("titlebar-title")
-        lay.addWidget(self.title, 1)
+        lay.addStretch(1)
         self.min_btn = IconButton("minus", "Minimise", 14, "text_3", box=26, width=32, over="chrome")
         self.max_btn = IconButton("square", "Maximise", 12, "text_3", box=26, width=32, over="chrome")
         self.close_btn = IconButton("x", "Close", 15, "text_3", box=26, width=32, over="chrome")
@@ -47,12 +67,15 @@ class TitleBar(QWidget):
         self.close_btn.clicked.connect(window.close)
         for b in (self.min_btn, self.max_btn, self.close_btn):
             lay.addWidget(b)
-        self.setAutoFillBackground(True)
-        theme.tint(self, bg="chrome")
-        for lb in self.findChildren(QLabel, "titlebar-title"):
-            lb.setFont(theme.font_ui(theme.FS_SMALL, 500))
-            theme.tint(lb, fg="text_2")
+        # painted here, in the window's rounded shape, not filled square by the palette
+        self.setAutoFillBackground(False)
+        bind(theme.theme.changed, self, lambda _t: self.update())
         window.installEventFilter(self)
+
+    def paintEvent(self, _e) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.fillPath(rounded_top(self.width(), self.height(), corner_radius(self._win)), QColor(theme.tokens().chrome))
 
     def toggle_max(self) -> None:
         if self._win.isMaximized():
@@ -62,7 +85,7 @@ class TitleBar(QWidget):
 
     # ---- dragging
     def mousePressEvent(self, e: QMouseEvent) -> None:
-        if e.button() == Qt.MouseButton.LeftButton and self.childAt(e.position().toPoint()) in (None, self.title):
+        if e.button() == Qt.MouseButton.LeftButton and self.childAt(e.position().toPoint()) is None:
             wh = self._win.windowHandle()
             if wh is not None and not self._win.isMaximized():
                 wh.startSystemMove()
@@ -73,59 +96,90 @@ class TitleBar(QWidget):
         if e.button() == Qt.MouseButton.LeftButton:
             self.toggle_max()
 
-    def set_text_x(self, x: int) -> None:
-        """Start the title at window x ``x``: the conversation sheet's text column, so the title
-        lines up with the session header whether the sidebar is open, resized or hidden."""
-        if self._lay.contentsMargins().left() != x:
-            self._lay.setContentsMargins(max(18, x), 0, 6, 0)
-
-    # ---- the window's title and state
+    # ---- the window's state
     def eventFilter(self, obj: QObject, e: QEvent) -> bool:
-        if obj is self._win:
-            if e.type() == QEvent.Type.WindowTitleChange:
-                self.title.setText(self._win.windowTitle())
-            elif e.type() == QEvent.Type.WindowStateChange:
-                self.max_btn.set_icon_name("copy" if self._win.isMaximized() else "square")
-                self.max_btn.setToolTip("Restore" if self._win.isMaximized() else "Maximise")
+        if obj is self._win and e.type() == QEvent.Type.WindowStateChange:
+            self.max_btn.set_icon_name("copy" if self._win.isMaximized() else "square")
+            self.max_btn.setToolTip("Restore" if self._win.isMaximized() else "Maximise")
+            self.update()  # the corners square off when maximised and round again after
         return False
 
 
 class EdgeResizer(QObject):
-    """Resizing a frameless window from its edges and corners, through the platform."""
+    """Resizing a frameless window from its edges and corners, through the platform.
+
+    It watches the native window (``QWindow``), not the widget: every pointer move reaches the native
+    window before Qt hands it to the widget under the pointer, whereas a widget sees a move only when
+    no child under the pointer takes it (a list, the conversation, the sidebar's rows all do). So the
+    edge is known wherever the pointer is. Near an edge the cursor is an override, which no child's
+    own cursor can replace; a press there starts the platform's resize and goes no further."""
 
     def __init__(self, window: QWidget) -> None:
         super().__init__(window)
         self._win = window
-        window.setMouseTracking(True)
+        self._shape: Optional[Qt.CursorShape] = None  # the override in force, if any
+        self._handle = None
         window.installEventFilter(self)
+        self._attach()
 
-    def _edges(self, pos: QPoint) -> Qt.Edges:
-        r: QRect = self._win.rect()
+    def _attach(self) -> None:
+        wh = self._win.windowHandle()
+        if wh is not None and wh is not self._handle:
+            wh.installEventFilter(self)
+            self._handle = wh
+
+    def _edges(self, pos: QPointF) -> Qt.Edges:
+        w, h = self._win.width(), self._win.height()
+        x, y = pos.x(), pos.y()
+        near_l, near_r = x < CORNER, x >= w - CORNER
+        near_t, near_b = y < CORNER, y >= h - CORNER
         edges = Qt.Edges()
-        if pos.x() <= EDGE:
+        # at a corner the zone is a little larger, along both edges
+        if x < EDGE or (near_l and (near_t or near_b)):
             edges |= Qt.Edge.LeftEdge
-        if pos.x() >= r.width() - EDGE:
+        if x >= w - EDGE or (near_r and (near_t or near_b)):
             edges |= Qt.Edge.RightEdge
-        if pos.y() <= EDGE:
+        if y < EDGE or (near_t and (near_l or near_r)):
             edges |= Qt.Edge.TopEdge
-        if pos.y() >= r.height() - EDGE:
+        if y >= h - EDGE or (near_b and (near_l or near_r)):
             edges |= Qt.Edge.BottomEdge
         return edges
 
+    def _set_cursor(self, edges: Qt.Edges) -> None:
+        shape = _cursor_for(edges) if edges else None
+        if shape == self._shape:
+            return
+        if shape is None:
+            QGuiApplication.restoreOverrideCursor()
+        elif self._shape is None:
+            QGuiApplication.setOverrideCursor(QCursor(shape))
+        else:
+            QGuiApplication.changeOverrideCursor(QCursor(shape))
+        self._shape = shape
+
     def eventFilter(self, obj: QObject, e: QEvent) -> bool:
-        if obj is not self._win or self._win.isMaximized():
+        t = e.type()
+        if obj is self._win:
+            if t in (QEvent.Type.Show, QEvent.Type.WinIdChange):
+                self._attach()
+            elif t == QEvent.Type.WindowStateChange and (self._win.isMaximized() or self._win.isFullScreen()):
+                self._set_cursor(Qt.Edges())
             return False
-        if e.type() == QEvent.Type.MouseMove:
-            edges = self._edges(e.position().toPoint())
-            self._win.setCursor(_cursor_for(edges))
-        elif e.type() == QEvent.Type.MouseButtonPress and e.button() == Qt.MouseButton.LeftButton:
-            edges = self._edges(e.position().toPoint())
-            wh = self._win.windowHandle()
-            if edges and wh is not None:
-                wh.startSystemResize(edges)
+        if obj is not self._handle:
+            return False
+        if self._win.isMaximized() or self._win.isFullScreen():
+            return False
+        if t == QEvent.Type.MouseMove:
+            if e.buttons() == Qt.MouseButton.NoButton or self._shape is not None:
+                self._set_cursor(self._edges(e.position()))
+        elif t == QEvent.Type.MouseButtonPress and e.button() == Qt.MouseButton.LeftButton:
+            edges = self._edges(e.position())
+            if edges and self._handle.startSystemResize(edges):
                 return True
-        elif e.type() == QEvent.Type.Leave:
-            self._win.unsetCursor()
+        elif t == QEvent.Type.MouseButtonRelease:
+            self._set_cursor(self._edges(e.position()))
+        elif t == QEvent.Type.Leave:
+            self._set_cursor(Qt.Edges())
         return False
 
 

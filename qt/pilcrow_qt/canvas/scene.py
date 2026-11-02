@@ -55,6 +55,9 @@ class Block:
     KIND = "block"
     #: block margins (transcript.css): the gap between two siblings is max(upper.MB, lower.MT)
     MT = 0
+    #: a placeholder at the head of its group (the loading skeleton) that takes no room once the content
+    #: is in: the block after it is the first one, with the group's first gap above it
+    LEAD = False
     MB = 0
     __slots__ = (
         "key",
@@ -288,6 +291,8 @@ class Group(Block):
 
     def gap_for(self, i: int) -> int:
         if i <= 0:
+            return 0 if self.children and self.children[0].LEAD else self.first_gap
+        if i == 1 and self.children[0].LEAD:
             return self.first_gap
         return max(self.children[i - 1].mb(), self.children[i].mt())
 
