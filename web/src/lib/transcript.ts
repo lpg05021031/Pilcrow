@@ -2,6 +2,7 @@
 // Items are mutable objects with a `rev` counter so React can re-render only what changed.
 import { parsePartialJson } from './partialJson';
 import { moment } from './format';
+import { toolMeta } from './tools';
 import type { RawMsg, ContentBlock, ToolInput, StructuredResult } from './types';
 
 type ToolStatus = 'streaming' | 'running' | 'done' | 'error' | 'denied' | 'interrupted' | 'background';
@@ -686,26 +687,59 @@ function originKind(m: RawMsg): string | undefined {
 
 /** One place a search matched: the item, and which match within it (the k-th, in reading order). */
 export interface FindHit {
-  item: UserItem | TextItem;
+  item: Item;
   k: number;
 }
 
+/**
+ * The text Find reads in an item: what the row shows. The person's words; Claude's words and a slash
+ * command's output through `plain` (the Markdown as it reads, not its source: no `**`, no link URLs);
+ * a step's head (its verb and target, a line each) and its output; a notice. A question or a plan is
+ * a form, not text, and a thought is folded away: neither is searched.
+ */
+export function findText(it: Item, plain: (md: string) => string = (s) => s, cwd?: string): string {
+  switch (it.kind) {
+    case 'user':
+      return it.text || '';
+    case 'text':
+    case 'command-output':
+      return it.text ? plain(it.text) : '';
+    case 'notice':
+      return it.text || '';
+    case 'tool': {
+      if (it.name === 'AskUserQuestion' || it.name === 'ExitPlanMode') return '';
+      const m = toolMeta(it.name, it.input, cwd);
+      // the head, then what the open card shows of the input (a command, a pattern), then the output
+      const inp = (it.input || {}) as Record<string, unknown>;
+      const shown = ['command', 'pattern', 'url', 'query'].map((k) => (typeof inp[k] === 'string' ? (inp[k] as string) : '')).filter((v) => v && v !== m.target);
+      return [m.verb, m.target, ...shown, it.result?.text || ''].filter(Boolean).join('\n');
+    }
+    default:
+      return '';
+  }
+}
+
 // Each item's text lowered once per change of it, so a search per keystroke reads, never re-lowers.
-const lowered = new WeakMap<Item, { rev: number; text: string }>();
+// Keyed by the projection too: a caller passes one stable `textOf` (FindBar), so its reads are cached.
+const lowered = new WeakMap<Item, { rev: number; status: string; fn: (it: Item) => string; text: string }>();
 
 /**
- * Where `needle` occurs in what the conversation says, the person's messages and Claude's words, in
- * order: what Find counts and steps through without drawing the conversation (FindBar). The steps'
- * own output is not searched; it stays folded away unless asked for. At most `max` hits.
+ * Where `needle` occurs in the conversation, in order: the person's messages, Claude's words, the
+ * steps (their heads and their output), notices and command output, as `textOf` reads them (findText
+ * by default). What Find counts and steps through without drawing the conversation (FindBar); the
+ * rows that are drawn correct these counts against what they show. At most `max` hits.
  */
-export function findInItems(items: Item[], needle: string, max = 3000): FindHit[] {
+const byDefault = (it: Item) => findText(it);
+export function findInItems(items: Item[], needle: string, max = 3000, textOf: (it: Item) => string = byDefault): FindHit[] {
   const out: FindHit[] = [];
   const q = needle.toLocaleLowerCase();
   if (!q) return out;
   for (const it of items) {
-    if ((it.kind !== 'user' && it.kind !== 'text') || !it.text) continue;
+    // a step's text changes with its status (the result arrives) as well as its rev
+    const status = it.kind === 'tool' ? it.status : '';
     let c = lowered.get(it);
-    if (!c || c.rev !== it.rev) lowered.set(it, (c = { rev: it.rev, text: it.text.toLocaleLowerCase() }));
+    if (!c || c.rev !== it.rev || c.status !== status || c.fn !== textOf) lowered.set(it, (c = { rev: it.rev, status, fn: textOf, text: textOf(it).toLocaleLowerCase() }));
+    if (!c.text) continue;
     for (let i = c.text.indexOf(q), k = 0; i >= 0; i = c.text.indexOf(q, i + q.length), k++) {
       if (out.length >= max) return out;
       out.push({ item: it, k });
