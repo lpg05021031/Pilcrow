@@ -74,7 +74,7 @@ def repos_view() -> SourceView:
         if not d.is_dir():
             continue
         if not (d / ".git").exists():
-            items.append({"name": d.name, "git": False, "note": "不是 git clone，repo-sync 會跳過"})
+            items.append({"name": d.name, "git": False, "note": "非 git clone；repo-sync 略過"})
             continue
         h = _head(d)
         _rc, dirty = _git(d, "status", "--porcelain", "--untracked-files=no")

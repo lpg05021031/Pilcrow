@@ -2,10 +2,10 @@
 {% import "_icons.html" as ic %}
 {% block title %}Setup{% endblock %}
 {% block heading %}設定精靈{% endblock %}
-{% block subheading %}<div class="sub">每一步就是 doctor 對應的檢查；全綠就能上工。順序由上而下，前面的沒好後面多半紅。設定值在 <a href="/console/settings">Settings</a> 改，secrets 在 <code>secrets.env</code>，改完 restart。</div>{% endblock %}
+{% block subheading %}<div class="sub">每一步對應 doctor 的一組檢查，依序完成即可投入服務。設定值於 <a href="/console/settings">設定</a> 頁修改；secrets 於 <code>secrets.env</code> 修改後重啟。</div>{% endblock %}
 {% block actions %}<a class="btn" href="/console/setup?refresh=1">{{ ic.icon('refresh') }}重新檢查</a>{% endblock %}
 {% block notices %}
-{% if not config_exists %}<div class="notice info">{{ ic.icon('setup') }}<div>尚無 <code>{{ config_path }}</code>：第一次在 Settings 按 Apply 會建立；或先跑 <code>python -m shared.install</code>。</div></div>{% endif %}
+{% if not config_exists %}<div class="notice info">{{ ic.icon('setup') }}<div><code>{{ config_path }}</code> 不存在：首次於設定頁套用時建立，或先執行 <code>python -m shared.install</code>。</div></div>{% endif %}
 {% endblock %}
 {% block body %}
 {% for s in steps %}
@@ -17,7 +17,7 @@
       {% if s.link %}<a class="btn sm" href="{{ s.link }}">{{ s.link_label }}</a>{% endif %}
     </div>
   </div>
-  <div class="bd"><p class="muted small">{{ s.why }}</p>{% if s.secrets %}<p class="hint">{{ ic.icon('lock') }} secrets：{{ s.secrets|join('、') }} 放 secrets.env。</p>{% endif %}</div>
+  <div class="bd"><p class="muted small">{{ s.why }}</p>{% if s.secrets %}<p class="hint">{{ ic.icon('lock') }} Secrets：{{ s.secrets|join('、') }}（secrets.env）</p>{% endif %}</div>
   <div class="bd flush">
   <table class="tbl">
     {% for c in s.checks %}

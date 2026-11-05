@@ -19,29 +19,29 @@ BLOCKING_GROUPS = {"settings", "services", "llm", "ado", "python"}
 
 # (group, name) → (人話標題, 動作標籤, 動作連結)。沒列的用 fallback。
 _HUMAN: dict[tuple[str, str], tuple[str, str, str]] = {
-    ("settings", "parse"): ("設定值有誤，服務用的是壞掉的設定", "去改設定", "/console/settings"),
-    ("settings", "smell"): ("設定有互相矛盾或已無作用的值", "去改設定", "/console/settings"),
-    ("python", "interpreter"): ("Python 版本太舊", "", ""),
-    ("python", "dependencies"): ("缺少 Python 套件", "", ""),
-    ("python", "semgrep"): ("semgrep 不在 PATH，靜態掃描會跳過", "靜態掃描設定", "/console/settings#g-static"),
-    ("python", "ruff"): ("ruff 不在 PATH，Python 靜態掃描會跳過", "靜態掃描設定", "/console/settings#g-static"),
-    ("paths", "REPOS_ROOT"): ("本地 clone 目錄有問題", "來源設定", "/console/settings#g-repos"),
-    ("paths", "RULES_ROOT"): ("團隊規則目錄有問題", "來源設定", "/console/settings#g-rules"),
-    ("paths", "KNOWLEDGE_ROOT"): ("知識帳本目錄有問題", "來源設定", "/console/settings#g-knowledge"),
-    ("paths", "DATA_DIR"): ("review 歷史目錄不可寫，歷史停用", "服務設定", "/console/settings#g-orchestrator"),
-    ("services", "orchestrator"): ("服務本體沒回應", "", ""),
-    ("services", "code graph ④"): ("code graph 連不上，影響半徑會缺席", "graph 設定", "/console/settings#g-graph"),
-    ("jobs", "repo-sync"): ("repo-sync 排程上次失敗", "看明細", "/console/sources#repos"),
-    ("jobs", "harvest"): ("知識收割排程上次失敗", "看明細", "/console/knowledge"),
-    ("langfuse", "health"): ("Langfuse 連不上，trace 與 prompt 版控全暗", "Langfuse 設定", "/console/settings#g-langfuse"),
-    ("langfuse", "keys"): ("Langfuse key 對不上這個 host", "Langfuse 設定", "/console/settings#g-langfuse"),
-    ("llm", "gateway"): ("LLM gateway 連不上", "LLM 設定", "/console/settings#g-llm"),
-    ("llm", "LLM_MODEL"): ("主模型不在 gateway 的清單裡", "LLM 設定", "/console/settings#g-llm"),
-    ("llm", "LLM_MODEL_ADVERSARY"): ("adversary 模型不在 gateway 的清單裡", "LLM 設定", "/console/settings#g-llm"),
-    ("llm", "LLM_MODEL_DIGEST"): ("digest 模型不在 gateway 的清單裡", "LLM 設定", "/console/settings#g-llm"),
-    ("ado", "ADO_PAT"): ("ADO_PAT 未設，抓不到也發不了 PR", "secrets.env 說明", "/console/settings#g-ado"),
-    ("ado", "reach"): ("打不到 Azure DevOps", "ADO 設定", "/console/settings#g-ado"),
-    ("systemd", "retired units"): ("舊的 systemd unit 還裝著，會跟行程內排程打架", "", ""),
+    ("settings", "parse"): ("設定解析失敗", "設定", "/console/settings"),
+    ("settings", "smell"): ("設定含矛盾或已廢棄的變數", "設定", "/console/settings"),
+    ("python", "interpreter"): ("Python 版本不符（需 ≥ 3.10）", "", ""),
+    ("python", "dependencies"): ("Python 依賴缺失", "", ""),
+    ("python", "semgrep"): ("semgrep 不在 PATH；靜態掃描停用", "靜態掃描設定", "/console/settings#g-static"),
+    ("python", "ruff"): ("ruff 不在 PATH；Python 靜態掃描停用", "靜態掃描設定", "/console/settings#g-static"),
+    ("paths", "REPOS_ROOT"): ("REPOS_ROOT 無效", "資料來源設定", "/console/settings#g-repos"),
+    ("paths", "RULES_ROOT"): ("RULES_ROOT 無效", "資料來源設定", "/console/settings#g-rules"),
+    ("paths", "KNOWLEDGE_ROOT"): ("KNOWLEDGE_ROOT 無效", "資料來源設定", "/console/settings#g-knowledge"),
+    ("paths", "DATA_DIR"): ("DATA_DIR 不可寫；review 記錄停用", "服務設定", "/console/settings#g-orchestrator"),
+    ("services", "orchestrator"): ("orchestrator 無回應", "", ""),
+    ("services", "code graph ④"): ("code graph 無法連線；impact radius 停用", "graph 設定", "/console/settings#g-graph"),
+    ("jobs", "repo-sync"): ("repo-sync 上次執行失敗", "檢視", "/console/sources#repos"),
+    ("jobs", "harvest"): ("harvest 上次執行失敗", "檢視", "/console/knowledge"),
+    ("langfuse", "health"): ("Langfuse 無法連線", "Langfuse 設定", "/console/settings#g-langfuse"),
+    ("langfuse", "keys"): ("Langfuse 憑證驗證失敗", "Langfuse 設定", "/console/settings#g-langfuse"),
+    ("llm", "gateway"): ("LLM gateway 無法連線", "LLM 設定", "/console/settings#g-llm"),
+    ("llm", "LLM_MODEL"): ("LLM_MODEL 不在 gateway 模型清單", "LLM 設定", "/console/settings#g-llm"),
+    ("llm", "LLM_MODEL_ADVERSARY"): ("LLM_MODEL_ADVERSARY 不在 gateway 模型清單", "LLM 設定", "/console/settings#g-llm"),
+    ("llm", "LLM_MODEL_DIGEST"): ("LLM_MODEL_DIGEST 不在 gateway 模型清單", "LLM 設定", "/console/settings#g-llm"),
+    ("ado", "ADO_PAT"): ("ADO_PAT 未設定", "ADO 設定", "/console/settings#g-ado"),
+    ("ado", "reach"): ("Azure DevOps API 無法存取", "ADO 設定", "/console/settings#g-ado"),
+    ("systemd", "retired units"): ("已廢棄的 systemd unit 仍啟用", "", ""),
 }
 
 _SEV_RANK = {"FAIL": 0, "WARN": 1}
@@ -53,18 +53,18 @@ def headline(checks: list[doctor.Check]) -> dict[str, Any]:
     hard = [c for c in fails if c.group in BLOCKING_GROUPS]
     if hard:
         why = _title(hard[0])
-        more = f"，另 {len(hard) - 1} 項" if len(hard) > 1 else ""
-        return {"state": "down", "title": "現在無法審查", "why": f"{why}{more}。",
+        more = f"；另 {len(hard) - 1} 項" if len(hard) > 1 else ""
+        return {"state": "down", "title": "服務不可用", "why": f"{why}{more}。review 無法執行。",
                 "fails": len(fails), "warns": len(warns)}
     if fails or warns:
         parts = []
         if fails:
-            parts.append(f"{len(fails)} 個故障")
+            parts.append(f"{len(fails)} 項故障")
         if warns:
-            parts.append(f"{len(warns)} 個警告")
-        return {"state": "degraded", "title": "可以審查，但有狀況", "why": "、".join(parts) + "，review 照跑、部分能力缺席。",
+            parts.append(f"{len(warns)} 項警告")
+        return {"state": "degraded", "title": "降級運作", "why": "、".join(parts) + "。review 可執行，部分能力停用。",
                 "fails": len(fails), "warns": len(warns)}
-    return {"state": "ok", "title": "可以審查", "why": "所有檢查通過。", "fails": 0, "warns": 0}
+    return {"state": "ok", "title": "服務就緒", "why": "所有檢查通過。", "fails": 0, "warns": 0}
 
 
 def _title(c: doctor.Check) -> str:
@@ -72,7 +72,7 @@ def _title(c: doctor.Check) -> str:
     if h:
         return h[0]
     if c.group == "systemd":
-        return f"systemd unit {c.name} 不是 active"
+        return f"systemd unit {c.name} 非 active"
     return f"{c.group}：{c.name}"
 
 
@@ -107,23 +107,23 @@ def feed(reviews: list[dict], audit: list[dict], jobs: dict[str, dict],
         elif r["status"] == "error":
             detail = (r.get("error") or "")[:120]
         else:
-            detail = "進行中"
+            detail = "執行中"
         ev.append({"ts": r["started"], "kind": "review", "tone": tone,
-                   "title": f"review {r['repo']}#{r['pr_id']}" + (f"：{r['title']}" if r.get("title") else ""),
+                   "title": f"Review {r['repo']}#{r['pr_id']}" + (f" · {r['title']}" if r.get("title") else ""),
                    "detail": detail, "href": f"/console/reviews/{r['id']}"})
     for a in audit:
         ev.append({"ts": a["ts"], "kind": "write", "tone": "ok" if a["posted"] else "neutral",
-                   "title": ("發出" if a["posted"] else "預覽（未發）") + ("review 留言" if a["kind"] == "review" else "知識稿"),
+                   "title": ("已發布 " if a["posted"] else "Dry-run · ") + ("review comment" if a["kind"] == "review" else "knowledge draft"),
                    "detail": f"PR {a['pr_url'].rsplit('/', 1)[-1]} · {a['note']}", "href": ""})
     for name, st in jobs.items():
         if st.get("last_end"):
             ev.append({"ts": st["last_end"], "kind": "job", "tone": "ok" if st.get("last_ok") else "fail",
-                       "title": f"{name} 跑完" if st.get("last_ok") else f"{name} 失敗",
+                       "title": f"{name} 執行完成" if st.get("last_ok") else f"{name} 執行失敗",
                        "detail": (st.get("last_error") or f"{len(st.get('last_detail') or [])} 項")[:120],
                        "href": "/console/sources#repos" if name == "repo-sync" else "/console/knowledge"})
     for c in changes:
         ev.append({"ts": c["ts"], "kind": "config", "tone": "neutral",
-                   "title": f"改了 {c['env']}", "detail": f"{c['old']} → {c['new']} · {c['actor']}",
+                   "title": f"設定變更 {c['env']}", "detail": f"{c['old']} → {c['new']} · {c['actor']}",
                    "href": "/console/settings#changes"})
     ev.sort(key=lambda e: e["ts"], reverse=True)
     return ev[:limit]

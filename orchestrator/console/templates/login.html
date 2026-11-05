@@ -4,12 +4,12 @@
 <section class="card narrow">
   <div class="hd"><div class="brand"><span class="mark">PR</span><div><b>pr-review</b><span>operations console</span></div></div></div>
   <div class="bd stack">
-    <p class="muted small">貼上 secrets.env 裡的 <code>ORCH_API_KEY</code>。</p>
-    {% if error %}<div class="notice fail">key 不對。</div>{% endif %}
+    <p class="muted small">輸入 secrets.env 中的 <code>ORCH_API_KEY</code>。</p>
+    {% if error %}<div class="notice fail">API key 驗證失敗。</div>{% endif %}
     <form method="post" action="/console/login" class="stack">
       <input type="hidden" name="next" value="{{ next }}">
       <div class="field"><label for="token">ORCH_API_KEY</label><input id="token" type="password" name="token" autofocus required></div>
-      <button class="primary">進入</button>
+      <button class="primary">登入</button>
     </form>
   </div>
 </section>

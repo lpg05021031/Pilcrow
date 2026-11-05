@@ -52,7 +52,7 @@
     var d = dirtyGroups();
     bar.hidden = d.length === 0;
     var t = document.getElementById('dirty-text');
-    if (t && d.length) t.textContent = d.length + ' 個區段有未套用的變更：' + d.map(function (g) { return g.getAttribute('data-group'); }).join('、');
+    if (t && d.length) t.textContent = d.length + ' 個區段有未套用變更：' + d.map(function (g) { return g.getAttribute('data-group'); }).join('、');
   }
 
   /* ---- 搜尋 / 只看已修改 ---- */

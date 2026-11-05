@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% import "_icons.html" as ic %}
-{% block title %}Sources{% endblock %}
-{% block heading %}餵給 reviewer 的東西新不新{% endblock %}
-{% block subheading %}<div class="sub">三個 git 資料域：repos（base 上下文）、rules（團隊規則）、knowledge（決策帳本）。這一頁只讀、只模擬；唯一會寫的是「新增 repo」。</div>{% endblock %}
+{% block title %}資料來源{% endblock %}
+{% block heading %}資料來源{% endblock %}
+{% block subheading %}<div class="sub">repos（base 上下文）、rules（團隊規則）、knowledge（決策帳本）三個 git 資料域的狀態與注入預覽。唯一的寫入操作為新增 repo。</div>{% endblock %}
 {% block notices %}{% if add_result %}<div class="notice info">{{ ic.icon('check') }}<div>{% for ln in add_result %}{{ ln }}<br>{% endfor %}</div></div>{% endif %}{% endblock %}
 {% block body %}
 
@@ -12,7 +12,7 @@
     <h2>repos <span class="doc mono">{{ v.repos.root or 'REPOS_ROOT 未設' }}</span></h2>
     <div class="row">
       {% if jobs['repo-sync'] %}
-      <span class="meta">repo-sync {% if not jobs['repo-sync'].enabled %}關閉{% elif jobs['repo-sync'].running %}正在跑{% elif jobs['repo-sync'].last_end %}上次 {{ ((now - jobs['repo-sync'].last_end)/60)|int }} 分前{% if jobs['repo-sync'].last_ok %}成功{% else %}<span class="err">失敗</span>{% endif %}{% else %}尚未跑過{% endif %}</span>
+      <span class="meta">repo-sync {% if not jobs['repo-sync'].enabled %}停用{% elif jobs['repo-sync'].running %}執行中{% elif jobs['repo-sync'].last_end %}上次 {{ ((now - jobs['repo-sync'].last_end)/60)|int }} min 前{% if jobs['repo-sync'].last_ok %}成功{% else %}<span class="err">失敗</span>{% endif %}{% else %}尚未執行{% endif %}</span>
       <form method="post" action="/console/jobs/repo-sync/run?back=/console/sources" class="inline"><button class="sm">{{ ic.icon('refresh') }}Sync now</button></form>
       {% endif %}
     </div>
@@ -20,23 +20,23 @@
   {% if v.repos.note %}<div class="bd"><p class="warn small">{{ v.repos.note }}</p></div>{% endif %}
   {% if v.repos.items %}
   <div class="bd flush"><table class="tbl">
-    <tr><th>repo</th><th>branch @ sha</th><th>最後 commit</th><th class="r">上次 fetch</th></tr>
+    <tr><th>repo</th><th>branch @ sha</th><th>最新 commit</th><th class="r">上次 fetch</th></tr>
     {% for r in v.repos.items %}
     <tr>
       <td class="k">{{ r.name }}</td>
       {% if r.git and not r.error %}
-      <td class="mono">{{ r.branch }}@{{ r.sha }}{% if r.dirty %} <span class="pill st-warn plain">工作樹有改動</span>{% endif %}</td>
+      <td class="mono">{{ r.branch }}@{{ r.sha }}{% if r.dirty %} <span class="pill st-warn plain">工作樹有未提交變更</span>{% endif %}</td>
       <td class="v">{{ r.date }} · {{ r.subject }}</td>
       <td class="r faint">{% if r.last_touch %}{{ ((now - r.last_touch)/3600)|round(1) }} 小時前{% else %}—{% endif %}</td>
       {% else %}<td colspan="3" class="v warn">{{ r.note or r.error }}</td>{% endif %}
     </tr>
     {% endfor %}
   </table></div>
-  {% elif v.repos.exists %}<div class="empty">目錄是空的。</div>{% endif %}
+  {% elif v.repos.exists %}<div class="empty">目錄為空。</div>{% endif %}
   {% if v.repos.exists %}
   <div class="bd">
     {% if jobs['repo-sync'] and jobs['repo-sync'].last_detail %}
-    <details><summary>上一輪 repo-sync 明細</summary><ul class="small">{% for ln in jobs['repo-sync'].last_detail %}<li>{{ ln }}</li>{% endfor %}</ul></details>
+    <details><summary>上次 repo-sync 明細</summary><ul class="small">{% for ln in jobs['repo-sync'].last_detail %}<li>{{ ln }}</li>{% endfor %}</ul></details>
     {% endif %}
     <details><summary>新增 repo（git clone 到 REPOS_ROOT）</summary>
       <form method="post" action="/console/sources/repos/add" class="form-row" style="margin-top:10px">
@@ -45,7 +45,7 @@
         <input type="text" name="branch" placeholder="target branch（預設 main）" style="flex:0 1 200px">
         <button class="primary sm">Clone</button>
       </form>
-      <p class="hint">用 ADO_PAT 認證；PAT 會進該 clone 的 .git/config（只有服務帳號讀得到）。大 repo 要幾分鐘，頁面會等它完成。</p>
+      <p class="hint">以 ADO_PAT 認證；PAT 會寫入該 clone 的 .git/config（僅服務帳號可讀）。大型 repo 需數分鐘，頁面會等待完成。</p>
     </details>
   </div>
   {% endif %}
@@ -70,16 +70,16 @@
       </table>
     </div>
     <div class="bd">
-      <h3>預覽注入</h3>
-      <p class="small muted" style="margin:4px 0 10px">某個 repo 的 review 會載到哪些規則——真的跑 load_rules。</p>
+      <h3>注入預覽</h3>
+      <p class="small muted" style="margin:4px 0 10px">模擬指定 repo 的 review 會載入哪些規則（實際呼叫 load_rules）。</p>
       <form method="get" action="/console/sources" class="form-row">
-        <input type="text" name="rules_repo" value="{{ rules_repo }}" placeholder="repo 名（空 = 只有 common）">
+        <input type="text" name="rules_repo" value="{{ rules_repo }}" placeholder="repo（留空 = 僅 common）">
         <button class="sm">預覽</button>
       </form>
       {% if rp %}
-      <p class="small" style="margin-top:12px">載入 {{ rp.files|length }} 檔、{{ rp.chars }} / {{ rp.cap }} chars{% if rp.truncated %} · <span class="warn">超過 RULES_MAX_CHARS，後面的檔被截掉</span>{% endif %} · 版本 <span class="mono">{{ rp.sha }}</span></p>
+      <p class="small" style="margin-top:12px">載入 {{ rp.files|length }} 檔、{{ rp.chars }} / {{ rp.cap }} chars{% if rp.truncated %} · <span class="warn">超過 RULES_MAX_CHARS，後續檔案已截斷</span>{% endif %} · 版本 <span class="mono">{{ rp.sha }}</span></p>
       <ul class="small mono" style="margin:6px 0 0; padding-left:18px">{% for s in rp.sections %}<li>{{ s.path }} <span class="faint">{{ s.chars }}</span></li>{% endfor %}</ul>
-      {% if not rp.loaded %}<p class="muted small">什麼都沒載到。</p>{% endif %}
+      {% if not rp.loaded %}<p class="muted small">未載入任何規則。</p>{% endif %}
       {% endif %}
     </div>
   </div>
@@ -107,16 +107,16 @@
       {% if v.knowledge.items|length > 60 %}<div class="empty">只列前 60 頁。</div>{% endif %}
     </div>
     <div class="bd">
-      <h3>預覽注入</h3>
-      <p class="small muted" style="margin:4px 0 10px">改了這些檔，reviewer 會收到哪些條目——真的跑 load_for。</p>
+      <h3>注入預覽</h3>
+      <p class="small muted" style="margin:4px 0 10px">模擬變更指定檔案時注入的知識條目（實際呼叫 load_for）。</p>
       <form method="get" action="/console/sources" class="form-row">
-        <input type="text" name="k_repo" value="{{ k_repo }}" placeholder="repo 名" style="flex:0 1 160px">
-        <input type="text" name="k_paths" value="{{ k_paths }}" placeholder="變更檔路徑，逗號分隔">
+        <input type="text" name="k_repo" value="{{ k_repo }}" placeholder="repo" style="flex:0 1 160px">
+        <input type="text" name="k_paths" value="{{ k_paths }}" placeholder="變更檔案路徑，逗號分隔">
         <button class="sm">預覽</button>
       </form>
       {% if kp %}
-      <p class="small" style="margin-top:12px">{{ kp.stats.knowledge_entries }} 條目 · {{ kp.chars }} / {{ kp.cap }} chars{% if kp.stats.knowledge_omitted %} · <span class="warn">{{ kp.stats.knowledge_omitted|length }} 條塞不下被省略</span>{% endif %}</p>
-      {% if kp.text %}<pre style="margin-top:8px">{{ kp.text }}</pre>{% else %}<p class="muted small">沒有命中任何條目。</p>{% endif %}
+      <p class="small" style="margin-top:12px">{{ kp.stats.knowledge_entries }} 條目 · {{ kp.chars }} / {{ kp.cap }} chars{% if kp.stats.knowledge_omitted %} · <span class="warn">{{ kp.stats.knowledge_omitted|length }} 條超出預算被省略</span>{% endif %}</p>
+      {% if kp.text %}<pre style="margin-top:8px">{{ kp.text }}</pre>{% else %}<p class="muted small">無命中條目。</p>{% endif %}
       {% endif %}
     </div>
   </div>

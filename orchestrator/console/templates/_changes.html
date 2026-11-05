@@ -1,7 +1,7 @@
 <div id="changes-body">
-{% if not changes %}<div class="empty">還沒有從控制台或 --migrate 改過任何值。</div>{% else %}
+{% if not changes %}<div class="empty">尚無變更紀錄。</div>{% else %}
 <table class="tbl">
-  <tr><th>時間</th><th>誰</th><th>鍵</th><th>舊 → 新</th></tr>
+  <tr><th>時間</th><th>來源</th><th>變數</th><th>舊值 → 新值</th></tr>
   {% for c in changes %}
   <tr>
     <td class="faint">{{ c.ts | int | datetime }}</td>

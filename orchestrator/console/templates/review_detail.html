@@ -10,15 +10,15 @@
 {% block body %}
 {% if r.status == 'running' %}
 <meta http-equiv="refresh" content="3">
-<section class="card"><div class="bd"><span class="pill st-skip">running</span> 跑了 {{ (now - r.started)|int }} 秒，還在跑……每 3 秒自動刷新。</div></section>
+<section class="card"><div class="bd"><span class="pill st-skip">running</span> 執行中（{{ (now - r.started)|int }} s）；每 3 秒自動更新。</div></section>
 {% elif r.status == 'error' %}
-<section class="card"><div class="bd"><span class="pill st-fail">error</span> <span class="err">{{ r.error }}</span></div></section>
+<section class="card"><div class="bd"><span class="pill st-fail">error</span> <span class="err">執行失敗：{{ r.error }}</span></div></section>
 {% else %}
 <div class="grid cols-2">
 <section class="card">
   <div class="hd"><h2>Findings</h2><span class="meta"><span class="sev error">{{ r.n_error }}</span> error · <span class="sev warning">{{ r.n_warning }}</span> warning · <span class="sev info">{{ r.n_info }}</span> info</span></div>
   <div class="bd flush">
-  {% if not r.findings %}<div class="empty">零 finding。</div>{% else %}
+  {% if not r.findings %}<div class="empty">無 finding。</div>{% else %}
   <table class="tbl">
     {% for f in r.findings %}
     <tr>
@@ -33,26 +33,26 @@
   </div>
 </section>
 <section class="card">
-  <div class="hd"><h2>這條 review 吃到了什麼</h2></div>
+  <div class="hd"><h2>輸入與上下文</h2></div>
   <div class="bd">
   {% set st = r.stats or {} %}
   <dl class="kv">
     <dt>diff</dt><dd>{{ st.files }} 檔 · {{ st.added_lines }} 新增行 · {{ st.hunks }} hunks{% if st.skipped %} · {{ st.skipped }} 檔被略過{% endif %}</dd>
     <dt>static</dt><dd>{{ st.static_findings }} 條{% if st.static_notes %} · {{ st.static_notes|join('；') }}{% endif %}</dd>
-    <dt>base 上下文</dt><dd>{% if st.base_available %}{{ st.base_files }} 檔{% else %}無（沒有本地 clone）{% endif %}</dd>
+    <dt>base 上下文</dt><dd>{% if st.base_available %}{{ st.base_files }} 檔{% else %}無（無本地 clone）{% endif %}</dd>
     <dt>rules</dt><dd>{% if st.rules_sha %}版本 <span class="mono">{{ st.rules_sha }}</span>{% if st.rules_files %} · {{ st.rules_files|length }} 檔{% endif %}{% if st.rules_truncated %} · <span class="warn">被截斷</span>{% endif %}{% else %}無{% endif %}</dd>
     <dt>knowledge</dt><dd>{% if st.knowledge_entries %}{{ st.knowledge_entries }} 條注入{% if st.knowledge_injected %}：<span class="mono">{{ st.knowledge_injected|join(', ') }}</span>{% endif %}{% if st.knowledge_grounded %} · {{ st.knowledge_grounded }} 條 finding 引用了{% endif %}{% else %}無{% endif %}</dd>
     <dt>graph</dt><dd>{% if st.graph_used %}有（{{ st.graph_impacted|length }} 個受波及）{% else %}{{ st.graph_note or '無' }}{% endif %}</dd>
-    {% if st.dimension_names %}<dt>dimensions</dt><dd>{{ st.dimension_names|join(' · ') }}{% if st.plan != 'ok' %} <span class="warn">（planner 降級為固定科目）</span>{% endif %}</dd>{% endif %}
+    {% if st.dimension_names %}<dt>dimensions</dt><dd>{{ st.dimension_names|join(' · ') }}{% if st.plan != 'ok' %} <span class="warn">（planner 降級為固定面向）</span>{% endif %}</dd>{% endif %}
     {% if st.adversary %}<dt>adversary</dt><dd>{{ st.adversary }}</dd>{% endif %}
-    {% if st.dropped_low_conf or st.dropped_over_cap %}<dt>synthesis</dt><dd>{{ st.dropped_low_conf or 0 }} 條低於信心門檻、{{ st.dropped_over_cap or 0 }} 條超過上限被濾掉</dd>{% endif %}
+    {% if st.dropped_low_conf or st.dropped_over_cap %}<dt>synthesis</dt><dd>過濾 {{ st.dropped_low_conf or 0 }} 條（低於信心門檻）、{{ st.dropped_over_cap or 0 }} 條（超過數量上限）</dd>{% endif %}
   </dl>
   </div>
   <div class="bd"><details><summary>完整 stats（JSON）</summary><pre style="margin-top:8px">{{ r.stats|tojson(indent=1) }}</pre></details></div>
 </section>
 </div>
 <section class="card">
-  <div class="hd"><h2>報告</h2><span class="meta">貼到 PR 的 markdown</span></div>
+  <div class="hd"><h2>Review 報告</h2><span class="meta">發布至 PR 的 markdown</span></div>
   <div class="bd"><pre class="tall">{{ r.markdown }}</pre></div>
 </section>
 {% endif %}

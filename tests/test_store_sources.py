@@ -163,13 +163,13 @@ def test_overview_shows_sources_and_recent_reviews(client):
     ST.finish_review(rid, ReviewResult(markdown="m", findings=[], stats={"pipeline": "v2"}))
     r = client.get("/console")
     assert "svc#5" in r.text and "1 顆 clone" in r.text and "2 條規則" in r.text
-    assert "最近活動" in r.text and "需要處理" in r.text
+    assert "活動紀錄" in r.text and "待處理項目" in r.text
 
 
 def test_reviews_pages_and_run_form(client, monkeypatch):
     import orchestrator.app as A
     r = client.get("/console/reviews")
-    assert r.status_code == 200 and "還沒有任何 review" in r.text
+    assert r.status_code == 200 and "尚無 review 記錄" in r.text
     r = client.post("/console/reviews/run", data={"pr_url": "not a url"}, follow_redirects=False)
     assert r.status_code == 303 and "error=" in r.headers["location"]
 
