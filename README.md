@@ -205,14 +205,19 @@ why 缺席、supersede 假訊號、幻覺不變式——最後一題是「invari
 ## 6. 維運速查
 
 **全套設定只有一份檔**：`/etc/pr-review-suite/suite.env`，十個 systemd unit 都指它；
-schema、預設值與每顆旋鈕的說明住 `shared/settings.py`（64 個變數、12 組），
-程式裡沒有第二個讀取點。三個指令取代翻文件：
+schema、預設值與每顆旋鈕的說明住 `shared/settings.py`（12 組），
+程式裡沒有第二個讀取點。四個指令取代翻文件：
 
 ```bash
+python -m shared.doctor               # 健康檢查一張表：設定、依賴、目錄、port、Langfuse、LLM、ADO、systemd
 python -m shared.settings --show      # 目前生效值與來源（env / default），secrets 遮罩
 python -m shared.settings --check     # 只驗證；壞值（REVIEW_MAX_FINDINGS=abc）回傳碼 1
 python -m shared.settings --example   # 由 schema 重生 deploy/env/suite.env.example
 ```
+
+`doctor` 是 RUNBOOK 全部手動判讀的程式版：每一列 OK / WARN / FAIL / SKIP，
+退出碼 0 可上工、1 有 FAIL、2 設定本身解析不過。`--pr-url <一條真 PR>` 會順手拿
+ADO_PAT 真打一次 API；`--no-network` 給 CI；`--json` 給日後的狀態頁。
 
 壞值不再靜默退回預設：服務啟動時 `fail_fast()` 直接報哪一顆錯、收到什麼。
 下表只列最常翻的幾顆；完整清單看 `--show`。

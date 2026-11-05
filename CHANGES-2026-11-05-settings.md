@@ -68,12 +68,23 @@ eval 的 run_eval / run_distill_eval / preflight。
   knobs 無 secrets、**67 個舊變數名一個都不能漏**、example 往返、
   warnings、fail_fast。
 
-## 五、沒做的事（留給下一步）
+## 五、`shared/doctor.py`（第二條 PR）
+
+RUNBOOK 全部手動判讀的程式版：`python -m shared.doctor [--pr-url URL] [--no-network] [--json]`。
+八組檢查各回 OK / WARN / FAIL / SKIP：settings（解析 + warnings_for）、python
+（3.10+、八個依賴版本、semgrep/ruff 在不在 PATH）、paths（REPOS_ROOT 的 clone 與
+HEAD、RULES_ROOT 的 md/semgrep 規則數與目錄名對不對、KNOWLEDGE_ROOT 的頁數與
+pending 數）、services（orchestrator /healthz、①②③ port、graph）、langfuse
+（/api/public/health + 用 key 打 /api/public/projects）、llm（/models 並對帳
+LLM_MODEL / _ADVERSARY / _DIGEST 在不在清單）、ado（PAT 有沒有設；給 --pr-url
+才真打）、systemd（LoadState / ActiveState；常駐組怕 dead、定時組怕 failed）。
+退出碼 0 / 1（有 FAIL）/ 2（設定解析不過）。四個探針（tcp / http / which / run）
+集中一處，`tests/test_doctor.py` 11 條全離線。
+
+## 六、沒做的事（留給下一步）
 
 - `pr-review-suite-full.sh` / `pr-review-suite-knowledge-loop.sh` 兩支單檔部署包
   仍是舊內容，需要重生。
-- `doctor` 指令（port 佔用、PAT 打通 ADO、Langfuse 連線、semgrep/ruff 在不在
-  PATH）：`settings.warnings_for()` 是它的第一塊，網路檢查還沒寫。
 - 五處 `read_text()` / `write_text()` 沒帶 `encoding="utf-8"`，在 Windows 預設
   cp950 下會炸（本機跑測試要 `PYTHONUTF8=1`）；Linux 不受影響。
 - ①②③ 併回 orchestrator 行程內（settings 做完後這一步變簡單）。
