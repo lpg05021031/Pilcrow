@@ -20,7 +20,11 @@ def offline(monkeypatch):
 
     def http(url, **kw):
         if url.endswith("/healthz"):
-            return 200, {"ok": True}, ""
+            return 200, {"ok": True, "pipeline": "v2", "jobs": {
+                "repo-sync": {"enabled": True, "interval_min": 10, "running": False,
+                              "last_ok": True, "last_end": 1e12, "last_detail": ["a -> 1", "b -> 2"]},
+                "harvest": {"enabled": False},
+            }}, ""
         if url.endswith("/api/public/health"):
             return 200, {"status": "OK"}, ""
         if url.endswith("/api/public/projects"):
@@ -55,13 +59,34 @@ def test_bad_settings_exit_2_and_nothing_else_runs(offline, monkeypatch):
     assert checks[0].status == D.FAIL and "REVIEW_MIN_CONFIDENCE" in checks[0].detail
 
 
-def test_required_service_down_fails_optional_warns(offline, monkeypatch):
-    monkeypatch.setattr(D, "_tcp_open", lambda host, port, timeout=0: port not in (8094, 8095))
+def test_orchestrator_down_fails_and_jobs_come_from_healthz(offline, monkeypatch):
+    checks, code = D.run()
+    assert _by(checks, "jobs", "repo-sync").status == D.OK
+    assert "2 項" in _by(checks, "jobs", "repo-sync").detail
+    assert _by(checks, "jobs", "harvest").status == D.SKIP
+    assert not [c for c in checks if c.group == "services" and "①" in c.name]
+
+    def http(url, **kw):
+        if url.endswith("/healthz"):
+            return None, None, "ConnectError"
+        return offline(url, **kw)
+    monkeypatch.setattr(D, "_http_get", http)
     checks, code = D.run()
     assert code == 1
-    assert _by(checks, "services", "ado_pr_tools ①").status == D.FAIL
-    assert _by(checks, "services", "repo_reader ②").status == D.WARN
-    assert _by(checks, "services", "review_result ③").status == D.OK
+    assert _by(checks, "services", "orchestrator").status == D.FAIL
+    assert not [c for c in checks if c.group == "jobs"]
+
+
+def test_failed_job_is_a_fail(offline, monkeypatch):
+    def http(url, **kw):
+        if url.endswith("/healthz"):
+            return 200, {"ok": True, "jobs": {"harvest": {
+                "enabled": True, "interval_min": 30, "running": False,
+                "last_ok": False, "last_error": "RuntimeError: git lock"}}}, ""
+        return offline(url, **kw)
+    monkeypatch.setattr(D, "_http_get", http)
+    checks, code = D.run()
+    assert code == 1 and "git lock" in _by(checks, "jobs", "harvest").detail
 
 
 def test_model_not_served_by_gateway_fails(offline, monkeypatch):

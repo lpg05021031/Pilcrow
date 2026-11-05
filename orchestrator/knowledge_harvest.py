@@ -1001,37 +1001,40 @@ def _git(root: Path, *args) -> None:
                   "—— 檔案已寫入但無版本紀錄；多半是 user.name/email 未設")
 
 
-def main() -> None:
-    root = fail_fast().knowledge.root
+def main() -> list[str]:
+    """跑一輪；回傳每個項目一行（jobs 存成 last_detail，CLI 直接印）。"""
+    out: list[str] = []
+    root = settings().knowledge.root
     if root is None:
-        print("KNOWLEDGE_ROOT 未設定，收割器不跑")
-        return
+        out.append("KNOWLEDGE_ROOT 未設定，收割器不跑")
+        return out
     if not root.is_dir():
-        print(f"KNOWLEDGE_ROOT 不存在：{root}")
-        return
+        out.append(f"KNOWLEDGE_ROOT 不存在：{root}")
+        return out
     _git(root, "add", "-A")
     _git(root, "commit", "-m", "knowledge: stage pendings")
 
     pendings = sorted((root / "_pending").rglob("pr-*.json")) \
         if (root / "_pending").is_dir() else []
-    print(f"[harvest] pending {len(pendings)} 條")
+    out.append(f"pending {len(pendings)} 條")
     with client() as c:
         for pend in pendings:
             try:
-                print(f"  PR {pend.stem[3:]}（{pend.parent.name}）："
-                      f"{_process_pending(c, root, pend)}")
+                out.append(f"PR {pend.stem[3:]}（{pend.parent.name}）："
+                           f"{_process_pending(c, root, pend)}")
             except Exception as e:
-                print(f"  {pend.name} 失敗：{e}（保留待下輪）")
-        for ln in _watermark_scan(c, root):
-            print(f"  {ln}")
-        for ln in _cycle_close(c, root):
-            print(f"  {ln}")
+                out.append(f"{pend.name} 失敗：{e}（保留待下輪）")
+        out += _watermark_scan(c, root)
+        out += _cycle_close(c, root)
 
     _git(root, "add", "-A")
     _git(root, "commit", "-m",
          f"knowledge: harvest {time.strftime('%F %T')}")
-    print("[harvest] 完成")
+    out.append("完成")
+    return out
 
 
 if __name__ == "__main__":
-    main()
+    fail_fast()
+    for _ln in main():
+        print(f"[harvest] {_ln}")

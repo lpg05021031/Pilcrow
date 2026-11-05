@@ -26,7 +26,7 @@ from pydantic import BaseModel
 from orchestrator import clients
 from orchestrator.core import run_review
 from orchestrator.models import ReviewResult
-from orchestrator import knowledge, progress
+from orchestrator import jobs, knowledge, progress
 from shared.azdo import find_pr_url
 from shared.settings import fail_fast, settings
 
@@ -34,7 +34,12 @@ from shared.settings import fail_fast, settings
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     fail_fast()          # 設定壞值在啟動就報，不等第一條 review
-    yield
+    for st in jobs.start():
+        print(f"[jobs] {st.name}: " + (f"每 {st.interval_min} 分" if st.enabled else "off"))
+    try:
+        yield
+    finally:
+        jobs.stop()
 
 
 app = FastAPI(title="review-orchestrator", lifespan=_lifespan)
@@ -403,4 +408,5 @@ async def eval_webhook(request: Request):
 
 @app.get("/healthz")
 async def healthz():
-    return {"ok": True}
+    return {"ok": True, "pipeline": settings().orchestrator.pipeline,
+            "jobs": jobs.snapshot()}

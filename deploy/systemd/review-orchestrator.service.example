@@ -1,11 +1,19 @@
 # 複製為 /etc/systemd/system/review-orchestrator.service
+#
+# S1 之後這是唯一的 unit：Azure DevOps 讀寫（原 ①③）、repo-sync 與 knowledge-harvest
+# （原兩組 timer）全部住在這個行程裡。排程間隔在 suite.env 的 REPO_SYNC_INTERVAL_MIN /
+# HARVEST_INTERVAL_MIN；狀態看 GET /healthz 或 python -m shared.doctor。
+# 舊 unit（pr-review-ado / -reader / -results / -repo-sync.* / -knowledge-harvest.*）
+# 請 disable --now 並刪檔，否則會跟行程內排程重複 commit。
 [Unit]
-Description=pr-review orchestrator (FastAPI, 8080)
+Description=pr-review orchestrator (FastAPI :8080; ADO adapter + in-process jobs)
 After=network.target
 
 [Service]
 EnvironmentFile=/etc/pr-review-suite/suite.env
 WorkingDirectory=/opt/pr-review-suite
+# PATH 要含 venv/bin：static pass 找 semgrep/ruff、repo-sync 找 code-review-graph 都靠它
+Environment=PATH=/opt/pr-review-suite/venv/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/opt/pr-review-suite/venv/bin/uvicorn orchestrator.app:app --host 0.0.0.0 --port 8080
 Restart=always
 User=svc-review

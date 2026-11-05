@@ -1,30 +1,65 @@
-"""Orchestrator → 三個 tool set 的呼叫層。
+"""Orchestrator 對外部系統的呼叫層。
 
-每個 wrapper 都疊 @observe：瀑布圖裡「抓 diff 花多久、讀 repo 花多久、
-發評論成不成功」各自成層 —— 這是唯一接 Langfuse 的服務。
+S1 起 Azure DevOps 的讀寫是行程內的函式（orchestrator/adapters/ado.py），
+這裡只負責兩件事：(1) 用 asyncio.to_thread 把同步的 httpx 呼叫移出 event loop
+（抓百檔 diff 是秒到分鐘級，不能卡住 SSE 旁白）；(2) 疊 @observe，瀑布圖裡
+「抓 diff 花多久、發評論成不成功」各自成層。
 
-位址來自 settings().tools（ADO_TOOLS_URL 等；未設就由各服務的 PORT 推得）。
+函式名與簽名跟 ①②③ 時代一模一樣：pipeline / knowledge / app 一行沒改，
+tests 的 monkeypatch 也照舊。
+
+④ code graph 仍是外部行程（code-review-graph serve --http），走 fastmcp Client。
 """
 from __future__ import annotations
 
+import asyncio
 import json
 
-from fastmcp import Client
 from langfuse import observe
 
+from orchestrator.adapters import ado
 from shared.settings import settings
 
 
-async def _call(server_url: str, tool: str, args: dict):
+# ---------- Azure DevOps（行程內） ----------
+
+@observe()
+async def fetch_pr_metadata(pr_url: str) -> dict:
+    return await asyncio.to_thread(ado.get_pr_metadata, pr_url)
+
+
+@observe()
+async def fetch_pr_diff(pr_url: str) -> str:
+    return await asyncio.to_thread(ado.get_pr_diff, pr_url)
+
+
+@observe()
+async def post_review_comment(pr_url: str, markdown: str) -> dict:
+    return await asyncio.to_thread(ado.post_review_comment, pr_url, markdown)
+
+
+@observe()
+async def post_knowledge_draft(pr_url: str, markdown: str,
+                               thread_id: int | None = None) -> dict:
+    """thread_id 給定 = 回覆進既有 thread（重蒸的更新稿），不開新 thread。"""
+    return await asyncio.to_thread(ado.post_knowledge_draft, pr_url, markdown, thread_id)
+
+
+# ---------- ④ code graph（選配；外部 MCP server） ----------
+# 裝好後先 list tools 確認名稱與參數，再設 GRAPH_TOOL_BLAST /
+# GRAPH_TOOL_BLAST_ARGS（JSON 樣板，$files / $repo 會被代入）。
+# GRAPH_TOOLS_URL 未設 = 整個 graph 功能停用，呼叫端全部優雅降級。
+
+
+async def _mcp_call(server_url: str, tool: str, args: dict):
     """呼叫遠端 MCP tool 並把結果攤平成 Python 物件。"""
+    from fastmcp import Client
     async with Client(server_url) as c:
         res = await c.call_tool(tool, args)
-    # fastmcp 2.x：優先用結構化 data；否則取第一個 text content
-    data = getattr(res, "data", None)
+    data = getattr(res, "data", None)          # fastmcp 2.x：優先用結構化 data
     if data is not None:
         return data
-    content = getattr(res, "content", None) or []
-    for block in content:
+    for block in getattr(res, "content", None) or []:
         text = getattr(block, "text", None)
         if text is not None:
             try:
@@ -34,76 +69,12 @@ async def _call(server_url: str, tool: str, args: dict):
     return None
 
 
-# ---------- ① ado-pr-tools ----------
-
-@observe()
-async def fetch_pr_metadata(pr_url: str) -> dict:
-    return await _call(settings().tools.ado_url,
-                       "get_pr_metadata", {"pr_url": pr_url})
-
-
-@observe()
-async def fetch_pr_diff(pr_url: str) -> str:
-    out = await _call(settings().tools.ado_url,
-                      "get_pr_diff", {"pr_url": pr_url})
-    return out if isinstance(out, str) else json.dumps(out, ensure_ascii=False)
-
-
-# ---------- ② repo-reader-tools（多 repo：repo=None 走單 repo 舊行為） ----------
-
-@observe()
-async def read_repo_file(path: str, start_line: int = 1,
-                         end_line: int | None = None,
-                         repo: str | None = None) -> str:
-    return await _call(settings().tools.reader_url,
-                       "read_file",
-                       {"path": path, "start_line": start_line,
-                        "end_line": end_line, "repo": repo})
-
-
-@observe()
-async def search_repo(pattern: str, glob: str = "**/*", repo: str | None = None):
-    return await _call(settings().tools.reader_url,
-                       "search_code", {"pattern": pattern, "glob": glob,
-                                       "repo": repo})
-
-
-# ---------- ③ review-result-tools ----------
-
-@observe()
-async def post_review_comment(pr_url: str, markdown: str) -> dict:
-    return await _call(settings().tools.result_url,
-                       "post_review_comment", {"pr_url": pr_url, "markdown": markdown})
-
-@observe()
-async def post_knowledge_draft(pr_url: str, markdown: str,
-                               thread_id: int | None = None) -> dict:
-    """thread_id 給定 = 回覆進既有 thread（重蒸的更新稿），不開新 thread。
-
-    thread_id 為 None 時**不送這個欄位**：跨服務的版本偏移是常態（orchestrator
-    先更新、③ 晚一步 restart），少送一個參數就讓舊版 ③ 照常收稿。這不是潔癖——
-    ③ 若因未知參數報錯，harvester 會把它當成「真的貼稿失敗」而代貼，那條路徑
-    不看 KNOWLEDGE_POST，影子期會因此誤發。
-    """
-    args = {"pr_url": pr_url, "markdown": markdown}
-    if thread_id is not None:
-        args["thread_id"] = thread_id
-    return await _call(settings().tools.result_url,
-                       "post_knowledge_draft", args)
-
-
-# ---------- ④ code graph（選配；code-review-graph 的 MCP server） ----------
-# 裝好後先 list tools 確認名稱與參數，再設 GRAPH_TOOL_BLAST /
-# GRAPH_TOOL_BLAST_ARGS（JSON 樣板，$files / $repo 會被代入）。
-# GRAPH_TOOLS_URL 未設 = 整個 graph 功能停用，呼叫端全部優雅降級。
-
-
 @observe()
 async def graph_call(tool: str, args: dict):
     url = settings().graph.tools_url
     if not url:
         return None
-    return await _call(url, tool, args)
+    return await _mcp_call(url, tool, args)
 
 
 async def graph_blast(files: list[str], repo: str | None = None):

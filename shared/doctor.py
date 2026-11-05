@@ -211,23 +211,13 @@ def check_services(s: S.Settings, network: bool) -> list[Check]:
 
     code, body, err = _http_get(f"{s.orchestrator.base_url}/healthz")
     if code == 200 and isinstance(body, dict) and body.get("ok"):
-        out.append(Check("services", "orchestrator", OK, f"{s.orchestrator.base_url}/healthz"))
+        out.append(Check("services", "orchestrator", OK,
+                         f"{s.orchestrator.base_url} (pipeline {body.get('pipeline', '?')})"))
+        out += _job_checks(body.get("jobs") or {}, s)
     else:
         out.append(Check("services", "orchestrator", FAIL,
-                         f"{s.orchestrator.base_url}/healthz → {code or err}"))
-
-    for name, url, required in (("ado_pr_tools ①", s.tools.ado_url, True),
-                                ("repo_reader ②", s.tools.reader_url, False),
-                                ("review_result ③", s.tools.result_url, True)):
-        hp = _host_port(url)
-        if hp is None:
-            out.append(Check("services", name, FAIL, f"URL 解析不出 host/port：{url}"))
-            continue
-        if _tcp_open(*hp):
-            out.append(Check("services", name, OK, f"{hp[0]}:{hp[1]} listening"))
-        else:
-            out.append(Check("services", name, FAIL if required else WARN,
-                             f"{hp[0]}:{hp[1]} 沒人聽" + ("" if required else "（v2 零呼叫者，可除役）")))
+                         f"{s.orchestrator.base_url}/healthz → {code or err}；"
+                         "①③ 與排程都住在這個行程裡，它不在 = 全部不在"))
 
     if not s.graph.enabled:
         out.append(Check("services", "code graph ④", SKIP,
@@ -237,6 +227,33 @@ def check_services(s: S.Settings, network: bool) -> list[Check]:
         ok = hp is not None and _tcp_open(*hp)
         out.append(Check("services", "code graph ④", OK if ok else FAIL,
                          f"{s.graph.tools_url}" + ("" if ok else " 沒人聽；pipeline 會優雅降級但沒有影響半徑")))
+    return out
+
+
+def _job_checks(jobs: dict, s: S.Settings) -> list[Check]:
+    """/healthz 回來的 jobs 狀態 → 每個 job 一列（原本是兩組 timer 的 is-active + journal）。"""
+    import time
+    out: list[Check] = []
+    if not jobs:
+        return [Check("jobs", "all", WARN, "/healthz 沒帶 jobs 欄位（舊版 orchestrator？）")]
+    for name, st in jobs.items():
+        if not st.get("enabled"):
+            why = {"repo-sync": "REPOS_ROOT 未設或 REPO_SYNC_INTERVAL_MIN=0",
+                   "harvest": "KNOWLEDGE_ROOT 未設或 HARVEST_INTERVAL_MIN=0"}.get(name, "off")
+            out.append(Check("jobs", name, SKIP, why))
+            continue
+        every = f"每 {st.get('interval_min')} 分"
+        if st.get("running"):
+            out.append(Check("jobs", name, OK, f"{every}；正在跑"))
+        elif st.get("last_ok") is None:
+            nxt = st.get("next_run")
+            wait = f"，{int(nxt - time.time())}s 後首跑" if nxt else ""
+            out.append(Check("jobs", name, OK, f"{every}；尚未跑過{wait}"))
+        elif st.get("last_ok"):
+            ago = int(time.time() - (st.get("last_end") or time.time()))
+            out.append(Check("jobs", name, OK, f"{every}；上次 {ago}s 前成功，{len(st.get('last_detail') or [])} 項"))
+        else:
+            out.append(Check("jobs", name, FAIL, f"{every}；上次失敗：{st.get('last_error', '')[:160]}"))
     return out
 
 
@@ -324,8 +341,10 @@ def check_ado(s: S.Settings, network: bool, pr_url: str | None) -> list[Check]:
     return out
 
 
-_UNITS = ("review-orchestrator", "pr-review-ado", "pr-review-reader", "pr-review-results")
-_TIMERS = ("pr-review-repo-sync.timer", "pr-review-knowledge-harvest.timer")
+_UNITS = ("review-orchestrator",)
+# S1 之前的七個 unit：還裝著就提醒拆（它們現在要嘛搶 port、要嘛跟行程內排程重複 commit）
+_RETIRED_UNITS = ("pr-review-ado", "pr-review-reader", "pr-review-results",
+                  "pr-review-repo-sync.timer", "pr-review-knowledge-harvest.timer")
 
 
 def check_systemd(s: S.Settings) -> list[Check]:
@@ -346,15 +365,11 @@ def check_systemd(s: S.Settings) -> list[Check]:
             out.append(Check("systemd", u, OK, "active"))
         else:
             out.append(Check("systemd", u, FAIL, f"{active or 'unknown'}；journalctl -u {u} -n 30"))
-    for t in _TIMERS:                     # 定時組怕 failed；oneshot 平時 inactive 是待命
-        load, active = _state(t)
-        if load == "not-found":
-            out.append(Check("systemd", t, SKIP, "timer 未安裝"))
-        elif active == "active":
-            _rc, nxt = _run(["systemctl", "show", t, "-p", "NextElapseUSecRealtime", "--value"])
-            out.append(Check("systemd", t, OK, f"active; next {nxt.strip() or '?'}"))
-        else:
-            out.append(Check("systemd", t, WARN, f"{active or 'unknown'}；systemctl list-timers {t}"))
+    leftovers = [u for u in _RETIRED_UNITS if _state(u)[0] != "not-found"]
+    if leftovers:
+        out.append(Check("systemd", "retired units", WARN,
+                         "S1 之後這些 unit 已無對應程式，請 disable --now 並刪檔："
+                         + ", ".join(leftovers)))
     return out
 
 
