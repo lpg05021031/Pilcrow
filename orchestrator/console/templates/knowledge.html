@@ -1,101 +1,108 @@
 {% extends "base.html" %}
+{% import "_icons.html" as ic %}
 {% block title %}Knowledge{% endblock %}
+{% block heading %}帳本在等誰{% endblock %}
+{% block subheading %}<div class="sub">蒸餾稿等 PR 終態，暫存稿等 release→master 驗收 PR 收口；沉默即落地，reject / keep 在這裡下跟在 PR 留言下同義。</div>{% endblock %}
+{% block actions %}
+{% if job %}<span class="faint small">harvest {% if not job.enabled %}關閉{% elif job.running %}正在跑{% elif job.last_end %}上次 {{ ((now - job.last_end)/60)|int }} 分前{% if job.last_ok %}成功{% else %}<span class="err">失敗</span>{% endif %}{% else %}尚未跑過{% endif %}</span>{% endif %}
+<form method="post" action="/console/jobs/harvest/run?back=/console/knowledge" class="inline"><button>{{ ic.icon('play') }}立刻 harvest</button></form>
+{% endblock %}
+{% block notices %}
+{% if not root %}<div class="notice warn">{{ ic.icon('warn') }}<div>KNOWLEDGE_ROOT 未設或不存在：K 段停用。到 <a href="/console/settings#g-knowledge">Settings → knowledge</a> 設。</div></div>{% endif %}
+{% if msg %}<div class="notice ok">{{ ic.icon('check') }}<div>{{ msg }}</div></div>{% endif %}
+{% endblock %}
 {% block body %}
-<div class="row between">
-  <h1>帳本在等誰</h1>
-  <div class="row">
-    {% if job %}<span class="muted small">harvest {% if not job.enabled %}off{% elif job.running %}正在跑{% elif job.last_end %}上次 {{ ((now - job.last_end)/60)|int }} 分前{% if job.last_ok %}成功{% else %}<span class="err">失敗</span>{% endif %}{% else %}尚未跑過{% endif %}</span>{% endif %}
-    <form method="post" action="/console/jobs/harvest/run?back=/console/knowledge" class="inline"><button class="ghost small">立刻 harvest</button></form>
-  </div>
-</div>
-{% if not root %}<section class="card"><p class="warn">KNOWLEDGE_ROOT 未設或不存在：K 段停用。到 <a href="/console/settings#g-knowledge">Settings → knowledge</a> 設。</p></section>{% endif %}
-{% if msg %}<div class="banner notice">{{ msg }}</div>{% endif %}
-
-<div class="grid2">
-<div>
+{% macro verdict(repo, kind, token, label, cls='xs') -%}
+<form method="post" action="/console/knowledge/verdict" class="inline"><input type="hidden" name="repo" value="{{ repo }}"><input type="hidden" name="kind" value="{{ kind }}"><input type="hidden" name="token" value="{{ token }}"><button class="{{ cls }} {{ 'danger' if kind == 'reject' else '' }}">{{ label }}</button></form>
+{%- endmacro %}
+<div class="grid cols-2">
+<div class="stack">
 <section class="card">
-  <h2>待裁決 _pending <span class="muted small">{{ pending|length }} 條 · 等 PR 終態（active 陪等 / abandoned 丟 / completed 進暫存）</span></h2>
-  {% if not pending %}<p class="muted small">沒有。</p>{% endif %}
+  <div class="hd"><h2>待裁決</h2><span class="meta">_pending · {{ pending|length }} 條 · active 陪等 / abandoned 丟 / completed 進暫存</span></div>
+  <div class="bd flush">
+  {% if not pending %}<div class="empty">沒有。</div>{% endif %}
   {% for p in pending %}
-  <div class="job">
-    <div class="row between">
-      <b class="mono">{{ p.repo }}#{{ p.pr_id }}</b>
-      <span class="small">
-        {% if p.posted %}<span class="ok">草稿已貼</span>{% elif p.dry_run %}<span class="muted">影子模式（未貼）</span>{% elif p.post_failed %}<span class="err">貼稿失敗</span>{% endif %}
-        {% if p.redistilled %}· 已重蒸{% elif p.redistill_attempts %}· 重蒸請求 {{ p.redistill_attempts }}/2{% endif %}
-        · {{ p.created[:16] }} · <a href="{{ p.pr_url }}" target="_blank" rel="noopener">PR</a>
-      </span>
-    </div>
+  <div class="item">
+    <div class="ttl"><b>{{ p.repo }}#{{ p.pr_id }}</b>
+      <span class="row small">
+        {% if p.posted %}<span class="pill st-ok plain">草稿已貼</span>{% elif p.dry_run %}<span class="pill st-skip plain">影子模式</span>{% elif p.post_failed %}<span class="pill st-fail plain">貼稿失敗</span>{% endif %}
+        {% if p.redistilled %}<span class="pill plain">已重蒸</span>{% elif p.redistill_attempts %}<span class="pill st-warn plain">重蒸 {{ p.redistill_attempts }}/2</span>{% endif %}
+        <span class="faint">{{ p.created[:16] }}</span> <a href="{{ p.pr_url }}" target="_blank" rel="noopener">PR</a>
+      </span></div>
     <div class="small">→ {{ p.target_branch }} · <span class="mono">{{ p.draft.primary_entity }}</span> · {{ p.draft.decisions|length }} 決策 · {{ p.draft.invariants|length }} 不變式{% if p.contradicted %} · <span class="warn">踩到 {{ p.contradicted|join(', ') }}</span>{% endif %}{% if p.dropped %} · <span class="warn">{{ p.dropped|length }} 條 decision 因引不出證據被丟</span>{% endif %}</div>
-    <div class="tiny muted">{{ p.draft.ledger_line }}</div>
+    <div class="meta">{{ p.draft.ledger_line }}</div>
   </div>
   {% endfor %}
+  </div>
 </section>
 
 <section class="card">
-  <h2>暫存 _cycle <span class="muted small">{{ staged|length }} 條 · 等 release→master 驗收 PR 收口；沉默即落地</span></h2>
-  {% if not staged %}<p class="muted small">沒有。</p>{% endif %}
+  <div class="hd"><h2>暫存</h2><span class="meta">_cycle · {{ staged|length }} 條 · 等驗收 PR 收口；沉默即落地</span></div>
+  <div class="bd flush">
+  {% if not staged %}<div class="empty">沒有。</div>{% endif %}
   {% for it in staged %}
-  <div class="job">
-    <div class="row between">
-      <b class="mono">{{ it.repo }}#{{ it.pr_id }}</b>
-      <span class="small muted">{{ it.provenance }} · → {{ it.target_branch }} · <a href="{{ it.pr_url }}" target="_blank" rel="noopener">PR</a>
-        <form method="post" action="/console/knowledge/verdict" class="inline"><input type="hidden" name="repo" value="{{ it.repo }}"><input type="hidden" name="kind" value="reject"><input type="hidden" name="token" value="PR{{ it.pr_id }}"><button class="ghost small" title="整條不入帳本">reject 整條</button></form>
-      </span>
-    </div>
+  <div class="item">
+    <div class="ttl"><b>{{ it.repo }}#{{ it.pr_id }}</b>
+      <span class="row small"><span class="pill plain">{{ it.provenance }}</span><span class="faint">→ {{ it.target_branch }}</span> <a href="{{ it.pr_url }}" target="_blank" rel="noopener">PR</a> {{ verdict(it.repo, 'reject', 'PR' ~ it.pr_id, 'reject 整條') }}</span></div>
     <div class="small"><span class="mono">{{ it.draft.primary_entity }}</span> — {{ it.draft.ledger_line }}</div>
-    <ul class="small">
-      {% for d in it.draft.decisions %}<li>{{ d.text }}
-        {% if d.id %}<form method="post" action="/console/knowledge/verdict" class="inline"><input type="hidden" name="repo" value="{{ it.repo }}"><input type="hidden" name="kind" value="reject"><input type="hidden" name="token" value="{{ d.id }}"><button class="ghost small">reject</button></form>{% endif %}</li>{% endfor %}
-      {% for i in it.draft.invariants %}<li>{{ i.text }} <code>{{ i.id }}</code>
-        <form method="post" action="/console/knowledge/verdict" class="inline"><input type="hidden" name="repo" value="{{ it.repo }}"><input type="hidden" name="kind" value="reject"><input type="hidden" name="token" value="{{ i.id }}"><button class="ghost small">reject</button></form></li>{% endfor %}
+    <ul>
+      {% for d in it.draft.decisions %}<li>{{ d.text }} {% if d.id %}{{ verdict(it.repo, 'reject', d.id, 'reject') }}{% endif %}</li>{% endfor %}
+      {% for i in it.draft.invariants %}<li>{{ i.text }} <code>{{ i.id }}</code> {{ verdict(it.repo, 'reject', i.id, 'reject') }}</li>{% endfor %}
     </ul>
     {% if it.contradicted %}
     <div class="small warn">合併的實作踩到既有規則 {{ it.contradicted|join(', ') }}：收口時會畫掉，除非有人 keep：
-      {% for iid in it.contradicted %}<form method="post" action="/console/knowledge/verdict" class="inline"><input type="hidden" name="repo" value="{{ it.repo }}"><input type="hidden" name="kind" value="keep"><input type="hidden" name="token" value="{{ iid }}"><button class="ghost small">keep {{ iid }}</button></form>{% endfor %}
-    </div>
+      {% for iid in it.contradicted %}{{ verdict(it.repo, 'keep', iid, 'keep ' ~ iid) }}{% endfor %}</div>
     {% endif %}
-    {% if it.author_note %}<div class="tiny muted">💬 author: {{ it.author_note }}</div>{% endif %}
+    {% if it.author_note %}<div class="meta">💬 author: {{ it.author_note }}</div>{% endif %}
   </div>
   {% endfor %}
+  </div>
 </section>
 </div>
 
-<div>
+<div class="stack">
 <section class="card">
-  <h2>控制台裁決 <span class="muted small">harvest 下次收口會套用，與 PR 留言的 reject / keep 同義</span></h2>
+  <div class="hd"><h2>控制台裁決</h2><span class="meta">harvest 下次收口會套用</span></div>
+  <div class="bd flush">
   {% set any = namespace(v=false) %}
+  <table class="tbl">
   {% for repo, kinds in verdicts.items() %}{% for kind, toks in kinds.items() %}{% for tok, meta in toks.items() %}{% set any.v = true %}
-  <div class="row between small">
-    <span><span class="mono">{{ repo }}</span> · <b>{{ kind }}</b> <code>{{ tok }}</code> <span class="muted">{{ meta.by }} {{ meta.ts[:16] }}</span></span>
-    <form method="post" action="/console/knowledge/verdict/remove" class="inline"><input type="hidden" name="repo" value="{{ repo }}"><input type="hidden" name="kind" value="{{ kind }}"><input type="hidden" name="token" value="{{ tok }}"><button class="ghost small">撤回</button></form>
-  </div>
+  <tr><td class="k mono">{{ repo }}</td><td class="st"><span class="pill plain {{ 'st-fail' if kind == 'reject' else 'st-ok' }}">{{ kind }}</span></td><td><code>{{ tok }}</code> <span class="faint small">{{ meta.by }} {{ meta.ts[:16] }}</span></td>
+    <td class="r"><form method="post" action="/console/knowledge/verdict/remove" class="inline"><input type="hidden" name="repo" value="{{ repo }}"><input type="hidden" name="kind" value="{{ kind }}"><input type="hidden" name="token" value="{{ tok }}"><button class="ghost xs">撤回</button></form></td></tr>
   {% endfor %}{% endfor %}{% endfor %}
-  {% if not any.v %}<p class="muted small">沒有待套用的裁決。</p>{% endif %}
-  <form method="post" action="/console/knowledge/verdict" class="row" style="margin-top:8px">
-    <input type="text" name="repo" placeholder="repo" style="max-width:140px" required>
-    <select name="kind"><option>reject</option><option>keep</option></select>
-    <input type="text" name="token" placeholder="實體名 / PR12 / PR12-I1" style="max-width:200px" required>
-    <button class="ghost small">記下</button>
-  </form>
-</section>
-
-<section class="card">
-  <h2>驗收窗 <span class="muted small">_state/cycle.json</span></h2>
-  {% if not cycle %}<p class="muted small">還沒有任何驗收 PR 開過窗。</p>{% endif %}
-  <table class="checks">
-    {% for key, st in cycle.items() %}
-    <tr class="st-{{ 'skip' if st.closed else 'ok' }}"><td class="status">{{ '已收口' if st.closed else '開窗中' }}</td><td class="name mono">{{ key }}</td><td class="detail small">{% if st.listed %}列過 {{ st.listed|join(', ') }}{% endif %}{% if st.note %} · {{ st.note }}{% endif %}</td></tr>
-    {% endfor %}
   </table>
+  {% if not any.v %}<div class="empty">沒有待套用的裁決。</div>{% endif %}
+  </div>
+  <div class="bd">
+    <form method="post" action="/console/knowledge/verdict" class="form-row">
+      <input type="text" name="repo" placeholder="repo" required style="flex:0 1 140px">
+      <select name="kind" style="flex:0 1 110px"><option>reject</option><option>keep</option></select>
+      <input type="text" name="token" placeholder="實體名 / PR12 / PR12-I1" required>
+      <button class="sm">記下</button>
+    </form>
+  </div>
 </section>
 
 <section class="card">
-  <h2>digest 預覽 <span class="muted small">跟驗收 PR 上那則同一個渲染（零 LLM，無顧問段）</span></h2>
-  <form method="get" action="/console/knowledge" class="row">
-    <input type="text" name="digest_repo" value="{{ digest_repo }}" placeholder="repo" style="max-width:200px"><button class="ghost small">預覽</button>
-  </form>
-  {% if digest %}<pre class="small">{{ digest }}</pre>{% elif digest_repo %}<p class="muted small">這個 repo 沒有暫存稿。</p>{% endif %}
+  <div class="hd"><h2>驗收窗</h2><span class="meta">_state/cycle.json</span></div>
+  <div class="bd flush">
+  {% if not cycle %}<div class="empty">還沒有任何驗收 PR 開過窗。</div>{% else %}
+  <table class="tbl">
+    {% for key, st in cycle.items() %}
+    <tr><td class="st"><span class="pill {{ 'st-skip' if st.closed else 'st-ok' }}">{{ '已收口' if st.closed else '開窗中' }}</span></td><td class="k mono">{{ key }}</td><td class="v">{% if st.listed %}列過 {{ st.listed|join(', ') }}{% endif %}{% if st.note %} · {{ st.note }}{% endif %}</td></tr>
+    {% endfor %}
+  </table>{% endif %}
+  </div>
+</section>
+
+<section class="card">
+  <div class="hd"><h2>digest 預覽</h2><span class="meta">跟驗收 PR 上那則同一個渲染（零 LLM）</span></div>
+  <div class="bd">
+    <form method="get" action="/console/knowledge" class="form-row">
+      <input type="text" name="digest_repo" value="{{ digest_repo }}" placeholder="repo" style="flex:0 1 200px"><button class="sm">預覽</button>
+    </form>
+    {% if digest %}<pre style="margin-top:12px">{{ digest }}</pre>{% elif digest_repo %}<p class="muted small" style="margin-top:10px">這個 repo 沒有暫存稿。</p>{% endif %}
+  </div>
 </section>
 </div>
 </div>

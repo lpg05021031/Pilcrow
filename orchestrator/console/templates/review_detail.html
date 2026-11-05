@@ -1,55 +1,59 @@
 {% extends "base.html" %}
+{% import "_icons.html" as ic %}
 {% block title %}Review {{ r.id }}{% endblock %}
+{% block heading %}<a href="/console/reviews" class="faint">Reviews</a> / <span class="mono">{{ r.repo }}#{{ r.pr_id }}</span>{% endblock %}
+{% block subheading %}<div class="sub">{{ r.title or '' }}{% if r.title %} · {% endif %}{{ r.started|datetime }} · {{ r.user }} · {{ r.pipeline or '' }}{% if r.duration %} · {{ r.duration|int }}s{% endif %}</div>{% endblock %}
+{% block actions %}
+<a class="btn" href="{{ r.pr_url }}" target="_blank" rel="noopener">{{ ic.icon('ext') }}PR</a>
+{% if r.trace_id %}<a class="btn" href="{{ langfuse_host }}/trace/{{ r.trace_id }}" target="_blank" rel="noopener">{{ ic.icon('ext') }}trace</a>{% endif %}
+{% endblock %}
 {% block body %}
-{% if r.status == 'running' %}<meta http-equiv="refresh" content="3">{% endif %}
-<div class="row between">
-  <h1><a href="/console/reviews">Reviews</a> / {{ r.repo }}#{{ r.pr_id }} <span class="muted small">{{ r.title or '' }}</span></h1>
-  <span class="muted small">{{ r.started|datetime }} · {{ r.user }} · {{ r.pipeline or '' }}{% if r.duration %} · {{ r.duration|int }}s{% endif %}
-    · <a href="{{ r.pr_url }}" target="_blank" rel="noopener">PR</a>
-    {% if r.trace_id %}· <a href="{{ langfuse_host }}/trace/{{ r.trace_id }}" target="_blank" rel="noopener">trace</a>{% endif %}</span>
-</div>
-
 {% if r.status == 'running' %}
-<section class="card"><p>跑了 {{ (now - r.started)|int }} 秒，還在跑……（每 3 秒自動刷新）</p></section>
+<meta http-equiv="refresh" content="3">
+<section class="card"><div class="bd"><span class="pill st-skip">running</span> 跑了 {{ (now - r.started)|int }} 秒，還在跑……每 3 秒自動刷新。</div></section>
 {% elif r.status == 'error' %}
-<section class="card"><p class="err">失敗：{{ r.error }}</p></section>
+<section class="card"><div class="bd"><span class="pill st-fail">error</span> <span class="err">{{ r.error }}</span></div></section>
 {% else %}
-<div class="grid2">
+<div class="grid cols-2">
 <section class="card">
-  <h2>Findings <span class="muted small"><span class="err">{{ r.n_error }}</span> error · <span class="warn">{{ r.n_warning }}</span> warning · {{ r.n_info }} info</span></h2>
-  <table class="checks">
-    {% for f in r.findings or [] %}
-    <tr class="st-{{ 'fail' if f.severity == 'error' else ('warn' if f.severity == 'warning' else 'ok') }}">
-      <td class="status">F{{ loop.index }}</td>
-      <td class="name mono small">{{ f.rule }}<br><span class="muted">{{ f.source }}{% if f.dimension %} · {{ f.dimension }}{% endif %} · {{ '%.2f'|format(f.confidence) }}</span></td>
-      <td class="detail"><span class="mono small">{{ f.file }}{% if f.line %}:{{ f.line }}{% endif %}</span><br>{{ f.note }}
-        {% if f.rule_ref %}<br><span class="muted tiny">rule: {{ f.rule_ref }}</span>{% endif %}
-        {% if f.knowledge_ref %}<br><span class="muted tiny">knowledge: {{ f.knowledge_ref|join(', ') }}</span>{% endif %}</td>
+  <div class="hd"><h2>Findings</h2><span class="meta"><span class="sev error">{{ r.n_error }}</span> error · <span class="sev warning">{{ r.n_warning }}</span> warning · <span class="sev info">{{ r.n_info }}</span> info</span></div>
+  <div class="bd flush">
+  {% if not r.findings %}<div class="empty">零 finding。</div>{% else %}
+  <table class="tbl">
+    {% for f in r.findings %}
+    <tr>
+      <td class="st"><span class="pill plain st-{{ 'fail' if f.severity == 'error' else ('warn' if f.severity == 'warning' else 'skip') }}">F{{ loop.index }}</span></td>
+      <td class="k"><div class="mono">{{ f.rule }}</div><div class="tag">{{ f.source }}{% if f.dimension %} · {{ f.dimension }}{% endif %} · {{ '%.2f'|format(f.confidence) }}</div></td>
+      <td class="v"><div class="mono" style="color:var(--fg)">{{ f.file }}{% if f.line %}:{{ f.line }}{% endif %}</div>{{ f.note }}
+        {% if f.rule_ref %}<div class="tag">rule: {{ f.rule_ref }}</div>{% endif %}
+        {% if f.knowledge_ref %}<div class="tag">knowledge: {{ f.knowledge_ref|join(', ') }}</div>{% endif %}</td>
     </tr>
     {% endfor %}
-  </table>
-  {% if not r.findings %}<p class="muted small">零 finding。</p>{% endif %}
+  </table>{% endif %}
+  </div>
 </section>
 <section class="card">
-  <h2>這條 review 吃到了什麼</h2>
+  <div class="hd"><h2>這條 review 吃到了什麼</h2></div>
+  <div class="bd">
   {% set st = r.stats or {} %}
-  <table class="checks">
-    <tr><td class="name">diff</td><td class="detail">{{ st.files }} 檔 · {{ st.added_lines }} 新增行 · {{ st.hunks }} hunks{% if st.skipped %} · {{ st.skipped }} 檔被略過{% endif %}</td></tr>
-    <tr><td class="name">static</td><td class="detail">{{ st.static_findings }} 條{% if st.static_notes %} · {{ st.static_notes|join('；') }}{% endif %}</td></tr>
-    <tr><td class="name">base 上下文</td><td class="detail">{% if st.base_available %}{{ st.base_files }} 檔{% else %}無（沒有本地 clone）{% endif %}</td></tr>
-    <tr><td class="name">rules</td><td class="detail">{% if st.rules_sha %}版本 {{ st.rules_sha }}{% if st.rules_files %} · {{ st.rules_files|length }} 檔{% endif %}{% if st.rules_truncated %} · <span class="warn">被截斷</span>{% endif %}{% else %}無{% endif %}</td></tr>
-    <tr><td class="name">knowledge</td><td class="detail">{% if st.knowledge_entries %}{{ st.knowledge_entries }} 條注入{% if st.knowledge_injected %}：<span class="mono tiny">{{ st.knowledge_injected|join(', ') }}</span>{% endif %}{% if st.knowledge_grounded %} · {{ st.knowledge_grounded }} 條 finding 引用了{% endif %}{% else %}無{% endif %}</td></tr>
-    <tr><td class="name">graph</td><td class="detail">{% if st.graph_used %}有（{{ st.graph_impacted|length }} 個受波及）{% else %}{{ st.graph_note or '無' }}{% endif %}</td></tr>
-    {% if st.dimension_names %}<tr><td class="name">dimensions</td><td class="detail">{{ st.dimension_names|join(' · ') }}{% if st.plan != 'ok' %} <span class="warn">（planner 降級為固定科目）</span>{% endif %}</td></tr>{% endif %}
-    {% if st.adversary %}<tr><td class="name">adversary</td><td class="detail">{{ st.adversary }}</td></tr>{% endif %}
-    {% if st.dropped_low_conf or st.dropped_over_cap %}<tr><td class="name">synthesis</td><td class="detail">{{ st.dropped_low_conf or 0 }} 條低於信心門檻、{{ st.dropped_over_cap or 0 }} 條超過上限被濾掉</td></tr>{% endif %}
-  </table>
-  <details><summary class="small muted">完整 stats（JSON）</summary><pre class="tiny">{{ r.stats|tojson(indent=1) }}</pre></details>
+  <dl class="kv">
+    <dt>diff</dt><dd>{{ st.files }} 檔 · {{ st.added_lines }} 新增行 · {{ st.hunks }} hunks{% if st.skipped %} · {{ st.skipped }} 檔被略過{% endif %}</dd>
+    <dt>static</dt><dd>{{ st.static_findings }} 條{% if st.static_notes %} · {{ st.static_notes|join('；') }}{% endif %}</dd>
+    <dt>base 上下文</dt><dd>{% if st.base_available %}{{ st.base_files }} 檔{% else %}無（沒有本地 clone）{% endif %}</dd>
+    <dt>rules</dt><dd>{% if st.rules_sha %}版本 <span class="mono">{{ st.rules_sha }}</span>{% if st.rules_files %} · {{ st.rules_files|length }} 檔{% endif %}{% if st.rules_truncated %} · <span class="warn">被截斷</span>{% endif %}{% else %}無{% endif %}</dd>
+    <dt>knowledge</dt><dd>{% if st.knowledge_entries %}{{ st.knowledge_entries }} 條注入{% if st.knowledge_injected %}：<span class="mono">{{ st.knowledge_injected|join(', ') }}</span>{% endif %}{% if st.knowledge_grounded %} · {{ st.knowledge_grounded }} 條 finding 引用了{% endif %}{% else %}無{% endif %}</dd>
+    <dt>graph</dt><dd>{% if st.graph_used %}有（{{ st.graph_impacted|length }} 個受波及）{% else %}{{ st.graph_note or '無' }}{% endif %}</dd>
+    {% if st.dimension_names %}<dt>dimensions</dt><dd>{{ st.dimension_names|join(' · ') }}{% if st.plan != 'ok' %} <span class="warn">（planner 降級為固定科目）</span>{% endif %}</dd>{% endif %}
+    {% if st.adversary %}<dt>adversary</dt><dd>{{ st.adversary }}</dd>{% endif %}
+    {% if st.dropped_low_conf or st.dropped_over_cap %}<dt>synthesis</dt><dd>{{ st.dropped_low_conf or 0 }} 條低於信心門檻、{{ st.dropped_over_cap or 0 }} 條超過上限被濾掉</dd>{% endif %}
+  </dl>
+  </div>
+  <div class="bd"><details><summary>完整 stats（JSON）</summary><pre style="margin-top:8px">{{ r.stats|tojson(indent=1) }}</pre></details></div>
 </section>
 </div>
 <section class="card">
-  <h2>報告（貼到 PR 的 markdown）</h2>
-  <pre class="small report">{{ r.markdown }}</pre>
+  <div class="hd"><h2>報告</h2><span class="meta">貼到 PR 的 markdown</span></div>
+  <div class="bd"><pre class="tall">{{ r.markdown }}</pre></div>
 </section>
 {% endif %}
 {% endblock %}
