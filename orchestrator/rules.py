@@ -95,7 +95,7 @@ def load_rules(repo: str | None = None) -> RulesBundle:
             continue
         if not body:
             continue
-        rel = str(f.relative_to(root))
+        rel = f.relative_to(root).as_posix()   # 跨平台一律 /（rule_ref 與報告都用這個）
         block = f"## {rel}\n{body}"
         if total + len(block) > max_chars:
             truncated = True

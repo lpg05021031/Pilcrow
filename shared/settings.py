@@ -295,6 +295,9 @@ class Orchestrator(_Group):
     url: Stripped = Field(
         "http://127.0.0.1:8080", alias="ORCH_URL",
         description="harvester 打重蒸請求的位址（同機 loopback；不走 proxy）。")
+    data_dir: Path = Field(
+        Path("/var/lib/pr-review-suite"), alias="DATA_DIR",
+        description="review 歷史（reviews.db，SQLite）住這裡；服務帳號要能寫。開不出來 = 歷史停用、review 照跑。")
 
     @property
     def base_url(self) -> str:
@@ -618,6 +621,8 @@ def _render_value(v: Any) -> str:
         return ",".join(v)
     if v is None:
         return ""
+    if isinstance(v, Path):
+        return v.as_posix()         # Windows dev machine renders \, Linux is the target
     return str(v)
 
 
@@ -706,14 +711,14 @@ def _toml_literal(v: Any) -> str:
     if isinstance(v, list):
         return "[" + ", ".join(_toml_literal(x) for x in v) + "]"
     if isinstance(v, Path):
-        v = str(v)
+        v = v.as_posix()
     return json.dumps(str(v), ensure_ascii=False)      # TOML 基本字串 = JSON 字串語法
 
 
 def _native(v: Any) -> Any:
     """把 settings 物件上的值變成能寫進 toml 的型別。"""
     if isinstance(v, Path):
-        return str(v)
+        return v.as_posix()
     if isinstance(v, SecretStr):
         return v.get_secret_value()
     return v

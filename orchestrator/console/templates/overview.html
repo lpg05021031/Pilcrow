@@ -35,6 +35,33 @@
 
 <div>
 <section class="card">
+  <h2>餵料 <a class="small" href="/console/sources">Sources →</a></h2>
+  <table class="checks">
+    {% for k in ('repos', 'rules', 'knowledge') %}{% set sv = sources[k] %}
+    <tr class="st-{{ 'ok' if sv.exists else 'skip' }}">
+      <td class="status">{{ 'OK' if sv.exists else 'off' }}</td>
+      <td class="name">{{ k }}</td>
+      <td class="detail">{% if not sv.exists %}{{ sv.note }}{% elif k == 'repos' %}{{ sv.counts.clones }} 顆 clone{% if sv.counts.others %}、{{ sv.counts.others }} 個非 git 目錄{% endif %}{% elif k == 'rules' %}{{ sv.counts.md }} 條規則 · 版本 {{ sv.head.sha }}{% else %}{{ sv.counts.pages }} 頁 · {{ sv.counts.pending }} 待裁決{% if sv.head.sha %} · 版本 {{ sv.head.sha }}{% endif %}{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+
+<section class="card">
+  <h2>最近 review <a class="small" href="/console/reviews">Reviews →</a> <span class="muted small">近 {{ summary.days }} 天 {{ summary.n }} 條{% if summary.errors %}、<span class="err">{{ summary.errors }} 失敗</span>{% endif %}</span></h2>
+  {% if not reviews %}<p class="muted small">還沒有。</p>{% endif %}
+  <table class="checks">
+    {% for r in reviews %}
+    <tr class="st-{{ 'fail' if r.status == 'error' else ('skip' if r.status == 'running' else 'ok') }}">
+      <td class="status">{{ r.status }}</td>
+      <td class="name mono small"><a href="/console/reviews/{{ r.id }}">{{ r.repo }}#{{ r.pr_id }}</a></td>
+      <td class="detail small">{{ r.started|datetime }}{% if r.status == 'done' %} · <span class="err">{{ r.n_error }}</span>/<span class="warn">{{ r.n_warning }}</span>/{{ r.n_info }}{% if r.duration %} · {{ r.duration|int }}s{% endif %}{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+
+<section class="card">
   <h2>排程 jobs</h2>
   {% for name, st in jobs.items() %}
   <div class="job">

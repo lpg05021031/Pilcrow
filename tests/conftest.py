@@ -10,8 +10,11 @@ import shared.settings as S
 
 
 @pytest.fixture(autouse=True)
-def _fresh_settings(monkeypatch):
+def _fresh_settings(monkeypatch, tmp_path):
     S.reset()
+    # review 歷史（SQLite）與 config.toml 永遠寫在這條測試自己的 tmp 裡，不碰真路徑
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CONFIG_DIR", str(tmp_path / "cfg"))
     orig_set, orig_del = pytest.MonkeyPatch.setenv, pytest.MonkeyPatch.delenv
 
     def setenv(self, *a, **k):

@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import SecretStr, ValidationError
 
-from orchestrator import jobs
+from orchestrator import jobs, sources, store
 from orchestrator.adapters import ado
 from orchestrator.console import auth
 from shared import doctor
@@ -30,8 +30,8 @@ templates.env.filters["datetime"] = lambda ts: time.strftime("%m-%d %H:%M", time
 
 NAV = [("overview", "Overview", "/console"),
        ("settings", "Settings", "/console/settings"),
-       ("sources", "Sources", None),      # S3
-       ("reviews", "Reviews", None),      # S3
+       ("sources", "Sources", "/console/sources"),
+       ("reviews", "Reviews", "/console/reviews"),
        ("knowledge", "Knowledge", None)]  # S4
 
 # 翻向這一側要勾「我確定」：會對外真發、或關掉安全氣囊
@@ -96,19 +96,97 @@ async def overview(request: Request, refresh: int = 0):
         groups.setdefault(c.group, []).append(c)
     counts = {k: sum(1 for c in checks if c.status == k)
               for k in (doctor.OK, doctor.WARN, doctor.FAIL, doctor.SKIP)}
+    views = await asyncio.to_thread(sources.all_views)
     return templates.TemplateResponse(request, "overview.html", _ctx(
         request, "overview", groups=groups, counts=counts,
         checked_at=_doctor_cache["ts"], jobs=jobs.snapshot(),
-        audit=list(ado.audit_log)[-10:][::-1], now=time.time()))
+        audit=list(ado.audit_log)[-10:][::-1], now=time.time(),
+        sources=views, reviews=store.list_reviews(8), summary=store.summary(7)))
 
 
 @router.post("/jobs/{name}/run")
-async def run_job(request: Request, name: str):
+async def run_job(request: Request, name: str, back: str = "/console?refresh=1"):
     if not auth.is_authed(request):
         return auth.login_redirect(request)
     if name in jobs.JOBS:
         asyncio.get_running_loop().create_task(jobs.run_once(name))
-    return RedirectResponse("/console?refresh=1", status_code=303)
+    return RedirectResponse(back if back.startswith("/console") else "/console", status_code=303)
+
+
+# ---------- Sources ----------
+
+@router.get("/sources", response_class=HTMLResponse)
+async def sources_page(request: Request, rules_repo: str = "", k_repo: str = "", k_paths: str = ""):
+    if not auth.is_authed(request):
+        return auth.login_redirect(request)
+    views = await asyncio.to_thread(sources.all_views)
+    rp = await asyncio.to_thread(sources.rules_preview, rules_repo) \
+        if (rules_repo or "rules_repo" in request.query_params) and views["rules"].exists else None
+    paths = [p.strip() for p in k_paths.split(",") if p.strip()]
+    kp = await asyncio.to_thread(sources.knowledge_preview, k_repo, paths) \
+        if k_repo and paths and views["knowledge"].exists else None
+    return templates.TemplateResponse(request, "sources.html", _ctx(
+        request, "sources", v=views, jobs=jobs.snapshot(), now=time.time(),
+        rules_repo=rules_repo, rp=rp, k_repo=k_repo, k_paths=k_paths, kp=kp,
+        add_result=request.query_params.getlist("added")))
+
+
+@router.post("/sources/repos/add", response_class=HTMLResponse)
+async def sources_add_repo(request: Request, name: str = Form(""), url: str = Form(""),
+                           branch: str = Form("")):
+    if not auth.is_authed(request):
+        return auth.login_redirect(request)
+    lines = await asyncio.to_thread(sources.add_repo, name, url, branch or "main")
+    from urllib.parse import urlencode
+    return RedirectResponse("/console/sources?" + urlencode([("added", ln) for ln in lines]) + "#repos",
+                            status_code=303)
+
+
+# ---------- Reviews ----------
+
+@router.get("/reviews", response_class=HTMLResponse)
+async def reviews_page(request: Request, error: str = ""):
+    if not auth.is_authed(request):
+        return auth.login_redirect(request)
+    rows = store.list_reviews(50)
+    return templates.TemplateResponse(request, "reviews.html", _ctx(
+        request, "reviews", reviews=rows, summary=store.summary(7), now=time.time(),
+        store_ok=store.enabled(), store_reason=store.disabled_reason(),
+        auto_post=S.settings().orchestrator.auto_post, run_error=error))
+
+
+@router.post("/reviews/run")
+async def reviews_run(request: Request, pr_url: str = Form("")):
+    if not auth.is_authed(request):
+        return auth.login_redirect(request)
+    from shared.azdo import find_pr_url
+    url = find_pr_url(pr_url)
+    if not url:
+        return RedirectResponse("/console/reviews?error=不是 PR URL（要含 /_git/<repo>/pullrequest/<id>）",
+                                status_code=303)
+    from orchestrator import app as A       # 延遲 import：app 先 import console
+    asyncio.get_running_loop().create_task(_run_and_log(A.handle_review, url))
+    await asyncio.sleep(0.2)                # 讓 start_review 先落帳，列表第一列就是它
+    return RedirectResponse("/console/reviews", status_code=303)
+
+
+async def _run_and_log(handle, url: str) -> None:
+    try:
+        await handle(url, "console")
+    except Exception as e:  # noqa: BLE001  —— 已由 handle_review 落帳為 error
+        print(f"[console] review {url} 失敗：{type(e).__name__}: {e}")
+
+
+@router.get("/reviews/{review_id}", response_class=HTMLResponse)
+async def review_detail(request: Request, review_id: int):
+    if not auth.is_authed(request):
+        return auth.login_redirect(request)
+    r = store.get_review(review_id)
+    if not r:
+        return HTMLResponse("not found", status_code=404)
+    return templates.TemplateResponse(request, "review_detail.html", _ctx(
+        request, "reviews", r=r, now=time.time(),
+        langfuse_host=S.settings().langfuse.host.rstrip("/")))
 
 
 # ---------- Settings ----------
