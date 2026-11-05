@@ -212,6 +212,21 @@ sudo cp /opt/pr-review-suite/deploy/systemd/review-orchestrator.service.example 
 suite.env 裡的 `HOST` / `PORT` / `*_TOOLS_PORT` / `*_TOOLS_URL` / `REPO_ROOT` 已無作用，
 刪掉（留著 doctor 會一直提醒）。
 
+**4.2c（S2，選做但建議）把旋鈕搬進 config.toml、secrets 留 env**。做完之後所有非 secret
+的設定都能在控制台改、即時生效：
+
+```bash
+prs venv/bin/python -m shared.settings --migrate
+# → 已寫入 /etc/pr-review-suite/config.toml（N 個非預設值）；並印出哪幾個是 secret
+sudo sh -c 'grep -E "^(ADO_PAT|LLM_API_KEY|LANGFUSE_PUBLIC_KEY|LANGFUSE_SECRET_KEY|ORCH_API_KEY|HTTPS_PROXY|ADO_VERIFY_SSL)=" /etc/pr-review-suite/suite.env > /etc/pr-review-suite/secrets.env'
+sudo chmod 600 /etc/pr-review-suite/secrets.env
+sudo mv /etc/pr-review-suite/suite.env /etc/pr-review-suite/suite.env.pre-s2   # env 會覆寫 toml，留著控制台就改不動
+```
+
+unit 樣板已經同時讀 `secrets.env` 與（若存在）`suite.env`，並設 `CONFIG_DIR`。
+之後要改旋鈕：`http://<主機>:8080/console/settings`，Apply 即生效；要改 secret：改
+secrets.env + restart。
+
 **4.3** 重啟 + 活體對帳：
 
 ```bash

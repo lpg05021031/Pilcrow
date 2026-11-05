@@ -111,14 +111,18 @@ JOBS: dict[str, Callable[[], list[str]]] = {
 }
 
 
-def _plan() -> list[JobState]:
+def _schedule(name: str) -> tuple[int, bool]:
+    """(間隔分, 現在該不該跑) —— 每輪重讀，控制台改設定不用 restart。"""
     s = settings()
-    return [
-        JobState("repo-sync", s.jobs.repo_sync_interval_min,
-                 enabled=s.jobs.repo_sync_interval_min > 0 and s.repos.repos_root is not None),
-        JobState("harvest", s.jobs.harvest_interval_min,
-                 enabled=s.jobs.harvest_interval_min > 0 and s.knowledge.root is not None),
-    ]
+    if name == "repo-sync":
+        iv = s.jobs.repo_sync_interval_min
+        return iv, iv > 0 and s.repos.repos_root is not None
+    iv = s.jobs.harvest_interval_min
+    return iv, iv > 0 and s.knowledge.root is not None
+
+
+def _plan() -> list[JobState]:
+    return [JobState(name, *_schedule(name)) for name in JOBS]
 
 
 async def run_once(name: str) -> JobState:
@@ -142,24 +146,32 @@ async def run_once(name: str) -> JobState:
     return st
 
 
+DISABLED_POLL_S = 60.0     # 關著的 job 每分鐘看一次設定有沒有把它打開
+
+
 async def _run_forever(st: JobState, first_delay_s: float) -> None:
     await asyncio.sleep(first_delay_s)
     while True:
+        st.interval_min, st.enabled = _schedule(st.name)
+        if not st.enabled:
+            st.next_run = None
+            await asyncio.sleep(DISABLED_POLL_S)
+            continue
         await run_once(st.name)
+        st.interval_min, st.enabled = _schedule(st.name)      # 跑的途中可能被改
         st.next_run = time.time() + st.interval_min * 60
         await asyncio.sleep(st.interval_min * 60)
 
 
 def start(first_delay_s: float = 60.0) -> list[JobState]:
-    """由 app 的 lifespan 呼叫。回傳排了哪些 job（含被關掉的，enabled=False）。"""
+    """由 app 的 lifespan 呼叫。每個 job 都排一個迴圈；關著的只是每分鐘看一次設定。"""
     _STATE.clear()
     for st in _plan():
         _STATE[st.name] = st
-        if st.enabled:
-            st.next_run = time.time() + first_delay_s
-            t = asyncio.get_running_loop().create_task(_run_forever(st, first_delay_s))
-            _TASKS.add(t)
-            t.add_done_callback(_TASKS.discard)
+        st.next_run = time.time() + first_delay_s if st.enabled else None
+        t = asyncio.get_running_loop().create_task(_run_forever(st, first_delay_s))
+        _TASKS.add(t)
+        t.add_done_callback(_TASKS.discard)
     return list(_STATE.values())
 
 

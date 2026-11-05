@@ -10,7 +10,12 @@ Description=pr-review orchestrator (FastAPI :8080; ADO adapter + in-process jobs
 After=network.target
 
 [Service]
-EnvironmentFile=/etc/pr-review-suite/suite.env
+# 設定三層：env（這兩個檔）＞ CONFIG_DIR/config.toml（控制台寫）＞ 預設。
+# secrets.env 放 ADO_PAT / LLM_API_KEY / LANGFUSE_* / ORCH_API_KEY；suite.env 是 S2 前的全 env 檔，
+# 有就一起讀（前綴 - 代表檔不存在也不報錯）。
+EnvironmentFile=-/etc/pr-review-suite/secrets.env
+EnvironmentFile=-/etc/pr-review-suite/suite.env
+Environment=CONFIG_DIR=/etc/pr-review-suite
 WorkingDirectory=/opt/pr-review-suite
 # PATH 要含 venv/bin：static pass 找 semgrep/ruff、repo-sync 找 code-review-graph 都靠它
 Environment=PATH=/opt/pr-review-suite/venv/bin:/usr/local/bin:/usr/bin:/bin

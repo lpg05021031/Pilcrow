@@ -1,5 +1,8 @@
 # pr-review 重構計畫：一個行程、一份設定、一個控制台（2026-11-06 草案）
 
+> 進度：S1 併行程 ✅（PR#5，`CHANGES-2026-11-06-s1.md`）· S2 設定載體 + Settings 頁 ✅
+> （`CHANGES-2026-11-06-s2.md`）· S3 Overview/Sources/Reviews ⏳ · S4 Knowledge 頁 + 安裝精靈 ⏳
+
 ## 0. 問題不是「缺一個 UI」
 
 今天的維運痛點是**形狀**的問題：一套給一兩個人維運、跑在一台 Linux 機上的系統，

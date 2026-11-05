@@ -1,0 +1,253 @@
+"""控制台路由。頁面：/console（Overview）、/console/settings、/console/login。
+
+Settings 頁的 Apply 走 POST /console/settings/{group}：
+  表單值 → settings.validate_group_values（純 schema 驗證，壞值回表單原地紅字）
+  → 危險旋鈕翻向危險側要勾確認 → settings.save_toml（備份、原子寫、change log、reset）
+  → 回該組的局部 HTML（console.js 原地替換）。
+被環境變數覆寫的欄位是唯讀的：env 永遠贏，改檔無效，頁面直說。
+"""
+from __future__ import annotations
+
+import asyncio
+import time
+from pathlib import Path
+from typing import Any
+
+from fastapi import APIRouter, Form, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
+from pydantic import SecretStr, ValidationError
+
+from orchestrator import jobs
+from orchestrator.adapters import ado
+from orchestrator.console import auth
+from shared import doctor
+from shared import settings as S
+
+router = APIRouter(prefix="/console", include_in_schema=False)
+templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+templates.env.filters["datetime"] = lambda ts: time.strftime("%m-%d %H:%M", time.localtime(ts))
+
+NAV = [("overview", "Overview", "/console"),
+       ("settings", "Settings", "/console/settings"),
+       ("sources", "Sources", None),      # S3
+       ("reviews", "Reviews", None),      # S3
+       ("knowledge", "Knowledge", None)]  # S4
+
+# 翻向這一側要勾「我確定」：會對外真發、或關掉安全氣囊
+DANGEROUS = {("orchestrator", "auto_post"): True,
+             ("posting", "dry_run"): False,
+             ("posting", "knowledge_post"): True}
+
+
+def _ctx(request: Request, page: str, **extra: Any) -> dict:
+    return {"request": request, "page": page, "nav": NAV,
+            "open_mode": auth.is_open(), "warnings": S.warnings_for(), **extra}
+
+
+# ---------- 登入 ----------
+
+@router.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request, next: str = "/console", error: str = ""):
+    if auth.is_open():
+        return RedirectResponse(next, status_code=302)
+    return templates.TemplateResponse(request, "login.html",
+                                      _ctx(request, "login", next=next, error=error))
+
+
+@router.post("/login")
+async def login(request: Request, token: str = Form(""), next: str = Form("/console")):
+    if not auth.token_ok(token):
+        return RedirectResponse("/console/login?error=1", status_code=302)
+    resp = RedirectResponse(next if next.startswith("/console") else "/console", status_code=302)
+    resp.set_cookie(auth.COOKIE, auth.expected_cookie(), httponly=True, samesite="lax",
+                    max_age=30 * 24 * 3600)
+    return resp
+
+
+@router.post("/logout")
+async def logout():
+    resp = RedirectResponse("/console/login", status_code=302)
+    resp.delete_cookie(auth.COOKIE)
+    return resp
+
+
+# ---------- Overview ----------
+
+_doctor_cache: dict[str, Any] = {"ts": 0.0, "checks": []}
+DOCTOR_TTL_S = 30.0
+
+
+async def _doctor_checks(force: bool = False) -> list[doctor.Check]:
+    if force or time.time() - _doctor_cache["ts"] > DOCTOR_TTL_S:
+        checks, _code = await asyncio.to_thread(doctor.run, network=True, pr_url=None)
+        _doctor_cache.update(ts=time.time(), checks=checks)
+    return _doctor_cache["checks"]
+
+
+@router.get("", response_class=HTMLResponse)
+@router.get("/", response_class=HTMLResponse)
+async def overview(request: Request, refresh: int = 0):
+    if not auth.is_authed(request):
+        return auth.login_redirect(request)
+    checks = await _doctor_checks(force=bool(refresh))
+    groups: dict[str, list[doctor.Check]] = {}
+    for c in checks:
+        groups.setdefault(c.group, []).append(c)
+    counts = {k: sum(1 for c in checks if c.status == k)
+              for k in (doctor.OK, doctor.WARN, doctor.FAIL, doctor.SKIP)}
+    return templates.TemplateResponse(request, "overview.html", _ctx(
+        request, "overview", groups=groups, counts=counts,
+        checked_at=_doctor_cache["ts"], jobs=jobs.snapshot(),
+        audit=list(ado.audit_log)[-10:][::-1], now=time.time()))
+
+
+@router.post("/jobs/{name}/run")
+async def run_job(request: Request, name: str):
+    if not auth.is_authed(request):
+        return auth.login_redirect(request)
+    if name in jobs.JOBS:
+        asyncio.get_running_loop().create_task(jobs.run_once(name))
+    return RedirectResponse("/console?refresh=1", status_code=303)
+
+
+# ---------- Settings ----------
+
+def _control(info) -> str:
+    """型別 → 控件種類（模板用）。"""
+    ann = info.annotation
+    if ann is SecretStr:
+        return "secret"
+    if ann is bool:
+        return "bool"
+    meta = getattr(ann, "__metadata__", None)
+    origin = getattr(ann, "__origin__", None)
+    base = getattr(ann, "__args__", (ann,))[0] if meta else ann
+    if base is bool:
+        return "bool"
+    if getattr(base, "__origin__", None) is not None and "Literal" in str(base):
+        return "choice"
+    if "Literal" in str(ann):
+        return "choice"
+    if base in (int, float) or ann in (int, float):
+        return "number"
+    if origin is list or base is list or "list[" in str(ann):
+        return "csv"
+    return "text"
+
+
+def _choices(info) -> list[str]:
+    import typing
+    for t in (info.annotation, *getattr(info.annotation, "__args__", ())):
+        if typing.get_origin(t) is typing.Literal:
+            return [str(x) for x in typing.get_args(t)]
+    return []
+
+
+def _group_view(gname: str, errors: dict[str, str] | None = None,
+                posted: dict[str, str] | None = None) -> dict:
+    s = S.settings()
+    gcls = S.Settings.model_fields[gname].annotation
+    grp = getattr(s, gname)
+    fields = []
+    for fname, info in gcls.model_fields.items():
+        v = getattr(grp, fname)
+        src = S.source_of(gname, fname, info)
+        kind = _control(info)
+        shown = (posted or {}).get(fname)
+        if shown is None:
+            shown = "" if v is None else (",".join(v) if isinstance(v, list)
+                                          else ("true" if v is True else "false" if v is False
+                                                else str(v)))
+        extra = info.json_schema_extra if isinstance(info.json_schema_extra, dict) else {}
+        fields.append({
+            "name": fname, "env": S.env_names(info)[0], "kind": kind,
+            "choices": _choices(info), "value": shown,
+            "masked": S._mask(v) if kind == "secret" else None,
+            "source": src, "locked": src.startswith("env:") or kind == "secret",
+            "description": info.description or "",
+            "default": S._render_value(S._native(info.get_default(call_default_factory=True))) or "(unset)",
+            "dangerous": (gname, fname) in DANGEROUS,
+            "min": getattr(info, "metadata", None) and next((m.ge for m in info.metadata if hasattr(m, "ge")), None),
+            "max": getattr(info, "metadata", None) and next((m.le for m in info.metadata if hasattr(m, "le")), None),
+            "error": (errors or {}).get(fname, ""),
+            "required": bool(extra.get("required")),
+        })
+    return {"name": gname, "doc": (gcls.__doc__ or "").strip(), "fields": fields,
+            "saved": False}
+
+
+@router.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request):
+    if not auth.is_authed(request):
+        return auth.login_redirect(request)
+    groups = [_group_view(g) for g in S.GROUP_ORDER]
+    return templates.TemplateResponse(request, "settings.html", _ctx(
+        request, "settings", groups=groups, config_path=str(S.config_path()),
+        config_exists=S.config_path().exists(), changes=S.recent_changes(20)))
+
+
+@router.post("/settings/{gname}", response_class=HTMLResponse)
+async def settings_apply(request: Request, gname: str):
+    if not auth.is_authed(request):
+        return auth.login_redirect(request)
+    if gname not in S.GROUP_ORDER:
+        return HTMLResponse("unknown group", status_code=404)
+    form = await request.form()
+    gcls = S.Settings.model_fields[gname].annotation
+    posted: dict[str, str] = {}
+    changes: dict[str, Any] = {}
+    errors: dict[str, str] = {}
+    for fname, info in gcls.model_fields.items():
+        if info.annotation is SecretStr or S.source_of(gname, fname, info).startswith("env:"):
+            continue                       # 唯讀：secret 走 secrets.env；env 覆寫改檔無效
+        kind = _control(info)
+        if kind == "bool":
+            if f"_b_{fname}" not in form:
+                continue                   # checkbox 沒隨表單送來 = 這欄沒在這次表單裡，不動
+            raw = "true" if form.get(fname) in ("on", "true", "1") else "false"
+        else:
+            raw = str(form.get(fname, "")).strip()
+        posted[fname] = raw
+        default = S._native(info.get_default(call_default_factory=True))
+        if raw == "" or raw == "(unset)":
+            changes[fname] = None          # 回預設 / 刪鍵
+            continue
+        if kind == "bool":
+            val: Any = raw == "true"
+        elif kind == "csv":
+            val = [x.strip() for x in raw.split(",") if x.strip()]
+        elif kind == "number":
+            try:
+                val = int(raw) if info.annotation is int or "int" in str(info.annotation) else float(raw)
+            except ValueError:
+                errors[fname] = "要是數字"
+                continue
+        else:
+            val = raw
+        try:                               # 先經 schema 正規化（"true" → True、路徑、清單）再比
+            val = S.validate_group_values(gname, {fname: val})[fname]
+        except ValidationError as e:
+            errors[fname] = e.errors()[0]["msg"]
+            continue
+        if val == default and fname not in (S.load_toml().get(gname) or {}):
+            continue                       # 等於預設且檔裡本來沒有 → 不寫
+        changes[fname] = val
+        if (gname, fname) in DANGEROUS and val == DANGEROUS[(gname, fname)] \
+                and form.get(f"confirm_{fname}") != "on":
+            errors[fname] = "翻到這一側會對外真發 / 關掉安全氣囊，要勾「我確定」"
+    view: dict
+    if errors:
+        view = _group_view(gname, errors=errors, posted=posted)
+    else:
+        log = S.save_toml({gname: changes},
+                          actor=request.client.host if request.client else "console") \
+            if changes else []
+        view = _group_view(gname)
+        view["saved"] = True
+        view["applied"] = log
+        view["restart_needed"] = gname == "orchestrator" and any(
+            e["field"] in ("url",) for e in log)
+    return templates.TemplateResponse(request, "_group.html", {
+        "request": request, "g": view, "warnings": S.warnings_for(),
+        "changes": S.recent_changes(20)})

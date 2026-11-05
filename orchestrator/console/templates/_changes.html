@@ -1,0 +1,13 @@
+<div id="changes-body">
+{% if not changes %}<p class="muted small">還沒有從控制台或 --migrate 改過任何值。</p>{% endif %}
+<table class="checks">
+  {% for c in changes %}
+  <tr>
+    <td class="muted small">{{ c.ts | int | datetime }}</td>
+    <td class="small">{{ c.actor }}</td>
+    <td><code>{{ c.env }}</code></td>
+    <td class="small"><span class="mono">{{ c.old }}</span> → <span class="mono">{{ c.new }}</span></td>
+  </tr>
+  {% endfor %}
+</table>
+</div>

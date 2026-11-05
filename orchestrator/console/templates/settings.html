@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block body %}
+<div class="row between">
+  <h1>設定</h1>
+  <span class="muted small">
+    env 覆寫 ＞ <code>{{ config_path }}</code>{% if not config_exists %}（尚未建立，第一次 Apply 會建）{% endif %} ＞ 預設。
+    Apply 即生效，不用 restart（除了 port / host）。
+  </span>
+</div>
+
+<div class="toc">
+  {% for g in groups %}<a href="#g-{{ g.name }}">{{ g.name }}</a>{% endfor %}
+  <a href="#changes">改動紀錄</a>
+</div>
+
+{% for g in groups %}
+<div id="g-{{ g.name }}">{% include "_group.html" %}</div>
+{% endfor %}
+
+<section class="card" id="changes">
+  <h2>改動紀錄</h2>
+  {% include "_changes.html" %}
+</section>
+{% endblock %}

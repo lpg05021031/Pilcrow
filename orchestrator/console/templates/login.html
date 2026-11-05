@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}登入{% endblock %}
+{% block body %}
+<section class="card narrow">
+  <h1>登入控制台</h1>
+  <p class="muted">貼上 suite.env / secrets.env 裡的 <code>ORCH_API_KEY</code>。</p>
+  {% if error %}<p class="err">key 不對。</p>{% endif %}
+  <form method="post" action="/console/login">
+    <input type="hidden" name="next" value="{{ next }}">
+    <label>ORCH_API_KEY <input type="password" name="token" autofocus required></label>
+    <button class="primary">進入</button>
+  </form>
+</section>
+{% endblock %}

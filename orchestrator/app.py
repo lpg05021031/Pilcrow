@@ -26,7 +26,7 @@ from pydantic import BaseModel
 from orchestrator import clients
 from orchestrator.core import run_review
 from orchestrator.models import ReviewResult
-from orchestrator import jobs, knowledge, progress
+from orchestrator import console, jobs, knowledge, progress
 from shared.azdo import find_pr_url
 from shared.settings import fail_fast, settings
 
@@ -43,6 +43,7 @@ async def _lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="review-orchestrator", lifespan=_lifespan)
+console.mount(app)          # /console/*：控制台（S2 起）
 
 MODEL_ID = "pr-reviewer"
 HELP_TEXT = (

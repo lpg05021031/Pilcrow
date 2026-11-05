@@ -13,9 +13,17 @@ from typing import Any
 from langfuse import get_client
 from langfuse.openai import AsyncOpenAI  # drop-in：呼叫自動變 generation span
 
-from shared.settings import settings
+from shared.settings import on_reload, settings
 
 _client: AsyncOpenAI | None = None
+
+
+def _drop_client() -> None:
+    global _client
+    _client = None
+
+
+on_reload(_drop_client)       # 控制台改 LLM_BASE_URL / API key → 下一次呼叫重建
 
 
 def _llm() -> AsyncOpenAI:
