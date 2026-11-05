@@ -13,20 +13,24 @@
 
 ```
 Open WebUI (:3001)
-   └─ review-orchestrator (:8080)   ← 唯一接 Langfuse 的服務
-        ├─ ① ado_pr_tools   (:8094)  唯讀：PR metadata / diff
-        ├─ ② repo_reader    (:8095)  唯讀（v2 零呼叫者；可除役或留作擴充面）
-        ├─ ③ review_result  (:8096)  唯寫：回貼留言（review 稿 / 知識稿分道）
-        ├─ ④ code graph     (:8097)  選配：影響半徑（per-call repo_root 切庫）
-        ├─ REPOS_ROOT/               唯讀鏡像庫（repo-sync timer 保鮮）
-        ├─ RULES_ROOT/               團隊規則（git、SHA 錨、targeted 載入）
-        └─ KNOWLEDGE_ROOT/           決策帳本（本系統的第二個輸出）
-Langfuse (:3000)                      trace / prompt 版控 / eval 儀表
+   └─ pr-review orchestrator (:8080)   ← 唯一的行程、唯一接 Langfuse 的服務
+        ├─ adapters/ado           Azure DevOps 讀（metadata / diff）＋寫（review 稿 / 知識稿；
+        │                         DRY_RUN × AUTO_POST、KNOWLEDGE_POST 雙開關，每次寫入留稽核）
+        ├─ jobs/                  行程內排程：repo-sync（每 10 分）、knowledge-harvest（每 30 分）
+        │                         狀態進 /healthz，doctor 一列一個
+        ├─ ④ code graph (:8097)   選配、外部行程：影響半徑（per-call repo_root 切庫）
+        ├─ REPOS_ROOT/            唯讀鏡像庫（repo-sync 保鮮）
+        ├─ RULES_ROOT/            團隊規則（git、SHA 錨、targeted 載入）
+        └─ KNOWLEDGE_ROOT/        決策帳本（本系統的第二個輸出；harvest 是唯一 commit 者）
+Langfuse (:3000)                       trace / prompt 版控 / eval 儀表
 ```
 
-讀與寫刻意拆成不同服務（①② 唯讀、③ 唯寫），權限治理可以只放行讀。
+2026-11-06（S1）之前這裡是 5 個行程、4 個 port：①②③ 三個 MCP 工具服務加兩組
+systemd timer。它們唯一的呼叫者就是 orchestrator、又在同一台機器，所以併回行程內
+（見 `CHANGES-2026-11-06-s1.md`；完整路線圖見 `PLAN-2026-11-06-console.md`）。
+讀寫的權限分界改以 `DRY_RUN` / `KNOWLEDGE_POST` 開關與寫入稽核紀錄承擔。
 repo 從 PR URL 現場解析——整套系統 **repo-agnostic**，每顆 repo 的裝備分三檔：
-零設定（完整 review、缺 base 上下文）→ +clone（base 上下文，timer 自動保鮮）
+零設定（完整 review、缺 base 上下文）→ +clone（base 上下文，repo-sync 自動保鮮）
 → +graph（影響半徑）。
 
 ## 2. 五條承重牆（設計哲學）
@@ -56,19 +60,19 @@ PR description」，驗不過的 evidence 剝掉、剝光的整條不入稿，�
 
 **四、不新增服務；重用已驗證的模式。**
 知識帳本完整複製 rules repo 的成功模式（本地 git、SHA 錨、targeted
-載入）；所有背景工作都是「timer + oneshot + journal」三件套；狀態帳本
+載入）；所有背景工作都是行程內的排程迴圈（狀態進 `/healthz`）；狀態帳本
 就是 git。輪詢、不開 webhook；**每個資料域只有一個寫手**（repos 歸
-repo-sync、knowledge 歸 harvester、pending 只寫檔不碰 git），併發衝突
+repo-sync job、knowledge 歸 harvest job、pending 只寫檔不碰 git），併發衝突
 從結構上不存在。
 
 **五、對外的每一次寫入都有雙開關縱深。**
-`AUTO_POST`（orchestrator 點火）×`DRY_RUN`（③ 煞車）管 review 回貼；
+`AUTO_POST`（orchestrator 點火）×`DRY_RUN`（adapter 煞車）管 review 回貼；
 `KNOWLEDGE_POST` 管小 PR 蒸餾稿；`KNOWLEDGE_DIGEST` 管收口 digest。
 出廠全安全側，誤設任何單顆都不會誤發。
 
 ## 3. Review pipeline（v2，九站）
 
-1. **取件**（code）— ① 拉 metadata 與 diff。
+1. **取件**（code）— adapters/ado 拉 metadata 與三點 diff。
 2. **解剖 + 靜態**（code）— anatomy 標定真實新行號、稀疏重建；semgrep
    （Java 規則家族實測校準）＋ ruff ＋ 啟發式；**確定性 MISSING-TEST**：
    diff 有新宣告且零測試檔 → conf 1.0 保底，跟模型無關。只評新增行。
@@ -224,9 +228,10 @@ ADO_PAT 真打一次 API；`--no-network` 給 CI；`--json` 給日後的狀態�
 
 | 開關 | 組 | 管什麼 | 出廠 |
 |---|---|---|---|
-| `AUTO_POST` | orchestrator | review 完是否呼叫 ③ | false |
-| `DRY_RUN` | tools | ③ 收到 review 稿是否真發 | true |
-| `KNOWLEDGE_POST` | tools | 小 PR 蒸餾稿是否真貼 | false |
+| `AUTO_POST` | orchestrator | review 完是否回貼 | false |
+| `DRY_RUN` | posting | review 稿是否只預覽不真發 | true |
+| `KNOWLEDGE_POST` | posting | 小 PR 蒸餾稿是否真貼 | false |
+| `REPO_SYNC_INTERVAL_MIN` / `HARVEST_INTERVAL_MIN` | jobs | 行程內排程間隔；0 = 關 | 10 / 30 |
 | `KNOWLEDGE_DIGEST` | knowledge | 收口 digest 是否貼 | true |
 | `KNOWLEDGE_DIGEST_LLM` | knowledge | digest 顧問分析（提案，不落地） | true |
 | `KNOWLEDGE_ROOT/_BRANCHES/_CYCLE_*` | knowledge | K 段開關與節奏 | 未設=停用 |
@@ -234,12 +239,11 @@ ADO_PAT 真打一次 API；`--no-network` 給 CI；`--json` 給日後的狀態�
 | `ORCH_API_KEY` + `ORCH_URL` | orchestrator | 重蒸端點的鑰匙與位址（harvester 共用） | 未設=不驗 |
 | `GRAPH_TOOL_BLAST_ARGS`（`$repo_dir`） | graph | graph 多 repo 自動切庫 | — |
 | `REVIEW_PIPELINE` | orchestrator | v1/v2 十秒回滾 | v1 |
-| `ADO_TOOLS_PORT` 等三顆 | tools | ①②③ 綁哪個 port；orchestrator 的 URL 由此推得 | 8094/8095/8096 |
 
-服務判讀口訣：**常駐組怕 dead、定時組怕 failed**（oneshot 平時
-`inactive (dead)` 是待命不是屍體，看 `list-timers` 的 NEXT/LAST）。
+服務判讀：只有一個 unit，`review-orchestrator` 要 active；兩個排程 job 的
+上次成功 / 失敗 / 下次時間看 `/healthz` 的 `jobs` 或 doctor 的 `[jobs]` 組。
 env 是行程啟動時讀的：改完必 restart，活體對帳用
-`/proc/<MainPID>/environ`。血淚榜首：installer 跑完必 `chown`；
+`python -m shared.doctor`。血淚榜首：installer 跑完必 `chown`；
 env 值一律單引號；systemd unit 的 PATH 要含 venv。
 
 ## 7. 目錄地圖
@@ -250,14 +254,15 @@ orchestrator/   pipeline、planner/reviewer/adversary、synthesis、render、
                 knowledge.py（K1+K2+loader+條目 ID+證據驗證+重蒸）、
                 knowledge_digest.py（digest 渲染＋顧問分析）、
                 knowledge_harvest.py（唯一寫手；重蒸只偵測不執行）
-tools/          ①②③ FastMCP 服務
+orchestrator/adapters/ado.py   Azure DevOps 讀寫（原 ①③，S1 併入行程）
+orchestrator/jobs.py           行程內排程：repo-sync、knowledge-harvest（原兩組 timer）
 shared/         settings.py（全套設定的唯一讀取點：schema、預設、--show/--check/--example）、
                 azdo.py（ADO URL 解析與 HTTP client）—— 笨層，無業務邏輯
 eval/           golden fixtures（30 題）、knowledge/ + knowledge_cases/（5 題
                 知識依賴題與其種子帳本）、distill/（10 題蒸餾考卷）、
                 run_eval、run_distill_eval、seed_langfuse（六份 prompt）
-deploy/         env/suite.env.example（由 schema 生成，勿手改）、systemd 樣板、
-                semgrep starter、knowledge 模板
+deploy/         env/suite.env.example（由 schema 生成，勿手改）、systemd 樣板（只剩
+                orchestrator 一個必要 unit）、semgrep starter、knowledge 模板
 docs/           三張流程/原型 HTML（主線、知識迴圈、wiki 條目）
 RUNBOOK.md      Phase 0–10：從裸機到知識迴圈的逐步部署
 ```

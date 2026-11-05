@@ -108,12 +108,12 @@ class _Group(BaseSettings):
 # ---------- 各組 ----------
 
 class Ado(_Group):
-    """Azure DevOps 連線與 diff 抓取（① ado_pr_tools、③ review_result_tools、harvester 共用）。"""
+    """Azure DevOps 連線與 diff 抓取（orchestrator/adapters/ado.py 與 harvester 共用）。"""
 
     pat: SecretStr = Field(
         SecretStr(""), alias="ADO_PAT",
-        description="Azure DevOps Personal Access Token。唯讀服務至少 Code > Read；"
-                    "③ 要真發留言需 Code > Read & Write。全套只填這一次。",
+        description="Azure DevOps Personal Access Token。只讀 PR 至少 Code > Read；"
+                    "要真發留言需 Code > Read & Write。全套只填這一次。",
         json_schema_extra={"example": "changeme", "required": True})
     verify_ssl: VerifySsl = Field(
         True, alias="ADO_VERIFY_SSL",
@@ -131,48 +131,30 @@ class Ado(_Group):
         description="抓檔併發度。每檔要抓 base/head 兩份；先確認 proxy/ADO 沒有連線數限制。")
 
 
-class Tools(_Group):
-    """①②③ 三個 MCP 工具服務的綁定位址，以及 orchestrator 怎麼找到它們。"""
+class Posting(_Group):
+    """對 Azure DevOps 的寫入開關（出廠全安全側；與 AUTO_POST 疊成雙保險）。"""
 
-    host: Stripped = Field(
-        "127.0.0.1", alias="HOST",
-        description="三個工具服務綁定的位址；只給同機 orchestrator 用就留 loopback。")
-    ado_port: int = Field(
-        8094, validation_alias=AliasChoices("ADO_TOOLS_PORT", "PORT"),
-        description="① ado_pr_tools 的 port。")
-    reader_port: int = Field(
-        8095, validation_alias=AliasChoices("READER_TOOLS_PORT", "PORT"),
-        description="② repo_reader_tools 的 port。")
-    result_port: int = Field(
-        8096, validation_alias=AliasChoices("RESULT_TOOLS_PORT", "PORT"),
-        description="③ review_result_tools 的 port。")
-    ado_url_override: str | None = Field(
-        None, alias="ADO_TOOLS_URL",
-        description="orchestrator 呼叫 ① 的 URL；未設 = http://127.0.0.1:<ADO_TOOLS_PORT>/mcp。")
-    reader_url_override: str | None = Field(
-        None, alias="READER_TOOLS_URL",
-        description="orchestrator 呼叫 ② 的 URL；未設 = 由 READER_TOOLS_PORT 推得。")
-    result_url_override: str | None = Field(
-        None, alias="RESULT_TOOLS_URL",
-        description="orchestrator 呼叫 ③ 的 URL；未設 = 由 RESULT_TOOLS_PORT 推得。")
     dry_run: bool = Field(
         True, alias="DRY_RUN",
-        description="③ 收到 review 稿是否只預覽不真發。內測期間保持 true（安全氣囊）。")
+        description="review 稿是否只預覽不真發。內測期間保持 true（安全氣囊）；"
+                    "要真發需同時 AUTO_POST=true。")
     knowledge_post: bool = Field(
         False, alias="KNOWLEDGE_POST",
-        description="③ 收到知識蒸餾稿是否真貼到 PR。跟 DRY_RUN 刻意分家，可先行試點。")
+        description="知識蒸餾稿是否真貼到 PR。跟 DRY_RUN 刻意分家，可先行試點。")
 
-    @property
-    def ado_url(self) -> str:
-        return self.ado_url_override or f"http://127.0.0.1:{self.ado_port}/mcp"
 
-    @property
-    def reader_url(self) -> str:
-        return self.reader_url_override or f"http://127.0.0.1:{self.reader_port}/mcp"
+class Jobs(_Group):
+    """行程內排程（原 repo-sync / knowledge-harvest 兩組 systemd timer）。0 = 關；對應 root 未設也不排。"""
 
-    @property
-    def result_url(self) -> str:
-        return self.result_url_override or f"http://127.0.0.1:{self.result_port}/mcp"
+    repo_sync_interval_min: int = Field(
+        10, alias="REPO_SYNC_INTERVAL_MIN", ge=0,
+        description="每隔幾分鐘把 REPOS_ROOT 底下的 clone git pull --ff-only 一次。")
+    harvest_interval_min: int = Field(
+        30, alias="HARVEST_INTERVAL_MIN", ge=0,
+        description="每隔幾分鐘跑一次 knowledge harvest（PR 終態裁決 + 落地 + commit）。")
+    graph_rebuild: Switch = Field(
+        "auto", alias="REPO_SYNC_GRAPH_REBUILD",
+        description="repo-sync 後是否跑 code-review-graph build。auto = 裝了就跑。")
 
 
 class Llm(_Group):
@@ -301,16 +283,13 @@ class Static(_Group):
 
 
 class Repos(_Group):
-    """本地乾淨 clone（base 上下文）與 ② repo_reader 的 repo 佈局。"""
+    """本地乾淨 clone（base 上下文）。REPOS_ROOT/<repo小寫>/ 一 repo 一顆，jobs 的 repo-sync 保鮮。"""
 
     repos_root: Path | None = Field(
         None, alias="REPOS_ROOT",
         description="REPOS_ROOT/<repo小寫>/ 一 repo 一顆 clone（target branch），"
-                    "repo-sync timer 保鮮。未設 = 沒有 base 上下文，review 照跑。",
+                    "jobs 的 repo-sync 保鮮。未設 = 沒有 base 上下文，review 照跑。",
         json_schema_extra={"example": "/opt/repos"})
-    repo_root: Path | None = Field(
-        None, alias="REPO_ROOT",
-        description="【已淘汰】舊版單 repo 模式，只有 ② 還認。改用 REPOS_ROOT。")
     context_lines: int = Field(
         6, alias="CONTEXT_LINES", ge=0,
         description="每個 hunk 從 base 取舊行號附近 ±N 行。")
@@ -380,7 +359,7 @@ class Knowledge(_Group):
 
     root: Path | None = Field(
         None, alias="KNOWLEDGE_ROOT",
-        description="本地 knowledge repo 路徑（harvester timer 是唯一 commit 者）。",
+        description="本地 knowledge repo 路徑（行程內的 harvest job 是唯一 commit 者）。",
         json_schema_extra={"example": "/opt/pr-review-knowledge"})
     branches: CsvList = Field(
         ["master", "main"], alias="KNOWLEDGE_BRANCHES",
@@ -449,7 +428,8 @@ class Settings(BaseModel):
     model_config = {"frozen": True}
 
     ado: Ado = Field(default_factory=Ado)
-    tools: Tools = Field(default_factory=Tools)
+    posting: Posting = Field(default_factory=Posting)
+    jobs: Jobs = Field(default_factory=Jobs)
     llm: Llm = Field(default_factory=Llm)
     langfuse: Langfuse = Field(default_factory=Langfuse)
     orchestrator: Orchestrator = Field(default_factory=Orchestrator)
@@ -464,7 +444,7 @@ class Settings(BaseModel):
     def knobs(self) -> dict[str, Any]:
         """進 trace metadata 的旋鈕快照（影響 review 結果的那幾組；無 secrets）。"""
         out: dict[str, Any] = {}
-        for grp in (self.orchestrator, self.review, self.static,
+        for grp in (self.orchestrator, self.posting, self.review, self.static,
                     self.repos, self.graph, self.rules, self.knowledge):
             for name, info in type(grp).model_fields.items():
                 v = getattr(grp, name)
@@ -474,8 +454,12 @@ class Settings(BaseModel):
         return out
 
 
-GROUP_ORDER = ("ado", "tools", "llm", "langfuse", "orchestrator", "review",
+GROUP_ORDER = ("ado", "posting", "llm", "langfuse", "orchestrator", "jobs", "review",
                "static", "repos", "graph", "rules", "knowledge", "eval")
+
+# S1 之前有意義、現在整組退場的名字：還留在 env 檔裡就提醒，別讓人以為它們還管事。
+RETIRED_ENV = ("HOST", "PORT", "ADO_TOOLS_PORT", "READER_TOOLS_PORT", "RESULT_TOOLS_PORT",
+               "ADO_TOOLS_URL", "READER_TOOLS_URL", "RESULT_TOOLS_URL", "REPO_ROOT")
 
 _cached: Settings | None = None
 
@@ -607,16 +591,15 @@ def warnings_for(s: Settings | None = None) -> list[str]:
     """設定層就看得出來的問題（不打網路；那是 doctor 的事）。"""
     s = s or settings()
     out: list[str] = []
-    if os.getenv("REPO_ROOT", ""):
-        out.append("REPO_ROOT 已淘汰，只有 ② 還認；改用 REPOS_ROOT。")
-    if os.getenv("PORT", "") and not any(os.getenv(n, "") for n in
-                                         ("ADO_TOOLS_PORT", "READER_TOOLS_PORT",
-                                          "RESULT_TOOLS_PORT")):
-        out.append("偵測到舊式 PORT：單一 env 檔請改用 ADO_TOOLS_PORT / "
-                   "READER_TOOLS_PORT / RESULT_TOOLS_PORT，否則三個服務會搶同一個 port。")
-    if s.orchestrator.auto_post and s.tools.dry_run:
-        out.append("AUTO_POST=true 但 DRY_RUN=true：review 會「假發」——③ 只回預覽。"
+    stale = [n for n in RETIRED_ENV if os.getenv(n, "")]
+    if stale:
+        out.append("這些變數已無作用（①②③ 已併入 orchestrator 行程、② 已移除），"
+                   f"從 env 檔刪掉：{', '.join(stale)}")
+    if s.orchestrator.auto_post and s.posting.dry_run:
+        out.append("AUTO_POST=true 但 DRY_RUN=true：review 會「假發」——只回預覽。"
                    "（這是出廠安全側，確認要真發再翻 DRY_RUN）")
+    if s.jobs.harvest_interval_min and s.knowledge.root is None:
+        pass                      # harvest 只在 KNOWLEDGE_ROOT 有設時排，不算問題
     if s.knowledge.root is not None and not s.knowledge.root.is_dir():
         out.append(f"KNOWLEDGE_ROOT 指向不存在的目錄：{s.knowledge.root}（K 段視同停用）")
     if s.rules.root is not None and not s.rules.root.is_dir():

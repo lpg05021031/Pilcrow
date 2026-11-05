@@ -18,8 +18,8 @@ def test_defaults_match_legacy_code(monkeypatch):
     assert s.orchestrator.pipeline == "v1"
     assert s.review.max_findings == 30 and s.review.min_confidence == 0.55
     assert s.knowledge.branches == ["master", "main"]
-    assert s.tools.ado_url == "http://127.0.0.1:8094/mcp"
-    assert s.tools.dry_run is True and s.tools.knowledge_post is False
+    assert s.posting.dry_run is True and s.posting.knowledge_post is False
+    assert s.jobs.repo_sync_interval_min == 10 and s.jobs.harvest_interval_min == 30
     assert s.ado.verify_ssl is True
     assert s.static.semgrep == "auto"
     assert s.knowledge.enabled is False and s.graph.enabled is False
@@ -69,16 +69,14 @@ def test_tri_state_and_switch_parsing(monkeypatch):
     assert S.settings().ado.verify_ssl is False
 
 
-def test_tool_ports_derive_urls_and_accept_legacy_port(monkeypatch):
+def test_retired_tool_names_are_flagged_not_honoured(monkeypatch):
+    _clear_all(monkeypatch)
     monkeypatch.setenv("ADO_TOOLS_PORT", "8094")
-    monkeypatch.setenv("RESULT_TOOLS_URL", "http://10.0.0.5:9000/mcp")
-    s = S.settings()
-    assert s.tools.ado_port == 8094
-    assert s.tools.ado_url == "http://127.0.0.1:8094/mcp"
-    assert s.tools.result_url == "http://10.0.0.5:9000/mcp"
-    monkeypatch.delenv("ADO_TOOLS_PORT")
-    monkeypatch.setenv("PORT", "8099")                      # 舊式單服務 env 檔
-    assert S.settings().tools.ado_port == 8099
+    monkeypatch.setenv("REPO_ROOT", "/srv/x")
+    s = S.settings()                                        # 不得 raise、不得有該欄位
+    assert not hasattr(s, "tools")
+    w = "\n".join(S.warnings_for(s))
+    assert "ADO_TOOLS_PORT" in w and "REPO_ROOT" in w and "已無作用" in w
 
 
 def test_enabled_flags_follow_directories(tmp_path, monkeypatch):
@@ -108,8 +106,8 @@ def test_every_legacy_env_name_is_still_recognised():
     """程式裡曾經 getenv 過的名字，schema 一個都不能漏。"""
     legacy = {
         "ADO_PAT", "ADO_VERIFY_SSL", "ADO_DIFF_MAX_FILES", "ADO_DIFF_MAX_FILE_BYTES",
-        "ADO_DIFF_FETCH_CONCURRENCY", "HOST", "PORT", "ADO_TOOLS_URL",
-        "READER_TOOLS_URL", "RESULT_TOOLS_URL", "DRY_RUN", "KNOWLEDGE_POST",
+        "ADO_DIFF_FETCH_CONCURRENCY", "DRY_RUN", "KNOWLEDGE_POST",
+        "REPO_SYNC_INTERVAL_MIN", "HARVEST_INTERVAL_MIN", "REPO_SYNC_GRAPH_REBUILD",
         "LLM_BASE_URL", "LLM_API_KEY", "LLM_MODEL", "LLM_MODEL_ADVERSARY",
         "LLM_MODEL_DIGEST", "LLM_TIMEOUT_S", "REVIEW_PIPELINE", "AUTO_POST",
         "REVIEW_DEDUPE_TTL", "ORCH_API_KEY", "ORCH_URL", "REVIEW_MAX_DIMENSIONS",
@@ -117,7 +115,7 @@ def test_every_legacy_env_name_is_still_recognised():
         "REVIEW_MAX_FINDINGS", "REVIEW_ADVERSARY", "ADVERSARY_CHUNK",
         "REVIEWER_RULES_MAX_CHARS", "REVIEWER_SLICES_MAX_CHARS",
         "REVIEWER_FILE_SLICE_MAX_CHARS", "STATIC_SEMGREP", "STATIC_RUFF",
-        "STATIC_TIMEOUT", "STATIC_MISSING_TEST", "REPOS_ROOT", "REPO_ROOT",
+        "STATIC_TIMEOUT", "STATIC_MISSING_TEST", "REPOS_ROOT",
         "CONTEXT_LINES", "CONTEXT_MAX_CHARS", "GRAPH_TOOLS_URL", "GRAPH_TOOL_BLAST",
         "GRAPH_TOOL_BLAST_ARGS", "GRAPH_REPO", "RULES_ROOT", "RULES_SUBDIR",
         "RULES_COMMON_DIR", "RULES_MAX_CHARS", "KNOWLEDGE_ROOT", "KNOWLEDGE_BRANCHES",
@@ -160,7 +158,7 @@ def test_warnings_catch_config_smells(tmp_path, monkeypatch):
     monkeypatch.setenv("PORT", "8094")
     w = "\n".join(S.warnings_for())
     assert "DRY_RUN=true" in w and "KNOWLEDGE_ROOT" in w
-    assert "GRAPH_TOOL_BLAST" in w and "PORT" in w
+    assert "GRAPH_TOOL_BLAST" in w and "PORT" in w and "已無作用" in w
 
 
 def test_fail_fast_exits_with_readable_message(monkeypatch, capsys):

@@ -33,9 +33,8 @@ prs venv/bin/python -m shared.doctor --pr-url <一條真 PR 的 URL>
 ```
 
 預期末行 `→ 可以上工`；任何 FAIL 列都附帶該去看什麼。沒有 shared/doctor.py
-的舊版主機才需要手動：`systemctl is-active review-orchestrator pr-review-ado
-pr-review-reader pr-review-results` 四個 `active` + `curl -s localhost:8080/healthz`
-回 `{"ok":true}`。
+的舊版主機才需要手動：`systemctl is-active review-orchestrator` 是 `active` +
+`curl -s localhost:8080/healthz` 回 `{"ok":true, ...}`。
 
 **0.4 全量快照**（installer 自帶逐檔備份，這是雙保險、一鍵還原用）：
 
@@ -108,7 +107,7 @@ Environment=PATH=/opt/pr-review-suite/venv/bin:/usr/local/bin:/usr/bin:/bin
 
 ---
 
-## Phase 3：本地 clone 佈局 + sync timer
+## Phase 3：本地 clone 佈局（同步由行程內排程負責）
 
 **3.1** 目錄命名規則先搞對：`/opt/repos/<repo小寫>/`，`<repo>` 必須等於
 PR URL 裡 `_git/<這段>` 的**小寫**。拿一條真 PR URL 驗證你要用的名字：
@@ -136,7 +135,7 @@ sudo -u svc-review git clone --branch main \
 # 方案 B（PAT 不落地）：credential.helper store，第一次 clone 互動輸入一次
 ```
 
-**3.4** 關鍵驗證——timer 之後做的就是這件事，先手動確認它不會卡互動：
+**3.4** 關鍵驗證——repo-sync job 之後做的就是這件事，先手動確認它不會卡互動：
 
 ```bash
 sudo -u svc-review git -C /opt/repos/<repo小寫> pull --ff-only
@@ -144,37 +143,33 @@ sudo -u svc-review git -C /opt/repos/<repo小寫> pull --ff-only
 
 預期 `Already up to date.`。跳出要帳密 → 回 3.3；SSL 錯 → 回 3.2。
 
-**3.5** timer 上線：
+**3.5** 同步排程：**不再有 timer**。orchestrator 啟動後每 `REPO_SYNC_INTERVAL_MIN`
+（預設 10）分鐘自己 pull 一輪；間隔與 graph 重建開關在 suite.env 的 `[jobs]` 組。
+先手動跑一次確認：
 
 ```bash
-sudo cp /opt/pr-review-suite/deploy/systemd/pr-review-repo-sync.service.example /etc/systemd/system/pr-review-repo-sync.service
-sudo cp /opt/pr-review-suite/deploy/systemd/pr-review-repo-sync.timer.example  /etc/systemd/system/pr-review-repo-sync.timer
-# 若之後裝 code-review-graph 進 venv，這個 service 也要 PATH（現在順手做掉）：
-sudo systemctl edit pr-review-repo-sync   # 寫入與 2.2 相同的 [Service] Environment=PATH=…
-sudo systemctl daemon-reload
-sudo systemctl enable --now pr-review-repo-sync.timer
-sudo systemctl start pr-review-repo-sync.service     # 手動觸發一次
-journalctl -u pr-review-repo-sync.service -n 20 --no-pager
+prs venv/bin/python -m orchestrator.jobs repo-sync
 ```
 
-預期每個 repo 一行 `[repo-sync] <名字> -> <sha>`。
-`pull 失敗` → 回 3.4 的兩個病因。
+預期每個 repo 一行 `[repo-sync] <名字> -> <sha>`；`pull 失敗` → 回 3.4 的兩個病因。
+服務起來之後看狀態：`curl -s localhost:8080/healthz | python -m json.tool`
+的 `jobs.repo-sync`（last_ok / last_detail / next_run），或 doctor 的 `[jobs]` 組。
+舊機器若還裝著 `pr-review-repo-sync.timer`，`disable --now` 並刪檔——留著會跟行程內
+排程重複 pull。
 
 ---
 
 ## Phase 4：env 合一 + 重啟
 
 **4.0 四份 env 檔合成一份**（只做一次；之前沒有四份檔的新機器直接從 4.0b 開始）。
-變數名一個都沒改，所以舊檔內容原樣可用；唯一新名字是三個 port——舊檔各自的
-`PORT=` 在單一檔裡會互撞，要改成 `ADO_TOOLS_PORT` / `READER_TOOLS_PORT` /
-`RESULT_TOOLS_PORT`（舊名 `PORT` 仍認，但只適合舊式一服務一檔）：
+變數名一個都沒改，所以舊檔內容原樣可用。S1 之後 ①②③ 已併入 orchestrator，
+`HOST` / `PORT` / `REPO_ROOT` 整個退場，合併時直接濾掉：
 
 ```bash
 cd /etc/pr-review-suite
 sudo cat orchestrator.env ado.env reader.env results.env \
-  | grep -vE '^(HOST|PORT|ADO_PAT|ADO_VERIFY_SSL|HTTPS_PROXY)=' > suite.env.tmp
+  | grep -vE '^(HOST|PORT|REPO_ROOT|ADO_PAT|ADO_VERIFY_SSL|HTTPS_PROXY)=' > suite.env.tmp
 sudo grep -hE '^(ADO_PAT|ADO_VERIFY_SSL|HTTPS_PROXY)=' ado.env | sort -u >> suite.env.tmp
-printf 'HOST=127.0.0.1\nADO_TOOLS_PORT=8094\nREADER_TOOLS_PORT=8095\nRESULT_TOOLS_PORT=8096\n' >> suite.env.tmp
 sudo mv suite.env.tmp suite.env && sudo chmod 600 suite.env && sudo chown root:root suite.env
 ```
 
@@ -203,23 +198,33 @@ v2 其他旋鈕（REVIEW_MIN_CONFIDENCE 等）先**全用預設**，不要現在
 **4.2** 若 `suite.env` 裡還有 `REPO_ROOT=…`（舊版單 repo），整行刪掉；
 `REPOS_ROOT` 已在 4.1。`--show` 的注意段會提醒。
 
-**4.2b** 十個 systemd 樣板的 `EnvironmentFile=` 已全部指向 `suite.env`；
-已部署的 unit 實檔請同步改（`sudo systemctl edit --full <unit>` 或重 cp 樣板）。
+**4.2b** S1 之後只剩一個 unit。拆掉舊的五個、換上新樣板（樣板已內含 PATH）：
 
-**4.3** 重啟 + 活體對帳（你們自己的招）：
+```bash
+sudo systemctl disable --now pr-review-ado pr-review-reader pr-review-results \
+     pr-review-repo-sync.timer pr-review-knowledge-harvest.timer 2>/dev/null
+sudo rm -f /etc/systemd/system/pr-review-{ado,reader,results}.service \
+           /etc/systemd/system/pr-review-{repo-sync,knowledge-harvest}.{service,timer}
+sudo cp /opt/pr-review-suite/deploy/systemd/review-orchestrator.service.example \
+        /etc/systemd/system/review-orchestrator.service
+```
+
+suite.env 裡的 `HOST` / `PORT` / `*_TOOLS_PORT` / `*_TOOLS_URL` / `REPO_ROOT` 已無作用，
+刪掉（留著 doctor 會一直提醒）。
+
+**4.3** 重啟 + 活體對帳：
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl restart review-orchestrator pr-review-reader
-for s in review-orchestrator pr-review-reader; do
-  echo "== $s"; sudo cat /proc/$(systemctl show -p MainPID --value $s)/environ | tr '\0' '\n' | grep -E '^(REVIEW_PIPELINE|REPOS_ROOT|RULES_ROOT|PATH)='
-done
-curl -s localhost:8080/healthz
+sudo systemctl restart review-orchestrator
+sudo cat /proc/$(systemctl show -p MainPID --value review-orchestrator)/environ | tr '\0' '\n' | grep -E '^(REVIEW_PIPELINE|REPOS_ROOT|RULES_ROOT|PATH)='
+curl -s localhost:8080/healthz | python3 -m json.tool
 ```
 
-判讀：orchestrator 要看到 `REVIEW_PIPELINE=v1`、`REPOS_ROOT`、PATH 開頭是
-venv/bin；reader 要看到 `REPOS_ROOT`。少哪個 = 哪個 env/override 沒生效
-（restart 而非 reload？CRLF？override 檔存了嗎？）。
+判讀：要看到 `REVIEW_PIPELINE=v1`、`REPOS_ROOT`、PATH 開頭是 venv/bin；healthz 的
+`jobs` 要列出 repo-sync（enabled true）。少哪個 = 哪個 env 沒生效
+（restart 而非 reload？CRLF？）。之後所有「活體對帳」都可以用
+`prs venv/bin/python -m shared.doctor` 一次做完。
 
 ---
 
@@ -354,7 +359,7 @@ sudo -u <服務user> bash -c 'export PATH=<安裝根>/venv/bin:$PATH; cd <REPOS_
 ```
 
 預期最後一行 `Full build: N files, X nodes, Y edges`。之後不用再手動——
-3.5 的 timer 每輪 pull 完會自動 `build`（增量，只重解析有改的檔）。
+3.5 的 repo-sync job 每輪 pull 完會自動 `build`（增量，只重解析有改的檔；`REPO_SYNC_GRAPH_REBUILD=off` 可關）。
 `igraph not available` 的 INFO 行無害（社群偵測退用檔案模式）。
 
 **8.3 起 MCP server（systemd）**：
@@ -381,8 +386,8 @@ unit 的 ExecStart 骨架（example 檔裡就是這個）：
 判讀：journal 出現 uvicorn 的啟動行即可。**用 curl 打 `/mcp` 會回 406，
 這是正常的**（MCP over HTTP 要特定 Accept header）——健康檢查請用 8.4
 的 list tools，別被 406 騙去 debug。設計取捨：unit 刻意**不開**
-`--auto-watch`，讓 3.5 的 timer 當 graph 的唯一寫入者（單一寫手，
-避免和 timer 的 build 併發搶 SQLite）。
+`--auto-watch`，讓 3.5 的 repo-sync job 當 graph 的唯一寫入者（單一寫手，
+避免和 job 的 build 併發搶 SQLite）。
 
 **8.4 驗收 + 填 env**。先 list tools：
 
@@ -419,7 +424,7 @@ GRAPH_TOOL_BLAST_ARGS='{"changed_files": $files, "repo_root": "<REPOS_ROOT>/$rep
 
 （`$repo_dir` 代入「repo 名小寫、無引號」；此模式 **GRAPH_REPO 留空**；
 serve 啟動時的 `--repo` 只是預設庫，隨便指主力那顆即可。前提：目標 repo
-要先 onboard 且 build 過圖——repo-sync timer 對 REPOS_ROOT 下所有 clone
+要先 onboard 且 build 過圖——repo-sync job 對 REPOS_ROOT 下所有 clone
 自動建圖，onboard 即涵蓋；未 onboard 的 repo 呼叫會失敗並優雅降級。）
 然後 `sudo systemctl restart review-orchestrator` + 4.3 活體對帳看到
 三個 GRAPH_ 變數。
@@ -471,9 +476,9 @@ graph 的貢獻才量得出來（離線 eval 本身查不到 graph，屬預期�
 6. **v2 比 v1 慢很多** → 正常（1 次呼叫變 4–6 次）。聊天體驗靠串流旁白
    撐；嫌太慢先降 `REVIEW_MAX_DIMENSIONS=3`、確認 `REVIEW_MAX_PARALLEL`
    沒被 gateway 限流卡住（journal 看 429/timeout）。
-7. **reader 起不來** → suite.env 改壞（CRLF/尾巴空白）或 REPOS_ROOT
-   打錯字；先 `prs venv/bin/python -m shared.settings --check`，
-   再 `journalctl -u pr-review-reader -n 30`，一定有一行說人話。
+7. **repo-sync 一直失敗**（doctor `[jobs] repo-sync FAIL` 或 healthz `last_ok: false`）
+   → 先 `prs venv/bin/python -m orchestrator.jobs repo-sync` 看那一行錯誤；八成是 3.4
+   的兩個病因（要帳密 / SSL），或 REPOS_ROOT 打錯字。
 8. **任何服務起不來、journal 第一行是「設定值有誤」** → 它會列出哪一顆變數、
    收到什麼值；這是 `fail_fast()` 在啟動時擋下的，修 suite.env 再 restart。
 
@@ -512,22 +517,24 @@ ORCH_URL=http://127.0.0.1:8080
 KNOWLEDGE_POST=false
 ```
 
-`restart review-orchestrator pr-review-results` → **re-seed**（`pr-review-distiller`
+`restart review-orchestrator` → **re-seed**（`pr-review-distiller`
 與 `pr-review-reviewer` 兩份 prompt 都要上 Langfuse；後者帶 `knowledge_ref` 合約）。
 
 ⚠ 設了 `ORCH_API_KEY` 之後，聊天室（Open WebUI）與腳本呼叫 `/review`
 都要帶 `Authorization: Bearer <key>`；`/eval-webhook` 刻意不驗（見 README）。
 
-### 10.3 harvest timer
+### 10.3 harvest 排程
+
+**不再有 timer**。`KNOWLEDGE_ROOT` 設了、orchestrator restart 之後，每
+`HARVEST_INTERVAL_MIN`（預設 30）分鐘跑一輪 harvest；0 = 關。手動觸發一輪：
 
 ```bash
-sudo cp deploy/systemd/pr-review-knowledge-harvest.service.example \
-     /etc/systemd/system/pr-review-knowledge-harvest.service
-sudo cp deploy/systemd/pr-review-knowledge-harvest.timer.example \
-     /etc/systemd/system/pr-review-knowledge-harvest.timer
-# 改 <你的user> / <安裝根> 佔位符
-sudo systemctl daemon-reload && sudo systemctl enable --now pr-review-knowledge-harvest.timer
+prs venv/bin/python -m orchestrator.jobs harvest
 ```
+
+狀態在 `/healthz` 的 `jobs.harvest` 或 doctor 的 `[jobs]` 組。舊機器若還裝著
+`pr-review-knowledge-harvest.timer`，一定要 `disable --now`：兩個 harvester 對同一個
+knowledge repo commit 會互撞。
 
 ### 10.4 驗證
 
@@ -554,7 +561,7 @@ curl -X POST localhost:8080/knowledge/redistill \
 ```
 
 真實動線：小 PR 貼了草稿之後再 push 一次、然後 complete →
-下一輪 timer 的 journal 會出現「請求重蒸（第 1/2 次，commit xxxxxxxx）」→
+下一輪 harvest job 的 journal 會出現「請求重蒸（第 1/2 次，commit xxxxxxxx）」→
 orchestrator 那邊「重蒸完成 → _pending 覆寫」→ 再下一輪「staged
 （silent·redistilled）」。作者先前的回覆逐字帶進重蒸材料，更新稿**回覆進原
 thread**（不開新 thread），開頭有 `Draft updated after new commits`。

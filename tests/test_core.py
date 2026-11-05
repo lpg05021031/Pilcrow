@@ -1215,12 +1215,11 @@ def test_redistill_is_once_per_pr(kroot, monkeypatch):
 
 
 def test_knowledge_draft_thread_reply_is_a_reply_not_a_new_thread(monkeypatch):
-    from tools.review_result_tools import server as S
+    from orchestrator.adapters import ado as S
     monkeypatch.setenv("KNOWLEDGE_POST", "false")
     url = "https://x/C/P/_git/repo-a/pullrequest/90"
-    call = getattr(S.post_knowledge_draft, "fn", S.post_knowledge_draft)
-    fresh = call(url, "body")
-    reply = call(url, "body", thread_id=7)
+    fresh = S.post_knowledge_draft(url, "body")
+    reply = S.post_knowledge_draft(url, "body", thread_id=7)
     assert fresh["would_post_to"].endswith("/threads")
     assert reply["would_post_to"].endswith("/threads/7/comments")
     assert reply["reply"] is True and reply["dry_run"] is True
@@ -1285,24 +1284,18 @@ def test_redistill_does_not_resurrect_a_dropped_draft(kroot, monkeypatch):
     assert not pend.exists()
 
 
-def test_post_knowledge_draft_omits_thread_id_for_old_result_servers(monkeypatch):
-    """版本偏移安全網：thread_id 為 None 時不送這個欄位，舊版 ③ 照常收稿。
-
-    ③ 若因未知參數報錯，會被當成「真的貼稿失敗」→ harvester 代貼，而那條路徑
-    不看 KNOWLEDGE_POST —— 影子期會因此誤發。
-    """
+def test_post_knowledge_draft_forwards_thread_id_to_the_adapter(monkeypatch):
+    """S1 之後 ③ 住在同一個行程：clients 只是 to_thread 的殼，thread_id 必須原樣到 adapter
+    （重蒸的更新稿要回進作者回過話的那串，不能開新 thread）。"""
     from orchestrator import clients
+    from orchestrator.adapters import ado
     sent = []
-
-    async def fake_call(url, tool, args):
-        sent.append((tool, args))
-        return {"posted": True}
-
-    monkeypatch.setattr(clients, "_call", fake_call)
+    monkeypatch.setattr(ado, "post_knowledge_draft",
+                        lambda pr_url, md, thread_id=None: sent.append((pr_url, md, thread_id))
+                        or {"posted": True})
     asyncio.run(clients.post_knowledge_draft("u", "md"))
     asyncio.run(clients.post_knowledge_draft("u", "md", thread_id=7))
-    assert sent[0][1] == {"pr_url": "u", "markdown": "md"}      # 舊介面原樣
-    assert sent[1][1]["thread_id"] == 7
+    assert sent == [("u", "md", None), ("u", "md", 7)]
 
 
 def test_cycle_close_first_sight_does_not_backfill(kroot, monkeypatch):
