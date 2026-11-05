@@ -221,3 +221,95 @@ pre.tall { max-height: 70vh; }
   .page-head, .content, .notices { padding-left: 16px; padding-right: 16px; }
   table.fields th { width: 50%; } .mono, code { word-break: break-all; }
 }
+
+
+/* ======================================================================
+   v2 版面：狀態頁與設定頁不再是「一堆卡片」。
+   狀態頁 = 一句結論 → 需要處理 → 餵料 ｜ 右欄活動時間軸、排程。
+   設定頁 = 左側段落索引 ｜ 依任務分段、每欄一列三格（說明 / 控件 / 狀態）、底部未套用列。
+   ====================================================================== */
+
+/* ---- 狀態：結論帶 ---- */
+.verdict { display: flex; align-items: stretch; justify-content: space-between; gap: 24px; padding: 22px 26px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); border-left-width: 6px; }
+.verdict.ok { border-left-color: var(--ok); } .verdict.degraded { border-left-color: var(--warn); } .verdict.down { border-left-color: var(--fail); }
+.verdict-title { font-size: 26px; font-weight: 650; letter-spacing: -.02em; line-height: 1.15; }
+.verdict.ok .verdict-title { color: var(--ok); } .verdict.degraded .verdict-title { color: var(--warn); } .verdict.down .verdict-title { color: var(--fail); }
+.verdict-why { color: var(--fg-2); margin-top: 6px; max-width: 60ch; }
+.verdict-side { display: flex; gap: 28px; align-items: center; }
+.verdict-side > div { display: flex; flex-direction: column; gap: 2px; min-width: 72px; }
+.verdict-side .num { font-size: 22px; font-weight: 600; letter-spacing: -.02em; line-height: 1.1; }
+.verdict-side span:last-child { font-size: 11.5px; color: var(--fg-3); }
+
+/* ---- 狀態：兩欄 ---- */
+.two-col { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(300px, 1fr); gap: 32px; align-items: start; }
+.col-main, .col-side { display: flex; flex-direction: column; gap: 28px; min-width: 0; }
+.block { min-width: 0; }
+.block-hd { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding-bottom: 8px; border-bottom: 1px solid var(--line); margin-bottom: 10px; }
+.block-hd h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .07em; color: var(--fg-2); font-weight: 600; }
+.quiet { color: var(--fg-3); padding: 10px 0; }
+
+/* ---- 需要處理 ---- */
+ol.todo { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+ol.todo li { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 14px; align-items: start; padding: 12px 0; border-bottom: 1px solid var(--line); }
+ol.todo li:last-child { border-bottom: 0; }
+.todo-mark { width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; background: var(--warn); }
+ol.todo li.fail .todo-mark { background: var(--fail); }
+.todo-title { font-weight: 600; }
+.todo-detail { color: var(--fg-2); font-size: 12.5px; margin-top: 2px; word-break: break-word; }
+.tag-block { display: inline-block; margin-left: 6px; font: 600 10.5px var(--mono); letter-spacing: .04em; padding: 1px 6px; border-radius: 4px; background: var(--fail-soft); color: var(--fail); vertical-align: middle; }
+details.healthy { margin-top: 14px; }
+details.healthy summary { color: var(--fg-3); }
+ul.healthy-list { margin: 8px 0 0; padding: 0 0 0 4px; list-style: none; font-size: 12.5px; color: var(--fg-2); columns: 2; column-gap: 24px; }
+ul.healthy-list li { padding: 2px 0; break-inside: avoid; }
+
+/* ---- 餵料 facts ---- */
+dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 8px 18px; margin: 0; font-size: 13px; }
+dl.facts dt { color: var(--fg-3); font-family: var(--mono); font-size: 12px; padding-top: 1px; }
+dl.facts dd { margin: 0; min-width: 0; word-break: break-word; }
+
+/* ---- 活動時間軸 ---- */
+ol.feed { list-style: none; margin: 0; padding: 0; }
+ol.feed li { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+ol.feed li:last-child { border-bottom: 0; }
+.feed-when { color: var(--fg-3); font-size: 11.5px; padding-top: 2px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.feed-body { padding-left: 12px; border-left: 2px solid var(--line); min-width: 0; }
+ol.feed li.ok .feed-body { border-left-color: var(--ok); } ol.feed li.fail .feed-body { border-left-color: var(--fail); }
+.feed-title { font-size: 13px; } .feed-title a { color: var(--fg); } .feed-title a:hover { color: var(--accent); }
+.feed-detail { color: var(--fg-3); font-size: 12px; margin-top: 1px; word-break: break-word; }
+ul.plain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+
+/* ---- 設定：版面 ---- */
+.settings-layout { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 32px; align-items: start; }
+.section-index { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 2px; }
+.section-index a { padding: 6px 10px; border-radius: 6px; color: var(--fg-2); font-size: 13px; display: flex; justify-content: space-between; align-items: center; }
+.section-index a:hover { background: var(--surface-2); color: var(--fg); text-decoration: none; }
+.section-index .count { font: 600 10.5px var(--mono); background: var(--accent-soft); color: var(--accent); border-radius: 999px; padding: 1px 6px; }
+.index-foot { margin-top: 12px; padding: 0 10px; word-break: break-all; }
+.settings-body { display: flex; flex-direction: column; gap: 36px; min-width: 0; }
+.task-hd { margin-bottom: 10px; } .task-hd h2 { font-size: 16px; } .task-hd p { margin-top: 2px; }
+.task { scroll-margin-top: 16px; }
+section.group { border-top: 1px solid var(--line); padding: 12px 0 6px; }
+section.group.dirty { border-top-color: var(--accent); }
+.group-hd { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-bottom: 8px; }
+.group-name { font-weight: 600; font-size: 13px; color: var(--fg); }
+.fields { display: flex; flex-direction: column; }
+.field-row { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) 118px; gap: 20px; align-items: start; padding: 11px 0; border-top: 1px dashed var(--line); }
+.field-row:first-child { border-top: 0; }
+.field-row[hidden] { display: none; }
+.field-label label { font-weight: 500; display: block; }
+.field-env { font-size: 11.5px; color: var(--fg-3); margin-top: 1px; }
+.field-desc { font-size: 12px; color: var(--fg-2); margin-top: 4px; line-height: 1.45; }
+.field-ctl input[type=text], .field-ctl input[type=number], .field-ctl select { max-width: 420px; }
+.field-state { text-align: right; padding-top: 6px; white-space: nowrap; }
+.field-row.locked .field-ctl { color: var(--fg-2); }
+.field-row.modified .field-label label { color: var(--accent); }
+.field-row.has-err .field-ctl input, .field-row.has-err .field-ctl select { border-color: var(--fail); box-shadow: 0 0 0 3px var(--fail-soft); }
+.search { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); padding: 0 8px; background: var(--surface); }
+.search svg { width: 14px; height: 14px; stroke: var(--fg-3); fill: none; stroke-width: 1.8; }
+.search input { border: 0; width: 280px; padding: 6px 2px; background: transparent; } .search input:focus { box-shadow: none; }
+.toggle-mod { display: inline-flex; gap: 6px; align-items: center; font-size: 12.5px; color: var(--fg-2); } .toggle-mod input { width: auto; }
+.dirty-bar { position: sticky; bottom: 0; margin: 0 -32px -40px; padding: 10px 32px; background: var(--surface); border-top: 1px solid var(--accent); display: flex; align-items: center; justify-content: space-between; gap: 12px; box-shadow: 0 -4px 16px rgba(0,0,0,.06); z-index: 5; }
+.dirty-bar[hidden] { display: none; }
+
+@media (max-width: 1100px) { .two-col { grid-template-columns: 1fr; } .settings-layout { grid-template-columns: 1fr; } .section-index { position: static; flex-direction: row; flex-wrap: wrap; } ul.healthy-list { columns: 1; } }
+@media (max-width: 820px) { .verdict { flex-direction: column; gap: 14px; } .field-row { grid-template-columns: 1fr; gap: 6px; } .field-state { text-align: left; } .search input { width: 160px; } .dirty-bar { margin: 0 -16px -40px; padding: 10px 16px; } }

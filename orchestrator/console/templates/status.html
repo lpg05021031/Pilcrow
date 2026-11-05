@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% import "_icons.html" as ic %}
+{% block title %}狀態{% endblock %}
+{% block heading %}狀態{% endblock %}
+{% block actions %}<span class="faint small">檢查於 {{ (now - checked_at) | int }} 秒前</span><a class="btn" href="/console?refresh=1">{{ ic.icon('refresh') }}重新檢查</a>{% endblock %}
+{% block body %}
+
+<section class="verdict {{ hl.state }}">
+  <div class="verdict-main">
+    <div class="verdict-title">{{ hl.title }}</div>
+    <div class="verdict-why">{{ hl.why }}</div>
+  </div>
+  <div class="verdict-side">
+    <div><span class="num">{{ summary.n }}</span><span>review · 近 {{ summary.days }} 天</span></div>
+    <div><span class="num">{{ sources.repos.counts.clones if sources.repos.exists else 0 }}</span><span>repo clone</span></div>
+    <div><span class="num">{{ sources.knowledge.counts.pending if sources.knowledge.exists else 0 }}</span><span>知識稿待裁決</span></div>
+  </div>
+</section>
+
+<div class="two-col">
+<div class="col-main">
+  <section class="block">
+    <div class="block-hd">
+      <h2>需要處理</h2>
+      <span class="faint small">{% if blockers %}{{ blockers|length }} 項{% if not config_exists %} · 尚無 config.toml{% endif %} · <a href="/console/setup">設定精靈</a>{% else %}沒有{% endif %}</span>
+    </div>
+    {% if not blockers %}
+    <p class="quiet">沒有需要處理的事。</p>
+    {% else %}
+    <ol class="todo">
+      {% for b in blockers %}
+      <li class="{{ b.sev|lower }}{% if b.blocking %} blocking{% endif %}">
+        <div class="todo-mark"></div>
+        <div class="todo-body">
+          <div class="todo-title">{{ b.title }}{% if b.blocking %} <span class="tag-block">擋住 review</span>{% endif %}</div>
+          <div class="todo-detail">{{ b.detail }}</div>
+        </div>
+        {% if b.href %}<a class="btn sm" href="{{ b.href }}">{{ b.action or '處理' }}</a>{% endif %}
+      </li>
+      {% endfor %}
+    </ol>
+    {% endif %}
+    <details class="healthy">
+      <summary>{{ healthy|length }} 項正常</summary>
+      <ul class="healthy-list">
+        {% for c in healthy %}<li><span class="faint">{{ c.group }}</span> {{ c.name }} <span class="faint">· {{ c.detail }}</span></li>{% endfor %}
+      </ul>
+    </details>
+  </section>
+
+  <section class="block">
+    <div class="block-hd"><h2>餵料</h2><a class="small" href="/console/sources">狀態與預覽</a></div>
+    <dl class="facts">
+      <dt>repos</dt><dd>{% if sources.repos.exists %}{{ sources.repos.counts.clones }} 顆 clone{% if sources.repos.counts.others %}、{{ sources.repos.counts.others }} 個非 git 目錄{% endif %}{% if jobs['repo-sync'] and jobs['repo-sync'].last_end %} · 同步於 {{ ago(jobs['repo-sync'].last_end) }}{% endif %}{% else %}<span class="faint">{{ sources.repos.note }}</span>{% endif %}</dd>
+      <dt>rules</dt><dd>{% if sources.rules.exists %}{{ sources.rules.counts.md }} 條規則 · 版本 <span class="mono">{{ sources.rules.head.sha }}</span> · {{ sources.rules.head.date }}{% else %}<span class="faint">{{ sources.rules.note }}</span>{% endif %}</dd>
+      <dt>knowledge</dt><dd>{% if sources.knowledge.exists %}{{ sources.knowledge.counts.pages }} 頁 · {{ sources.knowledge.counts.pending }} 待裁決 · {{ sources.knowledge.counts.staged }} 暫存{% else %}<span class="faint">{{ sources.knowledge.note }}</span>{% endif %}</dd>
+    </dl>
+  </section>
+</div>
+
+<aside class="col-side">
+  <section class="block">
+    <div class="block-hd"><h2>最近活動</h2><a class="small" href="/console/reviews">全部 review</a></div>
+    {% if not feed %}<p class="quiet">還沒有活動。跑一條 review 或等排程跑完。</p>{% else %}
+    <ol class="feed">
+      {% for e in feed %}
+      <li class="{{ e.tone }}">
+        <div class="feed-when">{{ ago(e.ts) }}</div>
+        <div class="feed-body">
+          <div class="feed-title">{% if e.href %}<a href="{{ e.href }}">{{ e.title }}</a>{% else %}{{ e.title }}{% endif %}</div>
+          {% if e.detail %}<div class="feed-detail">{{ e.detail }}</div>{% endif %}
+        </div>
+      </li>
+      {% endfor %}
+    </ol>
+    {% endif %}
+  </section>
+
+  <section class="block">
+    <div class="block-hd"><h2>排程</h2></div>
+    <ul class="plain">
+      {% for name, st in jobs.items() %}
+      <li class="row between">
+        <span><b class="mono">{{ name }}</b> <span class="faint small">{% if not st.enabled %}關閉{% elif st.running %}正在跑{% elif st.last_end %}{{ ago(st.last_end) }}{% if not st.last_ok %} <span class="err">失敗</span>{% endif %}{% else %}每 {{ st.interval_min }} 分，尚未跑{% endif %}</span></span>
+        <form method="post" action="/console/jobs/{{ name }}/run" class="inline"><button class="ghost xs" {% if st.running %}disabled{% endif %}>立刻執行</button></form>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+</aside>
+</div>
+{% endblock %}

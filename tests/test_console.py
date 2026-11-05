@@ -27,7 +27,7 @@ def client(tmp_path, monkeypatch):
 
 def test_open_mode_without_key_shows_banner(client):
     r = client.get("/console")
-    assert r.status_code == 200 and "ORCH_API_KEY 未設" in r.text and "Overview" in r.text
+    assert r.status_code == 200 and "開放模式" in r.text and "ORCH_API_KEY 未設" in r.text
     assert client.get("/console/static/console.css").status_code == 200
 
 

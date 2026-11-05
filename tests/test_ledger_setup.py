@@ -139,7 +139,7 @@ def test_overview_points_to_setup_when_failing(client, monkeypatch):
     import orchestrator.console.router as R
     R._doctor_cache.update(ts=0.0, checks=[])
     r = client.get("/console?refresh=1")
-    assert "設定精靈" in r.text
+    assert "設定精靈" in r.text and "現在無法審查" in r.text and "擋住 review" in r.text
 
 
 # ---------- install ----------

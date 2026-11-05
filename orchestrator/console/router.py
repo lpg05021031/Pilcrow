@@ -20,7 +20,8 @@ from pydantic import SecretStr, ValidationError
 
 from orchestrator import jobs, ledger, sources, store
 from orchestrator.adapters import ado
-from orchestrator.console import auth
+from orchestrator.console import auth, status as stat
+from orchestrator.console.labels import LABELS
 from shared import doctor
 from shared import settings as S
 
@@ -28,12 +29,25 @@ router = APIRouter(prefix="/console", include_in_schema=False)
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 templates.env.filters["datetime"] = lambda ts: time.strftime("%m-%d %H:%M", time.localtime(ts))
 
-NAV = [("overview", "Overview", "/console"),
-       ("settings", "Settings", "/console/settings"),
-       ("sources", "Sources", "/console/sources"),
-       ("reviews", "Reviews", "/console/reviews"),
-       ("knowledge", "Knowledge", "/console/knowledge"),
-       ("setup", "Setup", "/console/setup")]
+# 依維運者的任務分四頁；sources / setup 仍有路由，從 設定 與 狀態 頁進，不佔導覽。
+NAV = [("status", "狀態", "/console"),
+       ("reviews", "審查", "/console/reviews"),
+       ("knowledge", "知識", "/console/knowledge"),
+       ("settings", "設定", "/console/settings")]
+
+# 設定頁依任務分段（不是依模組）：維運者找的是「連線」「發文開關」，不是 ado / posting
+TASKS = [
+    {"title": "連線", "why": "LLM gateway、Langfuse、Azure DevOps、服務本體。secrets（PAT、key）只在 secrets.env。",
+     "groups": ["llm", "langfuse", "ado", "orchestrator"]},
+    {"title": "對外發文", "why": "三顆會真的寫到 PR 的開關，出廠全安全側；翻向真發側要勾確認。",
+     "groups": ["posting"]},
+    {"title": "審查調參", "why": "v2 pipeline 的科數、併發、信心門檻、切片預算，以及靜態掃描。改任何一顆先過 eval。",
+     "groups": ["review", "static"]},
+    {"title": "來源", "why": "本地 clone、團隊規則、知識帳本、code graph 的路徑與開關。",
+     "groups": ["repos", "rules", "knowledge", "graph"], "link": "/console/sources", "link_label": "看來源狀態與預覽注入"},
+    {"title": "自動化", "why": "行程內排程的間隔；0 = 關。", "groups": ["jobs"]},
+    {"title": "評測", "why": "CI gate 門檻。未設 = 只報數不擋。", "groups": ["eval"]},
+]
 
 # 翻向這一側要勾「我確定」：會對外真發、或關掉安全氣囊
 DANGEROUS = {("orchestrator", "auto_post"): True,
@@ -98,11 +112,15 @@ async def overview(request: Request, refresh: int = 0):
     counts = {k: sum(1 for c in checks if c.status == k)
               for k in (doctor.OK, doctor.WARN, doctor.FAIL, doctor.SKIP)}
     views = await asyncio.to_thread(sources.all_views)
-    return templates.TemplateResponse(request, "overview.html", _ctx(
-        request, "overview", groups=groups, counts=counts,
-        checked_at=_doctor_cache["ts"], jobs=jobs.snapshot(),
-        audit=list(ado.audit_log)[-10:][::-1], now=time.time(),
-        sources=views, reviews=store.list_reviews(8), summary=store.summary(7),
+    js = jobs.snapshot()
+    reviews = store.list_reviews(15)
+    audit = list(ado.audit_log)[-15:]
+    return templates.TemplateResponse(request, "status.html", _ctx(
+        request, "status", groups=groups, counts=counts,
+        hl=stat.headline(checks), blockers=stat.blockers(checks), healthy=stat.healthy(checks),
+        feed=stat.feed(reviews, audit, js, S.recent_changes(10)), ago=stat.ago,
+        checked_at=_doctor_cache["ts"], jobs=js, now=time.time(),
+        sources=views, reviews=reviews[:8], summary=store.summary(7),
         config_exists=S.config_path().exists()))
 
 
@@ -324,7 +342,12 @@ def _group_view(gname: str, errors: dict[str, str] | None = None,
                                           else ("true" if v is True else "false" if v is False
                                                 else str(v)))
         extra = info.json_schema_extra if isinstance(info.json_schema_extra, dict) else {}
+        desc = (info.description or "").strip()
+        env = S.env_names(info)[0]
+        default_native = S._native(info.get_default(call_default_factory=True))
         fields.append({
+            "label": LABELS.get(env, env), "more": desc,
+            "default_raw": S._render_value(default_native),
             "name": fname, "env": S.env_names(info)[0], "kind": kind,
             "choices": _choices(info), "value": shown,
             "masked": S._mask(v) if kind == "secret" else None,
@@ -345,9 +368,15 @@ def _group_view(gname: str, errors: dict[str, str] | None = None,
 async def settings_page(request: Request):
     if not auth.is_authed(request):
         return auth.login_redirect(request)
-    groups = [_group_view(g) for g in S.GROUP_ORDER]
+    views = {g: _group_view(g) for g in S.GROUP_ORDER}
+    tasks = []
+    for t in TASKS:
+        gs = [views[g] for g in t["groups"]]
+        tasks.append({**t, "groups": gs,
+                      "modified": sum(1 for g in gs for f in g["fields"] if f["source"] == "file")})
     return templates.TemplateResponse(request, "settings.html", _ctx(
-        request, "settings", groups=groups, config_path=str(S.config_path()),
+        request, "settings", tasks=tasks, groups=list(views.values()),
+        config_path=str(S.config_path()),
         config_exists=S.config_path().exists(), changes=S.recent_changes(20)))
 
 
