@@ -6,11 +6,9 @@ uvicorn>=0.29
 httpx>=0.27
 pydantic>=2.6
 pydantic-settings>=2.3   # shared/settings.py
-jinja2>=3.1              # orchestrator/console（伺服端渲染）
-python-multipart>=0.0.9  # 控制台表單 POST
+jinja2>=3.1              # orchestrator/console (server-side templates)
+python-multipart>=0.0.9  # console form posts
 
 # v2 static pass (optional but strongly recommended; skipped with a note when absent)
 # ruff>=0.4
 # semgrep>=1.60
-x
-x
