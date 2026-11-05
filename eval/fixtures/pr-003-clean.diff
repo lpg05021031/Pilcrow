@@ -1,0 +1,13 @@
+--- a/tests/test_calculator.py
++++ b/tests/test_calculator.py
+@@ -1,5 +1,10 @@
+ from src.calculator import multiply
+ 
+ 
+ def test_multiply_basic():
+     assert multiply(3, 4) == 12
++
++
++def test_multiply_by_zero():
++    """Edge case: anything times zero is zero."""
++    assert multiply(5, 0) == 0

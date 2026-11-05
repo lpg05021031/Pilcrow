@@ -1,0 +1,13 @@
+--- a/src/main/java/com/acme/user/ProfileService.java
++++ b/src/main/java/com/acme/user/ProfileService.java
+@@ -22,3 +22,11 @@ public class ProfileService {
+     public Profile load(long id) {
+         return repository.load(id);
+     }
++
++    /** Compliance note: personal data must never be written to application logs. */
++    public void update(Profile p) {
++        log.info("updating profile: name={}, email={}, nationalId={}",
++                p.getFullName(), p.getEmail(), p.getNationalId());
++        repository.save(p);
++    }

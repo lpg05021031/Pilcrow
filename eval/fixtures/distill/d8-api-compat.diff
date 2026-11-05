@@ -1,0 +1,17 @@
+--- a/src/main/java/com/acme/api/AccountResponse.java
++++ b/src/main/java/com/acme/api/AccountResponse.java
+@@ -14,8 +14,17 @@ public class AccountResponse {
+
+     private final BigDecimal balance;
+
++    @JsonProperty("available_balance")
++    public BigDecimal availableBalance() {
++        return balance.subtract(hold);
++    }
++
++    /** @deprecated kept for partner clients; remove after 2027-01-01. */
++    @Deprecated
++    @JsonProperty("balance")
+     public BigDecimal balance() {
+         return balance;
+     }

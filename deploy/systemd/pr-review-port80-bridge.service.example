@@ -1,0 +1,25 @@
+# port 80 → 8080 bridge —— 給 Langfuse eval webhook 用。
+# 背景：Langfuse 的 webhook URL 只准 80/443；而 iptables PREROUTING 那條
+# REDIRECT 有「本機打自己實體 IP 測不到」的量子行為（本機封包走 OUTPUT 鏈）。
+# socat 常駐橋沒有這個問題：本機、容器、外部三種來源一律直通，ss 看得見、
+# systemd 管生死、開機自活。裝之前先確認 :80 沒被別人（nginx 等）佔著：
+#   sudo ss -ltnp | grep ':80 '
+# 安裝：
+#   sudo apt-get install -y socat
+#   sudo cp 本檔 /etc/systemd/system/pr-review-port80-bridge.service（去 .example）
+#   sudo systemctl daemon-reload && sudo systemctl enable --now pr-review-port80-bridge
+# 驗收：curl -s http://<主機實IP>/healthz   → {"ok":true}（本機與容器內同測）
+[Unit]
+Description=port 80 -> 8080 bridge for Langfuse eval webhook
+After=network.target
+
+[Service]
+# 綁 :80 需要特權；預設以 root 跑最省事。潔癖版可改成非 root + 下面兩行：
+#   AmbientCapabilities=CAP_NET_BIND_SERVICE
+#   User=<你的user>
+ExecStart=/usr/bin/socat TCP-LISTEN:80,fork,reuseaddr TCP:127.0.0.1:8080
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

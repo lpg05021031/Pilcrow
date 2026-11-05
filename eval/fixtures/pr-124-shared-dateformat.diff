@@ -1,0 +1,14 @@
+--- a/src/main/java/com/acme/report/DateFormats.java
++++ b/src/main/java/com/acme/report/DateFormats.java
+@@ -9,3 +9,11 @@ public class DateFormats {
+ 
+     private DateFormats() {
+     }
++
++    private static final java.text.SimpleDateFormat ISO =
++            new java.text.SimpleDateFormat("yyyy-MM-dd");
++
++    /** Called concurrently by all report worker threads. */
++    public static String day(java.util.Date d) {
++        return ISO.format(d);
++    }

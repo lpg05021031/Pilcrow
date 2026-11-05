@@ -1,0 +1,13 @@
+--- a/src/main/java/com/acme/sync/SyncScheduler.java
++++ b/src/main/java/com/acme/sync/SyncScheduler.java
+@@ -12,3 +12,11 @@ public class SyncScheduler {
+     public SyncScheduler(SyncClient client) {
+         this.client = client;
+     }
++
++    /** Sync interval must be tunable per environment via sync.interval-seconds. */
++    public void start() {
++        int intervalSeconds = 30;
++        scheduler.scheduleAtFixedRate(client::sync, 0,
++                intervalSeconds, TimeUnit.SECONDS);
++    }

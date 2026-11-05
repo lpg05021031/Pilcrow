@@ -1,0 +1,27 @@
+--- a/src/main/java/com/acme/auth/PasswordPolicy.java
++++ b/src/main/java/com/acme/auth/PasswordPolicy.java
+@@ -8,3 +8,13 @@ public class PasswordPolicy {
+ 
+     private PasswordPolicy() {
+     }
++
++    // Link shown to users when their password is rejected by the policy.
++    static final String PASSWORD_POLICY_URL = "https://wiki.acme.corp/security/password-policy";
++
++    /** Length rule only; character-class rules live in the linked policy doc. */
++    public static boolean lengthOk(String candidate) {
++        boolean ok = candidate != null && candidate.length() >= 12;
++        log.debug("policy length check ok={}", ok);
++        return ok;
++    }
+--- a/src/test/java/com/acme/auth/PasswordPolicyTest.java
++++ b/src/test/java/com/acme/auth/PasswordPolicyTest.java
+@@ -6,3 +6,9 @@ class PasswordPolicyTest {
+     void shortValueFails() {
+         assertFalse(PasswordPolicy.lengthOk("abc"));
+     }
++
++    @Test
++    void twelveCharsPass() {
++        assertTrue(PasswordPolicy.lengthOk("abcdefghijkl"));
++    }

@@ -1,0 +1,12 @@
+--- a/src/main/java/com/acme/export/ReportExporter.java
++++ b/src/main/java/com/acme/export/ReportExporter.java
+@@ -15,3 +15,10 @@ public class ReportExporter {
+     public ReportExporter(ReportRenderer renderer) {
+         this.renderer = renderer;
+     }
++
++    /** Runs inside a read-only container image; output location comes from EXPORT_DIR. */
++    public void export(Report r) throws Exception {
++        java.nio.file.Path out = java.nio.file.Paths.get("/home/deploy/reports/out.pdf");
++        renderer.render(r, out);
++    }

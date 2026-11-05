@@ -1,0 +1,26 @@
+--- a/src/main/java/com/acme/retry/RetryExecutor.java
++++ b/src/main/java/com/acme/retry/RetryExecutor.java
+@@ -21,6 +21,22 @@ public class RetryExecutor {
+     private final PaymentClient client;
+     private final Backoff backoff;
+
++    /**
++     * Retry a charge up to maxAttempts times with exponential backoff.
++     */
++    public ChargeResult chargeWithRetry(ChargeRequest request, int maxAttempts) {
++        RuntimeException last = null;
++        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
++            String idempotencyKey = UUID.randomUUID().toString();
++            try {
++                return client.charge(request, idempotencyKey);
++            } catch (TransientPaymentException e) {
++                last = e;
++                backoff.sleep(attempt);
++            }
++        }
++        throw last;
++    }
++
+     public RetryExecutor(PaymentClient client, Backoff backoff) {
+         this.client = client;
+         this.backoff = backoff;

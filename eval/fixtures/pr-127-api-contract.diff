@@ -1,0 +1,25 @@
+--- a/src/main/java/com/acme/api/OrderDto.java
++++ b/src/main/java/com/acme/api/OrderDto.java
+@@ -6,8 +6,8 @@ public class OrderDto {
+ 
+     /** Public API v1 — field names are frozen for external clients. */
+-    private String orderId;
++    private String orderRef;
+ 
+-    public String getOrderId() {
+-        return orderId;
++    public String getOrderRef() {
++        return orderRef;
+     }
+ }
+--- a/src/main/java/com/acme/api/OrderController.java
++++ b/src/main/java/com/acme/api/OrderController.java
+@@ -18,3 +18,8 @@ public class OrderController {
+     public OrderDto get(@PathVariable long id) {
+         return mapper.toDto(orders.find(id));
+     }
++
++    @GetMapping("/api/v1/orders/{id}/summary")
++    public OrderDto summary(@PathVariable long id) {
++        return mapper.toDto(orders.find(id));
++    }

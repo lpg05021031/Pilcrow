@@ -1,0 +1,12 @@
+--- a/src/main/java/com/acme/http/HttpClientFactory.java
++++ b/src/main/java/com/acme/http/HttpClientFactory.java
+@@ -9,7 +9,9 @@ public class HttpClientFactory {
+ 
++    private static final int DEFAULT_TIMEOUT_SECONDS = 30;
++
+     public HttpClient create() {
+-        int t = 30;
+-        client.setTimeout(t);
++        client.setTimeout(DEFAULT_TIMEOUT_SECONDS);
+         return client.build();
+     }

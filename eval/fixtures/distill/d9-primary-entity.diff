@@ -1,0 +1,52 @@
+--- a/src/main/java/com/acme/lock/LockService.java
++++ b/src/main/java/com/acme/lock/LockService.java
+@@ -25,6 +25,14 @@ public class LockService {
+
++    /** Acquire both keys in a fixed order so two callers cannot deadlock. */
++    public Lease acquireBoth(String left, String right) {
++        String first = left.compareTo(right) <= 0 ? left : right;
++        String second = first.equals(left) ? right : left;
++        return new Lease(acquire(first), acquire(second));
++    }
++
+     public Lease acquire(String key) {
+         return store.putIfAbsent(key, owner());
+     }
+--- /dev/null
++++ b/src/test/java/com/acme/lock/integration/concurrent/LockServiceConcurrencyIntegrationTest.java
+@@ -0,0 +1,31 @@
++package com.acme.lock.integration.concurrent;
++
++class LockServiceConcurrencyIntegrationTest {
++
++    @Test
++    void acquiresBothKeysInAFixedOrder() {
++        LockService service = new LockService(store);
++        Lease lease = service.acquireBoth("beta", "alpha");
++        assertThat(lease.keys()).containsExactly("alpha", "beta");
++    }
++
++    @Test
++    void doesNotDeadlockUnderContention() throws Exception {
++        ExecutorService pool = Executors.newFixedThreadPool(8);
++        List<Future<?>> futures = new ArrayList<>();
++        for (int i = 0; i < 8; i++) {
++            futures.add(pool.submit(() -> service.acquireBoth("a", "b")));
++        }
++        for (Future<?> f : futures) {
++            f.get(5, TimeUnit.SECONDS);
++        }
++    }
++
++    @Test
++    void releasesBothLeases() {
++        Lease lease = service.acquireBoth("a", "b");
++        lease.close();
++        assertThat(store.isEmpty()).isTrue();
++    }
++
++    @Test
++    void rejectsEqualKeys() {
++        assertThatThrownBy(() -> service.acquireBoth("a", "a"));
++    }
++}

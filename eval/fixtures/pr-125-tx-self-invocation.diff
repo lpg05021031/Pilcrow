@@ -1,0 +1,17 @@
+--- a/src/main/java/com/acme/billing/InvoiceService.java
++++ b/src/main/java/com/acme/billing/InvoiceService.java
+@@ -21,3 +21,15 @@ public class InvoiceService {
+     public Invoice find(long id) {
+         return invoices.find(id);
+     }
++
++    /** Issue and archive must commit atomically. */
++    public void issueAndArchive(Invoice inv) {
++        this.persistAtomically(inv);
++    }
++
++    @Transactional
++    public void persistAtomically(Invoice inv) {
++        invoices.save(inv);
++        archive.record(inv);
++    }

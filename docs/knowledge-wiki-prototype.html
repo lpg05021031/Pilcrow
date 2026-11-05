@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>knowledge repo — wiki 原型（SessionCache 條目）</title>
+<style>
+  :root{
+    --paper:#EDF1F4; --card:#FFFFFF; --ink:#182230; --dim:#5A6B7E; --line:#D4DCE4;
+    --know:#1E8A6E; --know-bg:#E5F4EF; --know-line:#BFE3D6;
+    --code:#2F6DB3; --human:#B8791F;
+    --term-bg:#131A22; --term-fg:#C9D6E3; --term-dim:#6E8096;
+    --mono:ui-monospace,"Cascadia Code","JetBrains Mono",Consolas,Menlo,monospace;
+    --sans:"Segoe UI",system-ui,-apple-system,"PingFang TC","Microsoft JhengHei",sans-serif;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--paper);color:var(--ink);font-family:var(--sans);
+       line-height:1.6;padding:36px 20px 72px}
+  .wrap{max-width:1020px;margin:0 auto}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.22em;
+          text-transform:uppercase;color:var(--dim)}
+  h1{font-size:clamp(22px,3vw,30px);font-weight:750;letter-spacing:-.015em;margin:6px 0 8px}
+  .sub{color:var(--dim);max-width:70ch;font-size:14.5px}
+  .sub b{color:var(--ink)}
+
+  .grid{display:grid;grid-template-columns:250px 1fr;gap:18px;margin-top:26px}
+
+  /* ---------- 左：目錄樹 = 依 graph 實體歸檔 ---------- */
+  aside{background:var(--card);border:1px solid var(--line);border-radius:8px;
+        padding:14px 14px 16px;align-self:start;position:sticky;top:16px}
+  aside h2{font-family:var(--mono);font-size:11px;letter-spacing:.18em;
+           text-transform:uppercase;color:var(--dim);margin-bottom:10px}
+  .tree{font-family:var(--mono);font-size:12.5px;color:#3B4A5B;line-height:1.9}
+  .tree i{color:#9AA8B6;font-style:normal}
+  .tree .on{background:var(--know-bg);border:1px solid var(--know-line);
+            border-radius:4px;padding:1px 6px;color:#14523F;font-weight:700}
+  .tree .n{color:#8593A2;font-size:11px}
+  aside .note{font-size:12px;color:var(--dim);border-top:1px solid var(--line);
+              margin-top:12px;padding-top:10px}
+
+  /* ---------- 右：一頁條目 ---------- */
+  article{background:var(--card);border:1px solid var(--line);border-radius:8px;
+          border-top:4px solid var(--know);padding:22px 26px 8px}
+  .crumb{font-family:var(--mono);font-size:11.5px;color:var(--dim)}
+  article h1{font-size:24px;margin:4px 0 4px}
+  .badges{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 18px}
+  .badge{font-family:var(--mono);font-size:11px;border-radius:4px;padding:2px 8px;
+         border:1px solid var(--line);background:#EFF3F7;color:#3B4A5B}
+  .badge.ok{background:var(--know-bg);border-color:var(--know-line);color:#14523F}
+  .badge.hm{background:#FBF3E4;border-color:#EAD7AF;color:#7A5A17}
+
+  section{margin:0 0 20px}
+  section h3{font-family:var(--mono);font-size:12px;letter-spacing:.16em;
+             text-transform:uppercase;color:var(--know);margin-bottom:8px}
+  .lead{font-size:15px;color:#2A3644;max-width:72ch}
+
+  .item{border:1px solid var(--line);border-left:4px solid var(--know);
+        border-radius:6px;padding:10px 14px;margin-bottom:8px;background:#FBFCFD}
+  .item p{font-size:14.5px}
+  .ev{display:flex;flex-wrap:wrap;gap:6px;margin-top:7px}
+  .ev a{font-family:var(--mono);font-size:11px;color:#1E5FA8;background:#EAF1F9;
+        border:1px solid #C9DBEE;border-radius:4px;padding:1px 7px;text-decoration:none}
+  .inv{font-family:var(--mono);font-size:13px;background:#F2F7F5;border:1px dashed var(--know-line);
+       border-radius:6px;padding:9px 13px;margin-bottom:7px;color:#174F3E}
+
+  .quote{border-left:4px solid var(--human);background:#FBF6EC;border-radius:0 6px 6px 0;
+         padding:10px 14px;font-size:14px;color:#5B4A22}
+  .quote .who{font-family:var(--mono);font-size:11px;color:#8A6F33;margin-top:6px}
+
+  .hist{font-size:13.5px}
+  .hist tr{border-bottom:1px solid var(--line)}
+  .hist{width:100%;border-collapse:collapse}
+  .hist td{padding:7px 10px 7px 0;vertical-align:top}
+  .hist td:first-child{font-family:var(--mono);white-space:nowrap;color:#1E5FA8;width:96px}
+
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chip{font-family:var(--mono);font-size:11.5px;background:#EFF3F7;
+        border:1px solid var(--line);border-radius:4px;padding:2px 8px;color:#3B4A5B}
+
+  .prov{font-size:12px;color:var(--dim);border-top:1px solid var(--line);
+        margin:6px -26px 0;padding:12px 26px}
+  .prov code{font-family:var(--mono)}
+
+  /* ---------- 下方兩塊：raw md 與 review 注入 ---------- */
+  .duo{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:18px}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:16px 18px}
+  .panel h3{font-family:var(--mono);font-size:11.5px;letter-spacing:.16em;
+            text-transform:uppercase;color:var(--dim);margin-bottom:10px}
+  pre{font-family:var(--mono);font-size:12px;line-height:1.65;overflow:auto;
+      background:#F5F7F9;border:1px solid var(--line);border-radius:6px;padding:12px 14px;color:#2C3948}
+  .term{background:var(--term-bg);color:var(--term-fg);font-family:var(--mono);
+        font-size:12px;line-height:1.7;border-radius:6px;padding:12px 14px;overflow:auto}
+  .term .d{color:var(--term-dim)}
+  .term .k{color:#7FD8BC}
+
+  footer{margin-top:26px;font-size:12.5px;color:var(--dim);
+         border-top:1px solid var(--line);padding-top:14px}
+  footer code{font-family:var(--mono)}
+
+  @media (max-width:820px){
+    .grid,.duo{grid-template-columns:1fr}
+    aside{position:static}
+    body{padding:24px 12px 56px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="kicker">knowledge repo · wiki prototype</div>
+  <h1>條目長這樣 — 一頁就是一個 code 實體的決策帳本</h1>
+  <p class="sub">左側目錄 = <b>KNOWLEDGE_ROOT 的實際資料夾</b>（依 graph 實體歸檔，wiki-friendly：
+     目錄階層即頁面階層）。右側是一個實體的完整條目：每條知識<b>必附證據連結</b>、
+     人話寫在證據之上。同一份 markdown，機器（reviewer 注入）與人（ADO Publish code as wiki）兩邊通吃。</p>
+</header>
+
+<div class="grid">
+
+<aside>
+  <h2>knowledge/</h2>
+  <div class="tree">
+    <i>├─</i> repo-a/<br>
+    <i>│&nbsp;&nbsp;├─</i> cache/<br>
+    <i>│&nbsp;&nbsp;│&nbsp;&nbsp;├─</i> <span class="on">SessionCache.md</span><br>
+    <i>│&nbsp;&nbsp;│&nbsp;&nbsp;└─</i> CacheConfig.md <span class="n">2 則</span><br>
+    <i>│&nbsp;&nbsp;├─</i> billing/<br>
+    <i>│&nbsp;&nbsp;│&nbsp;&nbsp;└─</i> InvoiceService.md <span class="n">1 則</span><br>
+    <i>│&nbsp;&nbsp;└─</i> _module/<br>
+    <i>│&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;└─</i> auth-overview.md<br>
+    <i>└─</i> repo-b/<br>
+    <i>&nbsp;&nbsp;&nbsp;&nbsp;└─</i> export/ReportExporter.md
+  </div>
+  <p class="note">檔名錨在實體、不錨在 PR——同一實體被再次改動時，新 PR 的知識<b>接續寫進同一頁</b>，
+     像 git blame，但 blame 的是決策。<code style="font-family:var(--mono)">_module/</code>
+     放跨實體的模組級摘要。</p>
+</aside>
+
+<article>
+  <div class="crumb">repo-a / cache /</div>
+  <h1>SessionCache</h1>
+  <div class="badges">
+    <span class="badge">entity: src/main/java/com/acme/cache/SessionCache.java</span>
+    <span class="badge ok">approval: explicit（作者回覆修訂）</span>
+    <span class="badge">last: PR#123 · 2026-08-19</span>
+    <span class="badge hm">entries: 2</span>
+  </div>
+
+  <section>
+    <h3>Summary</h3>
+    <p class="lead">Session 快取的過期與更新排程。TTL 的<b>單位自 PR#123 起為毫秒</b>
+       （由 CacheConfig 統一換算），所有排程呼叫端不得自行乘除單位。</p>
+  </section>
+
+  <section>
+    <h3>Decisions（每條都站在證據上）</h3>
+    <div class="item">
+      <p><b>TTL 一律以毫秒對外</b>。歷史上 getTtl() 回秒，PR#123 改為毫秒並由
+         CacheConfig 集中換算——當時 SessionCache 的排程仍以秒計，造成過期前
+         5 秒的 refresh 視窗放大 1000 倍，review 在合併前攔下。</p>
+      <div class="ev"><a>PR#123</a><a>CacheConfig.java:24</a><a>SessionCache.java:36</a><a>finding F2 (BUG)</a></div>
+    </div>
+    <div class="item">
+      <p><b>refresh 排程走共用 scheduler，不自建執行緒</b>。PR#98 引入時定調：
+         cache 層不得持有自己的 thread pool，統一注入 TaskScheduler 以便測試與關機收斂。</p>
+      <div class="ev"><a>PR#98</a><a>SessionCache.java:18</a><a>work item #4412</a></div>
+    </div>
+  </section>
+
+  <section>
+    <h3>Invariants（改到這個檔前先讀）</h3>
+    <div class="inv">refresh 必須在過期「之前」發生：schedule(getTtl() − margin)，margin 與 TTL 同單位（毫秒）。</div>
+    <div class="inv">getTtl() 的回傳單位改動視為 breaking change——呼叫端遍及 repo-a 之外（見 blast）。</div>
+  </section>
+
+  <section>
+    <h3>Author note（合併時的原話，逐字保留）</h3>
+    <div class="quote">
+      「補充：margin 之所以是 5000ms 不是 5s 常數，是因為壓測時 4s 內 refresh 偶發撞上
+       GC pause。別調小。」
+      <div class="who">— PR#123 作者回覆 · 2026-08-19（此回覆即本條目的核准訊號）</div>
+    </div>
+  </section>
+
+  <section>
+    <h3>Affected entities（graph 給的鄰居）</h3>
+    <div class="chips">
+      <span class="chip">CacheConfig.getTtl()</span>
+      <span class="chip">SessionCache.scheduleRefresh()</span>
+      <span class="chip">webhooks/SessionWarmup.java</span>
+    </div>
+  </section>
+
+  <section>
+    <h3>History（決策的 blame）</h3>
+    <table class="hist">
+      <tr><td>PR#123</td><td>TTL 單位 秒→毫秒；margin 定 5000ms（作者補註 GC 原因）。approval: explicit。</td></tr>
+      <tr><td>PR#98</td><td>初版：引入共用 scheduler 原則。approval: silent（合併即落地、無異議）。</td></tr>
+    </table>
+  </section>
+
+  <div class="prov">provenance — distilled by <code>pr-review-distiller v3</code> ·
+     evidence sha <code>repo-a@b41c9e2</code> · knowledge sha <code>k-repo@77af310</code> ·
+     樣式規則：條目是「證據之上的視圖」，無連結的句子不得出現。</div>
+</article>
+</div>
+
+<div class="duo">
+  <div class="panel">
+    <h3>同一頁的 raw markdown（真正落地的東西）</h3>
+    <pre># SessionCache
+&gt; entity: src/main/java/com/acme/cache/SessionCache.java
+&gt; approval: explicit · last: PR#123
+
+## Summary
+Session 快取的過期與更新排程。TTL 單位自 PR#123 起為毫秒…
+
+## Decisions
+- **TTL 一律以毫秒對外** — 歷史上 getTtl() 回秒…
+  [PR#123] [CacheConfig.java:24] [SessionCache.java:36]
+
+## Invariants
+- refresh 必須在過期之前：schedule(getTtl() − margin)…
+
+## Author note (PR#123)
+&gt; 補充：margin 之所以是 5000ms…別調小。</pre>
+  </div>
+  <div class="panel">
+    <h3>Reviewer 在 Stage 04 收到的注入（targeted，只給相關那幾條）</h3>
+    <div class="term"><span class="d"># Knowledge (2 entries relevant to this change)</span><br>
+<span class="k">## SessionCache</span> — TTL is <b>milliseconds</b> since PR#123;<br>
+refresh must fire before expiry; margin unit = ms (author:<br>
+"4s 內 refresh 偶發撞上 GC pause. 別調小.")<br>
+<span class="k">## CacheConfig</span> — getTtl() unit change = breaking; callers<br>
+exist outside repo-a (blast: webhooks/SessionWarmup.java)<br>
+<span class="d">evidence: PR#123, PR#98 · treat as leads, verify against diff</span></div>
+    <p style="font-size:12.5px;color:var(--dim);margin-top:10px">
+      111 那類「A 改單位、B 當舊單位用」的病，從此在 review 當下就有前科可查。</p>
+  </div>
+</div>
+
+<footer>v1 落點：<code>KNOWLEDGE_ROOT=&lt;本地路徑&gt;</code>（git init 取 SHA 錨）。
+  要給人看的那天：push 成 ADO repo → <b>Publish code as wiki</b> → 左邊這棵樹原樣變成可搜尋的 wiki 導覽，新增服務數 0。</footer>
+
+</div>
+</body>
+</html>

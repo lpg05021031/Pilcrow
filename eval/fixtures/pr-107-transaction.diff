@@ -1,0 +1,12 @@
+--- a/src/main/java/com/acme/transfer/TransferService.java
++++ b/src/main/java/com/acme/transfer/TransferService.java
+@@ -19,3 +19,10 @@ public class TransferService {
+     public TransferService(AccountRepository accounts) {
+         this.accounts = accounts;
+     }
++
++    /** Debit and credit must succeed or fail together. */
++    public void transfer(long fromId, long toId, BigDecimal amount) {
++        accounts.debit(fromId, amount);
++        accounts.credit(toId, amount);
++    }

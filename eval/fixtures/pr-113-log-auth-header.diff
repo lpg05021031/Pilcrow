@@ -1,0 +1,11 @@
+--- a/src/main/java/com/acme/web/RequestLogFilter.java
++++ b/src/main/java/com/acme/web/RequestLogFilter.java
+@@ -18,3 +18,9 @@ public class RequestLogFilter {
+     public void init(FilterConfig cfg) {
+         this.enabled = true;
+     }
++
++    public void logRequest(javax.servlet.http.HttpServletRequest req) {
++        log.debug("path=" + req.getRequestURI()
++                + " auth=" + req.getHeader("Authorization"));
++    }

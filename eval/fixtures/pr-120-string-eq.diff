@@ -1,0 +1,11 @@
+--- a/src/main/java/com/acme/order/OrderStateMachine.java
++++ b/src/main/java/com/acme/order/OrderStateMachine.java
+@@ -19,3 +19,10 @@ public class OrderStateMachine {
+     public String stateOf(Order o) {
+         return o.getState();
+     }
++
++    public boolean canShip(Order o) {
++        String state = o.getState();
++        return state == "PAID" || state == "PACKED";
++    }

@@ -1,0 +1,14 @@
+--- a/src/main/java/com/acme/worker/RetryHelper.java
++++ b/src/main/java/com/acme/worker/RetryHelper.java
+@@ -13,3 +13,12 @@ public class RetryHelper {
+     public RetryHelper(Clock clock) {
+         this.clock = clock;
+     }
++
++    public void backoff(long millis) {
++        try {
++            Thread.sleep(millis);
++        } catch (InterruptedException e) {
++            log.warn("sleep interrupted");
++        }
++    }

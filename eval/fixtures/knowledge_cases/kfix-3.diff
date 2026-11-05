@@ -1,0 +1,25 @@
+--- a/src/main/java/com/acme/orders/OrderService.java
++++ b/src/main/java/com/acme/orders/OrderService.java
+@@ -38,12 +38,20 @@ public class OrderService {
+     @Transactional
+     public Order cancel(long orderId, String reason) {
+         Order order = repository.findById(orderId).orElseThrow();
+         stateMachine.apply(order, Event.CANCEL);
+         repository.save(order);
+-        auditLog.write(new AuditEntry(orderId, "CANCEL", reason));
++        publishAudit(orderId, reason);
+         return order;
+     }
+
++    /**
++     * Write the audit row off the request thread so cancellation returns
++     * faster; the audit table is not on the hot path.
++     */
++    @Async
++    public void publishAudit(long orderId, String reason) {
++        auditLog.write(new AuditEntry(orderId, "CANCEL", reason));
++    }
++
+     public Order get(long orderId) {
+         return repository.findById(orderId).orElseThrow();
+     }

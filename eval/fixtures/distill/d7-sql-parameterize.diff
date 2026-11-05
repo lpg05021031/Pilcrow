@@ -1,0 +1,13 @@
+--- a/src/main/java/com/acme/user/UserRepository.java
++++ b/src/main/java/com/acme/user/UserRepository.java
+@@ -40,10 +40,11 @@ public class UserRepository {
+
+-    public List<User> findByName(String name) {
+-        String sql = "SELECT * FROM users WHERE name = '" + name + "'";
+-        return jdbcTemplate.query(sql, USER_MAPPER);
+-    }
++    public List<User> findByName(String name) {
++        String sql = "SELECT * FROM users WHERE name = ?";
++        return jdbcTemplate.query(sql, USER_MAPPER, name);
++    }
+ }

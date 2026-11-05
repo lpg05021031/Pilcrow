@@ -1,0 +1,15 @@
+--- a/src/main/java/com/acme/user/BulkLookupService.java
++++ b/src/main/java/com/acme/user/BulkLookupService.java
+@@ -14,3 +14,13 @@ public class BulkLookupService {
+     public BulkLookupService(UserRepository repository) {
+         this.repository = repository;
+     }
++
++    /** Nightly sync passes up to 50,000 ids in one call. */
++    public java.util.List<User> loadAll(java.util.List<Long> ids) {
++        java.util.List<User> out = new java.util.ArrayList<>();
++        for (Long id : ids) {
++            repository.findById(id).ifPresent(out::add);
++        }
++        return out;
++    }

@@ -1,0 +1,19 @@
+--- a/src/main/java/com/acme/cache/LookupCache.java
++++ b/src/main/java/com/acme/cache/LookupCache.java
+@@ -8,13 +8,18 @@ import com.github.benmanes.caffeine.cache.Caffeine;
+
+ public class LookupCache {
+
+-    private final Cache<String, Account> cache = CacheBuilder.newBuilder()
+-            .maximumSize(10_000)
+-            .expireAfterWrite(10, TimeUnit.MINUTES)
+-            .build();
++    private final Cache<String, Account> cache = Caffeine.newBuilder()
++            .maximumSize(10_000)
++            .expireAfterWrite(10, TimeUnit.MINUTES)
++            .recordStats()
++            .build();
+
+     public Account get(String id) {
+         return cache.get(id, this::load);
+     }

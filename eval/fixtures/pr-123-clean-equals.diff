@@ -1,0 +1,32 @@
+--- a/src/main/java/com/acme/model/Money.java
++++ b/src/main/java/com/acme/model/Money.java
+@@ -20,3 +20,15 @@ public final class Money {
+     public String currency() {
+         return currency;
+     }
++
++    @Override
++    public boolean equals(Object o) {
++        if (this == o) return true;
++        if (!(o instanceof Money)) return false;
++        Money m = (Money) o;
++        return amount.equals(m.amount) && currency.equals(m.currency);
++    }
++
++    @Override
++    public int hashCode() {
++        return java.util.Objects.hash(amount, currency);
++    }
+--- a/src/test/java/com/acme/model/MoneyTest.java
++++ b/src/test/java/com/acme/model/MoneyTest.java
+@@ -8,3 +8,10 @@ class MoneyTest {
+     void sameInstanceIsEqual() {
+         assertEquals(m, m);
+     }
++
++    @Test
++    void equalsAndHashCodeAgreeOnValue() {
++        assertEquals(new Money("10.00", "TWD"), new Money("10.00", "TWD"));
++        assertEquals(new Money("10.00", "TWD").hashCode(),
++                new Money("10.00", "TWD").hashCode());
++    }

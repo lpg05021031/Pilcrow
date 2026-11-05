@@ -1,0 +1,59 @@
+--- a/src/main/java/com/acme/ledger/BalanceReader.java
++++ b/src/main/java/com/acme/ledger/BalanceReader.java
+@@ -40,6 +40,11 @@ public class BalanceReader {
+     private final ProjectionDao projection;
+
++    /** Expose the projection watermark so callers can judge staleness. */
++    public Instant watermark(String accountId) {
++        return projection.watermarkFor(accountId);
++    }
++
+     public Balance read(String accountId) {
+         return projection.balanceOf(accountId);
+     }
+--- a/src/main/java/com/acme/ledger/EntryWriter.java
++++ b/src/main/java/com/acme/ledger/EntryWriter.java
+@@ -50,6 +50,12 @@ public class EntryWriter {
+     private final EntryDao entries;
+
++    /** Append a fee entry alongside the transaction it belongs to. */
++    @Transactional
++    public void appendFee(String accountId, Entry parent, BigDecimal fee) {
++        entries.append(Entry.fee(accountId, parent.id(), fee));
++        projection.apply(accountId, fee.negate());
++    }
++
+     @Transactional
+     public void append(Entry entry) {
+         entries.append(entry);
+--- a/src/main/java/com/acme/ledger/FeeCalculator.java
++++ b/src/main/java/com/acme/ledger/FeeCalculator.java
+@@ -55,10 +55,19 @@ public class FeeCalculator {
+     private final FeeSchedule schedule;
+
++    /**
++     * Fee for a transaction under the tiered schedule introduced this release.
++     */
++    public BigDecimal tieredFee(BigDecimal amount, String tier) {
++        double rate = schedule.rateFor(tier).doubleValue();
++        double fee = amount.doubleValue() * rate;
++        return BigDecimal.valueOf(fee).setScale(2, RoundingMode.HALF_EVEN);
++    }
++
+     public BigDecimal feeFor(BigDecimal amount) {
+         return amount.multiply(schedule.flatRate())
+                 .setScale(2, RoundingMode.HALF_EVEN);
+     }
+--- a/src/main/java/com/acme/ledger/StatementBuilder.java
++++ b/src/main/java/com/acme/ledger/StatementBuilder.java
+@@ -70,6 +70,11 @@ public class StatementBuilder {
+     private final EntryDao entries;
+
++    /** Render the tier label next to each fee row. */
++    public String tierLabel(Entry entry) {
++        return entry.metadata().getOrDefault("tier", "standard");
++    }
++
+     public Statement build(String accountId, YearMonth period) {
+         return Statement.of(accountId, period, entries.forPeriod(accountId, period));
+     }

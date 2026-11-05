@@ -1,0 +1,14 @@
+# 複製為 /etc/systemd/system/pr-review-results.service
+[Unit]
+Description=pr-review - review-result-tools (8096, DRY_RUN)
+After=network.target
+
+[Service]
+EnvironmentFile=/etc/pr-review-suite/results.env
+WorkingDirectory=/opt/pr-review-suite
+ExecStart=/opt/pr-review-suite/venv/bin/python -m tools.review_result_tools.server
+Restart=always
+User=svc-review
+
+[Install]
+WantedBy=multi-user.target

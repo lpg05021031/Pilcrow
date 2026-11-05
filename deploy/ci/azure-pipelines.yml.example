@@ -1,0 +1,12 @@
+# 最小 CI：pytest（確定性層 + 幾何前提）——零 LLM、零金鑰、秒級。
+# eval 端到端刻意不進 CI（要 LLM 金鑰與 Langfuse）；由 webhook / 手動觸發。
+trigger:
+  branches: { include: [ main ] }
+pool: { vmImage: ubuntu-latest }
+steps:
+  - task: UsePythonVersion@0
+    inputs: { versionSpec: '3.12' }
+  - script: |
+      pip install -r requirements.txt pytest semgrep
+      python -m pytest -q tests/
+    displayName: deterministic-layer tests

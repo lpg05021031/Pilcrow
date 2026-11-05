@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>知識迴圈 — 最終版運作圖（週期驗收制）</title>
+<style>
+  :root{
+    --paper:#EDF1F4; --card:#FFF; --ink:#182230; --dim:#5A6B7E; --line:#D4DCE4;
+    --know:#1E8A6E; --know-bg:#E5F4EF; --know-line:#BFE3D6;
+    --code:#2F6DB3; --llm:#7A4FBF; --human:#B8791F;
+    --term-bg:#131A22; --term-fg:#C9D6E3; --term-dim:#6E8096;
+    --mono:ui-monospace,"Cascadia Code",Consolas,Menlo,monospace;
+    --sans:"Segoe UI",system-ui,"PingFang TC","Microsoft JhengHei",sans-serif;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--paper);color:var(--ink);font-family:var(--sans);
+       line-height:1.55;padding:36px 18px 64px}
+  .wrap{max-width:900px;margin:0 auto}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.22em;
+          text-transform:uppercase;color:var(--dim)}
+  h1{font-size:clamp(22px,3vw,30px);font-weight:750;margin:6px 0 8px;letter-spacing:-.01em}
+  .sub{color:var(--dim);max-width:70ch;font-size:14.5px}
+  .sub b{color:var(--ink)}
+
+  .phase{margin:26px 0 10px;display:flex;align-items:center;gap:12px}
+  .phase h2{font-family:var(--mono);font-size:12.5px;letter-spacing:.18em;
+            text-transform:uppercase;color:var(--know);white-space:nowrap}
+  .phase .freq{font-family:var(--mono);font-size:11px;color:var(--dim)}
+  .phase .rule{height:1px;background:var(--know-line);flex:1}
+
+  .step{background:var(--card);border:1px solid var(--line);
+        border-left:5px solid var(--lane,var(--code));border-radius:8px;
+        padding:13px 16px;margin-bottom:10px}
+  .step.llm{--lane:var(--llm)} .step.human{--lane:var(--human)}
+  .step.know{--lane:var(--know);background:#FAFDFC}
+  .h{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+  .no{font-family:var(--mono);font-size:12.5px;font-weight:700;color:var(--lane,var(--code))}
+  .nm{font-weight:700;font-size:15.5px}
+  .lane{font-family:var(--mono);font-size:10px;letter-spacing:.12em;
+        text-transform:uppercase;color:#fff;background:var(--lane,var(--code));
+        border-radius:3px;padding:2px 7px;margin-left:auto}
+  .b{margin-top:6px;font-size:14px;color:#33404F;max-width:74ch}
+  .b code{font-family:var(--mono);font-size:12.5px;background:#EFF3F7;
+          border:1px solid var(--line);border-radius:3px;padding:0 5px}
+  .arrow{width:2px;height:14px;background:var(--line);margin:0 auto 10px;position:relative}
+  .arrow::after{content:"";position:absolute;left:-4px;bottom:-1px;
+                border:5px solid transparent;border-top-color:var(--line)}
+  .loopback{border:1px dashed var(--know-line);background:var(--know-bg);
+            border-radius:8px;padding:10px 16px;margin:2px 0 10px;
+            font-size:13.5px;color:#1F5A4A}
+  .loopback b{font-family:var(--mono)}
+
+  table.mini{border-collapse:collapse;margin-top:8px;font-size:13px;width:100%}
+  .mini td{border-top:1px solid var(--line);padding:5px 10px 5px 0;vertical-align:top}
+  .mini td:first-child{font-family:var(--mono);white-space:nowrap;color:#3B4A5B;width:200px}
+  .keep{color:var(--know);font-weight:700}
+  .drop{color:#A64B3C;font-weight:700}
+
+  .term{background:var(--term-bg);color:var(--term-fg);font-family:var(--mono);
+        font-size:12px;border-radius:6px;padding:8px 14px;margin-top:10px}
+  .term::before{content:"journal ▸ ";color:var(--term-dim)}
+
+  .duo{display:grid;grid-template-columns:1.15fr .85fr;gap:14px;margin-top:22px}
+  .panel{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px 16px}
+  .panel h3{font-family:var(--mono);font-size:11px;letter-spacing:.16em;
+            text-transform:uppercase;color:var(--dim);margin-bottom:8px}
+  .tree{font-family:var(--mono);font-size:12.5px;line-height:1.9;color:#3B4A5B}
+  .tree i{color:#9AA8B6;font-style:normal}
+  .tree .hot{color:#14523F;font-weight:700}
+  .tag{display:inline-block;font-family:var(--mono);font-size:11px;border-radius:4px;
+       padding:1px 7px;margin:2px 4px 2px 0;border:1px solid var(--know-line);
+       background:var(--know-bg);color:#14523F}
+  .tag.warn{background:#FBF3E4;border-color:#EAD7AF;color:#7A5A17}
+  footer{margin-top:22px;font-size:12.5px;color:var(--dim);
+         border-top:1px solid var(--line);padding-top:12px}
+  footer code{font-family:var(--mono)}
+  @media(max-width:760px){.duo{grid-template-columns:1fr}body{padding:22px 12px 48px}}
+</style>
+</head>
+<body><div class="wrap">
+
+<header>
+  <div class="kicker">pr-review-suite · knowledge loop — final</div>
+  <h1>知識迴圈：小 PR 累積、release 驗收</h1>
+  <p class="sub">三元組：<b>reviewer 對 code 的理解</b>（蒸餾原料）＋<b>作者回饋</b>（逐字入帳）＋
+     <b>PR 終態</b>（裁決）。核准權從每條小 PR 撤走，收攏到你們本來就有的儀式——
+     <b>release → master 的驗收 PR</b>；週期內知識即時可用，落地一週期一批。新增服務數 <b>0</b>。</p>
+</header>
+
+<div class="phase"><h2>Phase A — 週期內</h2><span class="freq">每條小 PR（→ release/*），重複 N 次</span><div class="rule"></div></div>
+
+<section class="step">
+  <div class="h"><span class="no">A1</span><span class="nm">小 PR review 完成</span><span class="lane">code+llm</span></div>
+  <p class="b">v2 pipeline 照常出報告。K 段從這裡分岔、<b>非同步</b>起跑——不擋使用者。</p>
+</section>
+<div class="arrow"></div>
+
+<section class="step know">
+  <div class="h"><span class="no">K1</span><span class="nm">閘門（確定性）</span><span class="lane" style="background:var(--know)">code</span></div>
+  <p class="b">目標分支 ∈ <code>KNOWLEDGE_BRANCHES</code>（release/*）才進；
+     純 version-bump／分支同步 merge 出局、<b>revert 必收</b>；
+     驗收 PR 本身（<code>release/* → master</code>）豁免——它是儀式，不是知識單元。</p>
+</section>
+<div class="arrow"></div>
+
+<section class="step llm">
+  <div class="h"><span class="no">K2</span><span class="nm">蒸餾 + 貼稿</span><span class="lane">llm</span></div>
+  <p class="b">distiller 吃現成產物（PR 文字＋review 報告＋graph 鄰接），憲法：<b>never invent intent</b>——
+     why 缺席就標記、順手在稿末<b>問作者一行 why</b>（記憶最新鮮的時刻）。
+     稿貼成 PR 留言（<code>KNOWLEDGE_POST</code>）——<b>不催核准</b>，理不理都行。</p>
+</section>
+<div class="arrow"></div>
+
+<section class="step know">
+  <div class="h"><span class="no">K3</span><span class="nm">小 PR 終態分類 → 暫存</span><span class="lane" style="background:var(--know)">code</span></div>
+  <table class="mini">
+    <tr><td>作者有回覆</td><td><span class="keep">staged/explicit</span> — 回覆逐字收進 Author note</td></tr>
+    <tr><td>沉默 + code 未再動</td><td><span class="keep">staged/silent</span> — 原稿照單暫存</td></tr>
+    <tr><td>回覆含 reject</td><td><span class="drop">丟</span></td></tr>
+    <tr><td>draft 之後又有 push</td><td><span class="drop">stale 丟</span>（稿已不描述合併物）</td></tr>
+    <tr><td>PR abandoned</td><td><span class="drop">丟</span>（從未發生的決策不入帳本）</td></tr>
+  </table>
+  <div class="term">completed → staged（silent，等週期驗收）</div>
+</section>
+
+<div class="loopback">↻ <b>暫存即生效</b>：同週期後續的 review，loader 連 <b>_cycle/</b> 暫存稿一起讀
+   （主鍵＋graph 的 affected 鄰接副鍵），注入時標 <i>staged, pending cycle acceptance</i>——
+   飛輪在週期內就轉，不等收口。</div>
+
+<div class="phase"><h2>Phase B — 收口</h2><span class="freq">每 1–2 週一次：release → master 驗收 PR</span><div class="rule"></div></div>
+
+<section class="step know">
+  <div class="h"><span class="no">B1</span><span class="nm">驗收窗開啟</span><span class="lane" style="background:var(--know)">code</span></div>
+  <p class="b">harvester 偵測到 <b>active</b> 的驗收 PR → 貼一則 <b>cycle digest</b>：本週期全部暫存條目
+     （實體、來源 PR、provenance、一句摘要）。這就是階段性驗收的介面。</p>
+  <div class="term">repo-a: digest → 驗收 PR#500（3 條開窗）</div>
+</section>
+<div class="arrow"></div>
+
+<section class="step human">
+  <div class="h"><span class="no">B2</span><span class="nm">團隊掃一眼（唯一的人工時刻）</span><span class="lane">人</span></div>
+  <p class="b">release 當天本來就在做整體驗收的那個人，順眼掃 digest；
+     不同意哪條就回 <code>reject &lt;EntityName&gt;</code>（任何人可回）——該條當場出局。其餘不用動。</p>
+</section>
+<div class="arrow"></div>
+
+<section class="step know">
+  <div class="h"><span class="no">B3</span><span class="nm">驗收 PR completed → 批次落地</span><span class="lane" style="background:var(--know)">code</span></div>
+  <p class="b">倖存條目寫進實體頁（provenance：<code>cycle/explicit</code>｜<code>cycle/silent</code>、
+     History blame 疊行）＋自動生成 <b>_cycles/&lt;日期&gt;-PR&lt;id&gt;.md</b> 週期收據。
+     驗收 PR 若 abandoned → 暫存原地保留、等下一輪。digest 與收口皆冪等。</p>
+  <div class="term">repo-a: 驗收 PR#500 收口 → 落地 3 條 + 週期頁</div>
+</section>
+
+<div class="loopback">↻ 收口之後，所有 review 讀的就是<b>正式頁</b>（主鍵＋affected 副鍵命中）；
+   報告 Coverage 表記 <i>Knowledge context | N entries injected</i> —— 引用率的量測點。</div>
+
+<div class="duo">
+  <div class="panel">
+    <h3>KNOWLEDGE_ROOT 佈局（本地 git；push 成 ADO repo 即可 Publish code as wiki）</h3>
+    <div class="tree">
+      <i>├─</i> _pending/ <i>（distiller 只寫檔；timer 是唯一 commit 者）</i><br>
+      <i>├─</i> <span class="hot">_cycle/</span> <i>（本週期暫存稿；review 可即時讀）</i><br>
+      <i>├─</i> _state/ <i>（repos / watermark / cycle 記帳）</i><br>
+      <i>└─</i> repo-a/<br>
+      <i>&nbsp;&nbsp;&nbsp;├─</i> billing/TransferService.md <i>（實體頁＝決策 blame）</i><br>
+      <i>&nbsp;&nbsp;&nbsp;├─</i> _module/ <i>（純人類手寫區＋unreviewed ledger）</i><br>
+      <i>&nbsp;&nbsp;&nbsp;└─</i> <span class="hot">_cycles/</span>2026-08-22-PR500.md <i>（每輪 release 的知識收據）</i>
+    </div>
+  </div>
+  <div class="panel">
+    <h3>Provenance（信任等級攤在陽光下）</h3>
+    <span class="tag">cycle/explicit</span><span class="tag">cycle/silent</span>
+    <span class="tag warn">staged</span><span class="tag warn">unreviewed</span>
+    <p class="b" style="font-size:12.5px;margin-top:8px">
+      explicit＝作者說過話；silent＝沉默合併照單；staged＝週期內暫行；
+      unreviewed＝沒經過 bot 就進 release 的漏網 PR（watermark 補帳本行，
+      release 史零遺漏）。條目每句話掛 PR / file:line —— 無連結的句子不得出現。</p>
+  </div>
+</div>
+
+<footer>唯一寫手＝<code>knowledge-harvest.timer</code>（30 分/輪）；蒸餾 prompt
+  <code>pr-review-distiller</code> 受 Langfuse 版控；成敗兩指標＝引用率 × review 增益。</footer>
+
+</div></body></html>

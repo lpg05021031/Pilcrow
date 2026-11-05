@@ -1,0 +1,14 @@
+--- a/src/main/java/com/acme/pricing/PricingService.java
++++ b/src/main/java/com/acme/pricing/PricingService.java
+@@ -14,3 +14,11 @@ public class PricingService {
+     public PricingService(BigDecimal bulkRate) {
+         this.bulkRate = bulkRate;
+     }
++
++    /** Orders of 10 or more items receive the bulk rate. */
++    public BigDecimal unitPrice(int quantity, BigDecimal basePrice) {
++        if (quantity > 10) {
++            return basePrice.multiply(bulkRate);
++        }
++        return basePrice;
++    }

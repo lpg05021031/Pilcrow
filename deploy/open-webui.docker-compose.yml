@@ -1,0 +1,24 @@
+# 聊天室：Open WebUI（登入、多用戶、斷網可自架）
+# 使用者貼 PR URL 即得 review；登入者身分會轉發給 orchestrator 進 trace 的 user_id
+services:
+  open-webui:
+    # 改成 docker images 顯示的名稱:tag（斷網環境先在連外機 save/load 搬入）
+    image: openui:latest
+    pull_policy: never
+    restart: always
+    ports:
+      - "3001:8080"
+    environment:
+      OPENAI_API_BASE_URL: http://host.docker.internal:8080/v1
+      OPENAI_API_KEY: not-needed
+      ENABLE_FORWARD_USER_INFO_HEADERS: "true"
+      WEBUI_AUTH: "true"
+      OFFLINE_MODE: "true"
+      HF_HUB_OFFLINE: "1"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - open-webui-data:/app/backend/data
+
+volumes:
+  open-webui-data:

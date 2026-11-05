@@ -1,0 +1,9 @@
+# 複製為 /etc/systemd/system/pr-review-repo-sync.service（改 User）
+[Unit]
+Description=sync PR-review repo clones + rebuild code graph
+
+[Service]
+Type=oneshot
+User=svc-review
+Environment=REPOS_ROOT=/opt/repos
+ExecStart=/opt/pr-review-suite/deploy/bin/repo-sync.sh

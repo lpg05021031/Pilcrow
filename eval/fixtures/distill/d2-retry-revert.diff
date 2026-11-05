@@ -1,0 +1,20 @@
+--- a/src/main/java/com/acme/http/WriteClient.java
++++ b/src/main/java/com/acme/http/WriteClient.java
+@@ -30,16 +30,11 @@ public class WriteClient {
+     private final HttpClient http;
+
+-    public Response post(Request request) {
+-        for (int attempt = 1; attempt <= 5; attempt++) {
+-            try {
+-                return http.send(request);
+-            } catch (TransientException e) {
+-                jitterSleep(attempt);
+-            }
+-        }
+-        throw new GaveUpException();
+-    }
++    /** Writes are sent once; the caller decides what a failure means. */
++    public Response post(Request request) {
++        return http.send(request);
++    }
+ }

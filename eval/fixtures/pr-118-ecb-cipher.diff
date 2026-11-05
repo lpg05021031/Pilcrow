@@ -1,0 +1,17 @@
+--- a/src/main/java/com/acme/crypto/FieldEncryptor.java
++++ b/src/main/java/com/acme/crypto/FieldEncryptor.java
+@@ -1,4 +1,4 @@
+ package com.acme.crypto;
+ 
+ import javax.crypto.Cipher;
+ 
+@@ -14,3 +14,9 @@ public class FieldEncryptor {
+     public FieldEncryptor(KeyProvider keys) {
+         this.keys = keys;
+     }
++
++    public byte[] encrypt(byte[] plain) throws Exception {
++        Cipher cipher = Cipher.getInstance("AES/ECB/PKCS5Padding");
++        cipher.init(Cipher.ENCRYPT_MODE, keys.current());
++        return cipher.doFinal(plain);
++    }

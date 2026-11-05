@@ -1,0 +1,23 @@
+--- a/src/main/java/com/acme/payment/CardService.java
++++ b/src/main/java/com/acme/payment/CardService.java
+@@ -16,3 +16,9 @@ public class CardService {
+     public CardService(Vault vault) {
+         this.vault = vault;
+     }
++
++    public void register(String cardNumber) {
++        log.info("registering card {}", Masker.last4(cardNumber));
++        vault.store(cardNumber);
++    }
+--- a/src/test/java/com/acme/payment/CardServiceTest.java
++++ b/src/test/java/com/acme/payment/CardServiceTest.java
+@@ -10,3 +10,9 @@ class CardServiceTest {
+     void setUp() {
+         service = new CardService(vault);
+     }
++
++    @Test
++    void registerStoresFullNumberButLogsOnlyLast4() {
++        service.register("4111111111111111");
++        verify(vault).store("4111111111111111");
++    }

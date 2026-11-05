@@ -1,0 +1,12 @@
+--- a/src/main/java/com/acme/importer/BatchLoader.java
++++ b/src/main/java/com/acme/importer/BatchLoader.java
+@@ -18,7 +18,7 @@ public class BatchLoader {
+
+-    private static final int BATCH_SIZE = 100;
++    private static final int BATCH_SIZE = 500;
+
+     public void load(List<Row> rows) {
+         for (List<Row> chunk : Lists.partition(rows, BATCH_SIZE)) {
+             dao.insertAll(chunk);
+         }
+     }

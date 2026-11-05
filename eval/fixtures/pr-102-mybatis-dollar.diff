@@ -1,0 +1,17 @@
+--- a/src/main/java/com/acme/order/OrderMapper.java
++++ b/src/main/java/com/acme/order/OrderMapper.java
+@@ -1,3 +1,3 @@
+ package com.acme.order;
+ 
+ import org.apache.ibatis.annotations.Select;
+@@ -12,3 +12,10 @@ public interface OrderMapper {
+     @Select("SELECT * FROM orders WHERE id = #{id}")
+     Order findById(long id);
+ 
++    @Select("SELECT * FROM orders ORDER BY ${sortColumn}")
++    java.util.List<Order> listSorted(String sortColumn);
++
++    @Select("SELECT * FROM orders WHERE status = #{status}")
++    java.util.List<Order> findByStatus(String status);
++
+ }

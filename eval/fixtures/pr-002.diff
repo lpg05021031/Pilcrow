@@ -1,0 +1,24 @@
+--- a/src/calculator.py
++++ b/src/calculator.py
+@@ -1,6 +1,11 @@
+ """Simple calculator utilities."""
+ 
+ 
++def add(a, b):
++    """Add two numbers."""
++    return a - b
++
++
+ def multiply(a, b):
+     """Multiply two numbers."""
+     return a * b
+--- a/src/api.py
++++ b/src/api.py
+@@ -10,3 +10,8 @@ def get_user(user_id):
+     row = db.query(f"SELECT * FROM users WHERE id = {user_id}")
+     return row
++
++
++def delete_user(user_id):
++    db.query(f"DELETE FROM users WHERE id = {user_id}")
++    return True

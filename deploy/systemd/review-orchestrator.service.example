@@ -1,0 +1,14 @@
+# 複製為 /etc/systemd/system/review-orchestrator.service
+[Unit]
+Description=pr-review orchestrator (FastAPI, 8080)
+After=network.target
+
+[Service]
+EnvironmentFile=/etc/pr-review-suite/orchestrator.env
+WorkingDirectory=/opt/pr-review-suite
+ExecStart=/opt/pr-review-suite/venv/bin/uvicorn orchestrator.app:app --host 0.0.0.0 --port 8080
+Restart=always
+User=svc-review
+
+[Install]
+WantedBy=multi-user.target

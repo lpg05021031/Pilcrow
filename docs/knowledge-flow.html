@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pr-review-suite — 從貼上 PR URL 到知識落地的完整流程</title>
+<style>
+  :root{
+    --paper:#EDF1F4; --card:#FFFFFF; --ink:#182230; --dim:#5A6B7E;
+    --line:#D4DCE4;
+    --code:#2F6DB3;      /* 確定性（純 code） */
+    --llm:#7A4FBF;       /* LLM 階段 */
+    --human:#B8791F;     /* 人工時刻 */
+    --know:#1E8A6E;      /* 知識迴圈（v1 提案） */
+    --rail:#8593A2;      /* 外圈：觀測與評測 */
+    --term-bg:#131A22; --term-fg:#C9D6E3; --term-dim:#6E8096;
+    --mono:ui-monospace,"Cascadia Code","JetBrains Mono",Consolas,Menlo,monospace;
+    --sans:"Segoe UI",system-ui,-apple-system,"PingFang TC","Microsoft JhengHei",sans-serif;
+  }
+  *{box-sizing:border-box;margin:0}
+  body{background:var(--paper);color:var(--ink);font-family:var(--sans);
+       line-height:1.55;padding:40px 20px 72px}
+  .wrap{max-width:880px;margin:0 auto}
+
+  /* ---------- header ---------- */
+  header{margin-bottom:34px}
+  .kicker{font-family:var(--mono);font-size:12px;letter-spacing:.22em;
+          text-transform:uppercase;color:var(--dim)}
+  h1{font-size:clamp(24px,3.4vw,34px);font-weight:750;letter-spacing:-.015em;
+     margin:6px 0 10px}
+  .thesis{color:var(--dim);max-width:62ch}
+  .thesis b{color:var(--ink)}
+  .legend{display:flex;flex-wrap:wrap;gap:14px 22px;margin-top:18px;
+          font-size:13px}
+  .legend span{display:inline-flex;align-items:center;gap:7px;color:var(--dim)}
+  .dot{width:11px;height:11px;border-radius:2px;display:inline-block}
+
+  /* ---------- stage cards ---------- */
+  .stage{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--lane,var(--code));
+         border-radius:8px;padding:16px 18px 0;margin:0 0 14px;position:relative}
+  .stage.llm{--lane:var(--llm)} .stage.human{--lane:var(--human)}
+  .stage.know{--lane:var(--know);border-style:dashed;border-left-style:solid;background:#F7FBFA}
+  .head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .no{font-family:var(--mono);font-size:13px;font-weight:700;color:var(--lane,var(--code))}
+  .name{font-size:16.5px;font-weight:700}
+  .lane{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;
+        text-transform:uppercase;color:#fff;background:var(--lane,var(--code));
+        border-radius:3px;padding:2px 7px;margin-left:auto}
+  .body{margin:7px 0 12px;color:#33404F;font-size:14.5px;max-width:70ch}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 13px}
+  .chip{font-family:var(--mono);font-size:11.5px;background:#EFF3F7;
+        border:1px solid var(--line);border-radius:4px;padding:2px 7px;color:#3B4A5B}
+  .chip.k{background:#E5F4EF;border-color:#BFE3D6;color:#186A55}
+  .flow-in{font-family:var(--mono);font-size:11.5px;color:var(--know);
+           background:#E5F4EF;border:1px dashed #9CD2C0;border-radius:4px;
+           padding:2px 8px;display:inline-block;margin-bottom:10px}
+
+  /* 內嵌的聊天室旁白（使用者當下實際看到的那行） */
+  .term{background:var(--term-bg);color:var(--term-fg);font-family:var(--mono);
+        font-size:12.5px;border-radius:0 0 7px 7px;margin:0 -18px;
+        padding:9px 18px;display:flex;gap:10px;align-items:baseline}
+  .term::before{content:"chat ▸";color:var(--term-dim);font-size:11px;
+                letter-spacing:.08em;flex:none}
+  .term.quiet{color:var(--term-dim)}
+  .stage.noterm{padding-bottom:16px}
+
+  .arrow{width:2px;height:16px;background:var(--line);margin:0 auto 14px;
+         position:relative}
+  .arrow::after{content:"";position:absolute;left:-4px;bottom:-1px;
+                border:5px solid transparent;border-top-color:var(--line)}
+
+  /* ---------- 分節標題 / 分支 ---------- */
+  .part{margin:34px 0 14px;display:flex;align-items:center;gap:12px}
+  .part h2{font-size:13px;font-family:var(--mono);letter-spacing:.2em;
+           text-transform:uppercase;color:var(--dim);white-space:nowrap}
+  .part .rule{height:1px;background:var(--line);flex:1}
+  .part.know h2{color:var(--know)}
+  .scope{background:#E5F4EF;border:1px solid #BFE3D6;border-radius:8px;
+         padding:12px 16px;font-size:13.5px;color:#1F5A4A;margin:0 0 16px;
+         max-width:72ch}
+  .scope b{font-family:var(--mono)}
+
+  /* ---------- 外圈 ---------- */
+  .outer{border:1px solid var(--line);border-left:5px solid var(--rail);
+         border-radius:8px;background:#F4F6F8;padding:13px 18px;margin-bottom:10px;
+         font-size:13.5px;color:#465566}
+  .outer b{color:var(--ink)}
+  footer{margin-top:30px;font-size:12.5px;color:var(--dim);
+         border-top:1px solid var(--line);padding-top:14px}
+  footer code{font-family:var(--mono)}
+
+  @media (max-width:640px){
+    body{padding:24px 12px 56px}
+    .lane{margin-left:0}
+    .term{font-size:11.5px}
+  }
+  @media print{ body{background:#fff} .stage{break-inside:avoid} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="kicker">pr-review-suite · flow v2 + knowledge loop v1</div>
+  <h1>一條 PR URL 的完整旅程</h1>
+  <p class="thesis">分工鐵律貫穿全程：<b>能確定性計算的絕不交給 LLM</b>。
+     藍色階段是純 code（結果可重現、信心 1.0），紫色是 LLM（有 JSON 合約與降級路徑），
+     琥珀色是人。綠色虛線是新提案：把每次 review 的理解蒸餾成<b>本地 knowledge repo</b>，
+     回頭餵給下一次 review——飛輪在第 04 站閉合。</p>
+  <div class="legend">
+    <span><i class="dot" style="background:var(--code)"></i>確定性（code）</span>
+    <span><i class="dot" style="background:var(--llm)"></i>LLM</span>
+    <span><i class="dot" style="background:var(--human)"></i>人</span>
+    <span><i class="dot" style="background:var(--know)"></i>知識迴圈（v1 提案）</span>
+    <span><i class="dot" style="background:var(--rail)"></i>觀測與評測（全程）</span>
+  </div>
+</header>
+
+<div class="part"><h2>主線 — 已上線</h2><div class="rule"></div></div>
+
+<section class="stage human">
+  <div class="head"><span class="no">01</span><span class="name">使用者貼上 PR URL</span><span class="lane">人</span></div>
+  <p class="body">Open WebUI 選 <b>pr-reviewer</b> 模型、貼 Azure DevOps 連結。
+     元任務盾擋掉 title/tags 偷跑；同一條 PR 兩分鐘內重貼走 dedupe 快取重播。</p>
+  <div class="chips"><span class="chip">:3001 → orchestrator :8080</span><span class="chip">/v1/chat/completions (stream)</span></div>
+  <div class="term">Resolving pull request URL</div>
+</section>
+<div class="arrow"></div>
+
+<section class="stage">
+  <div class="head"><span class="no">02</span><span class="name">① 取件 — metadata 與 diff</span><span class="lane">code</span></div>
+  <p class="body">ado_pr_tools 用 PAT 打 ADO REST：標題、描述、來源/目標分支、
+     iteration changes 組出 unified diff。repo 名從 URL 現場解析——整套系統 repo-agnostic。</p>
+  <div class="chips"><span class="chip">:8094</span><span class="chip">ADO_PAT</span><span class="chip">DIFF_MAX_FILES / _FILE_BYTES</span></div>
+  <div class="term">PR located — "Fix session TTL"; fetching diff</div>
+</section>
+<div class="arrow"></div>
+
+<section class="stage">
+  <div class="head"><span class="no">03</span><span class="name">解剖 + 確定性掃描</span><span class="lane">code</span></div>
+  <p class="body">anatomy 解析 diff、標註真實新行號、稀疏重建檔案；semgrep（含 Java 全家規則）、
+     ruff、資源洩漏與 <b>MISSING-TEST 啟發式</b>逐一開火——這層的每一條發現信心 1.0，
+     是 recall 的地板，跟模型心情無關。</p>
+  <div class="chips"><span class="chip">starter.yml + rules/**/*.semgrep.yml</span><span class="chip">只評新增行</span><span class="chip">STATIC_MISSING_TEST</span></div>
+  <div class="term">Static analysis — 2 finding(s)</div>
+</section>
+<div class="arrow"></div>
+
+<section class="stage">
+  <div class="head"><span class="no">04</span><span class="name">上下文預抓</span><span class="lane">code</span></div>
+  <span class="flow-in">◂ K4 knowledge repo 由此注入（迴圈閉合點）</span>
+  <p class="body">四路彙集，全部確定性預抓、不走 agentic tool loop：
+     <b>base</b>（REPOS_ROOT 本地 clone，timer 15 分鐘保鮮）、
+     <b>code graph</b>（per-call repo_root 自動切庫）、
+     <b>team rules</b>（子樹 SHA 錨）、
+     以及提案中的 <b>knowledge 條目</b>——只載入與本次變更實體相關的那幾條。</p>
+  <div class="chips"><span class="chip">REPOS_ROOT</span><span class="chip">GRAPH_TOOL_BLAST_ARGS · $repo_dir</span><span class="chip">RULES_ROOT</span><span class="chip k">KNOWLEDGE_ROOT（提案）</span></div>
+  <div class="term">Context prefetch — base: 4 file(s); code graph: attached</div>
+</section>
+<div class="arrow"></div>
+
+<section class="stage llm">
+  <div class="head"><span class="no">05</span><span class="name">Planner — 任務書</span><span class="lane">LLM</span></div>
+  <p class="body">讀結構摘要 + 規則索引，現場開 2–4 個面向：每科帶調查焦點、
+     <b>2–4 條可驗證假說</b>、目標檔、指派規則。四類別鏡片（BUG / SECURITY /
+     MISSING-TEST / NAMING）+ PERF 必須全數有人認領。壞 JSON → 降級固定四科。
+     緊接著純 code 的 <b>coverage gate</b>：孤兒檔、孤兒規則自動補一個 Coverage Sweep 面向——
+     「某個檔沒人看過」在數學上不可能發生。</p>
+  <div class="chips"><span class="chip">pr-review-planner（Langfuse 版控）</span><span class="chip">REVIEW_MAX_DIMENSIONS</span></div>
+  <div class="term">Planning — 3 dimensions: Correctness, Security, Test Coverage</div>
+</section>
+<div class="arrow"></div>
+
+<section class="stage llm">
+  <div class="head"><span class="no">06</span><span class="name">平行 Reviewers</span><span class="lane">LLM</span></div>
+  <p class="body">每科一個獨立 reviewer 拿任務書開工：逐條假說驗證並在 assessment 交代結局、
+     只收自己被指派規則的內文（targeted context）、對每條規則表態 pass / violation。
+     嚴禁裸陣列輸出；「不確定就別報——誤報侵蝕信任」。</p>
+  <div class="chips"><span class="chip">pr-review-reviewer</span><span class="chip">REVIEW_MAX_PARALLEL=3</span><span class="chip">rule_checks</span></div>
+  <div class="term">Reviewing [Security] — done, 2 finding(s)</div>
+</section>
+<div class="arrow"></div>
+
+<section class="stage llm">
+  <div class="head"><span class="no">07</span><span class="name">Adversary — 對抗驗證</span><span class="lane">LLM</span></div>
+  <p class="body">分塊挑戰每條 LLM 發現（≤6 條/次，壞塊隔離降級）：先存在？專案慣例？
+     嚴重度灌水？證據撐得住？<b>rejected 必須引用行號並指明踩了哪一項挑戰</b>，
+     指不出就只准 uncertain。可換一顆腦當檢察官。static 發現不送審、不動。</p>
+  <div class="chips"><span class="chip">pr-review-adversary</span><span class="chip">ADVERSARY_CHUNK=6</span><span class="chip">LLM_MODEL_ADVERSARY</span></div>
+  <div class="term">Adversarial validation — ok(2 confirmed / 1 rejected / 3; 1 chunk(s))</div>
+</section>
+<div class="arrow"></div>
+
+<section class="stage">
+  <div class="head"><span class="no">08</span><span class="name">Synthesis — 彙整裁決</span><span class="lane">code</span></div>
+  <p class="body">去重（static×LLM 交叉命中 → 信心 1.0 並標 corroborated；MISSING-TEST 全域一條）、
+     信心乘數（confirmed ×1.25 / rejected ×0.35）、門檻過濾、上限截斷、規則稽核表——
+     全部純函式，尺是硬的。</p>
+  <div class="chips"><span class="chip">REVIEW_MIN_CONFIDENCE=0.55</span><span class="chip">REVIEW_MAX_FINDINGS=10</span></div>
+  <div class="term">Synthesis — 3 finding(s) retained, 1 filtered below confidence threshold</div>
+</section>
+<div class="arrow"></div>
+
+<section class="stage">
+  <div class="head"><span class="no">09</span><span class="name">Render — 專業報告回傳</span><span class="lane">code</span></div>
+  <p class="body">v3 英文標準報告：Outcome 三態、F 編號交叉引用、Required actions、
+     Changed Files / Dimensions / Rule Compliance / Coverage 四張表、graph 影響證據。
+     串流旁白收尾、報告吐回聊天室；③ 可回寫 PR 留言（DRY_RUN 預設）。
+     零發現照樣完整、無變更可解析明講「不代表通過」。</p>
+  <div class="chips"><span class="chip">REQUIRES CHANGES / APPROVED WITH SUGGESTIONS / APPROVED</span><span class="chip">:8096 DRY_RUN</span></div>
+  <div class="term quiet">## Pull Request Review …（完整報告串出）</div>
+</section>
+
+<div class="part know"><h2>知識迴圈 — v1 提案（review 完非同步跑，不擋使用者）</h2><div class="rule"></div></div>
+
+<div class="scope"><b>v1 範圍：knowledge repo 就放本地</b> —— 照 rules repo 的成功模式：
+  伺服器上一個目錄 + <b>git init</b>（子樹 SHA 當版本錨），env 指 <b>KNOWLEDGE_ROOT</b>，
+  免遠端、免新服務。哪天要全組共筆，加 remote push 上去即可，程式零改動。</div>
+
+<section class="stage know noterm">
+  <div class="head"><span class="no">K1</span><span class="name">訊號過濾 — 這條 PR 值得寫史嗎</span><span class="lane" style="background:var(--know)">code</span></div>
+  <p class="body">純 code 閘門：描述長度、有無 work item、討論深度、是否碰核心目錄。
+     八成的 bump-version PR 在這裡出局——防「write-only 墓園」的第一道閘。</p>
+  <div class="chips"><span class="chip k">KNOWLEDGE_MIN_SIGNALS</span></div>
+</section>
+<div class="arrow"></div>
+
+<section class="stage know noterm">
+  <div class="head"><span class="no">K2</span><span class="name">Distiller — 蒸餾成結構化條目</span><span class="lane" style="background:var(--know)">LLM</span></div>
+  <p class="body">吃的全是現成產物：PR 摘要、各面向 assessment、graph 受影響實體、規則稽核。
+     產出 <b>{ summary, decisions[], invariants[], affected_entities, evidence links }</b>——
+     每條知識必附 PR / commit / 行號連結，條目是「證據之上的視圖」，不是自由散文。</p>
+  <div class="chips"><span class="chip k">pr-review-distiller（Langfuse 版控）</span><span class="chip k">蒸餾品質同樣上 golden eval</span></div>
+</section>
+<div class="arrow"></div>
+
+<section class="stage know noterm" style="--lane:var(--human)">
+  <div class="head"><span class="no">K3</span><span class="name">作者核准 — 最便宜的策展人</span><span class="lane" style="background:var(--human)">人</span></div>
+  <p class="body">蒸餾稿以留言回貼到該 PR，作者按讚或改兩筆才入庫——
+     防「自信的錯誤」：LLM 摘要偏一點點，錯得篤定的文件比沒有更毒。</p>
+</section>
+<div class="arrow"></div>
+
+<section class="stage know noterm">
+  <div class="head"><span class="no">K4</span><span class="name">落地 knowledge repo（本地）→ 回饋 Stage 04</span><span class="lane" style="background:var(--know)">code</span></div>
+  <p class="body">條目以 markdown 寫進 <b>KNOWLEDGE_ROOT</b>、依 graph 實體歸檔
+     （像 git blame，但 blame 的是<b>決策</b>）。下一條碰到同實體的 PR，
+     reviewer 自動收到這段記憶——例如「SessionCache 的 TTL 在 PR#123 定為毫秒」，
+     111 那類跨檔單位錯配從此有前科可查。成敗只認兩個數：<b>引用率</b>與
+     <b>review 增益</b>（有知識 vs 無知識模組的 recall 對比，harness 直接量）。</p>
+  <div class="chips"><span class="chip k">KNOWLEDGE_ROOT=&lt;本地路徑&gt;</span><span class="chip k">git init → 子樹 SHA 錨</span><span class="chip k">▸ 注入 Stage 04</span></div>
+</section>
+
+<div class="part"><h2>外圈 — 全程隨行</h2><div class="rule"></div></div>
+
+<div class="outer"><b>觀測</b>：每一站都是 Langfuse trace 的 span——run-review → plan →
+  review-dimension ×N → adversary → synthesis，metadata 自我描述配置
+  （prompt 版號 × rules SHA × 模型 × 旋鈕），名字記時間、metadata 認世代。</div>
+<div class="outer"><b>評測</b>：30 題 golden set（static 保底 / LLM 邏輯 / hard / 乾淨負樣本）、
+  三道 CI gate、Langfuse 一鍵 A/B（<code>?pipeline=v1|v2</code>）。改任何一根桿，
+  先過這關再上線——目前基線 recall 1.000 / noise 0 / precision 0.93+。</div>
+
+<footer>lane 顏色即架構立場：藍（code）愈多、紫（LLM）愈受合約約束，系統愈可信。
+  綠色迴圈為 v1 提案：唯一新增服務數 = <code>0</code>，重用 rules repo 全套模式。</footer>
+
+</div>
+</body>
+</html>

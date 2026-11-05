@@ -1,0 +1,15 @@
+# 複製為 /etc/systemd/system/pr-review-reader.service
+[Unit]
+Description=pr-review - repo-reader-tools (8095)
+After=network.target
+
+[Service]
+EnvironmentFile=/etc/pr-review-suite/reader.env
+WorkingDirectory=/opt/pr-review-suite
+ExecStart=/opt/pr-review-suite/venv/bin/python -m tools.repo_reader_tools.server
+Restart=always
+# 這個帳號要讀得到 REPO_ROOT
+User=svc-review
+
+[Install]
+WantedBy=multi-user.target

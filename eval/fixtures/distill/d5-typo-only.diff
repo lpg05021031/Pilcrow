@@ -1,0 +1,13 @@
+--- a/src/main/java/com/acme/report/ReportBuilder.java
++++ b/src/main/java/com/acme/report/ReportBuilder.java
+@@ -12,10 +12,10 @@ public class ReportBuilder {
+
+     /**
+-     * Buids the montly report for an acount.
++     * Builds the monthly report for an account.
+      */
+     public Report build(String accountId, YearMonth period) {
+-        // TODO: recieve the rows from the dao
++        // TODO: receive the rows from the dao
+         return Report.of(accountId, period, dao.rowsFor(accountId, period));
+     }

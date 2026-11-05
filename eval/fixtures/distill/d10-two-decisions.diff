@@ -1,0 +1,23 @@
+--- a/src/main/java/com/acme/export/CsvExporter.java
++++ b/src/main/java/com/acme/export/CsvExporter.java
+@@ -30,10 +30,21 @@ public class CsvExporter {
+
+-    public byte[] export(List<Row> rows) {
+-        StringBuilder out = new StringBuilder();
+-        rows.forEach(r -> out.append(r.toCsv()).append(NEWLINE));
+-        return out.toString().getBytes(StandardCharsets.UTF_8);
+-    }
++    /** Stream rows into the sink; the caller owns the sink's lifetime. */
++    public void export(List<Row> rows, OutputStream sink) throws IOException {
++        int written = 0;
++        Writer writer = new OutputStreamWriter(sink, StandardCharsets.UTF_8);
++        for (Row row : rows) {
++            writer.write(row.toCsv());
++            writer.write(NEWLINE);
++            if (++written % FLUSH_EVERY == 0) {
++                writer.flush();
++            }
++        }
++        writer.flush();
++    }
+ }

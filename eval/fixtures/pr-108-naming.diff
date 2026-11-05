@@ -1,0 +1,14 @@
+--- a/src/main/java/com/acme/account/AccountService.java
++++ b/src/main/java/com/acme/account/AccountService.java
+@@ -11,3 +11,11 @@ public class AccountService {
+     private final AccountRepository accounts;
+ 
+     private final Clock clock;
++
++    // Cache of the most recently loaded accounts.
++    private final java.util.Map<Long, Account> accountList = new java.util.HashMap<>();
++
++    /** True when the given flag has a value. */
++    public boolean isNotUnset(String flag) {
++        return flag != null && !flag.isEmpty();
++    }

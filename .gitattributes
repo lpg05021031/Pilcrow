@@ -1,0 +1,10 @@
+# 這套系統部署在 Linux（bash 單檔部署包、systemd、heredoc）：
+# 一律 LF，不管在哪個 OS checkout。RUNBOOK 血淚 #2 就是 CRLF 把 .sh 弄壞。
+* text=auto eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.diff text eol=lf
+*.example text eol=lf
+*.yml text eol=lf
+*.html text eol=lf

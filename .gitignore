@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+venv/
+.venv/
+
+# 部署時 installer 留下的逐檔備份
+.full-backup-*/
+.v2-backup-*/
+
+# 真實 env 絕不進 repo（樣板在 deploy/env/suite.env.example）
+*.env
+!*.env.example
+
+# 編輯器 / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

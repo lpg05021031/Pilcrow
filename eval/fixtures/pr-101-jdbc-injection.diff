@@ -1,0 +1,16 @@
+--- a/src/main/java/com/acme/user/UserRepository.java
++++ b/src/main/java/com/acme/user/UserRepository.java
+@@ -18,4 +18,13 @@ public class UserRepository {
+     public User findById(long id) {
+         return jdbc.queryForObject("SELECT * FROM users WHERE id = ?", MAPPER, id);
+     }
++
++    public int deleteByName(String name) {
++        return jdbc.update("DELETE FROM users WHERE name = '" + name + "'");
++    }
++
++    public User findByEmail(String email) {
++        return jdbc.queryForObject(
++                String.format("SELECT * FROM users WHERE email = '%s'", email), MAPPER);
++    }
+ }

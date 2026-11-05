@@ -1,0 +1,13 @@
+--- a/src/main/java/com/acme/imports/CsvLoader.java
++++ b/src/main/java/com/acme/imports/CsvLoader.java
+@@ -16,3 +16,11 @@ public class CsvLoader {
+     public CsvLoader(RowParser parser) {
+         this.parser = parser;
+     }
++
++    public java.util.List<Row> load(java.io.File f) throws Exception {
++        java.io.BufferedReader reader =
++                new java.io.BufferedReader(new java.io.FileReader(f));
++        return reader.lines().map(parser::parse)
++                .collect(java.util.stream.Collectors.toList());
++    }

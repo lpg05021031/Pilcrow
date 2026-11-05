@@ -1,0 +1,12 @@
+--- a/src/main/java/com/acme/config/FeatureFlags.java
++++ b/src/main/java/com/acme/config/FeatureFlags.java
+@@ -11,3 +11,10 @@ public class FeatureFlags {
+     public FeatureFlags(Environment env) {
+         this.env = env;
+     }
++
++    public boolean isEnabled(String flag) {
++        String raw = env.getProperty("features." + flag);
++        // getProperty returns null when the key is absent
++        return raw.trim().equalsIgnoreCase("true");
++    }

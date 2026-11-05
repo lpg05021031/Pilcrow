@@ -1,0 +1,15 @@
+[Unit]
+Description=pr-review knowledge harvest (PR 終態裁決 + 落地 knowledge repo)
+# stale 重蒸會打 ORCH_URL（同機 orchestrator）；orchestrator 沒起來時請求會失敗，
+# 那條 PR 的稿留著、下一輪再試一次（attempts ≤ 2），不會遺失也不會無界重試。
+After=network.target review-orchestrator.service
+Wants=review-orchestrator.service
+
+[Service]
+Type=oneshot
+User=<你的user>
+WorkingDirectory=<安裝根>
+EnvironmentFile=/etc/pr-review-suite/orchestrator.env
+EnvironmentFile=/etc/pr-review-suite/results.env
+Environment=PATH=<安裝根>/venv/bin:/usr/bin:/bin
+ExecStart=/bin/bash -lc '<安裝根>/venv/bin/python -m orchestrator.knowledge_harvest'

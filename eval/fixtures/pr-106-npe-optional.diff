@@ -1,0 +1,11 @@
+--- a/src/main/java/com/acme/user/UserService.java
++++ b/src/main/java/com/acme/user/UserService.java
+@@ -17,3 +17,9 @@ public class UserService {
+     public UserService(UserRepository repository) {
+         this.repository = repository;
+     }
++
++    /** Returns the user's email, or null when the user does not exist. */
++    public String emailOf(long id) {
++        return repository.findById(id).get().getEmail();
++    }

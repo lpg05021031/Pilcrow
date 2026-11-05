@@ -1,0 +1,20 @@
+--- a/src/main/java/com/acme/cache/CacheConfig.java
++++ b/src/main/java/com/acme/cache/CacheConfig.java
+@@ -22,4 +22,4 @@ public class CacheConfig {
+     private final int ttl;
+ 
+-    /** Cache TTL in seconds. */
+-    public int getTtl() { return ttl; }
++    /** Cache TTL in milliseconds. */
++    public int getTtl() { return ttl * 1000; }
+--- a/src/main/java/com/acme/cache/SessionCache.java
++++ b/src/main/java/com/acme/cache/SessionCache.java
+@@ -30,3 +30,9 @@ public class SessionCache {
+     public void start() {
+         refresh();
+     }
++
++    /** Schedule the next refresh shortly before the entry expires. */
++    public void scheduleRefresh() {
++        scheduler.schedule(this::refresh, config.getTtl() - 5, TimeUnit.SECONDS);
++    }

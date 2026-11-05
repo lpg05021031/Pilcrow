@@ -1,0 +1,15 @@
+--- a/src/main/java/com/acme/auth/TokenService.java
++++ b/src/main/java/com/acme/auth/TokenService.java
+@@ -21,3 +21,12 @@ public class TokenService {
+     public Token issue(String subject) {
+         return new Token(subject, clock.instant().plus(TTL));
+     }
++
++    /** A token is expired once its expiry moment has passed. */
++    public boolean isExpired(Token token) {
++        return token.getExpiresAt().isBefore(clock.instant());
++    }
++
++    public boolean isUsable(Token token) {
++        return !isExpired(token) && !token.isRevoked();
++    }

@@ -1,0 +1,87 @@
+--- a/src/main/java/com/acme/routing/AlphaHandler.java
++++ b/src/main/java/com/acme/routing/AlphaHandler.java
+@@ -30,6 +30,10 @@ public class AlphaHandler implements FrameHandler {
+     private final RoutingMetrics metrics;
+
++    @Override
++    public String protocolName() {
++        return "alpha";
++    }
++
+     @Override
+     public Decision handle(Frame frame) {
+         metrics.counter("alpha.frames").increment();
+--- a/src/main/java/com/acme/routing/BetaHandler.java
++++ b/src/main/java/com/acme/routing/BetaHandler.java
+@@ -44,6 +44,10 @@ public class BetaHandler implements FrameHandler {
+     private final DownstreamQueue queue;
+
++    @Override
++    public String protocolName() {
++        return "beta";
++    }
++
+     @Override
+     public Decision handle(Frame frame) {
+         if (queue.isFull()) {
+--- a/src/main/java/com/acme/routing/DeltaHandler.java
++++ b/src/main/java/com/acme/routing/DeltaHandler.java
+@@ -25,6 +25,10 @@ public class DeltaHandler implements FrameHandler {
+     private final ControlPlane controlPlane;
+
++    @Override
++    public String protocolName() {
++        return "delta";
++    }
++
+     @Override
+     public Decision handle(Frame frame) {
+         Command command = Command.parse(frame);
+--- a/src/main/java/com/acme/routing/EpsilonHandler.java
++++ b/src/main/java/com/acme/routing/EpsilonHandler.java
+@@ -18,6 +18,10 @@ public class EpsilonHandler implements FrameHandler {
+     private final FeatureFlags flags;
+
++    @Override
++    public String protocolName() {
++        return "epsilon";
++    }
++
+     @Override
+     public Decision handle(Frame frame) {
+         if (!flags.enabled("routing.epsilon")) {
+--- a/src/main/java/com/acme/routing/GammaHandler.java
++++ b/src/main/java/com/acme/routing/GammaHandler.java
+@@ -36,6 +36,10 @@ public class GammaHandler implements FrameHandler {
+     private final CredentialCache credentials;
+
++    @Override
++    public String protocolName() {
++        return "gamma";
++    }
++
+     @Override
+     public Decision handle(Frame frame) {
+         credentials.verify(frame.signature());
+--- a/src/main/java/com/acme/routing/ZoneRouter.java
++++ b/src/main/java/com/acme/routing/ZoneRouter.java
+@@ -48,10 +48,20 @@ public class ZoneRouter {
+     private final Map<String, Pool> table;
+
++    /**
++     * Resolve the pool for a frame, now that each handler reports the protocol
++     * it speaks: protocol-scoped zones win over the plain zone entry.
++     */
++    public Pool resolve(Frame frame, FrameHandler handler) {
++        String zone = frame.zoneId();
++        for (String known : table.keySet()) {
++            if (zone == known) {
++                return table.get(known);
++            }
++        }
++        return defaultPool;
++    }
++
+     public Pool poolFor(String zoneId) {
+         return table.getOrDefault(zoneId, defaultPool);
+     }

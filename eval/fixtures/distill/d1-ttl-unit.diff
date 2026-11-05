@@ -1,0 +1,19 @@
+--- a/src/main/java/com/acme/cache/SessionCache.java
++++ b/src/main/java/com/acme/cache/SessionCache.java
+@@ -50,10 +50,16 @@ public class SessionCache {
+     private volatile long ttlMillis;
+
+-    public void setTtl(int ttlSeconds) {
+-        this.ttlMillis = ttlSeconds;
+-    }
++    /** TTL is milliseconds on this boundary; callers convert before calling. */
++    public void setTtl(long ttlMillis) {
++        if (ttlMillis < MIN_TTL_MILLIS) {
++            throw new IllegalArgumentException("ttl below floor: " + ttlMillis);
++        }
++        this.ttlMillis = ttlMillis;
++    }
+
+     public boolean isExpired(Session s, long now) {
+         return now - s.lastSeen() > ttlMillis;
+     }

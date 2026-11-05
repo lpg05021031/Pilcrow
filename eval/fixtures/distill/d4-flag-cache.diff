@@ -1,0 +1,14 @@
+--- a/src/main/java/com/acme/config/FeatureFlags.java
++++ b/src/main/java/com/acme/config/FeatureFlags.java
+@@ -22,6 +22,13 @@ public class FeatureFlags {
+     private final FlagStore store;
+
++    /** Read every flag a request needs in one store round-trip. */
++    public Map<String, Boolean> readAll(Set<String> names) {
++        return names.stream()
++                .collect(toMap(n -> n, store::enabled));
++    }
++
+     public boolean enabled(String name) {
+         return store.enabled(name);
+     }

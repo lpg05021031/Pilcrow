@@ -1,0 +1,195 @@
+# pr-review-suite 內建的 starter 規則（v2 static pass 第一份彈藥）。
+# 機械可查的「團隊規則」請放 rules repo（**/*.semgrep.yml），命中會自動
+# 以該規則檔路徑當 rule_ref；這份 starter 只放通用地雷。
+# metadata.review_rule 對應 findings 的 rule 代號。
+rules:
+  - id: fstring-sql-query
+    languages: [python]
+    severity: ERROR
+    message: SQL query built by f-string/format interpolation of user input — injection risk; use parameterized queries
+    metadata: {review_rule: SECURITY}
+    patterns:
+      - pattern-either:
+          - pattern: $DB.query(f"...")
+          - pattern: $DB.execute(f"...")
+          - pattern: $DB.query("...".format(...))
+          - pattern: $DB.execute("...".format(...))
+          - pattern: $DB.query("..." % ...)
+          - pattern: $DB.execute("..." % ...)
+  - id: subprocess-shell-true
+    languages: [python]
+    severity: WARNING
+    message: subprocess invoked with shell=True — command-injection risk if any argument carries external input
+    metadata: {review_rule: SECURITY}
+    pattern: subprocess.$FUNC(..., shell=True, ...)
+  - id: python-eval-exec
+    languages: [python]
+    severity: WARNING
+    message: eval/exec on a dynamic string — ensure the input is trusted or use a safe alternative
+    metadata: {review_rule: SECURITY}
+    pattern-either:
+      - pattern: eval(...)
+      - pattern: exec(...)
+  - id: hardcoded-secret-assign
+    languages: [python]
+    severity: ERROR
+    message: Possible hard-coded credential — move it to environment variables or a secrets manager
+    metadata: {review_rule: SECURITY}
+    patterns:
+      - pattern-either:
+          - pattern: $X = "..."
+      - metavariable-regex:
+          metavariable: $X
+          regex: (?i).*(password|passwd|secret|api_key|apikey|token)$
+      - pattern-not: $X = ""
+  - id: requests-verify-false
+    languages: [python]
+    severity: WARNING
+    message: TLS certificate verification disabled (verify=False)
+    metadata: {review_rule: SECURITY}
+    pattern: $M(..., verify=False, ...)
+  - id: bare-except-pass
+    languages: [python]
+    severity: WARNING
+    message: Bare except silently swallows exceptions
+    metadata: {review_rule: BUG}
+    pattern: |
+      try:
+          ...
+      except:
+          pass
+  # ---- Java（5 條皆已實測：完整檔與「稀疏重建片段」都能命中、行號正確）----
+  - id: java-sql-concat
+    languages: [java]
+    severity: ERROR
+    message: SQL/JPQL built by string concatenation of input (JDBC / JPA / Hibernate / JdbcTemplate) — injection risk; use parameterized queries
+    metadata: {review_rule: SECURITY}
+    patterns:
+      - pattern-either:
+          - pattern: $R.$M(<... "..." + $A ...>, ...)
+          - pattern: $R.$M(<... $A + "..." ...>, ...)
+      - metavariable-regex:
+          metavariable: $M
+          regex: ^(executeQuery|executeUpdate|execute|createQuery|createNativeQuery|createSQLQuery|query|queryForObject|queryForList|queryForMap|queryForRowSet|update|batchUpdate)$
+  - id: java-sql-format
+    languages: [java]
+    severity: ERROR
+    message: SQL/JPQL built via String.format — same injection risk as concatenation; use bound parameters
+    metadata: {review_rule: SECURITY}
+    patterns:
+      - pattern: $R.$M(String.format(...), ...)
+      - metavariable-regex:
+          metavariable: $M
+          regex: ^(executeQuery|executeUpdate|execute|createQuery|createNativeQuery|createSQLQuery|query|queryForObject|queryForList|queryForMap|queryForRowSet|update|batchUpdate)$
+  - id: java-mybatis-dollar
+    languages: [java]
+    severity: ERROR
+    message: MyBatis ${...} performs raw string substitution — injection risk; use #{...} parameter binding
+    metadata: {review_rule: SECURITY}
+    patterns:
+      - pattern-either:
+          - pattern: "@Select($Q)"
+          - pattern: "@Update($Q)"
+          - pattern: "@Delete($Q)"
+          - pattern: "@Insert($Q)"
+      - metavariable-regex:
+          metavariable: $Q
+          regex: .*\$\{.*
+  - id: java-cmd-exec-concat
+    languages: [java]
+    severity: ERROR
+    message: Runtime.exec invoked with concatenated input — command-injection risk; use ProcessBuilder with an argument list
+    metadata: {review_rule: SECURITY}
+    pattern: Runtime.getRuntime().exec("..." + $X)
+  - id: java-empty-catch
+    languages: [java]
+    severity: WARNING
+    message: Empty catch block silently swallows the exception — log it or rethrow
+    metadata: {review_rule: BUG}
+    pattern: |
+      try { ... } catch ($T $E) { }
+  - id: java-hardcoded-secret
+    languages: [java]
+    severity: ERROR
+    message: Possible hard-coded credential — move it to configuration or a secrets manager
+    metadata: {review_rule: SECURITY}
+    patterns:
+      - pattern: String $X = "...";
+      - metavariable-regex:
+          metavariable: $X
+          regex: (?i).*(password|passwd|secret|apikey|api_key|token)$
+      - pattern-not: String $X = "";
+  - id: java-noop-hostname-verifier
+    languages: [java]
+    severity: WARNING
+    message: TLS hostname verification disabled — do not ship this outside tests
+    metadata: {review_rule: SECURITY}
+    pattern-either:
+      - pattern: new NoopHostnameVerifier(...)
+      - pattern: $C.setHostnameVerifier(($A, $B) -> true)
+  - id: java-sensitive-log
+    languages: [java]
+    severity: WARNING
+    message: Sensitive value (credential / token / card / SSN) written to logs — mask or remove it
+    metadata: {review_rule: SECURITY}
+    patterns:
+      - pattern-either:
+          - pattern: $LOG.$M(..., $S, ...)
+          - pattern: $LOG.$M(<... "..." + $S ...>, ...)
+      - metavariable-regex:
+          metavariable: $M
+          regex: ^(trace|debug|info|warn|error)$
+      - metavariable-regex:
+          metavariable: $S
+          regex: ^(?i)(pass(word|wd)?|pwd|secret|token|apikey|api_key|access_token|authorization|auth_header|ssn|creditcard|credit_card|cardno|card_no)$
+  - id: java-auth-header-log
+    languages: [java]
+    severity: WARNING
+    message: Authorization header written to logs — this leaks bearer credentials
+    metadata: {review_rule: SECURITY}
+    patterns:
+      - pattern: $LOG.$M(<... $R.getHeader("Authorization") ...>, ...)
+      - metavariable-regex:
+          metavariable: $M
+          regex: ^(trace|debug|info|warn|error)$
+  - id: java-ecb-cipher
+    languages: [java]
+    severity: WARNING
+    message: ECB cipher mode is insecure (identical plaintext blocks yield identical ciphertext) — use GCM
+    metadata: {review_rule: SECURITY}
+    patterns:
+      - pattern-either:
+          - pattern: Cipher.getInstance($MODE)
+          - pattern: javax.crypto.Cipher.getInstance($MODE)
+      - metavariable-regex:
+          metavariable: $MODE
+          regex: .*ECB.*
+  - id: java-string-eq
+    languages: [java]
+    severity: ERROR
+    message: String compared with == / != compares references, not content — use equals()
+    metadata: {review_rule: BUG}
+    pattern-either:
+      - pattern: $X == "..."
+      - pattern: '"..." == $X'
+      - pattern: $X != "..."
+      - pattern: '"..." != $X'
+  - id: java-unclosed-io
+    languages: [java]
+    severity: WARNING
+    message: File stream/reader/writer created outside try-with-resources — it will leak if not explicitly closed on every path
+    metadata: {review_rule: BUG}
+    patterns:
+      - pattern-either:
+          - pattern: new FileReader(...)
+          - pattern: new FileInputStream(...)
+          - pattern: new FileWriter(...)
+          - pattern: new FileOutputStream(...)
+          - pattern: new java.io.FileReader(...)
+          - pattern: new java.io.FileInputStream(...)
+          - pattern: new java.io.FileWriter(...)
+          - pattern: new java.io.FileOutputStream(...)
+      - pattern-not-inside: |
+          try ($T $R = $INIT) { ... }
+      - pattern-not-inside: |
+          try ($T $R = $INIT; $T2 $R2 = $INIT2) { ... }

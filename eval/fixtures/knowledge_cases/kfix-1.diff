@@ -1,0 +1,19 @@
+--- a/src/main/java/com/acme/session/SessionConfigLoader.java
++++ b/src/main/java/com/acme/session/SessionConfigLoader.java
+@@ -14,6 +14,16 @@ public class SessionConfigLoader {
+     private final Properties props;
+     private final SessionCache cache;
+
++    /**
++     * Push the configured session timeout into the cache at startup.
++     */
++    public void applyTimeouts() {
++        int ttlSeconds = Integer.parseInt(
++                props.getProperty("session.ttl.seconds", "1800"));
++        cache.setTtl(ttlSeconds);
++        log.info("session ttl applied: {}s", ttlSeconds);
++    }
++
+     public SessionConfigLoader(Properties props, SessionCache cache) {
+         this.props = props;
+         this.cache = cache;

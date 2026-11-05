@@ -1,0 +1,18 @@
+# 複製為 /etc/systemd/system/pr-review-graph.service（三個 <佔位符> 都要換！）
+# code-review-graph 原生 MCP over HTTP（serve --http），綁 127.0.0.1，
+# 不需要任何橋接。--tools 白名單只放 pipeline 用得到的，省 token 也縮小面。
+# 先單一主力 repo；多 repo 之後每 repo 複製一份 unit、各配一個 port。
+[Unit]
+Description=code-review-graph MCP server (HTTP, 127.0.0.1:8097)
+After=network.target
+
+[Service]
+User=<服務user>
+ExecStart=<安裝根>/venv/bin/code-review-graph serve \
+    --repo <REPOS_ROOT>/<repo小寫> \
+    --http --host 127.0.0.1 --port 8097 \
+    --tools get_impact_radius_tool,get_review_context_tool,query_graph_tool
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
