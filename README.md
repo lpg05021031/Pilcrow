@@ -204,18 +204,32 @@ why 缺席、supersede 假訊號、幻覺不變式——最後一題是「invari
 
 ## 6. 維運速查
 
-| 開關 | 位置 | 管什麼 | 出廠 |
+**全套設定只有一份檔**：`/etc/pr-review-suite/suite.env`，十個 systemd unit 都指它；
+schema、預設值與每顆旋鈕的說明住 `shared/settings.py`（64 個變數、12 組），
+程式裡沒有第二個讀取點。三個指令取代翻文件：
+
+```bash
+python -m shared.settings --show      # 目前生效值與來源（env / default），secrets 遮罩
+python -m shared.settings --check     # 只驗證；壞值（REVIEW_MAX_FINDINGS=abc）回傳碼 1
+python -m shared.settings --example   # 由 schema 重生 deploy/env/suite.env.example
+```
+
+壞值不再靜默退回預設：服務啟動時 `fail_fast()` 直接報哪一顆錯、收到什麼。
+下表只列最常翻的幾顆；完整清單看 `--show`。
+
+| 開關 | 組 | 管什麼 | 出廠 |
 |---|---|---|---|
-| `AUTO_POST` | orchestrator.env | review 完是否呼叫 ③ | false |
-| `DRY_RUN` | results.env | ③ 收到 review 稿是否真發 | true |
-| `KNOWLEDGE_POST` | results.env | 小 PR 蒸餾稿是否真貼 | false |
-| `KNOWLEDGE_DIGEST` | orchestrator.env | 收口 digest 是否貼 | true |
-| `KNOWLEDGE_DIGEST_LLM` | orchestrator.env | digest 顧問分析（提案，不落地） | true |
-| `KNOWLEDGE_ROOT/_BRANCHES/_CYCLE_*` | orchestrator.env | K 段開關與節奏 | 未設=停用 |
-| `KNOWLEDGE_REDISTILL` | orchestrator.env | stale 稿用最終 diff 重蒸（≤2 次） | true |
-| `ORCH_API_KEY` + `ORCH_URL` | orchestrator.env | 重蒸端點的鑰匙與位址（harvester 共用） | 未設=不驗 |
-| `GRAPH_TOOL_BLAST_ARGS`（`$repo_dir`） | orchestrator.env | graph 多 repo 自動切庫 | — |
-| `REVIEW_PIPELINE` | orchestrator.env | v1/v2 十秒回滾 | v2 |
+| `AUTO_POST` | orchestrator | review 完是否呼叫 ③ | false |
+| `DRY_RUN` | tools | ③ 收到 review 稿是否真發 | true |
+| `KNOWLEDGE_POST` | tools | 小 PR 蒸餾稿是否真貼 | false |
+| `KNOWLEDGE_DIGEST` | knowledge | 收口 digest 是否貼 | true |
+| `KNOWLEDGE_DIGEST_LLM` | knowledge | digest 顧問分析（提案，不落地） | true |
+| `KNOWLEDGE_ROOT/_BRANCHES/_CYCLE_*` | knowledge | K 段開關與節奏 | 未設=停用 |
+| `KNOWLEDGE_REDISTILL` | knowledge | stale 稿用最終 diff 重蒸（≤2 次） | true |
+| `ORCH_API_KEY` + `ORCH_URL` | orchestrator | 重蒸端點的鑰匙與位址（harvester 共用） | 未設=不驗 |
+| `GRAPH_TOOL_BLAST_ARGS`（`$repo_dir`） | graph | graph 多 repo 自動切庫 | — |
+| `REVIEW_PIPELINE` | orchestrator | v1/v2 十秒回滾 | v1 |
+| `ADO_TOOLS_PORT` 等三顆 | tools | ①②③ 綁哪個 port；orchestrator 的 URL 由此推得 | 8094/8095/8096 |
 
 服務判讀口訣：**常駐組怕 dead、定時組怕 failed**（oneshot 平時
 `inactive (dead)` 是待命不是屍體，看 `list-timers` 的 NEXT/LAST）。
@@ -232,11 +246,13 @@ orchestrator/   pipeline、planner/reviewer/adversary、synthesis、render、
                 knowledge_digest.py（digest 渲染＋顧問分析）、
                 knowledge_harvest.py（唯一寫手；重蒸只偵測不執行）
 tools/          ①②③ FastMCP 服務
-shared/         ADO URL 解析與 HTTP client（笨層，無業務邏輯）
+shared/         settings.py（全套設定的唯一讀取點：schema、預設、--show/--check/--example）、
+                azdo.py（ADO URL 解析與 HTTP client）—— 笨層，無業務邏輯
 eval/           golden fixtures（30 題）、knowledge/ + knowledge_cases/（5 題
                 知識依賴題與其種子帳本）、distill/（10 題蒸餾考卷）、
                 run_eval、run_distill_eval、seed_langfuse（六份 prompt）
-deploy/         env 樣板、systemd 樣板、semgrep starter、knowledge 模板
+deploy/         env/suite.env.example（由 schema 生成，勿手改）、systemd 樣板、
+                semgrep starter、knowledge 模板
 docs/           三張流程/原型 HTML（主線、知識迴圈、wiki 條目）
 RUNBOOK.md      Phase 0–10：從裸機到知識迴圈的逐步部署
 ```

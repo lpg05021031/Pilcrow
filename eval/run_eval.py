@@ -51,6 +51,8 @@ from eval.preflight import (check_environment, check_fixture_geometry,
                             is_knowledge_item)
 from orchestrator.core import PROMPT_NAME, run_review
 from orchestrator.rules import load_rules
+from shared.settings import reset as reset_settings
+from shared.settings import settings
 
 DATASET = "pr-review-golden"
 KNOWLEDGE_FIXTURES = Path(__file__).parent / "fixtures" / "knowledge"
@@ -204,29 +206,21 @@ def scorer(*, input, output, expected_output, metadata=None, **kwargs):
 
 def _gates(recall_avg: float, noise_rate: float, forbidden_rate: float) -> list[str]:
     fails: list[str] = []
-    min_recall = float(os.getenv("EVAL_MIN_RECALL", "0"))
-    if min_recall and recall_avg < min_recall:
-        fails.append(f"recall {recall_avg:.2f} < 門檻 {min_recall}")
-    if os.getenv("EVAL_MAX_NOISE", "") != "":
-        mx = float(os.environ["EVAL_MAX_NOISE"])
-        if noise_rate > mx:
-            fails.append(f"噪音率 {noise_rate:.2f} > 上限 {mx}")
-    if os.getenv("EVAL_MAX_FORBIDDEN", "") != "":
-        mx = float(os.environ["EVAL_MAX_FORBIDDEN"])
-        if forbidden_rate > mx:
-            fails.append(f"禁語率 {forbidden_rate:.2f} > 上限 {mx}")
+    e = settings().eval
+    if e.min_recall and recall_avg < e.min_recall:
+        fails.append(f"recall {recall_avg:.2f} < 門檻 {e.min_recall}")
+    if e.max_noise is not None and noise_rate > e.max_noise:
+        fails.append(f"噪音率 {noise_rate:.2f} > 上限 {e.max_noise}")
+    if e.max_forbidden is not None and forbidden_rate > e.max_forbidden:
+        fails.append(f"禁語率 {forbidden_rate:.2f} > 上限 {e.max_forbidden}")
     return fails
 
 
 def _knowledge_gate(delta: float) -> list[str]:
     """knowledge_delta 的門檻。刻意預設「沒設 = 不擋」：基線穩定兩輪之前
     這個數只 report，用一個沒有量尺的門把 CI 擋紅是 0.35 那類錯誤的重演。"""
-    raw = os.getenv("EVAL_MIN_KNOWLEDGE_DELTA", "").strip()
-    if not raw or not _k_recalls["without"]:
-        return []
-    try:
-        want = float(raw)
-    except ValueError:
+    want = settings().eval.min_knowledge_delta
+    if want is None or not _k_recalls["without"]:
         return []
     return ([] if delta >= want else
             [f"knowledge_delta {delta:+.2f} < 門檻 {want:+.2f}"])
@@ -253,12 +247,13 @@ def _knowledge_ab(lf, dataset, run_name: str, run_meta: dict) -> None:
     if not k_items:
         print("  知識依賴題：0 條（跳過對照組）")
         return
-    if os.getenv("EVAL_KNOWLEDGE_AB", "true").strip().lower() in {"false", "0", "no"}:
+    if not settings().eval.knowledge_ab:
         print("  對照組已關閉（EVAL_KNOWLEDGE_AB=false）—— 只有上界，沒有 delta")
         return
     keep = os.environ.get("KNOWLEDGE_ROOT", "")
     _PHASE["name"] = "without"
     os.environ["KNOWLEDGE_ROOT"] = ""          # 這一輪的 agent 拿不到任何條目
+    reset_settings()                           # settings() 有快取，改 env 要清
     try:
         lf.run_experiment(
             name=f"{run_name}-noknowledge",
@@ -273,6 +268,7 @@ def _knowledge_ab(lf, dataset, run_name: str, run_meta: dict) -> None:
     finally:
         _PHASE["name"] = "with"
         os.environ["KNOWLEDGE_ROOT"] = keep
+        reset_settings()
 
 
 def main() -> None:
@@ -292,14 +288,15 @@ def main() -> None:
 
     # run-level 覆寫（不做 per-item env 切換：load_for 走現成的 repo 隔離，
     # eval 併發也安全）。實際值記進 run metadata，分數才對得回配置。
-    kroot = os.getenv("EVAL_KNOWLEDGE_ROOT", "").strip() or str(KNOWLEDGE_FIXTURES)
+    kroot = str(settings().eval.knowledge_root or KNOWLEDGE_FIXTURES)
     os.environ["KNOWLEDGE_ROOT"] = kroot
+    reset_settings()
 
     run_meta = {
-        "pipeline": os.getenv("REVIEW_PIPELINE", "v1"),
+        "pipeline": settings().orchestrator.pipeline,
         "rules_sha": load_rules(None).sha or None,
         "prompt_version": _prompt_version(),
-        "llm_model": os.getenv("LLM_MODEL", "gpt-4o-mini"),
+        "llm_model": settings().llm.model,
         "knowledge_root": kroot,
         "arm": "knowledge",
     }

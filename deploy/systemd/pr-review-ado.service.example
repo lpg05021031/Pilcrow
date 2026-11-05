@@ -4,7 +4,7 @@ Description=pr-review - ado-pr-tools (8094)
 After=network.target
 
 [Service]
-EnvironmentFile=/etc/pr-review-suite/ado.env
+EnvironmentFile=/etc/pr-review-suite/suite.env
 WorkingDirectory=/opt/pr-review-suite
 ExecStart=/opt/pr-review-suite/venv/bin/python -m tools.ado_pr_tools.server
 Restart=always

@@ -18,12 +18,8 @@
 編號 / 有內容的 PR description」——驗不過的 evidence 剝掉，剝光的 decision 整條
 不入稿，數字進 stats、痕跡進草稿留言 footer。語意判斷在模型、驗證在 code。
 
-env：
-  KNOWLEDGE_ROOT        本地 knowledge repo 路徑；未設 = 整個 K 段停用（全部靜默）
-  KNOWLEDGE_BRANCHES    逗號分隔、支援萬用字元（例：master,release/*）；預設 master,main
-  KNOWLEDGE_MAX_CHARS   注入區塊總上限（預設 18000）
-  DISTILL_DIFF_MAX_CHARS 蒸餾看到的 diff 切片預算（預設 100000）
-  KNOWLEDGE_REDISTILL   stale 重蒸開關（預設 true；false = 回到 stale 丟稿）
+設定：settings().knowledge（KNOWLEDGE_ROOT / KNOWLEDGE_BRANCHES / KNOWLEDGE_MAX_CHARS /
+DISTILL_DIFF_MAX_CHARS / KNOWLEDGE_REDISTILL …）；KNOWLEDGE_ROOT 未設 = 整個 K 段靜默停用。
 """
 from __future__ import annotations
 
@@ -41,6 +37,7 @@ from orchestrator.anatomy import (Anatomy, line_in_view, match_path,
                                   numbered_slice, parse_diff)
 from orchestrator.llm import complete, extract_json, prompt_or
 from orchestrator.static_pass import DECL_RE, TEST_PATH_RE
+from shared.settings import settings
 
 DISTILLER_PROMPT_NAME = "pr-review-distiller"
 
@@ -133,18 +130,6 @@ def entry_ids(data: dict, pr_id: int) -> set[str]:
     return out
 
 
-def _int_env(name: str, default: int) -> int:
-    try:
-        return int(os.getenv(name, str(default)) or default)
-    except ValueError:
-        return default
-
-
-def _flag_env(name: str, default: bool = True) -> bool:
-    raw = os.getenv(name, "true" if default else "false").strip().lower()
-    return raw not in {"false", "0", "no"}
-
-
 # ---------- 證據地板（Phase 1.2）：LLM 說的每一句都要指得回材料 ----------
 #
 # 型別合約：evidence 是「引用系統給的座標」，不是自由字串。三種形式各有一個
@@ -226,7 +211,7 @@ def distill_slices(ana: Anatomy,
                    finding_files: list[str] | None = None) -> tuple[str, list[str]]:
     """回 (切片文, 超預算被省略的檔案)。省略對模型有註記、對我們進 stats——
     降級可見，不安靜蒸發。"""
-    budget = _int_env("DISTILL_DIFF_MAX_CHARS", 100000)
+    budget = settings().knowledge.distill_diff_max_chars
     parts: list[str] = []
     skipped: list[str] = []
     used = 0
@@ -301,8 +286,7 @@ def _affected_block(body: str) -> str:
 
 
 def _root() -> Path | None:
-    r = os.getenv("KNOWLEDGE_ROOT", "").strip()
-    return Path(r) if r else None
+    return settings().knowledge.root
 
 
 def _norm(p: str) -> str:
@@ -523,7 +507,7 @@ def load_for(repo: str | None, changed_paths: list[str]) -> tuple[str, dict]:
     if not picked:
         return "", stats
     picked.sort(key=lambda x: (-x[0], x[1]))
-    cap_total = _int_env("KNOWLEDGE_MAX_CHARS", 18000)
+    cap_total = settings().knowledge.max_chars
     parts_out = [f"# Knowledge ({len(picked)} entr"
                  f"{'y' if len(picked) == 1 else 'ies'} relevant to this change)"]
     used = 0
@@ -578,8 +562,7 @@ def load_for(repo: str | None, changed_paths: list[str]) -> tuple[str, dict]:
 # ---------- K1 閘門 ----------
 
 def _branch_patterns() -> list[str]:
-    raw = os.getenv("KNOWLEDGE_BRANCHES", "master,main")
-    return [b.strip() for b in raw.split(",") if b.strip()]
+    return list(settings().knowledge.branches)
 
 
 def gate(meta: dict, changed_paths: list[str]) -> tuple[bool, str]:
@@ -591,8 +574,8 @@ def gate(meta: dict, changed_paths: list[str]) -> tuple[bool, str]:
                              for pat in _branch_patterns()):
         return False, f"目標分支 {target or '?'} 不在 KNOWLEDGE_BRANCHES"
     src = (meta.get("source_branch") or "").replace("refs/heads/", "").strip()
-    cyc_src = os.getenv("KNOWLEDGE_CYCLE_SOURCE", "release/*").strip()
-    cyc_tgt = os.getenv("KNOWLEDGE_CYCLE_TARGET", "master").strip()
+    cyc_src = settings().knowledge.cycle_source
+    cyc_tgt = settings().knowledge.cycle_target
     if cyc_src and fnmatch.fnmatch(src, cyc_src) \
             and fnmatch.fnmatch(target, cyc_tgt):
         return False, "cycle checkpoint PR（驗收儀式，不蒸餾）"
@@ -836,7 +819,7 @@ def _log_distill(pr_id: int, info: dict) -> None:
 # ---------- Phase 5：stale 重蒸（harvester 只偵測，這裡做全部） ----------
 
 def redistill_enabled() -> bool:
-    return _flag_env("KNOWLEDGE_REDISTILL", True)
+    return settings().knowledge.redistill
 
 
 def _clear_cycle_traces(root: Path, repo: str, pr_id: int) -> list[str]:

@@ -1,19 +1,18 @@
 """Azure DevOps 共用工具：PR URL 解析 + 帶 PAT/proxy 的 HTTP client。
 
 設計原則：這裡是「笨」的一層 —— 不 import langfuse、不含任何 review 邏輯。
-環境變數：
-  ADO_PAT        Azure DevOps Personal Access Token（必填）
-  HTTPS_PROXY /  標準 proxy 變數（選填，httpx trust_env 會自動吃）
-  ADO_VERIFY_SSL 預設 "true"；內部自簽憑證環境可設 "false" 或 CA bundle 路徑
+設定：settings().ado（ADO_PAT 必填；ADO_VERIFY_SSL 可為 true/false 或 CA bundle 路徑）。
+HTTPS_PROXY 等標準 proxy 變數由 httpx trust_env 自動吃。
 """
 from __future__ import annotations
 
-import os
 import re
 from dataclasses import dataclass
 from urllib.parse import quote
 
 import httpx
+
+from shared.settings import settings
 
 API_VERSION = "7.1"
 
@@ -61,16 +60,11 @@ def find_pr_url(text: str) -> str | None:
 
 
 def _verify() -> bool | str:
-    v = os.getenv("ADO_VERIFY_SSL", "true").strip()
-    if v.lower() in {"false", "0", "no"}:
-        return False
-    if v.lower() in {"true", "1", "yes", ""}:
-        return True
-    return v  # 當成 CA bundle 路徑
+    return settings().ado.verify_ssl
 
 
 def client() -> httpx.Client:
-    pat = os.getenv("ADO_PAT", "")
+    pat = settings().ado.pat.get_secret_value()
     if not pat:
         raise RuntimeError("環境變數 ADO_PAT 未設定")
     return httpx.Client(

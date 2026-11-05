@@ -86,10 +86,10 @@ def check_knowledge_fixtures(items) -> list[str]:
     """知識題的種子帳本必須真的在磁碟上——少一個目錄，那題會安靜地退化成
     「沒有知識的對照組」，delta 於是天生為 0 而且看不出原因。"""
     from pathlib import Path as _P
-    import os
+    from shared.settings import settings
 
-    root = _P(os.getenv("EVAL_KNOWLEDGE_ROOT", "").strip()
-              or (_P(__file__).parent / "fixtures" / "knowledge"))
+    root = (settings().eval.knowledge_root
+            or (_P(__file__).parent / "fixtures" / "knowledge"))
     probs: list[str] = []
     for item in items:
         if not _is_active(item) or not is_knowledge_item(item):

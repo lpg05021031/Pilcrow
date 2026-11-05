@@ -13,23 +13,12 @@
   U3 adversary 精緻化：分塊審（≤ ADVERSARY_CHUNK 條/次，防注意力稀釋）、判決
      必附行號證據與挑戰編號、可用 LLM_MODEL_ADVERSARY 換一顆腦去自我同意偏差。
 
-旋鈕（全進 env、全進 trace metadata）：
-  REVIEW_MAX_DIMENSIONS=8    planner 最多開幾科（sweep 可額外 +1，保證優先於上限）
-  REVIEW_MAX_PARALLEL=6      reviewer 併發
-  REVIEW_LLM_BASE_CONF=0.7   LLM finding 的基礎信心
-  REVIEW_MIN_CONFIDENCE=0.55 低於此分的 finding 被過濾
-  REVIEW_MAX_FINDINGS=30     輸出上限
-  REVIEW_ADVERSARY=true      關掉 = 跳過對抗段（A/B 用）
-  ADVERSARY_CHUNK=6          adversary 每次呼叫最多審幾條
-  LLM_MODEL_ADVERSARY        （選配）adversary 專用模型；未設 = 同 LLM_MODEL
-  REVIEWER_RULES_MAX_CHARS=20000  每個 reviewer 收到的規則文字上限
-  REVIEWER_SLICES_MAX_CHARS=30000 每一科的切片總預算（超過的檔降級 static-only）
-  REVIEWER_FILE_SLICE_MAX_CHARS=6000 單一檔案的切片上限（超過就檔內截斷）
+旋鈕全部住在 shared/settings.py 的 Review 組（settings().review.*），
+每顆都進 trace metadata；名字與預設值見該檔。
 """
 from __future__ import annotations
 
 import asyncio
-import os
 
 from langfuse import observe
 from pydantic import BaseModel
@@ -44,6 +33,7 @@ from orchestrator.progress import note
 from orchestrator.render import render_markdown, sort_key
 from orchestrator.rules import RulesBundle
 from orchestrator.static_pass import run_static
+from shared.settings import settings
 
 # ---------- 受版控 prompts（Langfuse 優先，內建為後備；seed_langfuse 會推上去） ----------
 
@@ -109,20 +99,6 @@ class _Dim(BaseModel):
     rules: list[str] = []
 
 
-def _int(env: str, default: int) -> int:
-    try:
-        return int(os.getenv(env, str(default)))
-    except ValueError:
-        return default
-
-
-def _float(env: str, default: float) -> float:
-    try:
-        return float(os.getenv(env, str(default)))
-    except ValueError:
-        return default
-
-
 def _norm(p: str) -> str:
     p = (p or "").strip().lstrip("/")
     if p[:2] in ("a/", "b/"):
@@ -135,7 +111,7 @@ def _norm(p: str) -> str:
 def _rules_for_dim(rules: RulesBundle, dim: _Dim) -> str:
     if not rules.loaded:
         return ""
-    cap = _int("REVIEWER_RULES_MAX_CHARS", 20000)
+    cap = settings().review.reviewer_rules_max_chars
     picked: list[tuple[str, str]] = []
     for want in dim.rules:
         for rel, body in rules.sections.items():
@@ -163,7 +139,7 @@ def _rules_for_dim(rules: RulesBundle, dim: _Dim) -> str:
 @observe(name="plan")
 async def _plan(ana: Anatomy, meta: dict, rules: RulesBundle,
                 graph_text: str, stats: dict) -> tuple[list[_Dim], str]:
-    max_dims = _int("REVIEW_MAX_DIMENSIONS", 8)
+    max_dims = settings().review.max_dimensions
     files = [fc.path for fc in ana.files]
     fallback = [
         _Dim(name="Correctness",
@@ -270,8 +246,8 @@ def _slices_for(dim: _Dim, ana: Anatomy) -> tuple[str, list[str]]:
               if not wanted or any(match_path(fc.path, w) for w in wanted)]
     if not picked:
         picked = ana.files
-    budget = _int("REVIEWER_SLICES_MAX_CHARS", 30000)
-    per_file = _int("REVIEWER_FILE_SLICE_MAX_CHARS", 6000)
+    budget = settings().review.reviewer_slices_max_chars
+    per_file = settings().review.reviewer_file_slice_max_chars
     parts, used, skipped = [], 0, []
     for fc in picked:
         chunk = numbered_slice(fc, max_chars=per_file)
@@ -320,7 +296,7 @@ async def _review_one(dim: _Dim, ana: Anatomy, rules: RulesBundle,
         return "(unparseable reviewer output)", [], [], \
             {"location_dropped": 0, "location_flagged": 0,
              "slices_skipped": slices_skipped}
-    base_conf = _float("REVIEW_LLM_BASE_CONF", 0.7)
+    base_conf = settings().review.llm_base_conf
     out: list[Finding] = []
     loc = {"location_dropped": 0, "location_flagged": 0,
            "slices_skipped": slices_skipped}
@@ -357,7 +333,7 @@ async def _review_one(dim: _Dim, ana: Anatomy, rules: RulesBundle,
 async def _review_all(dims: list[_Dim], ana: Anatomy, rules: RulesBundle,
                       base_text: str, graph_text: str,
                       stats: dict) -> list[Finding]:
-    sem = asyncio.Semaphore(_int("REVIEW_MAX_PARALLEL", 6))
+    sem = asyncio.Semaphore(settings().review.max_parallel)
 
     async def one(d: _Dim):
         async with sem:
@@ -399,7 +375,7 @@ async def _review_all(dims: list[_Dim], ana: Anatomy, rules: RulesBundle,
 async def _adversary(llm_findings: list[Finding], ana: Anatomy,
                      base_text: str, rules: RulesBundle, stats: dict) -> None:
     """就地調整 llm findings 的 confidence。static（確定性）不送審、不動。"""
-    if os.getenv("REVIEW_ADVERSARY", "true").strip().lower() in {"false", "0", "no"}:
+    if not settings().review.adversary:
         stats["adversary"] = "off"
         return
     if not llm_findings:
@@ -433,8 +409,8 @@ async def _adversary(llm_findings: list[Finding], ana: Anatomy,
                      + "\n\n".join(excerpts)[:4500])
         return text or fallback_diff
     system = prompt_or(ADVERSARY_PROMPT_NAME, DEFAULT_ADVERSARY_PROMPT)
-    model = os.getenv("LLM_MODEL_ADVERSARY", "").strip() or None
-    chunk = max(1, _int("ADVERSARY_CHUNK", 6))
+    model = settings().llm.model_adversary
+    chunk = settings().review.adversary_chunk
     chunks = [llm_findings[i:i + chunk]
               for i in range(0, len(llm_findings), chunk)]
 
@@ -462,7 +438,7 @@ async def _adversary(llm_findings: list[Finding], ana: Anatomy,
                 slots[idx] = v
         return slots
 
-    sem = asyncio.Semaphore(_int("REVIEW_MAX_PARALLEL", 6))
+    sem = asyncio.Semaphore(settings().review.max_parallel)
 
     async def _bounded(b):
         async with sem:                      # 檢察官同樣受併發上限管
@@ -560,10 +536,10 @@ def _verify_knowledge_refs(findings: list[Finding], stats: dict) -> None:
 def _synthesize(findings: list[Finding], stats: dict) -> list[Finding]:
     merged = _dedupe(findings)
     _verify_knowledge_refs(merged, stats)
-    threshold = _float("REVIEW_MIN_CONFIDENCE", 0.55)
+    threshold = settings().review.min_confidence
     passed = [f for f in merged if f.confidence >= threshold]
     stats["dropped_low_conf"] = len(merged) - len(passed)
-    cap = _int("REVIEW_MAX_FINDINGS", 30)
+    cap = settings().review.max_findings
     passed.sort(key=sort_key)
     stats["dropped_over_cap"] = max(0, len(passed) - cap)
     final = passed[:cap]

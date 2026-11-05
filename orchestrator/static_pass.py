@@ -25,6 +25,7 @@ from pathlib import Path
 
 from orchestrator.anatomy import Anatomy, sparse_new_file
 from orchestrator.models import Finding
+from shared.settings import settings
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 STARTER = _PROJECT_ROOT / "deploy" / "semgrep" / "starter.yml"
@@ -32,23 +33,10 @@ STARTER = _PROJECT_ROOT / "deploy" / "semgrep" / "starter.yml"
 _SEV = {"ERROR": "error", "WARNING": "warning", "INFO": "info"}
 
 
-def _enabled(env: str, binary: str) -> bool:
-    v = os.getenv(env, "auto").strip().lower()
-    if v in {"false", "0", "no", "off"}:
-        return False
-    has = shutil.which(binary) is not None
-    if v in {"true", "1", "yes", "on"}:
-        return has  # 明開但沒裝 → 還是只能跳過（會註記）
-    return has      # auto
-
-
 def _rules_semgrep_configs() -> list[tuple[Path, str]]:
     """(規則檔路徑, rule_ref) —— 來自 rules repo 的 semgrep 規則。"""
-    root = os.getenv("RULES_ROOT", "").strip()
-    if not root:
-        return []
-    r = Path(root)
-    if not r.is_dir():
+    r = settings().rules.root
+    if r is None or not r.is_dir():
         return []
     seen: dict[Path, str] = {}
     for pat in ("**/*.semgrep.yml", "**/*.semgrep.yaml",
@@ -76,10 +64,7 @@ def _materialize(ana: Anatomy, tmp: Path) -> dict[Path, str]:
 
 
 def _timeout() -> int:
-    try:
-        return int(os.getenv("STATIC_TIMEOUT", "300"))
-    except ValueError:
-        return 90
+    return settings().static.timeout
 
 
 def _run(cmd: list[str], env: dict | None = None) -> tuple[int, str, str]:
@@ -212,7 +197,7 @@ def _missing_test(ana: Anatomy) -> list[Finding]:
     """確定性 MISSING-TEST：新增了可呼叫行為、同 diff 卻沒碰任何測試檔。
     刻意保守：只認「新增宣告」為行為訊號 —— 純重構（改常數/搬呼叫）不觸發。
     STATIC_MISSING_TEST=false 可整段關閉。"""
-    if os.getenv("STATIC_MISSING_TEST", "true").strip().lower() in {"false", "0", "no"}:
+    if not settings().static.missing_test:
         return []
     if any(TEST_PATH_RE.search(fc.path.lstrip("/")) for fc in ana.files):
         return []                                   # diff 有帶測試 → 不吭聲
@@ -251,12 +236,12 @@ def run_static(ana: Anatomy) -> tuple[list[Finding], list[str], list[str]]:
     try:
         mapping = _materialize(ana, tmp)
         finds: list[Finding] = []
-        if _enabled("STATIC_SEMGREP", "semgrep"):
+        if settings().static.semgrep_enabled:
             sg, checked = _semgrep(tmp, mapping, added, notes)
             finds += sg
         else:
             notes.append("semgrep: disabled or not installed")
-        if _enabled("STATIC_RUFF", "ruff"):
+        if settings().static.ruff_enabled:
             finds += _ruff(mapping, added, notes)
         else:
             notes.append("ruff: disabled or not installed")

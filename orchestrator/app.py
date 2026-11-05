@@ -15,6 +15,7 @@ import os
 import re
 import time
 import uuid
+from contextlib import asynccontextmanager
 from typing import AsyncIterator, Awaitable, Callable, Optional
 
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -27,8 +28,16 @@ from orchestrator.core import run_review
 from orchestrator.models import ReviewResult
 from orchestrator import knowledge, progress
 from shared.azdo import find_pr_url
+from shared.settings import fail_fast, settings
 
-app = FastAPI(title="review-orchestrator")
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    fail_fast()          # 設定壞值在啟動就報，不等第一條 review
+    yield
+
+
+app = FastAPI(title="review-orchestrator", lifespan=_lifespan)
 
 MODEL_ID = "pr-reviewer"
 HELP_TEXT = (
@@ -56,11 +65,15 @@ def _is_meta_task(body: dict, last_text: str) -> bool:
 
 
 _RECENT: dict[str, tuple[float, str]] = {}   # pr_url -> (時間戳, markdown)
-_DEDUPE_TTL = float(os.getenv("REVIEW_DEDUPE_TTL", "120"))
+
+
+def _ttl() -> float:
+    return settings().orchestrator.dedupe_ttl
+
 
 def _cache_get(pr_url: str, source_commit: str = "") -> str | None:
     hit = _RECENT.get(pr_url)
-    if hit and (time.time() - hit[0]) < _DEDUPE_TTL:
+    if hit and (time.time() - hit[0]) < _ttl():
         cached_commit = hit[2] if len(hit) > 2 else ""
         if source_commit and cached_commit and source_commit != cached_commit:
             return None                    # push 了新 commit → 舊 review 作廢
@@ -70,7 +83,7 @@ def _cache_get(pr_url: str, source_commit: str = "") -> str | None:
 def _cache_put(pr_url: str, markdown: str, source_commit: str = "") -> None:
     _RECENT[pr_url] = (time.time(), markdown, source_commit)
     if len(_RECENT) > 200:   # 粗糙但夠用的清理
-        cutoff = time.time() - _DEDUPE_TTL
+        cutoff = time.time() - _ttl()
         for k in [k for k, (t, *_rest) in _RECENT.items() if t < cutoff]:
             _RECENT.pop(k, None)
 
@@ -90,7 +103,7 @@ _EVAL_BUSY = {"flag": False}    # eval-webhook 併發鎖（防連點疊考）
 
 def _check_auth(authorization: str | None):
     """設定 ORCH_API_KEY 時才驗；沒設就開放（內網 POC 模式）。"""
-    want = os.getenv("ORCH_API_KEY", "")
+    want = settings().orchestrator.api_key.get_secret_value()
     if not want:
         return
     got = (authorization or "").removeprefix("Bearer ").strip()
@@ -129,7 +142,7 @@ async def _handle_review_inner(pr_url: str, user: str, note) -> ReviewResult:
 
         result = await run_review(diff, metadata)
 
-        if os.getenv("AUTO_POST", "false").lower() in {"true", "1", "yes"}:
+        if settings().orchestrator.auto_post:
             await clients.post_review_comment(pr_url, result.markdown)
             await note("Review comment posted to the PR (subject to the results service DRY_RUN setting)")
 
@@ -361,7 +374,7 @@ async def eval_webhook(request: Request):
     # pipeline 可由 query（?pipeline=v2）或 body 指定；預設跟服務 env 走。
     # 在 Langfuse 存兩個 Remote Experiment 設定（v1 / v2 各一）= UI 一鍵 A/B。
     pipeline = (q.get("pipeline") or cfg.get("pipeline")
-                or os.getenv("REVIEW_PIPELINE", "v1")).strip().lower()
+                or settings().orchestrator.pipeline).strip().lower()
     if pipeline not in ("v1", "v2"):
         pipeline = "v1"
     run_name = (q.get("run_name") or cfg.get("run_name")

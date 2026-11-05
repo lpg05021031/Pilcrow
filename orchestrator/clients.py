@@ -3,22 +3,16 @@
 每個 wrapper 都疊 @observe：瀑布圖裡「抓 diff 花多久、讀 repo 花多久、
 發評論成不成功」各自成層 —— 這是唯一接 Langfuse 的服務。
 
-環境變數（都有合理預設）：
-  ADO_TOOLS_URL      http://127.0.0.1:8091/mcp
-  READER_TOOLS_URL   http://127.0.0.1:8092/mcp
-  RESULT_TOOLS_URL   http://127.0.0.1:8093/mcp
+位址來自 settings().tools（ADO_TOOLS_URL 等；未設就由各服務的 PORT 推得）。
 """
 from __future__ import annotations
 
 import json
-import os
 
 from fastmcp import Client
 from langfuse import observe
 
-
-def _url(env: str, default: str) -> str:
-    return os.getenv(env, default)
+from shared.settings import settings
 
 
 async def _call(server_url: str, tool: str, args: dict):
@@ -44,13 +38,13 @@ async def _call(server_url: str, tool: str, args: dict):
 
 @observe()
 async def fetch_pr_metadata(pr_url: str) -> dict:
-    return await _call(_url("ADO_TOOLS_URL", "http://127.0.0.1:8091/mcp"),
+    return await _call(settings().tools.ado_url,
                        "get_pr_metadata", {"pr_url": pr_url})
 
 
 @observe()
 async def fetch_pr_diff(pr_url: str) -> str:
-    out = await _call(_url("ADO_TOOLS_URL", "http://127.0.0.1:8091/mcp"),
+    out = await _call(settings().tools.ado_url,
                       "get_pr_diff", {"pr_url": pr_url})
     return out if isinstance(out, str) else json.dumps(out, ensure_ascii=False)
 
@@ -61,7 +55,7 @@ async def fetch_pr_diff(pr_url: str) -> str:
 async def read_repo_file(path: str, start_line: int = 1,
                          end_line: int | None = None,
                          repo: str | None = None) -> str:
-    return await _call(_url("READER_TOOLS_URL", "http://127.0.0.1:8092/mcp"),
+    return await _call(settings().tools.reader_url,
                        "read_file",
                        {"path": path, "start_line": start_line,
                         "end_line": end_line, "repo": repo})
@@ -69,7 +63,7 @@ async def read_repo_file(path: str, start_line: int = 1,
 
 @observe()
 async def search_repo(pattern: str, glob: str = "**/*", repo: str | None = None):
-    return await _call(_url("READER_TOOLS_URL", "http://127.0.0.1:8092/mcp"),
+    return await _call(settings().tools.reader_url,
                        "search_code", {"pattern": pattern, "glob": glob,
                                        "repo": repo})
 
@@ -78,7 +72,7 @@ async def search_repo(pattern: str, glob: str = "**/*", repo: str | None = None)
 
 @observe()
 async def post_review_comment(pr_url: str, markdown: str) -> dict:
-    return await _call(_url("RESULT_TOOLS_URL", "http://127.0.0.1:8093/mcp"),
+    return await _call(settings().tools.result_url,
                        "post_review_comment", {"pr_url": pr_url, "markdown": markdown})
 
 @observe()
@@ -94,7 +88,7 @@ async def post_knowledge_draft(pr_url: str, markdown: str,
     args = {"pr_url": pr_url, "markdown": markdown}
     if thread_id is not None:
         args["thread_id"] = thread_id
-    return await _call(_url("RESULT_TOOLS_URL", "http://127.0.0.1:8093/mcp"),
+    return await _call(settings().tools.result_url,
                        "post_knowledge_draft", args)
 
 
@@ -106,7 +100,7 @@ async def post_knowledge_draft(pr_url: str, markdown: str,
 
 @observe()
 async def graph_call(tool: str, args: dict):
-    url = os.getenv("GRAPH_TOOLS_URL", "").strip()
+    url = settings().graph.tools_url
     if not url:
         return None
     return await _call(url, tool, args)
@@ -114,10 +108,11 @@ async def graph_call(tool: str, args: dict):
 
 async def graph_blast(files: list[str], repo: str | None = None):
     """受影響範圍摘要。工具名/參數樣板由 env 決定（不同 graph 工具可換皮）。"""
-    tool = os.getenv("GRAPH_TOOL_BLAST", "").strip()
+    g = settings().graph
+    tool = g.tool_blast
     if not tool:
         return None
-    template = os.getenv("GRAPH_TOOL_BLAST_ARGS", '{"files": $files}')
+    template = g.tool_blast_args
     if "$repo_dir" in template and not (repo or "").strip():
         return None                      # 樣板要 repo、呼叫端沒給 → 靜默跳過
     rendered = (template
