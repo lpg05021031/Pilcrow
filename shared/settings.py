@@ -359,7 +359,7 @@ class Knowledge(_Group):
 
     root: Path | None = Field(
         None, alias="KNOWLEDGE_ROOT",
-        description="本地 knowledge repo 路徑（harvester timer 是唯一 commit 者）。",
+        description="本地 knowledge repo 路徑（行程內的 harvest job 是唯一 commit 者）。",
         json_schema_extra={"example": "/opt/pr-review-knowledge"})
     branches: CsvList = Field(
         ["master", "main"], alias="KNOWLEDGE_BRANCHES",

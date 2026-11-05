@@ -60,9 +60,9 @@ PR description」，驗不過的 evidence 剝掉、剝光的整條不入稿，�
 
 **四、不新增服務；重用已驗證的模式。**
 知識帳本完整複製 rules repo 的成功模式（本地 git、SHA 錨、targeted
-載入）；所有背景工作都是「timer + oneshot + journal」三件套；狀態帳本
+載入）；所有背景工作都是行程內的排程迴圈（狀態進 `/healthz`）；狀態帳本
 就是 git。輪詢、不開 webhook；**每個資料域只有一個寫手**（repos 歸
-repo-sync、knowledge 歸 harvester、pending 只寫檔不碰 git），併發衝突
+repo-sync job、knowledge 歸 harvest job、pending 只寫檔不碰 git），併發衝突
 從結構上不存在。
 
 **五、對外的每一次寫入都有雙開關縱深。**
@@ -240,10 +240,10 @@ ADO_PAT 真打一次 API；`--no-network` 給 CI；`--json` 給日後的狀態�
 | `GRAPH_TOOL_BLAST_ARGS`（`$repo_dir`） | graph | graph 多 repo 自動切庫 | — |
 | `REVIEW_PIPELINE` | orchestrator | v1/v2 十秒回滾 | v1 |
 
-服務判讀口訣：**常駐組怕 dead、定時組怕 failed**（oneshot 平時
-`inactive (dead)` 是待命不是屍體，看 `list-timers` 的 NEXT/LAST）。
+服務判讀：只有一個 unit，`review-orchestrator` 要 active；兩個排程 job 的
+上次成功 / 失敗 / 下次時間看 `/healthz` 的 `jobs` 或 doctor 的 `[jobs]` 組。
 env 是行程啟動時讀的：改完必 restart，活體對帳用
-`/proc/<MainPID>/environ`。血淚榜首：installer 跑完必 `chown`；
+`python -m shared.doctor`。血淚榜首：installer 跑完必 `chown`；
 env 值一律單引號；systemd unit 的 PATH 要含 venv。
 
 ## 7. 目錄地圖

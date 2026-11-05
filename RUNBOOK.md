@@ -359,7 +359,7 @@ sudo -u <服務user> bash -c 'export PATH=<安裝根>/venv/bin:$PATH; cd <REPOS_
 ```
 
 預期最後一行 `Full build: N files, X nodes, Y edges`。之後不用再手動——
-3.5 的 timer 每輪 pull 完會自動 `build`（增量，只重解析有改的檔）。
+3.5 的 repo-sync job 每輪 pull 完會自動 `build`（增量，只重解析有改的檔；`REPO_SYNC_GRAPH_REBUILD=off` 可關）。
 `igraph not available` 的 INFO 行無害（社群偵測退用檔案模式）。
 
 **8.3 起 MCP server（systemd）**：
@@ -386,8 +386,8 @@ unit 的 ExecStart 骨架（example 檔裡就是這個）：
 判讀：journal 出現 uvicorn 的啟動行即可。**用 curl 打 `/mcp` 會回 406，
 這是正常的**（MCP over HTTP 要特定 Accept header）——健康檢查請用 8.4
 的 list tools，別被 406 騙去 debug。設計取捨：unit 刻意**不開**
-`--auto-watch`，讓 3.5 的 timer 當 graph 的唯一寫入者（單一寫手，
-避免和 timer 的 build 併發搶 SQLite）。
+`--auto-watch`，讓 3.5 的 repo-sync job 當 graph 的唯一寫入者（單一寫手，
+避免和 job 的 build 併發搶 SQLite）。
 
 **8.4 驗收 + 填 env**。先 list tools：
 
@@ -561,7 +561,7 @@ curl -X POST localhost:8080/knowledge/redistill \
 ```
 
 真實動線：小 PR 貼了草稿之後再 push 一次、然後 complete →
-下一輪 timer 的 journal 會出現「請求重蒸（第 1/2 次，commit xxxxxxxx）」→
+下一輪 harvest job 的 journal 會出現「請求重蒸（第 1/2 次，commit xxxxxxxx）」→
 orchestrator 那邊「重蒸完成 → _pending 覆寫」→ 再下一輪「staged
 （silent·redistilled）」。作者先前的回覆逐字帶進重蒸材料，更新稿**回覆進原
 thread**（不開新 thread），開頭有 `Draft updated after new commits`。
