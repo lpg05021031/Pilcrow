@@ -322,7 +322,7 @@ def check_llm(s: S.Settings, network: bool) -> list[Check]:
 def check_ado(s: S.Settings, network: bool, pr_url: str | None) -> list[Check]:
     pat = s.ado.pat.get_secret_value()
     if not pat:
-        return [Check("ado", "ADO_PAT", FAIL, "未設 —— ①③ 與 harvester 都打不了 Azure DevOps")]
+        return [Check("ado", "ADO_PAT", FAIL, "未設定 —— 讀取 PR、發布 comment 與 harvest 都需要")]
     out = [Check("ado", "ADO_PAT", OK, f"set（{len(pat)} chars）；verify_ssl={s.ado.verify_ssl}")]
     if not network or not pr_url:
         out.append(Check("ado", "reach", SKIP, "給 --pr-url <一條真 PR> 才會真打一次 API"))
