@@ -70,6 +70,10 @@ table.checks tr.head th { text-align: left; font-weight: 500; color: var(--muted
 table.reviews td { white-space: nowrap; } table.reviews td:nth-child(3) { white-space: normal; }
 pre { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
 pre.report { max-height: 70vh; } details.add { margin-top: 8px; } details.add form { margin: 8px 0; }
+.step h2 .status { font-family: var(--mono); font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--skip-bg); margin-right: 6px; }
+.step.st-ok h2 .status { background: var(--ok-bg); color: var(--ok); } .step.st-warn h2 .status { background: var(--warn-bg); color: var(--warn); } .step.st-fail h2 .status { background: var(--fail-bg); color: var(--fail); }
+.step.st-fail { border-color: var(--fail); } .step.st-warn { border-color: var(--warn); }
+ul.small li form.inline button { margin-left: 6px; }
 
 /* 窄螢幕（手機 / 窄 pane）：導覽可換行、名稱欄可折行、長路徑可斷字 */
 @media (max-width: 760px) {

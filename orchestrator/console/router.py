@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import SecretStr, ValidationError
 
-from orchestrator import jobs, sources, store
+from orchestrator import jobs, ledger, sources, store
 from orchestrator.adapters import ado
 from orchestrator.console import auth
 from shared import doctor
@@ -32,7 +32,8 @@ NAV = [("overview", "Overview", "/console"),
        ("settings", "Settings", "/console/settings"),
        ("sources", "Sources", "/console/sources"),
        ("reviews", "Reviews", "/console/reviews"),
-       ("knowledge", "Knowledge", None)]  # S4
+       ("knowledge", "Knowledge", "/console/knowledge"),
+       ("setup", "Setup", "/console/setup")]
 
 # 翻向這一側要勾「我確定」：會對外真發、或關掉安全氣囊
 DANGEROUS = {("orchestrator", "auto_post"): True,
@@ -101,7 +102,8 @@ async def overview(request: Request, refresh: int = 0):
         request, "overview", groups=groups, counts=counts,
         checked_at=_doctor_cache["ts"], jobs=jobs.snapshot(),
         audit=list(ado.audit_log)[-10:][::-1], now=time.time(),
-        sources=views, reviews=store.list_reviews(8), summary=store.summary(7)))
+        sources=views, reviews=store.list_reviews(8), summary=store.summary(7),
+        config_exists=S.config_path().exists()))
 
 
 @router.post("/jobs/{name}/run")
@@ -175,6 +177,90 @@ async def _run_and_log(handle, url: str) -> None:
         await handle(url, "console")
     except Exception as e:  # noqa: BLE001  —— 已由 handle_review 落帳為 error
         print(f"[console] review {url} 失敗：{type(e).__name__}: {e}")
+
+
+# ---------- Knowledge ----------
+
+@router.get("/knowledge", response_class=HTMLResponse)
+async def knowledge_page(request: Request, digest_repo: str = "", msg: str = ""):
+    if not auth.is_authed(request):
+        return auth.login_redirect(request)
+    pend, stg, cyc, verd = await asyncio.to_thread(
+        lambda: (ledger.pending(), ledger.staged(), ledger.cycle_state(), ledger.verdicts()))
+    dig = await asyncio.to_thread(ledger.digest_preview, digest_repo) if digest_repo else ""
+    return templates.TemplateResponse(request, "knowledge.html", _ctx(
+        request, "knowledge", root=ledger._root() is not None, pending=pend, staged=stg,
+        cycle=cyc, verdicts=verd, digest=dig, digest_repo=digest_repo, msg=msg,
+        job=jobs.snapshot().get("harvest"), now=time.time()))
+
+
+@router.post("/knowledge/verdict")
+async def knowledge_verdict(request: Request, repo: str = Form(""), kind: str = Form(""),
+                            token: str = Form("")):
+    if not auth.is_authed(request):
+        return auth.login_redirect(request)
+    who = request.client.host if request.client else "console"
+    msg = ledger.add_verdict(repo, kind, token, by=who)
+    from urllib.parse import quote
+    return RedirectResponse(f"/console/knowledge?msg={quote(msg)}", status_code=303)
+
+
+@router.post("/knowledge/verdict/remove")
+async def knowledge_verdict_remove(request: Request, repo: str = Form(""), kind: str = Form(""),
+                                   token: str = Form("")):
+    if not auth.is_authed(request):
+        return auth.login_redirect(request)
+    msg = ledger.remove_verdict(repo, kind, token)
+    from urllib.parse import quote
+    return RedirectResponse(f"/console/knowledge?msg={quote(msg)}", status_code=303)
+
+
+# ---------- Setup 精靈 ----------
+
+SETUP_STEPS = [
+    {"key": "llm", "title": "LLM gateway", "groups": ["llm"], "doctor": [("llm", None)],
+     "why": "reviewer / planner / adversary 都打它；LLM_MODEL 要在 gateway 的清單裡。",
+     "secrets": ["LLM_API_KEY"]},
+    {"key": "langfuse", "title": "Langfuse", "groups": ["langfuse"], "doctor": [("langfuse", None)],
+     "why": "trace、prompt 版控、eval 全靠它；key 對不上這個 host 就全暗。",
+     "secrets": ["LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"]},
+    {"key": "ado", "title": "Azure DevOps", "groups": ["ado", "posting"], "doctor": [("ado", None)],
+     "why": "抓 PR 與回貼都用 ADO_PAT；DRY_RUN / KNOWLEDGE_POST 出廠安全側，確認要真發再翻。",
+     "secrets": ["ADO_PAT"]},
+    {"key": "service", "title": "服務本體", "groups": ["orchestrator", "jobs"],
+     "doctor": [("settings", None), ("python", None), ("services", None), ("jobs", None), ("systemd", None)],
+     "why": "行程在不在、依賴齊不齊、排程有沒有在跑。ORCH_API_KEY 設了控制台才要登入。",
+     "secrets": ["ORCH_API_KEY"]},
+    {"key": "repos", "title": "本地 clone（base 上下文）", "groups": ["repos"], "doctor": [("paths", "REPOS_ROOT")],
+     "why": "沒有也能 review，但 reviewer 看不到變更周邊；在 Sources 頁可以直接 clone。",
+     "link": "/console/sources#repos", "link_label": "Sources → repos"},
+    {"key": "rules", "title": "團隊規則", "groups": ["rules", "static"], "doctor": [("paths", "RULES_ROOT")],
+     "why": "RULES_ROOT 指向規則 repo 的 clone；semgrep 規則也從這裡來。", "link": "/console/sources#rules", "link_label": "Sources → rules"},
+    {"key": "knowledge", "title": "知識迴圈（選配）", "groups": ["knowledge"],
+     "doctor": [("paths", "KNOWLEDGE_ROOT"), ("paths", "DATA_DIR")],
+     "why": "KNOWLEDGE_ROOT 設了才會蒸餾、注入、收割；DATA_DIR 是 review 歷史。",
+     "link": "/console/knowledge", "link_label": "Knowledge"},
+]
+
+_RANK = {"OK": 0, "SKIP": 0, "WARN": 1, "FAIL": 2}
+
+
+@router.get("/setup", response_class=HTMLResponse)
+async def setup_page(request: Request, refresh: int = 0):
+    if not auth.is_authed(request):
+        return auth.login_redirect(request)
+    checks = await _doctor_checks(force=bool(refresh))
+    steps = []
+    for st in SETUP_STEPS:
+        mine = [c for c in checks for (g, n) in st["doctor"] if c.group == g and (n is None or c.name == n)]
+        worst = max((_RANK.get(c.status, 0) for c in mine), default=0)
+        status = {0: "OK", 1: "WARN", 2: "FAIL"}[worst]
+        if mine and all(c.status == "SKIP" for c in mine):
+            status = "SKIP"
+        steps.append({**st, "checks": mine, "status": status})
+    return templates.TemplateResponse(request, "setup.html", _ctx(
+        request, "setup", steps=steps, config_path=str(S.config_path()),
+        config_exists=S.config_path().exists()))
 
 
 @router.get("/reviews/{review_id}", response_class=HTMLResponse)

@@ -9,6 +9,7 @@
   </div>
 </div>
 
+{% if counts.FAIL or not config_exists %}<div class="banner notice">有 {{ counts.FAIL }} 個 FAIL{% if not config_exists %}、尚無 config.toml{% endif %} —— <a href="/console/setup">設定精靈</a> 一步一步綠燈。</div>{% endif %}
 <div class="tiles">
   <div class="tile ok"><b>{{ counts.OK }}</b><span>OK</span></div>
   <div class="tile warn"><b>{{ counts.WARN }}</b><span>WARN</span></div>

@@ -50,6 +50,7 @@ from shared.azdo import PrRef, client, get_json
 from shared.settings import fail_fast, settings
 
 from orchestrator import knowledge_digest as digest
+from orchestrator import ledger
 from orchestrator.knowledge import (_branch_patterns, _draft_comment,
                                     _suffix_eq, assign_ids, decision_line,
                                     inv_id, inv_text, invariant_line,
@@ -893,9 +894,10 @@ def _cycle_close(c, root: Path) -> list[str]:
             if listed or st.get("digest"):
                 st["listed"] = sorted(listed)
                 st["digest"] = True
-            # 驗收窗內收 reject（行首命令式；實體名 / PR12 / PR12-I1）
+            # 驗收窗內收 reject（行首命令式；實體名 / PR12 / PR12-I1）+ 控制台裁決（同義）
             msgs, ambiguous = _apply_rejects(
-                _collect_rejects(_get_threads(c, ref)), staged, "驗收窗")
+                _collect_rejects(_get_threads(c, ref)) | ledger.peek_verdicts(root, repo)[0],
+                staged, "驗收窗")
             for line in msgs:
                 out.append(f"{repo}: {line}")
             for line in _post_ambiguity(c, ref, state, key, ambiguous):
@@ -934,6 +936,8 @@ def _cycle_close(c, root: Path) -> list[str]:
                 keeps = _collect_keeps(threads)
             except Exception:
                 tokens = set()
+            c_rej, c_keep = ledger.consume_verdicts(root, repo)   # 控制台裁決：收口時用掉
+            tokens, keeps = tokens | c_rej, keeps | c_keep
             msgs, ambiguous = _apply_rejects(tokens, staged, "收口前")
             for line in msgs:
                 out.append(f"{repo}: {line}")
