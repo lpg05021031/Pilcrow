@@ -57,16 +57,16 @@ def test_ledger_reads_pending_staged_cycle_and_renders_digest(kroot):
 
 
 def test_verdicts_add_remove_peek_consume(kroot):
-    assert "已記下" in L.add_verdict("Repo-A", "reject", "PR6-I1", by="me")
-    assert "已記下" in L.add_verdict("repo-a", "keep", "PR1-I1")
-    assert "只認條目 ID" in L.add_verdict("repo-a", "keep", "Fee")
-    assert "缺" in L.add_verdict("repo-a", "nuke", "x")
+    assert "已記錄" in L.add_verdict("Repo-A", "reject", "PR6-I1", by="me")
+    assert "已記錄" in L.add_verdict("repo-a", "keep", "PR1-I1")
+    assert "僅接受條目 ID" in L.add_verdict("repo-a", "keep", "Fee")
+    assert "缺少" in L.add_verdict("repo-a", "nuke", "x")
     v = L.verdicts()
     assert set(v["repo-a"]["reject"]) == {"PR6-I1"} and set(v["repo-a"]["keep"]) == {"PR1-I1"}
     assert L.peek_verdicts(kroot, "repo-a") == ({"pr6-i1"}, {"PR1-I1"})
     assert L.verdicts()["repo-a"]["reject"]                      # peek 不清
     assert "已撤回" in L.remove_verdict("repo-a", "keep", "PR1-I1")
-    assert "沒有這筆" in L.remove_verdict("repo-a", "keep", "PR1-I1")
+    assert "無此裁決" in L.remove_verdict("repo-a", "keep", "PR1-I1")
     assert L.consume_verdicts(kroot, "repo-a") == ({"pr6-i1"}, set())
     assert L.consume_verdicts(kroot, "repo-a") == (set(), set())   # 用掉了
 
@@ -118,7 +118,7 @@ def test_knowledge_page_lists_and_records_verdicts(client):
     assert "keep PR1-I1" in r.text and "repo-a#99" in r.text
     r = client.post("/console/knowledge/verdict", data={"repo": "repo-a", "kind": "reject", "token": "PR6"},
                     follow_redirects=True)
-    assert "已記下" in r.text and "<code>PR6</code>" in r.text
+    assert "已記錄" in r.text and "<code>PR6</code>" in r.text
     r = client.post("/console/knowledge/verdict/remove", data={"repo": "repo-a", "kind": "reject", "token": "PR6"},
                     follow_redirects=True)
     assert "已撤回" in r.text
@@ -129,7 +129,7 @@ def test_knowledge_page_lists_and_records_verdicts(client):
 def test_setup_page_groups_doctor_checks_into_steps(client):
     r = client.get("/console/setup")
     assert r.status_code == 200
-    for title in ("LLM gateway", "Langfuse", "Azure DevOps", "服務本體", "本地 clone", "團隊規則", "知識迴圈"):
+    for title in ("LLM gateway", "Langfuse", "Azure DevOps", "Orchestrator 服務", "本地 clone", "團隊規則", "知識迴圈"):
         assert title in r.text
     assert "REPOS_ROOT" in r.text and "/console/settings#g-llm" in r.text
 
@@ -139,7 +139,7 @@ def test_overview_points_to_setup_when_failing(client, monkeypatch):
     import orchestrator.console.router as R
     R._doctor_cache.update(ts=0.0, checks=[])
     r = client.get("/console?refresh=1")
-    assert "設定精靈" in r.text
+    assert "設定精靈" in r.text and "服務不可用" in r.text and "BLOCKING" in r.text
 
 
 # ---------- install ----------

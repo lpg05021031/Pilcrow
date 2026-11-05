@@ -20,7 +20,8 @@ from pydantic import SecretStr, ValidationError
 
 from orchestrator import jobs, ledger, sources, store
 from orchestrator.adapters import ado
-from orchestrator.console import auth
+from orchestrator.console import auth, status as stat
+from orchestrator.console.labels import LABELS
 from shared import doctor
 from shared import settings as S
 
@@ -28,12 +29,25 @@ router = APIRouter(prefix="/console", include_in_schema=False)
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
 templates.env.filters["datetime"] = lambda ts: time.strftime("%m-%d %H:%M", time.localtime(ts))
 
-NAV = [("overview", "Overview", "/console"),
-       ("settings", "Settings", "/console/settings"),
-       ("sources", "Sources", "/console/sources"),
-       ("reviews", "Reviews", "/console/reviews"),
-       ("knowledge", "Knowledge", "/console/knowledge"),
-       ("setup", "Setup", "/console/setup")]
+# 依維運者的任務分四頁；sources / setup 仍有路由，從 設定 與 狀態 頁進，不佔導覽。
+NAV = [("status", "狀態", "/console"),
+       ("reviews", "審查", "/console/reviews"),
+       ("knowledge", "知識", "/console/knowledge"),
+       ("settings", "設定", "/console/settings")]
+
+# 設定頁依任務分段（不是依模組）：維運者找的是「連線」「發文開關」，不是 ado / posting
+TASKS = [
+    {"title": "連線", "why": "LLM gateway、Langfuse、Azure DevOps 與 orchestrator 本體。Secrets（PAT、API key）僅由 secrets.env 設定。",
+     "groups": ["llm", "langfuse", "ado", "orchestrator"]},
+    {"title": "發布開關", "why": "控制對 Azure DevOps 的寫入。預設全為安全側；切換至發布側需確認。",
+     "groups": ["posting"]},
+    {"title": "Review pipeline", "why": "v2 pipeline 的面向數、併發、信心門檻、切片預算與靜態掃描。調整前先通過 eval。",
+     "groups": ["review", "static"]},
+    {"title": "資料來源", "why": "本地 clone、團隊規則、知識帳本、code graph 的路徑與啟用狀態。",
+     "groups": ["repos", "rules", "knowledge", "graph"], "link": "/console/sources", "link_label": "來源狀態與注入預覽"},
+    {"title": "排程", "why": "行程內排程工作的執行間隔；0 為停用。", "groups": ["jobs"]},
+    {"title": "Eval gate", "why": "CI gate 門檻。未設定時僅回報、不擋。", "groups": ["eval"]},
+]
 
 # 翻向這一側要勾「我確定」：會對外真發、或關掉安全氣囊
 DANGEROUS = {("orchestrator", "auto_post"): True,
@@ -98,11 +112,15 @@ async def overview(request: Request, refresh: int = 0):
     counts = {k: sum(1 for c in checks if c.status == k)
               for k in (doctor.OK, doctor.WARN, doctor.FAIL, doctor.SKIP)}
     views = await asyncio.to_thread(sources.all_views)
-    return templates.TemplateResponse(request, "overview.html", _ctx(
-        request, "overview", groups=groups, counts=counts,
-        checked_at=_doctor_cache["ts"], jobs=jobs.snapshot(),
-        audit=list(ado.audit_log)[-10:][::-1], now=time.time(),
-        sources=views, reviews=store.list_reviews(8), summary=store.summary(7),
+    js = jobs.snapshot()
+    reviews = store.list_reviews(15)
+    audit = list(ado.audit_log)[-15:]
+    return templates.TemplateResponse(request, "status.html", _ctx(
+        request, "status", groups=groups, counts=counts,
+        hl=stat.headline(checks), blockers=stat.blockers(checks), healthy=stat.healthy(checks),
+        feed=stat.feed(reviews, audit, js, S.recent_changes(10)), ago=stat.ago,
+        checked_at=_doctor_cache["ts"], jobs=js, now=time.time(),
+        sources=views, reviews=reviews[:8], summary=store.summary(7),
         config_exists=S.config_path().exists()))
 
 
@@ -219,27 +237,27 @@ async def knowledge_verdict_remove(request: Request, repo: str = Form(""), kind:
 
 SETUP_STEPS = [
     {"key": "llm", "title": "LLM gateway", "groups": ["llm"], "doctor": [("llm", None)],
-     "why": "reviewer / planner / adversary 都打它；LLM_MODEL 要在 gateway 的清單裡。",
+     "why": "planner / reviewer / adversary 的呼叫端點；LLM_MODEL 須存在於 gateway 的模型清單。",
      "secrets": ["LLM_API_KEY"]},
     {"key": "langfuse", "title": "Langfuse", "groups": ["langfuse"], "doctor": [("langfuse", None)],
-     "why": "trace、prompt 版控、eval 全靠它；key 對不上這個 host 就全暗。",
+     "why": "Trace、prompt 版控與 eval 的後端；憑證須與 host 相符。",
      "secrets": ["LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY"]},
     {"key": "ado", "title": "Azure DevOps", "groups": ["ado", "posting"], "doctor": [("ado", None)],
-     "why": "抓 PR 與回貼都用 ADO_PAT；DRY_RUN / KNOWLEDGE_POST 出廠安全側，確認要真發再翻。",
+     "why": "讀取 PR 與發布 comment 皆使用 ADO_PAT；DRY_RUN / KNOWLEDGE_POST 預設為安全側。",
      "secrets": ["ADO_PAT"]},
-    {"key": "service", "title": "服務本體", "groups": ["orchestrator", "jobs"],
+    {"key": "service", "title": "Orchestrator 服務", "groups": ["orchestrator", "jobs"],
      "doctor": [("settings", None), ("python", None), ("services", None), ("jobs", None), ("systemd", None)],
-     "why": "行程在不在、依賴齊不齊、排程有沒有在跑。ORCH_API_KEY 設了控制台才要登入。",
+     "why": "行程狀態、Python 依賴、排程工作。設定 ORCH_API_KEY 後控制台需登入。",
      "secrets": ["ORCH_API_KEY"]},
     {"key": "repos", "title": "本地 clone（base 上下文）", "groups": ["repos"], "doctor": [("paths", "REPOS_ROOT")],
-     "why": "沒有也能 review，但 reviewer 看不到變更周邊；在 Sources 頁可以直接 clone。",
-     "link": "/console/sources#repos", "link_label": "Sources → repos"},
+     "why": "選配：提供變更周邊的 base 上下文。可於資料來源頁直接 clone。",
+     "link": "/console/sources#repos", "link_label": "資料來源 › repos"},
     {"key": "rules", "title": "團隊規則", "groups": ["rules", "static"], "doctor": [("paths", "RULES_ROOT")],
-     "why": "RULES_ROOT 指向規則 repo 的 clone；semgrep 規則也從這裡來。", "link": "/console/sources#rules", "link_label": "Sources → rules"},
+     "why": "RULES_ROOT 指向規則 repo 的本地 clone；semgrep 規則亦由此載入。", "link": "/console/sources#rules", "link_label": "資料來源 › rules"},
     {"key": "knowledge", "title": "知識迴圈（選配）", "groups": ["knowledge"],
      "doctor": [("paths", "KNOWLEDGE_ROOT"), ("paths", "DATA_DIR")],
-     "why": "KNOWLEDGE_ROOT 設了才會蒸餾、注入、收割；DATA_DIR 是 review 歷史。",
-     "link": "/console/knowledge", "link_label": "Knowledge"},
+     "why": "設定 KNOWLEDGE_ROOT 後啟用蒸餾、注入與收割；DATA_DIR 為 review 記錄目錄。",
+     "link": "/console/knowledge", "link_label": "知識帳本"},
 ]
 
 _RANK = {"OK": 0, "SKIP": 0, "WARN": 1, "FAIL": 2}
@@ -324,7 +342,12 @@ def _group_view(gname: str, errors: dict[str, str] | None = None,
                                           else ("true" if v is True else "false" if v is False
                                                 else str(v)))
         extra = info.json_schema_extra if isinstance(info.json_schema_extra, dict) else {}
+        desc = (info.description or "").strip()
+        env = S.env_names(info)[0]
+        default_native = S._native(info.get_default(call_default_factory=True))
         fields.append({
+            "label": LABELS.get(env, env), "more": desc,
+            "default_raw": S._render_value(default_native),
             "name": fname, "env": S.env_names(info)[0], "kind": kind,
             "choices": _choices(info), "value": shown,
             "masked": S._mask(v) if kind == "secret" else None,
@@ -345,9 +368,15 @@ def _group_view(gname: str, errors: dict[str, str] | None = None,
 async def settings_page(request: Request):
     if not auth.is_authed(request):
         return auth.login_redirect(request)
-    groups = [_group_view(g) for g in S.GROUP_ORDER]
+    views = {g: _group_view(g) for g in S.GROUP_ORDER}
+    tasks = []
+    for t in TASKS:
+        gs = [views[g] for g in t["groups"]]
+        tasks.append({**t, "groups": gs,
+                      "modified": sum(1 for g in gs for f in g["fields"] if f["source"] == "file")})
     return templates.TemplateResponse(request, "settings.html", _ctx(
-        request, "settings", groups=groups, config_path=str(S.config_path()),
+        request, "settings", tasks=tasks, groups=list(views.values()),
+        config_path=str(S.config_path()),
         config_exists=S.config_path().exists(), changes=S.recent_changes(20)))
 
 
@@ -385,7 +414,7 @@ async def settings_apply(request: Request, gname: str):
             try:
                 val = int(raw) if info.annotation is int or "int" in str(info.annotation) else float(raw)
             except ValueError:
-                errors[fname] = "要是數字"
+                errors[fname] = "須為數字"
                 continue
         else:
             val = raw
@@ -399,7 +428,7 @@ async def settings_apply(request: Request, gname: str):
         changes[fname] = val
         if (gname, fname) in DANGEROUS and val == DANGEROUS[(gname, fname)] \
                 and form.get(f"confirm_{fname}") != "on":
-            errors[fname] = "翻到這一側會對外真發 / 關掉安全氣囊，要勾「我確定」"
+            errors[fname] = "此變更會對外寫入或停用安全防護，需勾選確認"
     view: dict
     if errors:
         view = _group_view(gname, errors=errors, posted=posted)

@@ -1,25 +1,50 @@
 {% extends "base.html" %}
-{% block title %}Settings{% endblock %}
+{% import "_icons.html" as ic %}
+{% block title %}設定{% endblock %}
+{% block heading %}設定{% endblock %}
+{% block subheading %}<div class="sub">套用後即時生效，無需重啟。環境變數覆寫的值為唯讀；secrets 僅存於 <code>secrets.env</code>。</div>{% endblock %}
+{% block actions %}
+<label class="search">{{ ic.icon('search') }}<input type="search" id="settings-search" placeholder="搜尋（標籤、環境變數、說明）"></label>
+<label class="toggle-mod"><input type="checkbox" id="only-modified"> 僅顯示已覆寫</label>
+{% endblock %}
+{% block notices %}
+{% for w in warnings %}<div class="notice warn">{{ ic.icon('warn') }}<div>{{ w }}</div></div>{% endfor %}
+{% endblock %}
 {% block body %}
-<div class="row between">
-  <h1>設定</h1>
-  <span class="muted small">
-    env 覆寫 ＞ <code>{{ config_path }}</code>{% if not config_exists %}（尚未建立，第一次 Apply 會建）{% endif %} ＞ 預設。
-    Apply 即生效，不用 restart（除了 port / host）。
-  </span>
+<div class="settings-layout">
+  <nav class="section-index" id="section-index">
+    {% for t in tasks %}
+    <a href="#t-{{ loop.index }}">{{ t.title }}{% if t.modified %}<span class="count">{{ t.modified }}</span>{% endif %}</a>
+    {% endfor %}
+    <a href="#changes">變更紀錄</a>
+    <div class="index-foot faint tiny">{{ config_path }}{% if not config_exists %}<br>（不存在；首次套用時建立）{% endif %}</div>
+  </nav>
+
+  <div class="settings-body">
+    {% for t in tasks %}
+    <section class="task" id="t-{{ loop.index }}">
+      <header class="task-hd">
+        <h2>{{ t.title }}</h2>
+        <p class="faint small">{{ t.why }}{% if t.link %} · <a href="{{ t.link }}">{{ t.link_label }}</a>{% endif %}</p>
+      </header>
+      {% for g in t.groups %}
+      <div id="g-{{ g.name }}">{% include "_group.html" %}</div>
+      {% endfor %}
+    </section>
+    {% endfor %}
+
+    <section class="task" id="changes">
+      <header class="task-hd"><h2>變更紀錄</h2><p class="faint small">最近 20 筆寫入 config.toml 的變更（控制台或 --migrate）。</p></header>
+      {% include "_changes.html" %}
+    </section>
+  </div>
 </div>
 
-<div class="toc">
-  {% for g in groups %}<a href="#g-{{ g.name }}">{{ g.name }}</a>{% endfor %}
-  <a href="#changes">改動紀錄</a>
+<div class="dirty-bar" id="dirty-bar" hidden>
+  <span id="dirty-text">有未套用變更</span>
+  <div class="row">
+    <button class="ghost sm" id="dirty-discard">放棄變更</button>
+    <button class="primary sm" id="dirty-apply">套用全部</button>
+  </div>
 </div>
-
-{% for g in groups %}
-<div id="g-{{ g.name }}">{% include "_group.html" %}</div>
-{% endfor %}
-
-<section class="card" id="changes">
-  <h2>改動紀錄</h2>
-  {% include "_changes.html" %}
-</section>
 {% endblock %}

@@ -1,37 +1,41 @@
 {% extends "base.html" %}
-{% block title %}Reviews{% endblock %}
+{% import "_icons.html" as ic %}
+{% block title %}Review 記錄{% endblock %}
+{% block heading %}Review 記錄{% endblock %}
+{% block subheading %}<div class="sub">{{ summary.days }} 天內 {{ summary.n }} 筆{% if summary.errors %} · <span class="err">{{ summary.errors }} 筆失敗</span>{% endif %}{% if summary.avg_seconds %} · 平均耗時 {{ summary.avg_seconds|int }} s · 平均 {{ summary.avg_findings|round(1) }} finding{% endif %}</div>{% endblock %}
+{% block notices %}
+{% if not store_ok %}<div class="notice warn">{{ ic.icon('warn') }}<div>Review 記錄停用：{{ store_reason }}（DATA_DIR 不可寫；review 本身不受影響）</div></div>{% endif %}
+{% if run_error %}<div class="notice fail">{{ ic.icon('warn') }}<div>{{ run_error }}</div></div>{% endif %}
+{% endblock %}
 {% block body %}
-<div class="row between">
-  <h1>剛才那些 review 發生了什麼</h1>
-  <span class="muted small">近 {{ summary.days }} 天 {{ summary.n }} 條{% if summary.errors %} · <span class="err">{{ summary.errors }} 條失敗</span>{% endif %}{% if summary.avg_seconds %} · 平均 {{ summary.avg_seconds|int }} 秒 · 平均 {{ summary.avg_findings|round(1) }} 條 finding{% endif %}</span>
-</div>
-{% if not store_ok %}<p class="banner warn">review 歷史停用：{{ store_reason }}（DATA_DIR 開不出來；review 本身照跑）</p>{% endif %}
-
 <section class="card">
-  <form method="post" action="/console/reviews/run" class="row">
-    <input type="text" name="pr_url" placeholder="貼一條 PR URL（https://…/_git/<repo>/pullrequest/<id>）" required style="max-width:640px; flex:1">
-    <button class="primary small">跑一條 review</button>
-    <span class="muted tiny">走跟聊天室一模一樣的 pipeline；{% if auto_post %}<span class="warn">AUTO_POST=true，會回貼到 PR</span>{% else %}AUTO_POST=false，不會回貼{% endif %}</span>
-  </form>
-  {% if run_error %}<p class="err small">{{ run_error }}</p>{% endif %}
+  <div class="bd">
+    <form method="post" action="/console/reviews/run" class="form-row">
+      <input type="text" name="pr_url" placeholder="PR URL（https://…/_git/<repo>/pullrequest/<id>）" required style="flex:1 1 420px">
+      <button class="primary">{{ ic.icon('play') }}執行 review</button>
+      <span class="hint" style="margin:0">與 chat 入口相同的 pipeline；{% if auto_post %}<span class="warn">AUTO_POST=true：將發布 comment 至 PR</span>{% else %}AUTO_POST=false：不發布 comment{% endif %}</span>
+    </form>
+  </div>
 </section>
 
 <section class="card">
-  <table class="checks reviews">
-    <tr class="head"><th>時間</th><th>PR</th><th>標題</th><th>狀態</th><th>pipeline</th><th>finding</th><th>耗時</th><th></th></tr>
+  <div class="bd flush scroll">
+  {% if not reviews %}<div class="empty">尚無 review 記錄。</div>{% else %}
+  <table class="tbl">
+    <tr><th>時間</th><th>PR</th><th>標題</th><th>狀態</th><th>pipeline</th><th>findings</th><th class="r">耗時</th><th></th></tr>
     {% for r in reviews %}
-    <tr class="st-{{ 'fail' if r.status == 'error' else ('skip' if r.status == 'running' else 'ok') }}">
-      <td class="muted small">{{ r.started|datetime }}</td>
-      <td class="mono small">{{ r.repo }}#{{ r.pr_id }}</td>
-      <td class="small">{{ r.title or '' }}</td>
-      <td class="status">{{ r.status }}</td>
-      <td class="small">{{ r.pipeline or '' }}</td>
-      <td class="small">{% if r.status == 'done' %}<span class="err">{{ r.n_error }}</span> / <span class="warn">{{ r.n_warning }}</span> / {{ r.n_info }}{% endif %}</td>
-      <td class="small">{% if r.duration %}{{ r.duration|int }}s{% elif r.status == 'running' %}{{ (now - r.started)|int }}s…{% endif %}</td>
-      <td><a href="/console/reviews/{{ r.id }}">詳情</a></td>
+    <tr>
+      <td class="faint" style="white-space:nowrap">{{ r.started|datetime }}</td>
+      <td class="k"><a href="/console/reviews/{{ r.id }}" class="mono">{{ r.repo }}#{{ r.pr_id }}</a></td>
+      <td class="v">{{ r.title or '' }}</td>
+      <td class="st"><span class="pill st-{{ 'fail' if r.status == 'error' else ('skip' if r.status == 'running' else 'ok') }}">{{ r.status }}</span></td>
+      <td class="faint">{{ r.pipeline or '' }}</td>
+      <td style="white-space:nowrap">{% if r.status == 'done' %}<span class="sev error">{{ r.n_error }}</span> <span class="sev warning">{{ r.n_warning }}</span> <span class="sev info">{{ r.n_info }}</span>{% endif %}</td>
+      <td class="r faint">{% if r.duration %}{{ r.duration|int }}s{% elif r.status == 'running' %}{{ (now - r.started)|int }}s…{% endif %}</td>
+      <td class="r"><a href="/console/reviews/{{ r.id }}">詳情</a></td>
     </tr>
     {% endfor %}
-  </table>
-  {% if not reviews %}<p class="muted small">還沒有任何 review。上面貼一條 PR 試試。</p>{% endif %}
+  </table>{% endif %}
+  </div>
 </section>
 {% endblock %}

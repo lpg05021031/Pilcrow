@@ -3,33 +3,43 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>pr-review · {% block title %}{{ page }}{% endblock %}</title>
+<title>{% block title %}{{ page }}{% endblock %} · pr-review</title>
 <link rel="stylesheet" href="/console/static/console.css">
 </head>
 <body>
-<header class="top">
-  <a class="brand" href="/console">pr-review</a>
-  <nav>
-    {% for key, label, href in nav %}
-      {% if href %}<a href="{{ href }}" class="{{ 'on' if page == key else '' }}">{{ label }}</a>
-      {% else %}<span class="soon" title="下一階段">{{ label }}</span>{% endif %}
-    {% endfor %}
-  </nav>
-  {% if not open_mode and page != 'login' %}
-  <form method="post" action="/console/logout" class="inline"><button class="ghost">登出</button></form>
-  {% endif %}
-</header>
-{% if open_mode and page != 'login' %}
-<div class="banner warn">ORCH_API_KEY 未設：控制台對內網完全開放。設了 key 就會要求登入。</div>
-{% endif %}
-{% if warnings %}
-<div class="banner notice" id="warnings">
-  {% for w in warnings %}<div>⚠ {{ w }}</div>{% endfor %}
+{% import "_icons.html" as ic %}
+{% if page == 'login' %}
+<div class="login">{% block login %}{% endblock %}</div>
+{% else %}
+<div class="shell">
+  <aside class="sidebar">
+    <a class="brand" href="/console"><span class="mark">PR</span><b>pr-review</b></a>
+    <nav class="nav">
+      {% for key, label, href in nav %}
+      <a href="{{ href }}" class="{{ 'on' if page == key else '' }}">{{ ic.icon(key) }}<span>{{ label }}</span></a>
+      {% endfor %}
+    </nav>
+    <div class="side-foot">
+      {% if open_mode %}<span class="chip" title="ORCH_API_KEY 未設：控制台對內網開放"><span class="dot open"></span>開放模式</span>
+      {% else %}<span class="chip"><span class="dot"></span>已登入</span>
+      <form method="post" action="/console/logout" class="inline"><button class="ghost xs">登出</button></form>{% endif %}
+    </div>
+  </aside>
+  <div class="main">
+    <header class="page-head">
+      <div class="t">
+        <h1>{% block heading %}{{ page }}{% endblock %}</h1>
+        {% block subheading %}{% endblock %}
+      </div>
+      <div class="actions">{% block actions %}{% endblock %}</div>
+    </header>
+    <div class="notices" id="notices">{% block notices %}{% endblock %}</div>
+    <main class="content">
+    {% block body %}{% endblock %}
+    </main>
+  </div>
 </div>
 {% endif %}
-<main>
-{% block body %}{% endblock %}
-</main>
 <script src="/console/static/console.js"></script>
 </body>
 </html>

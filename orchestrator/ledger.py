@@ -134,14 +134,14 @@ def add_verdict(repo: str, kind: str, token: str, by: str = "console") -> str:
     repo = (repo or "").strip().lower()
     token = (token or "").strip()
     if kind not in ("reject", "keep") or not repo or not token:
-        return "缺 repo / kind / token"
+        return "缺少 repo / kind / token"
     if kind == "keep" and not token.upper().startswith("PR"):
-        return "keep 只認條目 ID（例如 PR12-I1）"
+        return "keep 僅接受條目 ID（例如 PR12-I1）"
     key = token.upper() if token.upper().startswith("PR") else token.lower()
     data = verdicts()
     data.setdefault(repo, {}).setdefault(kind, {})[key] = {"by": by, "ts": time.strftime("%FT%T")}
     write_json_atomic(root / "_state" / VERDICTS, data)
-    return f"{kind} {key} 已記下；下一次 harvest 的驗收窗 / 收口會套用"
+    return f"{kind} {key} 已記錄；下次 harvest 於驗收窗 / 收口時套用"
 
 
 def remove_verdict(repo: str, kind: str, token: str) -> str:
@@ -152,7 +152,7 @@ def remove_verdict(repo: str, kind: str, token: str) -> str:
     repo = (repo or "").strip().lower()
     key = token.upper() if token.upper().startswith("PR") else token.lower()
     if data.get(repo, {}).get(kind, {}).pop(key, None) is None:
-        return "沒有這筆"
+        return "無此裁決"
     write_json_atomic(root / "_state" / VERDICTS, data)
     return f"{kind} {key} 已撤回"
 

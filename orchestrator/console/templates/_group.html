@@ -1,48 +1,53 @@
-<section class="card group" data-group="{{ g.name }}">
+{% import "_icons.html" as ic %}
+<section class="group" data-group="{{ g.name }}">
   <form method="post" action="/console/settings/{{ g.name }}" data-async>
-    <div class="row between">
-      <h2>[{{ g.name }}] <span class="muted small">{{ g.doc }}</span></h2>
+    <div class="group-hd">
+      <div><span class="group-name mono">{{ g.name }}</span> <span class="faint small">{{ g.doc }}</span></div>
       <div class="row">
-        {% if g.saved %}<span class="ok small">已套用{% if g.applied %}（{{ g.applied|length }} 項）{% else %}（無變動）{% endif %}</span>{% endif %}
-        {% if g.restart_needed %}<span class="warn small">這組要 restart 才生效</span>{% endif %}
-        <button class="primary small">Apply</button>
+        {% if g.saved %}<span class="saved">{{ ic.icon('check') }}已套用{% if g.applied %}（{{ g.applied|length }} 項）{% else %}（無變動）{% endif %}</span>{% endif %}
+        {% if g.restart_needed %}<span class="pill st-warn plain">需重啟生效</span>{% endif %}
+        <button class="sm">套用</button>
       </div>
     </div>
-    <table class="fields">
+    <div class="fields">
       {% for f in g.fields %}
-      <tr class="{{ 'has-err' if f.error else '' }} {{ 'locked' if f.locked else '' }}">
-        <th>
-          <code>{{ f.env }}</code>
-          <div class="muted tiny">{{ f.description }}</div>
-          <div class="muted tiny">預設 {{ f.default }}</div>
-        </th>
-        <td class="ctl">
+      <div class="field-row {{ 'has-err' if f.error else '' }} {{ 'locked' if f.locked else '' }} {{ 'modified' if f.source == 'file' else '' }}" data-search="{{ f.env|lower }} {{ f.label|lower }} {{ f.description|lower }}">
+        <div class="field-label">
+          <label for="{{ g.name }}-{{ f.name }}">{{ f.label }}</label>
+          <div class="field-env mono">{{ f.env }}</div>
+          {% if f.more %}<div class="field-desc">{{ f.more }}</div>{% endif %}
+        </div>
+        <div class="field-ctl">
           {% if f.kind == 'secret' %}
             <span class="mono">{{ f.masked }}</span>
-            <div class="tiny muted">secret 只能放 secrets.env</div>
+            <div class="hint">{{ ic.icon('lock') }} Secret：僅能由 secrets.env 設定</div>
           {% elif f.locked %}
             <span class="mono">{{ f.value or '(unset)' }}</span>
-            <div class="tiny muted">由環境變數覆寫，改檔無效；要用控制台管就從 env 檔拿掉這行</div>
+            <div class="hint">由環境變數覆寫（唯讀）。移除該環境變數後方可由控制台管理。</div>
           {% elif f.kind == 'bool' %}
             <input type="hidden" name="_b_{{ f.name }}" value="1">
-            <label class="switch"><input type="checkbox" name="{{ f.name }}" {{ 'checked' if f.value == 'true' else '' }}> <span>{{ f.value }}</span></label>
-            {% if f.dangerous %}<label class="tiny confirm"><input type="checkbox" name="confirm_{{ f.name }}"> 我確定（這會對外真發 / 關掉安全氣囊）</label>{% endif %}
+            <label class="switch"><input id="{{ g.name }}-{{ f.name }}" type="checkbox" name="{{ f.name }}" data-initial="{{ 'on' if f.value == 'true' else '' }}" {{ 'checked' if f.value == 'true' else '' }}><span class="track"></span><span class="val">{{ f.value }}</span></label>
+            {% if f.dangerous %}<label class="confirm"><input type="checkbox" name="confirm_{{ f.name }}"> 確認：此變更將對外寫入或停用安全防護</label>{% endif %}
           {% elif f.kind == 'choice' %}
-            <select name="{{ f.name }}">{% for c in f.choices %}<option value="{{ c }}" {{ 'selected' if c == f.value else '' }}>{{ c }}</option>{% endfor %}</select>
+            <select id="{{ g.name }}-{{ f.name }}" name="{{ f.name }}" data-initial="{{ f.value }}">{% for c in f.choices %}<option value="{{ c }}" {{ 'selected' if c == f.value else '' }}>{{ c }}</option>{% endfor %}</select>
           {% elif f.kind == 'number' %}
-            <input type="number" name="{{ f.name }}" value="{{ f.value }}" step="any" {% if f.min is not none %}min="{{ f.min }}"{% endif %} {% if f.max is not none %}max="{{ f.max }}"{% endif %}>
+            <input id="{{ g.name }}-{{ f.name }}" type="number" name="{{ f.name }}" value="{{ f.value }}" data-initial="{{ f.value }}" step="any" {% if f.min is not none %}min="{{ f.min }}"{% endif %} {% if f.max is not none %}max="{{ f.max }}"{% endif %}>
           {% else %}
-            <input type="text" name="{{ f.name }}" value="{{ f.value }}" placeholder="{{ '必填' if f.required else '空白 = 預設' }}">
+            <input id="{{ g.name }}-{{ f.name }}" type="text" name="{{ f.name }}" value="{{ f.value }}" data-initial="{{ f.value }}" placeholder="{{ '必填' if f.required else '留空 = 預設值' }}">
           {% endif %}
-          {% if f.error %}<div class="err tiny">{{ f.error }}</div>{% endif %}
-        </td>
-        <td class="src"><span class="pill src-{{ f.source.split(':')[0] }}">{{ f.source }}</span></td>
-      </tr>
+          {% if f.error %}<div class="ferr">{{ f.error }}</div>{% endif %}
+        </div>
+        <div class="field-state">
+          {% if f.source == 'file' %}<span class="pill plain src-file">已覆寫</span> <button type="button" class="ghost xs reset" data-default="{{ f.default_raw }}" title="還原預設值 {{ f.default }}">還原預設</button>
+          {% elif f.source.startswith('env:') %}<span class="pill plain src-env" title="{{ f.source }}">env</span>
+          {% else %}<span class="faint tiny">預設 {{ f.default }}</span>{% endif %}
+        </div>
+      </div>
       {% endfor %}
-    </table>
+    </div>
   </form>
 </section>
 {% if g.saved %}
 <template data-swap="#changes-body">{% include "_changes.html" %}</template>
-<template data-swap="#warnings">{% for w in warnings %}<div>⚠ {{ w }}</div>{% endfor %}</template>
+<template data-swap="#notices">{% for w in warnings %}<div class="notice warn">{{ ic.icon('warn') }}<div>{{ w }}</div></div>{% endfor %}</template>
 {% endif %}

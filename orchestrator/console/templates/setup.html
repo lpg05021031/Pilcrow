@@ -1,29 +1,30 @@
 {% extends "base.html" %}
+{% import "_icons.html" as ic %}
 {% block title %}Setup{% endblock %}
+{% block heading %}設定精靈{% endblock %}
+{% block subheading %}<div class="sub">每一步對應 doctor 的一組檢查，依序完成即可投入服務。設定值於 <a href="/console/settings">設定</a> 頁修改；secrets 於 <code>secrets.env</code> 修改後重啟。</div>{% endblock %}
+{% block actions %}<a class="btn" href="/console/setup?refresh=1">{{ ic.icon('refresh') }}重新檢查</a>{% endblock %}
+{% block notices %}
+{% if not config_exists %}<div class="notice info">{{ ic.icon('setup') }}<div><code>{{ config_path }}</code> 不存在：首次於設定頁套用時建立，或先執行 <code>python -m shared.install</code>。</div></div>{% endif %}
+{% endblock %}
 {% block body %}
-<div class="row between">
-  <h1>設定精靈</h1>
-  <a class="button ghost" href="/console/setup?refresh=1">重新檢查</a>
-</div>
-<p class="muted small">每一步就是 doctor 對應的檢查；全綠就能上工。順序由上而下，前面的沒好後面多半紅。設定值在 <a href="/console/settings">Settings</a> 改（secrets 在 <code>secrets.env</code>，改完 restart）。</p>
-{% if not config_exists %}<div class="banner notice">尚無 <code>{{ config_path }}</code>：第一次在 Settings 按 Apply 會建立；或先跑 <code>python -m shared.install</code>。</div>{% endif %}
-
 {% for s in steps %}
 <section class="card step st-{{ s.status|lower }}">
-  <div class="row between">
-    <h2><span class="status">{{ s.status }}</span> {{ loop.index }}. {{ s.title }}</h2>
+  <div class="hd">
+    <h2><span class="idx">{{ loop.index }}</span>{{ s.title }} <span class="pill st-{{ s.status|lower }}" style="margin-left:8px">{{ s.status }}</span></h2>
     <div class="row small">
-      {% for g in s.groups %}<a href="/console/settings#g-{{ g }}">設定 {{ g }}</a>{% endfor %}
-      {% if s.link %}<a href="{{ s.link }}">{{ s.link_label }}</a>{% endif %}
+      {% for g in s.groups %}<a class="btn sm" href="/console/settings#g-{{ g }}">設定 {{ g }}</a>{% endfor %}
+      {% if s.link %}<a class="btn sm" href="{{ s.link }}">{{ s.link_label }}</a>{% endif %}
     </div>
   </div>
-  <p class="muted small">{{ s.why }}</p>
-  <table class="checks">
+  <div class="bd"><p class="muted small">{{ s.why }}</p>{% if s.secrets %}<p class="hint">{{ ic.icon('lock') }} Secrets：{{ s.secrets|join('、') }}（secrets.env）</p>{% endif %}</div>
+  <div class="bd flush">
+  <table class="tbl">
     {% for c in s.checks %}
-    <tr class="st-{{ c.status|lower }}"><td class="status">{{ c.status }}</td><td class="name">{{ c.name }}</td><td class="detail">{{ c.detail }}</td></tr>
+    <tr><td class="st"><span class="pill st-{{ c.status|lower }}">{{ c.status }}</span></td><td class="k">{{ c.name }}</td><td class="v">{{ c.detail }}</td></tr>
     {% endfor %}
   </table>
-  {% if s.secrets %}<p class="tiny muted">secrets：{{ s.secrets|join('、') }} 放 secrets.env。</p>{% endif %}
+  </div>
 </section>
 {% endfor %}
 {% endblock %}
