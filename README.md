@@ -278,7 +278,7 @@ eval/           golden fixtures（30 題）、knowledge/ + knowledge_cases/（5 
 deploy/         env/suite.env.example（由 schema 生成，勿手改）、systemd 樣板（只剩
                 orchestrator 一個必要 unit）、semgrep starter、knowledge 模板
 docs/           三張流程/原型 HTML（主線、知識迴圈、wiki 條目）
-RUNBOOK.md      Phase 0–10：從裸機到知識迴圈的逐步部署
+RUNBOOK.md      一頁：安裝五步、精靈、日常、升級、出事（舊版十個 Phase 在 docs/RUNBOOK-2026-08-legacy.md）
 ```
 
 ## 8. 上線節奏（建議）
