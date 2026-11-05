@@ -26,14 +26,16 @@ prs venv/bin/python --version
 
 預期 `Python 3.10` 以上。低於 3.10 → 先重建 venv 再回來。
 
-**0.3 現況確認**：
+**0.3 現況確認**（一條指令取代逐項 curl / systemctl）：
 
 ```bash
-systemctl is-active review-orchestrator pr-review-ado pr-review-reader pr-review-results
-curl -s localhost:8080/healthz
+prs venv/bin/python -m shared.doctor --pr-url <一條真 PR 的 URL>
 ```
 
-預期四個 `active` + `{"ok":true}`。
+預期末行 `→ 可以上工`；任何 FAIL 列都附帶該去看什麼。沒有 shared/doctor.py
+的舊版主機才需要手動：`systemctl is-active review-orchestrator pr-review-ado
+pr-review-reader pr-review-results` 四個 `active` + `curl -s localhost:8080/healthz`
+回 `{"ok":true}`。
 
 **0.4 全量快照**（installer 自帶逐檔備份，這是雙保險、一鍵還原用）：
 
@@ -448,6 +450,9 @@ graph 的貢獻才量得出來（離線 eval 本身查不到 graph，屬預期�
 ---
 
 ## Troubleshooting（v2 專屬，接在原 README 血淚之後）
+
+**第 0 步永遠是** `prs venv/bin/python -m shared.doctor`：下面每一條的判讀它都
+會替你做一次，並在 FAIL 列寫出該看的 journal 指令。以下是它指不出來時的人工路徑。
 
 1. **服務裡 static_findings 恆為 0，stats 有「semgrep：未啟用或未安裝」**
    → unit 的 PATH override 沒生效。`/proc/<pid>/environ` 看 PATH 是否以
