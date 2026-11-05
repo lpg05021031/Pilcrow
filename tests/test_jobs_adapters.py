@@ -121,8 +121,9 @@ def test_start_schedules_only_jobs_whose_root_is_set(tmp_path, monkeypatch):
             J.stop()
     enabled, n_tasks = asyncio.run(go())
     assert enabled == {"repo-sync": True, "harvest": False}
-    assert n_tasks == 1
+    assert n_tasks == 2                      # 關著的也有迴圈（每分鐘看設定），只是不跑
     assert J.snapshot()["repo-sync"]["next_run"] is not None
+    assert J.snapshot()["harvest"]["next_run"] is None
 
 
 def test_zero_interval_disables_job(tmp_path, monkeypatch):

@@ -6,8 +6,11 @@
 設計決定：
   變數名不動       每個欄位的 alias 就是既有的環境變數名；部署好的 env 檔
                    一個字都不用改。日後要改名，在這裡加 AliasChoices 即可。
-  env 仍是來源     測試用 monkeypatch.setenv、run_eval 直接改 os.environ 做
-                   對照組 —— 這些都要繼續成立，所以不引入 TOML/YAML。
+  三層來源         env > config.toml > 預設。env 仍是最高優先（測試的
+                   monkeypatch.setenv、run_eval 的對照組都靠它）；config.toml
+                   是控制台 Settings 頁寫的檔（CONFIG_DIR/config.toml，S2 起）；
+                   secrets 永遠只走 env（systemd EnvironmentFile=secrets.env），
+                   toml 裡出現 SecretStr 欄位會被忽略並警告。
   惰性 + 可清快取  settings() 第一次呼叫才讀；reset() 清掉。tests/conftest.py
                    把 monkeypatch.setenv 綁上 reset()，既有測試零改動。
   空字串 = 未設    KNOWLEDGE_ROOT="" 是 run_eval 關掉知識迴圈的正式手法；
@@ -22,21 +25,28 @@
   settings().review.max_findings
 
   python -m shared.settings --show      目前生效值與來源（secrets 遮罩）
-  python -m shared.settings --example   由 schema 產生 suite.env.example
-  python -m shared.settings --check     只驗證；壞值回傳碼 1
+  python -m shared.settings --example   由 schema 產生 suite.env.example（全 env 版）
+  python -m shared.settings --example-toml  由 schema 產生 config.toml 樣板
+  python -m shared.settings --migrate   把目前 env 裡非預設、非 secret 的值寫成 config.toml，
+                                        並印出該留在 secrets.env 的那幾行
+  python -m shared.settings --check     只驳證；壞值回傳碼 1
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import sys
+import time
+import tomllib
 from pathlib import Path
-from typing import Annotated, Any, Iterator, Literal
+from typing import Annotated, Any, Callable, Iterator, Literal
 
 from pydantic import (AliasChoices, BaseModel, BeforeValidator, Field,
                       SecretStr, ValidationError, model_validator)
 from pydantic.fields import FieldInfo
-from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
+from pydantic_settings import (BaseSettings, NoDecode, PydanticBaseSettingsSource,
+                               SettingsConfigDict)
 
 # ---------- 共用的欄位型別 ----------
 
@@ -89,11 +99,80 @@ VerifySsl = Annotated[bool | str, BeforeValidator(_tri_ssl)]
 Switch = Annotated[Literal["auto", "on", "off"], BeforeValidator(_switch)]
 
 
+# ---------- config.toml：第二層來源 ----------
+
+DEFAULT_CONFIG_DIR = "/etc/pr-review-suite"
+
+
+def config_dir() -> Path:
+    return Path(os.getenv("CONFIG_DIR", "") or DEFAULT_CONFIG_DIR)
+
+
+def config_path() -> Path:
+    """CONFIG_FILE 指定整個路徑，否則 CONFIG_DIR/config.toml。"""
+    p = os.getenv("CONFIG_FILE", "")
+    return Path(p) if p else config_dir() / "config.toml"
+
+
+_toml_cache: tuple[Path, float, dict] | None = None
+_toml_ignored_secrets: list[str] = []      # toml 裡出現的 secret 欄位（被忽略，warnings_for 會提）
+
+
+def load_toml() -> dict[str, dict[str, Any]]:
+    """讀 config.toml（依 mtime 快取）。檔不存在 = {}；壞檔 = raise（fail_fast 會轉成人話）。"""
+    global _toml_cache
+    p = config_path()
+    try:
+        mtime = p.stat().st_mtime
+    except OSError:
+        _toml_cache = None
+        return {}
+    if _toml_cache and _toml_cache[0] == p and _toml_cache[1] == mtime:
+        return _toml_cache[2]
+    with p.open("rb") as f:
+        data = tomllib.load(f)
+    if not isinstance(data, dict):
+        raise ValueError(f"{p}: 頂層必須是 table")
+    _toml_cache = (p, mtime, data)
+    return data
+
+
+class _TomlSection(PydanticBaseSettingsSource):
+    """把 config.toml 裡 [<group>] 那張表當成這個 group 的來源（欄位名為鍵）。"""
+
+    def __init__(self, settings_cls, section: str):
+        super().__init__(settings_cls)
+        self.section = section
+
+    def get_field_value(self, field: FieldInfo, field_name: str):
+        return load_toml().get(self.section, {}).get(field_name), field_name, False
+
+    def __call__(self) -> dict[str, Any]:
+        table = load_toml().get(self.section) or {}
+        out: dict[str, Any] = {}
+        for fname, info in self.settings_cls.model_fields.items():
+            if fname not in table:
+                continue
+            if info.annotation is SecretStr:
+                key = f"{self.section}.{fname}"
+                if key not in _toml_ignored_secrets:
+                    _toml_ignored_secrets.append(key)
+                continue
+            out[fname] = table[fname]
+        return out
+
+
 class _Group(BaseSettings):
-    """每一組設定的基底：直接讀環境變數、認 alias、忽略不認識的鍵。"""
+    """每一組設定的基底：env > config.toml 的 [group] 表 > 預設；認 alias；忽略不認識的鍵。"""
 
     model_config = SettingsConfigDict(extra="ignore", populate_by_name=True,
                                       frozen=True)
+
+    @classmethod
+    def settings_customise_sources(cls, settings_cls, init_settings, env_settings,
+                                   dotenv_settings, file_secret_settings):
+        return (init_settings, env_settings,
+                _TomlSection(settings_cls, cls.__name__.lower()))
 
     @model_validator(mode="before")
     @classmethod
@@ -472,9 +551,25 @@ def settings() -> Settings:
     return _cached
 
 
+_reload_hooks: list[Callable[[], None]] = []
+
+
+def on_reload(fn: Callable[[], None]) -> None:
+    """設定重載時要跟著清的東西（例如 llm 的長駐 client）在這裡登記。"""
+    if fn not in _reload_hooks:
+        _reload_hooks.append(fn)
+
+
 def reset() -> None:
-    global _cached
+    global _cached, _toml_cache
     _cached = None
+    _toml_cache = None
+    _toml_ignored_secrets.clear()
+    for fn in _reload_hooks:
+        try:
+            fn()
+        except Exception:  # noqa: BLE001  —— 清快取失敗不該讓設定重載失敗
+            pass
 
 
 def fail_fast() -> Settings:
@@ -487,6 +582,9 @@ def fail_fast() -> Settings:
         for err in e.errors():
             loc = ".".join(str(x) for x in err["loc"])
             print(f"  {loc}: {err['msg']}（收到 {err.get('input')!r}）", file=sys.stderr)
+        raise SystemExit(1)
+    except (tomllib.TOMLDecodeError, ValueError) as e:
+        print(f"config.toml 解析不過（{config_path()}）：{e}", file=sys.stderr)
         raise SystemExit(1)
 
 
@@ -535,7 +633,9 @@ def example_text() -> str:
     lines = [
         "# pr-review-suite 全套設定 —— 由 `python -m shared.settings --example` 產生，",
         "# 不要手改這個 .example；改 shared/settings.py 的 Field 再重生。",
-        "# 複製為 /etc/pr-review-suite/suite.env（chmod 600），十個 systemd unit 都指這一份。",
+        "# S2 起建議：secrets 放 /etc/pr-review-suite/secrets.env（systemd EnvironmentFile），",
+        "# 其他旋鈕放 config.toml（控制台 Settings 頁寫；--migrate 可從既有 env 一次轉過去）。",
+        "# 全部放 env 也仍然成立（env 永遠優先）——這份就是全 env 版。",
         "#",
         "# systemd 的 EnvironmentFile 不支援行內註解：註解一律獨立成行，",
         "# 等號右邊不可有空白或 # 尾巴（血淚：URL 會出現 %20）。含 $ 或空白的值用單引號。",
@@ -575,22 +675,173 @@ def example_text() -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def source_of(gname: str, fname: str, info: FieldInfo | None = None) -> str:
+    """'env:<NAME>' | 'file' | 'default' —— 這顆值現在是誰給的。"""
+    info = info or Settings.model_fields[gname].annotation.model_fields[fname]
+    src = next((n for n in env_names(info) if os.getenv(n, "") != ""), None)
+    if src:
+        return f"env:{src}"
+    if fname in (load_toml().get(gname) or {}) and info.annotation is not SecretStr:
+        return "file"
+    return "default"
+
+
 def show_rows(s: Settings | None = None) -> list[tuple[str, str, str, str]]:
     """(group, ENV, 生效值(遮罩), 來源) —— 給 --show 與 doctor。"""
     s = s or settings()
     rows = []
     for gname, _gcls, fname, info in iter_fields():
-        names = env_names(info)
-        src = next((n for n in names if os.getenv(n, "") != ""), None)
-        rows.append((gname, names[0], _mask(getattr(getattr(s, gname), fname)),
-                     f"env:{src}" if src else "default"))
+        rows.append((gname, env_names(info)[0], _mask(getattr(getattr(s, gname), fname)),
+                     source_of(gname, fname, info)))
     return rows
+
+
+# ---------- config.toml：寫入（控制台 Settings 頁、--migrate） ----------
+
+def _toml_literal(v: Any) -> str:
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, (int, float)):
+        return repr(v)
+    if isinstance(v, list):
+        return "[" + ", ".join(_toml_literal(x) for x in v) + "]"
+    if isinstance(v, Path):
+        v = str(v)
+    return json.dumps(str(v), ensure_ascii=False)      # TOML 基本字串 = JSON 字串語法
+
+
+def _native(v: Any) -> Any:
+    """把 settings 物件上的值變成能寫進 toml 的型別。"""
+    if isinstance(v, Path):
+        return str(v)
+    if isinstance(v, SecretStr):
+        return v.get_secret_value()
+    return v
+
+
+def render_toml(values: dict[str, dict[str, Any]]) -> str:
+    """由 schema 渲染整份 config.toml：每組一張表、每欄附說明；沒給值的欄位留成註解。
+    secrets 欄位永遠只出現在註解裡（它們住 secrets.env）。"""
+    lines = [
+        "# pr-review-suite 設定（env 會覆寫這裡；secrets 不放這裡，放 secrets.env）",
+        "# 由控制台 Settings 頁或 `python -m shared.settings --migrate` 寫入；",
+        "# 手改也行，服務重載時會重讀。每個鍵的說明見下方註解。",
+        "",
+    ]
+    for gname in GROUP_ORDER:
+        gcls = Settings.model_fields[gname].annotation
+        table = values.get(gname) or {}
+        lines.append(f"[{gname}]")
+        lines.append(f"# {(gcls.__doc__ or '').strip()}")
+        for fname, info in gcls.model_fields.items():
+            desc = " ".join(d.strip() for d in (info.description or "").split("。") if d.strip())
+            env = env_names(info)[0]
+            lines.append(f"# {fname}  (env {env})：{desc}")
+            if info.annotation is SecretStr:
+                lines.append(f"# {fname} = <secret：只能放 secrets.env 的 {env}>")
+            elif fname in table and table[fname] is not None:
+                lines.append(f"{fname} = {_toml_literal(table[fname])}")
+            else:
+                default = info.get_default(call_default_factory=True)
+                lines.append(f"# {fname} = {_toml_literal(_native(default)) if default is not None else '<unset>'}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def changes_log_path() -> Path:
+    return config_path().with_name("config-changes.jsonl")
+
+
+def validate_group_values(gname: str, values: dict[str, Any]) -> dict[str, Any]:
+    """用 schema 驗一組「欄位名 → 值」（不合併 env；控制台表單專用）。回正規化後的值；壞值 raise ValidationError。"""
+    gcls = Settings.model_fields[gname].annotation
+    obj = gcls.model_validate(values)           # model_validate 不跑 env 來源，純驗值
+    return {k: _native(getattr(obj, k)) for k in values}
+
+
+def save_toml(changes: dict[str, dict[str, Any]], actor: str = "console") -> list[dict]:
+    """把 changes（group → field → 值；值為 None = 刪掉這個鍵、回預設）寫進 config.toml。
+
+    順序：驗值 → 讀現檔 → 合併 → 備份 config.toml.bak-<ts> → 原子寫入 → 寫 change log
+    → reset()（下一次 settings() 就是新值）。secrets 欄位一律拒絕。
+    回傳每筆變動 {group, field, old, new}。
+    """
+    current = {g: dict(t) for g, t in load_toml().items() if isinstance(t, dict)}
+    before = settings()
+    log: list[dict] = []
+    for gname, fields in changes.items():
+        gcls = Settings.model_fields[gname].annotation
+        clean = {k: v for k, v in fields.items() if v is not None}
+        if clean:
+            clean = validate_group_values(gname, clean)
+        for fname, v in fields.items():
+            info = gcls.model_fields[fname]
+            if info.annotation is SecretStr:
+                raise ValueError(f"{gname}.{fname} 是 secret，只能放 secrets.env（{env_names(info)[0]}）")
+            old = _native(getattr(getattr(before, gname), fname))
+            table = current.setdefault(gname, {})
+            if v is None:
+                table.pop(fname, None)
+                new = _native(info.get_default(call_default_factory=True))
+            else:
+                table[fname] = clean[fname]
+                new = clean[fname]
+            if old != new:
+                log.append({"group": gname, "field": fname, "env": env_names(info)[0],
+                            "old": old, "new": new})
+    p = config_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    text = render_toml(current)
+    tomllib.loads(text)                          # 寫出去之前先確定自己讀得回來
+    if p.exists():
+        shutil.copy2(p, p.with_name(f"{p.name}.bak-{time.strftime('%Y%m%d-%H%M%S')}"))
+    tmp = p.with_suffix(".toml.tmp")
+    tmp.write_text(text, encoding="utf-8", newline="\n")
+    os.replace(tmp, p)
+    if log:
+        with changes_log_path().open("a", encoding="utf-8") as f:
+            for entry in log:
+                f.write(json.dumps({"ts": time.time(), "actor": actor, **entry},
+                                   ensure_ascii=False, default=str) + "\n")
+    reset()
+    return log
+
+
+def recent_changes(limit: int = 20) -> list[dict]:
+    p = changes_log_path()
+    if not p.exists():
+        return []
+    rows = [json.loads(ln) for ln in p.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    return rows[-limit:][::-1]
+
+
+def migrate_from_env() -> tuple[dict[str, dict[str, Any]], list[str]]:
+    """把目前 env 裡「非預設、非 secret」的值整理成 toml values；secrets 另列成 env 行。"""
+    s = settings()
+    values: dict[str, dict[str, Any]] = {}
+    secret_lines: list[str] = []
+    for gname, gcls, fname, info in iter_fields():
+        names = env_names(info)
+        raw = next((os.getenv(n) for n in names if os.getenv(n, "") != ""), None)
+        if raw is None:
+            continue
+        if info.annotation is SecretStr:
+            secret_lines.append(f"{names[0]}={raw}")
+            continue
+        v = _native(getattr(getattr(s, gname), fname))
+        default = _native(info.get_default(call_default_factory=True))
+        if v != default:
+            values.setdefault(gname, {})[fname] = v
+    return values, secret_lines
 
 
 def warnings_for(s: Settings | None = None) -> list[str]:
     """設定層就看得出來的問題（不打網路；那是 doctor 的事）。"""
     s = s or settings()
     out: list[str] = []
+    if _toml_ignored_secrets:
+        out.append("config.toml 裡放了 secret 欄位，已忽略（secrets 只能走 secrets.env）："
+                   + ", ".join(_toml_ignored_secrets))
     stale = [n for n in RETIRED_ENV if os.getenv(n, "")]
     if stale:
         out.append("這些變數已無作用（①②③ 已併入 orchestrator 行程、② 已移除），"
@@ -619,11 +870,28 @@ def _main(argv: list[str]) -> int:
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--show", action="store_true", help="目前生效值與來源（secrets 遮罩）")
     g.add_argument("--example", action="store_true", help="由 schema 產生 suite.env.example")
+    g.add_argument("--example-toml", action="store_true", help="由 schema 產生 config.toml 樣板")
+    g.add_argument("--migrate", action="store_true",
+                   help="目前 env 的非預設值寫成 CONFIG_DIR/config.toml；secrets 印出來讓你放 secrets.env")
     g.add_argument("--check", action="store_true", help="只驗證；壞值回傳碼 1")
     a = ap.parse_args(argv)
 
     if a.example:
         sys.stdout.write(example_text())
+        return 0
+    if a.example_toml:
+        sys.stdout.write(render_toml({}))
+        return 0
+    if a.migrate:
+        values, secret_lines = migrate_from_env()
+        log = save_toml(values, actor="migrate")
+        print(f"已寫入 {config_path()}（{sum(len(t) for t in values.values())} 個非預設值，"
+              f"{len(log)} 個與生效值不同）")
+        if secret_lines:
+            print("\n這幾行是 secret，不進 toml；放到 secrets.env（chmod 600）並由 systemd EnvironmentFile 載入：")
+            for ln in secret_lines:
+                k, _v = ln.split("=", 1)
+                print(f"  {k}=…")
         return 0
     try:
         s = Settings()

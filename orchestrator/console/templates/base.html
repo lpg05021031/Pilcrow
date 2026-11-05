@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pr-review · {% block title %}{{ page }}{% endblock %}</title>
+<link rel="stylesheet" href="/console/static/console.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/console">pr-review</a>
+  <nav>
+    {% for key, label, href in nav %}
+      {% if href %}<a href="{{ href }}" class="{{ 'on' if page == key else '' }}">{{ label }}</a>
+      {% else %}<span class="soon" title="下一階段">{{ label }}</span>{% endif %}
+    {% endfor %}
+  </nav>
+  {% if not open_mode and page != 'login' %}
+  <form method="post" action="/console/logout" class="inline"><button class="ghost">登出</button></form>
+  {% endif %}
+</header>
+{% if open_mode and page != 'login' %}
+<div class="banner warn">ORCH_API_KEY 未設：控制台對內網完全開放。設了 key 就會要求登入。</div>
+{% endif %}
+{% if warnings %}
+<div class="banner notice" id="warnings">
+  {% for w in warnings %}<div>⚠ {{ w }}</div>{% endfor %}
+</div>
+{% endif %}
+<main>
+{% block body %}{% endblock %}
+</main>
+<script src="/console/static/console.js"></script>
+</body>
+</html>

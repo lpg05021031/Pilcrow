@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Overview{% endblock %}
+{% block body %}
+<div class="row between">
+  <h1>系統現在怎樣</h1>
+  <div class="row">
+    <span class="muted small">檢查於 {{ (now - checked_at) | int }} 秒前</span>
+    <a class="button ghost" href="/console?refresh=1">重新檢查</a>
+  </div>
+</div>
+
+<div class="tiles">
+  <div class="tile ok"><b>{{ counts.OK }}</b><span>OK</span></div>
+  <div class="tile warn"><b>{{ counts.WARN }}</b><span>WARN</span></div>
+  <div class="tile fail"><b>{{ counts.FAIL }}</b><span>FAIL</span></div>
+  <div class="tile skip"><b>{{ counts.SKIP }}</b><span>SKIP</span></div>
+</div>
+
+<div class="grid2">
+<section class="card">
+  <h2>健康檢查（doctor）</h2>
+  {% for gname, checks in groups.items() %}
+  <h3 class="grp">{{ gname }}</h3>
+  <table class="checks">
+    {% for c in checks %}
+    <tr class="st-{{ c.status|lower }}">
+      <td class="status">{{ c.status }}</td>
+      <td class="name">{{ c.name }}</td>
+      <td class="detail">{{ c.detail }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% endfor %}
+</section>
+
+<div>
+<section class="card">
+  <h2>排程 jobs</h2>
+  {% for name, st in jobs.items() %}
+  <div class="job">
+    <div class="row between">
+      <b>{{ name }}</b>
+      <form method="post" action="/console/jobs/{{ name }}/run" class="inline">
+        <button class="ghost small" {% if st.running %}disabled{% endif %}>立刻執行</button>
+      </form>
+    </div>
+    <div class="muted small">
+      {% if not st.enabled %}off（對應 root 未設或間隔 0）
+      {% else %}每 {{ st.interval_min }} 分
+        {% if st.running %}· 正在跑
+        {% elif st.last_ok is none %}· 尚未跑過
+        {% elif st.last_ok %}· 上次 {{ ((now - st.last_end) / 60) | int }} 分前成功，{{ st.last_detail|length }} 項
+        {% else %}· <span class="err">上次失敗：{{ st.last_error }}</span>{% endif %}
+      {% endif %}
+    </div>
+    {% if st.last_detail %}
+    <details><summary class="small">上一輪明細</summary>
+      <ul class="small">{% for ln in st.last_detail %}<li>{{ ln }}</li>{% endfor %}</ul>
+    </details>
+    {% endif %}
+  </div>
+  {% endfor %}
+</section>
+
+<section class="card">
+  <h2>最近對 Azure DevOps 的寫入</h2>
+  {% if not audit %}<p class="muted small">本行程啟動後尚無寫入。</p>{% endif %}
+  <table class="checks">
+    {% for a in audit %}
+    <tr class="st-{{ 'ok' if a.posted else 'skip' }}">
+      <td class="status">{{ '已發' if a.posted else '預覽' }}</td>
+      <td class="name">{{ a.kind }}</td>
+      <td class="detail"><span class="muted">{{ ((now - a.ts) / 60) | int }} 分前</span> · {{ a.pr_url.rsplit('/', 1)[-1] }} · {{ a.note }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</section>
+</div>
+</div>
+{% endblock %}

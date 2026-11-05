@@ -14,6 +14,9 @@ venv/
 *.env
 !*.env.example
 
+# 本機預覽用的啟動設定（路徑是這台機器的）
+.claude/launch.json
+
 # 編輯器 / OS
 .idea/
 .vscode/
