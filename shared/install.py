@@ -1,6 +1,6 @@
 """install —— 一台乾淨 Linux 機從零到可開控制台，一條指令。
 
-    sudo venv/bin/python -m shared.install                 # 建目錄、寫空設定、寫 unit、跑 doctor
+    venv/bin/python -m shared.install   (root shell)      # 建目錄、寫空設定、寫 unit、跑 doctor
     venv/bin/python -m shared.install --dry-run            # 只印會做什麼
     venv/bin/python -m shared.install --no-unit            # 不碰 systemd（容器 / 手動跑）
 
@@ -116,7 +116,7 @@ def main(argv: list[str]) -> int:
     print("\n接下來：")
     print(f"  1. 編輯 {cfg / 'secrets.env'}（ADO_PAT、LANGFUSE_*；要登入控制台就設 ORCH_API_KEY）")
     if not a.no_unit:
-        print("  2. sudo systemctl daemon-reload && sudo systemctl enable --now review-orchestrator")
+        print("  2. (root) systemctl daemon-reload; systemctl enable --now review-orchestrator")
     print("  3. 開 http://<主機>:8080/console/setup，照精靈一步步綠燈")
     print("  4. 任何時候：venv/bin/python -m shared.doctor")
     if not dry:
