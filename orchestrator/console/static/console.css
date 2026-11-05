@@ -66,3 +66,19 @@ tr.locked td.ctl { color: var(--muted); } tr.has-err td.ctl input, tr.has-err td
 .pill { display: inline-block; font: 11px var(--mono); padding: 1px 7px; border-radius: 999px; background: var(--skip-bg); color: var(--muted); }
 .pill.src-env { background: var(--warn-bg); color: var(--warn); } .pill.src-file { background: var(--ok-bg); color: var(--ok); }
 label.switch { display: inline-flex; gap: 8px; align-items: center; } label.confirm { margin-top: 4px; color: var(--warn); }
+table.checks tr.head th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 4px 6px; }
+table.reviews td { white-space: nowrap; } table.reviews td:nth-child(3) { white-space: normal; }
+pre { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 10px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+pre.report { max-height: 70vh; } details.add { margin-top: 8px; } details.add form { margin: 8px 0; }
+
+/* 窄螢幕（手機 / 窄 pane）：導覽可換行、名稱欄可折行、長路徑可斷字 */
+@media (max-width: 760px) {
+  header.top { flex-wrap: wrap; gap: 8px 14px; }
+  header nav { flex-wrap: wrap; gap: 8px 12px; }
+  table.checks td.name { white-space: normal; width: auto; }
+  table.checks td.detail .mono, table.checks td.name.mono { word-break: break-all; }
+  table.fields th { width: 50%; }
+  .tiles { flex-wrap: wrap; } .tile { min-width: 45%; }
+  main { padding: 10px; }
+}
+.mono, code { word-break: break-all; }

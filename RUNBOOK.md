@@ -227,6 +227,13 @@ unit 樣板已經同時讀 `secrets.env` 與（若存在）`suite.env`，並設 
 之後要改旋鈕：`http://<主機>:8080/console/settings`，Apply 即生效；要改 secret：改
 secrets.env + restart。
 
+**4.2d（S3）review 歷史的目錄**：控制台 Reviews 頁讀 `DATA_DIR/reviews.db`（預設
+`/var/lib/pr-review-suite`）。服務帳號要能寫，否則歷史停用（review 照跑，頁面會說）：
+
+```bash
+sudo mkdir -p /var/lib/pr-review-suite && sudo chown svc-review: /var/lib/pr-review-suite
+```
+
 **4.3** 重啟 + 活體對帳：
 
 ```bash

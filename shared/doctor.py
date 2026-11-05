@@ -188,6 +188,16 @@ def check_paths(s: S.Settings) -> list[Check]:
                          + ("" if common.is_dir() else f"; 找不到 {sub.name}/{s.rules.common_dir}/"
                             "（RULES_SUBDIR / RULES_COMMON_DIR 對不上目錄）")))
 
+    d = s.orchestrator.data_dir
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+        probe = d / ".doctor-probe"
+        probe.write_text("x", encoding="utf-8"); probe.unlink()
+        n_db = (d / "reviews.db").exists()
+        out.append(Check("paths", "DATA_DIR", OK, f"{d} 可寫" + ("；reviews.db 存在" if n_db else "；尚無 reviews.db（第一條 review 會建）")))
+    except OSError as e:
+        out.append(Check("paths", "DATA_DIR", WARN, f"{d} 開不出來（{type(e).__name__}）—— review 歷史停用，review 照跑"))
+
     r = s.knowledge.root
     if r is None:
         out.append(Check("paths", "KNOWLEDGE_ROOT", SKIP, "unset —— K 段停用"))

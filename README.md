@@ -209,10 +209,13 @@ why 缺席、supersede 假訊號、幻覺不變式——最後一題是「invari
 ## 6. 維運速查
 
 **控制台**：`http://<主機>:8080/console`，用 `ORCH_API_KEY` 登入（未設則內網開放並掛警示）。
-Overview 一頁 = doctor 那張表 + 兩個排程 job 的狀態 + 最近對 ADO 的寫入；Settings 一頁 =
-13 組設定的表單，由 schema 生成（型別決定控件、說明與預設在旁、來源標 env / file /
-default），Apply 寫 `config.toml` 並**熱重載**，不用 restart；每筆改動進改動紀錄。
-翻 AUTO_POST / DRY_RUN / KNOWLEDGE_POST 到會真發的那一側要勾「我確定」。
+
+| 頁 | 回答的問題 |
+|---|---|
+| Overview | 系統現在怎樣：doctor 那張表、三個資料域摘要、最近 review、排程 job、最近對 ADO 的寫入 |
+| Settings | 要改什麼在哪：13 組由 schema 生成的表單，Apply 寫 `config.toml` 並**熱重載**；來源標 env / file / default；改動紀錄；翻 AUTO_POST / DRY_RUN / KNOWLEDGE_POST 到真發側要勾「我確定」 |
+| Sources | 餵給 reviewer 的東西新不新：repos 每顆 clone 的 sha 與上次同步、Sync now、新增 repo；rules 清單與「對 repo X 預覽注入」（真的跑 load_rules）；knowledge 頁清單與「改了這些檔預覽注入」（真的跑 load_for） |
+| Reviews | 剛才那條 review 發生了什麼：近 7 天摘要、跑一條 review、每條的 findings、吃到了哪些 rules / knowledge / base / graph、完整 stats、報告、PR 與 trace 連結。歷史在 `DATA_DIR/reviews.db`（SQLite） |
 
 **設定三層**：env ＞ `CONFIG_DIR/config.toml`（控制台寫）＞ 預設。secrets（PAT、API key、
 Langfuse key）只走 env（`secrets.env`，systemd EnvironmentFile），toml 裡出現會被忽略並警告。
@@ -265,6 +268,8 @@ orchestrator/   pipeline、planner/reviewer/adversary、synthesis、render、
 orchestrator/adapters/ado.py   Azure DevOps 讀寫（原 ①③，S1 併入行程）
 orchestrator/jobs.py           行程內排程：repo-sync、knowledge-harvest（原兩組 timer）
 orchestrator/console/          控制台：router、auth、templates/、static/（Jinja2 + 2 KB JS + 自寫 CSS）
+orchestrator/store.py          review 歷史（SQLite，DATA_DIR/reviews.db）；handle_review 落帳
+orchestrator/sources.py        repos / rules / knowledge 的狀態、預覽注入、新增 clone
 shared/         settings.py（全套設定的唯一讀取點：schema、預設、--show/--check/--example）、
                 azdo.py（ADO URL 解析與 HTTP client）—— 笨層，無業務邏輯
 eval/           golden fixtures（30 題）、knowledge/ + knowledge_cases/（5 題

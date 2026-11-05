@@ -20,13 +20,13 @@ from typing import AsyncIterator, Awaitable, Callable, Optional
 
 from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from langfuse import observe, propagate_attributes
+from langfuse import get_client, observe, propagate_attributes
 from pydantic import BaseModel
 
 from orchestrator import clients
 from orchestrator.core import run_review
 from orchestrator.models import ReviewResult
-from orchestrator import console, jobs, knowledge, progress
+from orchestrator import console, jobs, knowledge, progress, store
 from shared.azdo import find_pr_url
 from shared.settings import fail_fast, settings
 
@@ -129,17 +129,29 @@ async def handle_review(pr_url: str, user: str,
             await on_status(msg)
 
     token = progress.set_status_cb(on_status)  # v2 pipeline 各站旁白由此播出
+    rid = store.start_review(pr_url, user)       # 歷史（SQLite）；store 停用時是 None
     try:
-        return await _handle_review_inner(pr_url, user, note)
+        result = await _handle_review_inner(pr_url, user, note, rid)
+    except Exception as e:
+        store.fail_review(rid, f"{type(e).__name__}: {e}")
+        raise
     finally:
         progress.reset_status_cb(token)
+    try:
+        trace_id = get_client().get_current_trace_id()
+    except Exception:  # noqa: BLE001
+        trace_id = None
+    store.finish_review(rid, result, trace_id)
+    return result
 
 
-async def _handle_review_inner(pr_url: str, user: str, note) -> ReviewResult:
+async def _handle_review_inner(pr_url: str, user: str, note,
+                               rid: int | None = None) -> ReviewResult:
     with propagate_attributes(session_id=pr_url, user_id=user, tags=["live"]):
         await note("Resolving pull request URL")
         metadata = await clients.fetch_pr_metadata(pr_url)
         title = (metadata or {}).get("title", "")[:50]
+        store.set_title(rid, (metadata or {}).get("title", ""))
         await note(f"PR located — \"{title}\"; fetching diff")
 
         diff = await clients.fetch_pr_diff(pr_url)
