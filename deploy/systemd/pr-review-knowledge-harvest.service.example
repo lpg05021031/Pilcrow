@@ -9,7 +9,6 @@ Wants=review-orchestrator.service
 Type=oneshot
 User=<你的user>
 WorkingDirectory=<安裝根>
-EnvironmentFile=/etc/pr-review-suite/orchestrator.env
-EnvironmentFile=/etc/pr-review-suite/results.env
+EnvironmentFile=/etc/pr-review-suite/suite.env
 Environment=PATH=<安裝根>/venv/bin:/usr/bin:/bin
 ExecStart=/bin/bash -lc '<安裝根>/venv/bin/python -m orchestrator.knowledge_harvest'

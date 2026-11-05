@@ -3,16 +3,15 @@
 刻意跟 ①（唯讀）分開：讀與寫的權限等級不同，未來 gateway 治理可以只放行讀、
 寫要審批。預設 DRY_RUN=true —— 內測期間絕不誤發真評論。
 
-環境變數：ADO_PAT（必填）、DRY_RUN（預設 true）、HTTPS_PROXY / ADO_VERIFY_SSL 同 ①
-啟動：python -m tools.review_result_tools.server   （PORT 預設 8093）
+設定：settings().ado（ADO_PAT 必填）、settings().tools（DRY_RUN 預設 true、KNOWLEDGE_POST）
+啟動：python -m tools.review_result_tools.server   （RESULT_TOOLS_PORT 預設 8096；舊名 PORT 仍認）
 """
 from __future__ import annotations
-
-import os
 
 from fastmcp import FastMCP
 
 from shared.azdo import client, get_json, parse_pr_url
+from shared.settings import fail_fast, settings
 
 mcp = FastMCP("review-result-tools", mask_error_details=False)
 
@@ -20,7 +19,7 @@ MARKER = "<!-- pr-review-bot -->"  # 隱形浮水印：讓我們認得自己發�
 
 
 def _dry_run() -> bool:
-    return os.getenv("DRY_RUN", "true").strip().lower() not in {"false", "0", "no"}
+    return settings().tools.dry_run
 
 
 @mcp.tool()
@@ -57,7 +56,7 @@ KNOWLEDGE_MARKER = "<!-- pr-review-knowledge-draft -->"
 
 def _knowledge_post() -> bool:
     # 跟 review 的 DRY_RUN 刻意分家：知識稿可先行試點真貼，review 留言繼續乾跑
-    return os.getenv("KNOWLEDGE_POST", "false").strip().lower() in {"true", "1", "yes"}
+    return settings().tools.knowledge_post
 
 
 REDISTILL_PREFIX = ("_Draft updated after new commits; earlier author notes "
@@ -119,8 +118,5 @@ def get_past_reviews(pr_url: str) -> list[str]:
 
 
 if __name__ == "__main__":
-    mcp.run(
-        transport="http",
-        host=os.getenv("HOST", "127.0.0.1"),
-        port=int(os.getenv("PORT", "8093")),
-    )
+    t = fail_fast().tools
+    mcp.run(transport="http", host=t.host, port=t.result_port)

@@ -12,18 +12,15 @@
 紀律：唯讀、不碰網路、失敗絕不炸 review —— RULES_ROOT 沒設或路徑不存在時
 回空 bundle，行為與沒有規則功能的舊版完全相同。
 
-環境變數：
-  RULES_ROOT        本機 clone 路徑（未設定 = 規則功能整個靜默停用）
-  RULES_SUBDIR      預設 rules
-  RULES_COMMON_DIR  預設 common（你們的目錄若叫 commons，改這個就好）
-  RULES_MAX_CHARS   組進 prompt 的規則總量上限（字元），預設 60000
+設定：settings().rules（RULES_ROOT / RULES_SUBDIR / RULES_COMMON_DIR / RULES_MAX_CHARS）。
 """
 from __future__ import annotations
 
-import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from shared.settings import settings
 
 
 @dataclass(frozen=True)
@@ -44,8 +41,7 @@ class RulesBundle:
 
 
 def _root() -> Path | None:
-    root = os.getenv("RULES_ROOT", "").strip()
-    return Path(root) if root else None
+    return settings().rules.root
 
 
 def _git_sha(root: Path) -> str:
@@ -80,12 +76,13 @@ def load_rules(repo: str | None = None) -> RulesBundle:
     if root is None or not root.is_dir():
         return RulesBundle()
 
-    subdir = root / os.getenv("RULES_SUBDIR", "rules")
-    dirs = [subdir / os.getenv("RULES_COMMON_DIR", "common")]
+    cfg = settings().rules
+    subdir = root / cfg.subdir
+    dirs = [subdir / cfg.common_dir]
     if repo:
         dirs.append(subdir / repo.strip().lower())
 
-    max_chars = int(os.getenv("RULES_MAX_CHARS", "60000"))
+    max_chars = cfg.max_chars
     parts: list[str] = []
     files: list[str] = []
     sections: dict[str, str] = {}

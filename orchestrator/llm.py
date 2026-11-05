@@ -7,21 +7,30 @@ from __future__ import annotations
 
 import json
 import asyncio
-import os
 import re
 from typing import Any
 
 from langfuse import get_client
 from langfuse.openai import AsyncOpenAI  # drop-in：呼叫自動變 generation span
 
-llm = AsyncOpenAI(
-    base_url=os.getenv("LLM_BASE_URL", "http://localhost:8000"),
-    api_key=os.getenv("LLM_API_KEY", "not-needed"),
-)
+from shared.settings import settings
+
+_client: AsyncOpenAI | None = None
+
+
+def _llm() -> AsyncOpenAI:
+    """長駐 client（orchestrator 的 event loop 用）。第一次呼叫才建，
+    設定值由 settings() 來——模組載入時不再偷讀 env。"""
+    global _client
+    if _client is None:
+        s = settings().llm
+        _client = AsyncOpenAI(base_url=s.base_url,
+                              api_key=s.api_key.get_secret_value())
+    return _client
 
 
 def model_name() -> str:
-    return os.getenv("LLM_MODEL", "gpt-4o-mini")
+    return settings().llm.model
 
 
 def prompt_or(name: str, default: str) -> str:
@@ -38,10 +47,10 @@ async def complete(system: str, user: str, temperature: float = 0.2,
     （檢察官與被告律師分家，去掉自我同意偏差）。
     LLM_TIMEOUT_S（預設 180）+ 一次重試：gateway 卡住不吊死整場 review——
     重試仍失敗就把例外交還呼叫端，走各站既有的降級路徑。"""
-    timeout = float(os.getenv("LLM_TIMEOUT_S", "180") or 180)
+    timeout = settings().llm.timeout_s
 
     async def _once() -> str:
-        resp = await llm.chat.completions.create(
+        resp = await _llm().chat.completions.create(
             model=model or model_name(),
             temperature=temperature,
             messages=[{"role": "system", "content": system},
@@ -66,12 +75,12 @@ def complete_sync(system: str, user: str, temperature: float = 0.2,
     每次呼叫開一個新 event loop 並建一個新 client：模組層那顆 `llm` 的連線池
     綁在第一個 loop 上，跨 `asyncio.run` 重用會炸 "Event loop is closed"。
     同樣走 LLM_TIMEOUT_S + 一次重試；失敗把例外交還呼叫端走降級。"""
-    timeout = float(os.getenv("LLM_TIMEOUT_S", "180") or 180)
+    cfg = settings().llm
+    timeout = cfg.timeout_s
 
     async def _go() -> str:
-        client = AsyncOpenAI(
-            base_url=os.getenv("LLM_BASE_URL", "http://localhost:8000"),
-            api_key=os.getenv("LLM_API_KEY", "not-needed"))
+        client = AsyncOpenAI(base_url=cfg.base_url,
+                             api_key=cfg.api_key.get_secret_value())
 
         async def _once() -> str:
             resp = await client.chat.completions.create(

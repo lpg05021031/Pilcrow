@@ -4,11 +4,11 @@ Description=pr-review - repo-reader-tools (8095)
 After=network.target
 
 [Service]
-EnvironmentFile=/etc/pr-review-suite/reader.env
+EnvironmentFile=/etc/pr-review-suite/suite.env
 WorkingDirectory=/opt/pr-review-suite
 ExecStart=/opt/pr-review-suite/venv/bin/python -m tools.repo_reader_tools.server
 Restart=always
-# 這個帳號要讀得到 REPO_ROOT
+# 這個帳號要讀得到 REPOS_ROOT
 User=svc-review
 
 [Install]

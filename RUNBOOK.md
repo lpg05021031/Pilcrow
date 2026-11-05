@@ -11,7 +11,7 @@
 **0.1 定義本文件的標準執行姿勢**（每開一個新 shell 貼一次）：
 
 ```bash
-prs() { sudo -u svc-review bash -c "set -a; source /etc/pr-review-suite/orchestrator.env; set +a; export PATH=/opt/pr-review-suite/venv/bin:\$PATH; cd /opt/pr-review-suite; $*"; }
+prs() { sudo -u svc-review bash -c "set -a; source /etc/pr-review-suite/suite.env; set +a; export PATH=/opt/pr-review-suite/venv/bin:\$PATH; cd /opt/pr-review-suite; $*"; }
 ```
 
 意義：以服務帳號、載入正式 env、**把 venv/bin 排進 PATH**（後面 static pass
@@ -160,10 +160,34 @@ journalctl -u pr-review-repo-sync.service -n 20 --no-pager
 
 ---
 
-## Phase 4：env 更新 + 重啟
+## Phase 4：env 合一 + 重啟
 
-**4.1** `/etc/pr-review-suite/orchestrator.env` 追加（**註解獨立成行、
-等號右邊零尾巴**，血淚 #1）：
+**4.0 四份 env 檔合成一份**（只做一次；之前沒有四份檔的新機器直接從 4.0b 開始）。
+變數名一個都沒改，所以舊檔內容原樣可用；唯一新名字是三個 port——舊檔各自的
+`PORT=` 在單一檔裡會互撞，要改成 `ADO_TOOLS_PORT` / `READER_TOOLS_PORT` /
+`RESULT_TOOLS_PORT`（舊名 `PORT` 仍認，但只適合舊式一服務一檔）：
+
+```bash
+cd /etc/pr-review-suite
+sudo cat orchestrator.env ado.env reader.env results.env \
+  | grep -vE '^(HOST|PORT|ADO_PAT|ADO_VERIFY_SSL|HTTPS_PROXY)=' > suite.env.tmp
+sudo grep -hE '^(ADO_PAT|ADO_VERIFY_SSL|HTTPS_PROXY)=' ado.env | sort -u >> suite.env.tmp
+printf 'HOST=127.0.0.1\nADO_TOOLS_PORT=8094\nREADER_TOOLS_PORT=8095\nRESULT_TOOLS_PORT=8096\n' >> suite.env.tmp
+sudo mv suite.env.tmp suite.env && sudo chmod 600 suite.env && sudo chown root:root suite.env
+```
+
+**4.0b 驗證這份檔**（壞值、重複鍵、已淘汰的名字，一次全列）：
+
+```bash
+prs venv/bin/python -m shared.settings --check
+prs venv/bin/python -m shared.settings --show
+```
+
+預期 `設定 OK`，`--show` 每一列的來源欄是 `env:<名字>` 或 `default`；
+末段「注意」若列出 `REPO_ROOT 已淘汰` 或 `偵測到舊式 PORT`，照字面修。
+確認無誤後把四份舊檔移走（不要留在原位，systemd 樣板已經不再讀它們）。
+
+**4.1** `suite.env` 追加（**註解獨立成行、等號右邊零尾巴**，血淚 #1）：
 
 ```bash
 REVIEW_PIPELINE=v1
@@ -172,14 +196,13 @@ REPOS_ROOT=/opt/repos
 
 沒做過 rules 那輪的話，`RULES_ROOT=/opt/pr-review-rules` 也一併補上。
 v2 其他旋鈕（REVIEW_MIN_CONFIDENCE 等）先**全用預設**，不要現在調。
+完整清單與每顆的說明：`deploy/env/suite.env.example`（由 schema 生成）。
 
-**4.2** `/etc/pr-review-suite/reader.env`：把 `REPO_ROOT=…` 整行換成：
+**4.2** 若 `suite.env` 裡還有 `REPO_ROOT=…`（舊版單 repo），整行刪掉；
+`REPOS_ROOT` 已在 4.1。`--show` 的注意段會提醒。
 
-```bash
-REPOS_ROOT=/opt/repos
-```
-
-（HOST/PORT 不動。）
+**4.2b** 十個 systemd 樣板的 `EnvironmentFile=` 已全部指向 `suite.env`；
+已部署的 unit 實檔請同步改（`sudo systemctl edit --full <unit>` 或重 cp 樣板）。
 
 **4.3** 重啟 + 活體對帳（你們自己的招）：
 
@@ -280,7 +303,7 @@ metadata 有 `dimensions / static_findings / llm_findings / adversary=ok(…)`�
 
 ## Phase 7：服務切 v2 + 真 PR 驗證
 
-**7.1** `orchestrator.env` 把 `REVIEW_PIPELINE=v1` 改成 `v2` →
+**7.1** `suite.env` 把 `REVIEW_PIPELINE=v1` 改成 `v2` →
 `sudo systemctl restart review-orchestrator` → 4.3 的活體對帳再跑一次確認。
 
 **7.2** 真 PR 打一發：
@@ -373,7 +396,7 @@ asyncio.run(main())
 EOF
 ```
 
-預期正好列出白名單那三個。接著在 orchestrator.env 打開（值已實測）：
+預期正好列出白名單那三個。接著在 suite.env 打開（值已實測）：
 
 ```bash
 GRAPH_TOOLS_URL=http://127.0.0.1:8097/mcp
@@ -443,8 +466,11 @@ graph 的貢獻才量得出來（離線 eval 本身查不到 graph，屬預期�
 6. **v2 比 v1 慢很多** → 正常（1 次呼叫變 4–6 次）。聊天體驗靠串流旁白
    撐；嫌太慢先降 `REVIEW_MAX_DIMENSIONS=3`、確認 `REVIEW_MAX_PARALLEL`
    沒被 gateway 限流卡住（journal 看 429/timeout）。
-7. **reader 起不來** → reader.env 改壞（CRLF/尾巴空白）或 REPOS_ROOT
-   打錯字；`journalctl -u pr-review-reader -n 30` 一定有一行說人話。
+7. **reader 起不來** → suite.env 改壞（CRLF/尾巴空白）或 REPOS_ROOT
+   打錯字；先 `prs venv/bin/python -m shared.settings --check`，
+   再 `journalctl -u pr-review-reader -n 30`，一定有一行說人話。
+8. **任何服務起不來、journal 第一行是「設定值有誤」** → 它會列出哪一顆變數、
+   收到什麼值；這是 `fail_fast()` 在啟動時擋下的，修 suite.env 再 restart。
 
 ---
 
@@ -465,7 +491,7 @@ git add -A && git commit -m "seed"
 ### 10.2 env 與 prompt
 
 ```bash
-# orchestrator.env：
+# suite.env（同一份；下面的 KNOWLEDGE_POST 也在這裡）：
 KNOWLEDGE_ROOT=<路徑>
 KNOWLEDGE_BRANCHES=release/*,master
 # 驗收 PR 的長相（source → target）——符合者不蒸餾、作為週期收口儀式
@@ -477,7 +503,7 @@ KNOWLEDGE_REDISTILL=true
 # /knowledge/redistill 有 LLM 花費與寫檔語意，不是純讀
 ORCH_API_KEY=<一組隨機字串>
 ORCH_URL=http://127.0.0.1:8080
-# results.env（試點開關，先 false = 影子模式）：
+# 試點開關，先 false = 影子模式：
 KNOWLEDGE_POST=false
 ```
 
@@ -505,7 +531,7 @@ review 一條會碰到種子頁實體的 PR → Coverage 表出現
 `M invariants only, K omitted`）；有 finding 引到條目時再多一句
 `N finding(s) cite a ledger entry`。手動跑一次
 `prs venv/bin/python -m orchestrator.knowledge_harvest` 看 journal 五路分類。
-PAT 權限對帳：拿 results.env 的 PAT GET 一次 threads，通了即結案。
+PAT 權限對帳：拿 suite.env 的 ADO_PAT GET 一次 threads，通了即結案。
 
 新蒸的稿要能自我描述（`_pending/<repo>/pr-<id>.json`）：
 `evidence_verified: true`、`distill_dropped: []`（有值代表有 decision 因為

@@ -8,20 +8,17 @@
 清單——落地路徑（_land）永遠不讀這裡的任何輸出。「LLM 提、人裁、code 執行」，
 與 adversary → synthesis 是同一個模式。
 
-env：
-  KNOWLEDGE_DIGEST_LLM      true（預設）/ false：關掉顧問分析，digest 仍貼
-  LLM_MODEL_DIGEST          （選配）分析專用模型；未設 = LLM_MODEL
-  KNOWLEDGE_DIGEST_MAX_FLAGS 顧問旗標上限（預設 12）
+設定：settings().knowledge.digest_llm / digest_max_flags、settings().llm.model_digest。
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from orchestrator.knowledge import (assign_ids, catalogue_text, decision_line, entry_ids,
                                     existing_invariants, inv_id, inv_text,
                                     norm_id)
 from orchestrator.llm import complete_sync, extract_json, prompt_or
+from shared.settings import settings
 
 KMARK = "<!-- pr-review-knowledge-digest -->"
 DIGEST_PROMPT_NAME = "pr-review-digest"
@@ -119,7 +116,7 @@ def validate(raw, known: set[str], max_flags: int | None = None) -> dict | None:
     if not isinstance(raw, dict):
         return None
     cap = max_flags if max_flags is not None else \
-        int(os.getenv("KNOWLEDGE_DIGEST_MAX_FLAGS", "12") or 12)
+        settings().knowledge.digest_max_flags
     flags = []
     for f in (raw.get("flags") or []):
         if not isinstance(f, dict):
@@ -150,8 +147,7 @@ def validate(raw, known: set[str], max_flags: int | None = None) -> dict | None:
 # ---------- LLM 呼叫（失敗 = None，呼叫端退回純清單） ----------
 
 def analyze(repo: str, items: list[dict], log=print) -> dict | None:
-    if os.getenv("KNOWLEDGE_DIGEST_LLM", "true").strip().lower() \
-            in {"false", "0", "no"}:
+    if not settings().knowledge.digest_llm:
         return None
     if not items:
         return None
@@ -162,7 +158,7 @@ def analyze(repo: str, items: list[dict], log=print) -> dict | None:
         known = known_ids(items, cat)
         raw = complete_sync(prompt_or(DIGEST_PROMPT_NAME, DEFAULT_DIGEST_PROMPT),
                             analysis_input(items, cat),
-                            model=os.getenv("LLM_MODEL_DIGEST") or None)
+                            model=settings().llm.model_digest)
         out = validate(extract_json(raw), known)
         if out is None:
             log(f"[digest] {repo}: 分析輸出不是合約 JSON —— 退回純清單")

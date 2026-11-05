@@ -5,16 +5,17 @@
 多 repo 佈局（v2）：REPOS_ROOT/<repo小寫>/ 一 repo 一顆乾淨 clone，
 tool 呼叫帶 repo 參數選 repo。沒帶 repo（或只設 REPO_ROOT）= 舊版單 repo 行為。
 
-環境變數：REPOS_ROOT（多 repo 根）或 REPO_ROOT（單 repo，舊版）
-啟動：python -m tools.repo_reader_tools.server   （PORT 預設 8092）
+設定：settings().repos（REPOS_ROOT 多 repo 根；REPO_ROOT 單 repo 舊版、已淘汰）
+啟動：python -m tools.repo_reader_tools.server   （READER_TOOLS_PORT 預設 8095；舊名 PORT 仍認）
 """
 from __future__ import annotations
 
-import os
 import subprocess
 from pathlib import Path
 
 from fastmcp import FastMCP
+
+from shared.settings import fail_fast, settings
 
 mcp = FastMCP("repo-reader-tools", mask_error_details=False)
 
@@ -23,15 +24,15 @@ MAX_READ_LINES = 400
 
 
 def _root(repo: str | None = None) -> Path:
-    repos_root = os.getenv("REPOS_ROOT", "").strip()
+    cfg = settings().repos
+    repos_root = cfg.repos_root
     if repo and repos_root:
-        p = (Path(repos_root) / repo.strip().lower()).resolve()
+        p = (repos_root / repo.strip().lower()).resolve()
         if not p.is_dir():
             raise ValueError(f"REPOS_ROOT 底下沒有這個 repo：{repo!r}")
         return p
-    single = os.getenv("REPO_ROOT", "").strip()
-    if single:
-        return Path(single).resolve()
+    if cfg.repo_root:
+        return cfg.repo_root.resolve()
     if repos_root:
         raise ValueError("多 repo 模式需要帶 repo 參數（或另設 REPO_ROOT）")
     raise RuntimeError("環境變數 REPOS_ROOT / REPO_ROOT 皆未設定")
@@ -99,8 +100,5 @@ def get_file_history(path: str, limit: int = 10,
 
 
 if __name__ == "__main__":
-    mcp.run(
-        transport="http",
-        host=os.getenv("HOST", "127.0.0.1"),
-        port=int(os.getenv("PORT", "8092")),
-    )
+    t = fail_fast().tools
+    mcp.run(transport="http", host=t.host, port=t.reader_port)

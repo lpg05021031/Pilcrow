@@ -33,15 +33,13 @@ digest 裡的「Needs a look」段由 LLM 產生（knowledge_digest.analyze）�
 `_land` 維持零 LLM，也不必把半個 orchestrator 搬進這支 oneshot。
 
 用法：python -m orchestrator.knowledge_harvest
-env：KNOWLEDGE_ROOT / KNOWLEDGE_BRANCHES（同 orchestrator）+ ADO_PAT（同 ③）
-     + ORCH_URL / ORCH_API_KEY（重蒸請求；預設 http://127.0.0.1:8080）
-     + KNOWLEDGE_REDISTILL=false 可一鍵回到「stale 直接丟稿」
+設定：settings().knowledge（KNOWLEDGE_*）、settings().ado（ADO_PAT）、
+     settings().orchestrator（ORCH_URL / ORCH_API_KEY，重蒸請求用）。
 """
 from __future__ import annotations
 
 import fnmatch
 import json
-import os
 import re
 import hashlib
 import subprocess
@@ -49,6 +47,7 @@ import time
 from pathlib import Path
 
 from shared.azdo import PrRef, client, get_json
+from shared.settings import fail_fast, settings
 
 from orchestrator import knowledge_digest as digest
 from orchestrator.knowledge import (_branch_patterns, _draft_comment,
@@ -82,8 +81,8 @@ def _load_staged(path: Path) -> dict | None:
 
 
 def _cycle_pat() -> tuple[str, str]:
-    return (os.getenv("KNOWLEDGE_CYCLE_SOURCE", "release/*").strip(),
-            os.getenv("KNOWLEDGE_CYCLE_TARGET", "master").strip())
+    k = settings().knowledge
+    return (k.cycle_source, k.cycle_target)
 
 _HISTORY_ROW = re.compile(r"^\| PR#(\d+) \|.*\|$", re.M)
 
@@ -415,7 +414,7 @@ def _author_reply(threads: list[dict], thread_id, author_id: str,
 # ---------- stale 重蒸的請求端（偵測在這裡，蒸餾整個在 orchestrator） ----------
 
 def _orch_url() -> str:
-    return os.getenv("ORCH_URL", "http://127.0.0.1:8080").strip().rstrip("/")
+    return settings().orchestrator.base_url
 
 
 def _request_redistill(pr_url: str) -> tuple[bool, str]:
@@ -425,7 +424,7 @@ def _request_redistill(pr_url: str) -> tuple[bool, str]:
     （ADO 那條才需要 proxy）。端點收到即回 202，所以 timeout 開小即可。
     """
     import httpx
-    key = os.getenv("ORCH_API_KEY", "").strip()
+    key = settings().orchestrator.api_key.get_secret_value()
     headers = {"Authorization": f"Bearer {key}"} if key else {}
     try:
         r = httpx.post(f"{_orch_url()}/knowledge/redistill",
@@ -604,8 +603,7 @@ def _collect_rejects(threads: list[dict]) -> set[str]:
 # 任何人回 `keep PR12-I1` 就否決這次拔除。與 reject 同一個模式：人裁、code 執行。
 
 def _retire_on_contradiction() -> bool:
-    return os.getenv("KNOWLEDGE_RETIRE_ON_CONTRADICTION", "true").strip().lower() \
-        not in {"false", "0", "no"}
+    return settings().knowledge.retire_on_contradiction
 
 
 def _collect_keeps(threads: list[dict]) -> set[str]:
@@ -865,8 +863,7 @@ def _cycle_close(c, root: Path) -> list[str]:
     if not repos_f.exists():
         return []
     src_pat, tgt_pat = _cycle_pat()
-    digest_on = os.getenv("KNOWLEDGE_DIGEST", "true").strip().lower() \
-        not in {"false", "0", "no"}
+    digest_on = settings().knowledge.digest
     out: list[str] = []
 
     def _is_cycle_pr(pr: dict) -> tuple[bool, str]:
@@ -1005,11 +1002,10 @@ def _git(root: Path, *args) -> None:
 
 
 def main() -> None:
-    raw = os.getenv("KNOWLEDGE_ROOT", "").strip()
-    if not raw:
+    root = fail_fast().knowledge.root
+    if root is None:
         print("KNOWLEDGE_ROOT 未設定，收割器不跑")
         return
-    root = Path(raw)
     if not root.is_dir():
         print(f"KNOWLEDGE_ROOT 不存在：{root}")
         return

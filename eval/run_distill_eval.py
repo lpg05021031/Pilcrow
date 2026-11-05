@@ -24,13 +24,13 @@
 """
 from __future__ import annotations
 
-import os
 import sys
 
 from langfuse import Evaluation, get_client
 
 from orchestrator.anatomy import match_path, parse_diff
 from orchestrator.knowledge import DISTILLER_PROMPT_NAME, distill_once
+from shared.settings import settings
 
 DATASET = "pr-review-distill-golden"
 
@@ -161,24 +161,20 @@ def main() -> None:
         max_concurrency=2,
         metadata={"prompt": DISTILLER_PROMPT_NAME,
                   "prompt_version": prompt_version,
-                  "llm_model": os.getenv("LLM_MODEL", "gpt-4o-mini")},
+                  "llm_model": settings().llm.model},
     )
     lf.flush()
 
     avg = sum(_scores) / len(_scores) if _scores else 0.0
     print(f"run '{run_name}'：{len(_scores)} 題｜distill_score 平均 {avg:.2f}")
     print(f"  配置：prompt {DISTILLER_PROMPT_NAME} v{prompt_version} × "
-          f"{os.getenv('LLM_MODEL', 'gpt-4o-mini')}")
+          f"{settings().llm.model}")
     print(f"→ UI：Datasets → {DATASET} → Runs 看逐題分數與 trace")
 
-    want = os.getenv("EVAL_MIN_DISTILL_SCORE", "").strip()
-    if want:
-        try:
-            if avg < float(want):
-                print(f"CI gate 擋下：distill_score {avg:.2f} < 門檻 {want}")
-                sys.exit(1)
-        except ValueError:
-            pass
+    want = settings().eval.min_distill_score
+    if want is not None and avg < want:
+        print(f"CI gate 擋下：distill_score {avg:.2f} < 門檻 {want}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

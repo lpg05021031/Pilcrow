@@ -4,7 +4,7 @@ Description=pr-review - review-result-tools (8096, DRY_RUN)
 After=network.target
 
 [Service]
-EnvironmentFile=/etc/pr-review-suite/results.env
+EnvironmentFile=/etc/pr-review-suite/suite.env
 WorkingDirectory=/opt/pr-review-suite
 ExecStart=/opt/pr-review-suite/venv/bin/python -m tools.review_result_tools.server
 Restart=always

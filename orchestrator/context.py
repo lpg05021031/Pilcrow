@@ -13,23 +13,19 @@ LLM-as-judge 的阻礙），確定性預抓不吃這個能力；(2) 可重現 �
   B. code graph（選配）：GRAPH_TOOLS_URL 設定後，用 clients.graph_blast
      拿受影響範圍摘要。工具名/參數樣板用 env 設定（裝好後 list tools 再填）。
 
-環境變數：REPOS_ROOT、CONTEXT_LINES（±行數，預設 6）、CONTEXT_MAX_CHARS（24000）
+設定：settings().repos（REPOS_ROOT / CONTEXT_LINES / CONTEXT_MAX_CHARS）與 settings().graph。
 """
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 
 from orchestrator.anatomy import Anatomy, FileChange
+from shared.settings import settings
 
 
 def _repo_root(repo: str | None) -> Path | None:
-    base = os.getenv("REPOS_ROOT", "").strip()
-    if not base or not repo:
-        return None
-    root = (Path(base) / repo.strip().lower()).resolve()
-    return root if root.is_dir() else None
+    return settings().repos.root_for(repo)
 
 
 def _safe(root: Path, rel: str) -> Path | None:
@@ -68,8 +64,8 @@ def base_context(repo: str | None, ana: Anatomy) -> tuple[str, dict]:
     stats = {"base_files": 0, "base_available": root is not None}
     if root is None:
         return "", stats
-    ctx = int(os.getenv("CONTEXT_LINES", "6"))
-    budget = int(os.getenv("CONTEXT_MAX_CHARS", "24000"))
+    ctx = settings().repos.context_lines
+    budget = settings().repos.context_max_chars
     parts: list[str] = []
     total = 0
     for fc in ana.files:
@@ -88,10 +84,11 @@ def base_context(repo: str | None, ana: Anatomy) -> tuple[str, dict]:
 async def graph_context(repo: str | None, ana: Anatomy) -> tuple[str, dict]:
     """選配：code graph 的 blast radius 摘要。任何失敗 = 空字串 + 註記。"""
     stats = {"graph_used": False, "graph_note": ""}
-    if not os.getenv("GRAPH_TOOLS_URL", "").strip():
+    g = settings().graph
+    if not g.tools_url:
         stats["graph_note"] = "GRAPH_TOOLS_URL 未設定"
         return "", stats
-    bound = os.getenv("GRAPH_REPO", "").strip().lower()
+    bound = g.bound_repo
     if bound and (repo or "").strip().lower() != bound:
         # graph server 一次只服務一個 repo；別的 repo 寧可沒有 graph，
         # 也不能拿錯的圖出「無跨檔影響」的假證詞
@@ -125,7 +122,7 @@ async def graph_context(repo: str | None, ana: Anatomy) -> tuple[str, dict]:
     else:
         text = out if isinstance(out, str) else str(out)
         summary = text.strip()
-    budget = int(os.getenv("CONTEXT_MAX_CHARS", "24000"))
+    budget = settings().repos.context_max_chars
     stats["graph_used"] = True
     stats["graph_summary"] = summary           # 報告：血脈摘要
     stats["graph_impacted"] = list(dict.fromkeys(impacted))[:12]  # 報告：受波及清單

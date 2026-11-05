@@ -8,17 +8,12 @@ REVIEW_PIPELINE 決定肚子裡跑哪條路：
   v2          anatomy → static → plan → 平行 reviewer → adversary →
               synthesis → render（見 orchestrator/pipeline.py）
 
-環境變數：
-  LLM_BASE_URL / LLM_API_KEY / LLM_MODEL   OpenAI 相容 gateway
-  LANGFUSE_*                                SDK 自動讀
-  RULES_*                                   團隊規則（orchestrator/rules.py）
-  REVIEW_PIPELINE / REVIEW_*                v2 旋鈕（orchestrator/pipeline.py）
-  REPOS_ROOT / CONTEXT_* / GRAPH_*          v2 餵料（orchestrator/context.py）
+設定全部住 shared/settings.py（REVIEW_PIPELINE 在 settings().orchestrator.pipeline）；
+每次 review 的旋鈕快照以 settings().knobs() 進 trace metadata。
 """
 from __future__ import annotations
 
 import json
-import os
 import re
 
 from langfuse import get_client, observe
@@ -26,6 +21,7 @@ from langfuse import get_client, observe
 from orchestrator.llm import complete, prompt_or
 from orchestrator.models import Finding, ReviewResult
 from orchestrator.rules import load_rules, rules_context
+from shared.settings import settings
 
 PROMPT_NAME = "pr-review-system"
 
@@ -94,7 +90,7 @@ async def run_review(diff: str, metadata: dict | None = None) -> ReviewResult:
     """
     meta = metadata or {}
     rules = load_rules(meta.get("repo"))
-    mode = os.getenv("REVIEW_PIPELINE", "v1").strip().lower()
+    mode = settings().orchestrator.pipeline
 
     if mode == "v2":
         from orchestrator.pipeline import run_pipeline
@@ -109,6 +105,7 @@ async def run_review(diff: str, metadata: dict | None = None) -> ReviewResult:
             "rules_sha": rules.sha or None,
             "rules_files": rules.files,
             "rules_truncated": rules.truncated,
+            "config": settings().knobs(),
             **{k: v for k, v in result.stats.items() if k != "rules_sha"},
         },
     )

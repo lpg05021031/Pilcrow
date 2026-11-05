@@ -3,25 +3,23 @@
 紀律：無狀態、唯讀、不 import langfuse。PAT/proxy 只活在本服務的環境變數裡，
 永遠不會流進 orchestrator 或 trace。
 
-啟動：python -m tools.ado_pr_tools.server   （PORT 預設 8091）
+啟動：python -m tools.ado_pr_tools.server   （ADO_TOOLS_PORT 預設 8094；舊名 PORT 仍認）
 """
 from __future__ import annotations
 
 import difflib
-import os
 from concurrent.futures import ThreadPoolExecutor
 
 from fastmcp import FastMCP
 
 from shared.azdo import PrRef, client, get_json, get_text, parse_pr_url
+from shared.settings import fail_fast, settings
 
 mcp = FastMCP("ado-pr-tools", mask_error_details=False)
 
-MAX_FILES = int(os.getenv("ADO_DIFF_MAX_FILES", "300"))  # 先於一切層（含 static）的最外圈上限
-MAX_FILE_BYTES = int(os.getenv("ADO_DIFF_MAX_FILE_BYTES", "600000"))
-# 每個檔案要抓 base/head 兩份內容；序列化跑百檔會拖到分鐘級，用執行緒併發。
-# httpx.Client 是 thread-safe 的，共用同一顆 client 即可（連線池也一起共用）。
-FETCH_CONCURRENCY = max(1, int(os.getenv("ADO_DIFF_FETCH_CONCURRENCY", "8")))
+# 上限與併發度住 settings().ado：ADO_DIFF_MAX_FILES（先於一切層、含 static 的最外圈）、
+# ADO_DIFF_MAX_FILE_BYTES、ADO_DIFF_FETCH_CONCURRENCY（每檔抓 base/head 兩份，
+# 序列化跑百檔會拖到分鐘級；httpx.Client 是 thread-safe 的，共用同一顆即可）。
 
 
 PAGE = 200          # ADO 單頁上限；靠 $skip 迴圈把全部撈完
@@ -117,6 +115,7 @@ def get_pr_diff(pr_url: str) -> str:
     對外簽名 get_pr_diff(pr_url) -> str 維持不變即可。）
     """
     ref = parse_pr_url(pr_url)
+    cfg = settings().ado
     out: list[str] = []
     with client() as c:
         it = _latest_iteration(c, ref)
@@ -133,9 +132,9 @@ def get_pr_diff(pr_url: str) -> str:
                    if not _is_folder(e)]
 
         total = len(entries)
-        if total > MAX_FILES:
-            out.append(f"# 注意：共 {total} 個檔案，僅呈現前 {MAX_FILES} 個\n")
-            entries = entries[:MAX_FILES]
+        if total > cfg.diff_max_files:
+            out.append(f"# 注意：共 {total} 個檔案，僅呈現前 {cfg.diff_max_files} 個\n")
+            entries = entries[:cfg.diff_max_files]
 
         item_url = f"{ref.repo_api}/items"
 
@@ -164,13 +163,14 @@ def get_pr_diff(pr_url: str) -> str:
             return _content(base, old_path), _content(head, path)
 
         # executor.map 依輸入順序回傳 —— 併發抓取，輸出仍是 deterministic 的
-        with ThreadPoolExecutor(max_workers=FETCH_CONCURRENCY) as pool:
+        with ThreadPoolExecutor(max_workers=cfg.diff_fetch_concurrency) as pool:
             fetched = list(pool.map(_pair, targets))
 
         for (path, old_path), (old, new) in zip(targets, fetched):
             if old_path != path:
                 out.append(f"# {old_path} → {path}: renamed\n")
-            if (old and len(old) > MAX_FILE_BYTES) or (new and len(new) > MAX_FILE_BYTES):
+            if (old and len(old) > cfg.diff_max_file_bytes) \
+                    or (new and len(new) > cfg.diff_max_file_bytes):
                 out.append(f"# {path}: file too large — diff skipped\n")
                 continue
             if (old and "\x00" in old[:1024]) or (new and "\x00" in new[:1024]):
@@ -189,8 +189,5 @@ def get_pr_diff(pr_url: str) -> str:
 
 
 if __name__ == "__main__":
-    mcp.run(
-        transport="http",
-        host=os.getenv("HOST", "127.0.0.1"),
-        port=int(os.getenv("PORT", "8091")),
-    )
+    t = fail_fast().tools
+    mcp.run(transport="http", host=t.host, port=t.ado_port)
