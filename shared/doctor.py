@@ -1,4 +1,4 @@
-"""doctor —— 把 RUNBOOK 裡所有「手動 curl / cat /proc / journalctl 判讀」收成一條指令。
+"""doctor —— 把 RUNBOOK 裡所有「手動 HTTP 探針 / cat /proc / journalctl 判讀」收成一條指令。
 
     python -m shared.doctor                  全套檢查，印一張表
     python -m shared.doctor --pr-url <URL>   多做一件：拿 ADO_PAT 真打一條 PR 的 metadata

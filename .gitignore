@@ -22,3 +22,6 @@ venv/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# installer bundles are generated (deploy/bin/make_bundle.py), not tracked
+dist/
