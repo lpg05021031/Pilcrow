@@ -159,7 +159,11 @@ export async function drainQueue() {
 
 // ---------------------------------------------------------------- waiting
 
-/** Set or clear the condition a card waits on. A wake sends `wait.prompt`, or a line that names the condition. */
+/**
+ * Set or clear the condition a card waits on. A wake sends `wait.prompt`, or a line that names the condition.
+ * @param {string} id
+ * @param {{ kind: string, at?: number, branch?: string, id?: string, prompt?: string } | null | undefined} wait
+ */
 export async function setWait(id, wait) {
   const meta = store.getMeta(id);
   if (!meta) throw new Error('Unknown session: ' + id);
@@ -283,8 +287,10 @@ async function wakeDependents(id) {
  *   park     mark reviewed without sending anything; the card goes back to the backlog
  *   stop     interrupt the turn (or leave the queue); whatever turn end it produces counts as reviewed
  *   wake     stop waiting and start now
+ * @param {string} id
+ * @param {{ kind: string, note?: string, turn?: number }} d
  */
-export async function decide(id, { kind, note = '', turn } = {}) {
+export async function decide(id, { kind, note = '', turn }) {
   if (!DECISIONS.has(kind)) throw new Error('Unknown decision: ' + kind);
   const s = await sessions.get(id);
   const meta = store.getMeta(id) || {};
