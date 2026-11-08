@@ -409,6 +409,40 @@ test('workboard: a permission waiting on a card can be allowed from the panel', 
   await page.waitForSelector('.bd-lane.agent .bd-card[data-card="sess-empty"], .bd-lane.me .bd-card[data-card="sess-empty"]', { timeout: 15_000 });
 });
 
+test('workboard: a card written in the backlog stays there; Ctrl+Enter hands it to Claude', async ({ page }) => {
+  await ctl.call('mock.pace', { ms: 0 });
+  await page.locator('.side-page', { hasText: 'Workboard' }).click();
+  await page.waitForSelector('.bd-lanes', { timeout: 5000 });
+  await page.keyboard.press('n');
+  await page.waitForSelector('.bd-new', { timeout: 3000 });
+  await page.locator('.bd-new-title').fill('Rename the config file');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.bd-new', { state: 'detached', timeout: 5000 });
+  const made = await page.locator('.bd-lane.backlog .bd-card-title', { hasText: 'Rename the config file' }).count();
+  expect(made === 1, 'the card is not in the backlog');
+  expect(await page.locator('.board-page').count() === 1, 'writing a card must not leave the board');
+  await page.keyboard.press('n');
+  await page.locator('.bd-new-title').fill('Look at the parser');
+  await page.locator('.bd-new-intent').fill('Read the parser and fix the unrecoverable branch.');
+  await page.keyboard.press('Control+Enter');
+  await page.waitForSelector('.bd-lane.agent .bd-card-title:has-text("Look at the parser"), .bd-lane.me .bd-card-title:has-text("Look at the parser")', { timeout: 15_000 });
+});
+
+test('workboard: a finished turn shows its handoff on the card and in the panel', async ({ page }) => {
+  await ctl.call('mock.pace', { ms: 0 });
+  await ctl.call('session.send', { id: 'sess-empty', text: 'look at the parser and fix it' });
+  await page.locator('.side-page', { hasText: 'Workboard' }).click();
+  await page.waitForSelector('.bd-lane.me .bd-card[data-card="sess-empty"]', { timeout: 15_000 });
+  await sleep(300);
+  const line = await page.locator('.bd-card[data-card="sess-empty"] .bd-card-line').textContent();
+  expect(line.includes('Is a comment enough'), `the card line should carry the Decide question, got: ${line}`);
+  await page.click('.bd-card[data-card="sess-empty"]');
+  await page.waitForSelector('.bd-report', { timeout: 5000 });
+  const dd = await page.locator('.bd-report dd').allTextContents();
+  expect(dd.some((d) => d.includes('Added one comment')), 'the panel should show what was done');
+  expect(dd.some((d) => d.includes('partialJson.ts')), 'the panel should list the changed file');
+});
+
 // ---------------------------------------------------------------- run
 
 const chosen = tests.filter((t) => !grep || t.name.includes(grep));

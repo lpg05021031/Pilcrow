@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PanelLeftOpen, CircleAlert, Plus } from 'lucide-react';
-import { useStore, call, openSession, setUi, setDialog, decideCard, startCard } from '../lib/store';
+import { useStore, call, openSession, setUi, decideCard, startCard } from '../lib/store';
 import type { BoardState, SessionSummary } from '../lib/types';
 import { LANES, laneOf, cardState, step, actionsFor, type Lane } from '../lib/board';
 import { cost } from '../lib/format';
@@ -8,6 +8,7 @@ import { useNow, Num } from './ui/bits';
 import { typingElsewhere } from './tools/Permission';
 import { Card } from './board/Card';
 import { CardPanel } from './board/CardPanel';
+import { NewCard } from './board/NewCard';
 
 /** The card chosen last time the board was open, so coming back from a session lands on it. */
 let remembered: string | null = null;
@@ -25,6 +26,7 @@ export function Board() {
   const [state, setState] = useState<BoardState | null>(null);
   const [sel, setSel] = useState<string | null>(remembered);
   const [mode, setMode] = useState<'reject' | 'send' | null>(null);
+  const [creating, setCreating] = useState(false);
   const now = useNow(1000, true);
   const box = useRef<HTMLDivElement>(null);
 
@@ -117,7 +119,7 @@ export function Board() {
         if (lanes[lane.key][0]) select(lanes[lane.key][0].id);
         else return;
       } else if (k === 'n') {
-        setDialog('newSession', {});
+        setCreating(true);
       } else if (k === 'Escape') {
         if (mode) setMode(null);
         else if (sel) select(null);
@@ -192,14 +194,22 @@ export function Board() {
                 <span className="bd-lane-key">{i + 1}</span>
                 <span className="grow" />
                 {lane.key === 'backlog' && (
-                  <button className="icon-btn sm" title="New card (n)" aria-label="New card" onClick={() => setDialog('newSession', {})}>
+                  <button className="icon-btn sm" title="New card (n)" aria-label="New card" onClick={() => setCreating(true)}>
                     <Plus size={13} />
                   </button>
                 )}
                 <span className={`bd-lane-n tnum${lane.key === 'agent' && max > 0 && running >= max ? ' full' : ''}`}>{lane.key === 'agent' && max > 0 ? `${running}/${max}` : lanes[lane.key].length}</span>
               </div>
               <div className="bd-cards">
-                {lanes[lane.key].length ? lanes[lane.key].map((s) => <Card key={s.id} s={s} rt={rt[s.id]} selected={s.id === sel} now={now} onSelect={() => select(s.id)} onOpen={() => act(s.id, 'open')} />) : <div className="bd-empty">{lane.empty}</div>}
+                {lane.key === 'backlog' && creating && (
+                  <NewCard
+                    onDone={(id) => {
+                      setCreating(false);
+                      if (id) select(id);
+                    }}
+                  />
+                )}
+                {lanes[lane.key].length ? lanes[lane.key].map((s) => <Card key={s.id} s={s} rt={rt[s.id]} selected={s.id === sel} now={now} onSelect={() => select(s.id)} onOpen={() => act(s.id, 'open')} />) : lane.key === 'backlog' && creating ? null : <div className="bd-empty">{lane.empty}</div>}
               </div>
             </section>
           ))}

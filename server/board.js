@@ -66,6 +66,13 @@ function record(id, decision) {
   return decision;
 }
 
+/** The first sentence of a report line, trimmed to a commit subject. */
+function firstSentence(t) {
+  if (!t) return '';
+  const m = /^[^.!?\n]*[.!?]?/.exec(t.trim());
+  return (m ? m[0] : t).trim().replace(/[.]$/, '').slice(0, 120);
+}
+
 /** The short hash from `git commit`'s first line: `[branch 1a2b3c4] message`. */
 export function commitHash(output) {
   const m = /^\[[^\]\n]*?\b([0-9a-f]{7,40})\]/m.exec(output || '');
@@ -89,8 +96,12 @@ export async function decide(id, { kind, note = '', turn } = {}) {
   const forTurn = turn || meta.turnEnd || undefined;
 
   if (kind === 'approve') {
-    const message = text || (meta.title || s.title || 'Changes from Pilcrow').split('\n')[0].slice(0, 120);
-    const r = await git.commit(s.cwd, { message });
+    // The report of this very turn, if there is one: its "Did" names the commit, its files bound it.
+    const report = meta.report && meta.report.turn === meta.turnEnd ? meta.report : null;
+    const message = text || firstSentence(report?.did) || (meta.title || s.title || 'Changes from Pilcrow').split('\n')[0].slice(0, 120);
+    // A worktree is the session's own; in a shared folder only the files this turn changed go in.
+    const paths = !meta.worktree && report?.files?.length ? report.files.map((f) => f.path) : undefined;
+    const r = await git.commit(s.cwd, { message, paths });
     const nothing = /nothing to commit|nothing added to commit|no changes added/i.test(r.output || '');
     if (!r.ok && !nothing) throw new Error(r.output || 'Commit failed');
     const commit = r.ok ? commitHash(r.output) : null;

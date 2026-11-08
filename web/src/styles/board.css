@@ -320,6 +320,88 @@
   color: var(--err);
 }
 
+/* a card being written, at the top of the backlog */
+.bd-new {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 10px 10px 12px;
+  border-radius: var(--r-2);
+  background: var(--card);
+  box-shadow:
+    0 0 0 1.5px var(--accent-line),
+    var(--card-shadow);
+}
+.bd-new-title {
+  font: inherit;
+  font-size: var(--fs-ui);
+  font-weight: 500;
+  color: var(--text);
+  background: none;
+  border: 0;
+  border-bottom: 1px solid var(--hair-2);
+  padding: 2px 0 5px;
+  outline: none;
+}
+.bd-new-title:focus {
+  border-bottom-color: var(--accent-line);
+}
+.bd-new-intent {
+  font-size: var(--fs-small);
+  min-height: 0;
+}
+.bd-new-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+}
+.bd-new-row.opts {
+  gap: 10px;
+}
+.bd-new-row.acts {
+  gap: 6px;
+  padding-top: 2px;
+}
+.bd-new-row.acts .btn .key {
+  margin-left: 4px;
+}
+.bd-new-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: var(--fs-micro);
+  line-height: 18px;
+  padding: 0 7px;
+  border-radius: var(--r-5);
+  background: var(--fill-1);
+  color: var(--text-2);
+}
+.bd-new-chip:hover {
+  background: var(--fill-2);
+  color: var(--text);
+}
+.bd-new-chip.on {
+  background: var(--accent-wash);
+  color: var(--accent-text);
+}
+.bd-new-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-small);
+  color: var(--text-2);
+}
+.bd-new-model {
+  min-width: 0;
+  flex: 1;
+  font-size: var(--fs-small);
+}
+.bd-new-err {
+  font-size: var(--fs-small);
+  color: var(--err);
+}
+
 /* the panel */
 .bd-panel {
   width: 360px;

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { GitBranch, PanelRight, PanelLeftOpen, Ellipsis, Pencil, GitFork, FolderOpen, Archive, Trash, Copy, SquareTerminal, RotateCcw, Power, FolderGit2, Folder, Settings2, CircleDollarSign, ChevronDown, BookMarked } from 'lucide-react';
+import { GitBranch, PanelRight, PanelLeftOpen, Ellipsis, Pencil, GitFork, FolderOpen, Archive, Trash, Copy, SquareTerminal, RotateCcw, Power, FolderGit2, Folder, Settings2, CircleDollarSign, ChevronDown, BookMarked, LayoutGrid } from 'lucide-react';
 import { useStore, setUi, VIEW_MODES, renameSession, forkSession, archiveSession, deleteSession, confirmAction, call, insertIntoComposer, toast, openSession, setDialog, setCwd, getModel } from '../lib/store';
 import { basename, cost, tildify } from '../lib/format';
 import { McpNotice } from './McpNotice';
@@ -86,6 +86,7 @@ export function SessionView({ session }: { session: SessionSummary }) {
 
   const menu = [
     { label: 'Rename', icon: Pencil, onSelect: () => setEditing(true) },
+    { label: session.intent ? 'Edit the intent' : 'Make it a card', hint: session.intent ? undefined : 'Puts it on the workboard', icon: LayoutGrid, onSelect: () => setDialog('intent', { id }) },
     { label: 'Fork into a new session', icon: GitFork, onSelect: () => forkSession(id) },
     { label: 'Open folder', icon: FolderOpen, onSelect: () => call('shell.openPath', { path: cwd }) },
     { label: 'Open a terminal here', icon: SquareTerminal, onSelect: () => setUi({ panel: true, panelTab: 'terminal' }) },

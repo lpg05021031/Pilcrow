@@ -107,6 +107,12 @@ try {
   await page.click('.bd-card[data-card="sess-login"]');
   await sleep(500);
   await shot('board-panel');
+  await key('Escape', 300);
+  await key('n', 400);
+  await page.locator('.bd-new-title').fill('Rename the config file');
+  await page.locator('.bd-new-intent').fill('config.json becomes pilcrow.json; the loader reads both for a version.');
+  await shot('board-new');
+  await key('Escape', 300);
   await page.click('button[title="Results of scheduled sessions"]');
   await sleep(900);
   await shot('inbox');

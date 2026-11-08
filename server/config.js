@@ -23,6 +23,7 @@ export const DEFAULT_CONFIG = {
   memoryAuto: true, // distil notes about a project when a turn ends
   memoryInject: true, // hand those notes to new sessions
   maxConcurrent: 3, // sessions Claude works on at once from the workboard; 0 = no limit
+  handoffReport: true, // ask Claude to end finished work with a "## Handoff" section the workboard reads
   memoryModel: '', // '' = the session default // record a snapshot of the folder after every step so you can scrub back
   recentProjects: [],
   ui: {}, // free-form UI prefs (panel sizes, last tabs) owned by the client

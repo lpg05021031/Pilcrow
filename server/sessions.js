@@ -10,6 +10,7 @@ import * as history from './history.js';
 import * as snapshots from './snapshots.js';
 import * as memory from './memory.js';
 import { boardFields } from './board.js';
+import * as handoff from './handoff.js';
 import * as git from './git.js';
 import { AsyncQueue, uuid, IS_ROOT, log, xdg, slugify, cleanEnv, slash } from './util.js';
 
@@ -301,6 +302,8 @@ class Session {
     const input = new AsyncQueue();
     // What earlier sessions in this project learned rides along in the system prompt.
     const memoryText = cfg.memoryInject === false ? '' : memory.promptFor(memory.projectOf(this));
+    // Finished work ends with a handoff section the workboard reads (docs/WORKBOARD.md §6).
+    const appendText = [memoryText, cfg.handoffReport === false ? '' : handoff.HANDOFF_PROMPT].filter(Boolean).join('\n\n');
     const options = {
       cwd: this.cwd,
       pathToClaudeCodeExecutable: claude.path,
@@ -308,7 +311,7 @@ class Session {
       includePartialMessages: true,
       forwardSubagentText: true,
       settingSources: ['user', 'project', 'local'],
-      systemPrompt: { type: 'preset', preset: 'claude_code', ...(memoryText ? { append: memoryText } : {}) },
+      systemPrompt: { type: 'preset', preset: 'claude_code', ...(appendText ? { append: appendText } : {}) },
       env: childEnv(),
       canUseTool: (name, toolInput, opts) => this.askPermission(name, toolInput, opts),
       stderr: (d) => {
@@ -417,6 +420,11 @@ class Session {
         // A turn the board stopped is reviewed by that very decision; its end must not ask for review again.
         store.setMeta(this.id, { contextWindow: this.usage.contextWindow || null, costUsd: this.usage.costUsd || null, turnEnd, ...(this.autoReview ? { reviewedTurn: turnEnd } : {}) });
         this.autoReview = false;
+        // The handoff report, if the reply ends with one; measured files take a git call, so it lands a moment later.
+        handoff
+          .recordTurn(this, typeof msg.result === 'string' ? msg.result : '', turnEnd)
+          .then((r) => r !== undefined && bus.emit('list-changed'))
+          .catch((e) => log('handoff failed', e?.message));
         this.markDelivered(msg.user_message_uuids || (msg.user_message_uuid ? [msg.user_message_uuid] : null));
         if (!(msg.queued_turn_count > 0)) {
           this.status = 'idle';
@@ -987,13 +995,14 @@ class SessionManager {
     return [...out.values()].sort((a, b) => (b.lastModified || 0) - (a.lastModified || 0) || (a.id < b.id ? -1 : 1));
   }
 
-  async create({ cwd, worktree, mode, model, effort, title }) {
+  async create({ cwd, worktree, mode, model, effort, title, intent }) {
     cwd = slash(cwd);
     if (!cwd || !fs.existsSync(cwd)) throw new Error('Folder does not exist: ' + cwd);
     const id = uuid();
     const cfg = store.getConfig();
     const meta = { cwd, createdAt: Date.now(), touched: Date.now(), project: cwd };
     if (title) meta.title = title;
+    if (typeof intent === 'string' && intent.trim()) meta.intent = intent.trim();
     if (worktree) {
       const info = await git.info(cwd);
       if (!info.isRepo) throw new Error('Worktrees need a git repository.');

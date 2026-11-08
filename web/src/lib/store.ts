@@ -75,6 +75,8 @@ interface Dialogs {
   palette: boolean;
   shortcuts: boolean;
   confirm: ConfirmSpec | null;
+  /** Write or change a session's intent (make it a card on the workboard). */
+  intent: null | { id: string };
 }
 
 interface State {
@@ -123,7 +125,7 @@ export const useStore = create<State>(() => ({
   activeId: null,
   rt: {},
   ui: { sidebar: true, panel: false, panelTab: 'changes', sidebarW: 268, panelW: 560, showArchived: false, diffMode: 'unified', view: 'normal' },
-  dialogs: { newSession: null, settings: false, palette: false, shortcuts: false, confirm: null, mcpAuth: null },
+  dialogs: { newSession: null, settings: false, palette: false, shortcuts: false, confirm: null, mcpAuth: null, intent: null },
   toasts: [],
   fsRev: 0,
   unread: {},
@@ -548,10 +550,11 @@ async function loadSession(id: string) {
   }
 }
 
-export async function createSession(opts: { cwd: string; worktree?: { base?: string; name?: string } | null; mode?: PermissionMode; model?: string; effort?: Effort; prompt?: string; images?: { mediaType: string; data: string }[]; title?: string }) {
-  const { id } = await call<{ id: string }>('session.create', { cwd: opts.cwd, worktree: opts.worktree || undefined, mode: opts.mode, model: opts.model, effort: opts.effort, title: opts.title });
+export async function createSession(opts: { cwd: string; worktree?: { base?: string; name?: string } | null; mode?: PermissionMode; model?: string; effort?: Effort; prompt?: string; images?: { mediaType: string; data: string }[]; title?: string; intent?: string; open?: boolean }) {
+  const { id } = await call<{ id: string }>('session.create', { cwd: opts.cwd, worktree: opts.worktree || undefined, mode: opts.mode, model: opts.model, effort: opts.effort, title: opts.title, intent: opts.intent });
   await refreshSessions(true);
-  await openSession(id);
+  // A card written on the workboard stays there; everything else opens the new conversation.
+  if (opts.open !== false) await openSession(id);
   if (opts.prompt?.trim() || opts.images?.length) {
     try {
       await sendMessage(id, { text: opts.prompt || '', images: opts.images || [] });

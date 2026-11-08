@@ -6,6 +6,7 @@ import { SessionView } from './SessionView';
 import { RightPanel } from './RightPanel';
 import { Welcome } from './Welcome';
 import { Board } from './Board';
+import { IntentDialog } from './board/IntentDialog';
 import { InboxPage } from './Inbox';
 import { NewSessionDialog } from './NewSessionDialog';
 import { SettingsDialog } from './SettingsDialog';
@@ -155,6 +156,7 @@ export function App() {
       {dialogs.shortcuts && <ShortcutsDialog />}
       {dialogs.confirm && <ConfirmDialog />}
       {dialogs.mcpAuth && <McpAuthDialog />}
+      {dialogs.intent && <IntentDialog />}
       <Lightbox />
     </div>
   );

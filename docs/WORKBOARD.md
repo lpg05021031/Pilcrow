@@ -270,7 +270,7 @@ HTML5 drag。拖起時非法目標欄加 `.no`（淡化），合法目標 hover 
 
 ### 9.6 開單
 
-待辦欄 + 或 `n`：欄頂長出 `NewCard`：標題（必填）、意圖（textarea，可空）、專案 chip（預設最近一個，點選換，`…` 開 `FolderPicker`）、選項列（worktree 開關預設開、模型）。`Enter` 建立待辦（`session.create` 不帶 prompt，再 `session.intent`），`Ctrl+Enter` 建立並 `session.start`。
+待辦欄 + 或 `n`：欄頂長出 `NewCard`：標題（必填）、意圖（textarea，可空）、專案 chip（預設最近一個，點選換，`…` 開 `FolderPicker`）、選項列（worktree 開關預設開、模型）。`Enter` 建立待辦（`session.create` 帶 `intent`、不帶 prompt），`Ctrl+Enter` 建立並 `session.start`。意圖留空時以標題為一行意圖，卡片才會在看板上。
 
 `NewSessionDialog` 的 prompt 欄位標籤改為「意圖（也是第一則訊息）」，送出時同時寫 `intent`。
 
@@ -367,6 +367,11 @@ SessionView 標題列選單加「寫成卡片」：開一個只有意圖欄的�
 - Sidebar 的 Needs you 現在包含「做完還沒審」的卡，數量多時是否要分成兩段（提問在上、待審在下）。
 
 ## 15. 進度
+
+- 第 2 階段（2026-11-08）：`server/handoff.js`（`HANDOFF_PROMPT` 附在系統提示、`parseHandoff`、`filesChanged` 由 diff 量）；
+  一輪結束時寫 `meta.report`；`approve` 的 commit 訊息用 report 的 `did` 第一句，非 worktree session 只 add report 的檔案；
+  待辦欄就地開單（`NewCard`：標題、意圖、專案 chip、worktree、模型，Enter / Ctrl+Enter）；New session 對話框的第一則訊息
+  即意圖；session 選單「Make it a card / Edit the intent」；卡片說明行與側板顯示交接報告。`config.handoffReport=false` 可關。
 
 - 第 1 階段（2026-11-08）：`server/board.js`、`board.state` 與三個寫入 RPC、`web/src/lib/board.ts` 與單元測試、
   `Board.tsx` 五欄＋側板＋核准/退回/先放著/停止/交給代理、權限在側板直接回答、Sidebar 的 Needs you 改用 `laneOf`、

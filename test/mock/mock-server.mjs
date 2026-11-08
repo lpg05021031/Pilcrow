@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
+import { parseHandoff } from '../../server/handoff.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DIST = path.join(ROOT, 'web', 'dist');
@@ -74,7 +75,8 @@ const now = Date.now();
 /** @type {Map<string, Sess>} */
 const sessions = new Map();
 class Sess {
-  constructor({ id, title, cwd, touched, archived = false, pinned = false, messages = [], intent, turnEnd, reviewedTurn, decisions = [] }) {
+  constructor({ id, title, cwd, touched, archived = false, pinned = false, messages = [], intent, turnEnd, reviewedTurn, decisions = [], report = null }) {
+    this.report = report;
     this.id = id;
     // workboard (docs/WORKBOARD.md): a session with an intent is a card
     this.intent = intent;
@@ -110,7 +112,7 @@ class Sess {
     this.extra = {}; // fields the tests lay over state() (mock.patch): tasks, mcp, …
   }
   summary() {
-    return { id: this.id, title: this.title, firstPrompt: this.messages[0]?.message?.content?.[0]?.text, cwd: this.cwd, project: this.cwd, gitBranch: 'main', lastModified: this.touched, createdAt: this.createdAt, archived: this.archived, pinned: this.pinned, worktree: null, scheduled: null, intent: this.intent, turnEnd: this.turnEnd, reviewedTurn: this.reviewedTurn, decisions: this.decisions.length ? this.decisions : undefined, costUsd: this.usage.costUsd || undefined, status: this.status, live: this.live, pending: this.pending.size };
+    return { id: this.id, title: this.title, firstPrompt: this.messages[0]?.message?.content?.[0]?.text, cwd: this.cwd, project: this.cwd, gitBranch: 'main', lastModified: this.touched, createdAt: this.createdAt, archived: this.archived, pinned: this.pinned, worktree: null, scheduled: null, intent: this.intent, turnEnd: this.turnEnd, reviewedTurn: this.reviewedTurn, decisions: this.decisions.length ? this.decisions : undefined, report: this.report || undefined, costUsd: this.usage.costUsd || undefined, status: this.status, live: this.live, pending: this.pending.size };
   }
   state() {
     return {
@@ -148,7 +150,7 @@ function seed() {
   seq = 0;
   const t0 = now - 2 * 3600e3;
   const s1 = new Sess({
-    id: 'sess-login', title: 'Fix the login redirect bug', cwd: PROJ, touched: now - 25 * 60e3, intent: 'Signing in should return people to the page they came from. Done when the `next` parameter survives the form and the tests pass.', turnEnd: now - 25 * 60e3,
+    id: 'sess-login', title: 'Fix the login redirect bug', cwd: PROJ, touched: now - 25 * 60e3, intent: 'Signing in should return people to the page they came from. Done when the `next` parameter survives the form and the tests pass.', turnEnd: now - 25 * 60e3, report: { asked: 'Fix the redirect to /undefined after sign-in.', did: 'The form forwards next as a hidden field; the server falls back to / when it is missing.', files: [{ path: 'web/src/lib/auth.ts', add: 3, del: 1 }, { path: 'server/routes/login.js', add: 2, del: 0 }], unverified: 'Only the unit tests ran; nobody signed in by hand.', ask: 'Ship without a manual sign-in check?', turn: now - 25 * 60e3 },
     messages: [
       ...turn('sess-login', t0, { prompt: 'The login page redirects to /undefined after signing in. Can you find out why?', narration: "I'll look at how the redirect target is read after sign-in.", tools: [GREP('redirect'), READ('web/src/lib/auth.ts', 120), READ('server/routes/login.js', 88)], reply: 'The redirect target comes from `?next=` but the login form never forwards that parameter, so `next` is undefined by the time the server redirects. The fix is to carry it through the form as a hidden field.' }),
       ...turn('sess-login', t0 + 15 * 60e3, { prompt: 'Please fix it and run the tests.', narration: 'Adding the hidden field and a guard on the server side.', tools: [EDIT('web/src/lib/auth.ts', "const next = params.get('next')", "const next = params.get('next') || '/'"), BASH('npm test', 'Run the test suite', 'Test Suites: 12 passed\nTests: 148 passed')], reply: 'Done. The form now forwards `next`, the server falls back to `/` when it is missing, and all 148 tests pass.' }),
@@ -286,7 +288,7 @@ async function runTurn(s, text) {
       await say(s, [{ text: 'The parser is only used by the transcript model. Now the edit.' }]);
       await useTool(s, EDIT('web/src/lib/partialJson.ts', 'return null;', 'return null; // unrecoverable'));
       if (s.aborted) throw new Error('aborted');
-      await say(s, [{ text: 'Done: one comment added, nothing else changed. The parser is used in one place, so this is safe.' }]);
+      await say(s, [{ text: 'Done: one comment added, nothing else changed. The parser is used in one place, so this is safe.\n\n## Handoff\nAsked: Mark the unrecoverable branch of the parser.\nDid: Added one comment to partialJson.ts; nothing else changed.\nUnverified: nothing\nDecide: Is a comment enough, or should the branch log?' }]);
     } else if (script === 'permission') {
       await say(s, [{ text: "I need to run a command for this; I'll ask first." }]);
       const r = await useTool(s, BASH('rm -rf build && npm run build', 'Rebuild from scratch', 'built in 4.2s'), { ask: true });
@@ -305,6 +307,8 @@ async function runTurn(s, text) {
     s.usage.contextTokens += 900;
     s.record(msg.result(s.id, replyText, Date.now(), Date.now() - started, s.usage.costUsd));
     s.lastReply = { text: replyText.replace(/\s+/g, ' ').slice(0, 240), at: Date.now() };
+    const parsed = parseHandoff(replyText);
+    s.report = parsed ? { ...parsed, files: [{ path: 'web/src/lib/partialJson.ts', add: 1, del: 1 }], turn: Date.now() } : null;
   } catch (e) {
     if (e.message !== 'aborted') throw e;
     s.record({ type: 'result', subtype: 'error_during_execution', uuid: uuid(), session_id: s.id, is_error: false, terminal_reason: 'aborted_by_user', duration_ms: Date.now() - started, num_turns: 1, result: '', total_cost_usd: s.usage.costUsd });
@@ -312,6 +316,7 @@ async function runTurn(s, text) {
   if (s.turnSeq !== mine) return;
   s.status = 'idle';
   s.turnEnd = Date.now();
+  if (s.report) s.report.turn = s.turnEnd;
   if (s.autoReview) {
     s.reviewedTurn = s.turnEnd;
     s.autoReview = false;
@@ -374,9 +379,9 @@ const methods = {
     const s = S(id);
     return { state: s.state(), messages: s.messages, inflight: s.inflight, meta: { title: s.title } };
   },
-  'session.create': ({ cwd, title }) => {
+  'session.create': ({ cwd, title, intent }) => {
     const id = `sess-${uuid()}`;
-    const s = new Sess({ id, title: title || 'New session', cwd: cwd || PROJ, touched: Date.now() });
+    const s = new Sess({ id, title: title || 'New session', cwd: cwd || PROJ, touched: Date.now(), intent: typeof intent === 'string' && intent.trim() ? intent.trim() : undefined });
     s.createdAt = Date.now();
     sessions.set(id, s);
     listChanged();

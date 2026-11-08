@@ -93,7 +93,7 @@ export function NewSessionDialog() {
     setBusy(true);
     setError('');
     try {
-      await createSession({ cwd, worktree: useWorktree ? { base, name: wtName || prompt.slice(0, 40) || undefined } : null, mode, model, effort, prompt });
+      await createSession({ cwd, worktree: useWorktree ? { base, name: wtName || prompt.slice(0, 40) || undefined } : null, mode, model, effort, prompt, intent: prompt.trim() || undefined });
       setDialog('newSession', null);
     } catch (e) {
       setError(errText(e));
@@ -254,8 +254,10 @@ export function NewSessionDialog() {
       </Collapse>
 
       <section className="ns-section">
-        <div className="ns-label">First message</div>
-        <textarea className="textarea ns-prompt" rows={2} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={`What should Claude do in ${basename(cwd) || 'this folder'}? (optional)`} />
+        <div className="ns-label">
+          Intent <span className="faint">— also the first message; a session with one is a card on the workboard</span>
+        </div>
+        <textarea className="textarea ns-prompt" rows={2} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder={`What should Claude do in ${basename(cwd) || 'this folder'}, and when is it done? (optional)`} />
       </section>
     </Dialog>
   );
