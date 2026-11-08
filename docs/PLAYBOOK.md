@@ -53,7 +53,7 @@ ACE（Agentic Context Engineering, ICLR 2026）的做法是把 context 當成會
 |---|---|---|---|
 | session 啟動 | `sessions.js start()` | `memory.inject(project)` 回 `{ text, ids }`，`ids` 存進 `meta.playbook` | 無 |
 | 回合結束且值得 | `sessions.js`（原有） | `distill()`：最多 5 條，`source:'turn'` | 一次小模型呼叫（原有） |
-| 你按 **核准** | `board.decide('approve')` | `memory.credit(session)`：`meta.playbook` 裡每條 `helpful += 1` | 無 |
+| 你按 **核准** | `board.decide('approve')` | `memory.credit(session)`：`meta.playbook` 裡每條 `helpful += 1`；`memory.tally(session,'approve')` 記一筆 | 無 |
 | 你按 **退回** 並寫了原因 | `board.decide('reject')` | `memory.reflect(session, note)`：小模型讀你的退回、交接報告的 Did/Unverified、這個 session 拿到的筆記（編號），輸出最多 2 條新規則（`source:'reject'`）與 `MISLED: 1, 3`（那些筆記 `harmful += 1`） | 一次小模型呼叫，不等它回來才回應 UI |
 
 `reflect` 與 `distill` 同受「Take notes automatically」開關控制，用同一個 note-taking 模型。回答、先放著、停止、喚醒不產生訊號。
@@ -95,7 +95,12 @@ ACE（Agentic Context Engineering, ICLR 2026）的做法是把 context 當成會
 
 另外修了 `test/unit/setup.ts`：Windows 上測試原本把筆記寫進真實的 `%LOCALAPPDATA%\Pilcrow\data\memory`，現在 `APPDATA` / `LOCALAPPDATA` 也指到測試用的 home。
 
-## 8. 還沒做（下一階段）
+## 8. 量測
 
-1. **量測**：記錄每條筆記被注入的次數與核准 / 退回的比例，看 playbook 有沒有降低退回率；沒有就拿掉反思那一步。
-2. **衝突卡的第三個選項**：現在只有留 / 刪；「用新規則取代」目前等於刪舊的（新規則已經在），之後若新規則常常也錯，再考慮讓卡上能直接改寫。
+每條筆記記 `handed`（交給過幾個 session；Memory 頁顯示「read by n」）。每個專案另有 `stats`：
+核准與退回各自分成「這個 session 有拿到筆記」與「沒有」兩桶（`memory.tally`，退回也算在內，不管反思有沒有跑）。
+Memory 頁最上面一行把兩個退回率並排：有筆記的 session 退回率沒有比較低，就該關掉自動筆記，或至少拿掉反思那一步。
+
+## 9. 還沒做
+
+1. **衝突卡的第三個選項**：現在只有留 / 刪；「用新規則取代」目前等於刪舊的（新規則已經在），之後若新規則常常也錯，再考慮讓卡上能直接改寫。

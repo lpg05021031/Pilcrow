@@ -205,6 +205,7 @@ class MemoryPage(QWidget):
         select_value(self.proj, cwd)
         self.proj.blockSignals(False)
         self.notes = None
+        self.stats: Optional[Json] = None
         self.load()
 
     def load(self) -> None:
@@ -217,6 +218,7 @@ class MemoryPage(QWidget):
         def ok(r: Json) -> None:
             if cwd == self.cwd:
                 self.notes = list((r or {}).get("notes") or [])
+                self.stats = (r or {}).get("stats") or None
                 self.render()
 
         def bad(_e: Any) -> None:
@@ -331,6 +333,8 @@ class MemoryPage(QWidget):
             return
         pinned = [n for n in self.notes if n.get("pinned")]
         rest = [n for n in self.notes if not n.get("pinned")]
+        if self.stats:
+            self.list_lay.addWidget(hint(outcomes(self.stats)))
         if not self.notes:
             empty = QWidget()
             el = vbox(empty, 8, (20, 44, 20, 44))
@@ -370,6 +374,19 @@ class MemoryPage(QWidget):
         return box
 
 
+def outcomes(s: Json) -> str:
+    """The two rates side by side: whether the notes earn their place (docs/PLAYBOOK.md §8)."""
+
+    def line(b: Json) -> str:
+        a, r = int(b.get("approve") or 0), int(b.get("reject") or 0)
+        return f"{a} approved, {r} sent back ({round(100 * r / (a + r))}% sent back)" if a + r else "nothing yet"
+
+    return (
+        f"On the workboard, sessions that had notes: {line(s.get('withNotes') or {})}. "
+        f"Sessions that had none: {line(s.get('without') or {})}."
+    )
+
+
 def note_meta(n: Json) -> str:
     """The line under a note: where it came from, when, and how it fared with the sessions that read it."""
     if n.get("kind") == "manual":
@@ -382,6 +399,7 @@ def note_meta(n: Json) -> str:
     tally = [
         t
         for t in (
+            f"read by {n['handed']}" if n.get("handed") else "",
             f"helped {n['helpful']}" if n.get("helpful") else "",
             f"misled {n['harmful']}" if n.get("harmful") else "",
         )

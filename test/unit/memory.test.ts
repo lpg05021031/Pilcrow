@@ -131,6 +131,14 @@ describe('how a note stands (docs/PLAYBOOK.md)', () => {
     expect(handed.ids).toContain(fresh.id);
     expect(handed.ids).toContain(bad.id);
     expect(handed.text).toContain('CLAUDE.md and your own memory come first');
+    expect(memory.list(cwd).notes.find((x) => x.id === good.id)?.handed).toBe(1); // reached one session
+    // approvals and send-backs are counted apart for sessions with notes and without
+    expect(memory.list(cwd).stats).toBeNull();
+    memory.tally({ id: 's-ok', cwd }, 'approve');
+    memory.tally({ id: 's-ok', cwd }, 'reject');
+    memory.tally({ id: 'bare', cwd }, 'approve');
+    expect(memory.tally({ id: 's-ok', cwd }, 'wake')).toBeNull();
+    expect(memory.list(cwd).stats).toEqual({ withNotes: { approve: 1, reject: 1 }, without: { approve: 1, reject: 0 } });
     store.deleteMeta('s-ok');
     store.deleteMeta('s-ok2');
   });

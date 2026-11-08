@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { BookMarked, Pin, PinOff, Trash, Plus, Sparkles, Check, X, Folder, ClipboardCopy } from 'lucide-react';
 import { useStore, call, setConfig, toast, confirmAction, activeSession } from '../../lib/store';
 import { copy } from '../ui/clipboard';
-import type { Config, MemoryNote } from '../../lib/types';
+import type { Config, MemoryNote, MemoryStats } from '../../lib/types';
 import { basename, timeAgo, tildify, plural } from '../../lib/format';
 import { Select } from '../ui/Select';
 import { Switch, Spinner } from '../ui/bits';
@@ -28,6 +28,7 @@ export function MemoryPage({ config }: { config: Config }) {
   }, [sessions, config.recentProjects, active]);
   const [cwd, setCwd] = useState(projects[0] || '');
   const [notes, setNotes] = useState<MemoryNote[] | null>(null);
+  const [stats, setStats] = useState<MemoryStats | null>(null);
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
@@ -39,8 +40,8 @@ export function MemoryPage({ config }: { config: Config }) {
   useEffect(() => {
     if (!cwd) return;
     let alive = true;
-    call<{ notes: MemoryNote[] }>('memory.list', { cwd }, { quiet: true })
-      .then((r) => alive && setNotes(r.notes))
+    call<{ notes: MemoryNote[]; stats: MemoryStats | null }>('memory.list', { cwd }, { quiet: true })
+      .then((r) => alive && (setNotes(r.notes), setStats(r.stats || null)))
       .catch(() => alive && setNotes([]));
     return () => {
       alive = false;
@@ -133,6 +134,8 @@ export function MemoryPage({ config }: { config: Config }) {
         </button>
       </div>
 
+      {stats && <p className="hint mem-stats">{outcomes(stats)}</p>}
+
       {adding && (
         <div className="mem-add">
           <textarea aria-label="New note" className="textarea" rows={2} autoFocus placeholder="One durable fact about this project — e.g. “Tests must run from the repo root; the fixtures use relative paths.”" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => (e.key === 'Enter' && (e.metaKey || e.ctrlKey) ? add() : e.key === 'Escape' ? setAdding(false) : null)} />
@@ -191,6 +194,15 @@ export function MemoryPage({ config }: { config: Config }) {
   );
 }
 
+/** The two rates side by side: whether the notes earn their place (docs/PLAYBOOK.md §8). */
+function outcomes(s: MemoryStats): string {
+  const line = (b: { approve: number; reject: number }) => {
+    const n = b.approve + b.reject;
+    return n ? `${b.approve} approved, ${b.reject} sent back (${Math.round((100 * b.reject) / n)}% sent back)` : 'nothing yet';
+  };
+  return `On the workboard, sessions that had notes: ${line(s.withNotes)}. Sessions that had none: ${line(s.without)}.`;
+}
+
 function NoteRow({ n, now, onPatch, onRemove, onResolve }: { n: MemoryNote; now: number; onPatch: (p: Partial<MemoryNote>) => Promise<void>; onRemove: () => void; onResolve: (keep: boolean) => void }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(n.text);
@@ -200,7 +212,7 @@ function NoteRow({ n, now, onPatch, onRemove, onResolve }: { n: MemoryNote; now:
   };
   const retired = n.standing === 'retired';
   const origin = n.kind === 'manual' ? 'You' : n.source === 'reject' ? `From your correction${n.sessionTitle ? ` on ${n.sessionTitle}` : ''}` : n.sessionTitle || 'A session';
-  const tally = [n.helpful ? `helped ${n.helpful}` : '', n.harmful ? `misled ${n.harmful}` : ''].filter(Boolean).join(', ');
+  const tally = [n.handed ? `read by ${n.handed}` : '', n.helpful ? `helped ${n.helpful}` : '', n.harmful ? `misled ${n.harmful}` : ''].filter(Boolean).join(', ');
   return (
     <div className={`mem-note${n.pinned ? ' pinned' : ''}${retired ? ' retired' : ''}`} title={retired ? 'Retired: it misled sessions more than it helped, so new sessions no longer get it. Pin it to hand it on again.' : undefined}>
       {n.disputed && !editing && (

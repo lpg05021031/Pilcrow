@@ -318,6 +318,7 @@ export async function decide(id, { kind, note = '', turn }) {
     // The notes this session read stood up to your review (docs/PLAYBOOK.md §4).
     try {
       memory.credit(s);
+      memory.tally(s, 'approve');
     } catch (e) {
       log('memory credit failed', id, e?.message);
     }
@@ -329,7 +330,14 @@ export async function decide(id, { kind, note = '', turn }) {
     store.setMeta(id, { reviewedTurn: meta.turnEnd || at });
     bus.emit('list-changed');
     // A correction may hold a rule for later sessions; the run that reads it must not hold up the reply.
-    if (kind === 'reject') memory.reflect(s, text).catch((e) => log('memory reflect failed', id, e?.message));
+    if (kind === 'reject') {
+      try {
+        memory.tally(s, 'reject');
+      } catch (e) {
+        log('memory tally failed', id, e?.message);
+      }
+      memory.reflect(s, text).catch((e) => log('memory reflect failed', id, e?.message));
+    }
     await s.send({ text });
     return { ok: true };
   }

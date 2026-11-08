@@ -56,6 +56,12 @@ export interface SessionSummary {
   conflict?: MemoryConflict;
 }
 
+/** Approvals and send-backs on the workboard for a project, apart for sessions that had notes and sessions that had none. */
+export interface MemoryStats {
+  withNotes: { approve: number; reject: number };
+  without: { approve: number; reject: number };
+}
+
 /** A note in project memory that a correction of yours contradicted; it waits on the board to be kept or forgotten. */
 export interface MemoryConflict {
   id: string;
@@ -459,6 +465,8 @@ export interface MemoryNote {
   helpful?: number;
   /** Corrections that named it misleading. */
   harmful?: number;
+  /** Sessions it was handed to. */
+  handed?: number;
   /** Confirmed by you or by outcomes, fresh, or retired (misled more than it helped; never handed on). */
   standing?: 'confirmed' | 'fresh' | 'retired';
   /** Set while a correction of yours contradicts it and you have not kept or forgotten it. */
