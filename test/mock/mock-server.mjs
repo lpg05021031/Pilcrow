@@ -112,7 +112,7 @@ class Sess {
     this.extra = {}; // fields the tests lay over state() (mock.patch): tasks, mcp, …
   }
   summary() {
-    return { id: this.id, title: this.title, firstPrompt: this.messages[0]?.message?.content?.[0]?.text, cwd: this.cwd, project: this.cwd, gitBranch: 'main', lastModified: this.touched, createdAt: this.createdAt, archived: this.archived, pinned: this.pinned, worktree: null, scheduled: null, intent: this.intent, turnEnd: this.turnEnd, reviewedTurn: this.reviewedTurn, decisions: this.decisions.length ? this.decisions : undefined, report: this.report || undefined, costUsd: this.usage.costUsd || undefined, status: this.status, live: this.live, pending: this.pending.size };
+    return { id: this.id, title: this.title, firstPrompt: this.messages[0]?.message?.content?.[0]?.text, cwd: this.cwd, project: this.cwd, gitBranch: 'main', lastModified: this.touched, createdAt: this.createdAt, archived: this.archived, pinned: this.pinned, worktree: null, scheduled: null, intent: this.intent, turnEnd: this.turnEnd, reviewedTurn: this.reviewedTurn, decisions: this.decisions.length ? this.decisions : undefined, report: this.report || undefined, wait: this.wait || undefined, queued: this.queued || undefined, costUsd: this.usage.costUsd || undefined, status: this.status, live: this.live, pending: this.pending.size };
   }
   state() {
     return {
@@ -317,6 +317,7 @@ async function runTurn(s, text) {
   s.status = 'idle';
   s.turnEnd = Date.now();
   if (s.report) s.report.turn = s.turnEnd;
+  setTimeout(drainQueue, 50);
   if (s.autoReview) {
     s.reviewedTurn = s.turnEnd;
     s.autoReview = false;
@@ -363,6 +364,22 @@ const S = (id) => {
   if (!s) throw new Error('Unknown session: ' + id);
   return s;
 };
+const LIMIT = 3;
+const runningCount = () => [...sessions.values()].filter((s) => s.status === 'running' || s.status === 'starting').length;
+function startOrQueue(s, text) {
+  if (runningCount() >= LIMIT) {
+    s.queued = { text, at: Date.now() };
+    listChanged();
+    return { queued: true };
+  }
+  s.queued = null;
+  listChanged();
+  return { queued: false, uuid: methods['session.send']({ id: s.id, text }) };
+}
+function drainQueue() {
+  const next = [...sessions.values()].filter((s) => s.queued).sort((a, b) => a.queued.at - b.queued.at)[0];
+  if (next && runningCount() < LIMIT) startOrQueue(next, next.queued.text);
+}
 const listSessions = () => [...sessions.values()].map((s) => s.summary()).sort((a, b) => (b.lastModified || 0) - (a.lastModified || 0) || (a.id < b.id ? -1 : 1));
 
 const methods = {
@@ -513,6 +530,13 @@ const methods = {
       s.reviewedTurn = s.turnEnd || at;
       s.autoReview = true;
       s.aborted = true;
+      s.queued = null;
+      s.wait = null;
+    }
+    if (kind === 'wake') {
+      const w = s.wait;
+      s.wait = null;
+      return { ok: true, ...startOrQueue(s, (w && w.prompt) || s.intent || 'Continue.') };
     }
     listChanged();
     if (kind === 'reject' || kind === 'answer') methods['session.send']({ id, text: note });
@@ -521,8 +545,21 @@ const methods = {
   'session.start': ({ id, text }) => {
     const s = S(id);
     s.decisions = [...s.decisions, { at: Date.now(), kind: 'start' }];
+    return startOrQueue(s, text || s.intent || '');
+  },
+  'session.wait': ({ id, wait }) => {
+    const s = S(id);
+    if (!wait) {
+      s.wait = null;
+      listChanged();
+      return { wait: null };
+    }
+    if (wait.kind === 'ci') throw new Error('Waiting for CI needs the GitHub CLI (gh) on this machine.');
+    if (wait.kind === 'time' && !(wait.at > Date.now())) throw new Error('Pick a time in the future.');
+    s.wait = wait;
+    s.decisions = [...s.decisions, { at: Date.now(), kind: 'wait', note: wait.kind === 'time' ? 'Until a time' : 'Until another card is approved' }];
     listChanged();
-    return { ok: true, uuid: methods['session.send']({ id, text: text || s.intent || '' }) };
+    return { wait };
   },
   'fleet.state': () => {
     const live = Object.fromEntries([...sessions.values()].filter((s) => s.live).map((s) => [s.id, s.state()]));
@@ -531,7 +568,7 @@ const methods = {
     const perSession = [...sessions.values()].filter((s) => s.touched >= dayStart.getTime() && s.usage.costUsd > 0).map((s) => ({ id: s.id, title: s.title, cost: s.usage.costUsd })).sort((a, b) => b.cost - a.cost);
     const done = [...sessions.values()].filter((s) => s.decisions.at(-1)?.kind === 'approve' && s.decisions.at(-1).at >= dayStart.getTime()).length;
     const running = [...sessions.values()].filter((s) => s.status === 'running' || s.status === 'starting').length;
-    return { live, today: { cost: perSession.reduce((a, b) => a + b.cost, 0), sessions: perSession.length, done, perSession: perSession.slice(0, 8) }, spend: perSession.map((p) => ({ at: Date.now() - 600e3, id: p.id, delta: p.cost })), limit: { max: 3, running } };
+    return { live, today: { cost: perSession.reduce((a, b) => a + b.cost, 0), sessions: perSession.length, done, perSession: perSession.slice(0, 8) }, spend: perSession.map((p) => ({ at: Date.now() - 600e3, id: p.id, delta: p.cost })), limit: { max: LIMIT, running }, scheduled: [], caps: { ci: false } };
   },
   'timeline.steps': ({ id }) => ({ cwd: S(id).cwd, enabled: false, reason: 'Timeline is off in the mock', steps: [] }),
   'models.gateway': () => ({ ok: true, base: 'https://gateway.example.com', url: 'https://gateway.example.com/v1/models', models: [{ id: 'claude-mock-1', displayName: 'Claude Mock 1', created: null }, { id: 'claude-mock-fast', displayName: 'Claude Mock Fast', created: null }], fetchedAt: Date.now() }),

@@ -1,22 +1,26 @@
 import { useEffect, useRef, useState } from 'react';
-import { X, CircleCheck, ArrowUpRight, Pencil } from 'lucide-react';
-import type { PermissionDecision, SessionSummary } from '../../lib/types';
+import { X, CircleCheck, ArrowUpRight, Pencil, CalendarClock } from 'lucide-react';
+import type { PermissionDecision, SessionSummary, WaitCondition } from '../../lib/types';
 import { respond, setIntent, decideCard, type Runtime } from '../../lib/store';
-import { actionsFor, ledgerOf, permSummary, type CardState } from '../../lib/board';
+import { actionsFor, ledgerOf, permSummary, describeWait, isSchedule, scheduleActions, quickWaits, type CardState, type Lane } from '../../lib/board';
 import { basename, cost, timeAgo } from '../../lib/format';
 import { suggestionLabel } from '../tools/Permission';
 
-const WHERE: Record<CardState, string> = { review: 'With you · to review', prompt: 'With you · Claude is asking', running: 'With Claude', stuck: 'With Claude · stopped, needs something from you', wait: 'Waiting on a condition', backlog: 'Not started', done: 'Done' };
+export type PanelMode = 'reject' | 'send' | 'wait' | null;
+
+const WHERE: Record<CardState, string> = { review: 'With you · to review', prompt: 'With you · Claude is asking', running: 'With Claude', queued: 'With Claude · queued for a slot', stuck: 'With Claude · stopped, needs something from you', wait: 'Waiting on a condition', backlog: 'Not started', done: 'Done' };
 
 /**
  * The chosen card in full: its intent, what Claude is asking or why it stopped, the handoff report
  * when there is one, the ledger of everything that happened to it, and at the bottom the actions
- * its state allows. Approving and sending back happen here without opening the conversation.
+ * its state allows. Approving, sending back and setting a wait happen here without opening the
+ * conversation. A schedule's card shows what it will run and when; its actions open the schedule.
  */
-export function CardPanel({ s, rt, state, mode, setMode, onAct, onClose, now }: { s: SessionSummary; rt?: Runtime; state: CardState; mode: 'reject' | 'send' | null; setMode: (m: 'reject' | 'send' | null) => void; onAct: (a: string) => void; onClose: () => void; now: number }) {
-  const actions = actionsFor(state, rt);
+export function CardPanel({ s, rt, state, mode, setMode, caps, cards, titles, onAct, onClose, now }: { s: SessionSummary; rt?: Runtime; state: CardState; mode: PanelMode; setMode: (m: PanelMode) => void; caps: { ci: boolean }; cards: Record<Lane, SessionSummary[]>; titles: Record<string, string>; onAct: (a: string, payload?: WaitCondition | null) => void; onClose: () => void; now: number }) {
+  const schedule = isSchedule(s.id);
+  const actions = schedule ? scheduleActions() : actionsFor(state, rt);
   const perm = state === 'prompt' ? rt?.pending?.[0] : undefined;
-  const ledger = ledgerOf(s, rt);
+  const ledger = schedule ? [] : ledgerOf(s, rt);
   const [editing, setEditing] = useState(false);
   useEffect(() => setEditing(false), [s.id]);
   return (
@@ -24,22 +28,24 @@ export function CardPanel({ s, rt, state, mode, setMode, onAct, onClose, now }: 
       <div className="bd-panel-h">
         <div className="bd-panel-meta">
           <span className="ellipsis">{basename(s.project || s.cwd)}{s.worktree ? ` · ${s.worktree.branch}` : s.gitBranch ? ` · ${s.gitBranch}` : ''}</span>
-          <button className="icon-btn sm" title="Open the conversation (Enter)" aria-label="Open the conversation" onClick={() => onAct('open')}>
-            <ArrowUpRight size={14} />
-          </button>
+          {!schedule && (
+            <button className="icon-btn sm" title="Open the conversation" aria-label="Open the conversation" onClick={() => onAct('open')}>
+              <ArrowUpRight size={14} />
+            </button>
+          )}
           <button className="icon-btn sm" title="Close (Esc)" aria-label="Close" onClick={onClose}>
             <X size={14} />
           </button>
         </div>
         <h3 className="bd-panel-title">{s.title}</h3>
-        <div className="bd-panel-where">{WHERE[state]}</div>
+        <div className="bd-panel-where">{schedule ? 'A schedule · runs on its own' : WHERE[state]}</div>
       </div>
 
       <div className="bd-panel-body">
         <section className="bd-sec">
           <h4>
-            Intent
-            {!editing && (
+            {schedule ? 'What it runs' : 'Intent'}
+            {!schedule && !editing && (
               <button className="icon-btn sm" title="Edit the intent" aria-label="Edit the intent" onClick={() => setEditing(true)}>
                 <Pencil size={12} />
               </button>
@@ -47,6 +53,25 @@ export function CardPanel({ s, rt, state, mode, setMode, onAct, onClose, now }: 
           </h4>
           {editing ? <IntentEditor s={s} done={() => setEditing(false)} /> : s.intent ? <p className="bd-intent">{s.intent}</p> : <p className="bd-hint">No intent yet. Two or three sentences on the goal and when it is done; a card with one can be handed to Claude from here.</p>}
         </section>
+
+        {(state === 'wait' || schedule) && s.wait && (
+          <section className="bd-sec">
+            <h4>{schedule ? 'Next run' : 'Waiting for'}</h4>
+            <p className="bd-intent">
+              <CalendarClock size={13} style={{ verticalAlign: '-2px', marginRight: 6 }} />
+              {describeWait(s.wait, titles)}
+              {s.wait.kind === 'time' && <span className="faint"> · {timeAgo(s.wait.at, now)}</span>}
+            </p>
+            {s.wait.prompt && <p className="bd-hint">Then: {s.wait.prompt}</p>}
+          </section>
+        )}
+        {state === 'queued' && s.queued && (
+          <section className="bd-sec">
+            <h4>Queued</h4>
+            <p className="bd-intent">Claude is working on as many cards as the limit allows. This one starts when a slot frees, with:</p>
+            <p className="bd-hint">{s.queued.text}</p>
+          </section>
+        )}
 
         {perm && (
           <section className="bd-sec">
@@ -102,22 +127,26 @@ export function CardPanel({ s, rt, state, mode, setMode, onAct, onClose, now }: 
           </section>
         )}
 
-        <section className="bd-sec">
-          <h4>Ledger</h4>
-          <div className="bd-ledger">
-            {ledger.map((e, i) => (
-              <div key={i} className={`bd-ev${e.tone ? ` tone-${e.tone}` : ''}`}>
-                <b>{e.label}</b>
-                <span className="bd-ev-when tnum">{timeAgo(e.at, now)}</span>
-                {e.note && <span className="bd-ev-note">{e.note}</span>}
-              </div>
-            ))}
-          </div>
-        </section>
+        {ledger.length > 0 && (
+          <section className="bd-sec">
+            <h4>Ledger</h4>
+            <div className="bd-ledger">
+              {ledger.map((e, i) => (
+                <div key={i} className={`bd-ev${e.tone ? ` tone-${e.tone}` : ''}`}>
+                  <b>{e.label}</b>
+                  <span className="bd-ev-when tnum">{timeAgo(e.at, now)}</span>
+                  {e.note && <span className="bd-ev-note">{e.note}</span>}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
       </div>
 
       <div className="bd-actions">
-        {mode ? (
+        {mode === 'wait' ? (
+          <WaitPicker s={s} caps={caps} cards={cards} now={now} onPick={(w) => onAct('set-wait', w)} onCancel={() => setMode(null)} />
+        ) : mode ? (
           <NoteBox s={s} kind={mode === 'reject' ? 'reject' : 'answer'} placeholder={mode === 'reject' ? 'What should change? It goes to Claude as the next message, in this same conversation.' : 'What does it need? Your message continues the conversation.'} onDone={() => setMode(null)} />
         ) : (
           actions.map((a) => (
@@ -130,6 +159,65 @@ export function CardPanel({ s, rt, state, mode, setMode, onAct, onClose, now }: 
         {state === 'review' && !mode && rt?.usage && rt.usage.costUsd > 0 && <span className="bd-actions-cost tnum faint">{cost(rt.usage.costUsd)} so far</span>}
       </div>
     </aside>
+  );
+}
+
+/** The conditions a card can wait on: CI on its branch, a time, or another card being approved. */
+function WaitPicker({ s, caps, cards, now, onPick, onCancel }: { s: SessionSummary; caps: { ci: boolean }; cards: Record<Lane, SessionSummary[]>; now: number; onPick: (w: WaitCondition) => void; onCancel: () => void }) {
+  const quick = quickWaits(now);
+  const [at, setAt] = useState('');
+  const [other, setOther] = useState('');
+  const others = [...cards.backlog, ...cards.agent, ...cards.wait, ...cards.me].filter((c) => c.id !== s.id && !isSchedule(c.id));
+  const branch = s.worktree?.branch || s.gitBranch || '';
+  const local = (ms: number) => {
+    const d = new Date(ms);
+    const p = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+  return (
+    <div className="bd-waitpick">
+      <div className="bd-hint">Claude is woken with the intent when the condition is met; until then the card sits in Waiting.</div>
+      {quick.map((q) => {
+        const ci = q.wait === 'ci';
+        const disabled = ci && !caps.ci;
+        return (
+          <button key={q.key} data-k={q.key} className="bd-waitopt" disabled={disabled} title={disabled ? 'Needs the GitHub CLI (gh) on this machine' : undefined} onClick={() => onPick(ci ? { kind: 'ci', cwd: s.cwd, branch, since: now } : (q.wait as WaitCondition))}>
+            <span className="key">{q.key}</span>
+            <span>
+              {q.label}
+              {ci && branch ? <small> · {branch}</small> : null}
+            </span>
+            <small>{disabled ? 'no gh' : q.hint}</small>
+          </button>
+        );
+      })}
+      <div className="bd-waitrow">
+        <input id="bd-wait-at" type="datetime-local" className="input" value={at} min={local(now + 60e3)} onChange={(e) => setAt(e.target.value)} />
+        <button className="btn sm" disabled={!at || new Date(at).getTime() <= now} onClick={() => onPick({ kind: 'time', at: new Date(at).getTime() })}>
+          Until then
+        </button>
+      </div>
+      {others.length > 0 && (
+        <div className="bd-waitrow">
+          <select id="bd-wait-card" className="input" value={other} onChange={(e) => setOther(e.target.value)}>
+            <option value="">Until another card is approved…</option>
+            {others.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.title}
+              </option>
+            ))}
+          </select>
+          <button className="btn sm" disabled={!other} onClick={() => onPick({ kind: 'session', id: other })}>
+            Wait for it
+          </button>
+        </div>
+      )}
+      <div className="bd-note-row">
+        <button className="btn sm ghost" onClick={onCancel}>
+          Cancel<span className="key">Esc</span>
+        </button>
+      </div>
+    </div>
   );
 }
 

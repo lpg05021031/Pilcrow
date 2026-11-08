@@ -7,7 +7,6 @@ import { RightPanel } from './RightPanel';
 import { Welcome } from './Welcome';
 import { Board } from './Board';
 import { IntentDialog } from './board/IntentDialog';
-import { InboxPage } from './Inbox';
 import { NewSessionDialog } from './NewSessionDialog';
 import { SettingsDialog } from './SettingsDialog';
 import { McpAuthDialog } from './McpAuthDialog';
@@ -30,7 +29,7 @@ export function App() {
   const waiting = sessions.filter((s) => s.status === 'requires_action').length;
 
   useEffect(() => {
-    document.title = `${waiting ? `(${waiting}) ` : ''}${page === 'board' ? 'Workboard — ' : page === 'inbox' ? 'Inbox — ' : session ? `${session.title} — ` : ''}Pilcrow`;
+    document.title = `${waiting ? `(${waiting}) ` : ''}${page === 'board' ? 'Workboard — ' : session ? `${session.title} — ` : ''}Pilcrow`;
   }, [waiting, session?.title, page]); // eslint-disable-line react-hooks/exhaustive-deps -- only the title is read
 
   useEffect(() => {
@@ -143,7 +142,7 @@ export function App() {
           </div>
         )}
         <UpdateNotice />
-        {page === 'board' ? <Board /> : page === 'inbox' ? <InboxPage /> : session ? <SessionView key={session.id} session={session} /> : <Welcome />}
+        {page === 'board' ? <Board /> : session ? <SessionView key={session.id} session={session} /> : <Welcome />}
         <Toasts />
       </main>
       {panelOpen && <Resizer side="right" onResize={resizePanel} />}

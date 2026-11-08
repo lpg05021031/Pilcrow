@@ -206,6 +206,13 @@
 .bd-card.stuck .bd-stripe {
   background: var(--err);
 }
+.bd-card.queued .bd-stripe {
+  background: var(--hair-3);
+}
+.bd-chip.queued {
+  background: var(--fill-1);
+  color: var(--text-3);
+}
 .bd-card-top {
   display: flex;
   align-items: center;
@@ -649,6 +656,51 @@
 }
 .bd-note-row .bd-hint {
   margin-left: auto;
+}
+
+/* what to wait for */
+.bd-waitpick {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.bd-waitopt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 7px 10px;
+  border-radius: var(--r-2);
+  background: var(--raised);
+  box-shadow: 0 0 0 0.5px var(--hair-2);
+  font-size: var(--fs-small);
+}
+.bd-waitopt:hover:not(:disabled) {
+  box-shadow: 0 0 0 1px var(--accent-line);
+}
+.bd-waitopt:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.bd-waitopt > span:nth-child(2) {
+  flex: 1;
+  min-width: 0;
+}
+.bd-waitopt small {
+  color: var(--text-3);
+  font-size: var(--fs-micro);
+}
+.bd-waitrow {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.bd-waitrow .input {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--fs-small);
 }
 
 /* the key legend */

@@ -368,6 +368,12 @@ SessionView 標題列選單加「寫成卡片」：開一個只有意圖欄的�
 
 ## 15. 進度
 
+- 第 3 階段（2026-11-08）：`session.wait` 與三種條件（時間、CI 用 `gh run list` 每 2 分鐘輪詢、相依在核准時喚醒）；
+  `board.tick` 每 30 秒跑；`maxConcurrent` 上限與排隊（`meta.queued`，turn end 與 tick 遞補；手動送訊息不受限）；
+  排程觸發前以虛擬卡出現在「等待中」，排程清單與新增移到該欄標題的選單；排程啟動的 session 帶 `intent`，跑完進「需要你」。
+  Inbox 頁與其 CSS 移除，`inbox.*` RPC 與 `inbox.json` 保留。側板的等待選單：CI（沒有 gh 時停用）、明天 09:00、一小時後、
+  自選時間、等另一張卡。
+
 - 第 2 階段（2026-11-08）：`server/handoff.js`（`HANDOFF_PROMPT` 附在系統提示、`parseHandoff`、`filesChanged` 由 diff 量）；
   一輪結束時寫 `meta.report`；`approve` 的 commit 訊息用 report 的 `did` 第一句，非 worktree session 只 add report 的檔案；
   待辦欄就地開單（`NewCard`：標題、意圖、專案 chip、worktree、模型，Enter / Ctrl+Enter）；New session 對話框的第一則訊息

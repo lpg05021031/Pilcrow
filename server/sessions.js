@@ -9,7 +9,7 @@ import { resolveClaude } from './claude.js';
 import * as history from './history.js';
 import * as snapshots from './snapshots.js';
 import * as memory from './memory.js';
-import { boardFields } from './board.js';
+import { boardFields, drainQueue } from './board.js';
 import * as handoff from './handoff.js';
 import * as git from './git.js';
 import { AsyncQueue, uuid, IS_ROOT, log, xdg, slugify, cleanEnv, slash } from './util.js';
@@ -425,6 +425,8 @@ class Session {
           .recordTurn(this, typeof msg.result === 'string' ? msg.result : '', turnEnd)
           .then((r) => r !== undefined && bus.emit('list-changed'))
           .catch((e) => log('handoff failed', e?.message));
+        // A slot came free: the oldest queued card starts.
+        drainQueue().catch((e) => log('queue drain failed', e?.message));
         this.markDelivered(msg.user_message_uuids || (msg.user_message_uuid ? [msg.user_message_uuid] : null));
         if (!(msg.queued_turn_count > 0)) {
           this.status = 'idle';

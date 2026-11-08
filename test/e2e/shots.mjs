@@ -113,9 +113,11 @@ try {
   await page.locator('.bd-new-intent').fill('config.json becomes pilcrow.json; the loader reads both for a version.');
   await shot('board-new');
   await key('Escape', 300);
-  await page.click('button[title="Results of scheduled sessions"]');
-  await sleep(900);
-  await shot('inbox');
+  await page.click('.bd-card[data-card="sess-empty"]');
+  await sleep(300);
+  await key('w', 400);
+  await shot('board-wait');
+  await key('Escape', 300);
   await open('sess-login');
 
   await key('Control+,', 900);
@@ -208,10 +210,11 @@ try {
   await shot('confirm');
   await page.click('.dialog-foot button:has-text("Cancel")').catch(() => key('Escape', 300));
   await sleep(700);
-  // the schedule dialog from the inbox, with the folder picker open
-  await page.click('.side-page:has-text("Inbox")');
-  await sleep(700);
-  await page.click('.inbox-rail-h button:has-text("New")');
+  // the schedule dialog from the Waiting lane of the workboard, with the folder picker open
+  await key('Control+Shift+O', 900);
+  await page.click('.bd-lane.wait .bd-lane-menu');
+  await sleep(500);
+  await page.locator('.menu-item:has-text("New schedule")').click();
   await sleep(700);
   await shot('schedule');
   await page.click('.sd-folder');

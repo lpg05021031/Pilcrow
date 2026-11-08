@@ -1,6 +1,6 @@
 import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { EASE, reducedMotion } from '../lib/motion';
-import { Plus, Search, Settings, Sun, Moon, Monitor, ChevronRight, Archive, FolderGit2, GitBranch, Pin, Ellipsis, Pencil, GitFork, Trash, PinOff, ArchiveRestore, X, SquarePen, SlidersHorizontal, PanelLeftClose, LayoutGrid, Inbox } from 'lucide-react';
+import { Plus, Search, Settings, Sun, Moon, Monitor, ChevronRight, Archive, FolderGit2, GitBranch, Pin, Ellipsis, Pencil, GitFork, Trash, PinOff, ArchiveRestore, X, SquarePen, SlidersHorizontal, PanelLeftClose, LayoutGrid } from 'lucide-react';
 import { foldingRows, useStore, openSession, setDialog, setTheme, setUi, archiveSession, pinSession, forkSession, deleteSession, confirmAction, renameSession, quickNewSession, showPage } from '../lib/store';
 import { laneOf } from '../lib/board';
 import type { SessionSummary } from '../lib/types';
@@ -23,7 +23,6 @@ export function Sidebar() {
   const activeId = useStore((s) => s.activeId);
   const unread = useStore((s) => s.unread);
   const page = useStore((s) => s.page);
-  const inboxUnread = useStore((s) => s.inboxUnread);
   const config = useStore((s) => s.config);
   const info = useStore((s) => s.info);
   const ui = useStore((s) => s.ui);
@@ -36,7 +35,7 @@ export function Sidebar() {
 
   const { attention, pinned, groups, archivedCount } = useMemo(() => {
     let list = sessions.filter((s) => (ui.showArchived ? s.archived : !s.archived));
-    // Runs started by a schedule live in the inbox; the active one still shows so its row can be found.
+    // Runs started by a schedule are cards on the workboard; the active one still shows so its row can be found.
     if (!q.trim()) list = list.filter((s) => !s.scheduled || s.id === activeId);
     if (q.trim()) list = list.filter((s) => fuzzyScore(q, `${s.title} ${basename(s.project || s.cwd)}`));
     // The conversation on screen never jumps into "Needs you": you are already looking at it, and its
@@ -94,11 +93,6 @@ export function Sidebar() {
             <LayoutGrid size={15} />
             <span className="grow">Workboard</span>
             {needsAll > 0 ? <span className="side-page-n needs tnum">{needsAll}</span> : working > 0 ? <span className="side-page-n tnum">{working}</span> : null}
-          </button>
-          <button className={`side-page${page === 'inbox' ? ' on' : ''}`} onClick={() => showPage(page === 'inbox' ? 'session' : 'inbox')} title="Results of scheduled sessions">
-            <Inbox size={15} />
-            <span className="grow">Inbox</span>
-            {inboxUnread > 0 && <span className="side-page-n unread tnum">{inboxUnread}</span>}
           </button>
         </div>
       </div>

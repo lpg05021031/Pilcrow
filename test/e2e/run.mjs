@@ -443,6 +443,34 @@ test('workboard: a finished turn shows its handoff on the card and in the panel'
   expect(dd.some((d) => d.includes('partialJson.ts')), 'the panel should list the changed file');
 });
 
+test('workboard: a backlog card can wait for a time, then be woken from the panel', async ({ page }) => {
+  await ctl.call('mock.pace', { ms: 0 });
+  await page.locator('.side-page', { hasText: 'Workboard' }).click();
+  await page.click('.bd-card[data-card="sess-empty"]');
+  await page.waitForSelector('.bd-panel', { timeout: 5000 });
+  await page.keyboard.press('w');
+  await page.waitForSelector('.bd-waitpick', { timeout: 3000 });
+  expect(await page.locator('.bd-waitopt[data-k="1"]').isDisabled(), 'CI should be offered but off when gh is missing');
+  await page.keyboard.press('2'); // tomorrow 09:00
+  await page.waitForSelector('.bd-lane.wait .bd-card[data-card="sess-empty"]', { timeout: 5000 });
+  const line = await page.locator('.bd-card[data-card="sess-empty"] .bd-card-line').textContent();
+  expect(line.startsWith('Until'), `the card should say what it waits for, got: ${line}`);
+  await page.click('.bd-card[data-card="sess-empty"]');
+  await page.locator('.bd-actions .btn.primary', { hasText: 'Wake now' }).click();
+  await page.waitForSelector('.bd-lane.agent .bd-card[data-card="sess-empty"], .bd-lane.me .bd-card[data-card="sess-empty"]', { timeout: 15_000 });
+  expect(await page.locator('.bd-lane.wait .bd-card[data-card="sess-empty"]').count() === 0, 'the card is still waiting');
+});
+
+test('workboard: the Waiting lane menu lists schedules and opens the dialog for a new one', async ({ page }) => {
+  await page.locator('.side-page', { hasText: 'Workboard' }).click();
+  await page.click('.bd-lane.wait .bd-lane-menu');
+  await page.locator('.menu-item:has-text("New schedule")').click();
+  await page.waitForSelector('.sd', { timeout: 5000 });
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.sd', { state: 'detached', timeout: 3000 });
+  expect(await page.locator('.side-page', { hasText: 'Inbox' }).count() === 0, 'the Inbox page should be gone from the sidebar');
+});
+
 // ---------------------------------------------------------------- run
 
 const chosen = tests.filter((t) => !grep || t.name.includes(grep));

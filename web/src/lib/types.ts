@@ -40,6 +40,8 @@ export interface SessionSummary {
   costUsd?: number;
   wait?: WaitCondition | null;
   report?: HandoffReport | null;
+  /** Held until Claude is below the concurrency limit; the text is what will be sent. */
+  queued?: { text: string; at: number } | null;
 }
 
 export type DecisionKind = 'approve' | 'reject' | 'answer' | 'park' | 'wait' | 'wake' | 'stop' | 'start' | 'steer';
@@ -67,6 +69,18 @@ export interface BoardState {
   today: { cost: number; sessions: number; done: number; perSession: { id: string; title: string; cost: number }[] };
   spend: { at: number; id: string; delta: number }[];
   limit: { max: number; running: number };
+  /** Schedules that will fire: cards in the Waiting lane until they do. */
+  scheduled: ScheduledRun[];
+  caps: { ci: boolean };
+}
+export interface ScheduledRun {
+  id: string;
+  name: string;
+  cwd: string;
+  prompt: string;
+  at: number;
+  cadence: string;
+  createdAt: number;
 }
 
 export interface PermissionSuggestion {

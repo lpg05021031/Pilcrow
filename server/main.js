@@ -110,6 +110,8 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
   schedules.events.on('schedules', () => broadcast('schedules.changed', {}));
   schedules.events.on('inbox', () => broadcast('inbox.changed', schedules.inboxList().unread));
   schedules.start();
+  // Wakes cards whose time or CI came, and fills free slots from the queue (docs/WORKBOARD.md §7, §8).
+  setInterval(() => board.tick().catch((e) => log('board tick failed', e?.message)), 30_000);
   memory.events.on('changed', (d) => broadcast('memory.changed', d));
   term.terminals.on('data', (d) => broadcast('term.data', d));
   term.terminals.on('exit', (d) => broadcast('term.exit', d));
@@ -248,6 +250,7 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
     'session.intent': ({ id, intent }) => board.setIntent(id, intent),
     'session.decide': ({ id, kind, note, turn }) => board.decide(id, { kind, note, turn }),
     'session.start': ({ id, text }) => board.start(id, text),
+    'session.wait': ({ id, wait }) => board.setWait(id, wait),
     // ---- time machine
     'timeline.steps': async ({ id }) => snapshots.steps(await S(id)),
     'timeline.diff': async ({ id, from, to }) => snapshots.diff(await S(id), { from, to }),

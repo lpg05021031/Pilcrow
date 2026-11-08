@@ -5,12 +5,12 @@ import { rpc } from './rpc';
 import { TranscriptModel } from './transcript';
 import { setHome } from './format';
 import { EASE_EXIT, reducedMotion } from './motion';
-import type { AppInfo, Config, SessionState, SessionSummary, PermissionMode, Effort, RawMsg, GatewayModels, TimelineStep, PermissionDecision, DecisionKind } from './types';
+import type { AppInfo, Config, SessionState, SessionSummary, PermissionMode, Effort, RawMsg, GatewayModels, TimelineStep, PermissionDecision, DecisionKind, WaitCondition } from './types';
 import type { PilcrowNative } from './globals';
 import { errText } from './format';
 
 export type PanelTab = 'changes' | 'files' | 'terminal' | 'preview' | 'tasks' | 'history' | 'info';
-export type Page = 'session' | 'board' | 'inbox';
+export type Page = 'session' | 'board';
 
 export interface Runtime extends Partial<SessionState> {
   rev: number;
@@ -103,8 +103,6 @@ interface State {
   timeline: Record<string, TimelineStep[]>;
   /** What the main column shows: the open session, or one of the app-wide pages. */
   page: Page;
-  /** Unread results in the inbox (scheduled runs). */
-  inboxUnread: number;
   /** Bumped when schedules or the inbox change on the server. */
   schedRev: number;
   /** Edit or create a schedule; `null` closed, `{}` new. */
@@ -135,7 +133,6 @@ export const useStore = create<State>(() => ({
   gatewayModels: null,
   timeline: {},
   page: 'session',
-  inboxUnread: 0,
   schedRev: 0,
   scheduleDialog: null,
   lightbox: null,
@@ -357,7 +354,6 @@ export function initApp() {
       setHome(info.home);
       set({ info, config });
       loadGatewayModels();
-      rpc.call<{ unread: number }>('inbox.list').then((r) => set({ inboxUnread: r.unread })).catch(() => {});
       applyConfigUi(config);
       applyTheme();
       refreshSessions();
@@ -384,7 +380,7 @@ export function initApp() {
   rpc.on('sessions.changed', () => refreshSessions());
   rpc.on('schedules.changed', () => set({ schedRev: get().schedRev + 1 }));
   rpc.on('memory.changed', () => set({ schedRev: get().schedRev + 1 }));
-  rpc.on('inbox.changed', (unread: number) => set({ inboxUnread: typeof unread === 'number' ? unread : get().inboxUnread, schedRev: get().schedRev + 1 }));
+  rpc.on('inbox.changed', () => set({ schedRev: get().schedRev + 1 }));
   rpc.on('timeline.step', ({ id, step }: { id: string; step: TimelineStep }) => {
     const cur = get().timeline[id];
     if (!cur) return; // nobody has asked for this session's timeline yet
@@ -718,9 +714,15 @@ export async function decideCard(id: string, kind: DecisionKind, note?: string) 
   if (kind === 'approve') bumpFs();
   return r;
 }
+/** Set or clear what a card waits for; the server wakes it when the condition is met. */
+export async function setWait(id: string, wait: WaitCondition | null) {
+  await call('session.wait', { id, wait });
+  await refreshSessions(true);
+}
 /** Hand a backlog card to Claude: its intent becomes the first message. */
 export async function startCard(id: string, text?: string) {
-  await call('session.start', { id, text });
+  const r = await call<{ queued?: boolean }>('session.start', { id, text });
+  if (r?.queued) toast('Queued: Claude is at the limit, it starts when a slot frees', 'info');
   await refreshSessions(true);
 }
 

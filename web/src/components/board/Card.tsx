@@ -1,21 +1,22 @@
 import { memo } from 'react';
 import type { SessionSummary } from '../../lib/types';
 import type { Runtime } from '../../lib/store';
-import { cardState, cardLine } from '../../lib/board';
+import { cardState, cardLine, isSchedule } from '../../lib/board';
 import { basename, cost, duration, shortModel } from '../../lib/format';
 import { WorkingMark } from '../ui/bits';
 
-const CHIP: Record<string, string> = { review: 'To review', prompt: 'Asking', running: 'Working', stuck: 'Stopped', wait: 'Waiting', done: 'Done', backlog: '' };
+const CHIP: Record<string, string> = { review: 'To review', prompt: 'Asking', running: 'Working', queued: 'Queued', stuck: 'Stopped', wait: 'Waiting', done: 'Done', backlog: '' };
 
 /**
  * One session as a card: id line with a state chip, the title, one line on what it is waiting for
  * or doing, and a foot with who is on it and what it has cost. The stripe on the left is the only
  * colour: accent for a review, amber for a prompt, blue while working, red when stopped.
  */
-export const Card = memo(function Card({ s, rt, selected, now, onSelect, onOpen }: { s: SessionSummary; rt?: Runtime; selected: boolean; now: number; onSelect: () => void; onOpen: () => void }) {
+export const Card = memo(function Card({ s, rt, selected, now, titles, onSelect, onOpen }: { s: SessionSummary; rt?: Runtime; selected: boolean; now: number; titles?: Record<string, string>; onSelect: () => void; onOpen: () => void }) {
   const state = cardState(s, rt, now);
   if (!state) return null;
-  const line = cardLine(s, state, rt);
+  const schedule = isSchedule(s.id);
+  const line = cardLine(s, state, rt, titles);
   // Who is on it: the model once Claude has run (the live state knows it), otherwise you.
   const model = rt?.activeModel ? shortModel(rt.activeModel) : '';
   const elapsed = state === 'running' && rt?.turnStartedAt ? now - rt.turnStartedAt : 0;
@@ -28,7 +29,7 @@ export const Card = memo(function Card({ s, rt, selected, now, onSelect, onOpen 
       <span className="bd-stripe" aria-hidden="true" />
       <div className="bd-card-top">
         <span className="ellipsis">{basename(s.project || s.cwd)}{s.worktree ? ` · ${s.worktree.branch.replace(/^pilcrow\//, '')}` : ''}</span>
-        {CHIP[state] && <span className={`bd-chip ${state}`}>{CHIP[state]}</span>}
+        {schedule ? <span className="bd-chip wait">Scheduled</span> : CHIP[state] ? <span className={`bd-chip ${state}`}>{CHIP[state]}</span> : null}
       </div>
       <div className="bd-card-title">{s.title}</div>
       {line.text && <div className={`bd-card-line${line.tone ? ` ${line.tone}` : ''}`}>{line.text}</div>}

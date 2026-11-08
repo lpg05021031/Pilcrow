@@ -1,31 +1,37 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { PanelLeftOpen, CircleAlert, Plus } from 'lucide-react';
-import { useStore, call, openSession, setUi, decideCard, startCard } from '../lib/store';
-import type { BoardState, SessionSummary } from '../lib/types';
-import { LANES, laneOf, cardState, step, actionsFor, type Lane } from '../lib/board';
-import { cost } from '../lib/format';
+import { PanelLeftOpen, CircleAlert, Plus, CalendarClock } from 'lucide-react';
+import { useStore, call, openSession, setUi, decideCard, startCard, setWait, toast } from '../lib/store';
+import type { BoardState, Schedule, SessionSummary, WaitCondition } from '../lib/types';
+import { LANES, laneOf, cardState, step, actionsFor, scheduleCard, scheduleActions, isSchedule, SCHEDULE_PREFIX, type Lane } from '../lib/board';
+import { cost, timeAgo } from '../lib/format';
 import { useNow, Num } from './ui/bits';
+import { MenuButton, type MenuItem } from './ui/Popover';
 import { typingElsewhere } from './tools/Permission';
 import { Card } from './board/Card';
-import { CardPanel } from './board/CardPanel';
+import { CardPanel, type PanelMode } from './board/CardPanel';
 import { NewCard } from './board/NewCard';
+import { ScheduleDialog } from './ScheduleDialog';
 
 /** The card chosen last time the board was open, so coming back from a session lands on it. */
 let remembered: string | null = null;
 
 /**
  * The workboard: one lane for each pair of hands the work can be in — backlog, Claude, a condition,
- * you, done — and one card per session that is work (it has an intent) or is doing something. Only
- * the "Needs you" lane carries the accent. The panel on the right shows the chosen card's intent,
- * ledger and the actions its state allows; a single key does each of them.
+ * you, done — and one card per session that is work (it has an intent) or is doing something.
+ * Schedules that will fire sit in the Waiting lane until they do. Only the "Needs you" lane carries
+ * the accent. The panel on the right shows the chosen card's intent, ledger and the actions its
+ * state allows; a single key does each of them.
  */
 export function Board() {
   const sessions = useStore((s) => s.sessions);
   const rt = useStore((s) => s.rt);
   const sidebar = useStore((s) => s.ui.sidebar);
+  const schedRev = useStore((s) => s.schedRev);
+  const scheduleDialog = useStore((s) => s.scheduleDialog);
   const [state, setState] = useState<BoardState | null>(null);
+  const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [sel, setSel] = useState<string | null>(remembered);
-  const [mode, setMode] = useState<'reject' | 'send' | null>(null);
+  const [mode, setMode] = useState<PanelMode>(null);
   const [creating, setCreating] = useState(false);
   const now = useNow(1000, true);
   const box = useRef<HTMLDivElement>(null);
@@ -50,21 +56,35 @@ export function Board() {
       alive = false;
       clearInterval(t);
     };
-  }, [sessions.length]);
+  }, [sessions.length, schedRev]);
+  useEffect(() => {
+    let alive = true;
+    call<Schedule[]>('schedules.list', {}, { quiet: true })
+      .then((r) => alive && setSchedules(r || []))
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [schedRev]);
+
+  // Schedules are cards too, under their own ids; the panel treats them by their actions, not a transcript.
+  const all = useMemo(() => [...sessions, ...(state?.scheduled || []).map(scheduleCard)], [sessions, state?.scheduled]);
+  const titles = useMemo(() => Object.fromEntries(sessions.map((s) => [s.id, s.title])), [sessions]);
 
   const lanes = useMemo(() => {
     const out: Record<Lane, SessionSummary[]> = { backlog: [], agent: [], wait: [], me: [], done: [] };
-    for (const s of sessions) {
+    for (const s of all) {
       const lane = laneOf(s, rt[s.id], now);
       if (lane) out[lane].push(s);
     }
-    // Prompts first in "Needs you"; otherwise the most recently touched on top.
+    // Prompts first in "Needs you"; the soonest condition first in "Waiting"; otherwise the most recently touched on top.
     out.me.sort((a, b) => Number(cardState(b, rt[b.id], now) === 'prompt') - Number(cardState(a, rt[a.id], now) === 'prompt') || (b.lastModified || 0) - (a.lastModified || 0));
-    for (const k of ['backlog', 'agent', 'wait', 'done'] as Lane[]) out[k].sort((a, b) => (b.lastModified || 0) - (a.lastModified || 0));
+    out.wait.sort((a, b) => (a.wait?.kind === 'time' ? a.wait.at : Infinity) - (b.wait?.kind === 'time' ? b.wait.at : Infinity) || (b.lastModified || 0) - (a.lastModified || 0));
+    for (const k of ['backlog', 'agent', 'done'] as Lane[]) out[k].sort((a, b) => (b.lastModified || 0) - (a.lastModified || 0));
     return out;
-  }, [sessions, rt, Math.floor(now / 60e3)]); // eslint-disable-line react-hooks/exhaustive-deps -- lanes only move on the minute
+  }, [all, rt, Math.floor(now / 60e3)]); // eslint-disable-line react-hooks/exhaustive-deps -- lanes only move on the minute
 
-  const selected = sel ? sessions.find((s) => s.id === sel) || null : null;
+  const selected = sel ? all.find((s) => s.id === sel) || null : null;
   const selState = selected ? cardState(selected, rt[selected.id], now) : null;
   const select = useCallback((id: string | null) => {
     remembered = id;
@@ -82,24 +102,46 @@ export function Board() {
   const stuck = lanes.agent.filter((s) => cardState(s, rt[s.id], now) === 'stuck');
   const running = state?.limit.running ?? lanes.agent.filter((s) => s.status === 'running' || s.status === 'starting').length;
   const max = state?.limit.max ?? 0;
+  const openSchedule = (id?: string) => useStore.setState({ scheduleDialog: id ? { id } : {} });
 
   const act = useCallback(
-    async (id: string, action: string) => {
+    async (id: string, action: string, payload?: WaitCondition | null) => {
+      if (isSchedule(id)) {
+        const sid = id.slice(SCHEDULE_PREFIX.length);
+        if (action === 'schedule-edit' || action === 'open') openSchedule(sid);
+        else if (action === 'schedule-run') {
+          await call('schedules.runNow', { id: sid });
+          toast('Running now', 'info');
+        }
+        return;
+      }
       const s = useStore.getState().sessions.find((x) => x.id === id);
       if (!s) return;
+      const nextNeeds = () => {
+        const me = lanes.me.filter((x) => x.id !== id);
+        select(me[0]?.id || null);
+      };
       if (action === 'open') {
         setUi({ returnTo: 'board', ...(cardState(s, useStore.getState().rt[id]) === 'review' ? { panel: true, panelTab: 'changes' as const } : {}) });
         openSession(id);
       } else if (action === 'approve') {
         await decideCard(id, 'approve');
-        const me = lanes.me.filter((x) => x.id !== id);
-        select(me[0]?.id || null);
+        nextNeeds();
       } else if (action === 'park') {
         await decideCard(id, 'park');
-        const me = lanes.me.filter((x) => x.id !== id);
-        select(me[0]?.id || null);
+        nextNeeds();
       } else if (action === 'reject') setMode('reject');
       else if (action === 'send') setMode('send');
+      else if (action === 'wait') setMode('wait');
+      else if (action === 'set-wait') {
+        await setWait(id, payload || null);
+        setMode(null);
+        if (payload) {
+          toast('Waiting; Claude is woken when the condition is met', 'info');
+          nextNeeds();
+        }
+      } else if (action === 'unwait') await setWait(id, null);
+      else if (action === 'wake') await decideCard(id, 'wake');
       else if (action === 'stop') await decideCard(id, 'stop');
       else if (action === 'start') await startCard(id);
     },
@@ -110,9 +152,12 @@ export function Board() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (typingElsewhere(e.target) || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (scheduleDialog) return;
       const k = e.key;
       const dir = k === 'j' || k === 'ArrowDown' ? 'down' : k === 'k' || k === 'ArrowUp' ? 'up' : k === 'l' || k === 'ArrowRight' ? 'right' : k === 'h' || k === 'ArrowLeft' ? 'left' : null;
-      if (dir) {
+      if (mode === 'wait' && '123'.includes(k) && k !== '') {
+        document.querySelector<HTMLButtonElement>(`.bd-waitpick [data-k="${k}"]`)?.click();
+      } else if (dir) {
         select(step(lanes, sel, dir));
       } else if ('12345'.includes(k) && k !== '' && !(selState === 'prompt')) {
         const lane = LANES[Number(k) - 1];
@@ -125,7 +170,7 @@ export function Board() {
         else if (sel) select(null);
         else return;
       } else if (selected && selState) {
-        const actions = actionsFor(selState, rt[selected.id]);
+        const actions = isSchedule(selected.id) ? scheduleActions() : actionsFor(selState, rt[selected.id]);
         const hit = k === 'Enter' ? actions[0] : actions.find((a) => a.key === k);
         if (!hit) return;
         act(selected.id, hit.id);
@@ -134,7 +179,14 @@ export function Board() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [lanes, sel, selected, selState, mode, rt, act, select]);
+  }, [lanes, sel, selected, selState, mode, rt, act, select, scheduleDialog]);
+
+  const scheduleMenu = (): MenuItem[] => [
+    { heading: schedules.length ? 'Schedules' : 'No schedules yet' },
+    ...schedules.map((s) => ({ label: s.name, hint: s.enabled ? `${s.cadenceLabel}${s.nextRunAt ? ` · next ${timeAgo(s.nextRunAt, now)}` : ''}` : `${s.cadenceLabel} · paused`, checked: s.enabled, onSelect: () => openSchedule(s.id) })),
+    { separator: true },
+    { label: 'New schedule…', icon: CalendarClock, onSelect: () => openSchedule() },
+  ];
 
   const today = new Date(now).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
   return (
@@ -166,7 +218,7 @@ export function Board() {
         </span>
         <span className="grow" />
         {max > 0 && (
-          <span className={`bd-fact bd-limit${running >= max ? ' full' : ''}`} title="Sessions Claude works on at once (Settings → maxConcurrent)">
+          <span className={`bd-fact bd-limit${running >= max ? ' full' : ''}`} title="Sessions Claude works on at once from the board (maxConcurrent in the config; 0 for no limit)">
             running <b className="tnum">{running}</b> / {max}
           </span>
         )}
@@ -198,6 +250,11 @@ export function Board() {
                     <Plus size={13} />
                   </button>
                 )}
+                {lane.key === 'wait' && (
+                  <MenuButton items={scheduleMenu} className="icon-btn sm bd-lane-menu" title="Schedules: recurring work that lands here before each run" width={300}>
+                    <CalendarClock size={13} />
+                  </MenuButton>
+                )}
                 <span className={`bd-lane-n tnum${lane.key === 'agent' && max > 0 && running >= max ? ' full' : ''}`}>{lane.key === 'agent' && max > 0 ? `${running}/${max}` : lanes[lane.key].length}</span>
               </div>
               <div className="bd-cards">
@@ -209,13 +266,15 @@ export function Board() {
                     }}
                   />
                 )}
-                {lanes[lane.key].length ? lanes[lane.key].map((s) => <Card key={s.id} s={s} rt={rt[s.id]} selected={s.id === sel} now={now} onSelect={() => select(s.id)} onOpen={() => act(s.id, 'open')} />) : lane.key === 'backlog' && creating ? null : <div className="bd-empty">{lane.empty}</div>}
+                {lanes[lane.key].length ? lanes[lane.key].map((s) => <Card key={s.id} s={s} rt={rt[s.id]} selected={s.id === sel} now={now} titles={titles} onSelect={() => select(s.id)} onOpen={() => act(s.id, 'open')} />) : lane.key === 'backlog' && creating ? null : <div className="bd-empty">{lane.empty}</div>}
               </div>
             </section>
           ))}
         </div>
-        {selected && selState && <CardPanel s={selected} rt={rt[selected.id]} state={selState} mode={mode} setMode={setMode} onAct={(a) => act(selected.id, a)} onClose={() => select(null)} now={now} />}
+        {selected && selState && <CardPanel s={selected} rt={rt[selected.id]} state={selState} mode={mode} setMode={setMode} caps={state?.caps || { ci: false }} cards={lanes} titles={titles} onAct={(a, p) => act(selected.id, a, p)} onClose={() => select(null)} now={now} />}
       </div>
+
+      {scheduleDialog && <ScheduleDialog spec={scheduleDialog} schedule={scheduleDialog.id ? schedules.find((s) => s.id === scheduleDialog.id) : undefined} />}
 
       <footer className="bd-keys">
         <span>
@@ -239,7 +298,7 @@ export function Board() {
           <kbd>r</kbd> send back
         </span>
         <span>
-          <kbd>w</kbd> set aside
+          <kbd>w</kbd> wait / set aside
         </span>
         <span>
           <kbd>s</kbd> stop

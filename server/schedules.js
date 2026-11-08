@@ -204,7 +204,7 @@ export async function runNow(id, { manual = true } = {}) {
   if (running.size >= MAX_PARALLEL && !manual) return null; // the tick retries in a minute
   const startedAt = Date.now();
   const stamp = new Date(startedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
-  const { id: sessionId } = await sessions.create({ cwd: s.cwd, worktree: s.worktree ? { name: s.name } : null, mode: s.mode === 'deny' ? 'default' : s.mode, model: s.model || undefined, effort: s.effort || undefined, title: `${s.name} · ${stamp}` });
+  const { id: sessionId } = await sessions.create({ cwd: s.cwd, worktree: s.worktree ? { name: s.name } : null, mode: s.mode === 'deny' ? 'default' : s.mode, model: s.model || undefined, effort: s.effort || undefined, title: `${s.name} · ${stamp}`, intent: s.prompt });
   store.setMeta(sessionId, { scheduled: { id: s.id, name: s.name, at: startedAt, manual } });
   const session = sessions.find(sessionId);
   session.unattended = true;

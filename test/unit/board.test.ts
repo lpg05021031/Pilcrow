@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { actionsFor, awaitsReview, cardLine, cardState, laneOf, ledgerOf, step } from '../../web/src/lib/board';
+import { actionsFor, awaitsReview, cardLine, cardState, laneOf, ledgerOf, scheduleCard, step } from '../../web/src/lib/board';
 import type { Lane } from '../../web/src/lib/board';
 import type { SessionSummary } from '../../web/src/lib/types';
 
@@ -47,6 +47,19 @@ describe('laneOf', () => {
   it('running wins over an unreviewed turn (a send-back is in flight)', () => {
     expect(laneOf(card({ turnEnd: NOW - 60e3, status: 'running' }), undefined, NOW)).toBe('agent');
   });
+  it('a queued card is with Claude, even before it has an intent turn; a stop clears it', () => {
+    const q = card({ queued: { text: 'go', at: NOW } });
+    expect(laneOf(q, undefined, NOW)).toBe('agent');
+    expect(cardState(q, undefined, NOW)).toBe('queued');
+    expect(actionsFor('queued').map((a) => a.id)).toEqual(['open', 'stop']);
+    expect(cardLine(q, 'queued').text).toMatch(/Queued/);
+  });
+  it('a schedule is a waiting card under its own id', () => {
+    const s = scheduleCard({ id: 'sch1', name: 'Nightly tests', cwd: '/p', prompt: 'Run the suite.', at: NOW + 3600e3, cadence: 'daily at 02:00', createdAt: NOW - 86400e3 });
+    expect(s.id).toBe('sched:sch1');
+    expect(laneOf(s, undefined, NOW)).toBe('wait');
+    expect(cardLine(s, 'wait').text.startsWith('Until')).toBe(true);
+  });
   it('an error is stuck, in the agent lane; a wait condition is its own lane', () => {
     expect(cardState(card({ status: 'error', turnEnd: NOW - 60e3 }), undefined, NOW)).toBe('stuck');
     expect(laneOf(card({ wait: { kind: 'ci', cwd: '/p', branch: 'pilcrow/x', since: NOW } }), undefined, NOW)).toBe('wait');
@@ -58,6 +71,8 @@ describe('actionsFor', () => {
     expect(actionsFor('review')[0]).toMatchObject({ id: 'approve', key: 'e', primary: true });
     expect(actionsFor('backlog')[0]).toMatchObject({ id: 'start', primary: true });
     expect(actionsFor('running').map((a) => a.id)).toEqual(['open', 'stop']);
+    expect(actionsFor('wait')[0]).toMatchObject({ id: 'wake', key: '↵' });
+    expect(actionsFor('backlog').some((a) => a.id === 'wait' && a.key === 'w')).toBe(true);
   });
   it('names the prompt by the tool waiting', () => {
     expect(actionsFor('prompt', { pending: [{ requestId: 'r', toolName: 'AskUserQuestion', input: {}, suggestions: [] }] })[0].label).toBe('Answer the question');

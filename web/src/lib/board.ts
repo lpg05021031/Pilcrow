@@ -1,7 +1,7 @@
 // The workboard's pure logic: which lane a session sits in, what can be done to it there, and the
 // ledger of what happened to it. No React, no store; the Qt client ports this file one to one
 // (qt/pilcrow_qt/lib/board.py) and both run the cases in test/unit/board.test.ts.
-import type { Decision, PermissionRequest, SessionState, SessionSummary } from './types';
+import type { Decision, PermissionRequest, ScheduledRun, SessionState, SessionSummary, WaitCondition } from './types';
 import { relPath } from './format';
 import { str } from './tools';
 
@@ -41,6 +41,7 @@ export function laneOf(s: SessionSummary, rt?: Partial<SessionState>, now = Date
   if (s.archived) return null;
   if (hasPrompt(s, rt)) return 'me';
   if (s.status === 'running' || s.status === 'starting') return 'agent';
+  if (s.queued) return 'agent';
   if (!s.intent) return null;
   if (isStuck(s)) return 'agent';
   if (s.wait) return 'wait';
@@ -51,17 +52,17 @@ export function laneOf(s: SessionSummary, rt?: Partial<SessionState>, now = Date
 }
 
 /** A finer state than the lane, for the chip on the card and the actions in the panel. */
-export type CardState = 'review' | 'prompt' | 'running' | 'stuck' | 'wait' | 'done' | 'backlog';
+export type CardState = 'review' | 'prompt' | 'running' | 'queued' | 'stuck' | 'wait' | 'done' | 'backlog';
 export function cardState(s: SessionSummary, rt?: Partial<SessionState>, now = Date.now()): CardState | null {
   const lane = laneOf(s, rt, now);
   if (!lane) return null;
   if (lane === 'me') return hasPrompt(s, rt) ? 'prompt' : 'review';
-  if (lane === 'agent') return isStuck(s) ? 'stuck' : 'running';
+  if (lane === 'agent') return s.status === 'running' || s.status === 'starting' ? 'running' : isStuck(s) ? 'stuck' : s.queued ? 'queued' : 'running';
   return lane;
 }
 
 export interface CardAction {
-  id: 'open' | 'approve' | 'reject' | 'answer' | 'park' | 'stop' | 'start' | 'send';
+  id: 'open' | 'approve' | 'reject' | 'answer' | 'park' | 'stop' | 'start' | 'send' | 'wake' | 'wait' | 'unwait' | 'schedule-edit' | 'schedule-run';
   label: string;
   key: string;
   primary?: boolean;
@@ -91,6 +92,11 @@ export function actionsFor(state: CardState, rt?: Partial<SessionState>): CardAc
         { id: 'open', label: 'Open', key: '↵', primary: true },
         { id: 'stop', label: 'Stop', key: 's', danger: true },
       ];
+    case 'queued':
+      return [
+        { id: 'open', label: 'Open', key: '↵', primary: true },
+        { id: 'stop', label: 'Leave the queue', key: 's', danger: true },
+      ];
     case 'stuck':
       return [
         { id: 'send', label: 'Give it what it needs', key: 'r', primary: true },
@@ -98,15 +104,38 @@ export function actionsFor(state: CardState, rt?: Partial<SessionState>): CardAc
         { id: 'park', label: 'Set aside', key: 'w' },
       ];
     case 'wait':
-      return [{ id: 'open', label: 'Open', key: '↵', primary: true }];
+      return [
+        { id: 'wake', label: 'Wake now', key: '↵', primary: true },
+        { id: 'wait', label: 'Change the wait', key: 'w' },
+        { id: 'unwait', label: 'Stop waiting', key: 's', danger: true },
+        { id: 'open', label: 'Open', key: 'o' },
+      ];
     case 'backlog':
       return [
         { id: 'start', label: 'Hand to Claude', key: '↵', primary: true },
+        { id: 'wait', label: 'Wait for…', key: 'w' },
         { id: 'open', label: 'Open', key: 'o' },
       ];
     case 'done':
       return [{ id: 'open', label: 'Open', key: '↵', primary: true }];
   }
+}
+
+// ---- schedules as cards
+
+export const SCHEDULE_PREFIX = 'sched:';
+export const isSchedule = (id: string | null | undefined) => Boolean(id && id.startsWith(SCHEDULE_PREFIX));
+
+/** A schedule that will fire, as a card in the Waiting lane. It is not a session; its actions open the schedule. */
+export function scheduleCard(r: ScheduledRun): SessionSummary {
+  return { id: SCHEDULE_PREFIX + r.id, title: r.name, cwd: r.cwd, project: r.cwd, archived: false, pinned: false, worktree: null, status: 'idle', live: false, createdAt: r.createdAt, lastModified: r.at, intent: r.prompt, wait: { kind: 'time', at: r.at } };
+}
+
+export function scheduleActions(): CardAction[] {
+  return [
+    { id: 'schedule-edit', label: 'Edit the schedule', key: '↵', primary: true },
+    { id: 'schedule-run', label: 'Run now', key: 'r' },
+  ];
 }
 
 export interface LedgerEvent {
@@ -134,7 +163,7 @@ export function ledgerOf(s: SessionSummary, rt?: Partial<SessionState>): LedgerE
   const out: LedgerEvent[] = [];
   if (s.createdAt) out.push({ at: s.createdAt, kind: 'intent', label: s.intent ? 'Intent written' : 'Session opened', note: s.intent, tone: 'me' });
   for (const d of s.decisions || []) {
-    out.push({ at: d.at, kind: 'decision', label: DECISION_LABEL[d.kind] || d.kind, note: d.note, tone: d.kind === 'stop' ? 'err' : d.kind === 'approve' ? 'ok' : 'me' });
+    out.push({ at: d.at, kind: 'decision', label: DECISION_LABEL[d.kind] || d.kind, note: d.note, tone: d.kind === 'stop' ? 'err' : d.kind === 'approve' ? 'ok' : d.kind === 'wake' || d.kind === 'wait' ? '' : 'me' });
     if (d.commit) out.push({ at: d.at + 1, kind: 'commit', label: `Committed ${d.commit.slice(0, 7)}`, tone: 'ok' });
   }
   if (s.turnEnd) {
@@ -145,7 +174,7 @@ export function ledgerOf(s: SessionSummary, rt?: Partial<SessionState>): LedgerE
 }
 
 /** The one line under a card's title: what it is waiting for, doing, or asking. */
-export function cardLine(s: SessionSummary, state: CardState, rt?: Partial<SessionState>): { text: string; tone: 'ask' | 'err' | '' } {
+export function cardLine(s: SessionSummary, state: CardState, rt?: Partial<SessionState>, titles?: Record<string, string>): { text: string; tone: 'ask' | 'err' | '' } {
   switch (state) {
     case 'prompt': {
       const p = rt?.pending?.[0];
@@ -157,10 +186,12 @@ export function cardLine(s: SessionSummary, state: CardState, rt?: Partial<Sessi
       const a = rt?.activity;
       return { text: a?.kind === 'tool' ? `${a.tool} · ${a.label}` : a?.kind === 'text' ? a.label : s.status === 'starting' ? 'Starting Claude Code…' : 'Thinking…', tone: '' };
     }
+    case 'queued':
+      return { text: 'Queued: Claude is at the limit; it starts when a slot frees', tone: '' };
     case 'stuck':
       return { text: rt?.error || 'Stopped with an error', tone: 'err' };
     case 'wait':
-      return { text: s.wait ? describeWait(s.wait) : 'Waiting', tone: '' };
+      return { text: s.wait ? describeWait(s.wait, titles) : 'Waiting', tone: '' };
     case 'done': {
       const d = lastDecision(s);
       return { text: d?.commit ? `Committed ${d.commit.slice(0, 7)}` : 'Approved', tone: '' };
@@ -170,10 +201,11 @@ export function cardLine(s: SessionSummary, state: CardState, rt?: Partial<Sessi
   }
 }
 
-export function describeWait(w: NonNullable<SessionSummary['wait']>) {
-  if (w.kind === 'time') return `Until ${new Date(w.at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
-  if (w.kind === 'ci') return `Until CI passes on ${w.branch}`;
-  return 'Until another card is done';
+export function describeWait(w: WaitCondition, titles?: Record<string, string>) {
+  if (w.kind === 'time') return `Until ${new Date(w.at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })}`;
+  if (w.kind === 'ci') return `Until CI finishes on ${w.branch}`;
+  const t = titles?.[w.id];
+  return t ? `Until “${t}” is approved` : 'Until another card is approved';
 }
 
 const firstSentence = (t: string) => {
@@ -222,4 +254,16 @@ export function step(lanes: Record<Lane, SessionSummary[]>, id: string | null, d
     if (next.length) return next[Math.min(i, next.length - 1)].id;
   }
   return id;
+}
+
+/** The quick wait conditions the picker offers; a pure list so the keys 1–3 and the buttons agree. */
+export function quickWaits(now = Date.now()): { key: string; label: string; hint: string; wait: WaitCondition | 'ci' | 'session' | 'time' }[] {
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(9, 0, 0, 0);
+  return [
+    { key: '1', label: 'Until CI passes', hint: 'GitHub Actions on this branch', wait: 'ci' },
+    { key: '2', label: 'Tomorrow 09:00', hint: 'A one-off time', wait: { kind: 'time', at: tomorrow.getTime() } },
+    { key: '3', label: 'In an hour', hint: '', wait: { kind: 'time', at: now + 3600e3 } },
+  ];
 }
