@@ -25,7 +25,7 @@ export const Card = memo(function Card({ s, rt, selected, now, titles, onSelect,
   const add = files?.reduce((a, f) => a + f.add, 0) || 0;
   const del = files?.reduce((a, f) => a + f.del, 0) || 0;
   return (
-    <article className={`bd-card ${state}${selected ? ' sel' : ''}`} data-card={s.id} data-state={state} draggable={!schedule} role="button" tabIndex={0} onClick={onSelect} onDoubleClick={onOpen} onKeyDown={(e) => e.key === ' ' && (e.preventDefault(), onSelect())}>
+    <article className={`bd-card ${state}${s.conflict ? ' note' : ''}${selected ? ' sel' : ''}`} data-card={s.id} data-state={state} draggable={!schedule && !s.conflict} role="button" tabIndex={0} onClick={onSelect} onDoubleClick={onOpen} onKeyDown={(e) => e.key === ' ' && (e.preventDefault(), onSelect())}>
       <span className="bd-stripe" aria-hidden="true" />
       <div className="bd-card-top">
         <span className="ellipsis">
@@ -33,7 +33,7 @@ export const Card = memo(function Card({ s, rt, selected, now, titles, onSelect,
           {basename(s.project || s.cwd)}
           {s.worktree ? ` · ${s.worktree.branch.replace(/^pilcrow\//, '')}` : ''}
         </span>
-        {schedule ? <span className="bd-chip wait">Scheduled</span> : CHIP[state] ? <span className={`bd-chip ${state}`}>{CHIP[state]}</span> : null}
+        {schedule ? <span className="bd-chip wait">Scheduled</span> : s.conflict ? <span className="bd-chip prompt">Memory</span> : CHIP[state] ? <span className={`bd-chip ${state}`}>{CHIP[state]}</span> : null}
       </div>
       <div className="bd-card-title">{s.title}</div>
       {line.text && <div className={`bd-card-line${line.tone ? ` ${line.tone}` : ''}`}>{line.text}</div>}

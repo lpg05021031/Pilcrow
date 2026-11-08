@@ -517,8 +517,8 @@ test('workboard: a permission waiting on a card can be allowed from the panel', 
   await ctl.call('mock.pace', { ms: 40 });
   await ctl.call('session.send', { id: 'sess-empty', text: 'please ask permission before running a command' });
   await page.locator('.side-page', { hasText: 'Workboard' }).click();
-  await page.waitForSelector('.bd-card.prompt', { timeout: 15_000 });
-  const card = page.locator('.bd-card.prompt').first();
+  await page.waitForSelector('.bd-card.prompt:not(.note)', { timeout: 15_000 });
+  const card = page.locator('.bd-card.prompt:not(.note)').first();
   const lane = await page.locator('.bd-lane.me').boundingBox();
   const box = await card.boundingBox();
   expect(box.x >= lane.x - 1 && box.x + box.width <= lane.x + lane.width + 1, 'the card leaves its lane');
@@ -526,7 +526,7 @@ test('workboard: a permission waiting on a card can be allowed from the panel', 
   await page.waitForSelector('.bd-perm-tool', { timeout: 5000 });
   expect(await page.locator('.bd-perm-tool', { hasText: 'Bash' }).isVisible(), 'the panel does not name the tool');
   await page.locator('.bd-perm-row .btn.primary').click(); // Allow
-  await page.waitForSelector('.bd-card.prompt', { state: 'detached', timeout: 15_000 });
+  await page.waitForSelector('.bd-card.prompt:not(.note)', { state: 'detached', timeout: 15_000 });
   await page.waitForSelector('.bd-lane.agent .bd-card[data-card="sess-empty"], .bd-lane.me .bd-card[data-card="sess-empty"]', { timeout: 15_000 });
 });
 
@@ -591,6 +591,20 @@ test('workboard: the Waiting lane menu lists schedules and opens the dialog for 
   await page.waitForSelector('.sd', { state: 'detached', timeout: 3000 });
   // The Inbox stays beside the board (dispatch reports land there); the Control room row is what went.
   expect(await page.locator('.side-page', { hasText: 'Control room' }).count() === 0, 'the Control room row should be gone from the sidebar');
+});
+
+test('workboard: a contradicted note is a card in Needs you; forgetting it from the panel removes it', async ({ page }) => {
+  await page.locator('.side-page', { hasText: 'Workboard' }).click();
+  await page.waitForSelector('.bd-lane.me .bd-card[data-card="note:note-cents"]', { timeout: 5000 });
+  expect(await page.locator('.bd-card[data-card="note:note-cents"] .bd-chip', { hasText: 'Memory' }).isVisible(), 'the note card has no Memory chip');
+  expect(await page.locator('.bd-card[data-card="note:note-cents"]').getAttribute('draggable') === 'false', 'a note card must not drag');
+  await page.click('.bd-card[data-card="note:note-cents"]');
+  await page.waitForSelector('.bd-panel', { timeout: 5000 });
+  const body = await page.locator('.bd-panel').textContent();
+  expect(body.includes('The note') && body.includes('Your correction') && body.includes('Written instead'), `the panel should explain the conflict, got: ${body.slice(0, 200)}`);
+  expect((await page.locator('.bd-panel .icon-btn[title="Open the conversation"]').count()) === 0, 'a note card has no conversation to open');
+  await page.locator('.bd-actions .btn.primary', { hasText: 'Forget the note' }).click();
+  await page.waitForSelector('.bd-card[data-card="note:note-cents"]', { state: 'detached', timeout: 5000 });
 });
 
 test('workboard: dragging a review card onto Done approves it; onto Needs you does nothing', async ({ page }) => {

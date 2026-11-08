@@ -52,6 +52,22 @@ export interface SessionSummary {
   report?: HandoffReport | null;
   /** Held until Claude is below the concurrency limit; the text is what will be sent. */
   queued?: { text: string; at: number } | null;
+  /** Only on the card the board makes for a contradicted note in project memory (docs/PLAYBOOK.md §4). */
+  conflict?: MemoryConflict;
+}
+
+/** A note in project memory that a correction of yours contradicted; it waits on the board to be kept or forgotten. */
+export interface MemoryConflict {
+  id: string;
+  cwd: string;
+  text: string;
+  standing: 'confirmed' | 'fresh' | 'retired';
+  at: number;
+  correction: string;
+  sessionId: string | null;
+  sessionTitle: string | null;
+  /** The note the correction was written as instead, when there is one. */
+  replacement: { id: string; text: string } | null;
 }
 
 export type DecisionKind = 'approve' | 'reject' | 'answer' | 'park' | 'wait' | 'wake' | 'stop' | 'start' | 'steer';
@@ -81,6 +97,8 @@ export interface BoardState {
   limit: { max: number; running: number };
   /** Schedules that will fire: cards in the Waiting lane until they do. */
   scheduled: ScheduledRun[];
+  /** Contradicted notes in project memory: cards in "Needs you" until you keep or forget them. */
+  conflicts?: MemoryConflict[];
   caps: { ci: boolean };
 }
 export interface ScheduledRun {
@@ -443,6 +461,8 @@ export interface MemoryNote {
   harmful?: number;
   /** Confirmed by you or by outcomes, fresh, or retired (misled more than it helped; never handed on). */
   standing?: 'confirmed' | 'fresh' | 'retired';
+  /** Set while a correction of yours contradicts it and you have not kept or forgotten it. */
+  disputed?: { at: number; sessionId: string | null; sessionTitle: string | null; correction: string; replacement: string | null } | null;
 }
 /** One session's touch on a file, from the timeline. */
 export interface FileTouch {

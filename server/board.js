@@ -78,6 +78,8 @@ export async function state() {
     spend: costLog.since(Date.now() - 3600e3),
     limit: { max: limit(), running: runningCount() },
     scheduled,
+    // Notes in project memory that a correction of yours contradicted: cards in "Needs you" (docs/PLAYBOOK.md §4).
+    conflicts: memory.conflicts(),
     caps: caps(),
   };
 }

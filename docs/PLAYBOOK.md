@@ -1,7 +1,8 @@
 # 專案記憶 v2：會被驗證的筆記（playbook）
 
-> 狀態：第 1 階段已實作（`server/memory.js`、`server/board.js`、`server/sessions.js`、Memory 頁）。
-> 對使用者的日常操作沒有新增任何步驟；差別只在 Memory 頁上多了來源與戰績，以及新 session 收到的筆記排序不同。
+> 狀態：第 1、2 階段已實作（`server/memory.js`、`server/board.js`、`server/sessions.js`、Memory 頁、看板上的筆記卡）。
+> 對使用者的日常操作沒有新增任何步驟；差別只在 Memory 頁上多了來源與戰績、新 session 收到的筆記排序不同，
+> 以及當你的退回和某條筆記說相反的話時，看板「需要你」多一張卡讓你決定留或刪。
 
 ## 1. 為什麼
 
@@ -57,6 +58,21 @@ ACE（Agentic Context Engineering, ICLR 2026）的做法是把 context 當成會
 
 `reflect` 與 `distill` 同受「Take notes automatically」開關控制，用同一個 note-taking 模型。回答、先放著、停止、喚醒不產生訊號。
 
+### 4.1 矛盾 → 需要你的卡片
+
+被 `MISLED` 點名的筆記除了 `harmful += 1`，還會記上 `disputed = { at, sessionId, sessionTitle, correction, replacement }`
+（`replacement` 是同一次反思寫出的第一條新規則的 id，可能沒有）。
+
+- `memory.conflicts()` 掃所有專案的記憶檔，列出帶 `disputed` 的筆記；`board.state()` 以 `conflicts[]` 回傳。
+- 兩端的看板把每條做成一張虛擬卡（id 前綴 `note:`，如同排程的 `sched:`），固定在「需要你」欄，chip 寫 **Memory**，不能拖曳、沒有對話可開。
+  面板顯示：這條筆記、你的退回原文（與是哪張卡）、「改寫成」的新筆記、以及一行說明。
+- 動作只有兩個：**Forget the note**（↵，從這個專案的記憶移除）與 **Keep it**（e，清掉旗標；harmful 計數留著，新 session 會再拿到它）。
+  RPC 是 `memory.resolve { cwd, id, keep }`。
+- 在 Memory 頁改寫或釘選一條被點名的筆記，也算「留著」。
+- Memory 頁上同一條筆記會有一行「Contradicted by your correction on …: “…”」與同樣的 Keep / Forget。
+
+`k` 在看板上是向上移動，所以 Keep 用 `e`（與核准同鍵，語意也是「接受」）。
+
 ## 5. 去重與注入
 
 - `similar(a, b)`：取兩句的實詞（小寫、≥3 字、去 stop words），較短那句有 ≥ 75% 的詞出現在另一句即視為同一件事；短句（< 3 詞）要完全相同。
@@ -67,17 +83,19 @@ ACE（Agentic Context Engineering, ICLR 2026）的做法是把 context 當成會
 ## 6. 介面
 
 - Web Memory 頁：每條筆記的來源行多出「From your correction on <session>」、「helped n, misled n」、「confirmed」或「retired」；retired 劃掉、淡色，滑過有說明。
-- Qt 設定 › Memory：同一行文字（`note_meta`）。沒有新按鈕、沒有新設定。
-- 看板卡片沒有任何變化。
+  `confirmed` 的筆記多一個「Copy as a CLAUDE.md line」按鈕：把 `- <text>` 放進剪貼簿，由你自己貼進 CLAUDE.md；Pilcrow 不寫那個檔案。
+- Qt 設定 › Memory：同一行文字（`note_meta`）、同一個複製按鈕、同一列 Keep / Forget。沒有新設定。
+- 看板：只在有矛盾時多一張 Memory 卡（§4.1）；其餘卡片沒有變化。
 
 ## 7. 測試
 
-`test/unit/memory.test.ts`：standing 與排序、注入回 ids 並略過 retired 與 CLAUDE.md / auto-memory 已說的、`credit` 加分、`reflect` 新增規則並標記 MISLED、舊格式的檔案照讀。既有的 distill / promptFor 測試不變。
+`test/unit/memory.test.ts`：standing 與排序、注入回 ids 並略過 retired 與 CLAUDE.md / auto-memory 已說的、`credit` 加分、`reflect` 新增規則並標記 MISLED、舊格式的檔案照讀、`conflicts()` 跨專案列出並由 `resolve` / 改寫 / 釘選清掉。既有的 distill / promptFor 測試不變。
+
+看板：`test/unit/board.test.ts` 與 `qt/tests/test_lib_board.py` 各有一條 conflict card 的案例；mock server 種了一張（`note:note-cents`），`test/e2e/run.mjs` 從面板按 Forget、`qt/tests/test_board.py` 按 Keep，卡都要離開看板。
 
 另外修了 `test/unit/setup.ts`：Windows 上測試原本把筆記寫進真實的 `%LOCALAPPDATA%\Pilcrow\data\memory`，現在 `APPDATA` / `LOCALAPPDATA` 也指到測試用的 home。
 
 ## 8. 還沒做（下一階段）
 
-1. **矛盾 → 需要你的卡片**：`reflect` 回報 MISLED 時，現在只是計數。下一步是在 Memory 頁或看板上出一張「這條筆記和你的退回相反，留或刪？」的卡，一鍵決定。
-2. **升級到 CLAUDE.md**：`confirmed` 多次的筆記提供「複製成 CLAUDE.md 一行」的按鈕。仍由你貼上，Pilcrow 不寫那個檔案。
-3. **量測**：記錄每條筆記被注入的次數與核准 / 退回的比例，看 playbook 有沒有降低退回率；沒有就拿掉反思那一步。
+1. **量測**：記錄每條筆記被注入的次數與核准 / 退回的比例，看 playbook 有沒有降低退回率；沒有就拿掉反思那一步。
+2. **衝突卡的第三個選項**：現在只有留 / 刪；「用新規則取代」目前等於刪舊的（新規則已經在），之後若新規則常常也錯，再考慮讓卡上能直接改寫。

@@ -173,6 +173,47 @@ describe('how a note stands (docs/PLAYBOOK.md)', () => {
   });
 });
 
+describe('contradicted notes (docs/PLAYBOOK.md §4)', () => {
+  it('flags the notes a correction contradicted, lists them across projects, and settles them', async () => {
+    const cwd = project();
+    const other = project();
+    const wrong = memory.add(cwd, { text: 'Prices are stored in dollars', kind: 'auto' });
+    const fine = memory.add(cwd, { text: 'Tests run with vitest', kind: 'auto' });
+    const elsewhere = memory.add(other, { text: 'The build needs Node 24', kind: 'auto' });
+    store.setMeta('s-c1', { playbook: [wrong.id, fine.id], title: 'Fix the cart total', turnEnd: 3 });
+    store.setMeta('s-c2', { playbook: [elsewhere.id], title: 'Upgrade Node', turnEnd: 1 });
+    sdk.reply = '- Prices are stored in cents.\nMISLED: 1';
+    await memory.reflect({ id: 's-c1', cwd, messages: [] }, 'The API already returns cents.');
+    sdk.reply = 'MISLED: 1';
+    await memory.reflect({ id: 's-c2', cwd: other, messages: [] }, 'Node 22 is what CI runs.');
+    flushSaves();
+    const mine = () => memory.conflicts().filter((x) => x.cwd === cwd || x.cwd === other); // other tests leave theirs
+    const all = mine();
+    expect(all.map((c) => c.id)).toEqual([elsewhere.id, wrong.id]); // newest first
+    const c = all.find((x) => x.id === wrong.id);
+    expect(c).toMatchObject({ cwd, text: 'Prices are stored in dollars', correction: 'The API already returns cents.', sessionTitle: 'Fix the cart total' });
+    expect(c?.replacement?.text).toBe('Prices are stored in cents.');
+    expect(memory.list(cwd).notes.find((x) => x.id === fine.id)?.disputed).toBeUndefined();
+    // keeping clears the flag and leaves the tally; forgetting removes the note
+    const kept = memory.resolve(cwd, wrong.id, true) as any;
+    expect(kept.disputed).toBeUndefined();
+    expect(kept.harmful).toBe(1);
+    expect(mine().map((x) => x.id)).toEqual([elsewhere.id]);
+    expect(memory.resolve(other, elsewhere.id, false)).toBe(true);
+    expect(memory.list(other).notes).toHaveLength(0);
+    expect(mine()).toEqual([]);
+    expect(() => memory.resolve(cwd, 'nope', true)).toThrow('No such note.');
+    // editing or pinning a contradicted note is keeping it
+    sdk.reply = 'MISLED: 1';
+    await memory.reflect({ id: 's-c1', cwd, messages: [] }, 'Still wrong.');
+    expect(mine()).toHaveLength(1);
+    memory.update(cwd, wrong.id, { pinned: true });
+    expect(mine()).toHaveLength(0);
+    store.deleteMeta('s-c1');
+    store.deleteMeta('s-c2');
+  });
+});
+
 describe('the notes file', () => {
   it('is written off the event loop, and at once on quit', async () => {
     const cwd = project();

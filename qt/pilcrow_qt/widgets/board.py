@@ -35,16 +35,17 @@ from .. import icons, theme
 from ..lib.board import (
     LANES,
     SCHEDULE_PREFIX,
-    actions_for,
+    actions_of,
     card_line,
     card_state,
+    conflict_card,
     describe_wait,
+    is_conflict,
     is_schedule,
     lane_of,
     ledger_of,
     perm_summary,
     quick_waits,
-    schedule_actions,
     schedule_card,
     step,
 )
@@ -387,6 +388,8 @@ class BoardCard(Card):
         self.project.setText(proj)
         if schedule:
             self.chip.set_state("wait", "Scheduled")
+        elif s.get("conflict"):
+            self.chip.set_state("prompt", "Memory")
         else:
             self.chip.set_state(state, CHIP.get(state, ""))
         self.title.setText(str(s.get("title") or ""))
@@ -1051,16 +1054,24 @@ class Panel(QFrame):
         elif s.get("gitBranch"):
             meta += f" · {s['gitBranch']}"
         self.meta.setText(meta)
-        self.open_btn.setVisible(not schedule)
+        conflict = s.get("conflict")
+        virtual = schedule or bool(conflict)
+        self.open_btn.setVisible(not virtual)
         self.title.setText(str(s.get("title") or ""))
-        self.where.setText("A schedule · runs on its own" if schedule else WHERE.get(state, ""))
+        self.where.setText(
+            "A schedule · runs on its own"
+            if schedule
+            else "With you · project memory"
+            if conflict
+            else WHERE.get(state, "")
+        )
 
         # intent
         pencil = None
-        if not schedule and not self.editing:
+        if not virtual and not self.editing:
             pencil = IconButton("pencil", "Edit the intent", 12)
             pencil.clicked.connect(self._edit_intent)
-        sec = self._sec("What it runs" if schedule else "Intent", pencil)
+        sec = self._sec("What it runs" if schedule else "The note" if conflict else "Intent", pencil)
         if self.editing:
             sec.addWidget(
                 NoteBox(
@@ -1084,6 +1095,22 @@ class Panel(QFrame):
                 )
             )
 
+        if conflict:
+            on = f" · on {conflict['sessionTitle']}" if conflict.get("sessionTitle") else ""
+            sec = self._sec(f"Your correction{on}")
+            sec.addWidget(self._para(str(conflict.get("correction") or "You sent the work back.")))
+            if conflict.get("replacement"):
+                sec = self._sec("Written instead")
+                sec.addWidget(self._para(str(conflict["replacement"].get("text") or "")))
+            sec.addWidget(
+                _lbl(
+                    "Forgetting removes the note from this folder's memory. Keeping it clears the flag; "
+                    "new sessions get it again, with the correction counted against it.",
+                    "faint",
+                    "small",
+                    wrap=True,
+                )
+            )
         if (state == "wait" or schedule) and s.get("wait"):
             w = s["wait"]
             sec = self._sec("Next run" if schedule else "Waiting for")
@@ -1122,7 +1149,7 @@ class Panel(QFrame):
         elif state == "review" and (rt.get("lastReply") or {}).get("text"):
             sec = self._sec("Last reply")
             sec.addWidget(self._para(str(rt["lastReply"]["text"])))
-        if not schedule:
+        if not virtual:
             events = ledger_of(s, rt)
             if events:
                 sec = self._sec("Ledger")
@@ -1160,7 +1187,7 @@ class Panel(QFrame):
             self.actions_lay.addWidget(self.note)
         else:
             row = FlowLayout(spacing=6)
-            acts = schedule_actions() if schedule else actions_for(state, rt)
+            acts = actions_of(s, state, rt)
             for a in acts:
                 b = ActionButton(
                     str(a["label"]),
@@ -1719,7 +1746,12 @@ class Board(QWidget):
         return r.st if r is not None and r.st else None
 
     def all_cards(self) -> List[Json]:
-        return list(store.sessions) + [schedule_card(r) for r in ((self.state or {}).get("scheduled") or [])]
+        st = self.state or {}
+        return (
+            list(store.sessions)
+            + [schedule_card(r) for r in (st.get("scheduled") or [])]
+            + [conflict_card(c) for c in (st.get("conflicts") or [])]
+        )
 
     def refresh(self) -> None:
         self.now = now_ms()
@@ -1736,7 +1768,11 @@ class Board(QWidget):
                 states[sid] = card_state(s, rt, now) or ""
                 rts[sid] = rt
         lanes["me"].sort(
-            key=lambda s: (0 if states[str(s["id"])] == "prompt" else 1, -float(s.get("lastModified") or 0))
+            key=lambda s: (
+                1 if s.get("conflict") else 0,
+                0 if states[str(s["id"])] == "prompt" else 1,
+                -float(s.get("lastModified") or 0),
+            )
         )
         lanes["wait"].sort(
             key=lambda s: (
@@ -1879,6 +1915,19 @@ class Board(QWidget):
             elif action == "schedule-run":
                 store.run_schedule(real).then(lambda _r: store.toast("Running now", "info"))
             return
+        if is_conflict(sid):
+            card = next((x for x in self.all_cards() if str(x.get("id")) == sid), None)
+            c = (card or {}).get("conflict")
+            if not c or action not in ("note-keep", "note-forget"):
+                return
+            keep = action == "note-keep"
+
+            def settled(_r: Any) -> None:
+                store.toast("The note stays" if keep else "The note is forgotten", "info")
+                self._next_needs(sid)
+
+            store.call("memory.resolve", {"cwd": c.get("cwd"), "id": c.get("id"), "keep": keep}).then(settled)
+            return
         s = store.session(sid)
         if s is None:
             return
@@ -1967,6 +2016,7 @@ class Board(QWidget):
         sel = self.sel
         state = ""
         rt: Optional[Json] = None
+        s: Optional[Json] = None
         if sel:
             s = next((x for lst in self.lanes_data.values() for x in lst if str(x["id"]) == sel), None)
             rt = self.rt_of(sel)
@@ -2004,8 +2054,8 @@ class Board(QWidget):
                 self.select(None)
             else:
                 return False
-        elif sel and state:
-            acts = schedule_actions() if is_schedule(sel) else actions_for(state, rt)
+        elif sel and state and s is not None:
+            acts = actions_of(s, state, rt)
             hit = (
                 acts[0]
                 if key in (Qt.Key.Key_Return, Qt.Key.Key_Enter)

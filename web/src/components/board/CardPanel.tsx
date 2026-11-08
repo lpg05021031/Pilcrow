@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { X, CircleCheck, ArrowUpRight, Pencil, CalendarClock } from 'lucide-react';
 import type { PermissionDecision, SessionSummary, WaitCondition } from '../../lib/types';
 import { respond, setIntent, decideCard, call, type Runtime } from '../../lib/store';
-import { actionsFor, ledgerOf, permSummary, describeWait, isSchedule, scheduleActions, quickWaits, type CardState, type Lane } from '../../lib/board';
+import { actionsOf, ledgerOf, permSummary, describeWait, isSchedule, quickWaits, type CardState, type Lane } from '../../lib/board';
 import { basename, cost, timeAgo } from '../../lib/format';
 import { suggestionLabel } from '../tools/Permission';
 
@@ -18,9 +18,11 @@ const WHERE: Record<CardState, string> = { review: 'With you · to review', prom
  */
 export function CardPanel({ s, rt, state, mode, setMode, caps, cards, titles, onAct, onClose, now }: { s: SessionSummary; rt?: Runtime; state: CardState; mode: PanelMode; setMode: (m: PanelMode) => void; caps: { ci: boolean }; cards: Record<Lane, SessionSummary[]>; titles: Record<string, string>; onAct: (a: string, payload?: WaitCondition | null) => void; onClose: () => void; now: number }) {
   const schedule = isSchedule(s.id);
-  const actions = schedule ? scheduleActions() : actionsFor(state, rt);
-  const perm = state === 'prompt' ? rt?.pending?.[0] : undefined;
-  const ledger = schedule ? [] : ledgerOf(s, rt);
+  const conflict = s.conflict;
+  const virtual = schedule || Boolean(conflict);
+  const actions = actionsOf(s, state, rt);
+  const perm = state === 'prompt' && !conflict ? rt?.pending?.[0] : undefined;
+  const ledger = virtual ? [] : ledgerOf(s, rt);
   const [editing, setEditing] = useState(false);
   useEffect(() => setEditing(false), [s.id]);
   return (
@@ -28,7 +30,7 @@ export function CardPanel({ s, rt, state, mode, setMode, caps, cards, titles, on
       <div className="bd-panel-h">
         <div className="bd-panel-meta">
           <span className="ellipsis">{basename(s.project || s.cwd)}{s.worktree ? ` · ${s.worktree.branch}` : s.gitBranch ? ` · ${s.gitBranch}` : ''}</span>
-          {!schedule && (
+          {!virtual && (
             <button className="icon-btn sm" title="Open the conversation" aria-label="Open the conversation" onClick={() => onAct('open')}>
               <ArrowUpRight size={14} />
             </button>
@@ -38,14 +40,14 @@ export function CardPanel({ s, rt, state, mode, setMode, caps, cards, titles, on
           </button>
         </div>
         <h3 className="bd-panel-title">{s.title}</h3>
-        <div className="bd-panel-where">{schedule ? 'A schedule · runs on its own' : WHERE[state]}</div>
+        <div className="bd-panel-where">{schedule ? 'A schedule · runs on its own' : conflict ? 'With you · project memory' : WHERE[state]}</div>
       </div>
 
       <div className="bd-panel-body">
         <section className="bd-sec">
           <h4>
-            {schedule ? 'What it runs' : 'Intent'}
-            {!schedule && !editing && (
+            {schedule ? 'What it runs' : conflict ? 'The note' : 'Intent'}
+            {!virtual && !editing && (
               <button className="icon-btn sm" title="Edit the intent" aria-label="Edit the intent" onClick={() => setEditing(true)}>
                 <Pencil size={12} />
               </button>
@@ -54,6 +56,23 @@ export function CardPanel({ s, rt, state, mode, setMode, caps, cards, titles, on
           {editing ? <IntentEditor s={s} done={() => setEditing(false)} /> : s.intent ? <p className="bd-intent">{s.intent}</p> : <p className="bd-hint">No intent yet. Two or three sentences on the goal and when it is done; a card with one can be handed to Claude from here.</p>}
         </section>
 
+        {conflict && (
+          <>
+            <section className="bd-sec">
+              <h4>Your correction{conflict.sessionTitle ? ` · on ${conflict.sessionTitle}` : ''}</h4>
+              <p className="bd-intent">{conflict.correction || 'You sent the work back.'}</p>
+            </section>
+            {conflict.replacement && (
+              <section className="bd-sec">
+                <h4>Written instead</h4>
+                <p className="bd-intent">{conflict.replacement.text}</p>
+              </section>
+            )}
+            <section className="bd-sec">
+              <p className="bd-hint">Forgetting removes the note from this folder's memory. Keeping it clears the flag; new sessions get it again, with the correction counted against it.</p>
+            </section>
+          </>
+        )}
         {(state === 'wait' || schedule) && s.wait && (
           <section className="bd-sec">
             <h4>{schedule ? 'Next run' : 'Waiting for'}</h4>

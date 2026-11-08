@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { actionsFor, awaitsReview, cardLine, cardState, dropAction, laneOf, ledgerOf, scheduleCard, step } from '../../web/src/lib/board';
+import { actionsFor, actionsOf, awaitsReview, cardLine, cardState, conflictCard, dropAction, laneOf, ledgerOf, scheduleCard, step } from '../../web/src/lib/board';
 import type { Lane } from '../../web/src/lib/board';
 import type { SessionSummary } from '../../web/src/lib/types';
 import cases from './board-cases.json';
@@ -73,6 +73,15 @@ describe('laneOf', () => {
     expect(s.id).toBe('sched:sch1');
     expect(laneOf(s, undefined, NOW)).toBe('wait');
     expect(cardLine(s, 'wait').text.startsWith('Until')).toBe(true);
+  });
+  it('a contradicted note is a card in Needs you under its own id, with keep and forget', () => {
+    const s = conflictCard({ id: 'n1', cwd: '/p', text: 'Prices are in dollars', standing: 'fresh', at: NOW - 3600e3, correction: 'The API returns cents.', sessionId: 'sess-login', sessionTitle: 'Fix the cart total', replacement: null });
+    expect(s.id).toBe('note:n1');
+    expect(laneOf(s, undefined, NOW)).toBe('me');
+    expect(cardState(s, undefined, NOW)).toBe('prompt');
+    expect(cardLine(s, 'prompt').text).toContain('Fix the cart total');
+    expect(actionsOf(s, 'prompt').map((a) => a.id)).toEqual(['note-forget', 'note-keep']);
+    expect(actionsOf(card({}), 'backlog')[0].id).toBe('start');
   });
   it('an error is stuck, in the agent lane; a wait condition is its own lane', () => {
     expect(cardState(card({ status: 'error', turnEnd: NOW - 60e3 }), undefined, NOW)).toBe('stuck');

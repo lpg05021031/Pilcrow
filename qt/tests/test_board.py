@@ -175,3 +175,18 @@ def test_schedule_menu_opens_the_dialog(app_client):
     c.wait_until(lambda: dialogs.current("schedule") is None, 3, "dialog closes")
     # The Inbox stays beside the board (dispatch reports land there); the Control room row is what went.
     assert not hasattr(c.win.sidebar, "page_overview"), "the Control room row should be gone from the sidebar"
+
+
+def test_contradicted_note_card_is_kept_from_the_panel(app_client):
+    c = app_client
+    b = _board(c)
+    c.wait_until(lambda: _in_lane(b, "me", "note:note-cents"), 5, "the note card in Needs you")
+    card = b.cards["note:note-cents"]
+    assert card.chip.text() == "Memory"
+    b.select("note:note-cents")
+    c.wait_until(lambda: b.panel.isVisible() and b.panel.sid == "note:note-cents", 5, "panel")
+    assert not b.panel.open_btn.isVisible(), "a note card has no conversation to open"
+    labels = [x.label.text() for x in b.panel.action_buttons]
+    assert labels[0].startswith("Forget the note") and labels[1].startswith("Keep it")
+    b.act("note:note-cents", "note-keep")
+    c.wait_until(lambda: not _in_lane(b, "me", "note:note-cents"), 5, "the card leaves the board")

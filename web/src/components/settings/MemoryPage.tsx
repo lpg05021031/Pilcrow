@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { BookMarked, Pin, PinOff, Trash, Plus, Sparkles, Check, X, Folder } from 'lucide-react';
+import { BookMarked, Pin, PinOff, Trash, Plus, Sparkles, Check, X, Folder, ClipboardCopy } from 'lucide-react';
 import { useStore, call, setConfig, toast, confirmAction, activeSession } from '../../lib/store';
+import { copy } from '../ui/clipboard';
 import type { Config, MemoryNote } from '../../lib/types';
 import { basename, timeAgo, tildify, plural } from '../../lib/format';
 import { Select } from '../ui/Select';
@@ -60,6 +61,10 @@ export function MemoryPage({ config }: { config: Config }) {
   const remove = async (id: string) => {
     await call('memory.remove', { cwd, id }, { quiet: true });
     setNotes((xs) => (xs || []).filter((x) => x.id !== id));
+  };
+  const resolve = async (id: string, keep: boolean) => {
+    await call('memory.resolve', { cwd, id, keep });
+    setNotes((xs) => (keep ? (xs || []).map((x) => (x.id === id ? { ...x, disputed: null } : x)) : (xs || []).filter((x) => x.id !== id)));
   };
   const distill = async () => {
     const s = sessions.find((x) => x.id === useStore.getState().activeId);
@@ -153,7 +158,7 @@ export function MemoryPage({ config }: { config: Config }) {
           <div className="mem-group">
             <div className="tool-label">Pinned</div>
             {pinned.map((n) => (
-              <NoteRow key={n.id} n={n} now={now} onPatch={(p) => patch(n.id, p)} onRemove={() => remove(n.id)} />
+              <NoteRow key={n.id} n={n} now={now} onPatch={(p) => patch(n.id, p)} onRemove={() => remove(n.id)} onResolve={(keep) => resolve(n.id, keep)} />
             ))}
           </div>
         )}
@@ -161,7 +166,7 @@ export function MemoryPage({ config }: { config: Config }) {
           <div className="mem-group">
             {pinned.length > 0 && <div className="tool-label">Notes</div>}
             {rest.map((n) => (
-              <NoteRow key={n.id} n={n} now={now} onPatch={(p) => patch(n.id, p)} onRemove={() => remove(n.id)} />
+              <NoteRow key={n.id} n={n} now={now} onPatch={(p) => patch(n.id, p)} onRemove={() => remove(n.id)} onResolve={(keep) => resolve(n.id, keep)} />
             ))}
           </div>
         )}
@@ -186,7 +191,7 @@ export function MemoryPage({ config }: { config: Config }) {
   );
 }
 
-function NoteRow({ n, now, onPatch, onRemove }: { n: MemoryNote; now: number; onPatch: (p: Partial<MemoryNote>) => Promise<void>; onRemove: () => void }) {
+function NoteRow({ n, now, onPatch, onRemove, onResolve }: { n: MemoryNote; now: number; onPatch: (p: Partial<MemoryNote>) => Promise<void>; onRemove: () => void; onResolve: (keep: boolean) => void }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(n.text);
   const commit = async () => {
@@ -198,6 +203,19 @@ function NoteRow({ n, now, onPatch, onRemove }: { n: MemoryNote; now: number; on
   const tally = [n.helpful ? `helped ${n.helpful}` : '', n.harmful ? `misled ${n.harmful}` : ''].filter(Boolean).join(', ');
   return (
     <div className={`mem-note${n.pinned ? ' pinned' : ''}${retired ? ' retired' : ''}`} title={retired ? 'Retired: it misled sessions more than it helped, so new sessions no longer get it. Pin it to hand it on again.' : undefined}>
+      {n.disputed && !editing && (
+        <div className="mem-dispute">
+          <span className="ellipsis">
+            Contradicted by your correction{n.disputed.sessionTitle ? ` on ${n.disputed.sessionTitle}` : ''}: “{n.disputed.correction}”
+          </span>
+          <button className="btn xs" onClick={() => onResolve(true)}>
+            Keep
+          </button>
+          <button className="btn xs danger" onClick={() => onResolve(false)}>
+            Forget
+          </button>
+        </div>
+      )}
       {editing ? (
         <div className="mem-edit">
           <textarea aria-label="Note" className="textarea" rows={2} autoFocus value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => (e.key === 'Enter' && (e.metaKey || e.ctrlKey) ? commit() : e.key === 'Escape' ? (setText(n.text), setEditing(false)) : null)} />
@@ -222,6 +240,11 @@ function NoteRow({ n, now, onPatch, onRemove }: { n: MemoryNote; now: number; on
           {retired ? ' · retired' : n.standing === 'confirmed' && n.kind !== 'manual' && !n.pinned ? ' · confirmed' : ''}
         </span>
         <span className="grow" />
+        {n.standing === 'confirmed' && (
+          <button className="icon-btn sm" onClick={() => copy(`- ${n.text}`, 'The note, as a CLAUDE.md line,')} title="Copy as a CLAUDE.md line — paste it there yourself; Pilcrow never writes that file" aria-label="Copy as a CLAUDE.md line">
+            <ClipboardCopy size={12} />
+          </button>
+        )}
         <button className="icon-btn sm" onClick={() => onPatch({ pinned: !n.pinned })} title={n.pinned ? 'Unpin' : 'Pin — never forgotten'} aria-label={n.pinned ? 'Unpin' : 'Pin — never forgotten'}>
           {n.pinned ? <PinOff size={12} /> : <Pin size={12} />}
         </button>

@@ -261,6 +261,7 @@ function rpcMethods({ shell, quit, listChanged }) {
     'memory.update': ({ cwd, id, text, pinned }) => memory.update(pathParam(cwd, 'cwd'), id, { text, pinned }),
     'memory.remove': ({ cwd, id }) => memory.remove(pathParam(cwd, 'cwd'), str(id, 'id')),
     'memory.clear': ({ cwd }) => memory.clear(pathParam(cwd, 'cwd')),
+    'memory.resolve': ({ cwd, id, keep }) => memory.resolve(pathParam(cwd, 'cwd'), str(id, 'id'), Boolean(keep)),
     'memory.distill': async ({ id, force }) => {
       const s = await S(id);
       await s.loadHistory();

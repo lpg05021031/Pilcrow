@@ -30,6 +30,7 @@ LANES: List[Json] = [
 LANE_KEYS: List[Lane] = [str(lane["key"]) for lane in LANES]
 
 SCHEDULE_PREFIX = "sched:"
+NOTE_PREFIX = "note:"
 
 
 def _now_ms() -> float:
@@ -74,6 +75,8 @@ def lane_of(s: Json, rt: Optional[Json] = None, now: Optional[float] = None) -> 
     now = _now_ms() if now is None else now
     if s.get("archived"):
         return None
+    if s.get("conflict"):
+        return "me"
     if has_prompt(s, rt):
         return "me"
     if s.get("status") in ("running", "starting"):
@@ -106,7 +109,7 @@ def card_state(s: Json, rt: Optional[Json] = None, now: Optional[float] = None) 
     if lane is None:
         return None
     if lane == "me":
-        return "prompt" if has_prompt(s, rt) else "review"
+        return "prompt" if s.get("conflict") or has_prompt(s, rt) else "review"
     if lane == "agent":
         if s.get("status") in ("running", "starting"):
             return "running"
@@ -222,6 +225,46 @@ def schedule_actions() -> List[Action]:
     return [_a("schedule-edit", "Edit the schedule", "↵", primary=True), _a("schedule-run", "Run now", "r")]
 
 
+# ---- contradicted notes as cards (docs/PLAYBOOK.md §4)
+
+
+def is_conflict(sid: Optional[str]) -> bool:
+    return bool(sid and str(sid).startswith(NOTE_PREFIX))
+
+
+def conflict_card(c: Json) -> Json:
+    """A note in project memory that a correction of yours contradicted, as a card in "Needs you". It is
+    not a session: the note is its intent, and its actions keep or forget the note."""
+    return {
+        "id": NOTE_PREFIX + str(c.get("id")),
+        "title": "A note was contradicted",
+        "cwd": c.get("cwd"),
+        "project": c.get("cwd"),
+        "archived": False,
+        "pinned": False,
+        "worktree": None,
+        "status": "idle",
+        "live": False,
+        "createdAt": c.get("at"),
+        "lastModified": c.get("at"),
+        "intent": c.get("text"),
+        "conflict": c,
+    }
+
+
+def conflict_actions() -> List[Action]:
+    return [_a("note-forget", "Forget the note", "↵", primary=True), _a("note-keep", "Keep it", "e")]
+
+
+def actions_of(s: Json, state: CardState, rt: Optional[Json] = None) -> List[Action]:
+    """The actions of any card: a schedule's, a contradicted note's, or a session's by its state."""
+    if is_schedule(str(s.get("id"))):
+        return schedule_actions()
+    if s.get("conflict"):
+        return conflict_actions()
+    return actions_for(state, rt)
+
+
 # ---- the ledger
 
 DECISION_LABEL = {
@@ -331,6 +374,10 @@ def card_line(
 ) -> Tuple[str, str]:
     """The one line under a card's title and its tone ('ask' | 'err' | ''): what it waits for, does, or asks."""
     rt = rt or {}
+    c = s.get("conflict")
+    if c:
+        on = f" on {c['sessionTitle']}" if c.get("sessionTitle") else ""
+        return f"Your correction{on} says otherwise: keep the note or forget it", "ask"
     if state == "prompt":
         pending = rt.get("pending") or []
         p = pending[0] if pending else None

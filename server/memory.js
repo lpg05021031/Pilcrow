@@ -88,6 +88,8 @@ export function update(cwd, id, patch) {
   if (!n) throw new Error('No such note.');
   if (typeof patch.text === 'string') n.text = patch.text.trim().slice(0, 600);
   if (typeof patch.pinned === 'boolean') n.pinned = patch.pinned;
+  // Rewriting or pinning a contradicted note is deciding to keep it.
+  if ((typeof patch.text === 'string' && patch.text.trim() !== n.text) || patch.pinned === true) delete n.disputed;
   n.editedAt = Date.now();
   save(cwd);
   return withStanding(n);
@@ -450,6 +452,11 @@ If neither applies, reply with exactly NONE.`;
       }
     }
     const added = newBullets(text.replace(/^\s*MISLED:.*$/im, ''), d, cwd, 2).map((t) => ({ id: uuid(), at: Date.now(), text: t, kind: 'auto', source: 'reject', sessionId: session.id, sessionTitle: meta.title || null, pinned: false, helpful: 0, harmful: 0 }));
+    // A contradicted note is yours to settle: it shows on the workboard until you keep or forget it (§4).
+    for (const id of misled) {
+      const n = d.notes.find((x) => x.id === id);
+      if (n) n.disputed = { at: Date.now(), sessionId: session.id, sessionTitle: meta.title || null, correction: text0.slice(0, 400), replacement: added[0]?.id || null };
+    }
     d.notes.push(...added);
     trim(d);
     if (added.length || misled.length) save(cwd);
@@ -458,4 +465,48 @@ If neither applies, reply with exactly NONE.`;
   })().finally(() => inflight.delete(key));
   inflight.set(key, p);
   return p;
+}
+
+// ------------------------------------------------------------------ conflicts
+
+/** One contradicted note, as the workboard shows it. */
+function conflictOf(cwd, d, n) {
+  const r = n.disputed.replacement ? d.notes.find((x) => x.id === n.disputed.replacement) : null;
+  return { id: n.id, cwd: slash(cwd), text: n.text, standing: standing(n), at: n.disputed.at, correction: n.disputed.correction || '', sessionId: n.disputed.sessionId || null, sessionTitle: n.disputed.sessionTitle || null, replacement: r ? { id: r.id, text: r.text } : null };
+}
+
+/**
+ * Every contradicted note across the projects with memory, newest first: a correction of yours said the
+ * opposite of what the note says, and the note waits on the workboard for you to keep or forget it.
+ */
+export function conflicts() {
+  let files = [];
+  try {
+    files = fs.readdirSync(ROOT).filter((f) => f.endsWith('.json'));
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const f of files) {
+    const k = f.slice(0, -5);
+    let p = projects.get(k);
+    if (!p) {
+      const cwd = readJson(path.join(ROOT, f), {}).cwd;
+      if (!cwd || folderKey(cwd) !== k) continue;
+      p = projectFile(cwd);
+    }
+    for (const n of p.data.notes) if (n.disputed) out.push(conflictOf(p.data.cwd, p.data, n));
+  }
+  return out.sort((a, b) => b.at - a.at);
+}
+
+/** Settle a contradicted note: keep it (the flag goes, the tally stays) or forget it. */
+export function resolve(cwd, id, keep) {
+  const d = load(cwd);
+  const n = d.notes.find((x) => x.id === id);
+  if (!n) throw new Error('No such note.');
+  if (keep) delete n.disputed;
+  else d.notes = d.notes.filter((x) => x.id !== id);
+  save(cwd);
+  return keep ? withStanding(n) : true;
 }

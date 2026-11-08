@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PanelLeftOpen, CircleAlert, Plus, CalendarClock } from 'lucide-react';
 import { useStore, call, openSession, setUi, setDialog, decideCard, startCard, setWait, toast } from '../lib/store';
 import type { BoardState, Schedule, SessionSummary, WaitCondition } from '../lib/types';
-import { LANES, laneOf, cardState, step, actionsFor, dropAction, scheduleCard, scheduleActions, isSchedule, SCHEDULE_PREFIX, type Lane } from '../lib/board';
+import { LANES, laneOf, cardState, step, actionsOf, dropAction, scheduleCard, conflictCard, isSchedule, isConflict, SCHEDULE_PREFIX, type Lane } from '../lib/board';
 import { cost, timeAgo } from '../lib/format';
 import { Num } from './ui/bits';
 import { useNow } from './ui/hooks';
@@ -73,8 +73,8 @@ export function Board() {
     };
   }, [schedRev]);
 
-  // Schedules are cards too, under their own ids; the panel treats them by their actions, not a transcript.
-  const all = useMemo(() => [...sessions, ...(state?.scheduled || []).map(scheduleCard)], [sessions, state?.scheduled]);
+  // Schedules and contradicted notes are cards too, under their own ids; the panel treats them by their actions, not a transcript.
+  const all = useMemo(() => [...sessions, ...(state?.scheduled || []).map(scheduleCard), ...(state?.conflicts || []).map(conflictCard)], [sessions, state?.scheduled, state?.conflicts]);
   const titles = useMemo(() => Object.fromEntries(sessions.map((s) => [s.id, s.title])), [sessions]);
 
   const lanes = useMemo(() => {
@@ -83,8 +83,8 @@ export function Board() {
       const lane = laneOf(s, rt[s.id], now);
       if (lane) out[lane].push(s);
     }
-    // Prompts first in "Needs you"; the soonest condition first in "Waiting"; otherwise the most recently touched on top.
-    out.me.sort((a, b) => Number(cardState(b, rt[b.id], now) === 'prompt') - Number(cardState(a, rt[a.id], now) === 'prompt') || (b.lastModified || 0) - (a.lastModified || 0));
+    // Prompts first in "Needs you" and contradicted notes last; the soonest condition first in "Waiting"; otherwise the most recently touched on top.
+    out.me.sort((a, b) => Number(Boolean(a.conflict)) - Number(Boolean(b.conflict)) || Number(cardState(b, rt[b.id], now) === 'prompt') - Number(cardState(a, rt[a.id], now) === 'prompt') || (b.lastModified || 0) - (a.lastModified || 0));
     out.wait.sort((a, b) => (a.wait?.kind === 'time' ? a.wait.at : Infinity) - (b.wait?.kind === 'time' ? b.wait.at : Infinity) || (b.lastModified || 0) - (a.lastModified || 0));
     for (const k of ['backlog', 'agent', 'done'] as Lane[]) out[k].sort((a, b) => (b.lastModified || 0) - (a.lastModified || 0));
     return out;
@@ -121,6 +121,15 @@ export function Board() {
         }
         return;
       }
+      if (isConflict(id)) {
+        const c = all.find((x) => x.id === id)?.conflict;
+        if (!c || (action !== 'note-keep' && action !== 'note-forget')) return;
+        await call('memory.resolve', { cwd: c.cwd, id: c.id, keep: action === 'note-keep' });
+        toast(action === 'note-keep' ? 'The note stays' : 'The note is forgotten', 'info');
+        const me = lanes.me.filter((x) => x.id !== id);
+        select(me[0]?.id || null);
+        return;
+      }
       const s = useStore.getState().sessions.find((x) => x.id === id);
       if (!s) return;
       const nextNeeds = () => {
@@ -151,7 +160,7 @@ export function Board() {
       else if (action === 'stop') await decideCard(id, 'stop');
       else if (action === 'start') await startCard(id);
     },
-    [lanes.me, select],
+    [lanes.me, select, all],
   );
 
   // j/k and arrows move within a lane, h/l across lanes, 1–5 jump to a lane; single letters act on the card.
@@ -176,7 +185,7 @@ export function Board() {
         else if (sel) select(null);
         else return;
       } else if (selected && selState) {
-        const actions = isSchedule(selected.id) ? scheduleActions() : actionsFor(selState, rt[selected.id]);
+        const actions = actionsOf(selected, selState, rt[selected.id]);
         const hit = k === 'Enter' ? actions[0] : actions.find((a) => a.key === k);
         if (!hit) return;
         act(selected.id, hit.id);

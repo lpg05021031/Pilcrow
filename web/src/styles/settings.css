@@ -477,6 +477,13 @@
 .mem-edit .row {
   justify-content: flex-end;
 }
+.mem-dispute {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1_5);
+  font-size: var(--fs-micro);
+  color: var(--accent-text);
+}
 .mem-meta {
   display: flex;
   align-items: center;

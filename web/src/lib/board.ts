@@ -1,7 +1,7 @@
 // The workboard's pure logic: which lane a session sits in, what can be done to it there, and the
 // ledger of what happened to it. No React, no store; the Qt client ports this file one to one
 // (qt/pilcrow_qt/lib/board.py) and both run the cases in test/unit/board.test.ts.
-import type { Decision, PermissionRequest, ScheduledRun, SessionState, SessionSummary, WaitCondition } from './types';
+import type { Decision, MemoryConflict, PermissionRequest, ScheduledRun, SessionState, SessionSummary, WaitCondition } from './types';
 import { relPath } from './format';
 import { str } from './tools';
 
@@ -39,6 +39,7 @@ export const awaitsReview = (s: SessionSummary) => Boolean(s.intent && s.turnEnd
  */
 export function laneOf(s: SessionSummary, rt?: Partial<SessionState>, now = Date.now()): Lane | null {
   if (s.archived) return null;
+  if (s.conflict) return 'me';
   if (hasPrompt(s, rt)) return 'me';
   if (s.status === 'running' || s.status === 'starting') return 'agent';
   if (s.queued) return 'agent';
@@ -56,13 +57,13 @@ export type CardState = 'review' | 'prompt' | 'running' | 'queued' | 'stuck' | '
 export function cardState(s: SessionSummary, rt?: Partial<SessionState>, now = Date.now()): CardState | null {
   const lane = laneOf(s, rt, now);
   if (!lane) return null;
-  if (lane === 'me') return hasPrompt(s, rt) ? 'prompt' : 'review';
+  if (lane === 'me') return s.conflict || hasPrompt(s, rt) ? 'prompt' : 'review';
   if (lane === 'agent') return s.status === 'running' || s.status === 'starting' ? 'running' : isStuck(s) ? 'stuck' : s.queued ? 'queued' : 'running';
   return lane;
 }
 
 export interface CardAction {
-  id: 'open' | 'approve' | 'reject' | 'answer' | 'park' | 'stop' | 'start' | 'send' | 'wake' | 'wait' | 'unwait' | 'schedule-edit' | 'schedule-run';
+  id: 'open' | 'approve' | 'reject' | 'answer' | 'park' | 'stop' | 'start' | 'send' | 'wake' | 'wait' | 'unwait' | 'schedule-edit' | 'schedule-run' | 'note-forget' | 'note-keep';
   label: string;
   key: string;
   primary?: boolean;
@@ -157,6 +158,31 @@ export function scheduleActions(): CardAction[] {
   ];
 }
 
+// ---- contradicted notes as cards (docs/PLAYBOOK.md §4)
+
+export const NOTE_PREFIX = 'note:';
+export const isConflict = (id: string | null | undefined) => Boolean(id && id.startsWith(NOTE_PREFIX));
+
+/**
+ * A note in project memory that a correction of yours contradicted, as a card in "Needs you". It is
+ * not a session: the note is its intent, and its actions keep or forget the note.
+ */
+export function conflictCard(c: MemoryConflict): SessionSummary {
+  return { id: NOTE_PREFIX + c.id, title: 'A note was contradicted', cwd: c.cwd, project: c.cwd, archived: false, pinned: false, worktree: null, status: 'idle', live: false, createdAt: c.at, lastModified: c.at, intent: c.text, conflict: c };
+}
+
+export function conflictActions(): CardAction[] {
+  return [
+    { id: 'note-forget', label: 'Forget the note', key: '↵', primary: true },
+    { id: 'note-keep', label: 'Keep it', key: 'e' },
+  ];
+}
+
+/** The actions of any card: a schedule's, a contradicted note's, or a session's by its state. */
+export function actionsOf(s: SessionSummary, state: CardState, rt?: Partial<SessionState>): CardAction[] {
+  return isSchedule(s.id) ? scheduleActions() : s.conflict ? conflictActions() : actionsFor(state, rt);
+}
+
 export interface LedgerEvent {
   at: number;
   kind: 'intent' | 'decision' | 'turn' | 'commit';
@@ -194,6 +220,7 @@ export function ledgerOf(s: SessionSummary, rt?: Partial<SessionState>): LedgerE
 
 /** The one line under a card's title: what it is waiting for, doing, or asking. */
 export function cardLine(s: SessionSummary, state: CardState, rt?: Partial<SessionState>, titles?: Record<string, string>): { text: string; tone: 'ask' | 'err' | '' } {
+  if (s.conflict) return { text: `Your correction${s.conflict.sessionTitle ? ` on ${s.conflict.sessionTitle}` : ''} says otherwise: keep the note or forget it`, tone: 'ask' };
   switch (state) {
     case 'prompt': {
       const p = rt?.pending?.[0];

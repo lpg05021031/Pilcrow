@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import QHBoxLayout, QSizePolicy, QWidget
 
 from ... import icons, theme
@@ -256,6 +257,18 @@ class MemoryPage(QWidget):
 
         store.call("memory.update", {"cwd": self.cwd, "id": nid, **p}).then(ok)
 
+    def resolve(self, nid: str, keep: bool) -> None:
+        """Settle a contradicted note: keep it (the flag goes) or forget it."""
+
+        def ok(_r: Any) -> None:
+            if keep:
+                self.notes = [dict(x, disputed=None) if x.get("id") == nid else x for x in (self.notes or [])]
+            else:
+                self.notes = [x for x in (self.notes or []) if x.get("id") != nid]
+            self.render()
+
+        store.call("memory.resolve", {"cwd": self.cwd, "id": nid, "keep": keep}).then(ok)
+
     def remove(self, nid: str) -> None:
         def ok(_r: Any) -> None:
             self.notes = [x for x in (self.notes or []) if x.get("id") != nid]
@@ -438,11 +451,35 @@ class NoteRow(Panel):
         el.addWidget(er)
         self.edit_box.hide()
         self.lay.addWidget(self.edit_box)
+        disputed = n.get("disputed")
+        if disputed:
+            row = QWidget()
+            rl = QHBoxLayout(row)
+            rl.setContentsMargins(0, 0, 0, 0)
+            rl.setSpacing(6)
+            on = f" on {disputed['sessionTitle']}" if disputed.get("sessionTitle") else ""
+            rl.addWidget(
+                label(
+                    f"Contradicted by your correction{on}: “{disputed.get('correction') or ''}”",
+                    tone="accent",
+                    size="micro",
+                ),
+                1,
+            )
+            rl.addWidget(button("Keep", size="xs", on_click=lambda: page.resolve(nid, True)))
+            rl.addWidget(button("Forget", kind="danger", size="xs", on_click=lambda: page.resolve(nid, False)))
+            self.lay.addWidget(row)
         meta = QWidget()
         ml = QHBoxLayout(meta)
         ml.setContentsMargins(0, 0, 0, 0)
         ml.setSpacing(4)
         ml.addWidget(label(note_meta(n), tone="faint", size="micro"), 1)
+        if n.get("standing") == "confirmed":
+            cp = IconButton(
+                "copy", "Copy as a CLAUDE.md line — paste it there yourself; Pilcrow never writes that file", 12
+            )
+            cp.clicked.connect(lambda: self._copy_line())
+            ml.addWidget(cp)
         pin = IconButton(
             "pin-off" if n.get("pinned") else "pin", "Unpin" if n.get("pinned") else "Pin — never forgotten", 12
         )
@@ -463,6 +500,10 @@ class NoteRow(Panel):
                 self.cancel_edit()
                 return True
         return super().eventFilter(obj, e)
+
+    def _copy_line(self) -> None:
+        QGuiApplication.clipboard().setText(f"- {self.n.get('text') or ''}")
+        store.toast("The note, as a CLAUDE.md line, copied", "success")
 
     def start_edit(self) -> None:
         self.text_btn.hide()

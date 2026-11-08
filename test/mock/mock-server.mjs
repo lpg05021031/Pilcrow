@@ -37,6 +37,21 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let pace = 24;
 /** Canned results for RPC methods (mock.answer): a screenshot or test can show any state without a real backend. */
 const overrides = new Map();
+/** A note in project memory that a correction contradicted: a card in "Needs you" until kept or forgotten. */
+const seedConflicts = () => [
+  {
+    id: 'note-cents',
+    cwd: PROJ,
+    text: 'Prices in the cart API are in dollars; format them with two decimals.',
+    standing: 'fresh',
+    at: Date.now() - 2 * 3600e3,
+    correction: 'No — the API already returns cents; you rounded twice.',
+    sessionId: 'sess-login',
+    sessionTitle: 'Fix the cart total',
+    replacement: { id: 'note-cents-2', text: 'Prices are stored in cents; divide by 100 only when rendering.' },
+  },
+];
+let conflicts = seedConflicts();
 
 // ---------------------------------------------------------------- sessions and their transcripts
 
@@ -229,6 +244,10 @@ class Sess {
 }
 
 function seed() {
+  // "Done" holds what was approved today: just after midnight, three hours ago is yesterday, so clamp it.
+  const dayStart = new Date();
+  dayStart.setHours(0, 0, 0, 0);
+  const approvedToday = Math.max(now - 3 * 3600e3 + 90e3, dayStart.getTime() + 60e3);
   sessions.clear();
   seq = 0;
   const t0 = now - 2 * 3600e3;
@@ -241,7 +260,7 @@ function seed() {
     ],
   });
   const s2 = new Sess({
-    id: 'sess-tests', title: 'Write tests for the parser', cwd: PROJ, touched: now - 3 * 3600e3, intent: 'Unit tests for lib/partialJson.ts covering the cases the transcript relies on.', turnEnd: now - 3 * 3600e3, reviewedTurn: now - 3 * 3600e3, decisions: [{ at: now - 3 * 3600e3 + 90e3, kind: 'approve', commit: '7f3a9c1', turn: now - 3 * 3600e3 }],
+    id: 'sess-tests', title: 'Write tests for the parser', cwd: PROJ, touched: now - 3 * 3600e3, intent: 'Unit tests for lib/partialJson.ts covering the cases the transcript relies on.', turnEnd: now - 3 * 3600e3, reviewedTurn: now - 3 * 3600e3, decisions: [{ at: approvedToday, kind: 'approve', commit: '7f3a9c1', turn: now - 3 * 3600e3 }],
     messages: [...turn('sess-tests', now - 3.5 * 3600e3, { prompt: 'Write unit tests for lib/partialJson.ts', tools: [READ('web/src/lib/partialJson.ts', 40), { ...EDIT('test/unit/partialJson.test.ts', '', ''), name: 'Write', input: { file_path: `${PROJ}/test/unit/partialJson.test.ts`, content: 'import { describe } from "vitest";' } }, BASH('npx vitest run', 'Run the unit tests', 'Tests 8 passed')], reply: 'Eight tests cover complete JSON, open strings, nested containers, dangling keys and escapes. They all pass.' })],
   });
   const s3 = new Sess({ id: 'sess-site', title: 'Deploy the marketing site', cwd: OTHER, touched: now - 1 * DAY, messages: [...turn('sess-site', now - DAY - 600e3, { prompt: 'Deploy to staging', tools: [BASH('npm run deploy:staging', 'Deploy', 'Deployed https://staging.example.com')], reply: 'Deployed to staging.' })] });
@@ -1601,6 +1620,11 @@ const methods = {
   'skills.list': () => ({ roots: { user: `${HOME}/.claude/skills`, project: null }, user: [], project: [], plugin: [] }),
   'mcp.list': () => ({ file: `${HOME}/.claude.json`, servers: [] }),
   'memory.list': () => ({ notes: [] }),
+  'memory.resolve': ({ id }) => {
+    conflicts = conflicts.filter((c) => c.id !== id);
+    broadcast('memory.changed', {});
+    return true;
+  },
   'project.fileHistory': () => ({}),
   'board.state': () => methods['fleet.state'](),
   'session.intent': ({ id, intent }) => {
@@ -1711,7 +1735,7 @@ const methods = {
     const perSession = [...sessions.values()].filter((s) => s.touched >= dayStart.getTime() && s.usage.costUsd > 0).map((s) => ({ id: s.id, title: s.title, cost: s.usage.costUsd })).sort((a, b) => b.cost - a.cost);
     const done = [...sessions.values()].filter((s) => s.decisions.at(-1)?.kind === 'approve' && s.decisions.at(-1).at >= dayStart.getTime()).length;
     const running = [...sessions.values()].filter((s) => s.status === 'running' || s.status === 'starting').length;
-    return { live, today: { cost: perSession.reduce((a, b) => a + b.cost, 0), sessions: perSession.length, done, perSession: perSession.slice(0, 8) }, spend: perSession.map((p) => ({ at: Date.now() - 600e3, id: p.id, delta: p.cost })), limit: { max: LIMIT, running }, scheduled: [], caps: { ci: false } };
+    return { live, today: { cost: perSession.reduce((a, b) => a + b.cost, 0), sessions: perSession.length, done, perSession: perSession.slice(0, 8) }, spend: perSession.map((p) => ({ at: Date.now() - 600e3, id: p.id, delta: p.cost })), limit: { max: LIMIT, running }, scheduled: [], conflicts, caps: { ci: false } };
   },
   'timeline.steps': ({ id }) => ({ cwd: S(id).cwd, enabled: false, reason: 'Timeline is off in the mock', steps: [] }),
   'models.gateway': () => ({ ok: true, base: 'https://gateway.example.com', url: 'https://gateway.example.com/v1/models', models: [{ id: 'claude-mock-1', displayName: 'Claude Mock 1', created: null }, { id: 'claude-mock-fast', displayName: 'Claude Mock Fast', created: null }], fetchedAt: Date.now() }),
@@ -1744,6 +1768,7 @@ const methods = {
   'mock.reset': () => {
     seed();
     seedDispatch();
+    conflicts = seedConflicts();
     hAll.clear();
     hLeadRules.clear();
     for (const b of hNoteBuf.values()) clearTimeout(b.timer);

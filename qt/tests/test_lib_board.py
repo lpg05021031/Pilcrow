@@ -8,9 +8,11 @@ from pathlib import Path
 
 from pilcrow_qt.lib.board import (
     actions_for,
+    actions_of,
     awaits_review,
     card_line,
     card_state,
+    conflict_card,
     drop_action,
     lane_of,
     ledger_of,
@@ -144,6 +146,27 @@ def test_schedule_card():
     assert s["id"] == "sched:sch1"
     assert lane_of(s, None, NOW) == "wait"
     assert card_line(s, "wait")[0].startswith("Until")
+
+
+def test_conflict_card():
+    s = conflict_card(
+        {
+            "id": "n1",
+            "cwd": "/p",
+            "text": "Prices are in dollars",
+            "standing": "fresh",
+            "at": NOW - 3600e3,
+            "correction": "The API returns cents.",
+            "sessionId": "sess-login",
+            "sessionTitle": "Fix the cart total",
+            "replacement": None,
+        }
+    )
+    assert s["id"] == "note:n1"
+    assert lane_of(s, None, NOW) == "me"
+    assert card_state(s, None, NOW) == "prompt"
+    assert "Fix the cart total" in card_line(s, "prompt")[0]
+    assert [a["id"] for a in actions_of(s, "prompt")] == ["note-forget", "note-keep"]
 
 
 def test_step():
