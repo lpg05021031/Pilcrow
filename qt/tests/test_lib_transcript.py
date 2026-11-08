@@ -149,6 +149,8 @@ def test_tool_input_streams_as_partial_json_then_the_result_settles_the_status()
     )
     t = m.tools["toolu_1"]
     assert t.status == "streaming"
+    assert t.input_stale and t.input == {}  # parsed once per flush, not per delta
+    assert m.refresh_inputs() and not t.input_stale
     assert t.input == {"file_path": "/a/b.ts"}
     m.push(
         stream({"type": "content_block_delta", "index": 0, "delta": {"type": "input_json_delta", "partial_json": "}"}})
@@ -342,3 +344,46 @@ def test_latest_tool_finds_the_newest_by_name():
     latest = m.latest_tool("ExitPlanMode")
     assert latest is not None and latest.id == "p2"
     assert m.latest_tool("TodoWrite") is None
+
+
+def test_a_big_tool_input_streams_in_time_linear_in_its_size():
+    """A 100 KB Write fed as 40-byte deltas: each delta costs the delta (the scan is kept as state),
+    and the parse happens once per flush (``refresh_inputs``), not once per delta."""
+    import json
+    import time
+
+    m = TranscriptModel()
+    m.push(stream({"type": "message_start", "message": {"id": "msg_w"}}))
+    m.push(
+        stream(
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {"type": "tool_use", "id": "toolu_w", "name": "Write", "input": {}},
+            }
+        )
+    )
+    content = "\n".join(f"line {i} of a file being written by the model" for i in range(2200))
+    full = json.dumps({"file_path": "/proj/big.py", "content": content})
+    assert len(full) > 100_000
+    t = m.tools["toolu_w"]
+    t0 = time.perf_counter()
+    n = 0
+    for k in range(0, len(full), 40):
+        m.push(
+            stream(
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "input_json_delta", "partial_json": full[k : k + 40]},
+                }
+            )
+        )
+        n += 1
+        if n % 16 == 0:  # a flush every sixteen deltas, as the view would
+            m.refresh_inputs()
+            assert t.input.get("file_path") == "/proj/big.py"
+    elapsed = time.perf_counter() - t0
+    assert elapsed < 2.0, elapsed  # was 9.7 s with a parse of the whole text per delta
+    m.push(stream({"type": "content_block_stop", "index": 0}))
+    assert t.input == json.loads(full) and t.input_done and not t.input_stale

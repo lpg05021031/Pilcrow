@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from PySide6.QtCore import QByteArray, QPoint, QRect, QSize, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QFontMetrics, QKeyEvent, QMouseEvent, QPainter, QPixmap
+from PySide6.QtGui import QColor, QDesktopServices, QFontMetrics, QKeyEvent, QMouseEvent, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QAbstractScrollArea,
     QFrame,
@@ -140,6 +140,7 @@ class FileTree(QAbstractScrollArea):
         self._rows: List[TreeRow] = []
         self._hover = -1
         self._cursor = -1
+        self.note = ""  # shown instead of rows while there are none: reading, empty, or the error
         self.active: Optional[str] = None
         self.on_toggle: Optional[Callable[[str], None]] = None
         self.setFont(theme.font_ui(12.5))
@@ -171,11 +172,11 @@ class FileTree(QAbstractScrollArea):
         return QRect(self.viewport().width() - 6 - w, top + 4, w, 18)
 
     # ---- painting
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         self.set_rows(self._rows)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         vp = self.viewport()
         p = QPainter(vp)
@@ -183,6 +184,11 @@ class FileTree(QAbstractScrollArea):
         off = self.verticalScrollBar().value()
         fm = QFontMetrics(self.font())
         p.setFont(self.font())
+        if not self._rows and self.note:
+            p.setPen(QColor(t.text_4))
+            p.setFont(theme.font_ui(12))
+            p.drawText(QRect(12, 6, vp.width() - 24, 28), Qt.AlignmentFlag.AlignVCenter, self.note)
+            return
         first = max(0, off // ROW_H)
         last = min(len(self._rows), (off + vp.height()) // ROW_H + 2)
         for i in range(first, last):
@@ -243,18 +249,18 @@ class FileTree(QAbstractScrollArea):
         p.end()
 
     # ---- interaction
-    def mouseMoveEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+    def mouseMoveEvent(self, e: QMouseEvent) -> None:
         i = self.row_at(int(e.position().y()))
         if i != self._hover:
             self._hover = i
             self.viewport().update()
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
+    def leaveEvent(self, e) -> None:
         self._hover = -1
         self.viewport().update()
         super().leaveEvent(e)
 
-    def mousePressEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+    def mousePressEvent(self, e: QMouseEvent) -> None:
         if e.button() != Qt.MouseButton.LeftButton:
             return super().mousePressEvent(e)
         i = self.row_at(int(e.position().y()))
@@ -276,7 +282,7 @@ class FileTree(QAbstractScrollArea):
             self.opened.emit(r.path)
         self.viewport().update()
 
-    def keyPressEvent(self, e: QKeyEvent) -> None:  # noqa: N802
+    def keyPressEvent(self, e: QKeyEvent) -> None:
         k = e.key()
         n = len(self._rows)
         if not n:
@@ -315,10 +321,10 @@ class FTab(QWidget):
 
     def __init__(self, path: str, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)  # Qt repaints it on enter and leave
         self.path = path
         self.on = False
         self.dirty = False
-        self._hover = False
         self._x_hover = False
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -333,14 +339,14 @@ class FTab(QWidget):
             self.on, self.dirty = on, dirty
             self.update()
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         fm = QFontMetrics(self._font)
         return QSize(12 + fm.horizontalAdvance(basename(self.path)) + (6 + 7 if self.dirty else 0) + 4 + 20 + 5, 30)
 
     def _x_rect(self) -> QRect:
         return QRect(self.width() - 25, 5, 20, 20)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -348,7 +354,7 @@ class FTab(QWidget):
             p.setPen(theme.blend(t.hair, t.chrome))
             p.setBrush(theme.qcolor(t.canvas))
             p.drawRoundedRect(self.rect().adjusted(0, 0, -1, 2), theme.R2, theme.R2)
-        p.setPen(theme.qcolor(t.text if (self.on or self._hover) else t.text_3))
+        p.setPen(theme.qcolor(t.text if (self.on or self.underMouse()) else t.text_3))
         p.setFont(self._font)
         fm = QFontMetrics(self._font)
         name = basename(self.path)
@@ -358,7 +364,7 @@ class FTab(QWidget):
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(theme.qcolor(t.text_2))
             p.drawEllipse(QRect(x, 12, 7, 7))
-        if self.on or self._hover:
+        if self.on or self.underMouse():
             xr = self._x_rect()
             if self._x_hover:
                 p.setPen(Qt.PenStyle.NoPen)
@@ -366,21 +372,18 @@ class FTab(QWidget):
                 p.drawRoundedRect(xr, 4, 4)
             p.drawPixmap(xr.left() + 4, xr.top() + 4, icons.pixmap("x", t.text if self._x_hover else t.text_3, 11))
 
-    def enterEvent(self, e) -> None:  # noqa: N802
-        self._hover = True
+    def leaveEvent(self, e) -> None:
+        self._x_hover = False
         self.update()
+        super().leaveEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
-        self._hover = self._x_hover = False
-        self.update()
-
-    def mouseMoveEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+    def mouseMoveEvent(self, e: QMouseEvent) -> None:
         xh = self._x_rect().contains(e.position().toPoint())
         if xh != self._x_hover:
             self._x_hover = xh
             self.update()
 
-    def mousePressEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+    def mousePressEvent(self, e: QMouseEvent) -> None:
         if e.button() == Qt.MouseButton.MiddleButton or (
             e.button() == Qt.MouseButton.LeftButton and self._x_rect().contains(e.position().toPoint())
         ):
@@ -399,6 +402,8 @@ class FileTabs(QWidget):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setObjectName("chrome")
+        self.setAutoFillBackground(True)
+        theme.tint(self, bg="chrome")
         self.box = QHBoxLayout(self)
         self.box.setContentsMargins(6, 6, 6, 0)
         self.box.setSpacing(2)
@@ -432,10 +437,9 @@ class FileTabs(QWidget):
 # ---------------------------------------------------------------- document views
 
 
-def _browser_qss(t: theme.Tokens, size: float) -> str:
-    """A page surface on the canvas; the font is in the rule since the app's ``*`` rule beats setFont."""
-    ui = theme._UI_FAMILY or "sans-serif"
-    return f'QTextBrowser {{ background: {t.canvas}; color: {t.text}; border: none; padding: 0; font-family: "{ui}"; font-size: {size}px; }}'
+# A page surface on the canvas: the window colour of the palette, which Qt re-reads when the theme
+# repolishes the browser (theme.repolish); the font is set with setFont.
+_BROWSER_QSS = "QTextBrowser { background: palette(window); border: none; padding: 0; }"
 
 
 def _top(w: QWidget) -> QWidget:
@@ -470,13 +474,11 @@ class MarkdownView(QTextBrowser):
         self.on_open_path: Optional[Callable[[str], None]] = None
         self._base = ""
         self._text = ""
-        self._apply_theme()
+        self.setFont(theme.font_ui(theme.FS_BODY))
+        self.setStyleSheet(_BROWSER_QSS)
         bind(theme.theme.changed, self, lambda _t: self._apply_theme())
 
     def _apply_theme(self) -> None:
-        t = theme.tokens()
-        self.setFont(theme.font_ui(theme.FS_BODY))
-        self.setStyleSheet(_browser_qss(t, theme.FS_BODY))
         if self._text:
             self.set_markdown(self._text, self._base)
 
@@ -514,6 +516,8 @@ class HtmlPreview(QWidget):
         bar = Row(4, (12, 0, 6, 0))
         bar.setFixedHeight(30)
         bar.setObjectName("chrome")
+        bar.setAutoFillBackground(True)
+        theme.tint(bar, bg="chrome")
         bar.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.name = label(basename(path), tone="faint", size="micro", mono=True)
         bar.add(self.name, 1)
@@ -540,12 +544,9 @@ class HtmlPreview(QWidget):
         self.view.setFrameShape(QFrame.Shape.NoFrame)
         self.view.setOpenExternalLinks(True)
         self.view.document().setDocumentMargin(16)
+        self.view.setFont(theme.font_ui(theme.FS_BODY))
+        self.view.setStyleSheet(_BROWSER_QSS)
         lay.addWidget(self.view, 1)
-        self._apply_theme()
-        bind(theme.theme.changed, self, lambda _t: self._apply_theme())
-
-    def _apply_theme(self) -> None:
-        self.view.setStyleSheet(_browser_qss(theme.tokens(), theme.FS_BODY))
 
     def set_saved(self, saved: str, dirty: bool) -> None:
         self.save_btn.setVisible(dirty)
@@ -635,7 +636,7 @@ class ImageView(QScrollArea):
         lay.addWidget(label(bytes_(tab.size), tone="faint"), 0, Qt.AlignmentFlag.AlignHCenter)
         self.setWidget(host)
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         if not self._pm.isNull():
             w = max(40, self.viewport().width() - 48)
@@ -648,25 +649,6 @@ class ImageView(QScrollArea):
                     Qt.TransformationMode.SmoothTransformation,
                 )
             )
-
-
-class SegButtons(Row):
-    """A small segmented control of icon buttons (the ``Seg`` in ui/bits.tsx)."""
-
-    changed = Signal(str)
-
-    def __init__(self, options: List[Dict[str, str]], parent: Optional[QWidget] = None) -> None:
-        super().__init__(0, (0, 0, 2, 0), parent)
-        self._btns: Dict[str, IconButton] = {}
-        for o in options:
-            b = IconButton(o["icon"], o["title"], 13)
-            b.clicked.connect(lambda _c=False, v=o["value"]: self.changed.emit(v))
-            self._btns[o["value"]] = b
-            self.add(b)
-
-    def set_value(self, v: str) -> None:
-        for k, b in self._btns.items():
-            b.set_active(k == v)
 
 
 # ---------------------------------------------------------------- the panel
@@ -760,6 +742,7 @@ class FilesPanel(QWidget):
 
         self.editor_host = QWidget()
         self.editor_host.setObjectName("canvas")
+        self.editor_host.setAutoFillBackground(True)  # the palette's window colour: the canvas
         self.editor_host.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         el = QVBoxLayout(self.editor_host)
         el.setContentsMargins(0, 0, 0, 0)
@@ -917,7 +900,16 @@ class FilesPanel(QWidget):
 
     def render_tree(self) -> None:
         self.tree.active = self.st.active
-        self.tree.set_rows(self._visible_rows())
+        rows = self._visible_rows()
+        if rows:
+            self.tree.note = ""
+        elif self.cwd in self._loading:
+            self.tree.note = "Reading the folder…"
+        elif self._errors.get(self.cwd):
+            self.tree.note = str(self._errors[self.cwd])
+        else:
+            self.tree.note = "Nothing in this folder."
+        self.tree.set_rows(rows)
 
     # ---------------------------------------------------------------- history marks
     def _load_history(self) -> None:
@@ -1148,7 +1140,17 @@ class FilesPanel(QWidget):
         self.open_tab(str(d["path"]), d.get("line"))
 
     def _on_rt(self, sid: str) -> None:
-        if sid == self.session_id:
+        if sid != self.session_id:
+            return
+        if not self.isVisible():
+            self._stale = True  # the open files are re-read when the tab is shown again
+            return
+        self._reload_timer.start()
+
+    def showEvent(self, e) -> None:
+        super().showEvent(e)
+        if getattr(self, "_stale", False):
+            self._stale = False
             self._reload_timer.start()
 
     def _reload_open_files(self) -> None:

@@ -2,23 +2,25 @@
 
 from __future__ import annotations
 
+import faulthandler
 import json
 import os
 import subprocess
 import sys
 import time
-import urllib.request
+import traceback
 from pathlib import Path
-from typing import Optional
+from typing import Callable, List, Optional
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QTimer, QUrl
 from PySide6.QtGui import QIcon
+from PySide6.QtNetwork import QNetworkAccessManager, QNetworkProxy, QNetworkReply, QNetworkRequest
 from PySide6.QtWidgets import QApplication
 
 from . import fonts, icons
 from .rpc import rpc
 from .store import store
-from .theme import theme
+from .theme import DARK, theme
 
 # ---------------------------------------------------------------- finding or starting the server
 
@@ -29,28 +31,47 @@ def _state_dir() -> Path:
     return Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state")) / "pilcrow"
 
 
-def _hello(url: str, timeout: float = 1.5) -> Optional[dict]:
-    try:
-        with urllib.request.urlopen(url.rstrip("/") + "/api/hello", timeout=timeout) as r:
-            j = json.loads(r.read().decode("utf-8"))
-            return j if j.get("app") == "pilcrow" else None
-    except Exception:  # noqa: BLE001
-        return None
+_nam: Optional[QNetworkAccessManager] = None
 
 
-def existing_server() -> Optional[str]:
-    """The Pilcrow server already running for this user (its lock file names the port), if any."""
-    lock = _state_dir() / "instance.json"
+def ask_hello(url: str, timeout_ms: int, done: Callable[[Optional[dict]], None]) -> None:
+    """``GET /api/hello`` without blocking the event loop: ``done`` gets a Pilcrow server's answer, or
+    None (nothing listens, another program answered, the time ran out)."""
+    global _nam
+    if _nam is None:
+        _nam = QNetworkAccessManager()
+        _nam.setProxy(QNetworkProxy(QNetworkProxy.ProxyType.NoProxy))  # a server on this machine
+    req = QNetworkRequest(QUrl(url.rstrip("/") + "/api/hello"))
+    req.setTransferTimeout(timeout_ms)
+    reply = _nam.get(req)
+
+    def finished() -> None:
+        j = None
+        if reply.error() == QNetworkReply.NetworkError.NoError:
+            try:
+                j = json.loads(bytes(reply.readAll().data()).decode("utf-8"))
+            except ValueError:
+                j = None
+        reply.deleteLater()
+        done(j if isinstance(j, dict) and j.get("app") == "pilcrow" else None)
+
+    reply.finished.connect(finished)
+
+
+def find_server(done: Callable[[Optional[str]], None], timeout_ms: int = 1500) -> None:
+    """The Pilcrow server already running for this user (its lock file names the port): ``done`` gets
+    its URL, or None. The question goes out on the event loop; the window paints meanwhile."""
     try:
-        info = json.loads(lock.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001
-        return None
-    port = info.get("port")
+        info = json.loads((_state_dir() / "instance.json").read_text(encoding="utf-8"))
+    except Exception:
+        info = {}
+    port = info.get("port") if isinstance(info, dict) else None
     if not port:
-        return None
+        done(None)
+        return
     url = f"http://127.0.0.1:{port}/"
-    j = _hello(url)
-    return url if j and (not info.get("pid") or j.get("pid") == info.get("pid")) else None
+    pid = info.get("pid")
+    ask_hello(url, timeout_ms, lambda j: done(url if j and (not pid or j.get("pid") == pid) else None))
 
 
 class ServerProcess:
@@ -61,6 +82,10 @@ class ServerProcess:
         self.node = node or self._node_from_env() or "node"
         self.proc: Optional[subprocess.Popen] = None
         self.url = ""
+        self.log_path: Optional[Path] = None
+        self.log = None
+        self.timeout = 0.0
+        self.deadline = 0.0
 
     def _node_from_env(self) -> str:
         env = self.dir / ".launch-env"
@@ -70,41 +95,98 @@ class ServerProcess:
                     return line.split("=", 1)[1].strip().strip("'\"")
         return ""
 
-    def start(self, timeout: float = 25.0) -> str:
+    def start(self, timeout: float = 25.0) -> None:
+        """Launch the server and return at once; ``wait_for_server`` asks when it answers."""
         main_js = self.dir / "server" / "main.js"
         if not main_js.exists():
             raise RuntimeError(
                 f"Pilcrow is not installed at {self.dir} (no server/main.js). Run pilcrow-install.sh, or pass --dir."
             )
         env = {**os.environ, "PILCROW_SHELL_ENV": "0"}
+        # Its output goes to a file: a pipe nobody reads fills up and blocks the server's writes
+        # (Node's stdout is synchronous on a pipe on Linux). On Windows, no console window either.
+        log_dir = _state_dir()
+        try:
+            log_dir.mkdir(parents=True, exist_ok=True)
+            self.log_path = log_dir / "qt-server.log"
+            self.log = open(self.log_path, "a", encoding="utf-8", errors="replace")
+        except OSError:
+            self.log_path, self.log = None, open(os.devnull, "w")
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if sys.platform == "win32" else 0
         self.proc = subprocess.Popen(
             [self.node, str(main_js), "--shell=none"],
             cwd=str(self.dir),
             env=env,
-            stdout=subprocess.PIPE,
+            stdout=self.log,
             stderr=subprocess.STDOUT,
-            text=True,
+            creationflags=flags,
         )
-        deadline = time.time() + timeout
-        while time.time() < deadline:
-            url = existing_server()
-            if url:
-                self.url = url
-                return url
-            if self.proc.poll() is not None:
-                out = self.proc.stdout.read() if self.proc.stdout else ""
-                raise RuntimeError(f"The Pilcrow server exited right away:\n{out[-2000:]}")
-            time.sleep(0.15)
-        raise RuntimeError("The Pilcrow server did not come up within 25 seconds.")
+        self.timeout = timeout
+        self.deadline = time.monotonic() + timeout
+
+    def check(self) -> None:
+        """Raise RuntimeError when the server exited or the time to come up is over."""
+        if self.proc is not None and self.proc.poll() is not None:
+            raise RuntimeError(f"The Pilcrow server exited right away:\n{self._log_tail()}")
+        if time.monotonic() > self.deadline:
+            raise RuntimeError(
+                f"The Pilcrow server did not come up within {self.timeout:g} seconds.\n{self._log_tail()}"
+            )
+
+    def _log_tail(self) -> str:
+        try:
+            if self.log_path is not None:
+                return self.log_path.read_text(encoding="utf-8", errors="replace")[-2000:]
+        except OSError:
+            pass
+        return ""
 
     def stop(self) -> None:
-        if self.proc is None or self.proc.poll() is not None:
+        if self.proc is not None and self.proc.poll() is None:
+            try:
+                self.proc.terminate()
+                self.proc.wait(timeout=5)
+            except Exception:
+                self.proc.kill()
+        if self.log is not None:
+            try:
+                self.log.close()
+            except OSError:
+                pass
+            self.log = None
+
+
+def wait_for_server(
+    server: ServerProcess, parent: QApplication, found: Callable[[str], None], failed: Callable[[str], None]
+) -> QTimer:
+    """Ask every 150 ms, one question at a time, until the server we started answers (``found``) or
+    it exits or runs out of time (``failed``). Nothing blocks: the window paints while it boots."""
+    timer = QTimer(parent)
+    timer.setInterval(150)
+    asking: List[bool] = [False]
+
+    def answered(url: Optional[str]) -> None:
+        asking[0] = False
+        if url and timer.isActive():
+            timer.stop()
+            server.url = url
+            found(url)
+
+    def tick() -> None:
+        if asking[0]:
             return
         try:
-            self.proc.terminate()
-            self.proc.wait(timeout=5)
-        except Exception:  # noqa: BLE001
-            self.proc.kill()
+            server.check()
+        except RuntimeError as e:
+            timer.stop()
+            failed(str(e))
+            return
+        asking[0] = True
+        find_server(answered, 500)
+
+    timer.timeout.connect(tick)
+    timer.start()
+    return timer
 
 
 # ---------------------------------------------------------------- the app
@@ -142,21 +224,32 @@ def run(
     win = MainWindow(title=title)
     win.show()
 
-    server: Optional[ServerProcess] = None
-    target = url or existing_server()
-    if not target:
+    started: List[ServerProcess] = []  # the server this window launched, if it had to
+
+    def connect_or_start(target: Optional[str]) -> None:
+        if target:
+            rpc.connect_to(target)
+            return
+        # The server takes a few seconds to boot: wait for it on the event loop, so the window
+        # paints and answers meanwhile instead of sitting there frozen until it is up.
         server = ServerProcess(install_dir, node)
         try:
-            target = server.start()
+            server.start()
         except RuntimeError as e:
             win.show_fatal(str(e))
-            return app.exec()
-    rpc.connect_to(target)
+            return
+        started.append(server)
+        wait_for_server(server, app, rpc.connect_to, win.show_fatal)
+
+    if url:
+        rpc.connect_to(url)
+    else:
+        find_server(connect_or_start)
 
     def shutdown() -> None:
         rpc.close()
-        if server is not None and not keep_server:
-            server.stop()
+        if started and not keep_server:
+            started[0].stop()
 
     app.aboutToQuit.connect(shutdown)
     return app.exec()
@@ -164,19 +257,15 @@ def run(
 
 def _crash_log() -> None:
     """A native crash (segfault in Qt) leaves a Python traceback in the host log instead of nothing."""
-    import faulthandler
-
     try:
         log_dir = _state_dir().parent / "pilcrow-host" if sys.platform != "win32" else _state_dir()
         log_dir.mkdir(parents=True, exist_ok=True)
-        f = open(log_dir / "qt-crash.log", "a", encoding="utf-8")  # noqa: SIM115 - kept open for the process's life
+        f = open(log_dir / "qt-crash.log", "a", encoding="utf-8")  # kept open for the process's life
         f.write(f"\n--- {time.strftime('%Y-%m-%d %H:%M:%S')} pilcrow_qt started (pid {os.getpid()})\n")
         f.flush()
         faulthandler.enable(file=f, all_threads=True)
 
         def hook(exc_type, exc, tb) -> None:
-            import traceback
-
             traceback.print_exception(exc_type, exc, tb, file=f)
             f.flush()
             traceback.print_exception(exc_type, exc, tb)
@@ -190,12 +279,38 @@ def _app_icon() -> QIcon:
     svg = Path(__file__).resolve().parents[2] / "assets" / "icon.svg"
     if svg.exists():
         return QIcon(str(svg))
-    return QIcon(icons.pixmap("pilcrow", "#d97757", 64)) if "pilcrow" in icons.available() else QIcon()
+    return QIcon(icons.pixmap("pilcrow", DARK.accent, 64)) if "pilcrow" in icons.available() else QIcon()
 
 
 def _system_reduced_motion() -> bool:
-    return os.environ.get("PILCROW_LITE") == "1"
+    """Whether the system asks for reduced motion, where that is cheap to read: Windows' "Show
+    animations" (SPI_GETCLIENTAREAANIMATION), macOS's Reduce motion, GNOME's enable-animations.
+    ``PILCROW_LITE=1`` asks for it whatever the system says."""
+    if os.environ.get("PILCROW_LITE") == "1":
+        return True
+    try:
+        if sys.platform == "win32":
+            import ctypes  # Windows only
+
+            on = ctypes.c_int(1)
+            if ctypes.windll.user32.SystemParametersInfoW(0x1042, 0, ctypes.byref(on), 0):
+                return not on.value
+            return False
+        if sys.platform == "darwin":
+            cmd = ["defaults", "read", "com.apple.universalaccess", "reduceMotion"]
+            return _setting(cmd) == "1"
+        return _setting(["gsettings", "get", "org.gnome.desktop.interface", "enable-animations"]) == "false"
+    except (OSError, AttributeError, ValueError):
+        return False
 
 
-__all__ = ["run", "existing_server", "ServerProcess"]
-_ = (QTimer, Qt)
+def _setting(cmd: List[str]) -> str:
+    """What a settings command prints, or '' when it is missing, fails or takes more than a second."""
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=1)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return out.stdout.strip() if out.returncode == 0 else ""
+
+
+__all__ = ["run", "find_server", "wait_for_server", "ServerProcess"]

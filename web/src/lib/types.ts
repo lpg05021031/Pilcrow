@@ -1,6 +1,10 @@
 // Shared client-side types for data coming from the Pilcrow server.
 
 export type SessionStatus = 'idle' | 'starting' | 'running' | 'requires_action' | 'error' | 'stopped';
+/** Claude has the session in hand: starting, working, or waiting on the person in the middle of a turn. */
+export const isBusy = (status: string | undefined) => status === 'running' || status === 'starting' || status === 'requires_action';
+/** Claude is producing something right now: busy, and not waiting on the person. */
+export const isWorking = (status: string | undefined) => status === 'running' || status === 'starting';
 export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions' | 'dontAsk' | 'auto';
 export type Effort = '' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
@@ -28,6 +32,12 @@ export interface SessionSummary {
   pending?: number;
   /** Started by a schedule; such sessions live in the inbox rather than the sidebar. */
   scheduled?: { id: string; name: string; at: number; manual?: boolean } | null;
+  /** A run of a dispatch job (or its report session); reachable from the job's view. */
+  dispatch?: { jobId: string; runId: string | null; name: string; target: string } | null;
+  /** A helper of another session (HELPERS.md): nested under its lead in the sidebar. */
+  helper?: { leadId: string; name: string; state: HelperStateName | null } | null;
+  /** A session that has started helpers. */
+  lead?: { since: number; count: number } | null;
   // ---- workboard (docs/WORKBOARD.md). All optional; a plain conversation has none of them.
   /** Two or three sentences on what the work is and when it is done. A session with one is a card. */
   intent?: string;
@@ -200,6 +210,46 @@ export interface HeldMsg {
   images: number;
   files: string[];
   at: number;
+  /** A message Pilcrow wrote (a helper's news to its lead), not the person's. */
+  note?: string | null;
+  /** Who sent it when not the person ('lead'). */
+  from?: string | null;
+}
+
+// ---- helpers: a session that leads other sessions (server/helpers.js, HELPERS.md)
+export type HelperStateName = 'queued' | 'preparing' | 'running' | 'needs_action' | 'done' | 'failed' | 'stopped' | 'skipped';
+export interface HelperState {
+  name: string;
+  id: string;
+  cwd: string;
+  branch: string | null;
+  worktree: string | null;
+  state: HelperStateName;
+  since: number;
+  elapsedMs: number;
+  cost: number;
+  files: number;
+  add: number;
+  del: number;
+  pending: number;
+  lastLine: string;
+  after: string[];
+  reason?: string;
+  finished?: 'commit' | 'discard' | 'keep';
+  commit?: string;
+  pr?: string;
+}
+export interface LeadState {
+  since: number | null;
+  cost: number;
+  caps: { total: number; parallel: number; maxMinutes: number; costUsd: number };
+  rules: string[];
+}
+export interface HelperOf {
+  leadId: string;
+  leadTitle: string;
+  name: string;
+  state: HelperStateName | null;
 }
 
 export interface SessionState {
@@ -218,7 +268,7 @@ export interface SessionState {
   model: string;
   effort: Effort;
   activeModel: string | null;
-  usage: { contextTokens: number; contextWindow: number; costUsd: number; outputTokens: number; model: string | null };
+  usage: { contextTokens: number; contextWindow: number; costUsd: number; outputTokens: number; model: string | null; afterCompact?: boolean; compactedFrom?: number };
   mcp?: McpLive[];
   error: string | null;
   suggestion: string | null;
@@ -228,6 +278,10 @@ export interface SessionState {
   bgTasks: { task_id: string; task_type: string; description: string; subagent_type?: string }[];
   queued: string[];
   held: HeldMsg[];
+  /** A lead's helpers and its own numbers (HELPERS.md §5.11); a helper's lead. */
+  helpers?: HelperState[];
+  lead?: LeadState;
+  helper?: HelperOf;
   init: null | {
     version: string;
     tools: string[];
@@ -288,7 +342,43 @@ export interface Config {
   memoryModel?: string;
   maxConcurrent?: number;
   recentProjects: string[];
+  repos?: RepoEntry[];
+  helpers?: HelpersConfig;
   ui: Record<string, unknown>;
+}
+
+/** The repositories registry (REPOSITORIES.md): one entry the person maintains per repository. */
+export type RepoPolicy = 'allowed' | 'ask' | 'never';
+export interface RepoEntry {
+  id: string;
+  path: string;
+  name: string;
+  aliases: string[];
+  about: string;
+  policy: RepoPolicy;
+  defaults: { mode?: 'default' | 'acceptEdits' | 'plan'; worktree?: boolean; base?: string; prepare?: string; verify?: string; model?: string };
+  notes: string;
+  deps: string[];
+  facts: { manifest?: string | null; packageName?: string | null; isRepo?: boolean; branch?: string | null; dirty?: boolean; hasClaudeMd?: boolean; seenAt?: number; missing?: boolean };
+  addedAt: number;
+  machine: string;
+  missing?: boolean;
+}
+export interface RepoScanHit {
+  path: string;
+  name: string;
+  packageName: string | null;
+  kind: string | null;
+  branch: string | null;
+  registered: boolean;
+}
+export interface HelpersConfig {
+  enabled: boolean;
+  total: number;
+  parallel: number;
+  maxMinutes: number;
+  costUsd: number;
+  wakeLead: boolean;
 }
 
 export interface DiffLine {
@@ -368,6 +458,10 @@ export interface Cadence {
 }
 export interface Schedule {
   id: string;
+  /** 'prompt' runs a prompt in a folder; 'dispatch' runs a playbook across its repositories. */
+  kind?: 'prompt' | 'dispatch';
+  playbookId?: string | null;
+  playbookName?: string | null;
   name: string;
   cwd: string;
   prompt: string;
@@ -385,11 +479,18 @@ export interface Schedule {
   nextRunAt: number | null;
   cadenceLabel: string;
   error: string | null;
-  running: { sessionId: string; startedAt: number } | null;
+  running: { sessionId: string | null; jobId?: string | null; startedAt: number } | null;
 }
 export interface InboxItem {
   id: string;
-  scheduleId: string;
+  /** A dispatch job's report (`dispatch`), or a lead's helpers once they are all done (`helpers`). */
+  kind?: 'dispatch' | 'helpers';
+  jobId?: string;
+  dispatch?: DispatchReport;
+  leadId?: string;
+  title?: string;
+  helpers?: (HelperState & { handoff: string })[];
+  scheduleId: string | null;
   scheduleName: string;
   sessionId: string | null;
   cwd: string;
@@ -403,6 +504,218 @@ export interface InboxItem {
   files: { path: string; add: number; del: number }[];
   read: boolean;
   manual?: boolean;
+}
+
+// ---- dispatch: one job across many repositories (server/dispatch_core.js)
+export type RunState = 'queued' | 'preparing' | 'running' | 'needs_action' | 'done' | 'failed' | 'stopped' | 'skipped';
+/** The states a dispatch run or a helper ends in (the same words for both). */
+export const TERMINAL: ReadonlySet<string> = new Set<RunState>(['done', 'failed', 'stopped', 'skipped']);
+export type JobState = 'draft' | 'planned' | 'running' | 'reviewing' | 'finished' | 'stopped';
+export interface DispatchPending {
+  requestId: string;
+  toolName: string;
+  displayName: string | null;
+  key: string;
+  label: string;
+  interactive: boolean;
+  at: number;
+}
+export interface DispatchRun {
+  id: string;
+  jobId: string;
+  path: string;
+  name: string;
+  base: string;
+  size: string | null;
+  level: number;
+  dependsOn: string[];
+  wave: 'canary' | 'main';
+  state: RunState;
+  attempt: number;
+  sessionId: string | null;
+  worktree: { path: string; branch: string; base: string; repoRoot: string } | null;
+  startedAt: number | null;
+  endedAt: number | null;
+  durationMs: number;
+  cost: number;
+  summary: string;
+  files: { path: string; add: number; del: number }[];
+  add: number;
+  del: number;
+  reason: string | null;
+  verify: { ran: boolean; code: number; tail: string } | null;
+  now: string | null;
+  pending: DispatchPending[];
+  commit: string | null;
+  pr: string | null;
+  finished: 'commit' | 'discard' | 'keep' | null;
+  superseded?: string;
+}
+export interface DispatchSettings {
+  mode: 'ask' | 'acceptEdits' | 'allowlist';
+  allowedTools: string[];
+  model: string;
+  effort: string;
+  parallel: number;
+  maxMinutes: number;
+  costCap: number;
+  canary: number;
+  learn: boolean;
+  prepare: string;
+  copy: string[];
+  verify: string;
+  verifyRetry: boolean;
+  commitMessage: string;
+  pr: boolean;
+  report: 'table' | 'agent';
+  unattended?: boolean;
+  branch?: string;
+}
+export interface DispatchTarget {
+  path: string;
+  name: string;
+  base: string;
+  notes: string;
+  size?: string | null;
+  deps?: string[];
+}
+export interface DispatchPlanTarget {
+  path: string;
+  name: string;
+  base: string;
+  verdict: 'ok' | 'warning' | 'blocked';
+  notes: { kind: 'blocked' | 'warning' | 'note'; text: string }[];
+  brief: string;
+  level: number;
+  deps: string[];
+  size: string | null;
+}
+export interface DispatchPlan {
+  at: number;
+  targets: DispatchPlanTarget[];
+  levels: number;
+  worst: { minutes: number; cost: number | null; runs: number; levels: number };
+  ok: number;
+  warnings: number;
+  blocked: number;
+}
+export interface DispatchRule {
+  key: string;
+  label: string | null;
+  at: number;
+  count: number;
+}
+export interface DispatchReportTarget {
+  name: string;
+  path: string;
+  state: RunState;
+  reason: string | null;
+  summary: string;
+  files: number;
+  add: number;
+  del: number;
+  cost: number;
+  durationMs: number;
+  branch: string | null;
+  commit: string | null;
+  pr: string | null;
+  finished: 'commit' | 'discard' | 'keep' | null;
+  verify: { code: number } | null;
+}
+export interface DispatchReport {
+  at: number;
+  targets: DispatchReportTarget[];
+  rules: DispatchRule[];
+  plan: { ok: number; warnings: number; blocked: number; levels: number } | null;
+  cost: number;
+  durationMs: number;
+  prose?: string | null;
+  proseState?: 'writing' | 'done' | 'failed';
+  proseError?: string | null;
+  proseCost?: number;
+}
+export interface DispatchJob {
+  id: string;
+  name: string;
+  slug: string;
+  brief: string;
+  root: string;
+  targets: DispatchTarget[];
+  settings: DispatchSettings;
+  state: JobState;
+  wave: 'canary' | 'main' | 'done' | null;
+  paused: boolean;
+  createdAt: number;
+  updatedAt: number;
+  startedAt: number | null;
+  finishedAt: number | null;
+  plan: DispatchPlan | null;
+  rules: DispatchRule[];
+  learned: { name: string; summary: string }[];
+  forecast: { cost: number; minutes: number; from: string[]; runs: number } | null;
+  capReached: boolean;
+  report: DispatchReport | null;
+  stoppedReason: string | null;
+  playbookId: string | null;
+  scheduleId: string | null;
+  /** From the summary the server sends: counts per state, the total, cost, requests waiting. */
+  counts: Partial<Record<RunState, number>>;
+  total: number;
+  cost: number;
+  needsAction: number;
+  files: number;
+  canaryWaiting: boolean;
+}
+export interface DispatchDelta {
+  id: string;
+  removed?: boolean;
+  job?: DispatchJob;
+  runs?: DispatchRun[];
+  all?: boolean;
+}
+export interface Playbook {
+  id: string;
+  name: string;
+  brief: string;
+  root: string;
+  settings: DispatchSettings;
+  targets: DispatchTarget[];
+  createdAt: number;
+  updatedAt: number;
+  uses: number;
+  lastUsedAt: number | null;
+}
+export interface WorkspaceRepo {
+  path: string;
+  name: string;
+  branch: string | null;
+  dirty: boolean;
+  changed: number;
+  untracked: number;
+  ahead: number;
+  behind: number;
+  remote: { host: string; owner?: string; repo?: string; url?: string } | null;
+  hasClaudeMd: boolean;
+  size: 'small' | 'medium' | 'large';
+  files: number;
+  kind: string | null;
+  packageName: string | null;
+  lastSession: number | null;
+  deps: string[];
+  /** what the registry (REPOSITORIES.md) knows about it, when it is registered */
+  registered?: boolean;
+  registryId?: string;
+  registryName?: string;
+  about?: string;
+  policy?: RepoPolicy;
+  notes?: string;
+}
+export interface DispatchReview {
+  id: string;
+  runs: { runId: string; name: string; files: { path: string; add: number; del: number }[]; add: number; del: number }[];
+  same: { sig: string; path: string; runs: string[]; add: number; del: number; preview: string[] }[];
+  differ: { name: string; files: { path: string; add: number; del: number }[] }[];
+  files: number;
 }
 
 export interface DiffFile {
@@ -585,6 +898,8 @@ export interface RawMsg {
   elapsed_time_seconds?: number;
   id?: string;
   _local?: boolean;
+  _note?: string;
+  _from?: string;
 }
 
 /** Models the API endpoint offers (GET /v1/models), as Pilcrow's server read them. */

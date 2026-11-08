@@ -1,32 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Plus, SlidersHorizontal, PanelLeft, PanelRight, GitCompare, FolderTree, SquareTerminal, AppWindow, ListChecks, Info, Sun, Settings, Keyboard, CircleStop, GitFork, Archive, RefreshCw, MessageSquare, File as FileIcon, Search, X, CircleCheck, CircleAlert, TriangleAlert, Minimize2, Power, Eye, ScrollText, Plug, History, LayoutGrid } from 'lucide-react';
-import { useStore, setDialog, setUi, setTheme, openSession, interrupt, setMode, forkSession, refreshSessions, openFile, sendMessage, dismissToast, call, native, quickNewSession, type PanelTab, cycleView, showPage, holdToast, releaseToast, closeLightbox, type Toast } from '../lib/store';
+import { useStore, setDialog, setUi, setTheme, openSession, interrupt, setMode, forkSession, refreshSessions, openFile, sendMessage, dismissToast, useFileIndex, openFind, quitApp, quickNewSession, type PanelTab, cycleView, showPage, holdToast, releaseToast, closeLightbox, type Toast, type ConfirmSpec } from '../lib/store';
 import { useExitGhost, useFlipRows } from '../lib/motion';
 import { fuzzyFilter } from '../lib/fuzzy';
 import { basename, timeAgo } from '../lib/format';
 import { Dialog } from './ui/Dialog';
-import { MODES } from './Composer';
-import { Keys } from './ui/bits';
+import { MODES } from './composer/Menus';
+import { Keys, useEscape } from './ui/keys';
 import type { LucideIcon } from 'lucide-react';
-
-function quitNow() {
-  call('app.quit', {}, { quiet: true }).catch(() => {});
-  if (native()) return; // the desktop shell closes its own window
-  // A browser tab cannot always close itself; leave a clear end state instead.
-  setTimeout(() => {
-    window.close();
-    document.body.innerHTML = '<div class="quit-note">Pilcrow has quit. You can close this window.</div>';
-  }, 300);
-}
-
-/** Quit, asking first when Claude is still working (the desktop shell asks natively instead). */
-export function quitApp() {
-  if (native()) return quitNow();
-  const busy = useStore.getState().sessions.filter((s) => s.status === 'running' || s.status === 'requires_action').length;
-  if (!busy) return quitNow();
-  setDialog('confirm', { title: 'Quit Pilcrow?', body: `Claude is still working in ${busy} session${busy > 1 ? 's' : ''}. Quitting stops ${busy > 1 ? 'them' : 'it'}.`, confirm: 'Quit', danger: true, onConfirm: quitNow });
-}
+import { SHORTCUTS as K } from '../lib/shortcuts';
+import { Empty } from './ui/Empty';
 
 interface Cmd {
   id: string;
@@ -45,38 +29,36 @@ export function CommandPalette() {
   const rt = useStore((s) => (activeId ? s.rt[activeId] : undefined));
   const [q, setQ] = useState('');
   const [idx, setIdx] = useState(0);
-  const [files, setFiles] = useState<string[]>([]);
   const list = useRef<HTMLDivElement>(null);
+  const listId = useId();
   const close = () => setDialog('palette', false);
   const active = sessions.find((s) => s.id === activeId);
   const cwd = rt?.cwd || active?.cwd;
 
-  useEffect(() => {
-    if (q.startsWith('@') && cwd && !files.length) call<string[]>('fs.index', { cwd }, { quiet: true }).then(setFiles).catch(() => {});
-  }, [q, cwd, files.length]);
+  const files = useFileIndex(cwd, q.startsWith('@'));
 
   const panel = (tab: PanelTab) => () => setUi({ panel: true, panelTab: tab });
   const actions: Cmd[] = useMemo(
     () => [
-      { id: 'new', label: 'New session', hint: 'In the current folder, with your defaults', icon: Plus, kbd: 'Ctrl+N', group: 'Actions', run: () => quickNewSession() },
-      { id: 'new-opts', label: 'New session with options…', hint: 'Folder, worktree, permissions, model', icon: SlidersHorizontal, kbd: 'Ctrl+Shift+N', group: 'Actions', run: () => setDialog('newSession', {}) },
-      { id: 'side', label: 'Toggle sidebar', icon: PanelLeft, kbd: 'Ctrl+B', group: 'Actions', run: () => setUi({ sidebar: !useStore.getState().ui.sidebar }) },
-      { id: 'panel', label: 'Toggle side panel', icon: PanelRight, kbd: 'Ctrl+\\', group: 'Actions', run: () => setUi({ panel: !useStore.getState().ui.panel }) },
-      { id: 'view', label: 'Cycle view: Normal → Thinking → Verbose', icon: Eye, kbd: 'Ctrl+O', group: 'Actions', run: () => cycleView() },
-      { id: 'board', label: 'Workboard', hint: 'Every piece of work by whose hands it is in; approve, send back, answer in place', icon: LayoutGrid, kbd: 'Ctrl+Shift+O', group: 'Actions', run: () => showPage('board') },
+      { id: 'new', label: 'New session', hint: 'In the current folder, with your defaults', icon: Plus, kbd: K.newSession.keys, group: 'Actions', run: () => quickNewSession() },
+      { id: 'new-opts', label: 'New session with options…', hint: 'Folder, worktree, permissions, model', icon: SlidersHorizontal, kbd: K.newSessionWith.keys, group: 'Actions', run: () => setDialog('newSession', {}) },
+      { id: 'side', label: 'Toggle sidebar', icon: PanelLeft, kbd: K.sidebar.keys, group: 'Actions', run: () => setUi({ sidebar: !useStore.getState().ui.sidebar }) },
+      { id: 'panel', label: 'Toggle side panel', icon: PanelRight, kbd: K.panel.keys, group: 'Actions', run: () => setUi({ panel: !useStore.getState().ui.panel }) },
+      { id: 'view', label: 'Cycle view: Normal → Thinking → Verbose', icon: Eye, kbd: K.view.keys, group: 'Actions', run: () => cycleView() },
+      { id: 'board', label: 'Workboard', hint: 'Every piece of work by whose hands it is in; approve, send back, answer in place', icon: LayoutGrid, kbd: K.board.keys, group: 'Actions', run: () => showPage('board') },
       { id: 'skills', label: 'Skills…', hint: 'Personal and project skills', icon: ScrollText, group: 'Actions', run: () => setDialog('settings', 'skills') },
       { id: 'mcp', label: 'MCP servers…', hint: 'Add, sign in, reconnect', icon: Plug, group: 'Actions', run: () => setDialog('settings', 'mcp') },
       ...(activeId
         ? [
-            { id: 'find', label: 'Find in the conversation', icon: Search, kbd: 'Ctrl+F', group: 'Actions', run: () => setTimeout(() => window.dispatchEvent(new Event('pilcrow:find')), 60) } as Cmd,
-            { id: 'changes', label: 'Show changes', icon: GitCompare, kbd: 'Alt+1', group: 'Actions', run: panel('changes') } as Cmd,
-            { id: 'files', label: 'Show files', icon: FolderTree, kbd: 'Alt+2', group: 'Actions', run: panel('files') } as Cmd,
-            { id: 'term', label: 'Open terminal', icon: SquareTerminal, kbd: 'Alt+3', group: 'Actions', run: panel('terminal') } as Cmd,
-            { id: 'preview', label: 'Preview a web app', icon: AppWindow, kbd: 'Alt+4', group: 'Actions', run: panel('preview') } as Cmd,
-            { id: 'tasks', label: 'Show tasks', icon: ListChecks, kbd: 'Alt+5', group: 'Actions', run: panel('tasks') } as Cmd,
-            { id: 'history', label: 'Show the timeline', hint: 'Every step that changed files; restore from any point', icon: History, kbd: 'Alt+6', group: 'Actions', run: panel('history') } as Cmd,
-            { id: 'info', label: 'Session details and context usage', icon: Info, kbd: 'Alt+7', group: 'Actions', run: panel('info') } as Cmd,
-            { id: 'stop', label: 'Stop Claude', icon: CircleStop, kbd: 'Esc', group: 'Actions', run: () => interrupt(activeId) } as Cmd,
+            { id: 'find', label: 'Find in the conversation', icon: Search, kbd: K.find.keys, group: 'Actions', run: () => openFind() } as Cmd,
+            { id: 'changes', label: 'Show changes', icon: GitCompare, kbd: K.tabs.combos[0], group: 'Actions', run: panel('changes') } as Cmd,
+            { id: 'files', label: 'Show files', icon: FolderTree, kbd: K.tabs.combos[1], group: 'Actions', run: panel('files') } as Cmd,
+            { id: 'term', label: 'Open terminal', icon: SquareTerminal, kbd: K.tabs.combos[2], group: 'Actions', run: panel('terminal') } as Cmd,
+            { id: 'preview', label: 'Preview a web app', icon: AppWindow, kbd: K.tabs.combos[3], group: 'Actions', run: panel('preview') } as Cmd,
+            { id: 'tasks', label: 'Show tasks', icon: ListChecks, kbd: K.tabs.combos[4], group: 'Actions', run: panel('tasks') } as Cmd,
+            { id: 'history', label: 'Show the timeline', hint: 'Every step that changed files; restore from any point', icon: History, kbd: K.tabs.combos[5], group: 'Actions', run: panel('history') } as Cmd,
+            { id: 'info', label: 'Session details and context usage', icon: Info, kbd: K.tabs.combos[6], group: 'Actions', run: panel('info') } as Cmd,
+            { id: 'stop', label: 'Stop Claude', icon: CircleStop, kbd: K.stop.keys, group: 'Actions', run: () => interrupt(activeId) } as Cmd,
             { id: 'compact', label: 'Compact the conversation', icon: Minimize2, group: 'Actions', run: () => sendMessage(activeId, { text: '/compact' }) } as Cmd,
             { id: 'fork', label: 'Fork this session', icon: GitFork, group: 'Actions', run: () => forkSession(activeId) } as Cmd,
             ...MODES.map((m) => ({ id: 'mode-' + m.id, label: `Permission mode: ${m.label}`, hint: m.hint, icon: m.icon, group: 'Actions' as const, run: () => setMode(activeId, m.id) })),
@@ -85,9 +67,9 @@ export function CommandPalette() {
       { id: 'theme', label: `Switch to ${config?.theme === 'dark' ? 'light' : 'dark'} theme`, icon: Sun, group: 'Actions', run: () => setTheme(config?.theme === 'dark' ? 'light' : 'dark') },
       { id: 'archived', label: 'Show archived sessions', icon: Archive, group: 'Actions', run: () => setUi({ showArchived: !useStore.getState().ui.showArchived }) },
       { id: 'refresh', label: 'Reload session list', icon: RefreshCw, group: 'Actions', run: () => refreshSessions(true) },
-      { id: 'settings', label: 'Settings', icon: Settings, kbd: 'Ctrl+,', group: 'Actions', run: () => setDialog('settings', true) },
-      { id: 'keys', label: 'Keyboard shortcuts', icon: Keyboard, kbd: 'Ctrl+/', group: 'Actions', run: () => setDialog('shortcuts', true) },
-      { id: 'quit', label: 'Quit Pilcrow', hint: 'Stops all sessions', icon: Power, kbd: 'Ctrl+Q', group: 'Actions', run: () => quitApp() },
+      { id: 'settings', label: 'Settings', icon: Settings, kbd: K.settings.keys, group: 'Actions', run: () => setDialog('settings', true) },
+      { id: 'keys', label: 'Keyboard shortcuts', icon: Keyboard, kbd: K.shortcuts.keys, group: 'Actions', run: () => setDialog('shortcuts', true) },
+      { id: 'quit', label: 'Quit Pilcrow', hint: 'Stops all sessions', icon: Power, kbd: K.quit.keys, group: 'Actions', run: () => quitApp() },
     ],
     [activeId, config?.theme],  
   );
@@ -114,12 +96,19 @@ export function CommandPalette() {
   };
 
   let lastGroup = '';
+  const option = (i: number) => `${listId}-${i}`;
   return (
-    <Dialog onClose={close} width={600} className="palette">
+    <Dialog onClose={close} width={600} className="palette" label="Command palette">
       <div className="pal-input">
-        <Search size={16} />
+        <Search size={16} aria-hidden="true" />
         <input
           autoFocus
+          role="combobox"
+          aria-label="Search sessions and commands"
+          aria-expanded="true"
+          aria-controls={listId}
+          aria-autocomplete="list"
+          aria-activedescendant={items[idx] ? option(idx) : undefined}
           value={q}
           placeholder="Search sessions and commands, or type @ for files"
           onChange={(e) => setQ(e.target.value)}
@@ -137,15 +126,19 @@ export function CommandPalette() {
           }}
         />
       </div>
-      <div className="pal-list" ref={list}>
+      <div className="pal-list" ref={list} role="listbox" id={listId} aria-label="Results">
         {items.map((c, i) => {
           const head = c.group !== lastGroup ? c.group : null;
           lastGroup = c.group;
           return (
-            <div key={c.id}>
-              {head && <div className="pal-group">{head}</div>}
-              <button className={`pal-item${i === idx ? ' active' : ''}`} onMouseEnter={() => setIdx(i)} onClick={() => run(c)}>
-                <c.icon size={14} />
+            <div key={c.id} role="presentation">
+              {head && (
+                <div className="pal-group" role="presentation">
+                  {head}
+                </div>
+              )}
+              <button id={option(i)} role="option" aria-selected={i === idx} tabIndex={-1} className={`pal-item${i === idx ? ' active' : ''}`} onMouseEnter={() => setIdx(i)} onClick={() => run(c)}>
+                <c.icon size={14} aria-hidden="true" />
                 <span className="pal-label ellipsis">{c.label}</span>
                 {c.hint && <span className="pal-hint ellipsis">{c.hint}</span>}
                 {c.kbd && <Keys combo={c.kbd} className="pal-keys" />}
@@ -153,39 +146,18 @@ export function CommandPalette() {
             </div>
           );
         })}
-        {!items.length && <div className="empty">Nothing matches “{q}”.</div>}
+        {!items.length && <Empty title={`Nothing matches “${q}”.`} />}
       </div>
     </Dialog>
   );
 }
 
-const SHORTCUTS: [string, string][] = [
-  ['Ctrl+K', 'Command palette'],
-  ['Ctrl+N', 'New session'],
-  ['Ctrl+Shift+N', 'New session with options'],
-  ['Ctrl+F', 'Find in the conversation'],
-  ['Ctrl+B', 'Toggle sidebar'],
-  ['Ctrl+\\', 'Toggle side panel'],
-  ['Ctrl+O', 'Cycle view: Normal, Thinking, Verbose'],
-  ['Alt+1 … 7', 'Changes, Files, Terminal, Preview, Tasks, Timeline, Session'],
-  ['Ctrl+Shift+O', 'Workboard'],
-  ['Ctrl+Alt+↑ / ↓', 'Previous / next session'],
-  ['Enter', 'Send (Shift+Enter for a new line)'],
-  ['Shift+Tab', 'Cycle permission mode'],
-  ['Esc', 'Stop Claude'],
-  ['↑ in an empty box', 'Recall your previous message'],
-  ['@', 'Mention a file or folder'],
-  ['/', 'Run a slash command'],
-  ['1 · 2 · 3', 'Answer a permission request'],
-  ['Ctrl+S', 'Save the open file'],
-  ['Ctrl+,', 'Settings'],
-];
 
 export function ShortcutsDialog() {
   return (
     <Dialog title="Keyboard shortcuts" onClose={() => setDialog('shortcuts', false)} width={480}>
       <div className="shortcuts">
-        {SHORTCUTS.map(([k, v]) => (
+        {Object.values(K).map(({ keys: k, label: v }) => (
           <div key={k} className="shortcut">
             <span>{v}</span>
             <span className="keys">
@@ -198,8 +170,7 @@ export function ShortcutsDialog() {
   );
 }
 
-export function ConfirmDialog() {
-  const spec = useStore((s) => s.dialogs.confirm)!;
+export function ConfirmDialog({ spec }: { spec: ConfirmSpec }) {
   const [checked, setChecked] = useState(spec.checkbox?.value || false);
   const close = () => setDialog('confirm', null);
   return (
@@ -210,12 +181,13 @@ export function ConfirmDialog() {
       footer={
         <>
           <div className="grow" />
-          <button className="btn" onClick={close}>
+          {/* Enter right away should never be the destructive answer: a danger asks from Cancel. */}
+          <button className="btn" onClick={close} autoFocus={spec.danger}>
             Cancel
           </button>
           <button
             className={`btn ${spec.danger ? 'danger solid' : 'primary'}`}
-            autoFocus
+            autoFocus={!spec.danger}
             onClick={() => {
               close();
               spec.onConfirm(checked);
@@ -250,11 +222,30 @@ export function Toasts() {
   // When one toast leaves, the ones above it settle down into its place instead of jumping.
   useFlipRows(ref, '.toast', toasts);
   return (
-    <div className="toasts" role="status" aria-live="polite" ref={ref}>
-      {toasts.map((t) => (
-        <ToastItem key={t.id} t={t} />
-      ))}
-    </div>
+    <>
+      <div className="toasts" ref={ref}>
+        {toasts.map((t) => (
+          <ToastItem key={t.id} t={t} />
+        ))}
+      </div>
+      {/* What a screen reader hears: errors at once, the rest when it is free. A region of its own,
+          outside the app, so it is still heard while a dialog puts the app to sleep (ui/Dialog). */}
+      {createPortal(
+        <div className="sr-only" data-awake="">
+          <div role="alert">
+            {toasts.filter((t) => t.level === 'error').map((t) => (
+              <p key={t.id}>{t.text}</p>
+            ))}
+          </div>
+          <div role="status">
+            {toasts.filter((t) => t.level !== 'error').map((t) => (
+              <p key={t.id}>{t.text}</p>
+            ))}
+          </div>
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }
 
@@ -293,20 +284,20 @@ export function Lightbox() {
 function LightboxView({ src }: { src: string }) {
   const ref = useRef<HTMLDivElement>(null);
   useExitGhost(ref, { duration: 200, pin: false });
+  useEscape(closeLightbox);
+  // The focus goes in with it, and back to what opened it.
+  const x = useRef<HTMLButtonElement>(null);
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        closeLightbox();
-      }
+    const back = document.activeElement as HTMLElement | null;
+    x.current?.focus();
+    return () => {
+      if (back?.isConnected) back.focus();
     };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
   }, []);
   return createPortal(
     <div ref={ref} className="lightbox" role="dialog" aria-modal="true" aria-label="Image" onClick={closeLightbox}>
       <img src={src} alt="" onClick={(e) => e.stopPropagation()} draggable={false} />
-      <button className="lightbox-x" onClick={closeLightbox} aria-label="Close" title="Close (Esc)">
+      <button ref={x} className="lightbox-x" onClick={closeLightbox} aria-label="Close" title="Close (Esc)">
         <X size={18} />
       </button>
     </div>,

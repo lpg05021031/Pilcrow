@@ -1,6 +1,6 @@
 """Measure the client on a long conversation, offscreen, against the mock server.
 
-    python qt/tests/perf.py [--turns 400] [--port 5323]
+    python qt/tests/perf.py [--turns 400]
 
 Prints: time to open a conversation of N turns (RPC answer → rows on screen), the time the first
 paint after opening takes, average frame cost while a reply streams, and the process CPU share
@@ -26,13 +26,13 @@ if sys.platform == "win32":
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--turns", type=int, default=400)
-    ap.add_argument("--port", type=int, default=5323)
     args = ap.parse_args()
-    from harness import Client, start_mock
+    from harness import Client, free_port, start_mock
 
-    mock = start_mock(args.port, args.turns)
+    port = free_port()
+    mock = start_mock(port, args.turns)
     try:
-        c = Client(args.port)
+        c = Client(port)
         c.wait_until(lambda: c.store.sessions_loaded, 15, "sessions")
         c.call("mock.pace", {"ms": 8})
         # ---- open a long conversation
@@ -40,7 +40,7 @@ def main() -> int:
         c.store.open_session("sess-long")
         c.wait_until(lambda: "sess-long" in c.store.rt and c.store.rt["sess-long"].loaded, 30, "loaded")
         t_loaded = time.perf_counter() - t0
-        from pilcrow_qt.widgets.transcript.view import Transcript
+        from pilcrow_qt.canvas.transcript import Transcript
 
         c.wait_until(lambda: c.find(Transcript), 10, "transcript widget")
         tv = c.find(Transcript)[0]
@@ -50,10 +50,11 @@ def main() -> int:
         p0 = time.perf_counter()
         tv.grab()  # forces a full paint of what is on screen
         t_paint = time.perf_counter() - p0
-        drawn = sum(1 for u in getattr(tv, "pages", []) if getattr(u, "drawn", True)) if hasattr(tv, "pages") else -1
+        leaves = [b for b in tv.scene.root.walk() if not hasattr(b, "children")]
+        warm = sum(1 for b in leaves if b.warm)
         print(
-            f"open {args.turns} turns: transcript loaded {t_loaded * 1000:.0f} ms, rows on screen {t_rows * 1000:.0f} ms, first paint {t_paint * 1000:.1f} ms"
-            + (f", pages drawn {drawn}" if drawn >= 0 else "")
+            f"open {args.turns} turns: transcript loaded {t_loaded * 1000:.0f} ms, rows on screen {t_rows * 1000:.0f} ms,"
+            f" first paint {t_paint * 1000:.1f} ms, blocks measured {warm} of {len(leaves)}"
         )
 
         # ---- idle CPU: a real event loop (the harness's polling sleep would be the cost itself)
@@ -94,7 +95,7 @@ def main() -> int:
             tv.viewport().repaint()
             steps += 1
         print(
-            f"scroll to the top in {steps} steps: {(time.perf_counter() - t0) * 1000 / max(1, steps):.1f} ms per step (pages drawn on the way)"
+            f"scroll to the top in {steps} steps: {(time.perf_counter() - t0) * 1000 / max(1, steps):.1f} ms per step (blocks measured on the way)"
         )
         c.close()
         return 0

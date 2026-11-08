@@ -27,6 +27,11 @@ def _js_num(n: Any) -> str:
     return str(n)
 
 
+def now_ms() -> float:
+    """The wall clock in milliseconds, the unit of every timestamp the server sends (``Date.now()``)."""
+    return time.time() * 1000
+
+
 def time_ago(ms: Optional[float], now: Optional[float] = None, short: bool = False) -> str:
     """Relative time. `short` gives the compact form used in lists ("now", "4m", "3h", "2d")."""
     if not ms:
@@ -174,6 +179,11 @@ def first_line(s: Optional[str]) -> str:
     return (s or "").split("\n")[0]
 
 
+def clock(ms: float, seconds: bool = False) -> str:
+    """A 24-hour time of day, "14:05", or "14:05:09" with ``seconds``."""
+    return datetime.fromtimestamp(ms / 1000).strftime("%H:%M:%S" if seconds else "%H:%M")
+
+
 def plural(n: float, one: str, many: Optional[str] = None) -> str:
     if many is None:
         many = one + "s"
@@ -312,3 +322,11 @@ def err_text(e: Any) -> str:
     if e is not None and not isinstance(e, (int, float, bool, list)) and isinstance(getattr(e, "message", None), str):
         return e.message
     return str(e)
+
+
+def resolve_path(p: str, cwd: str) -> str:
+    """A path as a tool or a link names it, made absolute against the working directory."""
+    if not p or p.startswith("/") or p.startswith("~/") or re.match(r"^[A-Za-z]:[\\/]", p):
+        return p
+    base = (cwd or "").rstrip("/")
+    return f"{base}/{p[2:] if p.startswith('./') else p}" if base else p

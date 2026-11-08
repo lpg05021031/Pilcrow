@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RefreshCw, Rows2, Columns2, ChevronRight, Undo2, FileText, Send, GitCommitHorizontal, MessageSquareText, Eye, CircleCheck, GitPullRequestArrow } from 'lucide-react';
-import { useStore, call, setUi, openFile, confirmAction, sendMessage, toast, insertIntoComposer, models, bumpFs } from '../../lib/store';
+import { useStore, call, setUi, openFile, confirmAction, sendMessage, toast, insertIntoComposer, models, bumpFs, memo } from '../../lib/store';
 import { Select } from '../ui/Select';
 import type { DiffFile, DiffLine, SessionSummary } from '../../lib/types';
 import { basename, dirname, plural } from '../../lib/format';
@@ -8,8 +8,11 @@ import { DiffView, hunksFromPatch } from '../Code';
 import { Collapse } from '../ui/Collapse';
 import { Spinner, Seg } from '../ui/bits';
 import { FileTouches, useFileHistory } from '../FileTouches';
+import { HelpersChanges } from './HelpersChanges';
 import { str } from '../../lib/tools';
 import { errText } from '../../lib/format';
+import type { ToolItem } from '../../lib/transcript';
+import { Empty, Loading } from '../ui/Empty';
 
 interface DiffResult {
   isRepo: boolean;
@@ -20,20 +23,22 @@ interface DiffResult {
   error?: string | null;
 }
 
-// Review notes survive tab switches: sessionId -> path -> key -> note
-const notesStore = new Map<string, Record<string, Record<string, { text: string; line: string; lineNo: number }>>>();
 
 const STATUS_LABEL: Record<string, string> = { M: 'Modified', A: 'Added', D: 'Deleted', R: 'Renamed' };
 
 export function ChangesPanel({ session, cwd }: { session: SessionSummary; cwd: string }) {
-  const rt = useStore((s) => s.rt[session.id]);
+  // Narrow reads: the runtime record changes with every streamed frame; the diff is fetched again
+  // when Claude stops, and at most every 25 changes while it works.
+  const status = useStore((s) => s.rt[session.id]?.status);
+  const revStep = useStore((s) => Math.floor((s.rt[session.id]?.rev || 0) / 25));
   const mode = useStore((s) => s.ui.diffMode);
   const [data, setData] = useState<DiffResult | null>(null);
   const history = useFileHistory(cwd);
   const [loading, setLoading] = useState(false);
   const [base, setBase] = useState<string>(session.worktree?.base || 'HEAD');
   const [open, setOpen] = useState<Record<string, boolean>>({});
-  const [notes, setNotes] = useState(() => notesStore.get(session.id) || {});
+  // Review notes survive tab switches and closing the panel: they are kept in the session's memo.
+  const [notes, setNotes] = useState(() => memo(session.id).notes);
   const [commitOpen, setCommitOpen] = useState(false);
   const [message, setMessage] = useState('');
   const lastLoad = useRef(0);
@@ -50,7 +55,7 @@ export function ChangesPanel({ session, cwd }: { session: SessionSummary; cwd: s
   const viewMode = mode === 'split' && narrow ? 'unified' : mode;
 
   useEffect(() => {
-    notesStore.set(session.id, notes);
+    memo(session.id).notes = notes;
   }, [notes, session.id]);
 
   const load = useCallback(async () => {
@@ -66,25 +71,23 @@ export function ChangesPanel({ session, cwd }: { session: SessionSummary; cwd: s
     }
   }, [cwd, base]);
 
+  // Again when files change outside Claude's own tool calls (a restore, a discard, a commit, a save).
+  const fsRev = useStore((s) => s.fsRev);
   useEffect(() => {
     load();
-  }, [load]);
+  }, [load, fsRev]);
 
   // Refresh when Claude finishes a step that may have touched files.
-  const status = rt?.status;
-  const rev = rt?.rev || 0;
   useEffect(() => {
     if (status === 'idle') load();
   }, [status, load]);
-  const fsRev = useStore((s) => s.fsRev);
-  useEffect(() => {
-    if (fsRev) load();
-  }, [fsRev]); // eslint-disable-line react-hooks/exhaustive-deps
+  // A step under way may be writing files: again a moment after it, unless a load has just run (a new
+  // cwd or base loads through the effect above, which makes this one a no-op).
   useEffect(() => {
     if (Date.now() - lastLoad.current < 2500) return;
     const t = setTimeout(load, 1200);
     return () => clearTimeout(t);
-  }, [Math.floor(rev / 25)]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [revStep, load]);
 
   const files = useMemo(() => data?.files || [], [data]);
   const totals = useMemo(() => files.reduce((a, f) => ({ add: a.add + f.additions, del: a.del + f.deletions }), { add: 0, del: 0 }), [files]);
@@ -117,7 +120,7 @@ export function ChangesPanel({ session, cwd }: { session: SessionSummary; cwd: s
     toast('Sent your notes to Claude', 'success');
   };
 
-  const review = () => sendMessage(session.id, { text: rt?.init?.slashCommands?.includes('code-review') ? '/code-review' : 'Review the uncommitted changes in this repository. Look for bugs, missed edge cases and anything that does not match the surrounding code. Report findings with file and line references; do not change files yet.' });
+  const review = () => sendMessage(session.id, { text: useStore.getState().rt[session.id]?.init?.slashCommands?.includes('code-review') ? '/code-review' : 'Review the uncommitted changes in this repository. Look for bugs, missed edge cases and anything that does not match the surrounding code. Report findings with file and line references; do not change files yet.' });
 
   const commit = async () => {
     if (!message.trim()) return;
@@ -149,7 +152,7 @@ export function ChangesPanel({ session, cwd }: { session: SessionSummary; cwd: s
     <div className="changes" ref={box}>
       <div className="panel-toolbar changes-bar">
         {session.worktree ? (
-          <Select
+          <Select label="Compare with"
             className="ghost-select"
             value={base}
             onChange={setBase}
@@ -203,14 +206,14 @@ export function ChangesPanel({ session, cwd }: { session: SessionSummary; cwd: s
             { value: 'split', label: <Columns2 size={13} />, title: narrow ? 'Side by side (widen the panel to use it)' : 'Side by side', disabled: narrow },
           ]}
         />
-        <button className="icon-btn sm" title="Refresh" onClick={load}>
+        <button className="icon-btn sm" title="Refresh" aria-label="Refresh" onClick={load}>
           {loading ? <Spinner size={13} /> : <RefreshCw size={13} />}
         </button>
       </div>
 
       {commitOpen && (
         <div className="commit-box">
-          <textarea className="textarea" rows={3} autoFocus placeholder="Commit message" value={message} onChange={(e) => setMessage(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.metaKey || e.ctrlKey) && commit()} />
+          <textarea aria-label="Commit message" className="textarea" rows={3} autoFocus placeholder="Commit message" value={message} onChange={(e) => setMessage(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && (e.metaKey || e.ctrlKey) && commit()} />
           <div className="row">
             <button className="btn sm ghost" onClick={() => sendMessage(session.id, { text: 'Commit the current changes with a clear, conventional commit message. Do not push.' }).then(() => setCommitOpen(false))}>
               Let Claude write it
@@ -250,10 +253,10 @@ export function ChangesPanel({ session, cwd }: { session: SessionSummary; cwd: s
                 )}
                 <span className={`num-add${f.additions ? '' : ' zero'}`}>+{f.additions}</span>
                 <span className={`num-del${f.deletions ? '' : ' zero'}`}>−{f.deletions}</span>
-                <button className="icon-btn sm" title="Open file" onClick={() => openFile(`${data!.root}/${f.path}`)}>
+                <button className="icon-btn sm" title="Open file" aria-label="Open file" onClick={() => data && openFile(`${data.root}/${f.path}`)}>
                   <FileText size={13} />
                 </button>
-                <button className="icon-btn sm" title={f.untracked ? 'Delete new file' : 'Discard changes'} onClick={() => discard(f)}>
+                <button className="icon-btn sm" title={f.untracked ? 'Delete new file' : 'Discard changes'} aria-label={f.untracked ? 'Delete new file' : 'Discard changes'} onClick={() => discard(f)}>
                   <Undo2 size={13} />
                 </button>
               </div>
@@ -263,7 +266,13 @@ export function ChangesPanel({ session, cwd }: { session: SessionSummary; cwd: s
                     {f.binary ? (
                       <div className="faint cfile-note">Binary file</div>
                     ) : f.truncated && !f.hunks.length ? (
-                      <div className="faint cfile-note">This diff is too large to show here.</div>
+                      // Past the diff's budget (server git.diff) a file comes with its counts only.
+                      <div className="faint cfile-note">
+                        Too large to show here.{' '}
+                        <button className="link" onClick={() => data && openFile(`${data.root}/${f.path}`)}>
+                          Open in Files
+                        </button>
+                      </div>
                     ) : (
                       <DiffView hunks={f.hunks} path={f.path} mode={viewMode} wrap={narrow} dual comments={noteMap} onComment={onComment(f.path)} maxRows={600} />
                     )}
@@ -274,24 +283,14 @@ export function ChangesPanel({ session, cwd }: { session: SessionSummary; cwd: s
           );
         })}
         {!data && (
-          <div className="changes-loading" aria-label="Loading changes">
-            {[0, 1, 2].map((k) => (
-              <div key={k} className="sk-file">
-                <div className="sk" style={{ width: `${46 - k * 9}%` }} />
-                <div className="sk short" />
-                <div className="sk" />
-              </div>
-            ))}
-          </div>
+          <Loading label="Loading the changes" rows={3} />
         )}
         {data && !files.length && !loading && (
-          <div className="empty">
-            <CircleCheck size={22} />
-            <div>Working tree is clean.</div>
-            <div className="hint">Changes Claude makes will show up here for review. Hover a line and click the note icon to leave feedback.</div>
-          </div>
+          <Empty icon={CircleCheck} title="Working tree is clean." hint="Changes Claude makes will show up here for review. Hover a line and click the note icon to leave feedback." />
         )}
       </div>
+
+      <HelpersChanges sessionId={session.id} />
 
       {noteCount > 0 && (
         <div className="notes-bar">
@@ -309,26 +308,37 @@ export function ChangesPanel({ session, cwd }: { session: SessionSummary; cwd: s
   );
 }
 
+type Edit = { id: string; path: string; hunks: ReturnType<typeof hunksFromPatch> };
+
+function editOf(t: ToolItem): Edit | null {
+  const s = t.structured;
+  const path = str(t.input, 'file_path');
+  if (Array.isArray(s?.structuredPatch) && s.structuredPatch.length) return { id: t.id, path, hunks: hunksFromPatch(s.structuredPatch) };
+  if (t.name === 'Write' && typeof t.input?.content === 'string') return { id: t.id, path, hunks: [{ oldStart: 0, oldLines: 0, newStart: 1, newLines: 0, lines: t.input.content.split('\n').map((s2: string, k: number) => ({ t: '+', s: s2, n: k + 1 })) }] };
+  return null;
+}
+
+// Each edit's hunks, worked out once per change of that edit: the list is looked at again with every
+// streamed frame, and a long session has hundreds of edits.
+const editsSeen = new WeakMap<ToolItem, { rev: number; edit: Edit | null }>();
+
 /** Fallback for folders that are not git repositories: show what this session's tools changed. */
 function SessionEdits({ sessionId, cwd }: { sessionId: string; cwd: string }) {
-  const rev = useStore((s) => s.rt[sessionId]?.rev);
-  const model = models.get(sessionId);
-  const edits = useMemo(() => {
-    const out: { id: string; path: string; hunks: ReturnType<typeof hunksFromPatch> }[] = [];
-    for (const t of model?.tools.values() || []) {
-      if (!['Edit', 'Write', 'MultiEdit'].includes(t.name) || t.status !== 'done') continue;
-      const s = t.structured;
-      const path = str(t.input, 'file_path');
-      if (Array.isArray(s?.structuredPatch) && s.structuredPatch.length) out.push({ id: t.id, path, hunks: hunksFromPatch(s.structuredPatch) });
-      else if (t.name === 'Write' && typeof t.input?.content === 'string') out.push({ id: t.id, path, hunks: [{ oldStart: 0, oldLines: 0, newStart: 1, newLines: 0, lines: t.input.content.split('\n').map((s2: string, k: number) => ({ t: '+', s: s2, n: k + 1 })) }] });
-    }
-    return out;
-  }, [model, rev]); // eslint-disable-line react-hooks/exhaustive-deps -- the model mutates in place; rev marks a change
+  // Drawn again as the model changes (its rev), from a cache of each step's edit: a pass over the steps.
+  useStore((s) => s.rt[sessionId]?.rev);
+  const edits: Edit[] = [];
+  for (const t of models.get(sessionId)?.tools.values() || []) {
+    if (!['Edit', 'Write', 'MultiEdit'].includes(t.name) || t.status !== 'done') continue;
+    let e = editsSeen.get(t);
+    if (e === undefined || e.rev !== t.rev) editsSeen.set(t, (e = { rev: t.rev, edit: editOf(t) }));
+    if (e.edit) edits.push(e.edit);
+  }
   return (
     <div className="changes">
       <div className="changes-summary">
         <span className="faint">Not a git repository — showing edits made in this session.</span>
       </div>
+      <HelpersChanges sessionId={sessionId} />
       <div className="changes-files">
         {edits.map((e) => (
           <div key={e.id} className="cfile open">
@@ -343,7 +353,7 @@ function SessionEdits({ sessionId, cwd }: { sessionId: string; cwd: string }) {
             </div>
           </div>
         ))}
-        {!edits.length && <div className="empty">No file edits in this session yet.</div>}
+        {!edits.length && <Empty title="No file edits in this session yet." />}
       </div>
     </div>
   );

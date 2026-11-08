@@ -7,12 +7,13 @@ import re
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLineEdit, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QWidget
 
 from ... import icons, theme
 from ...lib.fmt import err_text, tildify, time_ago
 from ...store import ConfirmSpec, store
-from ..ui.bits import IconButton, Spinner, button, label
+from ..folder_picker import FolderPicker
+from ..ui.bits import IconButton, Spinner, button, hairline, label
 from ..ui.menu import show_menu
 from ..ui.signals import bind
 from .settings_ui import (
@@ -24,7 +25,6 @@ from .settings_ui import (
     count_chip,
     elide,
     field,
-    folder_picker,
     hint,
     home,
     icon_box,
@@ -243,6 +243,7 @@ class SkillsPage(QWidget):
             },
         ]
         total = len(d.get("user") or []) + len(d.get("project") or []) + len(d.get("plugin") or [])
+        self.new_btn.setVisible(not (total == 0 and not q))  # the intro card holds the first "New skill"
         if total == 0 and not q:
             intro = Intro(
                 "Teach Claude how you work",
@@ -278,7 +279,7 @@ class SkillsPage(QWidget):
         hl.addStretch(1)
         h = elide(mono_label(str(g["hint"])))
         h.setStyleSheet("font-size: 11.5px;")
-        h.setProperty("tone", "faint")
+        theme.tint(h, fg="text_3")
         h.setToolTip(str(g["hint"]))
         h.setMaximumWidth(360)
         h.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -295,6 +296,8 @@ class SkillsPage(QWidget):
                 if g["id"] == "project" and not has_project
                 else "None yet."
             )
+            if text == str(g["hint"]):
+                h.hide()  # the empty line says it; the hint at the right would say it again
             e = hint(text)
             e.setContentsMargins(0, 8, 0, 10)
             lay.addWidget(e)
@@ -333,12 +336,9 @@ class SkillsPage(QWidget):
         more = IconButton("ellipsis", f"More for {s.get('name')}", 14)
         more.clicked.connect(lambda: self._row_menu(s, g, has_project, more))
         rl.addWidget(more)
-        line = QWidget()
-        line.setFixedHeight(1)
-        line.setStyleSheet(f"background: {theme.blend(theme.tokens().hair, theme.tokens().raised).name()};")
         box = QWidget()
         bl = vbox(box, 0)
-        bl.addWidget(line)
+        bl.addWidget(hairline(over="raised"))
         bl.addWidget(r)
         return box
 
@@ -450,20 +450,7 @@ class ImportSkillSheet(Sheet):
         form = QWidget()
         fl = vbox(form, 14)
         fl.addWidget(hint("Pick the folder that contains SKILL.md. It is copied, so the original stays where it is."))
-        picker = folder_picker("", self._pick)
-        if picker is not None:
-            fl.addWidget(picker)
-        else:
-            self.path = line_edit("/path/to/skill", mono=True, name="Folder")
-            self.path.textChanged.connect(self._pick)
-            browse = button("Browse…", size="sm", on_click=self._browse)
-            r = QWidget()
-            rl = QHBoxLayout(r)
-            rl.setContentsMargins(0, 0, 0, 0)
-            rl.setSpacing(8)
-            rl.addWidget(self.path, 1)
-            rl.addWidget(browse)
-            fl.addWidget(r)
+        fl.addWidget(FolderPicker("", self._pick))
         self.chosen = mono_label("")
         self.chosen.setProperty("fs", "small")
         self.chosen.hide()
@@ -478,11 +465,6 @@ class ImportSkillSheet(Sheet):
         self.import_btn = button("Import", kind="primary", on_click=self.submit)
         self.import_btn.setEnabled(False)
         self.add_foot(self.import_btn)
-
-    def _browse(self) -> None:
-        d = QFileDialog.getExistingDirectory(self, "Pick the folder that contains SKILL.md", self.from_path or home())
-        if d:
-            self.path.setText(d)
 
     def _pick(self, path: str) -> None:
         self.from_path = path.strip()

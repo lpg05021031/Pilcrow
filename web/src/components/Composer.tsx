@@ -1,98 +1,60 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowUp, Square, Plus, X, ChevronDown, ShieldCheck, FilePen, Map as MapIcon, Zap, ShieldOff, File as FileIcon, Folder, CornerDownLeft, RefreshCw, Clock3, Image as ImageIcon } from 'lucide-react';
-import { useStore, sendMessage, interrupt, setMode, setModel, setEffort, setUi, toast, call, loadGatewayModels, removeHeld, updateHeld, sendHeldNow } from '../lib/store';
-import { ALIASES, useGatewayModels, modelLabel as nameOf } from '../lib/models';
-import type { PermissionMode, Effort, SlashCommandInfo, HeldMsg } from '../lib/types';
-import { fuzzyFilter } from '../lib/fuzzy';
-import { bytes } from '../lib/format';
-import { Popover, Menu, type MenuItem } from './ui/Popover';
-import { ContextRing, contextLabel, focusIfFree, Leave, Num } from './ui/bits';
+import { useEffect, useRef, useState } from 'react';
+import { ArrowUp, Square, Plus, CornerDownLeft } from 'lucide-react';
+import { useStore, sendMessage, interrupt, setMode, setUi, removeHeld, memo, toasted, takeComposerInsert } from '../lib/store';
+import { isBusy, type PermissionMode, type HeldMsg } from '../lib/types';
+import { ContextRing, contextLabel, Num } from './ui/bits';
+import { focusIfFree } from './ui/keys';
+import { useEvent } from './ui/hooks';
 import { markLaunch, reducedMotion, spring } from '../lib/motion';
-import type { LucideIcon } from 'lucide-react';
-import type { ModelInfo } from '../lib/types';
+import { useSuggest } from './composer/Suggest';
+import { useAttachments } from './composer/Attachments';
+import { MODES, ModeMenu, ModelMenu } from './composer/Menus';
+import { QueueTray } from './composer/QueueTray';
 
-export const MODES: { id: PermissionMode; label: string; hint: string; icon: LucideIcon; tone: string }[] = [
-  { id: 'default', label: 'Ask before edits', hint: 'Asks before changing files or running commands', icon: ShieldCheck, tone: '' },
-  { id: 'acceptEdits', label: 'Edit automatically', hint: 'File edits are applied without asking', icon: FilePen, tone: 'accent' },
-  { id: 'plan', label: 'Plan mode', hint: 'Explores and proposes a plan; changes nothing', icon: MapIcon, tone: 'plan' },
-  { id: 'auto', label: 'Auto', hint: 'Approves routine actions, asks about risky ones', icon: Zap, tone: 'info' },
-  { id: 'bypassPermissions', label: 'Bypass permissions', hint: 'Runs everything without asking — sandboxes only', icon: ShieldOff, tone: 'err' },
-];
+const NONE: HeldMsg[] = [];
 
-const BUILTIN_COMMANDS: SlashCommandInfo[] = [
-  { name: 'compact', description: 'Summarize the conversation to free up context' },
-  { name: 'clear', description: 'Start the conversation over' },
-  { name: 'context', description: 'Show what is using the context window' },
-  { name: 'usage', description: 'Show cost and token usage' },
-  { name: 'init', description: 'Write a CLAUDE.md for this project' },
-  { name: 'code-review', description: 'Review the current changes' },
-  { name: 'model', description: 'Change the model' },
-];
-
-const drafts = new Map<string, string>();
-const histories = new Map<string, string[]>();
-const fileIndexCache = new Map<string, { at: number; files: string[] }>();
-
-interface Img {
-  name: string;
-  mediaType: string;
-  data: string;
-  url: string;
-  size: number;
-}
-
-type Popup = { kind: 'mention' | 'slash'; query: string; start: number; index: number } | null;
-
-function readAsBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(String(r.result).split(',')[1] || '');
-    r.onerror = reject;
-    r.readAsDataURL(file);
-  });
-}
-
+/**
+ * The message field and its bar. What it holds per session (draft, sent messages) lives in the
+ * session's memo (lib/store), so it survives switching away and back.
+ */
 export function Composer({ sessionId, cwd }: { sessionId: string; cwd: string }) {
-  const rt = useStore((s) => s.rt[sessionId]);
-  const config = useStore((s) => s.config);
-  const info = useStore((s) => s.info);
+  // Narrow reads: the runtime record changes with every streamed frame; the composer shows a few of its fields.
+  const status = useStore((s) => s.rt[sessionId]?.status);
+  const held = useStore((s) => s.rt[sessionId]?.held) || NONE;
+  const rtMode = useStore((s) => s.rt[sessionId]?.mode);
+  const rtSuggestion = useStore((s) => s.rt[sessionId]?.suggestion);
+  const defaultMode = useStore((s) => s.config?.defaultMode);
+  const sendWithEnter = useStore((s) => (s.config?.sendKey || 'enter') === 'enter');
+  const isRoot = useStore((s) => s.info?.isRoot);
   const insert = useStore((s) => s.composerInsert);
-  const [text, setText] = useState(() => drafts.get(sessionId) || '');
-  const [images, setImages] = useState<Img[]>([]);
-  const [files, setFiles] = useState<{ name: string; text: string }[]>([]);
-  const [popup, setPopup] = useState<Popup>(null);
-  const [index, setIndex] = useState<string[]>([]);
+  const [text, setText] = useState(() => memo(sessionId).draft);
   const [dragging, setDragging] = useState(false);
   const [histPos, setHistPos] = useState(-1);
   const ta = useRef<HTMLTextAreaElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
-  const modeBtn = useRef<HTMLButtonElement>(null);
-  const modelBtn = useRef<HTMLButtonElement>(null);
-  const [menu, setMenu] = useState<null | 'mode' | 'model'>(null);
+  const suggest = useSuggest({ sessionId, cwd, text, setText, field: ta });
+  const attach = useAttachments();
 
-  const status = rt?.status;
-  const busy = status === 'running' || status === 'starting' || status === 'requires_action';
-  const held: HeldMsg[] = rt?.held || [];
-  const mode = (rt?.mode || config?.defaultMode || 'default') as PermissionMode;
-  const modeInfo = MODES.find((m) => m.id === mode) || MODES[0];
-  const sendWithEnter = (config?.sendKey || 'enter') === 'enter';
+  const busy = isBusy(status);
+  const mode = (rtMode || defaultMode || 'default') as PermissionMode;
 
-  // Keep drafts per session.
-  useEffect(() => {
-    setText(drafts.get(sessionId) || '');
-    setImages([]);
-    setFiles([]);
-    setPopup(null);
+  // Each session keeps its own draft: another session resets the field to it.
+  const reset = useEvent(() => {
+    setText(memo(sessionId).draft);
+    attach.clear();
+    suggest.close();
     setHistPos(-1);
     requestAnimationFrame(() => focusIfFree(ta.current));
-  }, [sessionId]);
+  });
+  useEffect(() => reset(), [sessionId, reset]);
   useEffect(() => {
-    drafts.set(sessionId, text);
+    memo(sessionId).draft = text;
   }, [sessionId, text]);
 
   // Text inserted from elsewhere (diff notes, edit & resend, example prompts).
   useEffect(() => {
     if (!insert || insert.id !== sessionId) return;
+    takeComposerInsert();
     setText((t) => (insert.replace || !t.trim() ? insert.text : `${t.replace(/\s+$/, '')}\n\n${insert.text}`));
     requestAnimationFrame(() => {
       const el = ta.current;
@@ -123,131 +85,45 @@ export function Composer({ sessionId, cwd }: { sessionId: string; cwd: string })
       const { soft, softT } = spring();
       el.animate([{ height: `${prev}px` }, { height: `${next}px` }], { duration: softT, easing: soft });
     }
-  }, [text]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const loadIndex = useCallback(async () => {
-    const hit = fileIndexCache.get(cwd);
-    if (hit && Date.now() - hit.at < 20_000) {
-      setIndex(hit.files);
-      return;
-    }
-    try {
-      const files = await call<string[]>('fs.index', { cwd }, { quiet: true });
-      fileIndexCache.set(cwd, { at: Date.now(), files });
-      setIndex(files);
-    } catch {
-      /* ignore */
-    }
-  }, [cwd]);
-
-  const commands: SlashCommandInfo[] = useMemo(() => {
-    if (rt?.commands?.length) return rt.commands;
-    if (rt?.init?.slashCommands?.length) return rt.init.slashCommands.map((n) => BUILTIN_COMMANDS.find((b) => b.name === n) || { name: n, description: '' });
-    return BUILTIN_COMMANDS;
-  }, [rt?.commands, rt?.init?.slashCommands]);
-
-  const suggestions = useMemo(() => {
-    if (!popup) return [];
-    if (popup.kind === 'slash') return fuzzyFilter(popup.query, commands, (c) => c.name, 40).map((m) => ({ key: m.item.name, label: '/' + m.item.name, hint: m.item.argumentHint ? `${m.item.argumentHint} — ${m.item.description}` : m.item.description, kind: 'cmd' as const }));
-    const q = popup.query;
-    const list = q ? fuzzyFilter(q, index, (f) => f, 40).map((m) => m.item) : index.filter((f) => !f.includes('/') || f.split('/').length <= 2).slice(0, 40);
-    return list.map((f) => ({ key: f, label: f, hint: '', kind: f.endsWith('/') ? ('dir' as const) : ('file' as const) }));
-  }, [popup, commands, index]);
-
-  const detectPopup = (value: string, caret: number) => {
-    const before = value.slice(0, caret);
-    const slash = before.match(/^\/([\w:-]*)$/);
-    if (slash) {
-      setPopup({ kind: 'slash', query: slash[1], start: 0, index: 0 });
-      return;
-    }
-    const at = before.match(/(?:^|\s)@([^\s@]*)$/);
-    if (at) {
-      if (!index.length) loadIndex();
-      setPopup({ kind: 'mention', query: at[1], start: caret - at[1].length - 1, index: 0 });
-      return;
-    }
-    setPopup(null);
-  };
-
-  const applySuggestion = (s: { key: string; kind: string }) => {
-    if (!popup) return;
-    const el = ta.current!;
-    const caret = el.selectionStart;
-    let next: string;
-    let pos: number;
-    if (popup.kind === 'slash') {
-      next = `/${s.key} ` + text.slice(caret);
-      pos = s.key.length + 2;
-    } else {
-      const ins = `@${s.key}${s.kind === 'dir' ? '' : ' '}`;
-      next = text.slice(0, popup.start) + ins + text.slice(caret);
-      pos = popup.start + ins.length;
-    }
-    setText(next);
-    setPopup(null);
-    requestAnimationFrame(() => {
-      el.focus();
-      el.setSelectionRange(pos, pos);
-      if (s.kind === 'dir') detectPopup(next, pos);
-    });
-  };
+  }, [text, sent]);
 
   const submit = async (now = false) => {
     const body = text.trim();
-    if (!body && !images.length && !files.length) return;
-    const payload = { text: body, images: images.map((i) => ({ mediaType: i.mediaType, data: i.data })), files };
+    if (!body && !attach.count) return;
+    const payload = { text: body, ...attach.payload() };
     // The bubble that lands in the conversation flies up from here; the arrow launches with it.
     if (ta.current) markLaunch(ta.current.getBoundingClientRect());
     setSent(Date.now());
     setText('');
-    setImages([]);
-    setFiles([]);
-    setPopup(null);
+    attach.clear();
+    suggest.close();
     setHistPos(-1);
-    drafts.set(sessionId, '');
-    if (body) histories.set(sessionId, [body, ...(histories.get(sessionId) || []).filter((h) => h !== body)].slice(0, 50));
+    const m = memo(sessionId);
+    m.draft = '';
+    if (body) m.sent = [body, ...m.sent.filter((h) => h !== body)].slice(0, 50);
     try {
       await sendMessage(sessionId, payload, { now: now && busy });
     } catch {
+      // call() has shown why; the text comes back so it can be sent again.
       setText(body);
     }
   };
 
   const cycleMode = () => {
-    const order: PermissionMode[] = MODES.filter((m) => !(m.id === 'bypassPermissions' && info?.isRoot) && m.id !== 'auto').map((m) => m.id);
-    const next = order[(order.indexOf(mode) + 1) % order.length];
-    setMode(sessionId, next).catch(() => {});
+    const order = MODES.filter((m) => !(m.id === 'bypassPermissions' && isRoot) && m.id !== 'auto').map((m) => m.id);
+    setMode(sessionId, order[(order.indexOf(mode) + 1) % order.length]).catch(toasted);
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (popup && suggestions.length) {
-      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-        e.preventDefault();
-        const d = e.key === 'ArrowDown' ? 1 : -1;
-        setPopup({ ...popup, index: (popup.index + d + suggestions.length) % suggestions.length });
-        return;
-      }
-      if (e.key === 'Enter' || e.key === 'Tab') {
-        e.preventDefault();
-        applySuggestion(suggestions[popup.index]);
-        return;
-      }
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        e.stopPropagation();
-        setPopup(null);
-        return;
-      }
-    }
+    if (suggest.onKey(e)) return;
     if (e.key === 'Tab' && e.shiftKey) {
       e.preventDefault();
       cycleMode();
       return;
     }
-    if (e.key === 'Tab' && !text && rt?.suggestion) {
+    if (e.key === 'Tab' && !text && rtSuggestion) {
       e.preventDefault();
-      setText(rt.suggestion);
+      setText(rtSuggestion);
       return;
     }
     const isEnter = e.key === 'Enter' && !e.nativeEvent.isComposing;
@@ -264,15 +140,15 @@ export function Composer({ sessionId, cwd }: { sessionId: string; cwd: string })
     }
     if (e.key === 'Escape' && busy) {
       e.preventDefault();
-      interrupt(sessionId);
+      interrupt(sessionId).catch(toasted);
       return;
     }
-    const hist = histories.get(sessionId) || [];
+    const hist = memo(sessionId).sent;
     if (e.key === 'ArrowUp' && text === '' && held.length && ta.current?.selectionStart === 0) {
       // Like the terminal: ↑ takes the last queued message back so it can be changed.
       e.preventDefault();
       const last = held[held.length - 1];
-      removeHeld(sessionId, last.uuid).catch(() => {});
+      removeHeld(sessionId, last.uuid).catch(toasted);
       setText(last.text);
       return;
     }
@@ -291,73 +167,17 @@ export function Composer({ sessionId, cwd }: { sessionId: string; cwd: string })
     }
   };
 
-  const addFiles = async (list: FileList | File[]) => {
-    for (const f of Array.from(list)) {
-      if (f.type.startsWith('image/')) {
-        if (f.size > 8 * 1024 * 1024) {
-          toast(`${f.name} is larger than 8 MB`, 'warning');
-          continue;
-        }
-        const data = await readAsBase64(f);
-        setImages((xs) => [...xs, { name: f.name || 'pasted image', mediaType: f.type, data, url: URL.createObjectURL(f), size: f.size }]);
-      } else if (f.size < 400 * 1024) {
-        const t = await f.text();
-        if (/\u0000/.test(t.slice(0, 4000))) {
-          toast(`${f.name} looks like a binary file`, 'warning');
-          continue;
-        }
-        setFiles((xs) => [...xs, { name: f.name, text: t }]);
-      } else toast(`${f.name} is too large to attach (400 KB max)`, 'warning');
-    }
-  };
-
   const onPaste = (e: React.ClipboardEvent) => {
     const fs = Array.from(e.clipboardData.files || []);
     if (fs.length) {
       e.preventDefault();
-      addFiles(fs);
+      attach.add(fs);
     }
   };
 
-  const ctxUsed = rt?.usage?.contextTokens || 0;
-  const ctxTotal = rt?.usage?.contextWindow || 0;
-  // Before this session's first reply Claude Code has not listed its models yet; borrow the list (and
-  // the default's name) from another session so the menu is never a dead end and the label never jumps.
-  const elsewhere = useStore((s) => Object.values(s.rt).find((r) => r !== rt && r?.models?.length));
-  const defaultSeen = useStore((s) => Object.values(s.rt).find((r) => r?.activeModel && !r?.model)?.activeModel);
-  const models: ModelInfo[] = rt?.models?.length ? rt.models : elsewhere?.models?.length ? elsewhere.models : ALIASES;
-  const gw = useGatewayModels();
-  const currentModel = rt?.model || '';
-  const modelInfo = models.find((m) => m.value === currentModel) || models.find((m) => m.value === 'default');
-  const effortLevels = (modelInfo?.supportedEffortLevels || (modelInfo?.supportsEffort ? ['low', 'medium', 'high', 'xhigh', 'max'] : [])) as Effort[];
-  const shown = currentModel || rt?.activeModel || defaultSeen || '';
-  const modelLabel = shown ? nameOf(shown, gw.models, models) : 'Default model';
-  const effortLabel = rt?.effort ? (rt.effort === 'xhigh' ? 'Extra high' : rt.effort[0].toUpperCase() + rt.effort.slice(1)) : '';
-
-  const effortName = (l: string) => (l === 'xhigh' ? 'Extra high' : l[0].toUpperCase() + l.slice(1));
-  const modeItems: MenuItem[] = MODES.filter((m) => !(m.id === 'bypassPermissions' && info?.isRoot)).map((m) => ({ label: m.label, hint: m.hint, icon: m.icon, checked: m.id === mode, danger: m.id === 'bypassPermissions', onSelect: () => setMode(sessionId, m.id).catch(() => {}) }));
-  const modelItems: MenuItem[] = [
-    { heading: 'Model' },
-    { label: 'Default', hint: 'Whatever Claude Code is configured to use', checked: !currentModel, onSelect: () => setModel(sessionId, '') },
-    // The gateway's own models. Claude Code's built-in aliases (Opus/Sonnet/Haiku) are not offered:
-    // everything goes through the gateway, which may not know them.
-    ...(gw.models.length || gw.loading || gw.error
-      ? [
-          { heading: gw.base ? `On ${hostOf(gw.base)}` : 'On your gateway' },
-          ...(gw.loading ? [{ label: 'Asking the gateway…', disabled: true }] : []),
-          ...gw.models.map((m) => ({ label: m.displayName ? m.displayName.replace(/^Claude\s+/i, '') : m.id, hint: m.displayName ? m.id : undefined, mono: true, checked: currentModel === m.id, onSelect: () => setModel(sessionId, m.id) })),
-          ...(gw.error ? [{ label: "Couldn't list the models", hint: gw.error, disabled: true }] : []),
-          ...(!gw.loading ? [{ label: gw.error ? 'Try again' : 'Refresh the list', icon: RefreshCw, onSelect: () => loadGatewayModels(true) }] : []),
-        ]
-      : []),
-    ...(effortLevels.length
-      ? [{ separator: true }, { heading: 'Effort' }, { label: 'Default', checked: !rt?.effort, onSelect: () => setEffort(sessionId, '') }, ...effortLevels.map((l) => ({ label: effortName(l), checked: rt?.effort === l, onSelect: () => setEffort(sessionId, l) }))]
-      : []),
-  ];
-  const ctxPct = ctxTotal > 0 ? ctxUsed / ctxTotal : 0;
-  const hasContent = Boolean(text.trim() || images.length || files.length);
+  const hasContent = Boolean(text.trim() || attach.count);
   const showStop = busy && !hasContent;
-  const suggestion = rt?.suggestion && !text ? rt.suggestion : '';
+  const suggestion = rtSuggestion && !text ? rtSuggestion : '';
   const placeholder = suggestion ? '' : busy ? (held.length ? 'Queue another message…' : 'Queue a message for after this step…') : 'Ask Claude to build, fix or explain…';
 
   // Toasts sit just above the composer, so they never cover the send button.
@@ -389,54 +209,13 @@ export function Composer({ sessionId, cwd }: { sessionId: string; cwd: string })
       onDrop={(e) => {
         e.preventDefault();
         setDragging(false);
-        if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+        if (e.dataTransfer.files.length) attach.add(e.dataTransfer.files);
       }}
     >
-      {popup && suggestions.length > 0 && (
-        <Leave className="suggest" role="listbox" duration={160}>
-          <div className="suggest-head">{popup.kind === 'slash' ? 'Commands' : popup.query ? 'Files' : 'Files — keep typing to narrow down'}</div>
-          <div className="suggest-list" style={{ ['--name-ch' as string]: `${Math.min(30, Math.max(8, ...suggestions.filter((x) => x.kind === 'cmd').map((x) => x.label.length)))}ch` }}>
-            {suggestions.slice(0, 40).map((s, i) => (
-              <button key={s.key} role="option" aria-selected={i === popup.index} className={`suggest-item${i === popup.index ? ' active' : ''}`} onMouseDown={(e) => e.preventDefault()} onClick={() => applySuggestion(s)} onMouseEnter={() => setPopup({ ...popup, index: i })} ref={i === popup.index ? (el) => el?.scrollIntoView({ block: 'nearest' }) : undefined}>
-                {s.kind === 'dir' ? <Folder size={14} /> : s.kind === 'file' ? <FileIcon size={14} /> : null}
-                <span className={`suggest-label${s.kind === 'cmd' ? ' cmd' : ''}`}>
-                  {s.kind === 'cmd' ? (
-                    <>
-                      <span className="suggest-slash">/</span>
-                      {s.label.slice(1)}
-                    </>
-                  ) : (
-                    s.label
-                  )}
-                </span>
-                {s.hint && <span className="suggest-hint">{s.hint}</span>}
-              </button>
-            ))}
-          </div>
-        </Leave>
-      )}
+      {suggest.view}
       {held.length > 0 && <QueueTray sessionId={sessionId} held={held} />}
       <div className={`composer mode-${mode}${busy ? ' busy' : ''}`} onClick={(e) => e.target === e.currentTarget && ta.current?.focus()}>
-        {(images.length > 0 || files.length > 0) && (
-          <div className="attachments">
-            {images.map((img) => (
-              <Leave key={img.url} className="attach-img" title={`${img.name} · ${bytes(img.size)}`} duration={180}>
-                <img src={img.url} alt={img.name} />
-                <button className="attach-x" onClick={() => setImages((xs) => xs.filter((x) => x !== img))} aria-label="Remove image">
-                  <X size={11} />
-                </button>
-              </Leave>
-            ))}
-            {files.map((f, k) => (
-              <Leave key={`${f.name}:${k}`} className="attach-file" duration={180}>
-                <FileIcon size={13} /> <span className="ellipsis">{f.name}</span>
-                <button onClick={() => setFiles((xs) => xs.filter((x) => x !== f))} aria-label="Remove file">
-                  <X size={11} />
-                </button>
-              </Leave>
-            ))}
-          </div>
-        )}
+        {attach.view}
         <div className="composer-field">
           {suggestion && (
             <div className="composer-ghost" aria-hidden="true">
@@ -447,73 +226,39 @@ export function Composer({ sessionId, cwd }: { sessionId: string; cwd: string })
           <textarea
             ref={ta}
             className="composer-input"
+            aria-label="Message to Claude"
+            aria-description={suggestion ? `Suggestion: ${suggestion}. Tab takes it.` : undefined}
+            aria-autocomplete="list"
+            {...suggest.fieldProps}
             rows={1}
             value={text}
             placeholder={placeholder}
             onChange={(e) => {
               setText(e.target.value);
               setHistPos(-1);
-              detectPopup(e.target.value, e.target.selectionStart);
+              suggest.detect(e.target.value, e.target.selectionStart);
             }}
-            onClick={(e) => detectPopup(text, (e.target as HTMLTextAreaElement).selectionStart)}
+            onClick={(e) => suggest.detect(text, (e.target as HTMLTextAreaElement).selectionStart)}
             onKeyDown={onKeyDown}
             onPaste={onPaste}
-            onBlur={() => setTimeout(() => setPopup(null), 120)}
+            onBlur={() => setTimeout(suggest.close, 120)}
             spellCheck={false}
           />
         </div>
         <div className="composer-bar">
-          <button className="cbtn icon" title="Attach images or files" onClick={() => fileInput.current?.click()}>
+          <button className="cbtn icon" title="Attach images or files" aria-label="Attach images or files" onClick={() => fileInput.current?.click()}>
             <Plus size={16} />
           </button>
-          <input ref={fileInput} type="file" multiple hidden onChange={(e) => e.target.files && addFiles(e.target.files)} />
-          <button ref={modeBtn} className={`cbtn mode ${mode !== 'default' ? modeInfo.tone || 'set' : ''}`} onClick={() => setMenu(menu === 'mode' ? null : 'mode')} title="Permission mode (Shift+Tab to switch)" aria-expanded={menu === 'mode'}>
-            <modeInfo.icon size={14} />
-            <span className="cbtn-label">{modeInfo.label}</span>
-            <ChevronDown size={12} className="cbtn-chev" />
-          </button>
+          <input ref={fileInput} type="file" multiple hidden aria-label="Attach images or files" onChange={(e) => e.target.files && attach.add(e.target.files)} />
+          <ModeMenu sessionId={sessionId} mode={mode} />
           <div className="grow" />
-          <button
-            ref={modelBtn}
-            className="cbtn"
-            onClick={() => {
-              if (menu !== 'model') loadGatewayModels();
-              setMenu(menu === 'model' ? null : 'model');
-            }}
-            title="Model and effort"
-            aria-expanded={menu === 'model'}
-          >
-            <span>{modelLabel}</span>
-            {effortLabel && <span className="cbtn-sub">· {effortLabel}</span>}
-            <ChevronDown size={12} className="cbtn-chev" />
-          </button>
-          {ctxTotal > 0 && (
-            <button className={`ctx-btn${ctxPct > 0.85 ? ' hot' : ''}${ctxPct >= 0.5 ? ' with-num' : ''}`} title={`Context ${Math.round(ctxPct * 100)}% used · ${contextLabel(ctxUsed, ctxTotal)}${ctxPct >= 0.5 ? ' — /compact frees space' : ''}`} aria-label="Context window usage" onClick={() => setUi({ panel: true, panelTab: 'info' })}>
-              <ContextRing used={ctxUsed} total={ctxTotal} size={16} />
-              {ctxPct >= 0.5 && (
-                <span className="tnum">
-                  <Num value={ctxPct * 100} format={(v) => `${Math.round(v)}%`} />
-                </span>
-              )}
-            </button>
-          )}
-          <button
-            className={`send${hasContent ? ' ready' : ''}${showStop ? ' stop' : ''}`}
-            title={showStop ? 'Stop (Esc)' : sendWithEnter ? 'Send (Enter)' : 'Send (Ctrl+Enter)'}
-            disabled={!hasContent && !showStop}
-            onClick={() => (showStop ? interrupt(sessionId) : submit())}
-            aria-label={showStop ? 'Stop' : 'Send'}
-          >
+          <ModelMenu sessionId={sessionId} />
+          <ContextButton sessionId={sessionId} />
+          <button className={`send${hasContent ? ' ready' : ''}${showStop ? ' stop' : ''}`} title={showStop ? 'Stop (Esc)' : sendWithEnter ? 'Send (Enter)' : 'Send (Ctrl+Enter)'} disabled={!hasContent && !showStop} onClick={() => (showStop ? interrupt(sessionId).catch(toasted) : submit())} aria-label={showStop ? 'Stop' : 'Send'}>
             <ArrowUp key={sent} size={16} strokeWidth={2.25} className={`send-arrow${sent ? ' go' : ''}`} />
             <Square size={11} fill="currentColor" className="send-stop" />
           </button>
         </div>
-        <Popover anchor={modeBtn.current} open={menu === 'mode'} onClose={() => setMenu(null)} placement="top-start" width={372}>
-          <Menu items={modeItems} onClose={() => setMenu(null)} />
-        </Popover>
-        <Popover anchor={modelBtn.current} open={menu === 'model'} onClose={() => setMenu(null)} placement="top-end" width={320}>
-          <Menu items={modelItems} onClose={() => setMenu(null)} />
-        </Popover>
       </div>
       <div className="composer-foot">
         {busy ? (
@@ -531,86 +276,21 @@ export function Composer({ sessionId, cwd }: { sessionId: string; cwd: string })
   );
 }
 
-/** Messages waiting for the current step to finish. Each can be edited, sent right away, or dropped. */
-function QueueTray({ sessionId, held }: { sessionId: string; held: HeldMsg[] }) {
-  const [editing, setEditing] = useState<string | null>(null);
-  const [draft, setDraft] = useState('');
-  const save = (h: HeldMsg) => {
-    setEditing(null);
-    const t = draft.trim();
-    if (!t && !h.images && !(h.files || []).length) removeHeld(sessionId, h.uuid).catch(() => {});
-    else if (t !== h.text) updateHeld(sessionId, h.uuid, t).catch(() => {});
-  };
+/** How full the context window is, as a ring; opens the session details. */
+function ContextButton({ sessionId }: { sessionId: string }) {
+  const used = useStore((s) => s.rt[sessionId]?.usage?.contextTokens) || 0;
+  const total = useStore((s) => s.rt[sessionId]?.usage?.contextWindow) || 0;
+  const afterCompact = useStore((s) => s.rt[sessionId]?.usage?.afterCompact);
+  if (!total) return null;
+  const pct = used / total;
   return (
-    <Leave className="queue" role="list" aria-label="Queued messages">
-      <div className="queue-head">
-        <Clock3 size={12} />
-        <span>{held.length === 1 ? 'Queued — Claude reads it after this step' : `${held.length} queued — Claude reads them in order after this step`}</span>
-      </div>
-      {held.map((h, i) => (
-        <div key={h.uuid} className={`queue-item${editing === h.uuid ? ' editing' : ''}`} role="listitem">
-          <span className="queue-n tnum">{i + 1}</span>
-          {editing === h.uuid ? (
-            <textarea
-              className="queue-edit"
-              autoFocus
-              rows={Math.min(6, Math.max(1, draft.split('\n').length))}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onBlur={() => save(h)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
-                  e.preventDefault();
-                  save(h);
-                } else if (e.key === 'Escape') {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  setDraft(h.text);
-                  setEditing(null);
-                }
-              }}
-            />
-          ) : (
-            <button
-              className="queue-text"
-              title="Click to edit"
-              onClick={() => {
-                setEditing(h.uuid);
-                setDraft(h.text);
-              }}
-            >
-              {h.text || <span className="faint">(no text)</span>}
-              {h.images > 0 && (
-                <span className="queue-attach">
-                  <ImageIcon size={11} /> {h.images}
-                </span>
-              )}
-              {(h.files || []).map((f) => (
-                <span key={f} className="queue-attach">
-                  <FileIcon size={11} /> {f}
-                </span>
-              ))}
-            </button>
-          )}
-          <span className="queue-actions">
-            <button className="queue-btn" title="Send now — interrupts the current step" onClick={() => sendHeldNow(sessionId, h.uuid)}>
-              <Zap size={12} />
-              <span>Now</span>
-            </button>
-            <button className="queue-btn icon" title="Remove" aria-label="Remove queued message" onClick={() => removeHeld(sessionId, h.uuid)}>
-              <X size={13} />
-            </button>
-          </span>
-        </div>
-      ))}
-    </Leave>
+    <button className={`ctx-btn${pct > 0.85 ? ' hot' : ''}${pct >= 0.5 ? ' with-num' : ''}`} title={afterCompact ? 'Context compacted — its size is measured at the next reply' : `Context ${Math.round(pct * 100)}% used · ${contextLabel(used, total)}${pct >= 0.5 ? ' — /compact frees space' : ''}`} aria-label={`Context window ${Math.round(pct * 100)}% used`} onClick={() => setUi({ panel: true, panelTab: 'info' })}>
+      <ContextRing used={used} total={total} size={16} />
+      {pct >= 0.5 && (
+        <span className="tnum">
+          <Num value={pct * 100} format={(v) => `${Math.round(v)}%`} />
+        </span>
+      )}
+    </button>
   );
 }
-
-const hostOf = (url: string) => {
-  try {
-    return new URL(url).host;
-  } catch {
-    return url;
-  }
-};

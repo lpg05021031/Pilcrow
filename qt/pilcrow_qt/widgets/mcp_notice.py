@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from .. import icons, theme
 from ..lib.fmt import err_text
 from ..store import store
-from .ui.bits import IconButton, button
+from .ui.bits import Box, IconButton, button
 from .ui.signals import bind
 
 Json = Dict[str, Any]
@@ -61,11 +61,8 @@ class McpNotice(QWidget):
         t = theme.tokens()
         name = str(m.get("name") or "")
         auth = m.get("status") == "needs-auth"
-        row = QWidget()
+        row = Box(bg=("warn_wash" if auth else "err_wash") + "/canvas", radius=theme.R3)
         row.setObjectName("mcp-notice")
-        row.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        wash = theme.blend(t.warn_wash if auth else t.err_wash, t.canvas).name()
-        row.setStyleSheet(f"#mcp-notice {{ background: {wash}; border-radius: {theme.R3}px; }}")
         row.setAccessibleName(f"{name} needs attention")
         lay = QHBoxLayout(row)
         lay.setContentsMargins(14, 6, 6, 6)
@@ -82,7 +79,7 @@ class McpNotice(QWidget):
             )
         lb = QLabel(text)
         lb.setTextFormat(Qt.TextFormat.RichText)
-        lb.setStyleSheet(f"font-size: {theme.FS_SMALL}px; color: {t.text};")
+        lb.setProperty("fs", "small")
         lay.addWidget(lb, 1)
         if auth:
             lay.addWidget(

@@ -1,42 +1,90 @@
 // Git integration: repo info, unified diffs for the review panel, commits and worktrees.
+// One convention: reads never throw (a folder that is not a repository reads as { isRepo: false } or
+// empty), and actions answer { ok, output } with git's own words, for the person to read.
 import fs from 'node:fs';
 import path from 'node:path';
-import { run } from './util.js';
+import { run, looksBinary, slash, under } from './util.js';
 
 const GIT = ['-c', 'core.quotePath=false', '-c', 'color.ui=false'];
-const MAX_UNTRACKED = 200;
+const MAX_UNTRACKED = 200; // untracked files shown in a diff, or counted for the header's line totals
+const COUNT_FILE_BYTES = 1024 * 1024; // larger untracked files are not counted
+const COUNT_BUDGET_BYTES = 8 * 1024 * 1024; // read per info(), which the header asks for every few seconds
 const MAX_FILE_BYTES = 768 * 1024;
 const MAX_LINES_PER_FILE = 4000;
+// The whole diff is one answer in one WebSocket frame: past these, files keep their stats and come back
+// without hunks (truncated), for the panel to open on their own.
+const DIFF_BUDGET_LINES = 10_000;
+const DIFF_BUDGET_BYTES = 1024 * 1024; // of line text
+const LINE_CACHE_MAX = 2000; // untracked files whose line count is remembered
 
 export function git(cwd, args, opts = {}) {
   return run('git', [...GIT, ...args], { cwd, timeout: 30_000, ...opts });
 }
 
-export async function info(cwd) {
-  if (!cwd || !fs.existsSync(cwd)) return { isRepo: false };
-  const r = await git(cwd, ['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=normal']);
-  if (r.code !== 0) return { isRepo: false };
-  const root = (await git(cwd, ['rev-parse', '--show-toplevel'])).stdout.trim();
-  const common = (await git(cwd, ['rev-parse', '--git-common-dir'])).stdout.trim();
-  const gitDir = (await git(cwd, ['rev-parse', '--git-dir'])).stdout.trim();
-  const out = { isRepo: true, root, branch: null, head: null, upstream: null, ahead: 0, behind: 0, changed: 0, untracked: 0 };
-  out.isWorktree = path.resolve(cwd, common) !== path.resolve(cwd, gitDir);
-  out.mainRoot = out.isWorktree ? path.dirname(path.resolve(cwd, common)) : root;
-  for (const rec of r.stdout.split('\0')) {
-    if (rec.startsWith('# branch.head ')) out.branch = rec.slice(14);
-    else if (rec.startsWith('# branch.oid ')) out.head = rec.slice(13, 13 + 12);
-    else if (rec.startsWith('# branch.upstream ')) out.upstream = rec.slice(18);
+/** path -> { size, mtimeMs, lines }: the header asks for info() every few seconds while Claude works,
+ *  and an untracked file that has not changed need not be read again to count its lines. */
+const lineCache = new Map();
+
+/** An untracked file's lines, from the cache when its size and time are the same; null when it is too
+ *  large to count. `read` is false once the caller's read budget is spent (a hit still counts). */
+async function untrackedLines(file, read) {
+  const st = await fs.promises.stat(file);
+  if (st.size >= COUNT_FILE_BYTES) return { lines: null, bytes: 0 };
+  const hit = lineCache.get(file);
+  if (hit && hit.size === st.size && hit.mtimeMs === st.mtimeMs) return { lines: hit.lines, bytes: 0 };
+  if (!read) return { lines: null, bytes: 0 };
+  const buf = await fs.promises.readFile(file);
+  const lines = lineCount(buf);
+  lineCache.delete(file);
+  if (lineCache.size >= LINE_CACHE_MAX) lineCache.delete(lineCache.keys().next().value);
+  lineCache.set(file, { size: st.size, mtimeMs: st.mtimeMs, lines });
+  return { lines, bytes: buf.length };
+}
+
+/** Lines in a file's bytes, the way a diff counts them (a last line without a newline counts). */
+function lineCount(buf) {
+  let n = 0;
+  for (let i = buf.indexOf(10); i !== -1; i = buf.indexOf(10, i + 1)) n++;
+  return n + (buf.length && buf[buf.length - 1] !== 10 ? 1 : 0);
+}
+
+/**
+ * Where the repository is and what state it is in, from two git processes run together: one
+ * `status --porcelain=v2 --branch` (branch, upstream, counts and the untracked files) and one
+ * `rev-parse` for the three folders. info() and diff() both start here.
+ */
+async function status(cwd) {
+  if (!cwd) return { info: { isRepo: false }, untracked: [] }; // (a folder that is gone fails git's spawn)
+  const [st, rp] = await Promise.all([git(cwd, ['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all']), git(cwd, ['rev-parse', '--show-toplevel', '--git-common-dir', '--git-dir'])]);
+  if (st.code !== 0 || rp.code !== 0) return { info: { isRepo: false }, untracked: [] };
+  const [root, common, gitDir] = rp.stdout.trim().split('\n');
+  const info = { isRepo: true, root, branch: null, head: null, upstream: null, ahead: 0, behind: 0, changed: 0, untracked: 0 };
+  info.isWorktree = path.resolve(cwd, common) !== path.resolve(cwd, gitDir);
+  info.mainRoot = info.isWorktree ? path.dirname(path.resolve(cwd, common)) : root;
+  const untracked = [];
+  for (const rec of st.stdout.split('\0')) {
+    if (rec.startsWith('# branch.head ')) info.branch = rec.slice(14);
+    else if (rec.startsWith('# branch.oid ')) info.head = rec.slice(13, 13 + 12);
+    else if (rec.startsWith('# branch.upstream ')) info.upstream = rec.slice(18);
     else if (rec.startsWith('# branch.ab ')) {
       const m = rec.match(/\+(\d+) -(\d+)/);
-      if (m) [out.ahead, out.behind] = [Number(m[1]), Number(m[2])];
-    } else if (rec.startsWith('? ')) out.untracked++;
-    else if (/^[12u] /.test(rec)) out.changed++;
+      if (m) [info.ahead, info.behind] = [Number(m[1]), Number(m[2])];
+    } else if (rec.startsWith('? ')) {
+      info.untracked++;
+      if (untracked.length < MAX_UNTRACKED) untracked.push(rec.slice(2)); // relative to the root
+    } else if (/^[12u] /.test(rec)) info.changed++;
   }
-  if (out.branch === '(detached)') out.branch = null;
+  if (info.branch === '(detached)') info.branch = null;
+  return { info, untracked };
+}
+
+export async function info(cwd) {
+  const { info: out, untracked } = await status(cwd);
+  if (!out.isRepo) return out;
   // Line totals for the header's "+18 −2" (tracked files against HEAD; new files count as added lines).
   out.insertions = 0;
   out.deletions = 0;
-  if (out.changed || out.untracked) {
+  if (out.changed) {
     const ns = await git(cwd, ['diff', '--numstat', 'HEAD']);
     for (const line of ns.stdout.split('\n')) {
       const m = line.match(/^(\d+)\t(\d+)\t/);
@@ -45,16 +93,15 @@ export async function info(cwd) {
         out.deletions += Number(m[2]);
       }
     }
-    if (out.untracked && out.untracked < 200) {
-      const u = await git(cwd, ['ls-files', '--others', '--exclude-standard', '-z']);
-      for (const f of u.stdout.split('\0').filter(Boolean).slice(0, 200)) {
-        try {
-          const st = fs.statSync(path.join(cwd, f));
-          if (st.isFile() && st.size < 1024 * 1024) out.insertions += fs.readFileSync(path.join(cwd, f), 'utf8').split('\n').filter((l, i, a) => i < a.length - 1 || l).length;
-        } catch {
-          /* unreadable: skip */
-        }
-      }
+  }
+  let budget = COUNT_BUDGET_BYTES;
+  for (const rel of untracked) {
+    try {
+      const { lines, bytes } = await untrackedLines(path.join(out.root, rel), budget > 0);
+      budget -= bytes;
+      out.insertions += lines || 0;
+    } catch {
+      /* unreadable or gone: skip */
     }
   }
   return out;
@@ -75,10 +122,23 @@ export async function branches(cwd) {
   };
 }
 
-/** Parse `git diff` unified output into files and hunks with line numbers. */
+/**
+ * @typedef {{ t: '+' | '-' | ' ', s: string, o?: number, n?: number, eof?: boolean }} DiffLine
+ * @typedef {{ oldStart: number, oldLines: number, newStart: number, newLines: number, header: string, lines: DiffLine[] }} Hunk
+ * @typedef {{ path: string | null, oldPath: string | null, status: string, binary: boolean, additions: number, deletions: number, hunks: Hunk[], truncated: boolean, untracked?: boolean }} DiffFile
+ */
+
+/**
+ * Parse `git diff` unified output into files and hunks with line numbers.
+ * @param {string} text
+ * @returns {DiffFile[]}
+ */
 export function parseUnifiedDiff(text) {
+  /** @type {DiffFile[]} */
   const files = [];
+  /** @type {DiffFile | null} */
   let file = null;
+  /** @type {Hunk | null} */
   let hunk = null;
   let inHeader = false;
   let remOld = 0;
@@ -86,14 +146,16 @@ export function parseUnifiedDiff(text) {
   let oldNo = 0;
   let newNo = 0;
   const stripPrefix = (p) => (p === '/dev/null' ? null : p.replace(/^[ab]\//, ''));
-  const startHunk = (line) => {
+  /** A hunk header starts a hunk of `f` (kept unless the file is past its line limit); null when it is not one. */
+  const startHunk = (f, line) => {
     const m = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@ ?(.*)$/);
-    if (!m) return false;
-    hunk = { oldStart: +m[1], oldLines: m[2] === undefined ? 1 : +m[2], newStart: +m[3], newLines: m[4] === undefined ? 1 : +m[4], header: m[5] || '', lines: [] };
-    [oldNo, newNo, remOld, remNew] = [hunk.oldStart, hunk.newStart, hunk.oldLines, hunk.newLines];
-    if (file.additions + file.deletions > MAX_LINES_PER_FILE) file.truncated = true;
-    else file.hunks.push(hunk);
-    return true;
+    if (!m) return null;
+    /** @type {Hunk} */
+    const h = { oldStart: +m[1], oldLines: m[2] === undefined ? 1 : +m[2], newStart: +m[3], newLines: m[4] === undefined ? 1 : +m[4], header: m[5] || '', lines: [] };
+    [oldNo, newNo, remOld, remNew] = [h.oldStart, h.newStart, h.oldLines, h.newLines];
+    if (f.additions + f.deletions > MAX_LINES_PER_FILE) f.truncated = true;
+    else f.hunks.push(h);
+    return h;
   };
   for (const line of text.split('\n')) {
     if (remOld <= 0 && remNew <= 0 && line.startsWith('diff --git ')) {
@@ -109,7 +171,7 @@ export function parseUnifiedDiff(text) {
     if (inHeader) {
       if (line.startsWith('@@')) {
         inHeader = false;
-        startHunk(line);
+        hunk = startHunk(file, line);
       } else if (line.startsWith('new file mode')) file.status = 'A';
       else if (line.startsWith('deleted file mode')) file.status = 'D';
       else if (line.startsWith('rename from ')) [file.status, file.oldPath] = ['R', line.slice(12)];
@@ -147,7 +209,7 @@ export function parseUnifiedDiff(text) {
       }
       continue;
     }
-    if (line.startsWith('@@')) startHunk(line);
+    if (line.startsWith('@@')) hunk = startHunk(file, line) || hunk;
     else if (line.startsWith('\\') && hunk) {
       const last = hunk.lines[hunk.lines.length - 1];
       if (last) last.eof = true;
@@ -156,37 +218,28 @@ export function parseUnifiedDiff(text) {
   for (const f of files) {
     if (!f.path) f.path = f.oldPath;
     if (f.status === 'R' && f.oldPath === f.path) f.status = 'M';
+    if (f.truncated) f.hunks = []; // a file is shown whole or not at all
   }
   return files;
 }
 
-function isBinaryBuffer(buf) {
-  const n = Math.min(buf.length, 8000);
-  for (let i = 0; i < n; i++) if (buf[i] === 0) return true;
-  return false;
-}
-
 async function untrackedAsDiff(root, rel) {
   const full = path.join(root, rel);
+  /** @type {DiffFile} */
   const f = { path: rel, oldPath: null, status: 'A', binary: false, additions: 0, deletions: 0, hunks: [], truncated: false, untracked: true };
-  let st;
-  try {
-    st = fs.statSync(full);
-  } catch {
-    return null;
-  }
-  if (!st.isFile()) return null;
+  const st = await fs.promises.stat(full).catch(() => null);
+  if (!st?.isFile()) return null;
   if (st.size > MAX_FILE_BYTES) {
     f.truncated = true;
     return f;
   }
-  const buf = fs.readFileSync(full);
-  if (isBinaryBuffer(buf)) {
+  const buf = await fs.promises.readFile(full).catch(() => null);
+  if (!buf) return null;
+  if (looksBinary(buf)) {
     f.binary = true;
     return f;
   }
-  const text = buf.toString('utf8');
-  const lines = text.split('\n');
+  const lines = buf.toString('utf8').split('\n');
   if (lines.length && lines[lines.length - 1] === '') lines.pop();
   f.additions = lines.length;
   if (lines.length > MAX_LINES_PER_FILE) {
@@ -197,32 +250,62 @@ async function untrackedAsDiff(root, rel) {
   return f;
 }
 
-/** Working tree vs `base` (default HEAD), including untracked files. */
+/**
+ * Keep the whole diff within DIFF_BUDGET_LINES and DIFF_BUDGET_BYTES, in path order: a file that does
+ * not fit keeps its stats and comes back with no hunks and `truncated`. Returns how many it cut.
+ * @param {DiffFile[]} files
+ */
+function withinBudget(files) {
+  let lines = 0;
+  let bytes = 0;
+  let cut = 0;
+  for (const f of files) {
+    let n = 0;
+    let b = 0;
+    for (const h of f.hunks) {
+      n += h.lines.length;
+      for (const l of h.lines) b += l.s.length;
+    }
+    if (lines + n > DIFF_BUDGET_LINES || bytes + b > DIFF_BUDGET_BYTES) {
+      f.hunks = [];
+      f.truncated = true;
+      cut++;
+    } else {
+      lines += n;
+      bytes += b;
+    }
+  }
+  return cut;
+}
+
+/**
+ * Working tree vs `base` (default HEAD), including untracked files. Two or three git processes besides
+ * status(): the merge base when `base` is a branch, and the diff itself. Within the total budget
+ * (withinBudget); `truncated` is how many files it left without hunks.
+ * @param {string} cwd @param {{ base?: string }} [opts]
+ */
 export async function diff(cwd, { base } = {}) {
-  const i = await info(cwd);
+  const { info: i, untracked } = await status(cwd);
   if (!i.isRepo) return { isRepo: false, files: [] };
   let baseRef = base || 'HEAD';
-  let baseLabel = base || 'HEAD';
+  const baseLabel = base || 'HEAD';
   if (base && base !== 'HEAD') {
     const mb = await git(cwd, ['merge-base', base, 'HEAD']);
     if (mb.code === 0) baseRef = mb.stdout.trim();
   }
-  const hasHead = (await git(cwd, ['rev-parse', '--verify', '-q', 'HEAD'])).code === 0;
+  const hasHead = i.head !== '(initial)'; // a repository without a commit yet
   const args = hasHead ? ['diff', '--no-ext-diff', '--find-renames', '-U3', baseRef, '--'] : ['diff', '--no-ext-diff', '--cached', '-U3', '--'];
   const r = await git(i.root, args);
   const files = parseUnifiedDiff(r.stdout);
-  const ut = await git(i.root, ['ls-files', '--others', '--exclude-standard', '-z']);
-  const untracked = ut.stdout.split('\0').filter(Boolean).slice(0, MAX_UNTRACKED);
-  for (const rel of untracked) {
-    const f = await untrackedAsDiff(i.root, rel);
-    if (f) files.push(f);
-  }
-  files.sort((a, b) => a.path.localeCompare(b.path));
-  return { isRepo: true, root: i.root, base: baseLabel, baseRef, branch: i.branch, files, error: r.code ? r.stderr : null };
+  for (const f of await Promise.all(untracked.map((rel) => untrackedAsDiff(i.root, rel)))) if (f) files.push(f);
+  files.sort((a, b) => (a.path || '').localeCompare(b.path || ''));
+  const truncated = withinBudget(files);
+  return { isRepo: true, root: i.root, base: baseLabel, baseRef, branch: i.branch, files, truncated, error: r.code ? r.stderr : null };
 }
 
+/** Commit everything (or `paths`) in the repository `cwd` is in. @param {string} cwd @param {{ message: string, paths?: string[] }} opts */
 export async function commit(cwd, { message, paths }) {
-  const i = await info(cwd);
+  const { info: i } = await status(cwd);
   if (!i.isRepo) return { ok: false, output: 'Not a git repository' };
   const add = await git(i.root, ['add', '-A', '--', ...(paths?.length ? paths : ['.'])]);
   if (add.code) return { ok: false, output: add.stderr || add.stdout };
@@ -231,10 +314,10 @@ export async function commit(cwd, { message, paths }) {
 }
 
 export async function discard(cwd, { path: rel, untracked }) {
-  const i = await info(cwd);
+  const { info: i } = await status(cwd);
   if (!i.isRepo) return { ok: false, output: 'Not a git repository' };
-  const full = path.resolve(i.root, rel);
-  if (!full.startsWith(i.root + path.sep)) return { ok: false, output: 'Path is outside the repository' };
+  const full = slash(path.resolve(i.root, rel));
+  if (full === slash(i.root) || !under(i.root, full)) return { ok: false, output: 'Path is outside the repository' };
   if (untracked) {
     fs.rmSync(full, { force: true, recursive: true });
     return { ok: true, output: '' };
@@ -259,9 +342,15 @@ export async function listWorktrees(cwd) {
   return out;
 }
 
+/**
+ * A new worktree on a new branch; `worktree` is where it went (the names get -2, -3… when taken).
+ * @typedef {{ path: string, branch: string, base: string, repoRoot: string }} Worktree
+ * @param {{ repo: string, base?: string, branch: string, dir: string }} spec
+ * @returns {Promise<{ ok: false, output: string, worktree?: undefined } | { ok: true, output: string, worktree: Worktree }>}
+ */
 export async function createWorktree({ repo, base, branch, dir }) {
-  const i = await info(repo);
-  if (!i.isRepo) throw new Error('Not a git repository: ' + repo);
+  const { info: i } = await status(repo);
+  if (!i.isRepo) return { ok: false, output: 'Not a git repository: ' + repo };
   const root = i.mainRoot || i.root;
   let name = branch;
   for (let n = 2; (await git(root, ['rev-parse', '--verify', '-q', `refs/heads/${name}`])).code === 0; n++) name = `${branch}-${n}`;
@@ -271,8 +360,8 @@ export async function createWorktree({ repo, base, branch, dir }) {
   const args = ['worktree', 'add', '-b', name, target];
   if (base) args.push(base);
   const r = await git(root, args);
-  if (r.code) throw new Error((r.stderr || r.stdout).trim() || 'git worktree add failed');
-  return { path: target, branch: name, base: base || i.branch || 'HEAD', repoRoot: root };
+  if (r.code) return { ok: false, output: (r.stderr || r.stdout).trim() || 'git worktree add failed' };
+  return { ok: true, output: '', worktree: { path: target, branch: name, base: base || i.branch || 'HEAD', repoRoot: root } };
 }
 
 export async function removeWorktree({ repoRoot, dir, branch, deleteBranch = false }) {

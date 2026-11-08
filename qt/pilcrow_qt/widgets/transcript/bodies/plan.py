@@ -15,9 +15,21 @@ from ....store import store
 from ...ui import bits
 from ...ui.signals import bind
 from ..ctx import ToolCtx
-from ..permission import typing_elsewhere
-from .common import Badge, Hairline, IconLabel, Json, LinkLabel, Row, Surface, code_more, faint, restyle, vbox
-from .generic import markdown_label
+from ..permission import key_badge, perm_button, typing_elsewhere
+from .common import (
+    Badge,
+    Hairline,
+    Json,
+    LinkLabel,
+    NeedsDot,
+    Row,
+    Surface,
+    caption,
+    code_more,
+    faint,
+    markdown_label,
+    vbox,
+)
 
 
 class PlanBody(QWidget):
@@ -38,16 +50,10 @@ class PlanBody(QWidget):
         bind(theme.theme.changed, self, lambda _t: self.update())
         lay = vbox(self, margins=(1, 1, 1, 1), spacing=0)
 
-        head = Row(spacing=10, margins=(20, 12, 16, 12))
-        kicker = bits.label("Plan ready for review" if self.live else "Plan", size="small")
-        restyle(
-            kicker,
-            lambda t: (
-                f"QLabel {{ font-weight: 600; font-size: {theme.FS_SMALL}px; "
-                f"color: {t.accent_text if self.live else t.text_3}; }}"
-            ),
-        )
-        head.add(kicker)
+        head = Row(spacing=8, margins=(16, 12, 16, 12))
+        if self.live:
+            head.add(NeedsDot())
+        head.add(caption("Plan ready for review" if self.live else "Plan", self.live))
         head.stretch()
         self.outcome: Optional[str] = None
         if not self.live and item.result:
@@ -59,7 +65,7 @@ class PlanBody(QWidget):
             head.add(Badge("Kept planning"))
         if self.file:
             link = Row(spacing=4)
-            link.add(IconLabel("file-text", "text_2", 13))
+            link.add(bits.IconLabel("file-text", "text_2", 13))
             fl = LinkLabel("Plan file")
             fl.setToolTip("Open the plan file")
             fl.clicked.connect(lambda: store.open_file(self.file))
@@ -103,8 +109,9 @@ class PlanBody(QWidget):
             self.keep_btn = bits.button("Keep planning", kind="ghost", on_click=self.start_revising)
             self.keep_btn.setAccessibleName("Keep planning")
             for b, k in ((self.approve_btn, "1"), (self.ask_btn, "2"), (self.keep_btn, "3")):
+                perm_button(b)
                 self.choices.add(b)
-                self.choices.add(_key(k))
+                self.choices.add(key_badge(k))
             self.choices.stretch()
             self.actions.add(self.choices)
             self.feedback_box = QWidget()
@@ -121,6 +128,8 @@ class PlanBody(QWidget):
             self.back_btn.setAccessibleName("Back")
             self.send_btn = bits.button("Send feedback", kind="primary", on_click=self.keep_planning)
             self.send_btn.setAccessibleName("Send feedback")
+            perm_button(self.back_btn)
+            perm_button(self.send_btn)
             frow.add(self.back_btn)
             frow.add(self.send_btn)
             fl.addWidget(frow)
@@ -195,23 +204,17 @@ class PlanBody(QWidget):
         elif key == "3":
             self.start_revising()
 
-    def eventFilter(self, obj: Any, e: Any) -> bool:  # noqa: N802
+    def eventFilter(self, obj: Any, e: Any) -> bool:
         if obj is getattr(self, "feedback", None) and e.type() == e.Type.KeyPress:
             if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and e.modifiers() & Qt.KeyboardModifier.ControlModifier:
                 self.keep_planning()
                 return True
         return super().eventFilter(obj, e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setPen(QPen(t.color("accent_ring" if self.live else "hair_2"), 1.5 if self.live else 1))
         p.setBrush(t.color("raised"))
-        p.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 14, 14)
-
-
-def _key(k: str) -> QWidget:
-    lb = bits.label(k, size="micro")
-    restyle(lb, lambda t: f"QLabel {{ color: {t.text_4}; font-size: 10.5px; padding: 0 4px; }}")
-    return lb
+        p.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 12, 12)

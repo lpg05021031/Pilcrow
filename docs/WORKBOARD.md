@@ -368,6 +368,17 @@ SessionView 標題列選單加「寫成卡片」：開一個只有意圖欄的�
 
 ## 15. 進度
 
+- 併入 3.0.7（2026-11-08）：把四個階段合進遠端 main（227 個 commit 之後）。決定：Control room 由看板取代；
+  **Inbox 頁保留**（3.0.x 的 dispatch 工作把報告放在那裡），所以 Sidebar 是 Workboard / Inbox / Dispatch 三列，
+  排程仍可從等待欄的時鐘選單管理；快捷鍵進遠端的單一表（`web/src/lib/shortcuts.ts`、`qt/pilcrow_qt/lib/shortcuts.py`），
+  `Esc` 由 `stop` 一個項目負責：有代理在跑就停止，否則從看板開的 session 回看板；Control room 的「Allow for all helpers」
+  搬進看板側板的權限區；系統提示的附加段是記憶、repos、交接報告三段相接；`rowOf` 帶出 board 欄位；
+  `app.css` 已被遠端拆檔，看板的 transition 依新規則放在 `motion.css`。§10 的 Inbox 移除與 §13 第 3 階段的「Inbox 併入」
+  在這個基底上不成立，以本條為準。
+  Qt 端對應 3.0.x 的規則：`widgets/board.py` 的樣式表不再帶顏色（文字用 `theme.tint`、面用 `Box` / 自繪），
+  舊 Control room 被 dispatch 頁共用的 `SectionHead` / `EmptyNote` / `KeyButton` 搬到 `widgets/ui/sections.py`，
+  側板權限區多了「Allow for all helpers」（helper）與「Allow for all」（dispatch run）。
+
 - 第 4 階段（2026-11-08）：Web 拖放完成：`dropAction(state, lane)` 決定放到哪一欄等於做什麼，非法目標變淡、合法目標亮框，
   拖曳中不改選取（否則側板一開版面就位移）；共用案例檔 `test/unit/board-cases.json` 由 web 與 Qt 的單元測試各跑一次。
   Qt 移植完成：`qt/pilcrow_qt/lib/board.py` 一對一移植（含 `drop_action`）、`widgets/board.py` 取代 overview.py 與 inbox.py、

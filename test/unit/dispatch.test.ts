@@ -1,0 +1,783 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- the server module is plain JavaScript */
+// Dispatch (server/dispatch_core.js): the pure helpers, the workspace scan and the plan on real
+// temporary repositories, and the job state machine driven through fake sessions and the bus.
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { EventEmitter } from 'node:events';
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import * as git from '../../server/git.js';
+import { createDispatcher, forecastFrom, levelsOf, renderBrief } from '../../server/dispatch_core.js';
+import { groupHunks, manifestOf, ruleKey } from '../../server/workspace.js';
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const g = (cwd: string, ...args: string[]) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', '-c', 'commit.gpgsign=false', ...args], { cwd, stdio: 'pipe' }).toString();
+
+function mkRepo(dir: string, files: Record<string, string> = { 'README.md': '# r\n' }) {
+  fs.mkdirSync(dir, { recursive: true });
+  execFileSync('git', ['init', '-q', '-b', 'main', dir], { stdio: 'pipe' });
+  for (const [rel, text] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+    fs.writeFileSync(path.join(dir, rel), text);
+  }
+  g(dir, 'add', '-A');
+  g(dir, 'commit', '-q', '-m', 'init');
+  return dir;
+}
+
+// ---------------------------------------------------------------- fakes
+
+class FakeSession {
+  id: string;
+  cwd: string;
+  q = true;
+  pending = new Map<string, { req: any }>();
+  sent: string[] = [];
+  decisions: any[] = [];
+  usage = { costUsd: 0 };
+  lastReply: { text: string } | null = null;
+  messages: any[] = [];
+  activity: any = null;
+  closed = false;
+  interrupted = 0;
+  unattended = false;
+  bus: EventEmitter;
+  constructor(id: string, cwd: string, bus: EventEmitter) {
+    this.id = id;
+    this.cwd = cwd;
+    this.bus = bus;
+  }
+  async send({ text }: { text: string }) {
+    this.sent.push(text);
+    return 'u';
+  }
+  respond(requestId: string, decision: any) {
+    const p = this.pending.get(requestId);
+    if (!p) return false;
+    this.pending.delete(requestId);
+    this.decisions.push({ requestId, decision });
+    this.bus.emit('permission-resolved', { id: this.id, requestId, decision: decision.behavior });
+    return true;
+  }
+  async interrupt() {
+    this.interrupted++;
+  }
+  close() {
+    this.closed = true;
+  }
+  // the test drives the session: it asks, it says, it ends its turn
+  ask(req: any) {
+    const r = { requestId: req.requestId || `req-${Math.random().toString(36).slice(2, 8)}`, interactive: false, at: Date.now(), ...req };
+    this.pending.set(r.requestId, { req: r });
+    this.bus.emit('permission', { id: this.id, request: r });
+    return r.requestId;
+  }
+  say(text: string, cost = 0.01) {
+    this.lastReply = { text };
+    this.usage.costUsd += cost;
+  }
+  idle() {
+    this.bus.emit('state', { id: this.id, status: 'idle', usage: this.usage, lastReply: this.lastReply, activity: null });
+  }
+  state(status: string, extra: any = {}) {
+    this.bus.emit('state', { id: this.id, status, usage: this.usage, lastReply: this.lastReply, activity: null, ...extra });
+  }
+}
+
+class FakeSessions {
+  all = new Map<string, FakeSession>();
+  created: any[] = [];
+  n = 0;
+  bus: EventEmitter;
+  realWorktrees: boolean;
+  constructor(bus: EventEmitter, realWorktrees = false) {
+    this.bus = bus;
+    this.realWorktrees = realWorktrees;
+  }
+  async create(p: any) {
+    this.created.push(p);
+    const id = `s${++this.n}`;
+    let worktree: any = null;
+    let cwd = p.cwd;
+    if (p.worktree) {
+      if (this.realWorktrees) {
+        const info = await git.info(p.cwd);
+        const dir = path.join(path.dirname(p.cwd), '.wt', `${path.basename(p.cwd)}-${id}`);
+        worktree = (await git.createWorktree({ repo: info.root, base: p.worktree.base || 'main', branch: `pilcrow/${p.worktree.name}`, dir })).worktree;
+        cwd = worktree.path;
+      } else {
+        worktree = { path: `${p.cwd}/.wt/${id}`, branch: `pilcrow/${p.worktree.name}`, base: p.worktree.base || 'main', repoRoot: p.cwd };
+        cwd = worktree.path;
+      }
+    }
+    const s = new FakeSession(id, cwd, this.bus);
+    this.all.set(id, s);
+    return { id, cwd, worktree };
+  }
+  find(id: string) {
+    return this.all.get(id);
+  }
+  async get(id: string) {
+    const s = this.all.get(id);
+    if (!s) throw new Error('no session');
+    return s;
+  }
+  last() {
+    return [...this.all.values()].at(-1)!;
+  }
+}
+
+function harness({ realWorktrees = false, file = null as string | null, shell = null as any, gitImpl = git as any } = {}) {
+  const bus = new EventEmitter();
+  const sessions = new FakeSessions(bus, realWorktrees);
+  const inbox: any[] = [];
+  const inboxUpdates: any[] = [];
+  const shellCalls: any[] = [];
+  const meta: Record<string, any> = {};
+  const store = { meta, setMeta: (id: string, patch: any) => (meta[id] = { ...(meta[id] || {}), ...patch }), getMeta: (id: string) => meta[id] || null, getConfig: () => ({}) };
+  const d = createDispatcher({
+    file,
+    sessions,
+    bus,
+    store,
+    git: gitImpl,
+    pushInbox: (item: any) => inbox.push(item),
+    updateInbox: (id: string, patch: any) => inboxUpdates.push({ id, patch }),
+    shell: async (cmd: string, cwd: string, timeout: number) => {
+      shellCalls.push({ cmd, cwd, timeout });
+      return shell ? shell(cmd, cwd) : { code: 0, output: 'ok' };
+    },
+    run: async () => ({ code: 1, stdout: '', stderr: 'no gh in tests' }),
+    which: () => null,
+  });
+  d.begin();
+  return { d, bus, sessions, inbox, inboxUpdates, shellCalls, store };
+}
+
+let root: string;
+beforeEach(() => {
+  root = fs.mkdtempSync(path.join(os.tmpdir(), 'pilcrow-dispatch-'));
+});
+afterEach(() => {
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+// ---------------------------------------------------------------- pure helpers
+
+describe('renderBrief', () => {
+  it('substitutes the variables and appends what was learned and what dependencies did', () => {
+    const out = renderBrief('Do it in {{repo.name}} ({{repo.path}}) on {{repo.branch}} for {{job.name}}. {{notes}} {{unknown}}', {
+      job: { name: 'Bump' },
+      target: { name: 'web', path: '/w', base: 'main', notes: 'Careful.' },
+      learned: [{ name: 'cli', summary: 'Changed eslint.config.js' }],
+      deps: [{ name: 'ds', summary: 'Published 2.0' }],
+    });
+    expect(out).toContain('Do it in web (/w) on main for Bump. Careful. {{unknown}}');
+    expect(out).toContain('depends on were done first:\n- ds: Published 2.0');
+    expect(out).toContain('already done in one repository');
+    expect(out).toContain('- cli: Changed eslint.config.js');
+  });
+});
+
+describe('ruleKey', () => {
+  it('one key for the same request from two repositories', () => {
+    expect(ruleKey({ toolName: 'Bash', input: { command: 'npm   install\n' } })).toBe('Bash:npm install');
+    expect(ruleKey({ toolName: 'Edit', input: { file_path: '/wt/a/src/x.ts' } }, '/wt/a')).toBe('Edit:src/x.ts');
+    expect(ruleKey({ toolName: 'Edit', input: { file_path: '/wt/b/src/x.ts' } }, '/wt/b')).toBe('Edit:src/x.ts');
+    expect(ruleKey({ toolName: 'WebFetch', input: { url: 'https://docs.example.com/a?b=1' } })).toBe('WebFetch:docs.example.com');
+    expect(ruleKey({ toolName: 'Glob', input: { pattern: '**/*.ts', path: '/wt/a/src' } }, '/wt/a')).toBe('Glob:{"path":"src","pattern":"**/*.ts"}');
+    expect(ruleKey({ toolName: 'Bash', input: { command: 'rm -rf x' } })).not.toBe(ruleKey({ toolName: 'Bash', input: { command: 'rm -rf y' } }));
+  });
+});
+
+describe('levelsOf', () => {
+  it('orders dependents after their dependencies and parks a cycle last', () => {
+    const { level, levels, cyclic } = levelsOf([
+      { path: 'a', deps: [] },
+      { path: 'b', deps: ['a'] },
+      { path: 'c', deps: ['b', 'zzz-not-a-target'] },
+      { path: 'd', deps: ['e'] },
+      { path: 'e', deps: ['d'] },
+    ]);
+    expect([level.get('a'), level.get('b'), level.get('c')]).toEqual([0, 1, 2]);
+    expect(cyclic.sort()).toEqual(['d', 'e']);
+    expect(level.get('d')).toBe(3);
+    expect(levels).toBe(4);
+  });
+});
+
+describe('groupHunks and forecastFrom', () => {
+  it('reads the same hunk in several repositories once', () => {
+    const hunk = { lines: [{ t: ' ', s: 'x' }, { t: '-', s: 'a' }, { t: '+', s: 'b' }] };
+    const r = groupHunks([
+      { runId: '1', name: 'one', files: [{ path: 'eslint.config.js', add: 1, del: 1, hunks: [hunk] }, { path: 'only-one.ts', add: 2, del: 0, hunks: [{ lines: [{ t: '+', s: 'q' }] }] }] },
+      { runId: '2', name: 'two', files: [{ path: 'eslint.config.js', add: 1, del: 1, hunks: [hunk] }] },
+    ]);
+    expect(r.same).toHaveLength(1);
+    expect(r.same[0].runs).toEqual(['one', 'two']);
+    expect(r.differ).toEqual([{ name: 'one', files: [{ path: 'only-one.ts', add: 2, del: 0 }] }]);
+    expect(r.files).toBe(3);
+  });
+  it('scales the canary by size class and divides the time by the parallel setting', () => {
+    const f = forecastFrom([{ state: 'done', size: 'small', cost: 0.1, durationMs: 60e3, name: 'c' }], [{ size: 'medium' }, { size: 'large' }, { size: 'small' }], 2)!;
+    expect(f.cost).toBe(0.7);
+    expect(f.minutes).toBe(4); // 7 units × 1 min ÷ 2
+    expect(f.from).toEqual(['c']);
+  });
+});
+
+describe('manifestOf', () => {
+  it('reads local dependencies from package.json, go.mod and Cargo.toml', () => {
+    const dir = path.join(root, 'm');
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: '@acme/web', dependencies: { '@acme/ds': 'file:../ds', react: '^18' } }));
+    fs.writeFileSync(path.join(dir, 'go.mod'), 'module acme/web\n\nrequire acme/core v0.1.0\n\nreplace acme/core => ../core\n');
+    fs.writeFileSync(path.join(dir, 'Cargo.toml'), '[package]\nname = "web"\n\n[dependencies]\ncore = { path = "../core-rs" }\nserde = "1"\n');
+    const m = manifestOf(dir);
+    expect(m.kind).toBe('node');
+    expect(m.name).toBe('@acme/web');
+    expect(m.localDeps.map((p) => path.basename(p)).sort()).toEqual(['core', 'core-rs', 'ds']);
+    expect(m.depNames).toContain('@acme/ds');
+    expect(m.depNames).toContain('acme/core');
+    expect(m.depNames).toContain('core');
+  });
+});
+
+// ---------------------------------------------------------------- the workspace
+
+describe('scan and plan on real repositories', () => {
+  it('finds the repositories, their state and the dependencies between them', async () => {
+    const ds = mkRepo(path.join(root, 'ds'), { 'package.json': JSON.stringify({ name: '@acme/ds' }), 'CLAUDE.md': 'hi' });
+    const web = mkRepo(path.join(root, 'web'), { 'package.json': JSON.stringify({ name: '@acme/web', dependencies: { '@acme/ds': 'file:../ds' } }) });
+    const api = mkRepo(path.join(root, 'api'), { 'go.mod': 'module acme/api\n' });
+    fs.writeFileSync(path.join(api, 'dirty.txt'), 'x'); // uncommitted
+    fs.mkdirSync(path.join(root, 'not-a-repo', 'node_modules', 'deep'), { recursive: true });
+    mkRepo(path.join(root, 'group', 'nested'));
+    const { d } = harness();
+    const r = await d.scan({ root, depth: 3 });
+    expect(r.repos.map((x: any) => x.name)).toEqual(['api', 'ds', 'nested', 'web']);
+    const byName = Object.fromEntries(r.repos.map((x: any) => [x.name, x]));
+    expect(byName.ds.branch).toBe('main');
+    expect(byName.ds.hasClaudeMd).toBe(true);
+    expect(byName.ds.kind).toBe('node');
+    expect(byName.api.dirty).toBe(true);
+    expect(byName.api.kind).toBe('go');
+    expect(byName.web.deps).toEqual([ds]);
+    expect(byName.web.size).toBe('small');
+    expect(byName.ds.dirty).toBe(false);
+    // cached: the second call does not walk again within a minute
+    const again = await d.scan({ root, depth: 3 });
+    expect(again).toBe(r);
+    const forced = await d.scan({ root, depth: 3, force: true });
+    expect(forced).not.toBe(r);
+    void web;
+  });
+
+  it('plans: blocked, warnings, notes, levels and the worst case', async () => {
+    const ds = mkRepo(path.join(root, 'ds'));
+    const web = mkRepo(path.join(root, 'web'));
+    fs.writeFileSync(path.join(web, 'dirty.txt'), 'x');
+    const { d } = harness();
+    const job = d.save({
+      name: 'Bump eslint',
+      brief: 'Upgrade {{repo.name}}.',
+      targets: [
+        { path: ds, name: 'ds', base: 'main' },
+        { path: web, name: 'web', base: 'main', deps: [ds] },
+        { path: path.join(root, 'nope'), name: 'nope', base: 'main' },
+        { path: ds, name: 'ds-release', base: 'release/4' },
+      ],
+      settings: { parallel: 2, maxMinutes: 10, costCap: 5 },
+    });
+    const p = await d.plan(job.id);
+    const by = Object.fromEntries(p.targets.map((t: any) => [t.name, t]));
+    expect(by.ds.verdict).toBe('ok');
+    expect(by.ds.brief).toBe('Upgrade ds.');
+    expect(by.web.verdict).toBe('warning');
+    expect(by.web.notes.map((n: any) => n.kind)).toContain('warning');
+    expect(by.web.level).toBe(1);
+    expect(by.web.notes.some((n: any) => /Runs after ds/.test(n.text))).toBe(true);
+    expect(by.nope.verdict).toBe('blocked');
+    expect(by.nope.notes[0].text).toBe('The folder does not exist.');
+    expect(by['ds-release'].verdict).toBe('blocked');
+    expect(by['ds-release'].notes[0].text).toMatch(/Branch release\/4 not found/);
+    expect(p.worst).toEqual({ minutes: 10, cost: 5, runs: 2, levels: 2 });
+    expect(p.blocked).toBe(2);
+    expect(d.get(job.id).job.state).toBe('planned');
+    await expect(d.start(job.id)).rejects.toThrow(/2 targets are blocked/);
+  });
+});
+
+// ---------------------------------------------------------------- the job
+
+async function jobWithRepos(h: ReturnType<typeof harness>, settings: any = {}, brief = 'Do the thing in {{repo.name}}.', deps = true) {
+  const a = mkRepo(path.join(root, 'a'));
+  const b = mkRepo(path.join(root, 'b'));
+  const c = mkRepo(path.join(root, 'c'));
+  const job = h.d.save({
+    name: 'Bump eslint',
+    brief,
+    targets: [
+      { path: a, name: 'a', base: 'main', size: 'small' },
+      { path: b, name: 'b', base: 'main', size: 'medium', deps: deps ? [a] : [] },
+      { path: c, name: 'c', base: 'main', size: 'small' },
+    ],
+    settings: { parallel: 3, maxMinutes: 10, canary: 1, ...settings },
+  });
+  return { job, a, b, c };
+}
+
+describe('a job through its life', () => {
+  it('past its minute cap a run is interrupted, and the idle that follows ends it as stopped, not done', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const h = harness();
+      const { job } = await jobWithRepos(h, { canary: 0, parallel: 1 });
+      await h.d.start(job.id);
+      await sleep(40);
+      const s1 = h.sessions.last();
+      vi.advanceTimersByTime(10 * 60e3);
+      expect(s1.interrupted).toBe(1);
+      s1.say('Half way.');
+      s1.idle();
+      await sleep(40);
+      expect(h.d.get(job.id).runs[0]).toMatchObject({ state: 'stopped', reason: 'Stopped after 10 minutes' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('canary first, one answer for every repository, dependents after dependencies, a report at the end', async () => {
+    const h = harness();
+    const { job } = await jobWithRepos(h);
+    const changes: any[] = [];
+    h.d.events.on('changed', (e) => changes.push(e));
+    await h.d.start(job.id);
+    await sleep(40);
+    let { job: j, runs } = h.d.get(job.id);
+    expect(j.state).toBe('running');
+    expect(j.wave).toBe('canary');
+    const canary = runs.find((r: any) => r.wave === 'canary')!;
+    expect(canary.name).toBe('a'); // level 0, smallest, first by name
+    expect(canary.state).toBe('running');
+    expect(runs.filter((r: any) => r.state === 'queued')).toHaveLength(2);
+    const s1 = h.sessions.last();
+    expect(h.sessions.created[0]).toMatchObject({ worktree: { name: 'bump-eslint', base: 'main' }, mode: 'acceptEdits', title: 'Bump eslint · a' });
+    expect(h.store.getMeta('s1').dispatch).toMatchObject({ jobId: job.id, runId: canary.id, target: 'a' });
+    expect(s1.sent[0]).toBe('Do the thing in a.');
+
+    // the canary asks: the run waits, with the request's key on it
+    const rid = s1.ask({ toolName: 'Bash', input: { command: 'npm install' }, displayName: 'Bash' });
+    await sleep(5);
+    ({ runs } = h.d.get(job.id));
+    expect(runs[0].state).toBe('needs_action');
+    expect(runs[0].pending[0]).toMatchObject({ requestId: rid, key: 'Bash:npm install', label: 'Bash: npm install' });
+    expect(h.d.get(job.id).job.needsAction).toBe(1);
+    // ...and is answered once for every repository
+    h.d.allow(job.id, 'Bash:npm install');
+    expect(s1.decisions[0].decision.behavior).toBe('allow');
+    ({ job: j, runs } = h.d.get(job.id));
+    expect(runs[0].state).toBe('running');
+    expect(j.rules).toEqual([expect.objectContaining({ key: 'Bash:npm install', label: 'Bash: npm install', count: 1 })]);
+
+    s1.say('Upgraded eslint in a.', 0.2);
+    s1.idle();
+    await sleep(40);
+    ({ job: j, runs } = h.d.get(job.id));
+    expect(runs[0].state).toBe('done');
+    expect(runs[0].summary).toBe('Upgraded eslint in a.');
+    expect(runs[0].cost).toBe(0.2);
+    expect(j.state).toBe('reviewing');
+    expect(j.wave).toBe('canary');
+    expect(j.canaryWaiting).toBe(true);
+    expect(j.learned).toEqual([{ name: 'a', summary: 'Upgraded eslint in a.' }]);
+    expect(j.forecast).toMatchObject({ runs: 2, from: ['a'] });
+    expect(j.forecast.cost).toBeCloseTo(0.6, 5); // medium (2) + small (1) at 0.2 per unit
+
+    // continue: the main wave learns from the canary; b waits for nothing (a is done) so both start
+    h.d.continue(job.id, { learn: true });
+    await sleep(40);
+    ({ job: j, runs } = h.d.get(job.id));
+    expect(j.state).toBe('running');
+    expect(j.wave).toBe('main');
+    expect(runs.filter((r: any) => r.state === 'running').map((r: any) => r.name).sort()).toEqual(['b', 'c']);
+    const sb = h.sessions.find('s2')!;
+    const sc = h.sessions.find('s3')!;
+    const briefB = [sb, sc].find((s) => s.sent[0].startsWith('Do the thing in b.'))!.sent[0];
+    expect(briefB).toContain('Repositories this one depends on were done first:\n- a: Upgraded eslint in a.');
+    expect(briefB).toContain('already done in one repository');
+    // the rule answers the same request from the next repository without asking
+    sb.ask({ toolName: 'Bash', input: { command: 'npm  install' } });
+    await sleep(5);
+    expect(sb.decisions).toHaveLength(1);
+    expect(h.d.get(job.id).runs.find((r: any) => r.sessionId === sb.id).state).toBe('running');
+    // a different request still asks
+    sc.ask({ toolName: 'Bash', input: { command: 'rm -rf node_modules' } });
+    await sleep(5);
+    expect(h.d.get(job.id).runs.find((r: any) => r.sessionId === sc.id).state).toBe('needs_action');
+    sc.respond([...sc.pending.keys()][0], { behavior: 'deny' });
+    await sleep(5);
+    expect(h.d.get(job.id).runs.find((r: any) => r.sessionId === sc.id).state).toBe('running');
+
+    sb.say('b done', 0.3);
+    sb.idle();
+    sc.say('c done', 0.1);
+    sc.idle();
+    await sleep(60);
+    ({ job: j, runs } = h.d.get(job.id));
+    expect(runs.map((r: any) => r.state)).toEqual(['done', 'done', 'done']);
+    expect(j.state).toBe('reviewing');
+    expect(j.wave).toBe('done');
+    expect(j.cost).toBeCloseTo(0.6, 5);
+    expect(h.inbox).toHaveLength(0);
+
+    // finishing: keep everything → the job is finished and the report is in the inbox
+    const f = await h.d.finish(job.id, { action: 'keep' });
+    expect(f.results.map((r: any) => r.ok)).toEqual([true, true, true]);
+    ({ job: j } = h.d.get(job.id));
+    expect(j.state).toBe('finished');
+    expect(h.inbox).toHaveLength(1);
+    expect(h.inbox[0]).toMatchObject({ kind: 'dispatch', scheduleName: 'Bump eslint', status: 'completed', jobId: job.id });
+    expect(h.inbox[0].dispatch.targets.map((t: any) => t.name)).toEqual(['a', 'b', 'c']);
+    expect(h.inbox[0].dispatch.rules[0].key).toBe('Bash:npm install');
+    const md = h.d.exportMarkdown(job.id);
+    expect(md).toContain('# Bump eslint');
+    expect(md).toContain('| a | done |');
+    expect(md).toContain('Allowed for every repository');
+    // the events named the job and the runs that changed
+    expect(changes.some((e) => e.id === job.id && e.runs.length)).toBe(true);
+    h.d.end();
+  });
+
+  it('prepare failing fails the run before anything is sent; verify failing goes back to the agent once', async () => {
+    let prepareCode = 1;
+    const verifyCodes = [1, 0];
+    const h = harness({
+      shell: (cmd: string) => (cmd === 'npm ci' ? { code: prepareCode, output: 'E404 nope' } : { code: verifyCodes.shift() ?? 0, output: cmd === 'npm test' ? '1 failing' : '' }),
+    });
+    const { job } = await jobWithRepos(h, { canary: 0, prepare: 'npm ci', verify: 'npm test', parallel: 1 });
+    await h.d.start(job.id);
+    await sleep(40);
+    let { runs } = h.d.get(job.id);
+    const first = runs.find((r: any) => r.name === 'a')!;
+    expect(first.state).toBe('failed');
+    expect(first.reason).toMatch(/Prepare failed \(exit 1\): E404 nope/);
+    expect(h.sessions.find('s1')!.sent).toEqual([]);
+    expect(h.shellCalls[0]).toMatchObject({ cmd: 'npm ci' });
+    // b depends on a, which failed: skipped; c goes next
+    await sleep(40);
+    ({ runs } = h.d.get(job.id));
+    expect(runs.find((r: any) => r.name === 'b')!.state).toBe('skipped');
+    expect(runs.find((r: any) => r.name === 'b')!.reason).toMatch(/Depends on a/);
+    prepareCode = 0;
+    // prepare passed this time? no: c already started with the failing code... let c retry
+    const c = runs.find((r: any) => r.name === 'c')!;
+    expect(c.state).toBe('failed');
+    const retried = h.d.retry(job.id, c.id);
+    await sleep(40);
+    ({ runs } = h.d.get(job.id));
+    const cr = runs.find((r: any) => r.id === retried.id)!;
+    expect(cr.state).toBe('running');
+    expect(cr.attempt).toBe(2);
+    const sc = h.sessions.last();
+    expect(sc.sent).toHaveLength(1);
+    // the turn ends: verify fails once → the output goes back; the second time it passes → done
+    sc.say('c done', 0.05);
+    sc.idle();
+    await sleep(30);
+    ({ runs } = h.d.get(job.id));
+    expect(runs.find((r: any) => r.id === retried.id)!.state).toBe('running');
+    expect(sc.sent).toHaveLength(2);
+    expect(sc.sent[1]).toMatch(/verify command `npm test` failed with exit code 1/);
+    expect(sc.sent[1]).toContain('1 failing');
+    sc.idle();
+    await sleep(40);
+    ({ runs } = h.d.get(job.id));
+    const done = runs.find((r: any) => r.id === retried.id)!;
+    expect(done.state).toBe('done');
+    expect(done.verify).toMatchObject({ ran: true, code: 0 });
+    expect(h.d.get(job.id).job.state).toBe('reviewing');
+    h.d.end();
+  });
+
+  it('a cost cap stops new runs, stop ends the active ones and skips the queued, a rate limit backs off', async () => {
+    const h = harness();
+    const { job } = await jobWithRepos(h, { canary: 0, parallel: 1, costCap: 0.15 });
+    await h.d.start(job.id);
+    await sleep(40);
+    let { job: j, runs } = h.d.get(job.id);
+    expect(runs.filter((r: any) => r.state === 'running')).toHaveLength(1);
+    const s1 = h.sessions.last();
+    // a rate limit: the run goes back to the queue and the job waits
+    s1.state('error', { error: 'API rate limit reached (429)' });
+    await sleep(5);
+    ({ job: j, runs } = h.d.get(job.id));
+    expect(runs[0].state).toBe('queued');
+    expect(runs[0].attempt).toBe(2);
+    expect(j.backoffUntil).toBeGreaterThan(Date.now());
+    expect(s1.closed).toBe(true);
+    // let the backoff pass quickly
+    j = h.d._data.jobs[0];
+    j.backoffUntil = Date.now() - 1;
+    h.d.pump();
+    await sleep(40);
+    ({ job: j, runs } = h.d.get(job.id));
+    expect(runs[0].state).toBe('running');
+    const s2 = h.sessions.last();
+    s2.say('a done', 0.2); // over the cap
+    s2.idle();
+    await sleep(40);
+    ({ job: j, runs } = h.d.get(job.id));
+    expect(runs[0].state).toBe('done');
+    expect(j.capReached).toBe(true);
+    expect(runs.filter((r: any) => r.state === 'queued')).toHaveLength(2);
+    expect(j.state).toBe('running');
+    // a raise of the cap resumes
+    h.d.save({ id: job.id, settings: { costCap: 10 } });
+    h.d.resume(job.id);
+    await sleep(40);
+    ({ job: j, runs } = h.d.get(job.id));
+    expect(runs.filter((r: any) => r.state === 'running')).toHaveLength(1);
+    expect(j.capReached).toBe(false);
+    // stop: the active run is interrupted and stopped, the queued one skipped
+    h.d.stop(job.id);
+    await sleep(40);
+    ({ job: j, runs } = h.d.get(job.id));
+    expect(h.sessions.last().interrupted).toBe(1);
+    expect(runs.map((r: any) => r.state).sort()).toEqual(['done', 'skipped', 'stopped']);
+    expect(j.state).toBe('stopped');
+    h.d.end();
+  });
+
+  it('once ended (the server quitting) a run that ends starts no git process', async () => {
+    const diff = vi.fn(async () => ({ isRepo: true, files: [] }));
+    const h = harness({ gitImpl: { ...git, diff } });
+    const { job } = await jobWithRepos(h, { canary: 0 });
+    await h.d.start(job.id);
+    await sleep(40);
+    h.d.end();
+    h.d.stop(job.id);
+    await sleep(40);
+    expect(h.d.get(job.id).runs.filter((r: any) => r.state === 'stopped').length).toBeGreaterThan(0);
+    expect(diff).not.toHaveBeenCalled();
+  });
+
+  it('after a restart a run whose session is gone reads stopped, and the job can be finished', async () => {
+    const file = path.join(root, 'dispatch.json');
+    const h = harness({ file });
+    const { job } = await jobWithRepos(h, { canary: 0 });
+    await h.d.start(job.id);
+    await sleep(40);
+    h.d.end(); // flushes to disk
+    const bus2 = new EventEmitter();
+    const sessions2 = new FakeSessions(bus2);
+    const inbox2: any[] = [];
+    const d2 = createDispatcher({ file, sessions: sessions2, bus: bus2, store: { meta: {}, setMeta: () => null, getMeta: () => null, getConfig: () => ({}) }, git, pushInbox: (i: any) => inbox2.push(i), shell: async () => ({ code: 0, output: '' }), run: async () => ({ code: 1, stdout: '', stderr: '' }) });
+    d2.begin();
+    await sleep(40);
+    const { job: j, runs } = d2.get(job.id);
+    // a and c were running; b waited for a, which did not finish, so it is skipped
+    expect(runs.filter((r: any) => r.state === 'stopped' && r.reason === 'The server restarted').map((r: any) => r.name)).toEqual(['a', 'c']);
+    expect(runs.find((r: any) => r.name === 'b')).toMatchObject({ state: 'skipped', reason: expect.stringMatching(/Depends on a/) });
+    // nothing is left to land, so the job is finished, with a failed report in the inbox
+    expect(j.state).toBe('finished');
+    expect(inbox2).toHaveLength(1);
+    expect(inbox2[0]).toMatchObject({ kind: 'dispatch', status: 'failed', reason: '2 of 3 did not finish' });
+    d2.end();
+  });
+});
+
+describe('finishing on real worktrees', () => {
+  it('commits on the run branch, keeps the branch and removes the directory; discard removes both; review groups the same change', async () => {
+    const h = harness({ realWorktrees: true });
+    const { job, a, b } = await jobWithRepos(h, { canary: 0, parallel: 3, commitMessage: 'chore: {{job.name}} in {{repo.name}}' }, undefined, false);
+    await h.d.start(job.id);
+    let { runs } = h.d.get(job.id);
+    for (let i = 0; i < 100 && !runs.every((r: any) => r.state === 'running'); i++) {
+      await sleep(30); // three real worktrees take a moment
+      ({ runs } = h.d.get(job.id));
+    }
+    expect(runs.every((r: any) => r.state === 'running')).toBe(true);
+    // the agents change files: the same change in a and b, another in c
+    for (const r of runs) {
+      const wt = r.worktree.path;
+      expect(fs.existsSync(wt)).toBe(true);
+      if (r.name !== 'c') fs.writeFileSync(path.join(wt, 'eslint.config.js'), 'export default [];\n');
+      else fs.writeFileSync(path.join(wt, 'README.md'), '# r\n\nmore\n');
+      const s = h.sessions.find(r.sessionId)!;
+      s.say(`done in ${r.name}`, 0.01);
+      s.idle();
+    }
+    for (let i = 0; i < 100 && !runs.every((r: any) => r.state === 'done' && r.files.length); i++) {
+      await sleep(30);
+      ({ runs } = h.d.get(job.id));
+    }
+    expect(runs.map((r: any) => r.state)).toEqual(['done', 'done', 'done']);
+    expect(runs.find((r: any) => r.name === 'a')!.files).toEqual([{ path: 'eslint.config.js', add: 1, del: 0 }]);
+    const rv = await h.d.review(job.id);
+    expect(rv.same).toHaveLength(1);
+    expect(rv.same[0]).toMatchObject({ path: 'eslint.config.js', runs: ['a', 'b'] });
+    expect(rv.differ).toEqual([{ name: 'c', files: [{ path: 'README.md', add: 2, del: 0 }] }]);
+    // commit a and b, discard c
+    const ra = runs.find((r: any) => r.name === 'a')!;
+    const rc = runs.find((r: any) => r.name === 'c')!;
+    const fa = await h.d.finish(job.id, { runId: ra.id, action: 'commit' });
+    expect(fa.results[0].ok).toBe(true);
+    ({ runs } = h.d.get(job.id));
+    const a2 = runs.find((r: any) => r.name === 'a')!;
+    expect(a2.finished).toBe('commit');
+    expect(a2.commit).toMatch(/^[0-9a-f]{7,}$/);
+    expect(fs.existsSync(a2.worktree.path)).toBe(false);
+    expect(g(a, 'log', '--oneline', 'pilcrow/bump-eslint')).toContain('chore: Bump eslint in a');
+    expect(g(a, 'branch', '--list', 'pilcrow/bump-eslint').trim()).toBe('pilcrow/bump-eslint');
+    const fc = await h.d.finish(job.id, { runId: rc.id, action: 'discard' });
+    expect(fc.results[0].ok).toBe(true);
+    ({ runs } = h.d.get(job.id));
+    const c2 = runs.find((r: any) => r.name === 'c')!;
+    expect(fs.existsSync(c2.worktree.path)).toBe(false);
+    expect(g(path.join(root, 'c'), 'branch', '--list', 'pilcrow/bump-eslint').trim()).toBe('');
+    expect(h.d.get(job.id).job.state).toBe('reviewing'); // b is still open
+    const fb = await h.d.finish(job.id, { action: 'commit' }); // everything left that is done
+    expect(fb.results.map((r: any) => r.name)).toEqual(['b']);
+    expect(g(b, 'log', '--oneline', 'pilcrow/bump-eslint')).toContain('chore: Bump eslint in b');
+    expect(h.d.get(job.id).job.state).toBe('finished');
+    expect(h.inbox[0].dispatch.targets.map((t: any) => t.finished)).toEqual(['commit', 'commit', 'discard']);
+    h.d.end();
+  });
+});
+
+describe('playbooks, schedules and the written report', () => {
+  it('saves a playbook from a job and starts an unattended job from it: no canary, permissions declined, the schedule told', async () => {
+    const h = harness();
+    const { job } = await jobWithRepos(h, { canary: 1 }, 'Do {{repo.name}}.', false);
+    const pb = h.d.savePlaybook({ fromJob: job.id, name: 'Eslint bump' });
+    expect(pb.targets.map((t: any) => t.name)).toEqual(['a', 'b', 'c']);
+    expect(pb.brief).toBe('Do {{repo.name}}.');
+    expect(pb.settings.canary).toBe(1);
+    expect(h.d.playbooks().map((p: any) => p.id)).toEqual([pb.id]);
+    expect(h.d.get(job.id).job.playbookId).toBe(pb.id);
+    expect(() => h.d.savePlaybook({ name: 'empty' })).toThrow(/needs a brief/);
+    const finished: any[] = [];
+    h.d.events.on('finished', (e) => finished.push(e));
+    const j2 = await h.d.startFromPlaybook(pb.id, { name: 'Nightly · 1', unattended: true, scheduleId: 'sch-1' });
+    await sleep(40);
+    expect(j2.name).toBe('Nightly · 1');
+    expect(j2.wave).toBe('main'); // unattended: nobody would read a canary
+    expect(j2.scheduleId).toBe('sch-1');
+    let { runs } = h.d.get(j2.id);
+    expect(runs.map((r: any) => r.state)).toEqual(['running', 'running', 'running']);
+    const mine = [...h.sessions.all.values()].filter((x) => h.store.getMeta(x.id)?.dispatch?.jobId === j2.id);
+    expect(mine).toHaveLength(3);
+    expect(mine.every((x) => x.unattended)).toBe(true);
+    for (const r of runs) {
+      const x = h.sessions.find(r.sessionId)!;
+      x.say(`ok ${r.name}`, 0.01);
+      x.idle();
+    }
+    await sleep(60);
+    ({ runs } = h.d.get(j2.id));
+    expect(runs.every((r: any) => r.state === 'done')).toBe(true);
+    await h.d.finish(j2.id, { action: 'keep' });
+    expect(finished).toHaveLength(1);
+    expect(finished[0]).toMatchObject({ id: j2.id, scheduleId: 'sch-1', playbookId: pb.id, status: 'completed' });
+    expect(h.inbox[0]).toMatchObject({ kind: 'dispatch', scheduleId: 'sch-1', scheduleName: 'Nightly · 1' });
+    expect(h.d.playbooks()[0]).toMatchObject({ uses: 1 });
+    expect(h.d.playbooks()[0].lastUsedAt).toBeGreaterThan(0);
+    h.d.removePlaybook(pb.id);
+    expect(h.d.playbooks()).toHaveLength(0);
+    expect(() => h.d.removePlaybook(pb.id)).toThrow(/No such playbook/);
+    h.d.end();
+  });
+
+  it('an agent writes the prose of the report once the job is finished, and the inbox item follows', async () => {
+    const h = harness();
+    const { job } = await jobWithRepos(h, { canary: 0, report: 'agent' }, undefined, false);
+    await h.d.start(job.id);
+    await sleep(40);
+    const { runs } = h.d.get(job.id);
+    for (const r of runs) {
+      const x = h.sessions.find(r.sessionId)!;
+      x.say(`done in ${r.name}`, 0.01);
+      x.idle();
+    }
+    await sleep(60);
+    await h.d.finish(job.id, { action: 'keep' });
+    await sleep(40);
+    let j = h.d.get(job.id).job;
+    expect(j.state).toBe('finished');
+    expect(j.report.proseState).toBe('writing');
+    expect(h.inbox).toHaveLength(1);
+    const rs = h.sessions.find(j.reportSessionId)!;
+    expect(rs.unattended).toBe(true);
+    expect(h.sessions.created.at(-1)).toMatchObject({ title: 'Bump eslint · report', mode: 'default' });
+    expect(h.sessions.created.at(-1).worktree).toBeUndefined();
+    expect(rs.sent[0]).toContain('writing the report of a job that ran the same brief across 3 repositories');
+    expect(rs.sent[0]).toContain('- a: done; 0 files changed');
+    expect(rs.sent[0]).toContain('Summary: done in a');
+    rs.say('Everything went the same way in all three. Nothing differed. Nothing needs a hand.', 0.02);
+    rs.idle();
+    await sleep(20);
+    j = h.d.get(job.id).job;
+    expect(j.report.proseState).toBe('done');
+    expect(j.report.prose).toContain('Everything went the same way');
+    expect(j.report.proseCost).toBe(0.02);
+    expect(h.inboxUpdates).toHaveLength(1);
+    expect(h.inboxUpdates[0].id).toBe(h.inbox[0].id);
+    expect(h.inboxUpdates[0].patch.summary).toContain('Everything went the same way');
+    expect(h.inboxUpdates[0].patch.dispatch.prose).toContain('Everything');
+    expect(h.d.exportMarkdown(job.id)).toContain('Everything went the same way');
+    expect(rs.closed).toBe(false); // closes a moment later
+    await sleep(1600);
+    expect(rs.closed).toBe(true);
+    h.d.end();
+    void runs;
+  });
+});
+
+describe('dispatch.json over many jobs', () => {
+  /** `n` jobs of `targets` repositories each, run and finished; their briefs are `briefKB` long. */
+  async function finishedJobs(h: ReturnType<typeof harness>, n: number, { targets = 8, briefKB = 6 } = {}) {
+    const repos = Array.from({ length: targets }, (_, i) => mkRepo(path.join(root, `r${i}`)));
+    const ids: string[] = [];
+    for (let j = 0; j < n; j++) {
+      const job = h.d.save({ name: `Job ${j}`, brief: `In {{repo.name}}: ${'do the careful thing. '.repeat(briefKB * 47)}`, targets: repos.map((p, i) => ({ path: p, name: `r${i}`, base: 'main' })), settings: { canary: 0, parallel: 8 } });
+      await h.d.start(job.id);
+      await sleep(20);
+      for (const r of h.d.get(job.id).runs) {
+        const s = h.sessions.find(r.sessionId)!;
+        s.say(`Did the thing in ${r.name}.`);
+        s.idle();
+      }
+      await sleep(20);
+      await h.d.finish(job.id, { action: 'keep' });
+      expect(h.d.get(job.id).job.state).toBe('finished');
+      ids.push(job.id);
+    }
+    return ids;
+  }
+
+  it('keeps one copy of each target’s brief (the plan’s)', { timeout: 30_000 }, async () => {
+    const file = path.join(root, 'dispatch.json');
+    const h = harness({ file });
+    await finishedJobs(h, 12);
+    h.d.end();
+    const bytes = fs.statSync(file).size;
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    console.log(`dispatch.json with 12 finished jobs of 8 repositories, 6 KB briefs: ${Math.round(bytes / 1024)} KB`);
+    expect(data.jobs[0].runs.every((r: any) => !('brief' in r))).toBe(true);
+    expect(data.jobs[0].plan.targets[0].brief).toMatch(/^In r0: do the careful thing/);
+    expect(bytes).toBeLessThan(900 * 1024); // 783 KB; 1 467 KB when each run kept its brief too (and the file was indented)
+  });
+
+  it('keeps the newest forty finished jobs and tells the windows the others are gone', { timeout: 30_000 }, async () => {
+    const h = harness();
+    const removed: string[] = [];
+    h.d.events.on('changed', (e) => e.removed && removed.push(e.id));
+    const ids = await finishedJobs(h, 42, { targets: 1, briefKB: 0 });
+    await sleep(40);
+    expect(h.d.list().map((j: any) => j.id).sort()).toEqual(ids.slice(2).sort());
+    expect(removed).toEqual(ids.slice(0, 2));
+    h.d.end();
+  });
+});

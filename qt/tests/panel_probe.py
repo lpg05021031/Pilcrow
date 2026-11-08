@@ -6,9 +6,9 @@ import traceback
 
 sys.path.insert(0, "qt")
 sys.path.insert(0, "qt/tests")
-from harness import Client, start_mock
+from harness import Client, free_port, start_mock
 
-port = 5333
+port = free_port()
 mock = start_mock(port, 20)
 try:
     c = Client(port)

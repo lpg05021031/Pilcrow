@@ -246,6 +246,7 @@ def windows_installer(version, files, dist, bundles):
         'PAYLOAD': '\n'.join(b64_lines(zb)).encode('ascii'),
         'DIGEST': sha256(zb).encode(),
         'HOST_PAYLOAD': '\n'.join(b64_lines(host)).encode('ascii'),
+        'HOST_DIGEST': sha256(host).encode(),
     }), zb
 
 
@@ -279,6 +280,11 @@ def main():
     bundles = collect_bundles()
     sh, tgz, dist = linux_installer(version, files, args.gzip_mtime, bundles)
     ps1, zb = windows_installer(version, files, dist, bundles)
+    # The Windows installer promises to be plain ASCII (no code page can mangle it, nothing for a
+    # scanner to see as hidden text): printable ASCII, newlines and tabs only.
+    odd = sorted(b for b in set(ps1) if b > 0x7e or (b < 0x20 and b not in (0x09, 0x0a)))
+    if odd:
+        sys.exit('the Windows installer is not plain ASCII; bytes: ' + ', '.join(f'0x{b:02x}' for b in odd))
     app_sh = files['scripts/pilcrow-app.sh']
 
     os.makedirs(args.out, exist_ok=True)
@@ -361,6 +367,10 @@ def verify(sh_path, ps1_path, files, dist, host, bundles):
     hp = base64.b64decode(re.sub(rb'\s', b'', re.search(rb"\$HostPayload = @'\n(.*?)\n'@", ps1, re.S).group(1)))
     if hp != host:
         sys.exit('verify: Windows shell script payload differs from ' + HOST_SCRIPT)
+    if sha256(hp) != re.search(rb"\$hostDigest -ne '([0-9a-f]{64})'", ps1).group(1).decode():
+        sys.exit('verify: Windows shell script digest mismatch')
+    if any(b > 0x7e for b in set(ps1)):
+        sys.exit('verify: the Windows installer is not plain ASCII')
     print(f'verify: OK ({len(src)} source files, {len(got_dist)} interface files, both installers match the tree)')
 
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Any, Dict, Optional
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QPainter
 from PySide6.QtWidgets import QHBoxLayout, QSizePolicy, QVBoxLayout, QWidget
 
 from ... import theme
@@ -39,8 +40,8 @@ class SetRow(QWidget):
         self.title = Text(title, theme.FS_UI, 500)
         ll.addWidget(self.title)
         self.hint = Text(hint_text, theme.FS_SMALL, 400, "text_3", 1.5)
-        self.hint.setVisible(bool(hint_text))
         ll.addWidget(self.hint)
+        self.hint.setVisible(bool(hint_text))  # once it has a parent: shown alone it would be a window
         ll.addStretch(1)
         left.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         lay.addWidget(left, 1)
@@ -59,7 +60,7 @@ class SetRow(QWidget):
         self.control = control
         self.lined = False
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         # the web grid: 1fr | minmax(180px, 46%) of the row
         self.right.setFixedWidth(max(180, int(round(self.width() * 0.46))))
         super().resizeEvent(e)
@@ -88,10 +89,9 @@ class Rows(QWidget):
         self._n += 1
         return r
 
-    def paintEvent(self, e) -> None:  # noqa: N802
+    def paintEvent(self, e) -> None:
         # ``.set-row + .set-row { box-shadow: 0 -1px 0 var(--hair) }``: the line sits just above the row
         super().paintEvent(e)
-        from PySide6.QtGui import QPainter
 
         t = theme.tokens()
         p = QPainter(self)

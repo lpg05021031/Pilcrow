@@ -106,7 +106,10 @@ export async function gatewayModels(cwd, { force = false, version = '0' } = {}) 
   }
 }
 
-/** One list URL, following has_more pages. */
+/**
+ * One list URL, following has_more pages. `notHere`: the gateway has no list at this URL (try the next).
+ * @returns {Promise<{ ok: true, models: { id: string, displayName: string | null, created: number | null }[] } | { ok: false, error: string, notHere?: boolean, unsupported?: boolean }>}
+ */
 async function fetchList(listUrl, headers, env) {
   const models = [];
   const seen = new Set();
@@ -224,7 +227,7 @@ function request(url, headers, env) {
     const pmod = proxy.protocol === 'https:' ? https : http;
     const connect = pmod.request({ host: proxy.hostname, port: proxy.port || (proxy.protocol === 'https:' ? 443 : 80), method: 'CONNECT', path: `${url.hostname}:${port}`, headers: { host: `${url.hostname}:${port}`, ...auth(proxy) }, timeout: TIMEOUT });
     connect.on('timeout', () => connect.destroy(new Error('timeout')));
-    connect.on('error', (e) => {
+    connect.on('error', (/** @type {Error & { proxy?: string }} */ e) => {
       e.proxy = proxy.host;
       fail(e);
     });

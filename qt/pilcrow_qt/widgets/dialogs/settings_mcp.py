@@ -7,13 +7,12 @@ import json
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QStackedWidget, QWidget
 
 from ... import icons, theme
 from ...lib.fmt import err_text, tildify
 from ...store import ConfirmSpec, store
-from ..ui.bits import IconButton, Spinner, button, label
+from ..ui.bits import IconButton, Spinner, button, hairline, label
 from ..ui.menu import show_menu
 from ..ui.signals import bind
 from .settings_skills import active_cwd, search_box
@@ -241,6 +240,7 @@ class McpPage(QWidget):
         servers = self.servers()
         live = self.live()
         by_name = {s.get("name"): s for s in live}
+        self.add_btn.setVisible(bool(servers) or bool(q))  # the intro card holds the first "Add server"
         if not servers and not q:
             intro = Intro(
                 "Give Claude more tools",
@@ -273,10 +273,7 @@ class McpPage(QWidget):
 
     def _row(self, grid: QGridLayout, rown: int, s: Json, st: Optional[Json]) -> int:
         t = theme.tokens()
-        line = QWidget()
-        line.setFixedHeight(1)
-        line.setStyleSheet(f"background: {theme.blend(t.hair, t.raised).name()};")
-        grid.addWidget(line, rown, 0, 1, 5)
+        grid.addWidget(hairline(over="raised"), rown, 0, 1, 5)
         rown += 1
         cfg = s.get("config") or {}
         status = (st or {}).get("status")
@@ -329,12 +326,11 @@ class McpPage(QWidget):
             b.setAccessibleName(f"Retry {name_s}")
             stl.addWidget(b)
         else:
-            color = {"ok": t.ok, "warn": t.accent_text, "err": t.err}.get(tone, t.text_3)
+            name = {"ok": "ok", "warn": "accent_text", "err": "err"}.get(tone, "text_3")
             ic = QLabel()
-            ic.setPixmap(icons.pixmap(ico, color, 14))
+            ic.setPixmap(icons.pixmap(ico, getattr(t, name), 14))
             stl.addWidget(ic)
-            lb = label(lab, size="small")
-            lb.setStyleSheet(f"color: {t.text_2 if tone == 'ok' else color};")
+            lb = label(lab, size="small", tone="text_2" if tone == "ok" else name)
             stl.addWidget(lb)
             if status == "connected" and st is not None and tool_count(st) > 0:
                 tools = button(f"{tool_count(st)} tools", kind="link", size="sm", on_click=lambda: self.show_tools(s))
@@ -567,7 +563,7 @@ class AddMcpSheet(Sheet):
                 self.url.setText(str(c.get("url") or ""))
                 self.headers.setPlainText("\n".join(f"{k}: {v}" for k, v in (c.get("headers") or {}).items()))
             self._toggle_mode()
-        except Exception as e:  # noqa: BLE001 — whatever was pasted, say why it did not parse
+        except Exception as e:  # whatever was pasted, say why it did not parse
             store.toast(f"Could not read that JSON: {err_text(e)}", "error")
 
     def submit(self) -> None:
@@ -634,6 +630,3 @@ class ToolsSheet(Sheet):
                 bl.addWidget(label(str(t["description"]), tone="muted", size="small", wrap=True))
             self.list_lay.addWidget(box)
         self.schedule_relayout()
-
-
-_ = Qt

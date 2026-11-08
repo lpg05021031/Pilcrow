@@ -1,9 +1,11 @@
 // Incremental transcript model: turns raw SDK messages (live or from history) into render items.
 // Items are mutable objects with a `rev` counter so React can re-render only what changed.
 import { parsePartialJson } from './partialJson';
+import { moment } from './format';
+import { toolMeta } from './tools';
 import type { RawMsg, ContentBlock, ToolInput, StructuredResult } from './types';
 
-export type ToolStatus = 'streaming' | 'running' | 'done' | 'error' | 'denied' | 'interrupted' | 'background';
+type ToolStatus = 'streaming' | 'running' | 'done' | 'error' | 'denied' | 'interrupted' | 'background';
 
 interface Base {
   id: string;
@@ -16,6 +18,10 @@ export interface UserItem extends Base {
   kind: 'user';
   uuid: string;
   text: string;
+  /** A message Pilcrow wrote, not the person ('helper': a helper's news to its lead). */
+  note?: string;
+  /** Who sent it when not the person ('lead'). */
+  from?: string;
   images: string[];
   files: string[];
   local?: boolean;
@@ -35,7 +41,7 @@ export interface ThinkingItem extends Base {
   endTs?: number;
   redacted?: boolean;
 }
-export interface ToolResult {
+interface ToolResult {
   text: string;
   images: string[];
   isError: boolean;
@@ -95,7 +101,7 @@ let seq = 0;
 const nid = (p: string) => `${p}-${++seq}`;
 
 /** What a task_started / task_progress / task_notification message says about a background task. */
-export interface TaskInfoPatch {
+interface TaskInfoPatch {
   taskId: string;
   status?: string;
   summary?: string;
@@ -148,6 +154,11 @@ export class TranscriptModel {
   lastChain: string | undefined;
   private infoSeen = new Set<string>();
 
+  /**
+   * Mark a change. Each bump raises `rev` by one and exactly one top-level item's rev by one (the item,
+   * or the outermost tool it sits under), so `rev` is always the sum of the top-level items' revs:
+   * ItemList (lib/units extendTurns) relies on that to see a change to an earlier turn without reading it.
+   */
   private bump(item: Item) {
     item.rev++;
     this.rev++;
@@ -174,8 +185,25 @@ export class TranscriptModel {
     this.bump(item);
   }
 
+  /** A batch of messages, as the server sends them: a streamed tool input is parsed once for all of it (endBatch). */
   pushAll(msgs: RawMsg[]) {
     for (const m of msgs) this.push(m);
+    this.endBatch();
+  }
+
+  /** Tools whose streamed input has grown since it was last parsed. */
+  private partial = new Set<ToolItem>();
+
+  /**
+   * Parse what each tool's input has streamed so far, once per batch: parsed per piece, a large Write
+   * (thousands of pieces, each parse reading the whole input so far) cost time quadratic in its size.
+   */
+  endBatch() {
+    for (const t of this.partial) {
+      const parsed = parsePartialJson(t.inputJson);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) t.input = parsed as ToolInput;
+    }
+    this.partial.clear();
   }
 
   push(m: RawMsg) {
@@ -232,7 +260,8 @@ export class TranscriptModel {
     }
     const msgId = this.current.get(parent);
     if (!msgId) return;
-    const drafts = this.drafts.get(msgId)!;
+    const drafts = this.drafts.get(msgId);
+    if (!drafts) return;
     const index = e.index ?? 0;
     if (e.type === 'content_block_start') {
       if ((this.ordinals.get(msgId) || 0) > index) return; // final block already shown
@@ -267,8 +296,7 @@ export class TranscriptModel {
       else if (d.type === 'thinking_delta' && item.kind === 'thinking') item.text += d.thinking || '';
       else if (d.type === 'input_json_delta' && item.kind === 'tool') {
         item.inputJson += d.partial_json || '';
-        const parsed = parsePartialJson(item.inputJson);
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) item.input = parsed as ToolInput;
+        this.partial.add(item);
       } else return;
       this.bump(item);
     } else if (e.type === 'content_block_stop') {
@@ -276,6 +304,7 @@ export class TranscriptModel {
         item.streaming = false;
         item.endTs = Date.now();
       } else if (item.kind === 'tool') {
+        this.partial.delete(item);
         item.inputDone = true;
         try {
           item.input = JSON.parse(item.inputJson || '{}');
@@ -371,10 +400,10 @@ export class TranscriptModel {
     for (const r of results) {
       const t = r.tool_use_id ? this.tools.get(r.tool_use_id) : undefined;
       if (!t) continue;
-      t.result = contentToResult(r.content, Boolean(r.is_error));
+      const res = (t.result = contentToResult(r.content, Boolean(r.is_error)));
       if (results.length === 1 && m.tool_use_result && typeof m.tool_use_result === 'object') t.structured = m.tool_use_result as StructuredResult;
       t.endTs = ts;
-      t.status = classifyResult(t);
+      t.status = classifyResult(t, res);
       this.bump(t);
     }
     if (results.length) return;
@@ -424,7 +453,7 @@ export class TranscriptModel {
       this.add({ kind: 'user', id: m.uuid || nid('u'), uuid: m.uuid || '', rev: 0, text: '', images, files, command: { name: cmdName.replace(/^\//, ''), args: (stripTags(text, 'command-args') || '').trim() }, ts }, null);
       return;
     }
-    this.add({ kind: 'user', id: m.uuid || nid('u'), uuid: m.uuid || '', rev: 0, text, images, files, local: Boolean(m._local), ts, prevUuid: prevChain }, null);
+    this.add({ kind: 'user', id: m.uuid || nid('u'), uuid: m.uuid || '', rev: 0, text, images, files, local: Boolean(m._local), note: m._note || '', from: m._from || '', ts, prevUuid: prevChain }, null);
     this.lastTurnTools = [];
   }
 
@@ -454,7 +483,11 @@ export class TranscriptModel {
         this.unsettled.delete(it);
       } else this.unsettled.delete(it);
     }
-    if (all) this.drafts.clear();
+    // With nothing left in flight no stream event can refer to these messages again: let them go.
+    if (all || !this.unsettled.size) {
+      this.drafts.clear();
+      this.ordinals.clear();
+    }
   }
 
   private onResult(m: RawMsg) {
@@ -583,7 +616,7 @@ export class TranscriptModel {
 
   private onRateLimit(m: RawMsg) {
     const info = m.rate_limit_info || {};
-    if (info.status === 'rejected') this.add({ kind: 'notice', id: nid('n'), rev: 0, level: 'error', text: 'Usage limit reached', detail: info.resetsAt ? `Resets ${new Date(info.resetsAt * 1000).toLocaleString()}` : undefined }, null);
+    if (info.status === 'rejected') this.add({ kind: 'notice', id: nid('n'), rev: 0, level: 'error', text: 'Usage limit reached', detail: info.resetsAt ? `Resets ${moment(info.resetsAt * 1000)}` : undefined }, null);
   }
 
   /** Find the most recent tool item with this name (used for plans and todos). */
@@ -595,8 +628,7 @@ export class TranscriptModel {
   }
 }
 
-function classifyResult(t: ToolItem): ToolStatus {
-  const r = t.result!;
+function classifyResult(t: ToolItem, r: ToolResult): ToolStatus {
   const s = t.structured;
   if (s && typeof s === 'object') {
     if (s.isAsync || s.status === 'async_launched' || (s.backgroundTaskId && !r.isError)) return t.task && t.task.status !== 'running' ? (t.task.status === 'completed' ? 'done' : 'interrupted') : 'background';
@@ -649,4 +681,69 @@ function blocksOf(content: string | ContentBlock[] | undefined): ContentBlock[] 
 function originKind(m: RawMsg): string | undefined {
   const o = m.origin as unknown;
   return o && typeof o === 'object' ? (o as { kind?: string }).kind : typeof o === 'string' ? o : undefined;
+}
+
+// ---------------------------------------------------------------- find
+
+/** One place a search matched: the item, and which match within it (the k-th, in reading order). */
+export interface FindHit {
+  item: Item;
+  k: number;
+}
+
+/**
+ * The text Find reads in an item: what the row shows. The person's words; Claude's words and a slash
+ * command's output through `plain` (the Markdown as it reads, not its source: no `**`, no link URLs);
+ * a step's head (its verb and target, a line each) and its output; a notice. A question or a plan is
+ * a form, not text, and a thought is folded away: neither is searched.
+ */
+export function findText(it: Item, plain: (md: string) => string = (s) => s, cwd?: string): string {
+  switch (it.kind) {
+    case 'user':
+      return it.text || '';
+    case 'text':
+    case 'command-output':
+      return it.text ? plain(it.text) : '';
+    case 'notice':
+      return it.text || '';
+    case 'tool': {
+      if (it.name === 'AskUserQuestion' || it.name === 'ExitPlanMode') return '';
+      const m = toolMeta(it.name, it.input, cwd);
+      // the head, then what the open card shows of the input (a command, a pattern), then the output
+      const inp = (it.input || {}) as Record<string, unknown>;
+      const shown = ['command', 'pattern', 'url', 'query'].map((k) => (typeof inp[k] === 'string' ? (inp[k] as string) : '')).filter((v) => v && v !== m.target);
+      return [m.verb, m.target, ...shown, it.result?.text || ''].filter(Boolean).join('\n');
+    }
+    default:
+      return '';
+  }
+}
+
+// Each item's text lowered once per change of it, so a search per keystroke reads, never re-lowers.
+// Keyed by the projection too: a caller passes one stable `textOf` (FindBar), so its reads are cached.
+const lowered = new WeakMap<Item, { rev: number; status: string; fn: (it: Item) => string; text: string }>();
+
+/**
+ * Where `needle` occurs in the conversation, in order: the person's messages, Claude's words, the
+ * steps (their heads and their output), notices and command output, as `textOf` reads them (findText
+ * by default). What Find counts and steps through without drawing the conversation (FindBar); the
+ * rows that are drawn correct these counts against what they show. At most `max` hits.
+ */
+const byDefault = (it: Item) => findText(it);
+export function findInItems(items: Item[], needle: string, max = 3000, textOf: (it: Item) => string = byDefault): FindHit[] {
+  const out: FindHit[] = [];
+  const q = needle.toLocaleLowerCase();
+  if (!q) return out;
+  for (const it of items) {
+    // a step's text changes with its status (the result arrives) as well as its rev
+    const status = it.kind === 'tool' ? it.status : '';
+    let c = lowered.get(it);
+    if (!c || c.rev !== it.rev || c.status !== status || c.fn !== textOf) lowered.set(it, (c = { rev: it.rev, status, fn: textOf, text: textOf(it).toLocaleLowerCase() }));
+    if (!c.text) continue;
+    for (let i = c.text.indexOf(q), k = 0; i >= 0; i = c.text.indexOf(q, i + q.length), k++) {
+      if (out.length >= max) return out;
+      out.push({ item: it, k });
+    }
+  }
+  return out;
 }

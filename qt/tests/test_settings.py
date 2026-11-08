@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from harness import app_client, mock_server  # noqa: F401
+from harness import app_client, mock_server
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QLabel, QLineEdit, QPlainTextEdit, QPushButton
-
-MOCK_PORT = 5381
+from PySide6.QtWidgets import QLabel, QLineEdit, QPushButton
 
 
 def _labels(c, parent=None):
@@ -45,7 +43,7 @@ def test_general_page_and_theme(app_client):
     c.sleep(100)
     assert s.isVisible() and not s.isWindow()
     nav = [b.text() for b in c.find(QPushButton, s.nav)]
-    assert nav == ["General", "Claude Code", "Skills", "MCP servers", "Memory", "Diagnostics"], nav
+    assert nav == ["General", "Repositories", "Claude Code", "Skills", "MCP servers", "Memory", "Diagnostics"], nav
     assert s.nav_buttons["general"].isChecked()
     assert "Theme" in _labels(c, s.frame)
     seg = s.page.theme
@@ -142,15 +140,15 @@ def test_memory_page(app_client):
 def test_new_session_dialog(app_client):
     c = app_client
     from pilcrow_qt.widgets.dialogs.new_session import NewSessionSheet, open_new_session
-    from pilcrow_qt.widgets.dialogs.settings_ui import FolderChip
+    from pilcrow_qt.widgets.ui.button import Btn
 
     c.wait_until(lambda: c.store.sessions_loaded, 10, "sessions")
     s = open_new_session(c.win, {})
     assert isinstance(s, NewSessionSheet)
     c.sleep(300)
     assert s.path.text() == "/home/tester/code/pilcrow"
-    chips = [ch.text() for ch in c.find(FolderChip, s.frame) if ch.isVisible()]
-    assert chips == ["website"], chips
+    chips = [ch.text() for ch in c.find(Btn, s.chips) if ch.isVisible()]
+    assert chips == ["web", "api", "legacy-api", "website"], chips  # registered repositories first, by name
     assert "Options" in _labels(c, s.frame)
     assert _button(c, "Create session", s.frame)
     # The options fold open with the permission modes, model and effort.
@@ -237,7 +235,7 @@ def test_new_session_options_screenshot(app_client):
     QTest.mouseClick(s.wt_switch, Qt.MouseButton.LeftButton)
     c.sleep(200)
     assert s.use_worktree and s.wt_fields.isVisible()
-    assert [s.base.itemText(i) for i in range(s.base.count())] == ["main"]
+    assert [s.base.itemText(i) for i in range(s.base.count())] == ["main", "pilcrow/lexer-fix"]
     assert c.shot("new-session-options").exists()
     QTest.mouseClick(s.disclose, Qt.MouseButton.LeftButton)
     c.sleep(150)
@@ -247,9 +245,6 @@ def test_new_session_options_screenshot(app_client):
         assert s.picker.isVisible() and not s.chips_w.isVisible()
         assert c.shot("new-session-browse").exists()
     _close_all(c)
-
-
-_ = QPlainTextEdit
 
 
 def test_claude_tab_selects_open_the_menu(app_client):

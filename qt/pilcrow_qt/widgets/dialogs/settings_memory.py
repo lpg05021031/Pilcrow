@@ -5,13 +5,14 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QPushButton, QSizePolicy, QWidget
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtWidgets import QHBoxLayout, QSizePolicy, QWidget
 
 from ... import icons, theme
 from ...lib.fmt import basename, tildify, time_ago
 from ...store import ConfirmSpec, store
-from ..ui.bits import IconButton, Spinner, button, label
+from ..ui.bits import Box, IconButton, Spinner, button, hairline, label
+from ..ui.button import text_button
 from ..ui.signals import bind
 from .parts import Text
 from .settings_general import save
@@ -25,9 +26,7 @@ from .settings_ui import (
     combo_value,
     hint,
     home,
-    mono_label,
     select_value,
-    styled,
     text_area,
     vbox,
 )
@@ -64,10 +63,8 @@ class MemoryPage(QWidget):
         self.busy = False
         self.lay = vbox(self, 14, (0, 6, 0, 0))
 
-        intro = QFrame()
+        intro = Box(bg="inset", radius=12)
         intro.setObjectName("intro")
-        intro.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        styled(intro, lambda t: f"#intro {{ background: {t.inset}; border-radius: 12px; }}")
         il = vbox(intro, 8, (20, 18, 20, 18))
         ico = label()
         ico.setFixedSize(16, 16)
@@ -179,9 +176,7 @@ class MemoryPage(QWidget):
         bind(store.config_changed, self, self._sync)
         self.load()
 
-    def eventFilter(self, obj, e) -> bool:  # noqa: N802
-        from PySide6.QtCore import QEvent
-
+    def eventFilter(self, obj, e) -> bool:
         if obj is self.draft and e.type() == QEvent.Type.KeyPress:
             if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and e.modifiers() & Qt.KeyboardModifier.ControlModifier:
                 self.add()
@@ -380,10 +375,7 @@ def _setting(title: str, hint_text: str, control: QWidget) -> QWidget:
 
 
 def _sep() -> QWidget:
-    w = QWidget()
-    w.setFixedHeight(1)
-    styled(w, lambda t: f"background: {theme.blend(t.hair, theme.blend(t.fill_1, t.raised).name()).name()};")
-    return w
+    return hairline(over="fill_1/raised")
 
 
 class NoteRow(Panel):
@@ -394,18 +386,11 @@ class NoteRow(Panel):
         self.n, self.page = n, page
         self.lay.setSpacing(3)
         nid = str(n.get("id") or "")
-        self.text_btn = QPushButton(str(n.get("text") or ""))
+        self.text_btn = text_button(str(n.get("text") or ""), theme.FS_SMALL)
         self.text_btn.setAutoDefault(False)
         self.text_btn.setToolTip("Click to edit")
         self.text_btn.setAccessibleName("Edit note")
-        self.text_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.text_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        styled(
-            self.text_btn,
-            lambda t: (
-                f"QPushButton {{ border: none; background: transparent; text-align: left; padding: 0; font-size: {theme.FS_SMALL}px; color: {t.text}; }} QPushButton:hover {{ color: {t.text_2}; }}"
-            ),
-        )
+        self.text_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.text_btn.clicked.connect(self.start_edit)
         self.lay.addWidget(self.text_btn)
         self.edit_box = QWidget()
@@ -444,9 +429,7 @@ class NoteRow(Panel):
         self.lay.addWidget(meta)
         self.edit.installEventFilter(self)
 
-    def eventFilter(self, obj, e) -> bool:  # noqa: N802
-        from PySide6.QtCore import QEvent
-
+    def eventFilter(self, obj, e) -> bool:
         if obj is self.edit and e.type() == QEvent.Type.KeyPress:
             if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and e.modifiers() & Qt.KeyboardModifier.ControlModifier:
                 self.commit()
@@ -473,6 +456,3 @@ class NoteRow(Panel):
             self.page.patch(str(self.n.get("id") or ""), {"text": text})
             return
         self.cancel_edit()
-
-
-_ = mono_label

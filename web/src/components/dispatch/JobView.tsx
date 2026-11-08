@@ -1,0 +1,456 @@
+import { useEffect, useMemo, useState } from 'react';
+import { ArrowLeft, Pause, Play, Square, Ellipsis, GitCommitHorizontal, GitPullRequestArrow, ExternalLink, RotateCw, BookMarked, CalendarClock, ClipboardPaste, Trash, CircleDollarSign } from 'lucide-react';
+import { useStore, call, openSession, respond, ALLOW_ONCE, DECLINE, confirmAction, toast, showDispatch, openJob, runsIn, loadPlaybooks, setDialog, showPage, toasted } from '../../lib/store';
+import { TERMINAL, type DispatchJob, type DispatchReview, type DispatchRun, type Playbook } from '../../lib/types';
+import { cost, duration, plural } from '../../lib/format';
+import { Switch } from '../ui/bits';
+import { useNow } from '../ui/hooks';
+import { copy } from '../ui/clipboard';
+import { MenuButton } from '../ui/Popover';
+import { ACTIVE, Glyph, RequestAnswers, STATE_WORD, askedBy, clockMmss, elapsedText, groupRequests, jobCostText, type RequestGroup } from './common';
+
+/**
+ * A job's view: the header with its state and controls, the brief and the plan, the canary waiting
+ * to be read, the requests waiting for a hand, one row per repository, and at the foot the review
+ * across repositories with the ways to finish.
+ */
+export function JobView({ id }: { id: string }) {
+  const job = useStore((s) => s.jobs[id]);
+  const myRuns = useStore((s) => s.jobRuns[id]); // this job's own map: another job's delta does not render here
+  const playbooks = useStore((s) => s.playbooks);
+  const now = useNow(1000, true);
+  const runs = useMemo(() => runsIn(myRuns).sort((a, b) => a.level - b.level || a.name.localeCompare(b.name)), [myRuns]);
+  const [review, setReview] = useState<DispatchReview | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const st = job?.state;
+  const reviewing = Boolean(job) && (st === 'reviewing' || st === 'finished' || st === 'stopped') && !job.canaryWaiting;
+  const doneKey = runs
+    .filter((r) => r.state === 'done')
+    .map((r) => r.id)
+    .join(',');
+  useEffect(() => {
+    if (!reviewing || st === 'finished') return;
+    let alive = true;
+    // The review fills in once the job has one; until then the view shows the runs.
+    call<DispatchReview>('dispatch.review', { id }, { quiet: true }).then(
+      (r) => alive && setReview(r),
+      () => {},
+    );
+    return () => {
+      alive = false;
+    };
+  }, [id, reviewing, st, doneKey]);
+  if (!job) {
+    return (
+      <div className="dispatch">
+        <header className="ov-head">
+          <button className="icon-btn" title="Back to the board" aria-label="Back" onClick={() => showDispatch(null)}>
+            <ArrowLeft size={16} />
+          </button>
+          <h1 className="ov-title">Job</h1>
+        </header>
+      </div>
+    );
+  }
+  const groups = groupRequests(runs);
+  const openRuns = runs.filter((r) => TERMINAL.has(r.state) && !r.finished && r.worktree);
+  const doneOpen = openRuns.filter((r) => r.state === 'done');
+  const rules = job.rules || [];
+  const rep = job.report;
+
+  const saveBrief = () => {
+    setEditing(false);
+    if (draft.trim() && draft !== job.brief) call('dispatch.save', { id, brief: draft }).catch(toasted);
+  };
+  const finish = (action: 'commit' | 'discard' | 'keep', pr = false) => {
+    const list = action === 'commit' ? doneOpen : openRuns;
+    if (!list.length) return;
+    if (action === 'keep') return void call('dispatch.finish', { id, action }).catch(toasted);
+    const branch = `pilcrow/${job.slug || 'job'}`;
+    confirmAction({
+      title: action === 'commit' ? `${pr ? 'Open pull requests for' : 'Commit'} ${plural(list.length, 'repository', 'repositories')}?` : `Discard the changes in ${plural(list.length, 'repository', 'repositories')}?`,
+      body: action === 'commit' ? `Each run's changes are committed on its branch ${branch} with the message “${job.settings.commitMessage || job.name}”. ${pr ? 'The branches are pushed and a pull request opened with gh where the repository has a GitHub remote. ' : ''}The worktree directories are removed; the branches stay.` : `The worktrees and the branches ${branch} are removed. This cannot be undone.`,
+      confirm: pr ? 'Open pull requests' : action === 'commit' ? 'Commit' : 'Discard',
+      danger: action === 'discard',
+      onConfirm: () => call('dispatch.finish', { id, action, pr }).catch(toasted),
+    });
+  };
+  const ensurePlaybook = async (): Promise<string | null> => {
+    const pid = job.playbookId;
+    if (pid && playbooks.some((p: Playbook) => p.id === pid)) return pid;
+    const pb = await call<Playbook>('dispatch.savePlaybook', { fromJob: id }).catch(() => null);
+    loadPlaybooks();
+    return pb?.id || null;
+  };
+  const menu = [
+    {
+      label: 'Run again',
+      hint: 'A new job from this brief',
+      icon: RotateCw,
+      onSelect: async () => {
+        const pid = await ensurePlaybook();
+        if (!pid) return;
+        const j = await call<DispatchJob>('dispatch.startFromPlaybook', { id: pid, name: job.name }).catch(() => null);
+        if (j) openJob(j.id);
+      },
+    },
+    {
+      label: 'Save as playbook',
+      icon: BookMarked,
+      onSelect: async () => {
+        await call('dispatch.savePlaybook', { fromJob: id, name: job.name }).catch(() => null);
+        loadPlaybooks();
+        toast(`Saved as playbook: ${job.name}`, 'success');
+      },
+    },
+    {
+      label: 'Schedule this…',
+      icon: CalendarClock,
+      onSelect: async () => {
+        const pid = await ensurePlaybook();
+        if (pid) {
+          showPage('inbox');
+          setDialog('schedule', { kind: 'dispatch', playbookId: pid });
+        }
+      },
+    },
+    { separator: true },
+    {
+      label: 'Copy the report as Markdown',
+      icon: ClipboardPaste,
+      onSelect: async () => {
+        const md = await call<string>('dispatch.export', { id }).catch(() => null);
+        if (md) await copy(md, 'Report');
+      },
+    },
+    ...(job.state === 'running' && job.capReached
+      ? [
+          {
+            label: 'Raise the cost cap and resume',
+            icon: CircleDollarSign,
+            onSelect: () => call('dispatch.save', { id, settings: { costCap: job.settings.costCap ? job.settings.costCap * 2 : 10 } }).then(() => call('dispatch.resume', { id })),
+          },
+        ]
+      : []),
+    { separator: true },
+    {
+      label: 'Remove the job',
+      icon: Trash,
+      danger: true,
+      onSelect: () =>
+        confirmAction({
+          title: `Remove ${job.name}?`,
+          body: `${job.state === 'running' ? 'It is still running: its runs are stopped first. ' : ''}Worktrees that were kept are removed with their branches; committed branches stay.`,
+          confirm: 'Remove',
+          danger: true,
+          onConfirm: () => call('dispatch.remove', { id, removeWorktrees: true }).then(() => showDispatch(null)),
+        }),
+    },
+  ];
+
+  const reviewText = () => {
+    if (st === 'finished') {
+      const t = rep?.targets || [];
+      const committed = t.filter((x) => x.finished === 'commit').length;
+      const prs = t.filter((x) => x.pr).length;
+      return `Finished: ${t.filter((x) => x.state === 'done').length} of ${t.length} done · ${committed} committed${prs ? ` · ${prs} PRs` : ''} · report in the inbox`;
+    }
+    if (!review) return 'Review: reading the changes…';
+    const changed = review.runs.filter((r) => r.files.length).length;
+    const bits = [`${plural(changed, 'repository', 'repositories')} changed`, plural(review.files, 'file')];
+    if (review.same.length) bits.push(`the same change in ${review.same[0].runs.length} repos (${review.same[0].path})${review.same.length > 1 ? ` and ${review.same.length - 1} more` : ''}`);
+    if (review.differ.length && review.same.length) bits.push(`${review.differ.length} differ`);
+    return `Review: ${bits.join(' · ')}`;
+  };
+  const canEdit = st === 'running' || (st === 'reviewing' && job.canaryWaiting);
+  return (
+    <div className="dispatch">
+      <header className="ov-head">
+        <button className="icon-btn" title="Back to the board" aria-label="Back" onClick={() => showDispatch(null)}>
+          <ArrowLeft size={16} />
+        </button>
+        <h1 className="ov-title ellipsis">{job.name || 'Untitled job'}</h1>
+        <JobPill job={job} />
+        <span className="ov-sum tnum">
+          {[plural(job.total || 0, 'repo'), job.cost ? jobCostText(job) : '', st === 'finished' || st === 'stopped' ? elapsedText(job, now) : job.startedAt ? clockMmss(now - job.startedAt) : '', st === 'stopped' ? (job.stoppedReason || '').toLowerCase() : ''].filter(Boolean).join(' · ')}
+        </span>
+        <div className="grow" />
+        {st === 'running' && (
+          <button className="btn sm ghost" onClick={() => call(job.paused ? 'dispatch.resume' : 'dispatch.pause', { id }).catch(toasted)}>
+            {job.paused ? <Play size={13} /> : <Pause size={13} />} {job.paused ? 'Resume' : 'Pause'}
+          </button>
+        )}
+        {(st === 'running' || st === 'reviewing') && (
+          <button className="btn sm ghost" onClick={() => confirmAction({ title: `Stop ${job.name}?`, body: 'Runs under way are interrupted and kept as they are; queued ones are skipped. Nothing is discarded.', confirm: 'Stop the job', danger: true, onConfirm: () => call('dispatch.stop', { id }).catch(toasted) })}>
+            <Square size={12} /> Stop
+          </button>
+        )}
+        <MenuButton items={menu} title="More" width={280}>
+          <Ellipsis size={16} />
+        </MenuButton>
+      </header>
+      <div className="dp-top">
+        <div className="dp-box">
+          <div className="dp-box-h">
+            <span>Brief</span>
+            <span className="faint">
+              {job.plan ? `plan · ${job.plan.ok} of ${job.plan.targets?.length || job.total || 0} ready${job.plan.warnings ? ` · ${plural(job.plan.warnings, 'warning')}` : ''}${job.plan.blocked ? ` · ${job.plan.blocked} blocked` : ''}${job.plan.levels > 1 ? ` · ${job.plan.levels} levels` : ''}` : ''}
+            </span>
+            <div className="grow" />
+            {canEdit && (
+              <button className="link" onClick={() => (editing ? saveBrief() : (setDraft(job.brief), setEditing(true)))}>
+                {editing ? 'Save' : 'Edit'}
+              </button>
+            )}
+          </div>
+          {editing ? <textarea aria-label="Brief" className="textarea" rows={5} value={draft} onChange={(e) => setDraft(e.target.value)} /> : <p className="dp-brief">{job.brief}</p>}
+          {rules.length > 0 && <div className="dp-rules faint">Allowed for every repository: {rules.map((r) => r.label || r.key).join('; ')}</div>}
+        </div>
+        {rep && (rep.prose || rep.proseState === 'writing' || rep.proseState === 'failed') && (
+          <div className="dp-box">
+            <div className="dp-box-h">
+              <span>Report</span>
+            </div>
+            <p className={`dp-brief${rep.prose ? '' : ' faint'}`}>{rep.prose || (rep.proseState === 'writing' ? 'An agent is writing the report from the runs’ summaries…' : `The written report did not come: ${rep.proseError || 'unknown reason'}. The table stands.`)}</p>
+          </div>
+        )}
+        {job.canaryWaiting && <CanaryCard job={job} runs={runs} />}
+        {groups.slice(0, 6).map((g) => (
+          <RequestCard key={g.key} jobId={id} group={g} now={now} />
+        ))}
+      </div>
+      <div className="dp-runs">
+        <table className="dp-table">
+          <thead>
+            <tr>
+              <th>state</th>
+              <th>repository</th>
+              <th>branch</th>
+              <th className="num">elapsed</th>
+              <th className="num">Δ files</th>
+              <th className="num">cost</th>
+              <th>now</th>
+            </tr>
+          </thead>
+          <tbody>
+            {runs.map((r) => (
+              <RunRow key={r.id} run={r} jobId={id} now={now} runs={runs} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {reviewing && runs.length > 0 && (
+        <footer className="dp-foot">
+          <span className="grow">{reviewText()}</span>
+          {doneOpen.length > 0 && (
+            <>
+              <button className="btn sm" onClick={() => finish('commit')}>
+                <GitCommitHorizontal size={13} /> Commit all…
+              </button>
+              <button className="btn sm" onClick={() => finish('commit', true)}>
+                <GitPullRequestArrow size={13} /> Open PRs…
+              </button>
+            </>
+          )}
+          {openRuns.length > 0 && (
+            <>
+              <button className="btn sm ghost" onClick={() => finish('keep')}>
+                Keep
+              </button>
+              <button className="btn sm ghost" onClick={() => finish('discard')}>
+                Discard…
+              </button>
+            </>
+          )}
+        </footer>
+      )}
+    </div>
+  );
+}
+
+/** The job's state as the sessions show theirs: the pill beside the title; nothing once it is over. */
+function JobPill({ job }: { job: DispatchJob }) {
+  let cls = '';
+  let label = '';
+  if (job.state === 'running') {
+    if (job.paused) [cls, label] = ['paused', 'Paused'];
+    else if (job.capReached) [cls, label] = ['requires_action', 'Cost cap reached'];
+    else if (job.needsAction) [cls, label] = ['requires_action', 'Needs you'];
+    else [cls, label] = ['running', 'Running'];
+  } else if (job.state === 'reviewing') {
+    if (job.canaryWaiting) [cls, label] = ['requires_action', 'Canary done'];
+    else if (job.needsAction) [cls, label] = ['requires_action', 'Needs you'];
+    else [cls, label] = ['review', 'In review'];
+  }
+  if (!cls) return null;
+  return (
+    <span className={`status-pill ${cls}`}>
+      <span className="status-dot" />
+      {label}
+    </span>
+  );
+}
+
+/** The canary finished (`.ovc.needs`): its name, how it went, its summary in the well, Continue with the forecast, and whether the rest learn from it. */
+function CanaryCard({ job, runs }: { job: DispatchJob; runs: DispatchRun[] }) {
+  const names = job.learned.map((l) => l.name).join(', ') || 'the canary';
+  const canary = runs.filter((r) => r.wave === 'canary');
+  const bits = canary.flatMap((r) => [r.startedAt && r.endedAt ? clockMmss(r.endedAt - r.startedAt) : '', r.cost ? cost(r.cost) : '', r.files?.length ? plural(r.files.length, 'file') : '']).filter(Boolean);
+  const summary = (job.learned[0]?.summary || '').split('\n')[0].slice(0, 300);
+  const f = job.forecast;
+  const openCanary = () => {
+    const run = canary.find((r) => r.sessionId);
+    if (run?.sessionId) openSession(run.sessionId);
+  };
+  return (
+    <article className="ovc needs dp-canary">
+      <span className="ovc-rail" aria-hidden="true" />
+      <div className="ovc-row">
+        <div className="ovc-head">
+          <span className="ovc-title">Canary {names} finished</span>
+          {bits.length > 0 && <span className="ovc-proj tnum">{bits.join(' · ')}</span>}
+        </div>
+      </div>
+      {summary && (
+        <div className="ovc-well">
+          <span className="ovc-perm-what">{summary}</span>
+        </div>
+      )}
+      <div className="ovc-actions">
+        <button className="btn sm primary" onClick={() => call('dispatch.continue', { id: job.id }).catch(toasted)}>
+          <Play size={12} /> Continue
+        </button>
+        <button className="btn sm ghost" onClick={openCanary}>
+          Open canary
+        </button>
+        {f && (
+          <span className="faint tnum">
+            forecast {cost(f.cost)} · {f.minutes} min for {plural(f.runs, 'repo')}
+          </span>
+        )}
+      </div>
+      <div className="dp-learn">
+        <Switch on={job.settings.learn !== false} onChange={(on) => call('dispatch.save', { id: job.id, settings: { learn: on } }).catch(toasted)} label="the rest learn from its summary" />
+        <span className="faint">the rest learn from its summary</span>
+      </div>
+    </article>
+  );
+}
+
+/** A request group (`.ovc.needs`): the tool as the title, who asked under it, how long it has waited, what it asks in the well, the answers. */
+function RequestCard({ jobId, group, now }: { jobId: string; group: RequestGroup; now: number }) {
+  const [tool, ...rest] = group.label.split(': ');
+  const what = rest.join(': ');
+  return (
+    <article className="ovc needs dp-ask">
+      <span className="ovc-rail" aria-hidden="true" />
+      <div className="ovc-row">
+        <div className="ovc-head">
+          <span className="ovc-title">{what ? tool : group.label}</span>
+          <span className="ovc-proj">{askedBy(group.names)}</span>
+        </div>
+        <span className="ovc-wait tnum">{group.at && now - group.at >= 1000 ? `waiting ${duration(now - group.at)}` : ''}</span>
+      </div>
+      <div className="ovc-well">
+        <span className="ovc-perm-what mono">{what || group.label}</span>
+      </div>
+      <div className="ovc-actions">
+        <RequestAnswers jobId={jobId} group={group} />
+      </div>
+    </article>
+  );
+}
+
+function RunRow({ run, jobId, now, runs }: { run: DispatchRun; jobId: string; now: number; runs: DispatchRun[] }) {
+  const open = () => (run.sessionId ? openSession(run.sessionId) : toast('This run has no session yet.', 'info'));
+  const pending = run.pending?.[0];
+  const answer = (allow: boolean) => pending && run.sessionId && respond(run.sessionId, pending.requestId, allow ? ALLOW_ONCE : DECLINE);
+  const elapsed = run.startedAt ? clockMmss((run.endedAt || now) - run.startedAt) : '—';
+  let nowText = '';
+  let nowClass = '';
+  if (run.state === 'done') {
+    const bits: string[] = [];
+    if (run.verify?.ran) bits.push(run.verify.code === 0 ? 'verify passed' : `verify exit ${run.verify.code}`);
+    if (run.files?.length) bits.push(plural(run.files.length, 'file'));
+    if (run.commit) bits.push(`committed ${run.commit}`);
+    else if (run.finished) bits.push(run.finished);
+    nowText = bits.join(' · ') || (run.summary || '').slice(0, 80);
+    nowClass = bits.length ? 'ok' : '';
+  } else if (run.state === 'failed' || run.state === 'stopped' || run.state === 'skipped') {
+    nowText = run.reason || STATE_WORD[run.state];
+    nowClass = run.state === 'failed' ? 'err' : 'faint';
+  } else if (run.state === 'queued') {
+    const deps = runs.filter((x) => run.dependsOn.includes(x.path)).map((x) => x.name);
+    nowText = deps.length ? `after ${deps.join(', ')}` : 'waiting for a slot';
+    nowClass = 'faint';
+  } else nowText = run.now || STATE_WORD[run.state];
+  const stop = (e: React.MouseEvent) => (e.stopPropagation(), call('dispatch.stop', { id: jobId, runId: run.id }).catch(toasted));
+  const retry = (e: React.MouseEvent) => (e.stopPropagation(), call('dispatch.retry', { id: jobId, runId: run.id }).catch(toasted));
+  const skip = (e: React.MouseEvent) => (e.stopPropagation(), call('dispatch.skip', { id: jobId, runId: run.id }).catch(toasted));
+  return (
+    <tr className={`dp-row ${run.state}`} onClick={open}>
+      <td className="dp-state">
+        <Glyph state={run.state} /> <span className={`dp-word ${run.state}`}>{STATE_WORD[run.state]}</span>
+      </td>
+      <td className="dp-repo">{run.name}</td>
+      <td className="mono faint">{run.worktree?.branch || '—'}</td>
+      <td className="num tnum">{elapsed}</td>
+      <td className="num tnum">
+        {run.add || run.del ? (
+          <>
+            <span className="num-add">+{run.add}</span> <span className="num-del">−{run.del}</span>
+          </>
+        ) : (
+          '—'
+        )}
+      </td>
+      <td className="num tnum">{run.cost ? cost(run.cost) : '—'}</td>
+      <td className={`dp-now ${nowClass}`}>
+        <span className="ellipsis">{nowText}</span>
+        <span className="dp-acts" onClick={(e) => e.stopPropagation()}>
+          {run.state === 'needs_action' && pending && !pending.interactive && (
+            <>
+              <button className="btn xs primary" onClick={() => answer(true)}>
+                Allow
+              </button>
+              <button className="btn xs ghost" onClick={() => answer(false)}>
+                Deny
+              </button>
+            </>
+          )}
+          {run.state === 'needs_action' && pending?.interactive && (
+            <button className="btn xs primary" onClick={open}>
+              Open to respond
+            </button>
+          )}
+          {(run.state === 'failed' || run.state === 'stopped') && (
+            <>
+              <button className="btn xs" onClick={retry}>
+                Retry
+              </button>
+              <button className="btn xs ghost" onClick={open}>
+                Open
+              </button>
+            </>
+          )}
+          {ACTIVE.includes(run.state) && run.state !== 'needs_action' && (
+            <button className="btn xs ghost" onClick={stop}>
+              Stop
+            </button>
+          )}
+          {run.state === 'queued' && (
+            <button className="btn xs ghost" onClick={skip}>
+              Skip
+            </button>
+          )}
+          {run.state === 'done' && run.pr && (
+            <a className="link" href={run.pr} target="_blank" rel="noreferrer">
+              PR <ExternalLink size={11} />
+            </a>
+          )}
+        </span>
+      </td>
+    </tr>
+  );
+}

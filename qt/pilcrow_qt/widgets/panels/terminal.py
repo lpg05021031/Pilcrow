@@ -16,11 +16,10 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import pyte
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QGuiApplication, QKeyEvent, QMouseEvent, QPainter, QWheelEvent
-from PySide6.QtWidgets import QAbstractScrollArea, QFrame, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QAbstractScrollArea, QFrame, QStackedWidget, QVBoxLayout, QWidget
 
 from ... import icons, theme
 from ...lib.fmt import basename, err_text
-from ...rpc import rpc
 from ...store import store
 from ..ui.bits import IconButton, Row
 from ..ui.menu import show_menu_at
@@ -244,12 +243,12 @@ class TerminalView(QAbstractScrollArea):
         s.cursor.x = min(s.cursor.x, cols - 1)
         s.dirty.update(range(rows))
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         self._fit()
         self.viewport().update()
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         return QSize(int(80 * self._cell_w) + 12, 24 * self._cell_h)
 
     # ---------------------------------------------------------------- data
@@ -315,7 +314,7 @@ class TerminalView(QAbstractScrollArea):
         return theme.qcolor(t.text) if is_fg else None
 
     # ---------------------------------------------------------------- painting
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         vp = self.viewport()
         p = QPainter(vp)
@@ -399,7 +398,7 @@ class TerminalView(QAbstractScrollArea):
         self._sync_scrollbar()
         self.viewport().update()
 
-    def wheelEvent(self, e: QWheelEvent) -> None:  # noqa: N802
+    def wheelEvent(self, e: QWheelEvent) -> None:
         steps = e.angleDelta().y() / 120.0
         self.scroll_lines(int(round(steps * 3)))
         e.accept()
@@ -443,7 +442,7 @@ class TerminalView(QAbstractScrollArea):
         if text:
             self.send(text.replace("\r\n", "\r").replace("\n", "\r").encode("utf-8"))
 
-    def mousePressEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+    def mousePressEvent(self, e: QMouseEvent) -> None:
         self.setFocus()
         if e.button() == Qt.MouseButton.LeftButton:
             cell = self._cell_at(e.position().toPoint())
@@ -464,19 +463,19 @@ class TerminalView(QAbstractScrollArea):
                 self,
             )
 
-    def mouseMoveEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+    def mouseMoveEvent(self, e: QMouseEvent) -> None:
         if self._selecting and self._sel is not None:
             self._sel = (self._sel[0], self._cell_at(e.position().toPoint()))
             self.viewport().update()
 
-    def mouseReleaseEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, e: QMouseEvent) -> None:
         if e.button() == Qt.MouseButton.LeftButton:
             self._selecting = False
             if self._sel is not None:
                 self._sel = (self._sel[0], self._cell_at(e.position().toPoint()))
                 self.viewport().update()
 
-    def mouseDoubleClickEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+    def mouseDoubleClickEvent(self, e: QMouseEvent) -> None:
         row, col = self._cell_at(e.position().toPoint())
         line = self._line(row)
         text = "".join(line[c].data or " " for c in range(self.cols))
@@ -492,7 +491,7 @@ class TerminalView(QAbstractScrollArea):
         self.viewport().update()
 
     # ---------------------------------------------------------------- keys and focus
-    def keyPressEvent(self, e: QKeyEvent) -> None:  # noqa: N802
+    def keyPressEvent(self, e: QKeyEvent) -> None:
         key, mods = e.key(), e.modifiers()
         ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier)
         shift = bool(mods & Qt.KeyboardModifier.ShiftModifier)
@@ -535,14 +534,14 @@ class TerminalView(QAbstractScrollArea):
             return True
         return super().event(e)
 
-    def focusInEvent(self, e) -> None:  # noqa: N802
+    def focusInEvent(self, e) -> None:
         super().focusInEvent(e)
         self._cursor_on = True
         if not store.reduced_motion:
             self._blink.start()
         self.viewport().update()
 
-    def focusOutEvent(self, e) -> None:  # noqa: N802
+    def focusOutEvent(self, e) -> None:
         super().focusOutEvent(e)
         self._blink.stop()
         self._cursor_on = True
@@ -575,10 +574,10 @@ class TTab(QWidget):
 
     def __init__(self, ref: TermRef, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)  # Qt repaints it on enter and leave
         self.ref = ref
         self.on = False
         self.text = ref.title
-        self._hover = False
         self._x_hover = False
         self.setMouseTracking(True)
         self.setFixedHeight(26)
@@ -593,13 +592,13 @@ class TTab(QWidget):
         self.updateGeometry()
         self.update()
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         return QSize(9 + int(QFontMetricsF(self._font).horizontalAdvance(self.text)) + 4 + 18 + 4, 26)
 
     def _x_rect(self) -> QRect:
         return QRect(self.width() - 22, 4, 18, 18)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -610,7 +609,7 @@ class TTab(QWidget):
             p.setBrush(theme.qcolor(t.fill_2))
             p.drawRoundedRect(self.rect(), theme.R2, theme.R2)
         p.setFont(self._font)
-        p.setPen(theme.qcolor(t.text if (self.on or self._hover) else t.text_3))
+        p.setPen(theme.qcolor(t.text if (self.on or self.underMouse()) else t.text_3))
         p.drawText(QRect(9, 0, self.width() - 9 - 22, 26), Qt.AlignmentFlag.AlignVCenter, self.text)
         xr = self._x_rect()
         if self._x_hover:
@@ -619,21 +618,18 @@ class TTab(QWidget):
             p.drawRoundedRect(xr, 4, 4)
         p.drawPixmap(xr.left() + 3, xr.top() + 3, icons.pixmap("x", t.text if self._x_hover else t.text_3, 11))
 
-    def enterEvent(self, e) -> None:  # noqa: N802
-        self._hover = True
+    def leaveEvent(self, e) -> None:
+        self._x_hover = False
         self.update()
+        super().leaveEvent(e)
 
-    def leaveEvent(self, e) -> None:  # noqa: N802
-        self._hover = self._x_hover = False
-        self.update()
-
-    def mouseMoveEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+    def mouseMoveEvent(self, e: QMouseEvent) -> None:
         xh = self._x_rect().contains(e.position().toPoint())
         if xh != self._x_hover:
             self._x_hover = xh
             self.update()
 
-    def mousePressEvent(self, e: QMouseEvent) -> None:  # noqa: N802
+    def mousePressEvent(self, e: QMouseEvent) -> None:
         if e.button() == Qt.MouseButton.MiddleButton or (
             e.button() == Qt.MouseButton.LeftButton and self._x_rect().contains(e.position().toPoint())
         ):
@@ -664,6 +660,8 @@ class TerminalPanel(QWidget):
         root.addWidget(Hairline())
         self.host = QWidget()
         self.host.setObjectName("chrome")
+        self.host.setAutoFillBackground(True)
+        theme.tint(self.host, bg="chrome")
         self.host.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         hl = QVBoxLayout(self.host)
         hl.setContentsMargins(12, 8, 4, 4)
@@ -673,24 +671,28 @@ class TerminalPanel(QWidget):
         self.empty = self._empty_state()
         root.addWidget(self.empty, 1)
         self.empty.hide()
-        self._off_data = rpc.on("term.data", self._on_data)
-        self._off_exit = rpc.on("term.exit", self._on_exit)
-        self.destroyed.connect(lambda *_a: (self._off_data(), self._off_exit()))
+        bind(store.term_data, self, self._on_data)
+        bind(store.term_exit, self, self._on_exit)
         bind(store.info_changed, self, lambda _i: self.render())
         self.render()
 
     @staticmethod
     def _empty_state() -> QWidget:
-        """The web's ``.empty`` here fills the tab (a stretched grid), so its icon sits in the middle of
-        the top half and the sentence in the middle of the bottom half."""
-        e = EmptyState("square-terminal", "The terminal needs python3 (or util-linux `script`) on this machine.")
-        lay = e.layout()
-        lay.setContentsMargins(28, 40, 28, 40)
-        lay.insertStretch(0, 1)
-        lay.insertStretch(2, 2)
+        """One block at the top of the tab, like the other tabs' empty states: the icon, the sentence,
+        and what to do about it."""
+        host = QWidget()
+        lay = QVBoxLayout(host)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
+        lay.addWidget(
+            EmptyState(
+                "square-terminal",
+                "The terminal needs python3 (or util-linux `script`) on this machine.",
+                "Install one and open the tab again; the rest of Pilcrow works without it.",
+            )
+        )
         lay.addStretch(1)
-        e.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        return e
+        return host
 
     # ---------------------------------------------------------------- state
     @property
@@ -825,7 +827,7 @@ class TerminalPanel(QWidget):
         if act and act in self._views:
             self.stack.setCurrentWidget(self._views[act])
 
-    def showEvent(self, e) -> None:  # noqa: N802
+    def showEvent(self, e) -> None:
         super().showEvent(e)
         if not self.terms and self._pty_ok():
             self.create()
@@ -840,6 +842,7 @@ if __name__ == "__main__":  # pragma: no cover - development window
     from PySide6.QtWidgets import QApplication
 
     from ... import fonts
+    from ...rpc import rpc
 
     app = QApplication(sys.argv)
     fonts.load()

@@ -11,14 +11,15 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import QRectF, Qt, QUrl
-from PySide6.QtGui import QColor, QDesktopServices, QFontMetricsF, QPainter, QPen
+from PySide6.QtCore import Qt, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtNetwork import QNetworkAccessManager, QNetworkReply, QNetworkRequest
-from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLineEdit, QVBoxLayout, QWidget
 
 from ... import theme
 from ...store import store
 from ..ui.bits import Row
+from ..ui.button import chip_button
 from ..ui.signals import bind
 from .right_panel import Btn, EmptyState, Hairline, icon_btn, lbl
 
@@ -46,39 +47,6 @@ def find_urls(session_id: str) -> List[str]:
     return list(found)[-6:][::-1]
 
 
-class Chip(QPushButton):
-    """A detected address as a shortcut (``.chip.mono``): a 24px pill, 11.5px mono, lit when chosen."""
-
-    def __init__(self, url: str, parent: Optional[QWidget] = None) -> None:
-        super().__init__(re.sub(r"^https?://", "", url), parent)
-        self.url = url
-        self.on = False
-        self.setFlat(True)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setAccessibleName(url)
-        self.setToolTip(url)
-        self.setFixedHeight(24)
-        self.setFixedWidth(9 + int(QFontMetricsF(theme.font_mono(11.5)).horizontalAdvance(self.text())) + 9 + 1)
-        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
-        bind(theme.theme.changed, self, lambda _t: self.update())
-
-    def set_on(self, on: bool) -> None:
-        self.on = on
-        self.update()
-
-    def paintEvent(self, _e) -> None:  # noqa: N802
-        t = theme.tokens()
-        hover = self.underMouse()
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(QPen(theme.blend(t.hair_3 if self.on else t.hair, t.canvas), 1))
-        p.setBrush(theme.blend(t.fill_2 if (self.on or hover) else t.fill_1, t.canvas))
-        p.drawRoundedRect(QRectF(0.5, 0.5, self.width() - 1, self.height() - 1), 12, 12)
-        p.setFont(theme.font_mono(11.5))
-        p.setPen(QColor(t.text if (self.on or hover) else t.text_2))
-        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self.text())
-
-
 class PreviewPanel(QWidget):
     """The Preview tab of the side panel for one session."""
 
@@ -88,7 +56,7 @@ class PreviewPanel(QWidget):
         self.cwd = cwd
         self.url = _urls.get(session_id, "")
         self.detected: List[str] = []
-        self._chips: List[Chip] = []
+        self._chips: List[Btn] = []
         self._net = QNetworkAccessManager(self)
         self._reply: Optional[QNetworkReply] = None
 
@@ -99,6 +67,15 @@ class PreviewPanel(QWidget):
         bar.setMinimumHeight(42)
         self.field = QLineEdit(self.url or DEFAULT_URL)
         self.field.setPlaceholderText(DEFAULT_URL)
+        # .input.mono: a quiet fill with a hairline, 12.5px mono; focus lifts it onto the canvas. The
+        # colours are palette roles, re-read when the theme repolishes the field.
+        self.field.setFont(theme.font_mono(12))
+        self.field.setStyleSheet(
+            f"QLineEdit {{ background: palette(light); border: 1px solid palette(shadow); border-radius: {theme.R2}px; padding: 0 10px; }}"
+            "QLineEdit:hover { border-color: palette(dark); }"
+            "QLineEdit:focus { background: palette(window); border-color: palette(mid); }"
+        )
+        theme.tint(self.field, placeholder="text_3")
         self.field.setFixedHeight(28)
         self.field.setAccessibleName("Address")
         self.field.returnPressed.connect(lambda: self.go(self.field.text()))
@@ -146,18 +123,6 @@ class PreviewPanel(QWidget):
         self.refresh()
 
     def _apply_theme(self) -> None:
-        # .input.mono: a quiet fill with a hairline, 12.5px mono; focus lifts it onto the canvas.
-        t = theme.tokens()
-        f = theme.font_mono(12.5)
-        self.field.setStyleSheet(
-            f'QLineEdit {{ font-family: "{f.family()}"; font-size: 12px; background: {theme.blend(t.fill_1, t.canvas).name()}; '
-            f"border: 1px solid {theme.blend(t.hair, t.canvas).name()}; border-radius: {theme.R2}px; padding: 0 10px; color: {t.text}; }}"
-            f"QLineEdit:hover {{ border-color: {theme.blend(t.hair_2, t.canvas).name()}; }}"
-            f"QLineEdit:focus {{ background: {t.canvas}; border-color: {theme.blend(t.hair_3, t.canvas).name()}; }}"
-        )
-        pal = self.field.palette()
-        pal.setColor(pal.ColorRole.PlaceholderText, theme.qcolor(t.text_3))
-        self.field.setPalette(pal)
         self.render()
 
     # ---------------------------------------------------------------- state
@@ -171,7 +136,17 @@ class PreviewPanel(QWidget):
         self.refresh()
 
     def _on_rt(self, sid: str) -> None:
-        if sid == self.session_id:
+        if sid != self.session_id:
+            return
+        if not self.isVisible():
+            self._stale = True  # looked at again when the tab is shown
+            return
+        self.refresh()
+
+    def showEvent(self, e) -> None:
+        super().showEvent(e)
+        if getattr(self, "_stale", False):
+            self._stale = False
             self.refresh()
 
     def refresh(self) -> None:
@@ -222,25 +197,23 @@ class PreviewPanel(QWidget):
                 or reply.attribute(QNetworkRequest.Attribute.HttpStatusCodeAttribute) is not None
             ):
                 self.status.setText("Something is listening there.")
-                self.status.setProperty("tone", "ok")
+                theme.tint(self.status, fg="ok")
             else:
                 self.status.setText("Nothing answered at this address yet.")
-                self.status.setProperty("tone", "faint")
-            self.status.style().unpolish(self.status)
-            self.status.style().polish(self.status)
+                theme.tint(self.status, fg="text_3")
             reply.deleteLater()
 
         reply.finished.connect(done)
 
     # ---------------------------------------------------------------- render
     def render(self) -> None:
-        t = theme.tokens()
         for c in self._chips:
             self.chips_box.removeWidget(c)
             c.deleteLater()
         self._chips = []
         for i, u in enumerate(self.detected):
-            c = Chip(u)
+            c = chip_button(re.sub(r"^https?://", "", u), u, h=24, px=9.5, fs=11.5, mono=True)
+            c.setAccessibleName(u)
             c.set_on(u == self.url)
             c.clicked.connect(lambda _c=False, u=u: self.go(u))
             self.chips_box.insertWidget(i, c)
@@ -249,7 +222,6 @@ class PreviewPanel(QWidget):
         self.chips_line.setVisible(bool(self.detected))
         self.reload_btn.setEnabled(bool(self.url))
         self.open_btn.setEnabled(bool(self.url))
-        _ = t
         if self.url:
             self.body.set_icon("globe")
             self.body.set_text(self.url, "The preview opens in your browser in this client.")

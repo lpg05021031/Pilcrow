@@ -10,29 +10,33 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QPushButton, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QPushButton, QScrollArea, QSizePolicy, QWidget
 
 from ... import theme
 from ...store import store
-from ..ui.bits import Mark, hairline
+from ..ui.bits import Mark
+from ..ui.button import Btn
 from ..ui.signals import bind
 from .parts import Text, sheet_bg
-from .settings_ui import Sheet, open_sheet, styled, vbox
+from .settings_ui import Sheet, open_sheet, vbox
 
 SECTIONS: List[Tuple[str, str]] = [
     ("general", "General"),
+    ("repos", "Repositories"),
     ("claude", "Claude Code"),
     ("skills", "Skills"),
     ("mcp", "MCP servers"),
     ("memory", "Memory"),
     ("diagnostics", "Diagnostics"),
 ]
-WIDE = ("skills", "mcp", "memory")
+#: one size for every section: the sheet used to be narrower and shorter on some (General, Claude Code,
+#: Diagnostics) and wider and taller on others, so it jumped as the person moved between them
+WIDTH = 860
 
 
 class SettingsSheet(Sheet):
     def __init__(self, window: QWidget, page: str = "general") -> None:
-        super().__init__(window, "settings", "Settings", 720, body_margins=(0, 0, 0, 0))
+        super().__init__(window, "settings", "Settings", WIDTH, body_margins=(0, 0, 0, 0))
         self.body.setSpacing(0)
         self.section = ""
         self.page: Optional[QWidget] = None
@@ -50,28 +54,26 @@ class SettingsSheet(Sheet):
         self.group.setExclusive(True)
         self.nav_buttons: Dict[str, QPushButton] = {}
         for sid, text in SECTIONS:
-            b = QPushButton(text)
+            b = Btn(text, size="")
+            b.override.update(h=30, px=10, fs=theme.FS_UI, fw=400, r=theme.R2)
+            b.pad_left = 10
+            b.set_look(
+                "text_2",
+                "text",
+                hover_bg=lambda t: theme.blend(t.fill_1, sheet_bg(t).name()),
+                on_fg="text",
+                on_bg=lambda t: theme.blend(t.fill_2, sheet_bg(t).name()),
+            )
+            b.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             b.setCheckable(True)
             b.setAutoDefault(False)
-            b.setAccessibleName(text)
-            b.setCursor(Qt.CursorShape.PointingHandCursor)
-            b.setFixedHeight(30)
-            b.setFont(theme.font_ui(theme.FS_UI))
+            b.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+            b.toggled.connect(lambda on, b=b: (b.override.update(fw=600 if on else 400), b.update()))
             b.clicked.connect(lambda _c=False, s=sid: self.show_section(s))
             nl.addWidget(b)
             self.group.addButton(b)
             self.nav_buttons[sid] = b
         nl.addStretch(1)
-        styled(
-            self.nav,
-            lambda t: (
-                f"""
-            #settings-nav QPushButton {{ text-align: left; border: none; background: transparent; padding: 0 10px; min-height: 30px; max-height: 30px; border-radius: {theme.R2}px; color: {t.text_2}; font-weight: 400; }}
-            #settings-nav QPushButton:hover {{ background: {theme.blend(t.fill_1, sheet_bg(t).name()).name()}; color: {t.text}; }}
-            #settings-nav QPushButton:checked {{ background: {theme.blend(t.fill_2, sheet_bg(t).name()).name()}; color: {t.text}; font-weight: 600; }}
-        """
-            ),
-        )
         row.addWidget(self.nav)
 
         self.page_scroll = QScrollArea()
@@ -121,7 +123,7 @@ class SettingsSheet(Sheet):
             old.deleteLater()
         self.page = self._build(sid)
         self.page_lay.insertWidget(0, self.page)
-        self._width = 860 if sid in WIDE else 720
+        self._width = WIDTH
         self.page_scroll.verticalScrollBar().setValue(0)
         self.schedule_relayout()
 
@@ -130,8 +132,7 @@ class SettingsSheet(Sheet):
         if host is None:
             return
         h = host.height()
-        wide = self.section in WIDE
-        self.layout_w.setFixedHeight(min(620, int(h * 0.78)) if wide else min(480, int(h * 0.64)))
+        self.layout_w.setFixedHeight(min(620, int(h * 0.78)))
         super().relayout()
 
     def _build(self, sid: str) -> QWidget:
@@ -139,6 +140,10 @@ class SettingsSheet(Sheet):
             from .settings_general import GeneralPage
 
             return GeneralPage(self)
+        if sid == "repos":
+            from .settings_repos import ReposPage
+
+            return ReposPage(self)
         if sid == "claude":
             from .settings_claude import ClaudePage
 
@@ -175,6 +180,3 @@ def open_settings(window: QWidget, page: Any) -> Optional[SettingsSheet]:
     s = SettingsSheet(window, section)
     s.open()
     return s
-
-
-_ = (hairline, QVBoxLayout)

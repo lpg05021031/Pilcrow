@@ -7,7 +7,6 @@ and app.css (``.mem-peek``, ``.chip``)."""
 
 from __future__ import annotations
 
-import re
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QRect, QRectF, QSize, Qt
@@ -15,9 +14,10 @@ from PySide6.QtGui import QColor, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
 from ... import icons, theme
-from ...lib.fmt import cost, short_model, tildify, tokens
+from ...lib.fmt import cost, tildify, tokens
+from ...lib.models import model_label
 from ...store import ConfirmSpec, store
-from ..ui.bits import ContextRing, Spinner, copy_text
+from ..ui.bits import Box, ContextRing, Spinner, copy_text
 from ..ui.menu import show_menu_at
 from ..ui.signals import bind
 from .right_panel import Btn, Refresher, Section, elide, empty_text, icon_btn, lbl
@@ -41,18 +41,6 @@ CAT_TONES = {
     "Custom agents": "think",
     "Skills": "warn",
 }
-
-
-def model_label(value: str, aliases: Optional[List[Json]] = None) -> str:
-    """A short name for a model value: the endpoint's display name, Claude Code's alias name, or a tidied ID."""
-    gw = store.gateway_models if isinstance(store.gateway_models, dict) else {}
-    for m in gw.get("models") or []:
-        if m.get("id") == value and m.get("displayName"):
-            return re.sub(r"^Claude\s+", "", str(m["displayName"]), flags=re.I)
-    for a in aliases or []:
-        if a.get("value") == value and a.get("displayName"):
-            return str(a["displayName"])
-    return short_model(value) if re.search(r"claude-", value, re.I) else value
 
 
 def cat_tone(c: Json) -> Optional[str]:
@@ -82,7 +70,7 @@ class RingGauge(ContextRing):
         pct = self.used / self.total if self.total else 0
         return t.err if pct > 0.85 else t.accent if pct > 0.65 else t.text_2
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -118,7 +106,7 @@ class StatTile(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -145,7 +133,7 @@ class CatBar(QWidget):
         self._max = max(1, int(usage.get("maxTokens") or 1))
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -183,17 +171,17 @@ class ChipCloud(QWidget):
             x += w + 6
         return out
 
-    def hasHeightForWidth(self) -> bool:  # noqa: N802
+    def hasHeightForWidth(self) -> bool:
         return True
 
-    def heightForWidth(self, w: int) -> int:  # noqa: N802
+    def heightForWidth(self, w: int) -> int:
         placed = self._place(max(1, w))
         return min(200, placed[-1][0].bottom() + 1) if placed else 0
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         return QSize(200, self.heightForWidth(max(200, self.width())))
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -261,7 +249,7 @@ class McpRow(QWidget):
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(8)
-        self.dot = QLabel()
+        self.dot = Box(radius=3)
         self.dot.setFixedSize(7, 7)
         lay.addWidget(self.dot)
         lay.addWidget(elide(lbl(str(s.get("name") or ""), theme.FS_SMALL)), 1)
@@ -282,11 +270,11 @@ class McpRow(QWidget):
         bind(theme.theme.changed, self, lambda _t: self._paint())
 
     def _paint(self) -> None:
-        t = theme.tokens()
-        color = {"connected": t.ok, "failed": t.err, "needs-auth": t.accent, "pending": t.accent}.get(
-            self._status, t.text_4
+        self.dot.set_look(
+            bg={"connected": "ok", "failed": "err", "needs-auth": "accent", "pending": "accent"}.get(
+                self._status, "text_4"
+            )
         )
-        self.dot.setStyleSheet(f"background: {color}; border-radius: 3px;")
 
 
 class InfoPanel(QWidget):
@@ -446,12 +434,21 @@ class InfoPanel(QWidget):
         info = store.info or {}
         init: Json = st.get("init") or {}
         usage: Json = st.get("usage") or {}
+        live = bool(st.get("live"))
+        self._context_section(usage, live)
+        self._claude_section(info, init, live, st)
+        self._memory_section()
+        self._mcp_section(init, live, st)
+        self._worktree_section(info, session)
+        self._endpoint_section(info)
+        for i, sec in enumerate(self._sections):
+            sec.set_last(i == len(self._sections) - 1)
+
+    def _context_section(self, usage: Json, live: bool) -> None:
+        """The context window: the gauge, its figures, the session's usage (``.gauge-row``)."""
         used, total = int(usage.get("contextTokens") or 0), int(usage.get("contextWindow") or 0)
         pct = used / total if total else 0.0
-        live = bool(st.get("live"))
         t = theme.tokens()
-
-        # context window (.gauge-row)
         s = Section("Context window")
         row = QWidget()
         rl = QHBoxLayout(row)
@@ -459,7 +456,8 @@ class InfoPanel(QWidget):
         rl.setSpacing(16)
         self.ring = RingGauge()
         self.ring.set_values(used, total)
-        self.ring.set_text(f"{round(pct * 100)}%" if total else tokens(used))
+        after_compact = bool(usage.get("afterCompact"))
+        self.ring.set_text("—" if after_compact else f"{round(pct * 100)}%" if total else tokens(used))
         rl.addWidget(self.ring)
         side = QWidget()
         sl = QVBoxLayout(side)
@@ -468,7 +466,9 @@ class InfoPanel(QWidget):
         self.gauge_line = lbl("", theme.FS_SMALL, tone="faint")
         self.gauge_line.setTextFormat(Qt.TextFormat.RichText)
         self.gauge_line.setText(
-            f'<b style="color:{t.text}; font-weight:600">{tokens(used)}</b> of {tokens(total)} tokens'
+            "Compacted — the context is a summary now; its size is measured at the next reply"
+            if after_compact
+            else f'<b style="color:{t.text}; font-weight:600">{tokens(used)}</b> of {tokens(total)} tokens'
             if total
             else f"{tokens(used)} of {tokens(total)}"
         )
@@ -494,12 +494,9 @@ class InfoPanel(QWidget):
                     continue
                 cr = QHBoxLayout()
                 cr.setSpacing(8)
-                sw = QLabel()
-                sw.setFixedSize(8, 8)
                 tone = cat_tone(c)
-                sw.setStyleSheet(
-                    f"background: {theme.blend(getattr(t, tone), t.canvas).name() if tone else 'transparent'}; border-radius: 2px;"
-                )
+                sw = Box(bg=f"{tone}/canvas" if tone else None, radius=2)
+                sw.setFixedSize(8, 8)
                 cr.addWidget(sw)
                 cr.addWidget(lbl(str(c.get("name") or ""), theme.FS_SMALL, tone="muted"), 1)
                 cr.addWidget(lbl(tokens(int(c.get("tokens") or 0)), theme.FS_SMALL, tone="faint", mono=True))
@@ -531,10 +528,12 @@ class InfoPanel(QWidget):
         )
         self._add(s)
 
-        # Claude Code (.kv)
+    def _claude_section(self, info: Json, init: Json, live: bool, st: Json) -> None:
+        """Claude Code: the model, the mode, the session ID, the tools it has (``.kv``)."""
         s = Section("Claude Code")
         model_id = str(st.get("activeModel") or st.get("model") or "")
-        name = model_label(model_id, st.get("models") or None) if model_id else "Default"
+        gw = store.gateway_models if isinstance(store.gateway_models, dict) else {}
+        name = model_label(model_id, gw.get("models") or [], st.get("models") or []) if model_id else "Default"
         model_w = QWidget()
         ml = QHBoxLayout(model_w)
         ml.setContentsMargins(0, 0, 0, 0)
@@ -590,7 +589,8 @@ class InfoPanel(QWidget):
                 s.add(ChipCloud(chips))
         self._add(s)
 
-        # memory (.mem-peek)
+    def _memory_section(self) -> None:
+        """The project's memory: its notes, and saving this session's (``.mem-peek``)."""
         s = Section("Project memory")
         notes = self.notes
         s.head_add(
@@ -612,9 +612,8 @@ class InfoPanel(QWidget):
                 r.setSpacing(8)
                 dot = QWidget()
                 dot.setFixedSize(6, 5 + 7)
-                d = QLabel(dot)
+                d = Box(bg="text_4", radius=2, parent=dot)
                 d.setGeometry(0, 7, 5, 5)
-                d.setStyleSheet(f"background: {t.text_4}; border-radius: 2px;")
                 r.addWidget(dot, 0, Qt.AlignmentFlag.AlignTop)
                 r.addWidget(lbl(str(n.get("text") or ""), theme.FS_SMALL, tone="muted", wrap=True), 1)
                 pl.addLayout(r)
@@ -640,7 +639,8 @@ class InfoPanel(QWidget):
         s.add(_row([save] + ([lbl(f"{mine} from this session", theme.FS_SMALL, tone="faint")] if mine else [])))
         self._add(s)
 
-        # MCP (.mcp-row)
+    def _mcp_section(self, init: Json, live: bool, st: Json) -> None:
+        """The MCP servers and their state (``.mcp-row``)."""
         s = Section("MCP servers")
         s.head_add(Btn("Manage", kind="link", on_click=lambda: store.set_dialog("settings", "mcp")))
         if live:
@@ -657,7 +657,8 @@ class InfoPanel(QWidget):
             s.add(empty_text("No MCP servers configured." if init else "Shown after Claude Code starts."))
         self._add(s)
 
-        # worktree
+    def _worktree_section(self, info: Json, session: Json) -> None:
+        """The worktree the session runs in, when it has one."""
         wt = session.get("worktree")
         if wt:
             s = Section("Worktree")
@@ -683,13 +684,19 @@ class InfoPanel(QWidget):
                             on_click=lambda: store.call("shell.openPath", {"path": wt.get("path")}),
                         ),
                         Btn(
-                            "Remove", icon="trash", kind="danger", size="sm", on_click=lambda: self._remove_worktree(wt)
+                            "Remove",
+                            icon="trash",
+                            kind="danger-text",
+                            size="sm",
+                            on_click=lambda: self._remove_worktree(wt),
                         ),
                     ]
                 )
             )
             self._add(s)
 
+    def _endpoint_section(self, info: Json) -> None:
+        """The API endpoint, when one is configured."""
         gw = info.get("gateway") or {}
         if gw.get("baseUrl"):
             s = Section("API endpoint")
@@ -702,8 +709,6 @@ class InfoPanel(QWidget):
                 )
             )
             self._add(s)
-        for i, sec in enumerate(self._sections):
-            sec.set_last(i == len(self._sections) - 1)
 
     def _add(self, s: Section) -> None:
         self._lay.insertWidget(self._lay.count() - 1, s)

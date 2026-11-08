@@ -7,7 +7,8 @@ import { searchKeymap, highlightSelectionMatches, search } from '@codemirror/sea
 import { syntaxHighlighting, HighlightStyle, indentOnInput, bracketMatching, foldGutter, foldKeymap, StreamLanguage, indentUnit, type StreamParser } from '@codemirror/language';
 import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
 import { tags as t } from '@lezer/highlight';
-import { langFromPath } from '../../lib/format';
+import { basename, langFromPath } from '../../lib/format';
+import { useEvent } from '../ui/hooks';
 
 const style = HighlightStyle.define([
   { tag: [t.comment, t.lineComment, t.blockComment, t.docComment], color: 'var(--cm-comment)', fontStyle: 'italic' },
@@ -36,14 +37,14 @@ const theme = EditorView.theme({
   '.cm-content': { caretColor: 'var(--accent)' },
   '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--accent)', borderLeftWidth: '2px' },
   '&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection': { backgroundColor: 'var(--selection) !important' },
-  '.cm-gutters': { backgroundColor: 'var(--bg-2)', color: 'var(--text-3)', border: 'none', borderRight: '1px solid var(--line)' },
-  '.cm-activeLine': { backgroundColor: 'color-mix(in srgb, var(--bg-3) 70%, transparent)' },
-  '.cm-activeLineGutter': { backgroundColor: 'var(--bg-3)', color: 'var(--text-2)' },
+  '.cm-gutters': { backgroundColor: 'var(--chrome)', color: 'var(--text-3)', border: 'none', borderRight: '1px solid var(--hair)' },
+  '.cm-activeLine': { backgroundColor: 'color-mix(in srgb, var(--raised) 70%, transparent)' },
+  '.cm-activeLineGutter': { backgroundColor: 'var(--raised)', color: 'var(--text-2)' },
   '.cm-searchMatch': { backgroundColor: 'var(--accent-wash)', outline: '1px solid var(--accent-line)' },
   '.cm-selectionMatch': { backgroundColor: 'var(--info-wash)' },
-  '.cm-panels': { backgroundColor: 'var(--bg-2)', color: 'var(--text)', borderTop: '1px solid var(--line)' },
+  '.cm-panels': { backgroundColor: 'var(--chrome)', color: 'var(--text)', borderTop: '1px solid var(--hair)' },
   '.cm-panels input, .cm-panels button': { fontFamily: 'var(--font-ui)', fontSize: '12px' },
-  '.cm-foldPlaceholder': { backgroundColor: 'var(--bg-3)', border: '1px solid var(--line-2)', color: 'var(--text-2)' },
+  '.cm-foldPlaceholder': { backgroundColor: 'var(--raised)', border: '1px solid var(--hair-2)', color: 'var(--text-2)' },
   '.cm-line.cm-flash': { backgroundColor: 'var(--accent-wash)' },
 });
 
@@ -142,16 +143,20 @@ async function languageFor(path: string): Promise<Extension | null> {
   }
 }
 
-export function Editor({ path, doc, onChange, onSave, line, nonce }: { path: string; doc: string; onChange: (text: string) => void; onSave: () => void; line?: number; nonce?: number }) {
+export function Editor({ path, doc, onChange, onSave, jump }: { path: string; doc: string; onChange: (text: string) => void; onSave: () => void; jump?: { line?: number } | null }) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
   const langComp = useRef(new Compartment());
-  const cbs = useRef({ onChange, onSave });
-  cbs.current = { onChange, onSave };
+  // The editor is made once per file: it starts from the document of that moment and calls the latest handlers.
+  const initial = useEvent(() => doc);
+  const change = useEvent(onChange);
+  const save = useEvent(onSave);
 
   useEffect(() => {
+    const parent = host.current;
+    if (!parent) return;
     const state = EditorState.create({
-      doc,
+      doc: initial(),
       extensions: [
         lineNumbers(),
         foldGutter(),
@@ -170,14 +175,15 @@ export function Editor({ path, doc, onChange, onSave, line, nonce }: { path: str
         indentUnit.of('  '),
         syntaxHighlighting(style),
         theme,
+        EditorView.contentAttributes.of({ 'aria-label': basename(path) }), // the text box a screen reader names by its file
         langComp.current.of([]),
-        keymap.of([{ key: 'Mod-s', preventDefault: true, run: () => (cbs.current.onSave(), true) }, ...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...foldKeymap, indentWithTab]),
+        keymap.of([{ key: 'Mod-s', preventDefault: true, run: () => (save(), true) }, ...closeBracketsKeymap, ...defaultKeymap, ...searchKeymap, ...historyKeymap, ...foldKeymap, indentWithTab]),
         EditorView.updateListener.of((u) => {
-          if (u.docChanged) cbs.current.onChange(u.state.doc.toString());
+          if (u.docChanged) change(u.state.doc.toString());
         }),
       ],
     });
-    const v = new EditorView({ state, parent: host.current! });
+    const v = new EditorView({ state, parent });
     view.current = v;
     let alive = true;
     languageFor(path).then((ext) => {
@@ -188,7 +194,7 @@ export function Editor({ path, doc, onChange, onSave, line, nonce }: { path: str
       v.destroy();
       view.current = null;
     };
-  }, [path]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [path, initial, change, save]);
 
   // External reloads replace the document.
   useEffect(() => {
@@ -199,12 +205,12 @@ export function Editor({ path, doc, onChange, onSave, line, nonce }: { path: str
 
   useEffect(() => {
     const v = view.current;
-    if (!v || !line) return;
-    const ln = Math.min(Math.max(1, line), v.state.doc.lines);
+    if (!v || !jump?.line) return;
+    const ln = Math.min(Math.max(1, jump.line), v.state.doc.lines);
     const pos = v.state.doc.line(ln).from;
     v.dispatch({ selection: { anchor: pos }, effects: EditorView.scrollIntoView(pos, { y: 'center' }) });
     v.focus();
-  }, [line, nonce]);
+  }, [jump]);
 
   return <div className="editor" ref={host} />;
 }

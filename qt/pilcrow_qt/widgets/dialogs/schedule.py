@@ -5,15 +5,14 @@ model, the time limit, the worktree and whether it is enabled. ``schedules.save`
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
-from PySide6.QtCore import QSize, Qt, QTime, QTimer, Signal
+from PySide6.QtCore import Qt, QTime, QTimer, Signal
 from PySide6.QtGui import QIntValidator
 from PySide6.QtWidgets import (
     QGridLayout,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -23,11 +22,11 @@ from ... import icons, theme
 from ...lib.fmt import basename, tildify
 from ...store import store
 from ..folder_picker import FolderPicker
-from ..ui.bits import button
+from ..ui.bits import Box, button
 from ..ui.menu import Popover, host_for
 from ..ui.signals import bind
-from .parts import ElideLabel, LayoutButton, Switch, Text, sheet_bg, well_bg
-from .settings_ui import ModelSelect, Select, input_css, line_edit, styled, text_area
+from .parts import ElideLabel, LayoutButton, Switch, Text, sheet_bg, well_bg, well_line
+from .settings_ui import Field, ModelSelect, Select, line_edit, style_field, text_area
 from .sheet import Sheet
 
 Json = Dict[str, Any]
@@ -79,7 +78,7 @@ def _field(title: str, w: QWidget, note: Optional[QWidget] = None) -> QWidget:
     return box
 
 
-class NumInput(QLineEdit):
+class NumInput(Field):
     """``input.sd-num``: a 64px number box (the web's ``<input type=number>``), with a spin box's
     ``value``/``setValue``/``valueChanged`` so the form reads it the same way."""
 
@@ -95,13 +94,13 @@ class NumInput(QLineEdit):
         self.setAccessibleName(name)
         self.setValidator(QIntValidator(lo, hi, self))
         self.setText(str(value))
-        styled(self, lambda t: input_css("#input", t, False, "0 6px"))
+        style_field(self, False, "0 6px")
         self.textChanged.connect(self._typed)
 
     def value(self) -> int:
         return self._value
 
-    def setValue(self, v: int) -> None:  # noqa: N802
+    def setValue(self, v: int) -> None:
         v = max(self.lo, min(self.hi, int(v)))
         if v != self._value:
             self._value = v
@@ -117,7 +116,7 @@ class NumInput(QLineEdit):
                 self.valueChanged.emit(v)
 
 
-class TimeInput(QLineEdit):
+class TimeInput(Field):
     """``input.sd-time``: a 112px ``HH:MM`` box (the web's ``<input type=time>``), with ``time``/``setTime``/
     ``timeChanged`` as a QTimeEdit has."""
 
@@ -131,13 +130,13 @@ class TimeInput(QLineEdit):
         self.setAccessibleName(name)
         self.setInputMask("99:99")
         self.setText(t.toString("HH:mm"))
-        styled(self, lambda tk: input_css("#input", tk, False, "0 10px"))
+        style_field(self, False, "0 10px")
         self.textChanged.connect(self._typed)
 
     def time(self) -> QTime:
         return self._time
 
-    def setTime(self, t: QTime) -> None:  # noqa: N802
+    def setTime(self, t: QTime) -> None:
         if t != self._time:
             self._time = t
             self.timeChanged.emit(t)
@@ -182,12 +181,12 @@ class FolderButton(LayoutButton):
         for w in (self.ico, self.label, self.chev):
             w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.clicked.connect(self.open)
-        styled(
-            self,
-            lambda t: (
-                f"#sdfolder {{ background: {theme.blend(t.fill_1, sheet_bg(t).name()).name()}; border: 1px solid {theme.blend(t.hair, theme.blend(t.fill_1, sheet_bg(t).name()).name()).name()}; border-radius: {theme.R3}px; padding: 0; text-align: left; }}"
-                f' #sdfolder:hover, #sdfolder[open="true"] {{ background: {theme.blend(t.fill_2, sheet_bg(t).name()).name()}; }}'
-            ),
+        self.set_look(
+            bg=lambda t: theme.over(theme.qcolor(t.fill_1), sheet_bg(t)),
+            hover=lambda t: theme.over(theme.qcolor(t.fill_2), sheet_bg(t)),
+            on=lambda t: theme.over(theme.qcolor(t.fill_2), sheet_bg(t)),
+            line=lambda t: theme.over(theme.qcolor(t.hair), theme.over(theme.qcolor(t.fill_1), sheet_bg(t))),
+            radius=theme.R3,
         )
         bind(theme.theme.changed, self, lambda _t: self._paint())
         self._paint()
@@ -203,13 +202,13 @@ class FolderButton(LayoutButton):
     def text(self) -> str:
         return self._value
 
-    def setText(self, v: str) -> None:  # noqa: N802
+    def setText(self, v: str) -> None:
         if v != self._value:
             self._value = v
             self._paint()
             self.textChanged.emit(v)
 
-    def open(self) -> None:  # noqa: A003
+    def open(self) -> None:
         if self._pop is not None and self._pop.is_open:
             self._pop.dismiss()
             return
@@ -224,11 +223,14 @@ class FolderButton(LayoutButton):
             pop.dismiss()
 
         pop.set_content(FolderPicker(self._value, picked))
-        pop.closed.connect(lambda: (self.setProperty("open", "false"), self.style().polish(self)))
+        pop.closed.connect(lambda: self._set_open(False))
         self._pop = pop
         pop.open_at(self, "bottom-start")
-        self.setProperty("open", "true")
-        self.style().polish(self)
+        self._set_open(True)
+
+    def _set_open(self, on: bool) -> None:
+        self.look_active = on
+        self.update()
 
 
 class RadioRow(LayoutButton):
@@ -249,13 +251,19 @@ class RadioRow(LayoutButton):
         self.ico = QLabel()
         lay.addWidget(self.ico)
         self.label = QLabel(label)
+        self.label.setFont(theme.font_ui(theme.FS_UI, 600))
         lay.addWidget(self.label)
         self.hint = ElideLabel(hint_text)
-        self.hint.setProperty("fs", "small")
+        self.hint.setFont(theme.font_ui(theme.FS_SMALL))
+        theme.tint(self.hint, fg="text_3")
         lay.addWidget(self.hint, 1)
         self.check = QLabel()
         self.check.setFixedWidth(16)
         lay.addWidget(self.check)
+        self.set_look(
+            hover=lambda t: theme.over(theme.qcolor(t.fill_1), well_bg(t)),
+            on=lambda t: theme.over(theme.qcolor(t.fill_2), well_bg(t)),
+        )
         self.toggled.connect(lambda _c: self._paint())
         bind(theme.theme.changed, self, lambda _t: self._paint())
         self._paint()
@@ -263,17 +271,11 @@ class RadioRow(LayoutButton):
     def _paint(self) -> None:
         t = theme.tokens()
         on = self.isChecked()
-        fg = t.err if self._danger else (t.text if on else t.text_2)
         self.ico.setPixmap(icons.pixmap(self._icon, t.err if self._danger else (t.text if on else t.text_3), 14))
-        self.label.setStyleSheet(f"color: {fg}; font-weight: 600;")
-        self.hint.setStyleSheet(f"color: {t.text_3}; font-size: {theme.FS_SMALL}px;")
+        theme.tint(self.label, fg="err" if self._danger else ("text" if on else "text_2"))
         self.check.setPixmap(icons.pixmap("check", t.text, 14) if on else icons.pixmap("check", "transparent", 14))
-        well = well_bg(t).name()
-        bg = theme.blend(t.fill_2, well).name() if on else "transparent"
-        self.setStyleSheet(
-            f"QPushButton {{ background: {bg}; border: none; border-radius: 0; text-align: left; padding: 0; min-height: 35px; max-height: 35px; }} "
-            f"QPushButton:hover {{ background: {theme.blend(t.fill_1 if not on else t.fill_2, well).name()}; }}"
-        )
+        self.look_active = on
+        self.update()
 
 
 class ScheduleDialog(Sheet):
@@ -309,7 +311,47 @@ class ScheduleDialog(Sheet):
             or ""
         )
 
-        # ---- name, folder
+        self._build_what()
+        self._build_name_folder(default_cwd)
+        self._build_prompt()
+        self._build_when()
+        self._build_mode(info)
+        self._build_more()
+        self._build_footer(editing)
+        self._mode = "acceptEdits"
+        self.set_mode(self._mode)
+        if self.spec.get("kind") == "dispatch":
+            self.what.setCurrentIndex(1)
+            if self.spec.get("playbookId"):
+                self._pick_playbook(str(self.spec["playbookId"]))
+        self._on_kind()
+        self._on_cadence()
+        self._summary()
+        if editing:
+            store.call("schedules.list", {}, quiet=True).then(self._got_schedules).catch(lambda _e: None)
+
+    def _build_what(self) -> None:
+        """What runs: a prompt in a folder, or a dispatch playbook across its repositories."""
+        what = QWidget()
+        wl0 = QHBoxLayout(what)
+        wl0.setContentsMargins(0, 0, 0, 0)
+        wl0.setSpacing(8)
+        self.what = Select("What runs", popup_width=260)
+        self.what.addItem("A prompt in a folder", "prompt", hint="One session, in one folder")
+        self.what.addItem("A dispatch playbook", "dispatch", hint="One job across the playbook's repositories")
+        self.what.setFixedWidth(220)
+        self.what.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.what.currentIndexChanged.connect(lambda _i: self._on_kind())
+        wl0.addWidget(self.what)
+        self.playbook = Select("Playbook", popup_width=300)
+        self.playbook.currentIndexChanged.connect(lambda _i: self._summary())
+        wl0.addWidget(self.playbook, 1)
+        self.body_lay.addWidget(_field("What runs", what))
+        bind(store.playbooks_changed, self, lambda _p: self._fill_playbooks())
+        self._fill_playbooks()
+
+    def _build_name_folder(self, default_cwd: str) -> None:
+        """The name and the folder, side by side."""
         two = QWidget()
         tl = QGridLayout(two)
         tl.setContentsMargins(0, 0, 0, 0)
@@ -319,30 +361,42 @@ class ScheduleDialog(Sheet):
         self.name.setProperty("autofocus", True)
         tl.addWidget(_field("Name", self.name), 0, 0)
         self.cwd = FolderButton(default_cwd)
-        tl.addWidget(_field("Folder", self.cwd), 0, 1)
+        self.cwd_field = _field("Folder", self.cwd)
+        tl.addWidget(self.cwd_field, 0, 1)
         self.body_lay.addWidget(two)
 
-        # ---- prompt
+    def _build_prompt(self) -> None:
+        """The prompt (a playbook brings its own: a note says so instead)."""
         self.prompt = text_area(
             "Run the test suite, fix any failing tests you can, and summarise what changed. Do not push.",
             rows=4,
             name="What Claude does each time",
         )
-        self.body_lay.addWidget(
-            _field(
-                "What Claude does each time",
-                self.prompt,
-                Text(
-                    "Nobody is there to answer questions during a run, so say what to assume and what to leave alone.",
-                    theme.FS_SMALL,
-                    400,
-                    "text_3",
-                    1.5,
-                ),
-            )
+        self.prompt_field = _field(
+            "What Claude does each time",
+            self.prompt,
+            Text(
+                "Nobody is there to answer questions during a run, so say what to assume and what to leave alone.",
+                theme.FS_SMALL,
+                400,
+                "text_3",
+                1.5,
+            ),
         )
+        self.body_lay.addWidget(self.prompt_field)
+        self.dispatch_note = Text(
+            "The playbook's brief, repositories and settings are used as saved. Nobody is there to answer, so "
+            "permissions are declined and there is no canary; the report lands in the inbox.",
+            theme.FS_SMALL,
+            400,
+            "text_3",
+            1.5,
+        )
+        self.dispatch_note.hide()
+        self.body_lay.addWidget(self.dispatch_note)
 
-        # ---- when
+    def _build_when(self) -> None:
+        """When it runs: the cadence and its fields, or a cron expression."""
         when = QWidget()
         wl = QHBoxLayout(when)
         wl.setContentsMargins(0, 0, 0, 0)
@@ -384,16 +438,10 @@ class ScheduleDialog(Sheet):
         wl.addStretch(1)
         self.body_lay.addWidget(_field("When", when))
 
-        # ---- mode
-        radios = QWidget()
+    def _build_mode(self, info: Json) -> None:
+        """What Claude may do while it runs: the permission modes."""
+        radios = Box(bg=well_bg, line=well_line, radius=theme.R3)
         radios.setObjectName("radio-list")
-        radios.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        styled(
-            radios,
-            lambda t: (
-                f"#radio-list {{ background: {well_bg(t).name()}; border: 1px solid {theme.blend(t.hair, well_bg(t).name()).name()}; border-radius: {theme.R3}px; }}"
-            ),
-        )
         rl = QVBoxLayout(radios)
         rl.setContentsMargins(1, 1, 1, 1)
         rl.setSpacing(0)
@@ -405,9 +453,11 @@ class ScheduleDialog(Sheet):
             row.clicked.connect(lambda _c=False, mid=m["id"]: self.set_mode(mid))
             self.mode_rows[m["id"]] = row
             rl.addWidget(row)
-        self.body_lay.addWidget(_field("While it runs, Claude may", radios))
+        self.mode_field = _field("While it runs, Claude may", radios)
+        self.body_lay.addWidget(self.mode_field)
 
-        # ---- more
+    def _build_more(self) -> None:
+        """More: the model, a time limit, a worktree, enabled."""
         self.more_btn = LayoutButton()
         self.more_btn.setObjectName("disclose")
         self.more_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -423,13 +473,7 @@ class ScheduleDialog(Sheet):
         ml.addWidget(more_title)
         self.more_sum = Text("", theme.FS_SMALL, 400, "text_3", wrap=False)
         ml.addWidget(self.more_sum, 1)
-        styled(
-            self.more_btn,
-            lambda t: (
-                f"#disclose {{ border: none; background: transparent; border-radius: {theme.R2}px; text-align: left; padding: 0; }}"
-                f" #disclose:hover {{ background: {theme.blend(t.fill_1, sheet_bg(t).name()).name()}; }}"
-            ),
-        )
+        self.more_btn.set_look(hover=lambda t: theme.over(theme.qcolor(t.fill_1), sheet_bg(t)), radius=theme.R2)
         self.more_btn.clicked.connect(self.toggle_more)
         self.body_lay.addWidget(self.more_btn)
 
@@ -472,7 +516,8 @@ class ScheduleDialog(Sheet):
         self.more_box.hide()
         self.body_lay.addWidget(self.more_box)
 
-        # ---- footer
+    def _build_footer(self, editing: bool) -> None:
+        """The footer: the next runs, Cancel and Save."""
         self.preview_lb = Text("", theme.FS_SMALL, 400, "text_3", 1.5)
         self.preview_lb.set_max_width(300)
         self.foot_lay.addWidget(self.preview_lb, 1)
@@ -481,14 +526,44 @@ class ScheduleDialog(Sheet):
         self.save_btn.setDefault(False)
         self.add_footer(self.cancel_btn, self.save_btn, stretch_before=False)
 
-        self._mode = "acceptEdits"
-        self.set_mode(self._mode)
-        self._on_cadence()
-        self._summary()
-        if editing:
-            store.call("schedules.list", {}, quiet=True).then(self._got_schedules).catch(lambda _e: None)
-
     # ---- loading an existing schedule
+    # ---- what runs
+    def _fill_playbooks(self) -> None:
+        cur = str(self.playbook.currentData() or self.spec.get("playbookId") or "")
+        self.playbook.clear()
+        for pb in store.playbooks:
+            self.playbook.addItem(
+                str(pb.get("name") or "Untitled playbook"),
+                str(pb.get("id")),
+                hint=f"{len(pb.get('targets') or [])} repositories",
+            )
+        if not store.playbooks:
+            self.playbook.addItem("No playbooks yet — save one from a job", "", hint="")
+        self._pick_playbook(cur)
+
+    def _pick_playbook(self, pid: str) -> None:
+        i = self.playbook.findData(pid) if pid else -1
+        self.playbook.setCurrentIndex(i if i >= 0 else 0)
+
+    def what_runs(self) -> str:
+        return str(self.what.currentData() or "prompt")
+
+    def _on_kind(self) -> None:
+        dispatch = self.what_runs() == "dispatch"
+        self.playbook.setVisible(dispatch)
+        self.cwd_field.setVisible(not dispatch)
+        self.prompt_field.setVisible(not dispatch)
+        self.dispatch_note.setVisible(dispatch)
+        self.mode_field.setVisible(not dispatch)
+        self.more_btn.setVisible(not dispatch)
+        if dispatch:
+            self.more_box.hide()
+        elif self._more:
+            self.more_box.show()
+        if dispatch and not self.name.text().strip():
+            self.name.setText(str(self.playbook.currentText() or ""))
+        self.place()
+
     def _got_schedules(self, lst: Any) -> None:
         if self._closed or not isinstance(lst, list):
             return
@@ -496,6 +571,10 @@ class ScheduleDialog(Sheet):
         if s is None:
             return
         self.schedule = s
+        if s.get("kind") == "dispatch":
+            self.what.setCurrentIndex(1)
+            self._pick_playbook(str(s.get("playbookId") or ""))
+            self._on_kind()
         self.name.setText(str(s.get("name") or ""))
         self.cwd.setText(str(s.get("cwd") or ""))
         self.prompt.setPlainText(str(s.get("prompt") or ""))
@@ -583,7 +662,6 @@ class ScheduleDialog(Sheet):
         err = r.get("error")
         nxt = r.get("nextRunAt")
         label = str(r.get("label") or "")
-        t = theme.tokens()
         if err:
             self.preview_lb.set_color("err")
             self.preview_lb.setText(str(err))
@@ -594,7 +672,6 @@ class ScheduleDialog(Sheet):
         else:
             self.preview_lb.set_color("text_3")
             self.preview_lb.setText(label)
-        _ = t
 
     # ---- mode, more
     def set_mode(self, mode: str) -> None:
@@ -609,6 +686,8 @@ class ScheduleDialog(Sheet):
         self.place()
 
     def _summary(self) -> None:
+        if not hasattr(self, "more_chev"):
+            return  # the playbooks filled in before the form was whole
         t = theme.tokens()
         self.more_chev.setPixmap(icons.pixmap("chevron-down" if self._more else "chevron-right", t.text_4, 14))
         model = self.model.value
@@ -626,6 +705,7 @@ class ScheduleDialog(Sheet):
     def values(self) -> Json:
         model = self.model.value
         out: Json = {
+            "kind": self.what_runs(),
             "name": self.name.text().strip(),
             "cwd": self.cwd.text().strip(),
             "prompt": self.prompt.toPlainText(),
@@ -636,6 +716,9 @@ class ScheduleDialog(Sheet):
             "maxMinutes": int(self.max_minutes.value()),
             "enabled": self.enabled.isChecked(),
         }
+        if out["kind"] == "dispatch":
+            out["playbookId"] = str(self.playbook.currentData() or "")
+            out["playbookName"] = str(self.playbook.currentText() or "")
         if self.spec.get("id"):
             out["id"] = self.spec["id"]
         return out
@@ -647,7 +730,10 @@ class ScheduleDialog(Sheet):
         if not v["name"]:
             store.toast("Give the schedule a name.", "warning")
             return
-        if not v["prompt"].strip():
+        if v["kind"] == "dispatch" and not v.get("playbookId"):
+            store.toast("Pick a playbook for the schedule.", "warning")
+            return
+        if v["kind"] != "dispatch" and not v["prompt"].strip():
             store.toast("Write what Claude should do each time.", "warning")
             return
         self._busy = True
@@ -683,6 +769,3 @@ def _row(title: str, note: str, control: QWidget) -> QWidget:
     lay.addLayout(col, 1)
     lay.addWidget(control, 0, Qt.AlignmentFlag.AlignVCenter)
     return box
-
-
-_ = (QSize, basename, List)

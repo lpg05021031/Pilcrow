@@ -1,0 +1,1444 @@
+{
+ "label": "2.9.8",
+ "heavy_turns": 600,
+ "mixed_turns": 2000,
+ "scenarios": {
+  "open_cold": {
+   "mixed": {
+    "loaded_ms": 552,
+    "rows_ms": 968,
+    "first_paint_ms": 45.1,
+    "total_ms": 1746,
+    "rss_delta_mb": 53.3,
+    "widgets": 1076,
+    "items": 8500,
+    "window": {
+     "layout": 815,
+     "paint": 770,
+     "paint_px": 137067637,
+     "resize": 1713,
+     "move": 38352,
+     "widgets_made": 293,
+     "cold_paints": 0
+    }
+   },
+   "heavy": {
+    "loaded_ms": 388,
+    "rows_ms": 632,
+    "first_paint_ms": 31.1,
+    "total_ms": 1307,
+    "rss_delta_mb": 25.2,
+    "widgets": 770,
+    "items": 3300,
+    "window": {
+     "layout": 723,
+     "paint": 780,
+     "paint_px": 126103260,
+     "resize": 1171,
+     "move": 7196,
+     "widgets_made": 143,
+     "cold_paints": 0
+    }
+   },
+   "_seconds": 3.1
+  },
+  "view_mode_cycle": {
+   "thinking": {
+    "to_paint_ms": 2922,
+    "stall_max_ms": 61.55,
+    "widgets_made": 126
+   },
+   "verbose": {
+    "to_paint_ms": 15041,
+    "stall_max_ms": 517.77,
+    "widgets_made": 126
+   },
+   "normal": {
+    "to_paint_ms": 1863,
+    "stall_max_ms": 380.3,
+    "widgets_made": 134
+   },
+   "_seconds": 20.3
+  },
+  "theme_toggle": {
+   "light": {
+    "to_paint_ms": 7540,
+    "stall_max_ms": 32.53,
+    "window": {
+     "layout": 2525,
+     "paint": 2170,
+     "paint_px": 183810247,
+     "resize": 2728,
+     "move": 3987,
+     "widgets_made": 0,
+     "cold_paints": 0
+    }
+   },
+   "dark": {
+    "to_paint_ms": 6799,
+    "stall_max_ms": 10.07,
+    "window": {
+     "layout": 2084,
+     "paint": 269,
+     "paint_px": 20736534,
+     "resize": 224,
+     "move": 112,
+     "widgets_made": 0,
+     "cold_paints": 0
+    }
+   },
+   "_seconds": 17.4
+  },
+  "fold_toggle": {
+   "folds": [
+    {
+     "action": "open",
+     "filmed": false,
+     "sync_ms": 48.0,
+     "stall": {
+      "n": 364,
+      "p50": 0.02,
+      "p95": 0.13,
+      "max": 10.8,
+      "mean": 0.07,
+      "over_16ms": 0,
+      "over_50ms": 0,
+      "wall_s": 0.8,
+      "cpu_pct": 5.1
+     },
+     "layout": 80,
+     "resize": 29,
+     "move": 45,
+     "paint": 79,
+     "scroll_sets": 0,
+     "height_frames": 0,
+     "anim_ms": 0,
+     "fps": 0,
+     "below_max_jump_px": 0
+    },
+    {
+     "action": "close",
+     "filmed": false,
+     "sync_ms": 11.0,
+     "stall": {
+      "n": 318,
+      "p50": 0.02,
+      "p95": 4.53,
+      "max": 7.32,
+      "mean": 0.38,
+      "over_16ms": 0,
+      "over_50ms": 0,
+      "wall_s": 0.8,
+      "cpu_pct": 16.8
+     },
+     "layout": 162,
+     "resize": 577,
+     "move": 714,
+     "paint": 1374,
+     "scroll_sets": 0,
+     "height_frames": 12,
+     "anim_ms": 166,
+     "fps": 72.2,
+     "below_max_jump_px": 0
+    },
+    {
+     "action": "open",
+     "filmed": true,
+     "sync_ms": 7.6,
+     "stall": {
+      "n": 84,
+      "p50": 0.09,
+      "p95": 5.68,
+      "max": 11.01,
+      "mean": 0.96,
+      "over_16ms": 0,
+      "over_50ms": 0,
+      "wall_s": 0.8,
+      "cpu_pct": 75.6
+     },
+     "layout": 132,
+     "resize": 259,
+     "move": 385,
+     "paint": 742,
+     "scroll_sets": 0,
+     "height_frames": 9,
+     "anim_ms": 250,
+     "fps": 35.9,
+     "below_max_jump_px": 0,
+     "flashes": 0,
+     "distinct_frames": 15
+    },
+    {
+     "action": "close",
+     "filmed": true,
+     "sync_ms": 7.9,
+     "stall": {
+      "n": 84,
+      "p50": 0.05,
+      "p95": 6.4,
+      "max": 7.93,
+      "mean": 1.04,
+      "over_16ms": 0,
+      "over_50ms": 0,
+      "wall_s": 0.8,
+      "cpu_pct": 77.4
+     },
+     "layout": 110,
+     "resize": 414,
+     "move": 501,
+     "paint": 895,
+     "scroll_sets": 0,
+     "height_frames": 8,
+     "anim_ms": 183,
+     "fps": 43.6,
+     "below_max_jump_px": 0,
+     "flashes": 0,
+     "distinct_frames": 17
+    },
+    {
+     "action": "open",
+     "filmed": false,
+     "sync_ms": 37.1,
+     "stall": {
+      "n": 265,
+      "p50": 0.03,
+      "p95": 6.05,
+      "max": 41.35,
+      "mean": 0.9,
+      "over_16ms": 1,
+      "over_50ms": 0,
+      "wall_s": 0.8,
+      "cpu_pct": 31.2
+     },
+     "layout": 128,
+     "resize": 72,
+     "move": 126,
+     "paint": 1689,
+     "scroll_sets": 24,
+     "height_frames": 0,
+     "anim_ms": 0,
+     "fps": 0,
+     "below_max_jump_px": 0
+    },
+    {
+     "action": "close",
+     "filmed": false,
+     "sync_ms": 39.8,
+     "stall": {
+      "n": 275,
+      "p50": 0.02,
+      "p95": 6.93,
+      "max": 22.84,
+      "mean": 0.8,
+      "over_16ms": 1,
+      "over_50ms": 0,
+      "wall_s": 0.8,
+      "cpu_pct": 28.1
+     },
+     "layout": 169,
+     "resize": 575,
+     "move": 746,
+     "paint": 1067,
+     "scroll_sets": 6,
+     "height_frames": 9,
+     "anim_ms": 190,
+     "fps": 47.3,
+     "below_max_jump_px": 0
+    },
+    {
+     "action": "open",
+     "filmed": true,
+     "sync_ms": 37.8,
+     "stall": {
+      "n": 53,
+      "p50": 5.56,
+      "p95": 16.25,
+      "max": 18.66,
+      "mean": 6.37,
+      "over_16ms": 2,
+      "over_50ms": 0,
+      "wall_s": 0.8,
+      "cpu_pct": 85.8
+     },
+     "layout": 171,
+     "resize": 201,
+     "move": 384,
+     "paint": 2179,
+     "scroll_sets": 30,
+     "height_frames": 7,
+     "anim_ms": 372,
+     "fps": 18.8,
+     "below_max_jump_px": 0,
+     "flashes": 0,
+     "distinct_frames": 32
+    },
+    {
+     "action": "close",
+     "filmed": true,
+     "sync_ms": 37.6,
+     "stall": {
+      "n": 69,
+      "p50": 0.06,
+      "p95": 11.62,
+      "max": 27.21,
+      "mean": 2.77,
+      "over_16ms": 1,
+      "over_50ms": 0,
+      "wall_s": 0.81,
+      "cpu_pct": 81.6
+     },
+     "layout": 152,
+     "resize": 389,
+     "move": 500,
+     "paint": 1013,
+     "scroll_sets": 5,
+     "height_frames": 6,
+     "anim_ms": 215,
+     "fps": 27.9,
+     "below_max_jump_px": 0,
+     "flashes": 0,
+     "distinct_frames": 19
+    },
+    {
+     "action": "open",
+     "filmed": false,
+     "sync_ms": 18.6,
+     "stall": {
+      "n": 285,
+      "p50": 0.02,
+      "p95": 0.15,
+      "max": 11.02,
+      "mean": 0.08,
+      "over_16ms": 0,
+      "over_50ms": 0,
+      "wall_s": 0.8,
+      "cpu_pct": 25.8
+     },
+     "layout": 57,
+     "resize": 21,
+     "move": 34,
+     "paint": 70,
+     "scroll_sets": 0,
+     "height_frames": 0,
+     "anim_ms": 0,
+     "fps": 0,
+     "below_max_jump_px": 0
+    },
+    {
+     "action": "close",
+     "filmed": false,
+     "sync_ms": 6.8,
+     "stall": {
+      "n": 222,
+      "p50": 0.03,
+      "p95": 6.17,
+      "max": 11.19,
+      "mean": 0.56,
+      "over_16ms": 0,
+      "over_50ms": 0,
+      "wall_s": 0.8,
+      "cpu_pct": 42.0
+     },
+     "layout": 112,
+     "resize": 386,
+     "move": 463,
+     "paint": 834,
+     "scroll_sets": 0,
+     "height_frames": 10,
+     "anim_ms": 169,
+     "fps": 59.2,
+     "below_max_jump_px": 9
+    },
+    {
+     "action": "open",
+     "filmed": true,
+     "sync_ms": 4.3,
+     "stall": {
+      "n": 75,
+      "p50": 0.11,
+      "p95": 6.19,
+      "max": 7.09,
+      "mean": 0.91,
+      "over_16ms": 0,
+      "over_50ms": 0,
+      "wall_s": 0.81,
+      "cpu_pct": 80.4
+     },
+     "layout": 101,
+     "resize": 140,
+     "move": 225,
+     "paint": 588,
+     "scroll_sets": 0,
+     "height_frames": 8,
+     "anim_ms": 238,
+     "fps": 33.7,
+     "below_max_jump_px": 12,
+     "flashes": 0,
+     "distinct_frames": 16
+    },
+    {
+     "action": "close",
+     "filmed": true,
+     "sync_ms": 4.7,
+     "stall": {
+      "n": 83,
+      "p50": 0.04,
+      "p95": 6.55,
+      "max": 8.46,
+      "mean": 0.91,
+      "over_16ms": 0,
+      "over_50ms": 0,
+      "wall_s": 0.81,
+      "cpu_pct": 78.3
+     },
+     "layout": 83,
+     "resize": 293,
+     "move": 356,
+     "paint": 640,
+     "scroll_sets": 0,
+     "height_frames": 7,
+     "anim_ms": 154,
+     "fps": 45.4,
+     "below_max_jump_px": 11,
+     "flashes": 0,
+     "distinct_frames": 14
+    }
+   ],
+   "summary": {
+    "toggles": 12,
+    "layout_per_toggle": 118.0,
+    "paint_per_toggle": 852.2,
+    "scroll_sets_per_toggle": 5.0,
+    "sync_max_ms": 48.0,
+    "stall_p95_ms": 6.93,
+    "stall_max_ms": 41.35,
+    "fps_min_animated": 47.3,
+    "below_max_jump_px": 12,
+    "flashes": 0
+   },
+   "_seconds": 12.4
+  },
+  "thinking_toggle": {
+   "thinking": [
+    {
+     "action": "open",
+     "filmed": false,
+     "sync_ms": 9.0,
+     "stall": {
+      "n": 286,
+      "p50": 0.03,
+      "p95": 8.07,
+      "max": 15.73,
+      "mean": 0.66,
+      "over_16ms": 0,
+      "over_50ms": 0,
+      "wall_s": 0.8,
+      "cpu_pct": 25.1
+     },
+     "layout": 12,
+     "resize": 23,
+     "move": 59,
+     "paint": 1319,
+     "scroll_sets": 19,
+     "height_frames": 0,
+     "anim_ms": 0,
+     "fps": 0,
+     "below_max_jump_px": 0
+    },
+    {
+     "action": "close",
+     "filmed": false,
+     "sync_ms": 7.7,
+     "stall": {
+      "n": 289,
+      "p50": 0.04,
+      "p95": 5.34,
+      "max": 12.42,
+      "mean": 0.64,
+      "over_16ms": 0,
+      "over_50ms": 0,
+      "wall_s": 0.8,
+      "cpu_pct": 24.4
+     },
+     "layout": 100,
+     "resize": 353,
+     "move": 510,
+     "paint": 804,
+     "scroll_sets": 5,
+     "height_frames": 12,
+     "anim_ms": 174,
+     "fps": 69.1,
+     "below_max_jump_px": 0
+    },
+    {
+     "action": "open",
+     "filmed": true,
+     "sync_ms": 9.1,
+     "stall": {
+      "n": 45,
+      "p50": 1.07,
+      "p95": 13.39,
+      "max": 19.37,
+      "mean": 4.42,
+      "over_16ms": 1,
+      "over_50ms": 0,
+      "wall_s": 0.81,
+      "cpu_pct": 87.0
+     },
+     "layout": 125,
+     "resize": 874,
+     "move": 915,
+     "paint": 948,
+     "scroll_sets": 14,
+     "height_frames": 3,
+     "anim_ms": 108,
+     "fps": 27.8,
+     "below_max_jump_px": 0,
+     "flashes": 0,
+     "distinct_frames": 14
+    },
+    {
+     "action": "close",
+     "filmed": true,
+     "sync_ms": 6.0,
+     "stall": {
+      "n": 75,
+      "p50": 0.05,
+      "p95": 10.33,
+      "max": 14.0,
+      "mean": 1.39,
+      "over_16ms": 0,
+      "over_50ms": 0,
+      "wall_s": 0.81,
+      "cpu_pct": 80.6
+     },
+     "layout": 74,
+     "resize": 239,
+     "move": 329,
+     "paint": 422,
+     "scroll_sets": 3,
+     "height_frames": 7,
+     "anim_ms": 162,
+     "fps": 43.1,
+     "below_max_jump_px": 0,
+     "flashes": 0,
+     "distinct_frames": 9
+    },
+    {
+     "action": "open",
+     "filmed": false,
+     "sync_ms": 10.6,
+     "stall": {
+      "n": 170,
+      "p50": 0.04,
+      "p95": 0.14,
+      "max": 16.68,
+      "mean": 0.15,
+      "over_16ms": 1,
+      "over_50ms": 0,
+      "wall_s": 0.8,
+      "cpu_pct": 55.6
+     },
+     "layout": 12,
+     "resize": 25,
+     "move": 40,
+     "paint": 97,
+     "scroll_sets": 0,
+     "height_frames": 0,
+     "anim_ms": 0,
+     "fps": 0,
+     "below_max_jump_px": 0
+    },
+    {
+     "action": "close",
+     "filmed": false,
+     "sync_ms": 2.6,
+     "stall": {
+      "n": 135,
+      "p50": 0.05,
+      "p95": 8.97,
+      "max": 13.03,
+      "mean": 1.07,
+      "over_16ms": 0,
+      "over_50ms": 0,
+      "wall_s": 0.8,
+      "cpu_pct": 64.9
+     },
+     "layout": 71,
+     "resize": 241,
+     "move": 321,
+     "paint": 946,
+     "scroll_sets": 0,
+     "height_frames": 7,
+     "anim_ms": 185,
+     "fps": 37.8,
+     "below_max_jump_px": 33
+    },
+    {
+     "action": "open",
+     "filmed": true,
+     "sync_ms": 19.5,
+     "stall": {
+      "n": 52,
+      "p50": 0.84,
+      "p95": 5.64,
+      "max": 14.08,
+      "mean": 2.01,
+      "over_16ms": 0,
+      "over_50ms": 0,
+      "wall_s": 0.81,
+      "cpu_pct": 84.2
+     },
+     "layout": 142,
+     "resize": 29,
+     "move": 45,
+     "paint": 347,
+     "scroll_sets": 0,
+     "height_frames": 2,
+     "anim_ms": 86,
+     "fps": 23.1,
+     "below_max_jump_px": 52,
+     "flashes": 0,
+     "distinct_frames": 4
+    },
+    {
+     "action": "close",
+     "filmed": true,
+     "sync_ms": 3.1,
+     "stall": {
+      "n": 52,
+      "p50": 0.11,
+      "p95": 8.9,
+      "max": 10.64,
+      "mean": 1.96,
+      "over_16ms": 0,
+      "over_50ms": 0,
+      "wall_s": 0.8,
+      "cpu_pct": 85.8
+     },
+     "layout": 62,
+     "resize": 182,
+     "move": 252,
+     "paint": 912,
+     "scroll_sets": 0,
+     "height_frames": 6,
+     "anim_ms": 177,
+     "fps": 34.0,
+     "below_max_jump_px": 31,
+     "flashes": 0,
+     "distinct_frames": 14
+    }
+   ],
+   "summary": {
+    "toggles": 8,
+    "layout_per_toggle": 48.8,
+    "paint_per_toggle": 791.5,
+    "scroll_sets_per_toggle": 6.0,
+    "sync_max_ms": 10.6,
+    "stall_p95_ms": 8.97,
+    "stall_max_ms": 16.68,
+    "fps_min_animated": 37.8,
+    "below_max_jump_px": 52,
+    "flashes": 0
+   },
+   "_seconds": 27.1
+  },
+  "tool_toggle": {
+   "tools": [
+    {
+     "action": "open",
+     "filmed": false,
+     "sync_ms": 90.0,
+     "stall": {
+      "n": 124,
+      "p50": 0.05,
+      "p95": 7.55,
+      "max": 75.72,
+      "mean": 1.75,
+      "over_16ms": 1,
+      "over_50ms": 1,
+      "wall_s": 0.8,
+      "cpu_pct": 67.6
+     },
+     "layout": 65,
+     "resize": 41,
+     "move": 87,
+     "paint": 1292,
+     "scroll_sets": 18,
+     "height_frames": 0,
+     "anim_ms": 0,
+     "fps": 0,
+     "below_max_jump_px": 13
+    },
+    {
+     "action": "close",
+     "filmed": false,
+     "sync_ms": 7.9,
+     "stall": {
+      "n": 102,
+      "p50": 0.07,
+      "p95": 8.8,
+      "max": 39.21,
+      "mean": 1.95,
+      "over_16ms": 1,
+      "over_50ms": 0,
+      "wall_s": 0.81,
+      "cpu_pct": 72.8
+     },
+     "layout": 85,
+     "resize": 257,
+     "move": 372,
+     "paint": 738,
+     "scroll_sets": 2,
+     "height_frames": 8,
+     "anim_ms": 171,
+     "fps": 46.8,
+     "below_max_jump_px": 77
+    },
+    {
+     "action": "open",
+     "filmed": true,
+     "sync_ms": 39.6,
+     "stall": {
+      "n": 44,
+      "p50": 5.73,
+      "p95": 14.34,
+      "max": 22.81,
+      "mean": 6.06,
+      "over_16ms": 2,
+      "over_50ms": 0,
+      "wall_s": 0.8,
+      "cpu_pct": 88.2
+     },
+     "layout": 107,
+     "resize": 179,
+     "move": 294,
+     "paint": 1769,
+     "scroll_sets": 20,
+     "height_frames": 6,
+     "anim_ms": 225,
+     "fps": 26.7,
+     "below_max_jump_px": 57,
+     "flashes": 0,
+     "distinct_frames": 26
+    },
+    {
+     "action": "close",
+     "filmed": true,
+     "sync_ms": 6.6,
+     "stall": {
+      "n": 51,
+      "p50": 0.11,
+      "p95": 10.54,
+      "max": 35.12,
+      "mean": 3.17,
+      "over_16ms": 1,
+      "over_50ms": 0,
+      "wall_s": 0.81,
+      "cpu_pct": 85.1
+     },
+     "layout": 71,
+     "resize": 251,
+     "move": 355,
+     "paint": 740,
+     "scroll_sets": 2,
+     "height_frames": 6,
+     "anim_ms": 232,
+     "fps": 25.9,
+     "below_max_jump_px": 58,
+     "flashes": 0,
+     "distinct_frames": 16
+    },
+    {
+     "action": "open",
+     "filmed": false,
+     "sync_ms": 61.0,
+     "stall": {
+      "n": 261,
+      "p50": 0.03,
+      "p95": 7.43,
+      "max": 34.99,
+      "mean": 0.94,
+      "over_16ms": 1,
+      "over_50ms": 0,
+      "wall_s": 0.8,
+      "cpu_pct": 32.2
+     },
+     "layout": 80,
+     "resize": 44,
+     "move": 95,
+     "paint": 1437,
+     "scroll_sets": 23,
+     "height_frames": 0,
+     "anim_ms": 0,
+     "fps": 0,
+     "below_max_jump_px": 0
+    },
+    {
+     "action": "close",
+     "filmed": false,
+     "sync_ms": 5.4,
+     "stall": {
+      "n": 253,
+      "p50": 0.03,
+      "p95": 7.67,
+      "max": 30.79,
+      "mean": 1.04,
+      "over_16ms": 1,
+      "over_50ms": 0,
+      "wall_s": 0.8,
+      "cpu_pct": 34.2
+     },
+     "layout": 119,
+     "resize": 514,
+     "move": 751,
+     "paint": 983,
+     "scroll_sets": 4,
+     "height_frames": 11,
+     "anim_ms": 216,
+     "fps": 50.8,
+     "below_max_jump_px": 0
+    },
+    {
+     "action": "open",
+     "filmed": true,
+     "sync_ms": 91.1,
+     "stall": {
+      "n": 41,
+      "p50": 6.85,
+      "p95": 22.12,
+      "max": 40.25,
+      "mean": 8.73,
+      "over_16ms": 3,
+      "over_50ms": 0,
+      "wall_s": 0.81,
+      "cpu_pct": 89.6
+     },
+     "layout": 113,
+     "resize": 232,
+     "move": 376,
+     "paint": 1551,
+     "scroll_sets": 20,
+     "height_frames": 11,
+     "anim_ms": 343,
+     "fps": 32.1,
+     "below_max_jump_px": 0,
+     "flashes": 0,
+     "distinct_frames": 26
+    },
+    {
+     "action": "close",
+     "filmed": true,
+     "sync_ms": 6.7,
+     "stall": {
+      "n": 51,
+      "p50": 0.13,
+      "p95": 14.44,
+      "max": 31.66,
+      "mean": 4.54,
+      "over_16ms": 1,
+      "over_50ms": 0,
+      "wall_s": 0.8,
+      "cpu_pct": 86.2
+     },
+     "layout": 67,
+     "resize": 338,
+     "move": 483,
+     "paint": 931,
+     "scroll_sets": 8,
+     "height_frames": 7,
+     "anim_ms": 245,
+     "fps": 28.5,
+     "below_max_jump_px": 0,
+     "flashes": 0,
+     "distinct_frames": 17
+    },
+    {
+     "action": "open",
+     "filmed": false,
+     "sync_ms": 6.6,
+     "stall": {
+      "n": 241,
+      "p50": 0.03,
+      "p95": 8.09,
+      "max": 50.94,
+      "mean": 1.19,
+      "over_16ms": 3,
+      "over_50ms": 1,
+      "wall_s": 0.8,
+      "cpu_pct": 35.7
+     },
+     "layout": 111,
+     "resize": 659,
+     "move": 978,
+     "paint": 1352,
+     "scroll_sets": 2,
+     "height_frames": 11,
+     "anim_ms": 241,
+     "fps": 45.7,
+     "below_max_jump_px": 0
+    },
+    {
+     "action": "close",
+     "filmed": false,
+     "sync_ms": 62.1,
+     "stall": {
+      "n": 167,
+      "p50": 0.11,
+      "p95": 10.54,
+      "max": 30.84,
+      "mean": 2.68,
+      "over_16ms": 2,
+      "over_50ms": 0,
+      "wall_s": 0.8,
+      "cpu_pct": 56.4
+     },
+     "layout": 212,
+     "resize": 247,
+     "move": 489,
+     "paint": 2822,
+     "scroll_sets": 29,
+     "height_frames": 12,
+     "anim_ms": 353,
+     "fps": 34.0,
+     "below_max_jump_px": 0
+    },
+    {
+     "action": "open",
+     "filmed": true,
+     "sync_ms": 11.5,
+     "stall": {
+      "n": 57,
+      "p50": 0.14,
+      "p95": 9.4,
+      "max": 51.18,
+      "mean": 3.41,
+      "over_16ms": 1,
+      "over_50ms": 1,
+      "wall_s": 0.8,
+      "cpu_pct": 84.8
+     },
+     "layout": 89,
+     "resize": 468,
+     "move": 690,
+     "paint": 1139,
+     "scroll_sets": 3,
+     "height_frames": 9,
+     "anim_ms": 239,
+     "fps": 37.7,
+     "below_max_jump_px": 0,
+     "flashes": 0,
+     "distinct_frames": 22
+    },
+    {
+     "action": "close",
+     "filmed": true,
+     "sync_ms": 43.0,
+     "stall": {
+      "n": 50,
+      "p50": 6.01,
+      "p95": 15.01,
+      "max": 16.18,
+      "mean": 5.81,
+      "over_16ms": 0,
+      "over_50ms": 0,
+      "wall_s": 0.8,
+      "cpu_pct": 86.5
+     },
+     "layout": 169,
+     "resize": 131,
+     "move": 268,
+     "paint": 1870,
+     "scroll_sets": 26,
+     "height_frames": 6,
+     "anim_ms": 299,
+     "fps": 20.0,
+     "below_max_jump_px": 0,
+     "flashes": 0,
+     "distinct_frames": 28
+    }
+   ],
+   "summary": {
+    "toggles": 12,
+    "layout_per_toggle": 112.0,
+    "paint_per_toggle": 1437.3,
+    "scroll_sets_per_toggle": 13.0,
+    "sync_max_ms": 90.0,
+    "stall_p95_ms": 10.54,
+    "stall_max_ms": 75.72,
+    "fps_min_animated": 34.0,
+    "below_max_jump_px": 77,
+    "flashes": 0
+   },
+   "_seconds": 13.8
+  },
+  "hover_sweep": {
+   "moves": 232,
+   "stall": {
+    "n": 766,
+    "p50": 0.03,
+    "p95": 1.46,
+    "max": 3.16,
+    "mean": 0.18,
+    "over_16ms": 0,
+    "over_50ms": 0,
+    "wall_s": 1.94,
+    "cpu_pct": 16.8
+   },
+   "layout": 271,
+   "paint": 513,
+   "paint_px": 3451958,
+   "resize": 29,
+   "move": 56,
+   "widgets_made": 0,
+   "cold_paints": 0,
+   "_seconds": 5.6
+  },
+  "streaming_follow": {
+   "stall": {
+    "n": 320,
+    "p50": 0.22,
+    "p95": 30.57,
+    "max": 3018.67,
+    "mean": 35.45,
+    "over_16ms": 25,
+    "over_50ms": 10,
+    "wall_s": 12.04,
+    "cpu_pct": 93.5
+   },
+   "render": {
+    "n": 40,
+    "p50": 9.62,
+    "p95": 39.25,
+    "max": 42.22,
+    "mean": 12.68
+   },
+   "layout_per_s": 20,
+   "paint_per_s": 278,
+   "transcript": {
+    "layout": 246,
+    "paint": 3348,
+    "paint_px": 243173674,
+    "resize": 827,
+    "move": 2368,
+    "widgets_made": 15,
+    "cold_paints": 0
+   },
+   "window_widgets_made": 891,
+   "items_after": 3329,
+   "filmed": {
+    "frames": 37,
+    "flashes": 0,
+    "blank_fraction": 0.0
+   },
+   "_seconds": 30.1
+  },
+  "streaming_scrolled_up": {
+   "stall": {
+    "n": 36,
+    "p50": 1.28,
+    "p95": 3592.27,
+    "max": 4093.82,
+    "mean": 312.86,
+    "over_16ms": 9,
+    "over_50ms": 4,
+    "wall_s": 13.96,
+    "cpu_pct": 98.2
+   },
+   "scroll_moved_px": 0,
+   "scroll_sets": 0,
+   "shift": {
+    "frames": 36,
+    "moved_frames": 4,
+    "unexpected_frames": 4,
+    "unexpected_px": 165,
+    "max_jump_px": 64
+   },
+   "flashes": 0,
+   "layout": 74,
+   "paint": 135,
+   "latest_pill_shown": true,
+   "_seconds": 15.8
+  },
+  "typing": {
+   "chars": 240,
+   "stall": {
+    "n": 247,
+    "p50": 3.67,
+    "p95": 5.7,
+    "max": 11.94,
+    "mean": 3.81,
+    "over_16ms": 0,
+    "over_50ms": 0,
+    "wall_s": 6.02,
+    "cpu_pct": 90.6
+   },
+   "shift": {
+    "frames": 247,
+    "moved_frames": 0,
+    "unexpected_frames": 0,
+    "unexpected_px": 0,
+    "max_jump_px": 0
+   },
+   "layout": 0,
+   "paint": 52,
+   "paint_px": 12673891,
+   "resize": 8,
+   "move": 10,
+   "widgets_made": 0,
+   "cold_paints": 0,
+   "_seconds": 7.0
+  },
+  "resize_window": {
+   "steps": 26,
+   "step": {
+    "n": 26,
+    "p50": 27.37,
+    "p95": 190.84,
+    "max": 203.41,
+    "mean": 77.16
+   },
+   "over_50ms": 10,
+   "flashes": 0,
+   "layout": 359,
+   "paint": 1759,
+   "paint_px": 177100298,
+   "resize": 11426,
+   "move": 14316,
+   "widgets_made": 0,
+   "cold_paints": 0,
+   "_seconds": 3.1
+  },
+  "switch_session": {
+   "switch": {
+    "n": 10,
+    "p50": 7805.32,
+    "p95": 8942.26,
+    "max": 8942.26,
+    "mean": 6804.42
+   },
+   "widgets_made_per_switch": 374,
+   "rss_growth_mb": 90.7,
+   "_seconds": 76.7
+  },
+  "panel_tabs": {
+   "tabs": {
+    "changes": {
+     "first_turn_ms": 40.6,
+     "stall_max_ms": 40.64,
+     "widgets_made": 0,
+     "layout": 0,
+     "paint": 232,
+     "total_ms": 1205
+    },
+    "files": {
+     "first_turn_ms": 31.0,
+     "stall_max_ms": 30.97,
+     "widgets_made": 1,
+     "layout": 45,
+     "paint": 171,
+     "total_ms": 1280
+    },
+    "terminal": {
+     "first_turn_ms": 22.2,
+     "stall_max_ms": 22.19,
+     "widgets_made": 1,
+     "layout": 11,
+     "paint": 140,
+     "total_ms": 1257
+    },
+    "preview": {
+     "first_turn_ms": 26.7,
+     "stall_max_ms": 26.69,
+     "widgets_made": 1,
+     "layout": 10,
+     "paint": 124,
+     "total_ms": 1233
+    },
+    "tasks": {
+     "first_turn_ms": 31.5,
+     "stall_max_ms": 31.55,
+     "widgets_made": 1,
+     "layout": 120,
+     "paint": 1260,
+     "total_ms": 1292
+    },
+    "history": {
+     "first_turn_ms": 19.5,
+     "stall_max_ms": 1706.94,
+     "widgets_made": 301,
+     "layout": 1230,
+     "paint": 644,
+     "total_ms": 2947
+    },
+    "info": {
+     "first_turn_ms": 61.4,
+     "stall_max_ms": 67.82,
+     "widgets_made": 6,
+     "layout": 691,
+     "paint": 419,
+     "total_ms": 1308
+    }
+   },
+   "drag": {
+    "step": {
+     "n": 32,
+     "p50": 30.42,
+     "p95": 153.72,
+     "max": 160.6,
+     "mean": 60.16
+    },
+    "layout": 13,
+    "paint": 6733
+   },
+   "_seconds": 23.1
+  },
+  "panel_while_streaming": {
+   "changes": {
+    "stall": {
+     "n": 380,
+     "p50": 1.98,
+     "p95": 122.06,
+     "max": 525.84,
+     "mean": 21.57,
+     "over_16ms": 78,
+     "over_50ms": 44,
+     "wall_s": 9.0,
+     "cpu_pct": 90.9
+    },
+    "panel": {
+     "layout": 1037,
+     "paint": 4740,
+     "paint_px": 115669640,
+     "resize": 18,
+     "move": 79,
+     "widgets_made": 56,
+     "cold_paints": 0
+    },
+    "panel_widgets_made_per_s": 6,
+    "transcript_layout": 532
+   },
+   "tasks": {
+    "stall": {
+     "n": 318,
+     "p50": 7.15,
+     "p95": 134.21,
+     "max": 316.92,
+     "mean": 25.68,
+     "over_16ms": 86,
+     "over_50ms": 48,
+     "wall_s": 8.85,
+     "cpu_pct": 92.3
+    },
+    "panel": {
+     "layout": 2168,
+     "paint": 7111,
+     "paint_px": 272075599,
+     "resize": 2494,
+     "move": 2576,
+     "widgets_made": 51,
+     "cold_paints": 0
+    },
+    "panel_widgets_made_per_s": 6,
+    "transcript_layout": 551
+   },
+   "files": {
+    "stall": {
+     "n": 593,
+     "p50": 0.44,
+     "p95": 76.57,
+     "max": 348.99,
+     "mean": 12.79,
+     "over_16ms": 78,
+     "over_50ms": 38,
+     "wall_s": 8.84,
+     "cpu_pct": 85.2
+    },
+    "panel": {
+     "layout": 961,
+     "paint": 665,
+     "paint_px": 83604864,
+     "resize": 0,
+     "move": 0,
+     "widgets_made": 51,
+     "cold_paints": 0
+    },
+    "panel_widgets_made_per_s": 6,
+    "transcript_layout": 487
+   },
+   "info": {
+    "stall": {
+     "n": 416,
+     "p50": 1.27,
+     "p95": 119.59,
+     "max": 532.95,
+     "mean": 19.58,
+     "over_16ms": 75,
+     "over_50ms": 36,
+     "wall_s": 9.03,
+     "cpu_pct": 89.6
+    },
+    "panel": {
+     "layout": 960,
+     "paint": 1680,
+     "paint_px": 96291160,
+     "resize": 0,
+     "move": 0,
+     "widgets_made": 56,
+     "cold_paints": 0
+    },
+    "panel_widgets_made_per_s": 6,
+    "transcript_layout": 522
+   },
+   "history": {
+    "stall": {
+     "n": 507,
+     "p50": 0.77,
+     "p95": 102.29,
+     "max": 580.3,
+     "mean": 15.8,
+     "over_16ms": 74,
+     "over_50ms": 42,
+     "wall_s": 9.09,
+     "cpu_pct": 86.5
+    },
+    "panel": {
+     "layout": 963,
+     "paint": 3460,
+     "paint_px": 100125600,
+     "resize": 0,
+     "move": 0,
+     "widgets_made": 51,
+     "cold_paints": 0
+    },
+    "panel_widgets_made_per_s": 6,
+    "transcript_layout": 506
+   },
+   "_seconds": 53.2
+  },
+  "scroll_wheel": {
+   "up": {
+    "stall": {
+     "n": 382,
+     "p50": 6.7,
+     "p95": 10.55,
+     "max": 194.08,
+     "mean": 8.21,
+     "over_16ms": 3,
+     "over_50ms": 3,
+     "wall_s": 4.02,
+     "cpu_pct": 79.4
+    },
+    "px_travelled": 27791,
+    "px_per_s": 6906,
+    "layout": 152,
+    "paint": 16679,
+    "paint_px": 2381634879,
+    "resize": 497,
+    "move": 1790,
+    "widgets_made": 16,
+    "cold_paints": 0
+   },
+   "down": {
+    "stall": {
+     "n": 322,
+     "p50": 6.73,
+     "p95": 10.59,
+     "max": 12.42,
+     "mean": 7.0,
+     "over_16ms": 0,
+     "over_50ms": 0,
+     "wall_s": 3.0,
+     "cpu_pct": 76.9
+    },
+    "px_travelled": 21600,
+    "px_per_s": 7198,
+    "layout": 0,
+    "paint": 12642,
+    "paint_px": 1988126994,
+    "resize": 0,
+    "move": 360,
+    "widgets_made": 0,
+    "cold_paints": 0
+   },
+   "up_filmed": {
+    "stall": {
+     "n": 135,
+     "p50": 7.16,
+     "p95": 10.13,
+     "max": 15.82,
+     "mean": 7.42,
+     "over_16ms": 0,
+     "over_50ms": 0,
+     "wall_s": 2.51,
+     "cpu_pct": 88.1
+    },
+    "px_travelled": 18000,
+    "px_per_s": 7175,
+    "layout": 0,
+    "paint": 5661,
+    "paint_px": 841628004,
+    "resize": 206,
+    "move": 506,
+    "widgets_made": 0,
+    "cold_paints": 0,
+    "blank_fraction": 0.0,
+    "flashes": 0,
+    "shift": {
+     "frames": 135,
+     "moved_frames": 134,
+     "unexpected_frames": 134,
+     "unexpected_px": 35760,
+     "max_jump_px": 480
+    }
+   },
+   "_seconds": 10.9
+  },
+  "scroll_drag": {
+   "step": {
+    "n": 81,
+    "p50": 281.24,
+    "p95": 363.85,
+    "max": 421.74,
+    "mean": 218.96
+   },
+   "over_16ms": 58,
+   "layout": 8254,
+   "paint": 2343,
+   "paint_px": 797473775,
+   "resize": 28024,
+   "move": 92587,
+   "widgets_made": 456,
+   "cold_paints": 0,
+   "_seconds": 18.3
+  },
+  "find": {
+   "open_ms": 24039,
+   "search_ms": 4077,
+   "stall_max_ms": 127.62,
+   "entries": 2700,
+   "widgets": 21682,
+   "_seconds": 29.1
+  },
+  "idle": {
+   "quiet_cpu_pct": 3.3,
+   "busy_look_cpu_pct": 9.1,
+   "_seconds": 9.5
+  }
+ },
+ "generated": {
+  "heavy": {
+   "id": "sess-heavy",
+   "turns": 600,
+   "messages": 5200,
+   "bytes": 5718543
+  },
+  "mixed": {
+   "id": "sess-mixed",
+   "turns": 2000,
+   "messages": 10500,
+   "bytes": 4098040
+  },
+  "ms": 207
+ }
+}

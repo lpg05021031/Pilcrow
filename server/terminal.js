@@ -11,10 +11,16 @@ import { fileURLToPath } from 'node:url';
 import { which, uuid, log, cleanEnv, IS_WIN, HOME, slash } from './util.js';
 
 const BRIDGE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'pty_bridge.py');
-const SCROLLBACK = 400 * 1024;
+const SCROLLBACK = 400 * 1024; // characters of output a terminal keeps for a window that opens it later
+const KILL_GRACE_MS = 1500; // a shell that ignores SIGHUP this long gets SIGKILL
 const require = createRequire(import.meta.url);
 
 export const terminals = new EventEmitter();
+/**
+ * @typedef {{ id: string, cwd: string, io: any, resizable: boolean, chunks: string[], size: number, exited: { code: number | null, signal: string | null } | null,
+ *   title: string, cols: number, rows: number, typed: boolean }} Term
+ * @type {Map<string, Term>}
+ */
 const all = new Map();
 
 let nodePty;
@@ -117,20 +123,23 @@ function openUnix({ caps, argv, cwd, env, cols, rows }) {
     write: (d) => proc.stdin.write(d),
     resize: (c, r) => {
       try {
-        proc.stdio[3].write(JSON.stringify({ cols: c, rows: r }) + '\n');
+        /** @type {import('node:stream').Writable} */ (proc.stdio[3]).write(JSON.stringify({ cols: c, rows: r }) + '\n');
       } catch {
         /* bridge gone */
       }
     },
-    kill: () => {
-      try {
+    /** Hang up, then SIGKILL after a grace period; settles when the process is gone. */
+    kill: () =>
+      new Promise((resolve) => {
+        if (proc.exitCode !== null || proc.signalCode !== null) return resolve(undefined);
+        const hard = setTimeout(() => proc.kill('SIGKILL'), KILL_GRACE_MS);
+        proc.once('exit', () => {
+          clearTimeout(hard);
+          resolve(undefined);
+        });
         proc.stdin.end();
         proc.kill('SIGHUP');
-        setTimeout(() => proc.exitCode === null && proc.kill('SIGKILL'), 1500);
-      } catch {
-        /* already gone */
-      }
-    },
+      }),
   };
 }
 
@@ -157,13 +166,18 @@ export function open({ cwd, cols = 100, rows = 30, command }) {
     io = openUnix({ caps, argv: command ? [shell, '-lc', command] : [shell, '-l'], cwd: dir, env, cols, rows });
   }
   const id = uuid();
-  const term = { id, cwd: slash(dir), io, resizable: io.resizable, buffer: '', exited: null, title: path.basename(dir) || dir, cols, rows, typed: false };
+  // The scrollback is a list of chunks: dropping whole old chunks keeps an append from copying it all.
+  /** @type {Term} */
+  const term = { id, cwd: slash(dir), io, resizable: io.resizable, chunks: [], size: 0, exited: null, title: path.basename(dir) || dir, cols, rows, typed: false };
   all.set(id, term);
   const started = Date.now();
   const emit = (data) => {
     if (!data) return;
-    term.buffer += data;
-    if (term.buffer.length > SCROLLBACK) term.buffer = term.buffer.slice(-SCROLLBACK);
+    term.chunks.push(data);
+    term.size += data.length;
+    let drop = 0;
+    while (term.size - term.chunks[drop].length >= SCROLLBACK) term.size -= term.chunks[drop++].length;
+    if (drop) term.chunks.splice(0, drop);
     terminals.emit('data', { id, data });
   };
   const attach = (cur) => {
@@ -205,16 +219,16 @@ export function resize(id, cols, rows) {
   t.io.resize(cols, rows);
 }
 
-export function close(id) {
+/** End a terminal; settles when its process is gone (at once where the kill cannot be watched). */
+export async function close(id) {
   const t = all.get(id);
   if (!t) return;
   all.delete(id);
-  if (!t.exited) {
-    try {
-      t.io.kill();
-    } catch {
-      /* already gone */
-    }
+  if (t.exited) return;
+  try {
+    await t.io.kill();
+  } catch {
+    /* already gone */
   }
 }
 
@@ -224,9 +238,9 @@ export function list() {
 
 export function snapshot(id) {
   const t = all.get(id);
-  return t ? { id, buffer: t.buffer, exited: t.exited, cwd: t.cwd, resizable: t.resizable } : null;
+  return t ? { id, buffer: t.chunks.join('').slice(-SCROLLBACK), exited: t.exited, cwd: t.cwd, resizable: t.resizable } : null;
 }
 
 export function closeAll() {
-  for (const id of [...all.keys()]) close(id);
+  return Promise.all([...all.keys()].map(close));
 }

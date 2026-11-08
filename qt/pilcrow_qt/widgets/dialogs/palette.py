@@ -8,12 +8,14 @@ from typing import Callable, List, Optional
 
 from PySide6.QtCore import QEvent, QObject, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetricsF, QPainter
-from PySide6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QLineEdit, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QLineEdit, QScrollArea, QVBoxLayout, QWidget
 
 from ... import icons, theme
 from ...lib.fmt import basename, time_ago
 from ...lib.fuzzy import fuzzy_filter
+from ...lib.shortcuts import SHORTCUTS as K
 from ...store import store
+from ..ui.bits import hairline
 from ..ui.signals import bind
 from .parts import Keys, sheet_bg, web_font
 from .sheet import Sheet
@@ -85,13 +87,13 @@ class PalItem(QWidget):
             self._active = on
             self.update()
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         if self.keys is not None:
             kw = self.keys.sizeHint().width()
             self.keys.setGeometry(self.width() - 10 - kw, 9, kw, 18)
         super().resizeEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -124,11 +126,11 @@ class PalItem(QWidget):
                     hm.elidedText(self.cmd.hint, Qt.TextElideMode.ElideRight, hw),
                 )
 
-    def enterEvent(self, e) -> None:  # noqa: N802
+    def enterEvent(self, e) -> None:
         self.entered.emit()
         super().enterEvent(e)
 
-    def mouseReleaseEvent(self, e) -> None:  # noqa: N802
+    def mouseReleaseEvent(self, e) -> None:
         if e.button() == Qt.MouseButton.LeftButton:
             self.chosen.emit()
 
@@ -158,20 +160,18 @@ class CommandPalette(Sheet):
         self.input.setProperty("autofocus", True)
         self.input.setPlaceholderText("Search sessions and commands, or type @ for files")
         self.input.setAccessibleName("Search sessions and commands")
-        self.input.setStyleSheet(
-            f"QLineEdit {{ background: transparent; border: none; font-size: 15.5px; padding: 0; color: {t.text}; selection-background-color: {theme.blend(t.selection, sheet_bg(t).name()).name()}; }}"
+        self.input.setStyleSheet("QLineEdit { background: transparent; border: none; font-size: 15.5px; padding: 0; }")
+        theme.tint(
+            self.input,
+            fg="text",
+            placeholder="text_3",
+            highlight=lambda tk: theme.over(theme.qcolor(tk.selection), sheet_bg(tk)),
         )
-        pal = self.input.palette()
-        pal.setColor(pal.ColorRole.PlaceholderText, theme.qcolor(t.text_3))
-        self.input.setPalette(pal)
         self.input.textChanged.connect(self._on_text)
         self.input.installEventFilter(self)
         tl.addWidget(self.input, 1)
         self.body_lay.addWidget(top)
-        line = QFrame()
-        line.setProperty("hairline", "true")
-        line.setFrameShape(QFrame.Shape.NoFrame)
-        self.body_lay.addWidget(line)
+        self.body_lay.addWidget(hairline(over=sheet_bg))
 
         self.list_scroll = QScrollArea()
         self.list_scroll.setWidgetResizable(True)
@@ -185,7 +185,7 @@ class CommandPalette(Sheet):
         self.list_scroll.setWidget(self.list_host)
         self.body_lay.addWidget(self.list_scroll)
         self.empty = QLabel()
-        self.empty.setProperty("tone", "faint")
+        theme.tint(self.empty, fg="text_3")
         self.empty.setContentsMargins(18, 14, 18, 18)
         self.empty.hide()
         self.body_lay.addWidget(self.empty)
@@ -217,7 +217,7 @@ class CommandPalette(Sheet):
                 "Actions",
                 s.quick_new_session,
                 "In the current folder, with your defaults",
-                "Ctrl+N",
+                K["newSession"].keys,
             ),
             Cmd(
                 "new-opts",
@@ -226,7 +226,7 @@ class CommandPalette(Sheet):
                 "Actions",
                 lambda: s.set_dialog("newSession", {}),
                 "Folder, worktree, permissions, model",
-                "Ctrl+Shift+N",
+                K["newSessionWith"].keys,
             ),
             Cmd(
                 "side",
@@ -235,7 +235,7 @@ class CommandPalette(Sheet):
                 "Actions",
                 lambda: s.set_ui(sidebar=not s.ui.sidebar),
                 "",
-                "Ctrl+B",
+                K["sidebar"].keys,
             ),
             Cmd(
                 "panel",
@@ -244,9 +244,9 @@ class CommandPalette(Sheet):
                 "Actions",
                 lambda: s.set_ui(panel=not s.ui.panel),
                 "",
-                "Ctrl+\\",
+                K["panel"].keys,
             ),
-            Cmd("view", "Cycle view: Normal → Thinking → Verbose", "eye", "Actions", s.cycle_view, "", "Ctrl+O"),
+            Cmd("view", "Cycle view: Normal → Thinking → Verbose", "eye", "Actions", s.cycle_view, "", K["view"].keys),
             Cmd(
                 "board",
                 "Workboard",
@@ -254,7 +254,7 @@ class CommandPalette(Sheet):
                 "Actions",
                 lambda: s.show_page("board"),
                 "Every piece of work by whose hands it is in; approve, send back, answer in place",
-                "Ctrl+Shift+O",
+                K["board"].keys,
             ),
             Cmd(
                 "skills",
@@ -276,12 +276,12 @@ class CommandPalette(Sheet):
         if active_id:
             sid = active_id
             out += [
-                Cmd("find", "Find in the conversation", "search", "Actions", find, "", "Ctrl+F"),
-                Cmd("changes", "Show changes", "git-compare", "Actions", panel("changes"), "", "Alt+1"),
-                Cmd("files", "Show files", "folder-tree", "Actions", panel("files"), "", "Alt+2"),
-                Cmd("term", "Open terminal", "square-terminal", "Actions", panel("terminal"), "", "Alt+3"),
-                Cmd("preview", "Preview a web app", "app-window", "Actions", panel("preview"), "", "Alt+4"),
-                Cmd("tasks", "Show tasks", "list-checks", "Actions", panel("tasks"), "", "Alt+5"),
+                Cmd("find", "Find in the conversation", "search", "Actions", find, "", K["find"].keys),
+                Cmd("changes", "Show changes", "git-compare", "Actions", panel("changes"), "", K["tabs"].combos[0]),
+                Cmd("files", "Show files", "folder-tree", "Actions", panel("files"), "", K["tabs"].combos[1]),
+                Cmd("term", "Open terminal", "square-terminal", "Actions", panel("terminal"), "", K["tabs"].combos[2]),
+                Cmd("preview", "Preview a web app", "app-window", "Actions", panel("preview"), "", K["tabs"].combos[3]),
+                Cmd("tasks", "Show tasks", "list-checks", "Actions", panel("tasks"), "", K["tabs"].combos[4]),
                 Cmd(
                     "history",
                     "Show the timeline",
@@ -289,10 +289,18 @@ class CommandPalette(Sheet):
                     "Actions",
                     panel("history"),
                     "Every step that changed files; restore from any point",
-                    "Alt+6",
+                    K["tabs"].combos[5],
                 ),
-                Cmd("info", "Session details and context usage", "info", "Actions", panel("info"), "", "Alt+7"),
-                Cmd("stop", "Stop Claude", "circle-stop", "Actions", lambda: s.interrupt(sid), "", "Esc"),
+                Cmd(
+                    "info",
+                    "Session details and context usage",
+                    "info",
+                    "Actions",
+                    panel("info"),
+                    "",
+                    K["tabs"].combos[6],
+                ),
+                Cmd("stop", "Stop Claude", "circle-stop", "Actions", lambda: s.interrupt(sid), "", K["stop"].keys),
                 Cmd(
                     "compact",
                     "Compact the conversation",
@@ -329,7 +337,15 @@ class CommandPalette(Sheet):
                 lambda: s.set_ui(show_archived=not s.ui.show_archived),
             ),
             Cmd("refresh", "Reload session list", "refresh-cw", "Actions", lambda: s.refresh_sessions(True)),
-            Cmd("settings", "Settings", "settings", "Actions", lambda: s.set_dialog("settings", True), "", "Ctrl+,"),
+            Cmd(
+                "settings",
+                "Settings",
+                "settings",
+                "Actions",
+                lambda: s.set_dialog("settings", True),
+                "",
+                K["settings"].keys,
+            ),
             Cmd(
                 "keys",
                 "Keyboard shortcuts",
@@ -337,9 +353,9 @@ class CommandPalette(Sheet):
                 "Actions",
                 lambda: s.set_dialog("shortcuts", True),
                 "",
-                "Ctrl+/",
+                K["shortcuts"].keys,
             ),
-            Cmd("quit", "Quit Pilcrow", "power", "Actions", lambda: _quit(win), "Stops all sessions", "Ctrl+Q"),
+            Cmd("quit", "Quit Pilcrow", "power", "Actions", lambda: _quit(win), "Stops all sessions", K["quit"].keys),
         ]
         return out
 
@@ -395,16 +411,15 @@ class CommandPalette(Sheet):
         self.rows = []
         self.items = self._compute()
         self._idx = max(0, min(self._idx, len(self.items) - 1))
-        t = theme.tokens()
         last_group = ""
         height = 6 + 10
         for i, c in enumerate(self.items):
             if c.group != last_group:
                 head = QLabel(c.group)
                 head.setFixedHeight(31)  # padding 10 10 5 round an 11px line
-                head.setStyleSheet(
-                    f"color: {t.text_3}; font-size: {theme.FS_MICRO}px; font-weight: 600; padding: 10px 10px 5px;"
-                )
+                head.setContentsMargins(10, 10, 10, 5)
+                head.setFont(theme.font_ui(theme.FS_MICRO, 600))
+                theme.tint(head, fg="text_3")
                 self.list_lay.addWidget(head)
                 last_group = c.group
                 height += 31
@@ -443,7 +458,7 @@ class CommandPalette(Sheet):
     def submit(self) -> None:
         self.run(self.selected())
 
-    def eventFilter(self, obj: QObject, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj: QObject, e: QEvent) -> bool:
         if obj is self.input and e.type() == QEvent.Type.KeyPress:
             k = e.key()
             if k == Qt.Key.Key_Down:
@@ -462,6 +477,3 @@ def _quit(window: QWidget) -> None:
     from . import quit_app
 
     quit_app(window)
-
-
-_ = QApplication

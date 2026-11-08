@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useWindowKey } from '../ui/keys';
 import { CornerDownLeft } from 'lucide-react';
 import type { ToolItem } from '../../lib/transcript';
 import type { PermissionRequest, PermissionSuggestion } from '../../lib/types';
-import { respond, toast } from '../../lib/store';
+import { ALLOW_ONCE, DECLINE, respond, toast } from '../../lib/store';
 import { relPath } from '../../lib/format';
 import type { ToolCtx } from './ToolCard';
 import { str } from '../../lib/tools';
@@ -44,12 +45,12 @@ export function suggestionLabel(s: PermissionSuggestion, cwd?: string): string {
   return describeSuggestion(s, cwd);
 }
 
-export function suggestionRules(s: PermissionSuggestion): string {
+function suggestionRules(s: PermissionSuggestion): string {
   if (s.type !== 'addRules') return '';
   return (s.rules || []).map((r) => (r.ruleContent ? `${r.toolName}(${r.ruleContent})` : r.toolName)).join('  ·  ');
 }
 
-export function describeSuggestion(s: PermissionSuggestion, cwd?: string): string {
+function describeSuggestion(s: PermissionSuggestion, cwd?: string): string {
   if (s.type === 'setMode') return s.mode === 'acceptEdits' ? `Allow all edits ${destLabel(s.destination)}` : `Switch to ${s.mode} ${destLabel(s.destination)}`;
   if (s.type === 'addDirectories') return `Allow access to ${(s.directories || []).map((d) => relPath(d, cwd)).join(', ')} ${destLabel(s.destination)}`;
   if (s.type === 'addRules' && s.behavior === 'allow') {
@@ -107,33 +108,33 @@ export function PermissionCard({ perm, item, ctx, stale = false }: { perm: Permi
       setBusy(false);
     }
   };
-  const allow = () => decide({ behavior: 'allow', decisionClassification: 'user_temporary' });
+  const allow = () => decide(ALLOW_ONCE);
   const always = () => decide({ behavior: 'allow', updatedPermissions: perm.suggestions, decisionClassification: 'user_permanent' });
   const deny = () => {
-    decide({ behavior: 'deny', message: feedback.trim() ? `The user declined and said: ${feedback.trim()}` : 'The user declined this action.', decisionClassification: 'user_reject' });
+    decide(feedback.trim() ? { ...DECLINE, message: `The user declined and said: ${feedback.trim()}` } : DECLINE);
     if (feedback.trim()) toast('Sent your note to Claude', 'info');
   };
 
-  useEffect(() => {
-    if (!first) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (typingElsewhere(e.target)) return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      if (e.key === '1' && !perm.defaultToNo) allow();
-      else if (e.key === '2' && allowAlways) always();
-      else if (e.key === (allowAlways ? '3' : '2')) deny();
-      else return;
-      e.preventDefault();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  });
+  useWindowKey((e) => {
+    if (typingElsewhere(e.target)) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === '1' && !perm.defaultToNo) allow();
+    else if (e.key === '2' && allowAlways) always();
+    else if (e.key === (allowAlways ? '3' : '2')) deny();
+    else return;
+    e.preventDefault();
+  }, first);
 
   const rule = allowAlways ? suggestionRules(perm.suggestions[0]) : '';
   const extra = allowAlways && perm.suggestions.length > 1 ? ` and ${perm.suggestions.length - 1} more` : '';
 
   return (
     <div className={`perm${stale ? ' stale' : ''}${item ? '' : ' orphan'}`} role="alertdialog" aria-label="Permission request">
+      {!item && (
+        <div className="perm-cap">
+          <span className="wait-dot" aria-hidden="true" /> Needs your permission
+        </div>
+      )}
       {titleText && <div className="perm-title">{titleText}</div>}
       {(sub.length > 0 || perm.blockedPath) && (
         <div className="perm-sub">
@@ -184,7 +185,7 @@ export function PermissionCard({ perm, item, ctx, stale = false }: { perm: Permi
       )}
       {showNote && (
         <div className="perm-feedback">
-          <input
+          <input aria-label="What should Claude do instead?"
             className="input"
             autoFocus
             value={feedback}

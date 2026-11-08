@@ -5,9 +5,7 @@ from __future__ import annotations
 import time
 
 import pytest
-from harness import app_client, mock_server  # noqa: F401
-
-MOCK_PORT = 5361
+from harness import app_client, mock_server
 
 
 @pytest.fixture(autouse=True)
@@ -50,7 +48,8 @@ def _open(c, sid: str = "sess-login"):
 
 
 def _idle(c, sid: str) -> None:
-    c.wait_until(lambda: c.store.rt[sid].status == "idle", 20, "idle")
+    # and the frame's rt_changed has gone out (the store coalesces a session's changes per frame)
+    c.wait_until(lambda: c.store.rt[sid].status == "idle" and not c.store._dirty, 20, "idle")
 
 
 def test_header_shows_title_and_crumbs(app_client):
@@ -59,7 +58,7 @@ def test_header_shows_title_and_crumbs(app_client):
     assert v.title.text() == "Fix the login redirect bug"
     assert v.folder_crumb.isVisible() and v.folder_crumb.text() == "pilcrow"
     assert v.branch_crumb.isVisible() and v.branch_crumb.text() == "main"
-    assert v.diffstat.isVisible() and v.diffstat.add.text() == "+14" and v.diffstat.dele.text() == "−3"
+    assert v.diffstat.isVisible() and v.diffstat.add.text() == "+3" and v.diffstat.dele.text() == "−1"
     assert not v.pill.isVisible()
     assert v.composer.mode_btn.text_lb.text() == "Ask before edits"
     assert v.composer.model_btn.text_lb.text() == "Mock 1"
@@ -139,7 +138,11 @@ def test_at_opens_the_file_popup(app_client):
     edit = v.composer.edit
     edit.setFocus()
     QTest.keyClicks(edit, "@")
-    c.wait_until(lambda: v.composer.popup.isVisible() and v.composer.suggestions, 5, "file popup")
+    c.wait_until(
+        lambda: v.composer.popup.isVisible() and any(s.get("kind") != "repo" for s in v.composer.suggestions),
+        5,
+        "file popup",
+    )
     labels = [s["label"] for s in v.composer.suggestions]
     assert "README.md" in labels and "server/main.js" in labels, labels
     QTest.keyClicks(edit, "readme")
@@ -185,7 +188,7 @@ def test_sending_while_busy_queues_the_message(app_client):
     c.wait_until(lambda: len(c.store.rt[sid].held) == 1, 5, "held")
     c.wait_until(lambda: v.composer.queue.isVisible(), 5, "queue tray")
     assert v.composer.queue.head_text.text() == "Queued — Claude reads it after this step"
-    from pilcrow_qt.widgets.composer import QueueItem
+    from pilcrow_qt.widgets.queue_tray import QueueItem
 
     items = c.find(QueueItem, v.composer.queue)
     assert len(items) == 1 and items[0].text_btn.text() == "and then this"
@@ -216,3 +219,43 @@ def test_screenshot(app_client):
     assert v.composer.send_btn.state == "ready"
     assert c.shot("session-view").exists()
     v.composer.edit.clear()
+
+
+def test_folder_chip_opens_the_picker_in_a_popover(app_client):
+    from pilcrow_qt.widgets.folder_picker import FolderPicker
+    from pilcrow_qt.widgets.ui.menu import Popover
+
+    c = app_client
+    v = _open(c)
+    v.pick_folder()
+    pop = v._picker
+    assert isinstance(pop, Popover) and pop.is_open and pop.findChild(FolderPicker) is not None
+    assert pop.width() == 380 and pop.styleSheet() == ""  # painted from the tokens, no colours in a stylesheet
+    v.pick_folder()  # the chip again closes it
+    assert not pop.is_open
+
+
+def test_the_header_menu_button_closes_its_menu_on_a_second_click(app_client):
+    """The "…" button opens the session menu and, pressed again, closes it (a press on the button is not
+    "outside" the menu, so the click used to close it and open it again)."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    from pilcrow_qt.widgets.ui.menu import open_menu
+
+    c = app_client
+    v = _open(c)
+    btn = v.menu_btn
+    QTest.mouseClick(btn, Qt.MouseButton.LeftButton)
+    c.sleep(80)
+    m = open_menu()
+    assert m is not None and m.is_open
+    QTest.mouseClick(btn, Qt.MouseButton.LeftButton)
+    c.sleep(80)
+    assert open_menu() is None and not m.is_open, "the second click closes it"
+    QTest.mouseClick(btn, Qt.MouseButton.LeftButton)
+    c.sleep(80)
+    assert open_menu() is not None, "and a third opens it again"
+    from pilcrow_qt.widgets.ui.menu import close_menus
+
+    close_menus()

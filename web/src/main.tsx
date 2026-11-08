@@ -1,11 +1,27 @@
 import { createRoot } from 'react-dom/client';
+// The order is the cascade's order, so it is part of the design: tokens before anything reads them,
+// base elements and controls before the components that compose them, and motion last, because
+// every `animation`, `transition` and @keyframes is there (styles/README.md). No selector declares
+// the same property in two of these files, so the order never decides which of two rules renders
+// (scripts/css-overlap.mjs, run by `npm run lint`, checks both).
 import './styles/fonts.css';
 import './styles/tokens.css';
 import './styles/base.css';
-import './styles/app.css';
+import './styles/shell.css';
+import './styles/sidebar.css';
+import './styles/session.css';
+import './styles/composer.css';
+import './styles/menus.css';
+import './styles/dialogs.css';
+import './styles/settings.css';
+import './styles/welcome.css';
+import './styles/overview.css';
+import './styles/inbox.css';
+import './styles/helpers.css';
 import './styles/transcript.css';
 import './styles/panels.css';
 import './styles/board.css';
+import './styles/dispatch.css';
 import './styles/motion.css';
 import { App } from './components/App';
 import { initApp, applyTheme } from './lib/store';
@@ -33,4 +49,5 @@ try {
 applyTheme();
 installTooltips();
 initApp();
-createRoot(document.getElementById('root')!).render(<App />);
+const root = document.getElementById('root'); // index.html's own; without it there is nothing to draw into
+if (root) createRoot(root).render(<App />);

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PanelLeftOpen, CircleAlert, Plus, CalendarClock } from 'lucide-react';
-import { useStore, call, openSession, setUi, decideCard, startCard, setWait, toast } from '../lib/store';
+import { useStore, call, openSession, setUi, setDialog, decideCard, startCard, setWait, toast } from '../lib/store';
 import type { BoardState, Schedule, SessionSummary, WaitCondition } from '../lib/types';
 import { LANES, laneOf, cardState, step, actionsFor, dropAction, scheduleCard, scheduleActions, isSchedule, SCHEDULE_PREFIX, type Lane } from '../lib/board';
 import { cost, timeAgo } from '../lib/format';
-import { useNow, Num } from './ui/bits';
+import { Num } from './ui/bits';
+import { useNow } from './ui/hooks';
 import { MenuButton, type MenuItem } from './ui/Popover';
 import { typingElsewhere } from './tools/Permission';
 import { Card } from './board/Card';
@@ -28,7 +29,7 @@ export function Board() {
   const rt = useStore((s) => s.rt);
   const sidebar = useStore((s) => s.ui.sidebar);
   const schedRev = useStore((s) => s.schedRev);
-  const scheduleDialog = useStore((s) => s.scheduleDialog);
+  const scheduleDialog = useStore((s) => s.dialogs.schedule);
   const [state, setState] = useState<BoardState | null>(null);
   const [schedules, setSchedules] = useState<Schedule[]>([]);
   const [sel, setSel] = useState<string | null>(remembered);
@@ -107,7 +108,7 @@ export function Board() {
   const stuck = lanes.agent.filter((s) => cardState(s, rt[s.id], now) === 'stuck');
   const running = state?.limit.running ?? lanes.agent.filter((s) => s.status === 'running' || s.status === 'starting').length;
   const max = state?.limit.max ?? 0;
-  const openSchedule = (id?: string) => useStore.setState({ scheduleDialog: id ? { id } : {} });
+  const openSchedule = (id?: string) => setDialog('schedule', id ? { id } : {});
 
   const act = useCallback(
     async (id: string, action: string, payload?: WaitCondition | null) => {
@@ -247,7 +248,8 @@ export function Board() {
           onDragStart={(e) => {
             const el = (e.target as HTMLElement).closest<HTMLElement>('.bd-card[draggable="true"]');
             if (!el) return;
-            const id = el.dataset.card!;
+            const id = el.dataset.card;
+            if (!id) return;
             const st = el.dataset.state as CardStateT;
             e.dataTransfer.effectAllowed = 'move';
             e.dataTransfer.setData('text/plain', id);
@@ -268,7 +270,7 @@ export function Board() {
               e.preventDefault();
               e.dataTransfer.dropEffect = 'move';
             }
-            const over = ok ? lane! : null;
+            const over = ok && lane ? lane : null;
             if (over !== d.over) {
               dragRef.current = { ...d, over };
               setDrag(dragRef.current);

@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { EASE_EXIT, reducedMotion, spring } from '../../lib/motion';
+import { useEvent } from './hooks';
 
 /**
  * Height-animated disclosure. Opening grows from nothing to the content's height; closing shrinks
@@ -13,6 +14,7 @@ export function Collapse({ open, className = '', children, onDone }: { open: boo
   const anim = useRef<Animation | null>(null);
 
   if (open && !mounted) setMounted(true);
+  const done = useEvent(() => onDone?.());
 
   useLayoutEffect(() => {
     const el = ref.current;
@@ -43,7 +45,7 @@ export function Collapse({ open, className = '', children, onDone }: { open: boo
       a.onfinish = () => {
         el.style.overflow = '';
         anim.current = null;
-        onDone?.();
+        done();
       };
     } else {
       el.inert = true; // what is folding away can no longer be clicked
@@ -58,10 +60,10 @@ export function Collapse({ open, className = '', children, onDone }: { open: boo
       a.onfinish = () => {
         anim.current = null;
         setMounted(false);
-        onDone?.();
+        done();
       };
     }
-  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [open, done]);
 
   if (!mounted) return null;
   return (

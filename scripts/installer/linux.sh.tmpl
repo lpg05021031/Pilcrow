@@ -360,7 +360,8 @@ pilcrow_retire_reticle() {
   step "移除舊名稱 Reticle 的安裝（設定與對話會自動搬到 Pilcrow）"
   if [ -f "$lock" ]; then
     local pid; pid="$(sed -n 's/.*"pid"[^0-9]*\([0-9]*\).*/\1/p' "$lock" | head -1)"
-    [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+    # the lock file can be stale and the pid reused: only a node process is stopped
+    if [ -n "$pid" ] && [ "$(ps -o comm= -p "$pid" 2>/dev/null)" = node ]; then kill "$pid" 2>/dev/null || true; fi
   fi
   rm -f "$HOME/.local/bin/reticle" "${XDG_DATA_HOME:-$HOME/.local/share}/applications/reticle.desktop" "${XDG_DATA_HOME:-$HOME/.local/share}/applications/reticle-desktop.desktop" 2>/dev/null || true
   rm -f "${XDG_DATA_HOME:-$HOME/.local/share}"/icons/hicolor/*/apps/reticle.png "${XDG_DATA_HOME:-$HOME/.local/share}"/icons/hicolor/scalable/apps/reticle.svg 2>/dev/null || true

@@ -1,0 +1,86 @@
+# The gates every change must pass. Each job is what a developer runs locally (package.json scripts,
+# qt/README): type checks and lint for the interface and the server, the unit tests, the built
+# interface driven in headless Chrome (behaviour, accessibility, performance budgets), and the Qt
+# client's offscreen suite with its own perf budgets. The browser and Qt jobs run on their own so a
+# failure names the gate that failed.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Types, lint, unit tests, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run check
+      - run: npm run check:server
+      - run: npm run lint
+      - run: npm run test:unit
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+          retention-days: 1
+
+  browser:
+    name: Browser tests (behaviour, accessibility, performance)
+    needs: checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+      # The runner image ships Google Chrome; the test runners find it at /usr/bin/google-chrome.
+      - run: npm run test:e2e
+      - run: npm run test:ux
+      - run: npm run test:perf
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-failures
+          path: test/out
+          if-no-files-found: ignore
+
+  qt:
+    name: Qt client (Python 3.9, offscreen)
+    needs: checks
+    runs-on: ubuntu-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts # the mock server the Qt tests talk to needs `ws`
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.9' # the oldest version the client supports (qt/ARCHITECTURE.md)
+          cache: pip
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3
+      - run: pip install -r qt/requirements.txt pytest ruff
+      - run: python -m compileall -q qt/pilcrow_qt
+      - run: ruff check qt && ruff format --check qt
+      - run: python -m pytest qt/tests -q -p no:cacheprovider

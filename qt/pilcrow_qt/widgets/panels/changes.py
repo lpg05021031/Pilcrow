@@ -6,19 +6,21 @@ Folders that are not git repositories show the edits this session's tools made i
 from __future__ import annotations
 
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtGui import QKeyEvent, QPainter
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPlainTextEdit, QScrollArea, QVBoxLayout, QWidget
 
 from ... import icons, theme
-from ...lib.fmt import basename, dirname, err_text, plural
+from ...lib.fmt import basename, dirname, err_text, lang_from_path, plural
 from ...store import ConfirmSpec, store
 from ..ui.bits import Spinner
 from ..ui.menu import show_menu
 from ..ui.signals import bind
 from .diff_view import DiffView, Num, hunks_from_patch, style_textarea
+from .editor import lexer_for_path
+from .helpers_changes import HelpersChanges
 from .right_panel import Btn, EmptyState, Hairline, Refresher, Seg, Toolbar, icon_btn, lbl
 
 Json = Dict[str, Any]
@@ -40,7 +42,7 @@ class Skeleton(QWidget):
         self.setFixedHeight(16 + 3 * (3 * 11 + 2 * 9) + 2 * 22 + 16)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -88,7 +90,7 @@ class CommitBox(QWidget):
         outer.addWidget(inner)
         outer.addWidget(Hairline())
 
-    def eventFilter(self, obj, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj, e: QEvent) -> bool:
         if obj is self.message and e.type() == QEvent.Type.KeyPress:
             ke: QKeyEvent = e  # type: ignore[assignment]
             if (
@@ -107,11 +109,37 @@ class NotesBar(QWidget):
         super().__init__(parent)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.fillRect(self.rect(), theme.qcolor(t.raised))
         p.fillRect(0, 0, self.width(), 1, theme.blend(t.hair_2, t.raised))
+
+
+EDIT_TOOLS = ("Edit", "Write", "MultiEdit")
+
+
+def lexer_warmer(sid: str) -> Callable[[], bool]:
+    """A step that compiles one more of the syntax lexers the session's edits will need (Pygments
+    builds a lexer's state machine on first use, some 30 ms each) and says whether any remain. Run
+    at idle, so the Changes tab's first card does not pay for it."""
+    m = store.models.get(sid)
+    langs: List[str] = []
+    seen = set()
+    for t in m.tools.values() if m else []:
+        if t.name in EDIT_TOOLS:
+            path = str((t.input or {}).get("file_path") or "")
+            lang = lang_from_path(path)
+            if lang not in seen:
+                seen.add(lang)
+                langs.append(path)
+
+    def step() -> bool:
+        if langs:
+            lexer_for_path(langs.pop(0))
+        return bool(langs)
+
+    return step
 
 
 class ChangesPanel(QWidget):
@@ -125,6 +153,8 @@ class ChangesPanel(QWidget):
         self.loading = False
         self._last_load = 0.0
         self._last_status = ""
+        self._stale = False  # changed while hidden: load when shown
+        self._edits_sig: Any = None  # the edits last rendered (tool ids and revisions)
         self._narrow = False
         self._commit_open = False
         session = store.session(session_id) or {}
@@ -135,7 +165,21 @@ class ChangesPanel(QWidget):
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
 
-        # toolbar (.changes-bar: gap 6)
+        self._build_toolbar(lay)
+        self._build_summary(lay)
+        self._build_files()
+        self._build_helpers(lay, session_id)
+        self._build_notes_bar(lay)
+        self._paint()
+        bind(theme.theme.changed, self, lambda _t: self._paint())
+        bind(store.ui_changed, self, lambda _u: self._apply_mode())
+        self._refresher = Refresher(self, session_id, self._on_rt, fs=False)
+        bind(store.fs_changed, self, lambda _r: self.load())
+        self._apply_mode()
+        self.load()
+
+    def _build_toolbar(self, lay: QVBoxLayout) -> None:
+        """The toolbar (``.changes-bar``): the figures, Pull request, Review, Commit, the view mode, refresh."""
         self.bar = Toolbar()
         self.bar.box.setSpacing(6)
         if self.worktree:
@@ -208,7 +252,8 @@ class ChangesPanel(QWidget):
         self.commit_box.hide()
         lay.addWidget(self.commit_box)
 
-        # not a repository: the summary line stays put above the scrolling edits (.changes-summary)
+    def _build_summary(self, lay: QVBoxLayout) -> None:
+        """Not a repository: the summary line stays put above the scrolling edits (``.changes-summary``)."""
         self.summary_wrap = QWidget()
         sw = QVBoxLayout(self.summary_wrap)
         sw.setContentsMargins(0, 0, 0, 0)
@@ -220,11 +265,13 @@ class ChangesPanel(QWidget):
         self.summary_wrap.hide()
         lay.addWidget(self.summary_wrap)
 
-        # the files (.changes-files)
+    def _build_files(self) -> None:
+        """The files (``.changes-files``): the diff, the session's edits, the skeleton and the empty states."""
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         host = QWidget()
+        self.scroll.setWidget(host)  # owned by the scroll area from here on
         self._host_lay = QVBoxLayout(host)
         self._host_lay.setContentsMargins(0, 0, 0, 24)
         self._host_lay.setSpacing(0)
@@ -253,11 +300,16 @@ class ChangesPanel(QWidget):
         self.empty_edits = EmptyState("", "No file edits in this session yet.")
         self.empty_edits.hide()
         self._host_lay.addWidget(self.empty_edits)
+
+    def _build_helpers(self, lay: QVBoxLayout, session_id: str) -> None:
+        """A lead's helpers, each worktree a section, with the finish actions (HELPERS.md §6.5)."""
+        self.helpers = HelpersChanges(session_id)
+        self._host_lay.addWidget(self.helpers)
         self._host_lay.addStretch(1)
-        self.scroll.setWidget(host)
         lay.addWidget(self.scroll, 1)
 
-        # notes bar
+    def _build_notes_bar(self, lay: QVBoxLayout) -> None:
+        """The notes bar: the review notes, added to the message or sent to Claude."""
         self.notes_bar = NotesBar()
         nl = QHBoxLayout(self.notes_bar)
         nl.setContentsMargins(12, 10, 12, 10)
@@ -273,14 +325,6 @@ class ChangesPanel(QWidget):
         nl.addWidget(self.send_notes_btn)
         self.notes_bar.hide()
         lay.addWidget(self.notes_bar)
-
-        self._paint()
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        bind(store.ui_changed, self, lambda _u: self._apply_mode())
-        self._refresher = Refresher(self, session_id, self._on_rt, fs=False)
-        bind(store.fs_changed, self, lambda _r: self.load())
-        self._apply_mode()
-        self.load()
 
     # ---- state
     def _paint(self) -> None:
@@ -303,13 +347,14 @@ class ChangesPanel(QWidget):
             "split", self._narrow, "Side by side (widen the panel to use it)" if self._narrow else "Side by side"
         )
 
-    def showEvent(self, e) -> None:  # noqa: N802
+    def showEvent(self, e) -> None:
         # The web remounts this tab each time it is shown; here it stays built and refreshes instead.
-        if self.data is not None and time.monotonic() - self._last_load > 2.5:
-            self.load()
         super().showEvent(e)
+        self.helpers.sync()  # a lead's helpers, caught up now that the tab shows
+        if self._stale or (self.data is not None and time.monotonic() - self._last_load > 2.5):
+            self.load()
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         narrow = self.width() < NARROW_W
         if narrow != self._narrow:
             self._narrow = narrow
@@ -319,16 +364,26 @@ class ChangesPanel(QWidget):
     def _on_rt(self) -> None:
         rt = store.rt_of(self.sid)
         status = rt.status if rt else ""
-        if status == "idle" and self._last_status != "idle":
+        was = self._last_status
+        self._last_status = status
+        if not self.isVisible():
+            # a hidden tab does no work: it catches up when it is shown
+            self._stale = True
+            return
+        self.helpers.sync()
+        if status == "idle" and was != "idle":
             self.load()
         elif status in ("running", "requires_action") and time.monotonic() - self._last_load > 2.5:
             QTimer.singleShot(1200, self.load)
-        self._last_status = status
         if self.data is not None and not self.data.get("isRepo"):
             self._render_session_edits()
 
     # ---- loading
     def load(self) -> None:
+        if not self.isVisible():
+            self._stale = True
+            return
+        self._stale = False
         self.loading = True
         self._last_load = time.monotonic()
         self.spinner.show()
@@ -387,10 +442,13 @@ class ChangesPanel(QWidget):
         self.empty.hide()
         self.view.hide()
         m = store.models.get(self.sid)
+        done = [t for t in (m.tools.values() if m else []) if t.name in EDIT_TOOLS and t.status == "done"]
+        sig = tuple((t.id, t.rev) for t in done)
+        if sig == self._edits_sig:
+            return  # the same edits as last time: the grids stand
+        self._edits_sig = sig
         edits: List[Json] = []
-        for t in m.tools.values() if m else []:
-            if t.name not in ("Edit", "Write", "MultiEdit") or t.status != "done":
-                continue
+        for t in done:
             s = t.structured or {}
             path = str((t.input or {}).get("file_path") or "")
             patch = s.get("structuredPatch") if isinstance(s, dict) else None

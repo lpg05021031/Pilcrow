@@ -5,6 +5,7 @@ from __future__ import annotations
 from pilcrow_qt.lib.fmt import (
     basename,
     bytes_,
+    clock,
     cost,
     dirname,
     duration,
@@ -132,3 +133,10 @@ def test_err_text_reads_any_thrown_shape():
     assert err_text("plain") == "plain"
     assert err_text({"message": "obj"}) == "obj"
     assert err_text(42) == "42"
+
+
+def test_clock():
+    from datetime import datetime
+
+    ms = datetime(2026, 5, 4, 14, 5, 9).timestamp() * 1000
+    assert clock(ms) == "14:05" and clock(ms, True) == "14:05:09"

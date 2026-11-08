@@ -1,0 +1,537 @@
+"""The conversation's rows measured and painted offscreen without a server: the prose block's line
+boxes and painted decorations, the person's bubble, the column width and the workflow body."""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "qt"))
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+if sys.platform == "win32":
+    os.environ.setdefault("QT_QPA_FONTDIR", os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"))
+
+from PySide6.QtCore import Qt  # noqa: E402
+from PySide6.QtGui import QColor, QImage, QPainter  # noqa: E402
+from PySide6.QtWidgets import QApplication  # noqa: E402
+
+from pilcrow_qt import fonts, markdown, theme  # noqa: E402
+from pilcrow_qt.lib.transcript_model import TextItem, ToolItem, UserItem  # noqa: E402
+from pilcrow_qt.store import Runtime, store  # noqa: E402
+from pilcrow_qt.widgets.transcript.ctx import ToolCtx  # noqa: E402
+
+
+@pytest.fixture(scope="module")
+def app():
+    a = QApplication.instance() or QApplication([])
+    fonts.load()
+    theme.theme.apply(True)
+    store.reduced_motion = True
+    yield a
+
+
+def measurer():
+    from pilcrow_qt.canvas.view import measurer
+
+    return measurer()
+
+
+def prose(text: str, width: int = 700, **kw):
+    from pilcrow_qt.canvas.blocks.prose import ProseBlock
+
+    b = ProseBlock("p", text, **kw)
+    b.set_height(b.measure(width, measurer()), 2, width)
+    return b
+
+
+def painted(b, width: int = 700) -> QImage:
+    """The block painted on the canvas colour, as the view would paint it."""
+    from pilcrow_qt.canvas.paint import PaintState
+
+    m = measurer()
+    img = QImage(width, max(1, b.h), QImage.Format.Format_ARGB32_Premultiplied)
+    img.fill(QColor(theme.tokens().canvas))
+    p = QPainter(img)
+    st = PaintState(m)
+    st.now = 0.0
+    st.needle = ""
+    b.paint(p, 0, 0, width, st.for_block(None, None, None, None))
+    p.end()
+    return img
+
+
+def test_prose_lines_are_24px_apart(app):
+    from pilcrow_qt.canvas.blocks.prose import TextGroup
+
+    assert prose("one line").h == 24
+    assert prose("word " * 30).h == 48  # wraps to two lines at 700px
+    g = TextGroup(TextItem(id="t1", text="a\n\nb", streaming=False, ts=0))
+    assert not g.shaped and g.estimate(700, measurer()) > 0  # one estimate until the text comes near
+    g.ensure_shape(None)
+    assert len(g.children) == 2
+    for c in g.children:
+        c.set_height(c.measure(700, measurer()), 2, 700)
+    assert g.children[1].gap == 11 and g.h == 24 + 11 + 24  # 0.75em between paragraphs, none under the last
+    assert prose("one line", compact=True).h == 21
+
+
+def test_pill_rects_follow_the_code_spans(app):
+    b = prose("see `next` and `/undefined` here")
+    doc = b.doc
+    blk = doc.firstBlock()
+    marked = []  # each span is a run of marked fragments: a pad, the code, a pad
+    it = blk.begin()
+    last_end = -1
+    while not it.atEnd():
+        fr = it.fragment()
+        bg = fr.charFormat().background()
+        if bg.style() != Qt.BrushStyle.NoBrush and bg.color().alpha() == 0:
+            piece = fr.text().replace(chr(0x2060), "")  # the no-wrap joiners are not text
+            if marked and fr.position() == last_end:
+                marked[-1] += piece
+            else:
+                marked.append(piece)
+            last_end = fr.position() + fr.length()
+        it += 1
+    assert marked == [
+        f"{markdown.PILL_PAD}next{markdown.PILL_PAD}",
+        f"{markdown.PILL_PAD}/undefined{markdown.PILL_PAD}",
+    ]
+    # the pad is the web's 0.38em of the code size, not a full mono cell
+    pad_w = tl_pad = (
+        blk.layout().lineAt(0).cursorToX(len("see ") + 1)[0] - blk.layout().lineAt(0).cursorToX(len("see "))[0]
+    )
+    assert abs(pad_w - 0.38 * markdown.PROSE.code) < 1.0, (pad_w, tl_pad)
+    # the painted pill is the fill-2 tint under the first span's glyphs
+    img = painted(b)
+    tl = blk.layout()
+    start = len("see ")
+    x = int(tl.lineAt(0).cursorToX(start + 3)[0]) + 1
+    pill = theme.blend(theme.tokens().fill_2, theme.tokens().canvas)
+    row = [img.pixelColor(x, y).name() for y in range(0, 24)]
+    assert pill.name() in row, row
+
+
+def test_copied_text_loses_the_pill_padding(app):
+    b = prose("see `next` here")
+    assert b.selected_text(None, None) == "see next here"
+    assert b.text() == "see `next` here"  # what find searches: the source
+
+
+def test_fence_well_and_quote_are_marked(app):
+    b = prose("```ts\nconst a = 1;\n```\n\n> quoted\n\nafter")
+    doc = b.doc
+    tables = [f for f in doc.rootFrame().childFrames()]
+    assert len(tables) == 1 and tables[0].format().borderCollapse()
+    quotes = []
+    blk = doc.firstBlock()
+    while blk.isValid():
+        if blk.blockFormat().leftMargin() == markdown.QUOTE_INDENT:
+            quotes.append(blk.text())
+        blk = blk.next()
+    assert quotes == ["quoted"]
+    # the empty paragraph after the table takes no room: well (30 + 20 + 13 = 63) + 1em + quote + 11 + after
+    assert b.h <= 9 + 63 + 15 + 2 + 24 + 11 + 24 + 2, b.h
+
+
+def test_find_lights_matches_and_the_current_one(app):
+    from pilcrow_qt.canvas.paint import PaintState, find_ranges
+
+    b = prose("next and next again")
+    ranges = find_ranges(b.doc, "next")
+    assert len(ranges) == 2 and all(b.doc.toPlainText()[a:z] == "next" for a, z in ranges)
+    # remembered for the next paint, asked again when the needle or the document changes
+    assert find_ranges(b.doc, "next") is ranges
+    assert find_ranges(b.doc, "again") == [(14, 19)]
+    edited = prose("next")
+    first = find_ranges(edited.doc, "next")
+    from PySide6.QtGui import QTextCursor
+
+    cur = QTextCursor(edited.doc)
+    cur.movePosition(QTextCursor.MoveOperation.End)
+    cur.insertText(" next")
+    assert len(find_ranges(edited.doc, "next")) == 2 and len(first) == 1
+    # painted: the current match in the accent, the other in the wash
+    m = measurer()
+    img = QImage(700, b.h, QImage.Format.Format_ARGB32_Premultiplied)
+    img.fill(QColor(theme.tokens().canvas))
+    p = QPainter(img)
+    st = PaintState(m)
+    st.now = 0.0
+    st.needle = "next"
+    bst = st.for_block(None, None, None, None)
+    bst.needle_current = 1
+    b.paint(p, 0, 0, 700, bst)
+    p.end()
+    seen = {img.pixelColor(x, 12).name() for x in range(0, 200)}
+    assert theme.tokens().accent in seen
+    assert theme.blend(theme.tokens().find_mark, theme.tokens().canvas).name() in seen
+
+
+def test_user_bubble_is_the_webs_size(app):
+    from pilcrow_qt.canvas.blocks.user import BUBBLE_LINE, PAD_H, UserBlock
+
+    assert BUBBLE_LINE == 22  # 14.5px on 1.55
+    m = measurer()
+    b = UserBlock(UserItem(id="u1", uuid="uu1", text="Please fix it and run the tests."), "sess", "/proj")
+    b.set_height(b.measure(742, m), 2, 742)
+    assert b.bubble.height() == PAD_H + 22 + PAD_H, b.bubble.height()
+    assert b.bubble.width() < 742 * 0.84 + 1
+    assert b.bubble.right() == 742 - 1, "the bubble sits at the right of the column"
+    long = UserBlock(UserItem(id="u2", uuid="uu2", text="word " * 60), "sess", "/proj")
+    long.set_height(long.measure(742, m), 2, 742)
+    assert long.bubble.width() == int(742 * 0.84), long.bubble.width()  # max-width 84% of the column
+    assert long.bubble.height() > PAD_H + 22 * 2 + PAD_H
+    # the estimate is close to the measure: the scrollbar of a cold history is honest
+    assert abs(long.estimate(742, m) - long.h) <= 22 * 2
+
+
+def _ink_rows(b, w: int):
+    """(bubble top, bubble bottom, first ink row, last ink row) of a painted bubble."""
+    from pilcrow_qt.canvas.paint import PaintState
+
+    m = measurer()
+    b.set_height(b.measure(w, m), 0, w)
+    img = QImage(w, b.h + 4, QImage.Format.Format_ARGB32)
+    img.fill(QColor(theme.tokens().canvas))
+    p = QPainter(img)
+    st = PaintState(m)
+    st.now = 0
+    st.needle = ""
+    b.paint(p, 0, 0, w, st.for_block(None, None, None, None))
+    p.end()
+    br = b.bubble
+    bg = img.pixelColor(br.right() - 3, br.center().y()).lightness()
+    xs = range(br.x() + 8, br.right() - 8)
+    ink = [
+        y for y in range(br.y() + 1, br.bottom()) if any(abs(img.pixelColor(x, y).lightness() - bg) > 40 for x in xs)
+    ]
+    return br.y(), br.bottom(), ink[0], ink[-1]
+
+
+@pytest.mark.parametrize("text", ["Fix it now", "對話框送出的訊息", "Fix it\nand then run it"])
+def test_the_words_sit_in_the_middle_of_the_bubble(app, text):
+    """The words are centred in the grey bubble as drawn — capitals for Latin, the outline for Chinese
+    (whose fallback font draws lower) — not left a pixel or two low by Qt's line box."""
+    from pilcrow_qt.canvas.blocks.user import UserBlock
+
+    top, bottom, a, z = _ink_rows(UserBlock(UserItem(id="c", uuid="c", text=text), "s", "/p"), 742)
+    above, below = a - top, bottom - z
+    assert abs(above - below) <= 1, (text, above, below)
+
+
+def test_a_notice_centres_its_words_and_icon_in_the_wash(app):
+    from pilcrow_qt.canvas.blocks.misc import NoticeBlock
+    from pilcrow_qt.canvas.paint import PaintState
+    from pilcrow_qt.lib.transcript_model import NoticeItem
+
+    m = measurer()
+    w = 700
+    b = NoticeBlock(NoticeItem(id="n", text="The session ended with an error.", level="error"))
+    b.set_height(b.measure(w, m), 0, w)
+    img = QImage(w, b.h + 4, QImage.Format.Format_ARGB32)
+    canvas = QColor(theme.tokens().canvas)
+    img.fill(canvas)
+    p = QPainter(img)
+    st = PaintState(m)
+    st.now = 0
+    st.needle = ""
+    b.paint(p, 0, 0, w, st.for_block(None, None, None, None))
+    p.end()
+    xr = w - 20
+    wash = [y for y in range(img.height()) if img.pixelColor(xr, y) != canvas]
+    top, bottom = wash[0], wash[-1]
+    bg = img.pixelColor(xr, (top + bottom) // 2).lightness()
+
+    def ink(x0: int, x1: int):
+        ys = [
+            y
+            for y in range(top + 1, bottom)
+            if any(abs(img.pixelColor(x, y).lightness() - bg) > 40 for x in range(x0, x1))
+        ]
+        return (ys[0] + ys[-1]) / 2
+
+    box = (top + bottom) / 2
+    assert abs(ink(4, 34) - box) <= 0.5  # the icon
+    assert abs(ink(40, 400) - box) <= 0.5  # the words (no descenders in this line)
+
+
+def test_an_attached_image_is_decoded_once_across_resizes_and_rewarms(app, monkeypatch):
+    """The thumbnail does not depend on the width: a resize step or a re-warm re-measures the
+    bubble without decoding and scaling the image again."""
+    from PySide6.QtCore import QBuffer, QByteArray, QIODevice
+
+    from pilcrow_qt.canvas.blocks import user
+
+    img = QImage(1280, 800, QImage.Format.Format_RGB32)
+    img.fill(QColor("#1e1e1e"))
+    ba = QByteArray()
+    buf = QBuffer(ba)
+    buf.open(QIODevice.OpenModeFlag.WriteOnly)
+    img.save(buf, "PNG")
+    src = "data:image/png;base64," + bytes(ba.toBase64()).decode()
+    decoded = []
+    pixmap_of = user._pixmap_of
+    monkeypatch.setattr(user, "_pixmap_of", lambda s: decoded.append(len(s)) or pixmap_of(s))
+    user._thumb.cache_clear()
+    m = measurer()
+    b = user.UserBlock(UserItem(id="u3", uuid="uu3", text="This one", images=[src]), "sess", "/proj")
+    for w in (742, 700, 742):
+        b.measure(w, m)
+    b.cool()
+    b.measure(742, m)
+    assert len(decoded) == 1
+    ((r, pm, _s),) = b.thumbs
+    assert (pm.width(), pm.height()) == (user.THUMB_W, 137) == (r.width(), r.height())  # 1280×800 in 220×160
+
+
+def test_a_line_whose_words_change_is_painted_again(app, monkeypatch):
+    """The "N earlier steps" line of an open fold and a compaction's divider change their words with
+    their rev and sig as they were: the commit repaints them from the new words, not from the pixmap
+    cached of the old ones."""
+    from PySide6.QtTest import QTest
+
+    from pilcrow_qt.canvas.blocks.fold import MoreBlock, Steps, sync_row
+    from pilcrow_qt.canvas.blocks.misc import DividerBlock, compact_label
+    from pilcrow_qt.canvas.scene import Group, Scene
+    from pilcrow_qt.canvas.view import CanvasView
+    from pilcrow_qt.lib.transcript_model import CompactItem
+
+    def bash(i: int) -> ToolItem:
+        return ToolItem(id=f"t{i}", name="Bash", input={"command": f"echo {i}"}, input_done=True, status="done")
+
+    ctx = ToolCtx("sess", "/proj", view="verbose")
+    items = [bash(i) for i in range(12)]
+    steps = Steps(items, ctx, "sess", "steps:1")
+    compact = CompactItem(id="c1", trigger="auto")
+    divider = DividerBlock("compact:c1", compact_label(compact))
+    scene = Scene()
+    v = CanvasView(scene)
+    v.resize(760, 900)  # all of it on screen
+    v.show()
+    v.mutate(lambda: (scene.root.append(divider), scene.root.append(steps)))
+    QTest.qWait(80)  # measured
+    v.viewport().repaint()  # both lines go into the pixmap cache
+    more = next(c for c in steps.children if isinstance(c, MoreBlock))
+    assert more.label == "6 earlier steps"
+    painted = []
+    for cls in (MoreBlock, DividerBlock):
+        monkeypatch.setattr(
+            cls, "paint", lambda self, *a, real=cls.paint: (painted.append(self.label), real(self, *a))[1]
+        )
+    # the compaction's figures arrive: nothing else changes, so nothing else would repaint
+    compact.pre_tokens = 120_000
+    assert v.mutate(lambda: sync_row(divider, compact, ctx)) == [divider]
+    QTest.qWait(40)
+    assert compact_label(compact) in painted, painted
+    # a 13th step: one more hidden
+    v.begin()
+    changed = steps.sync(items + [bash(12)], ctx, live=True)
+    for b in changed:
+        if isinstance(b, Group):
+            v.estimate(b)
+        elif b.warm:
+            v._exact(b)
+    v.end()
+    QTest.qWait(40)
+    assert more in changed and "7 earlier steps" in painted, painted
+    v.close()
+
+
+def test_column_width_is_the_golden_section_of_the_pane():
+    from pilcrow_qt.theme import column_width
+
+    assert column_width(1212) == 749
+    assert column_width(1202) == 742  # the web's pane at 1480 wide: text from x=499 to 1241
+    assert column_width(900) == 640  # never under 640
+    assert column_width(660) == 640  # clamp() keeps the floor even when the pane is tighter
+    assert column_width(3000) == 1080
+
+
+def test_workflow_row_body_reads_the_run_from_the_session(app):
+    from pilcrow_qt.canvas import nodes as nd
+    from pilcrow_qt.canvas.blocks.bodies import ToolBodyBlock
+    from pilcrow_qt.lib.workflow import workflow_counts
+
+    script = "export const meta = { name: 'review', description: 'Review it', phases: ['A', 'B', 'C'] }"
+    item = ToolItem(
+        id="toolu_wf",
+        name="Workflow",
+        input={"script": script},
+        input_json="",
+        input_done=True,
+        status="done",
+        start_ts=0,
+    )
+    rt = Runtime(loaded=True)
+    agents = [
+        {"type": "workflow_agent", "index": 0, "state": "done"},
+        {"type": "workflow_agent", "index": 1, "state": "done"},
+    ]
+    rt.st = {
+        "status": "idle",
+        "tasks": [
+            {
+                "id": "t1",
+                "toolUseId": "toolu_wf",
+                "type": "local_workflow",
+                "status": "completed",
+                "workflow": {"phases": [{"index": 0, "title": "A"}], "agents": agents, "logs": []},
+            }
+        ],
+    }
+    store.rt["sess-wf-test"] = rt
+    try:
+        body = ToolBodyBlock(item, ToolCtx("sess-wf-test", "/proj"))
+        body.measure(640, measurer())
+        root = body.root
+        assert root is not None
+
+        def leaves(n):
+            if getattr(n, "children", None) is not None:
+                for c in n.children:
+                    yield from leaves(c)
+            elif getattr(n, "child", None) is not None:
+                yield from leaves(n.child)
+            else:
+                yield n
+
+        texts = [x.text() for x in leaves(root) if x.text()]
+        assert "Review it" in texts
+        assert "3 phases · 2 of 2 agents done" in texts
+        assert [x.label for x in leaves(root) if isinstance(x, nd.Button)] == ["Open in Tasks"]
+        assert not [x for x in leaves(root) if isinstance(x, nd.Toggle)]  # no result text: no toggle
+        counts = workflow_counts(agents)
+        assert (counts.done, counts.total) == (2, 2)  # the "2/2 agents" at the right of the head
+    finally:
+        store.rt.pop("sess-wf-test", None)
+
+
+def test_code_well_carries_a_copy_at_its_corner(app):
+    from PySide6.QtCore import QRect
+    from PySide6.QtWidgets import QWidget
+
+    b = prose("before\n\n```ts\nconst a = 1;\n```")
+    wells = b.wells()
+    assert len(wells) == 1 and wells[0][1] == "const a = 1;"
+    r = wells[0][0]
+    cr = b.copy_rect(r)
+    assert cr.right() <= r.right() and cr.top() >= r.top()
+    t = b.hit(cr.center().x(), cr.center().y())
+    assert t is not None and t.kind == "button" and t.id == "copy:0"
+    assert b.hit(int(r.left()) + 20, int(r.top()) + 45).kind == "text"  # the code itself selects
+    assert [x.id for x in b.targets()] == ["copy:0"]
+
+    class View:
+        copied = ""
+
+        def copy_text(self, text: str) -> None:
+            self.copied = text
+
+        def viewport(self):
+            return QWidget()
+
+        def block_rect(self, _b):
+            return QRect(0, 0, 10, 10)
+
+    v = View()
+    b.activate(t, v)
+    assert v.copied == "const a = 1;"
+    assert b._copied[0] == 0  # the corner says "Copied" for a moment
+
+
+def test_a_written_thought_is_quiet_markdown(app):
+    from pilcrow_qt.canvas.blocks.thinking import ThinkingBlock
+    from pilcrow_qt.lib.transcript_model import ThinkingItem
+
+    m = measurer()
+    done = ThinkingItem(id="th1", text="Plan:\n\n1. read `a.ts`\n2. run it", streaming=False, start_ts=0, end_ts=1000)
+    blk = ThinkingBlock(done)
+    body = blk.children[0]
+    body.measure(700, m)
+    assert body._md and "`" not in body.doc.toPlainText()
+    assert body.selected_text(None, None).startswith("Plan:\nread a.ts")
+    live = ThinkingItem(id="th2", text="still `thinking`", streaming=True, start_ts=0)
+    blk2 = ThinkingBlock(live)
+    blk2.children[0].measure(700, m)
+    assert not blk2.children[0]._md and "`" in blk2.children[0].doc.toPlainText()
+
+
+def test_a_thought_sits_on_the_step_grid_and_an_empty_one_takes_no_room(app):
+    """In an open fold a thought is a step row like the tools around it: its icon in the 18px column,
+    its words at 28 (a tool head's ``x + 28``), 28px tall. A finished thought with no words kept is not
+    shown at all (the web's ``return null``), so it cannot open onto nothing; a private one keeps its
+    head but has nothing to open."""
+    from pilcrow_qt.canvas.blocks import thinking as th
+    from pilcrow_qt.canvas.blocks.thinking import ThinkingBlock
+    from pilcrow_qt.lib.transcript_model import ThinkingItem
+
+    m = measurer()
+    assert th.TEXT_X == 28 and th.HEAD_H == 28 and th.ICON_X == 2
+    words = ThinkingBlock(ThinkingItem(id="t1", text="a plan", streaming=False, start_ts=0, end_ts=1000))
+    words.measure(700, m)
+    assert words.h == 28 and words.hit(40, 10) is not None and words.can_open
+
+    empty = ThinkingBlock(ThinkingItem(id="t2", text="", streaming=False, start_ts=0, end_ts=1000), "verbose")
+    assert empty.estimate(700, m) == 0
+    empty.measure(700, m)
+    assert empty.h == 0 and not empty.open, "verbose would open every thought, but this one has nothing"
+    assert empty.hit(40, 10) is None
+
+    private = ThinkingBlock(ThinkingItem(id="t3", text="", streaming=False, start_ts=0, end_ts=1000, redacted=True))
+    private.measure(700, m)
+    assert private.h == 28 and private.hit(40, 10) is None and not private.can_open
+
+
+def test_a_node_body_lays_out_from_its_own_edge(app):
+    from pilcrow_qt.canvas import nodes as nd
+    from pilcrow_qt.canvas.blocks.base import NodeBlock
+
+    nb = NodeBlock("nb", lambda m: nd.note("a note"), pad=(4, 0, 0, 0))
+    nb.indent = 28  # nested two levels deep: the view paints it 28px in and 28px narrower
+    nb.measure(600, measurer())
+    assert nb.root.x == 4 and nb.root.w == 596
+
+
+def test_a_markdown_body_finds_its_links_once_and_keeps_their_ids_through_a_reflow(app, monkeypatch):
+    """A screen reader asks a row for its targets once per child: a Markdown body reads its links
+    from the document once per layout, and a link keeps its id when a reflow moves the body, so the
+    focus stays on it."""
+    from pilcrow_qt.canvas import nodes as nd
+    from pilcrow_qt.canvas.blocks.base import NodeBlock
+
+    calls = []
+    doc_links = nd.doc_links
+    monkeypatch.setattr(nd, "doc_links", lambda doc: calls.append(1) or doc_links(doc))
+    note = "The prompt the fetch was given, long enough to wrap onto another line when the body narrows. "
+    nb = NodeBlock(
+        "nb", lambda m: nd.vstack(nd.note(note * 2), nd.Markdown("See [a](https://a.b) and [c](https://c.d)."))
+    )
+    nb.measure(742, measurer())
+    first = nb.targets()
+    assert [t.name for t in first] == ["a", "c"] and nb.targets() == first and len(calls) == 1
+    nb.measure(400, measurer())  # the note wraps once more: the body moves down
+    moved = nb.targets()
+    assert moved == first and moved[0].rect[1] > first[0].rect[1] and len(calls) == 2
+
+
+def test_number_gutters_fit_their_widest_number(app):
+    from pilcrow_qt.canvas.blocks.codehtml import code_html, gutter_width
+
+    html, total, shown = code_html("\n".join(f"line {i}" for i in range(1, 13)), path="/p/a.py")
+    assert total == 12 and f'<td width="{gutter_width(12, 14, 12)}"' in html
+    assert gutter_width(120, 14, 12) > gutter_width(12, 14, 12) > gutter_width(1, 14, 12)
+
+
+def test_hit_tests_land_on_the_line_under_the_leading(app):
+    from pilcrow_qt.canvas.paint import doc_pos_at
+
+    b = prose("```ts\nexport function tokens() {\n  const out = [];\n}\n```")
+    r = b.wells()[0][0]
+    first = int(r.top()) + 30 + 1  # the first code line starts under the 30px head
+    positions = {doc_pos_at(b.doc, 60, first + 20 * k + 1) for k in range(3)}  # the top strip of each line
+    assert len(positions) == 3 and max(positions) < b.doc.characterCount() - 1

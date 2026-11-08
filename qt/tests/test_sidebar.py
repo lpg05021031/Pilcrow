@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from harness import app_client, mock_server  # noqa: F401
+from harness import app_client, mock_server
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
-
-MOCK_PORT = 5331
 
 
 def _ready(c) -> None:
@@ -18,15 +16,17 @@ def _ready(c) -> None:
 
 
 def _rows(c):
+    """The rows as they stand on screen, top to bottom (the sidebar keeps its rows and moves only the
+    ones that moved, so creation order says nothing about place)."""
     from pilcrow_qt.widgets.sidebar import SessionRow
 
-    return [r for r in c.find(SessionRow) if r.isVisible()]
+    return sorted((r for r in c.find(SessionRow) if r.isVisible()), key=lambda r: _at(r, c).y())
 
 
 def _heads(c):
     from pilcrow_qt.widgets.sidebar import GroupHead
 
-    return [h for h in c.find(GroupHead) if h.isVisible()]
+    return sorted((h for h in c.find(GroupHead) if h.isVisible()), key=lambda h: _at(h, c).y())
 
 
 def _at(w, c) -> QPoint:
@@ -107,11 +107,13 @@ def test_measures_match_app_css(app_client):
     assert _at(sb.new_opts, c) == QPoint(232, 46) and sb.new_opts.width() == 26
     assert _at(sb.search_row, c) == QPoint(10, 76) and sb.search_row.height() == 30
     assert _at(sb.page_board, c) == QPoint(10, 118) and sb.page_board.height() == 30
+    assert _at(sb.page_inbox, c) == QPoint(10, 149)
+    assert _at(sb.page_dispatch, c) == QPoint(10, 180) and sb.page_dispatch.height() == 30
     heads = _heads(c)
-    assert _at(heads[0].btn, c) == QPoint(10, 170) and heads[0].btn.height() == 24
+    assert _at(heads[0].btn, c) == QPoint(10, 232) and heads[0].btn.height() == 24
     rows = _rows(c)
-    assert _at(rows[0], c) == QPoint(10, 194) and rows[0].height() == 30 and rows[0].width() == 248
-    assert _at(rows[1], c) == QPoint(10, 224)
+    assert _at(rows[0], c) == QPoint(10, 256) and rows[0].height() == 30 and rows[0].width() == 248
+    assert _at(rows[1], c) == QPoint(10, 286)
     assert _at(rows[0].title, c).x() == 18, ".side-row-main padding-left 8"
     assert _at(heads[1].btn, c).y() == _at(rows[3], c).y() + 30 + 14
     h = c.win.height()
@@ -184,8 +186,8 @@ def test_active_row_is_a_pill(app_client):
     from pilcrow_qt import theme
 
     assert active.title.font().weight() == 400
-    assert theme.tokens().text in active.title.styleSheet()
-    assert theme.tokens().text_2 in other.title.styleSheet()
+    assert active.title.palette().color(active.title.foregroundRole()).name() == theme.tokens().text
+    assert other.title.palette().color(other.title.foregroundRole()).name() == theme.tokens().text_2
 
 
 def test_needs_you_section_and_glyph(app_client):
@@ -215,3 +217,119 @@ def test_screenshot(app_client):
     c.wait_until(lambda: len(_rows(c)) >= 5, 10, "rows")
     _ready(c)
     assert c.shot("sidebar").exists()
+
+
+def test_icon_buttons_paint_their_glyph_from_a_token_name(app_client):
+    """The foot's archive and appearance buttons (and every IconButton given "text_3") must paint: a
+    token name is resolved to its colour, not handed to the icon painter as a literal."""
+    c = app_client
+    from PySide6.QtGui import QColor
+
+    sb = c.win.sidebar
+    for w in (sb.archive_btn, sb.theme_btn, sb.collapse_btn):
+        img = w.grab().toImage()
+        colours = {img.pixel(x, y) for x in range(img.width()) for y in range(img.height())}
+        assert len(colours) > 1, f"{w.accessibleName()} painted nothing"
+        bg = QColor(img.pixel(0, 0))
+        assert any(abs(QColor(px).lightness() - bg.lightness()) > 40 for px in colours), (
+            "the glyph stands off its ground"
+        )
+
+
+def test_icon_button_without_a_colour_paints_in_text_2(app_client):
+    """The default (no colour given) is text-2, not black: most IconButtons pass none."""
+    from PySide6.QtGui import QColor
+
+    from pilcrow_qt import theme
+    from pilcrow_qt.widgets.ui.bits import IconButton
+
+    b = IconButton("x", "Dismiss", 13)
+    b.resize(25, 25)
+    img = b.grab().toImage()
+    want = QColor(theme.tokens().text_2)
+    inked = [QColor(img.pixel(x, y)) for x in range(img.width()) for y in range(img.height())]
+    brightest = max(inked, key=lambda c: c.lightness())
+    assert abs(brightest.lightness() - want.lightness()) < 30, f"glyph {brightest.name()} vs text-2 {want.name()}"
+    b.deleteLater()
+
+
+def test_a_deleted_session_does_not_come_back_with_a_late_list(app_client, monkeypatch):
+    """A list read before the delete that lands after it (or a server that still lists the session for a
+    moment) does not put the row back: the row goes at once and stays gone."""
+    from pilcrow_qt import store as store_mod
+    from pilcrow_qt.rpc import Call
+
+    c = app_client
+    c.wait_until(lambda: len(_rows(c)) >= 5, 10, "rows")
+    _ready(c)
+    stale = [dict(s) for s in c.store.sessions]
+    assert any(s.get("id") == "sess-tests" for s in stale)
+    c.store.delete_session("sess-tests")
+    assert "sess-tests" not in [s.get("id") for s in c.store.sessions], "gone from the list at once"
+    c.wait_until(lambda: "sess-tests" not in [r.sid for r in _rows(c)], 5, "row gone")
+
+    real = store_mod.rpc.call
+
+    def call(method, params=None):
+        if method in ("sessions.list", "sessions.refresh"):
+            late = Call(method)
+            late._resolve([dict(s) for s in stale])  # the list as it was before the delete
+            return late
+        return real(method, params)
+
+    monkeypatch.setattr(store_mod.rpc, "call", call)
+    c.store.refresh_sessions(True)
+    c.sleep(100)
+    assert "sess-tests" not in [s.get("id") for s in c.store.sessions]
+    assert "sess-tests" not in [r.sid for r in _rows(c)]
+
+
+def _click(w, c) -> None:
+    """A press and a release at the middle of ``w``, as a mouse makes them (separately, so a menu that
+    closes on the press is caught: the release then finds no row to pick)."""
+    p = w.rect().center()
+    QTest.mouseMove(w, p)
+    QTest.mousePress(w, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, p)
+    c.sleep(20)
+    QTest.mouseRelease(w, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, p)
+    c.sleep(150)
+
+
+def _menu_row(c, label: str):
+    from pilcrow_qt.widgets.ui.menu import MenuPopover, MenuRow
+
+    pops = [p for p in c.win.findChildren(MenuPopover) if p.isVisible()]
+    assert len(pops) == 1, "the row's menu is open"
+    return next(r for r in pops[0].findChildren(MenuRow) if r.label.startswith(label))
+
+
+def test_the_row_menu_picks_with_the_mouse_and_delete_deletes(app_client):
+    """Every pick from a row's menu with the mouse: the press on a menu row used to travel on to the
+    window behind the menu, read as a press outside, and close the menu before the release, so no
+    item did anything (Delete among them)."""
+    from PySide6.QtWidgets import QAbstractButton
+
+    c = app_client
+    c.wait_until(lambda: len(_rows(c)) >= 5, 10, "rows")
+    _ready(c)
+
+    def row(sid):
+        return next(r for r in _rows(c) if r.sid == sid)
+
+    r = row("sess-site")
+    QTest.mouseMove(r, r.rect().center())
+    c.sleep(100)
+    _click(r.menu_btn, c)
+    _click(_menu_row(c, "Pin to top"), c)
+    c.wait_until(lambda: any(s.get("id") == "sess-site" and s.get("pinned") for s in c.store.sessions), 5, "pinned")
+
+    r = row("sess-tests")
+    QTest.mouseMove(r, r.rect().center())
+    c.sleep(100)
+    _click(r.menu_btn, c)
+    _click(_menu_row(c, "Delete"), c)
+    c.wait_until(lambda: bool(c.store.dialogs.get("confirm")), 3, "the confirm dialog")
+    btn = next(b for b in c.win.findChildren(QAbstractButton) if b.isVisible() and b.text() == "Delete session")
+    _click(btn, c)
+    c.wait_until(lambda: "sess-tests" not in [s.get("id") for s in c.store.sessions], 5, "deleted")
+    assert "sess-tests" not in [s["id"] for s in c.call("sessions.list")], "gone on the server too"

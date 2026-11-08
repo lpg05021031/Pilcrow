@@ -15,7 +15,7 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
 from PySide6.QtCore import QDateTime, QEvent, QObject, QPoint, QRect, QRectF, QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QColor, QFont, QPainter
 from PySide6.QtWidgets import (
     QApplication,
     QDateTimeEdit,
@@ -50,11 +50,12 @@ from ..lib.board import (
 )
 from ..lib.fmt import basename, cost, duration, short_model, tildify, time_ago
 from ..store import Runtime, store
-from .dialogs.parts import Card, ElideLabel, Kbd, LayoutButton, Switch, Text, Well
+from .dialogs.parts import Card, ElideLabel, Kbd, Switch, Text, Well
 from .dialogs.settings_ui import ModelSelect, Select, combo_value, text_area
 from .transcript.permission import suggestion_label, typing_elsewhere
-from .ui.bits import IconButton, WorkingMark, button
+from .ui.bits import Box, IconButton, LayoutButton, WorkingMark, button, paint_box
 from .ui.menu import show_menu
+from .ui.sections import KeyButton
 from .ui.signals import bind
 
 Json = Dict[str, Any]
@@ -99,6 +100,14 @@ def _lbl(text: str = "", tone: str = "", fs: str = "", wrap: bool = False) -> QL
     return lb
 
 
+def _dt(text: str) -> QLabel:
+    """A row label of the handoff grid (``.bd-report dt``)."""
+    lb = QLabel(text)
+    lb.setFont(theme.font_ui(theme.FS_SMALL))
+    theme.tint(lb, fg="text_4")
+    return lb
+
+
 def _repolish(w: QWidget) -> None:
     w.style().unpolish(w)
     w.style().polish(w)
@@ -128,35 +137,35 @@ class FlowLayout(QLayout):
         self._gap = spacing
         self.setContentsMargins(0, 0, 0, 0)
 
-    def addItem(self, item) -> None:  # noqa: N802
+    def addItem(self, item) -> None:
         self._items.append(item)
 
     def count(self) -> int:
         return len(self._items)
 
-    def itemAt(self, i: int):  # noqa: N802
+    def itemAt(self, i: int):
         return self._items[i] if 0 <= i < len(self._items) else None
 
-    def takeAt(self, i: int):  # noqa: N802
+    def takeAt(self, i: int):
         return self._items.pop(i) if 0 <= i < len(self._items) else None
 
-    def expandingDirections(self) -> Qt.Orientation:  # noqa: N802
+    def expandingDirections(self) -> Qt.Orientation:
         return Qt.Orientation(0)
 
-    def hasHeightForWidth(self) -> bool:  # noqa: N802
+    def hasHeightForWidth(self) -> bool:
         return True
 
-    def heightForWidth(self, w: int) -> int:  # noqa: N802
+    def heightForWidth(self, w: int) -> int:
         return self._lay(QRect(0, 0, w, 0), True)
 
-    def setGeometry(self, r: QRect) -> None:  # noqa: N802
+    def setGeometry(self, r: QRect) -> None:
         super().setGeometry(r)
         self._lay(r, False)
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         return self.minimumSize()
 
-    def minimumSize(self) -> QSize:  # noqa: N802
+    def minimumSize(self) -> QSize:
         s = QSize()
         for it in self._items:
             s = s.expandedTo(it.minimumSize())
@@ -178,106 +187,87 @@ class FlowLayout(QLayout):
         return y + row_h - r.y()
 
 
-class Chip(QLabel):
+class Chip(Box):
     """``.bd-chip``: the state in a pill on the card's first line."""
 
+    WASH = {
+        "review": "accent_wash",
+        "prompt": "warn_wash",
+        "running": "info_wash",
+        "stuck": "err_wash",
+        "done": "ok_wash",
+    }
+    INK = {
+        "review": "accent_text",
+        "prompt": "warn",
+        "running": "info",
+        "stuck": "err",
+        "done": "ok",
+        "queued": "text_3",
+    }
+
     def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
+        super().__init__(bg="fill_1/raised", radius=8, parent=parent)
         self._state = ""
         self.setFixedHeight(16)
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(6, 0, 6, 0)
+        self.lb = QLabel()
+        self.lb.setFont(theme.font_ui(theme.FS_MICRO, 500))
+        lay.addWidget(self.lb)
+
+    def text(self) -> str:
+        return self.lb.text()
 
     def set_state(self, state: str, text: str) -> None:
         self._state = state
-        self.setText(text)
+        self.lb.setText(text)
         self.setVisible(bool(text))
-        self._paint()
-
-    def _paint(self) -> None:
-        t = theme.tokens()
-        bg, fg = theme.blend(t.fill_1, t.raised).name(), t.text_2
-        if self._state == "review":
-            bg, fg = theme.blend(t.accent_wash, t.raised).name(), t.accent_text
-        elif self._state == "prompt":
-            bg, fg = theme.blend(t.warn_wash, t.raised).name(), t.warn
-        elif self._state == "running":
-            bg, fg = theme.blend(t.info_wash, t.raised).name(), t.info
-        elif self._state == "stuck":
-            bg, fg = theme.blend(t.err_wash, t.raised).name(), t.err
-        elif self._state == "done":
-            bg, fg = theme.blend(t.ok_wash, t.raised).name(), t.ok
-        elif self._state == "queued":
-            fg = t.text_3
-        self.setStyleSheet(
-            f"QLabel {{ background: {bg}; color: {fg}; border-radius: 8px; padding: 0 6px; font-size: {theme.FS_MICRO}px; font-weight: 500; }}"
-        )
+        self.set_look(bg=f"{self.WASH.get(state, 'fill_1')}/raised")
+        theme.tint(self.lb, fg=self.INK.get(state, "text_2"))
 
 
-class ActionButton(LayoutButton):
+class ActionButton(KeyButton):
     """``.btn.sm`` with a key cap at its end (``.key``): what one letter does to the card."""
 
     def __init__(self, text: str, key: str = "", kind: str = "", parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
+        super().__init__(text, kind, parent)
         self.action_id = ""
-        self.setProperty("fs", "sm")
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setAccessibleName(text)
-        self.setAutoDefault(False)
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(9, 0, 9, 0)
-        lay.setSpacing(6)
-        self.label = QLabel(text)
-        self.label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        lay.addWidget(self.label)
-        self.kbd = Kbd(key)
-        self.kbd.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        self.kbd.setVisible(bool(key))
-        lay.addWidget(self.kbd)
-        self.setFixedHeight(26)
-        self.set_kind(kind)
+        self.set_key(key)
 
     def set_kind(self, kind: str) -> None:
-        self.setProperty("kind", kind)
-        t = theme.tokens()
-        color = (
-            t.accent_ink
-            if kind == "primary"
-            else t.err
-            if kind == "danger-text"
-            else t.text_2
-            if kind == "ghost"
-            else t.text
-        )
-        self.label.setStyleSheet(
-            f"background: transparent; color: {color}; font-size: {theme.FS_SMALL}px; font-weight: {600 if kind == 'primary' else 500};"
-        )
-        _repolish(self)
+        if kind == "danger-text":
+            super().set_kind("")
+            self.kind = kind
+            self.setProperty("kind", kind)
+            theme.tint(self.label, fg="err")
+            return
+        super().set_kind(kind)
 
 
-class Avatar(QLabel):
+class Avatar(Box):
     """``.bd-av``: the model's initial in a round blue mark, or ``you`` in an accent pill."""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        super().__init__(bg="info_wash/raised", radius=7, parent=parent)
         self.setFixedHeight(14)
         self._me = False
-        bind(theme.theme.changed, self, lambda _t: self._paint())
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        self.lb = QLabel()
+        self.lb.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.lb.setFont(theme.font_ui(9, 600))
+        lay.addWidget(self.lb)
+
+    def text(self) -> str:
+        return self.lb.text()
 
     def set_who(self, model: str) -> None:
         self._me = not model
-        self.setText("you" if self._me else model[0].upper())
+        self.lb.setText("you" if self._me else model[0].upper())
         self.setFixedWidth(26 if self._me else 14)
-        self._paint()
-
-    def _paint(self) -> None:
-        t = theme.tokens()
-        bg = theme.blend(t.accent_wash if self._me else t.info_wash, t.raised).name()
-        fg = t.accent_text if self._me else t.info
-        self.setStyleSheet(
-            f"QLabel {{ background: {bg}; color: {fg}; border-radius: 7px; font-size: 9px; font-weight: 600; }}"
-        )
+        self.set_look(bg="accent_wash/raised" if self._me else "info_wash/raised")
+        theme.tint(self.lb, fg="accent_text" if self._me else "info")
 
 
 # ---------------------------------------------------------------- cards
@@ -332,37 +322,32 @@ class BoardCard(Card):
         self.spent = QLabel()
         foot.addWidget(self.spent)
         lay.addLayout(foot)
-        bind(theme.theme.changed, self, lambda _t: self._paint_extra())
         self._paint_extra()
 
     def _paint_extra(self) -> None:
-        t = theme.tokens()
-        micro = f"font-size: {theme.FS_MICRO}px; color: {t.text_4}; background: transparent;"
         for w in (self.project, self.who, self.elapsed, self.spent):
-            w.setStyleSheet(micro)
-        self.delta.setStyleSheet(f"font-size: {theme.FS_MICRO}px; background: transparent;")
+            theme.tint(w, fg="text_4")
+            if w is not self.project:
+                w.setFont(theme.font_ui(theme.FS_MICRO))
         self.update()
 
     def _paint(self) -> None:
-        # the card surface, with a 1.5px accent ring when it is the chosen one (``.bd-card.sel``)
-        t = theme.tokens()
-        name = self.metaObject().className()
-        sel = getattr(self, "_sel", False)  # Card paints once in its own __init__, before this field exists
-        border = t.accent if sel else theme.blend(t.hair_2, t.canvas).name()
-        hover = t.accent if sel else theme.blend(t.hair_3, t.canvas).name()
-        self.setStyleSheet(
-            f"{name} {{ background: {t.raised}; border: {'2px' if sel else '1px'} solid {border}; border-radius: {theme.R2}px; }} "
-            f"{name}:hover {{ border-color: {hover}; }}"
-        )
+        self.update()
 
     def set_selected(self, on: bool) -> None:
         if on != self._sel:
             self._sel = on
             self._paint()
 
-    def paintEvent(self, e) -> None:  # noqa: N802
-        super().paintEvent(e)
+    def paintEvent(self, e) -> None:
         t = theme.tokens()
+        if getattr(self, "_sel", False):
+            # the chosen card: the surface with a 1.5px accent ring (``.bd-card.sel``)
+            p = QPainter(self)
+            paint_box(p, QRectF(self.rect()), QColor(t.raised), QColor(t.accent), theme.R2, 1.5)
+            p.end()
+        else:
+            super().paintEvent(e)
         color = {"review": t.accent, "prompt": t.warn, "running": t.info, "stuck": t.err, "queued": t.hair_3}.get(
             self.state
         )
@@ -374,15 +359,15 @@ class BoardCard(Card):
         p.setBrush(QColor(color))
         p.drawRoundedRect(QRectF(0, 9, 3, self.height() - 18), 1.5, 1.5)
 
-    def mousePressEvent(self, e) -> None:  # noqa: N802
+    def mousePressEvent(self, e) -> None:
         self.selected.emit(self.sid)
         super().mousePressEvent(e)
 
-    def mouseDoubleClickEvent(self, e) -> None:  # noqa: N802
+    def mouseDoubleClickEvent(self, e) -> None:
         self.opened.emit(self.sid)
         super().mouseDoubleClickEvent(e)
 
-    def keyPressEvent(self, e) -> None:  # noqa: N802
+    def keyPressEvent(self, e) -> None:
         if e.key() == Qt.Key.Key_Space:
             self.selected.emit(self.sid)
             return
@@ -396,6 +381,9 @@ class BoardCard(Card):
         proj = basename(str(s.get("project") or s.get("cwd") or ""))
         if wt.get("branch"):
             proj += f" · {str(wt['branch']).replace('pilcrow/', '', 1)}"
+        helper = (rt or {}).get("helper") or s.get("helper")
+        if helper:
+            proj = f"helper of {((rt or {}).get('helper') or {}).get('leadTitle') or 'a lead session'} · {proj}"
         self.project.setText(proj)
         if schedule:
             self.chip.set_state("wait", "Scheduled")
@@ -429,16 +417,16 @@ class BoardCard(Card):
         self.update()
 
 
-class LaneWidget(QFrame):
+class LaneWidget(Box):
     """One lane (``.bd-lane``): a header with the mark, title, key number and count, then the cards."""
 
+    MARK = {"agent": "info", "wait": "text_4", "me": "accent", "done": "ok"}
+
     def __init__(self, spec: Json, index: int, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
+        super().__init__(bg="inset", line="hair/inset", radius=theme.R3, parent=parent)
         self.key = str(spec["key"])
         self.spec = spec
         self.card_widgets: List[BoardCard] = []
-        self.setObjectName(f"lane_{self.key}")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setMinimumWidth(LANE_MIN_W)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         lay = QVBoxLayout(self)
@@ -448,19 +436,24 @@ class LaneWidget(QFrame):
         hl = QHBoxLayout(head)
         hl.setContentsMargins(12, 9, 10, 5)
         hl.setSpacing(7)
-        self.mark = QLabel()
+        self.mark = Box(bg=self.MARK.get(self.key, "hair_3"), radius=2)
         self.mark.setFixedSize(8, 8)
         hl.addWidget(self.mark)
         self.title = QLabel(str(spec["title"]))
+        self.title.setFont(theme.font_ui(theme.FS_SMALL, 600))
+        theme.tint(self.title, fg="accent_text" if self.key == "me" else "text_2")
         hl.addWidget(self.title)
         self.num = QLabel(str(index + 1))
         self.num.setFont(theme.font_mono(theme.FS_MICRO))
+        theme.tint(self.num, fg="text_4")
         hl.addWidget(self.num)
         hl.addStretch(1)
         self.extra = QHBoxLayout()
         self.extra.setSpacing(4)
         hl.addLayout(self.extra)
         self.count = QLabel("0")
+        self.count.setFont(theme.font_ui(theme.FS_SMALL, 500))
+        theme.tint(self.count, fg="text_4")
         hl.addWidget(self.count)
         lay.addWidget(head)
         self.cards_host = QWidget()
@@ -470,30 +463,10 @@ class LaneWidget(QFrame):
         self.empty = Text(str(spec["empty"]), theme.FS_SMALL, 400, "text_4")
         self.cards_lay.addWidget(self.empty)
         lay.addWidget(self.cards_host)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
-
-    def _paint(self) -> None:
-        t = theme.tokens()
-        mark = {"agent": t.info, "wait": t.text_4, "me": t.accent, "done": t.ok}.get(self.key, t.hair_3)
-        self.mark.setStyleSheet(f"background: {mark}; border-radius: 2px;")
-        self.title.setStyleSheet(
-            f"color: {t.accent_text if self.key == 'me' else t.text_2}; font-size: {theme.FS_SMALL}px; font-weight: 600; background: transparent;"
-        )
-        self.num.setStyleSheet(f"color: {t.text_4}; background: transparent;")
-        self.count.setStyleSheet(
-            f"color: {t.text_4}; font-size: {theme.FS_SMALL}px; font-weight: 500; background: transparent;"
-        )
-        self.setStyleSheet(
-            f"#lane_{self.key} {{ background: {t.inset}; border: 1px solid {theme.blend(t.hair, t.inset).name()}; border-radius: {theme.R3}px; }}"
-        )
 
     def set_count(self, text: str, full: bool = False) -> None:
-        t = theme.tokens()
         self.count.setText(text)
-        self.count.setStyleSheet(
-            f"color: {t.warn if full else t.text_4}; font-size: {theme.FS_SMALL}px; font-weight: 500; background: transparent;"
-        )
+        theme.tint(self.count, fg="warn" if full else "text_4")
 
     def set_cards(self, widgets: List[QWidget], hide_empty: bool = False) -> None:
         """Lay these widgets out in order, keeping the ones already here (their state and hover stay)."""
@@ -536,8 +509,11 @@ class PermissionBox(QWidget):
         wl.setContentsMargins(10, 8, 10, 8)
         wl.setSpacing(2)
         self.tool = QLabel()
+        self.tool.setFont(theme.font_ui(theme.FS_MICRO, 600))
+        theme.tint(self.tool, fg="text_3")
         wl.addWidget(self.tool)
         self.what = QLabel()
+        theme.tint(self.what, fg="text")
         self.what.setWordWrap(True)
         self.what.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         wl.addWidget(self.what)
@@ -554,6 +530,14 @@ class PermissionBox(QWidget):
         self.always_btn = ActionButton("Always allow", "2")
         self.always_btn.clicked.connect(self.always)
         row.addWidget(self.always_btn)
+        # a helper's request can be answered for every helper of its lead at once (HELPERS.md §5.6)
+        self.all_btn = ActionButton("Allow for all helpers")
+        self.all_btn.setToolTip("Answer every helper of this lead that asks the same thing, now and later")
+        self.all_btn.clicked.connect(self.allow_all)
+        self.all_btn.hide()
+        row.addWidget(self.all_btn)
+        self._helper: Optional[Json] = None  # the lead this session helps, if any
+        self._job: str = ""  # the dispatch job this session runs for, if any
         self.deny_btn = ActionButton("Deny", "3", "ghost")
         self.deny_btn.clicked.connect(self.deny)
         row.addWidget(self.deny_btn)
@@ -563,14 +547,6 @@ class PermissionBox(QWidget):
         row.addWidget(self.decided_lb)
         row.addStretch(1)
         lay.addLayout(row)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
-
-    def _paint(self) -> None:
-        t = theme.tokens()
-        self.tool.setStyleSheet(
-            f"color: {t.text_3}; font-size: {theme.FS_MICRO}px; font-weight: 600; background: transparent;"
-        )
 
     @property
     def perm(self) -> Optional[Json]:
@@ -585,12 +561,20 @@ class PermissionBox(QWidget):
             self.hide()
             return
         self.show()
-        t = theme.tokens()
+        h = s.get("helper")
+        self._helper = h if isinstance(h, dict) and h.get("leadId") else None
+        d = s.get("dispatch")
+        self._job = str(d.get("jobId")) if isinstance(d, dict) and d.get("jobId") else ""
+        self.all_btn.label.setText("Allow for all helpers" if self._helper else "Allow for all")
+        self.all_btn.setToolTip(
+            "Answer every helper of this lead that asks the same thing, now and later"
+            if self._helper
+            else "Answer every run of this job that asks the same thing, now and later"
+        )
         text, mono, note = perm_summary(perm, self._cwd)
         self.tool.setText(str(perm.get("displayName") or perm.get("toolName") or ""))
         self.what.setText(text)
         self.what.setFont(theme.font_mono(theme.MONO_SIZE) if mono else theme.font_ui(theme.FS_SMALL))
-        self.what.setStyleSheet(f"color: {t.text}; background: transparent;")
         self.note.setText(note or "")
         self.note.setVisible(bool(note))
         self.wait.setText(f"waiting {max(0, int(round((now - float(perm.get('at') or now)) / 1000)))}s")
@@ -615,33 +599,54 @@ class PermissionBox(QWidget):
         self.allow_btn.setVisible(not interactive and not decided)
         self.always_btn.setVisible(not interactive and not decided and self._allow_always)
         self.deny_btn.setVisible(not interactive and not decided)
+        self.all_btn.setVisible(not interactive and not decided and bool(self._helper or self._job))
         self.open_btn.setVisible(interactive and not decided)
         self.decided_lb.setVisible(decided)
-        for b in (self.allow_btn, self.always_btn, self.deny_btn):
+        for b in (self.allow_btn, self.always_btn, self.all_btn, self.deny_btn):
             b.setEnabled(not self._busy)
 
     def decide(self, decision: Json) -> None:
         perm = self._perm
         if not perm or self._busy:
             return
+        self._send(
+            store.respond(self.sid, str(perm.get("requestId") or ""), decision), decision.get("behavior") == "allow"
+        )
+
+    def _send(self, call: Any, allowed: bool) -> None:
         self._busy = True
-        for b in (self.allow_btn, self.always_btn, self.deny_btn):
+        buttons = (self.allow_btn, self.always_btn, self.all_btn, self.deny_btn)
+        for b in buttons:
             b.setEnabled(False)
 
         def ok(_r: Any) -> None:
-            self._decided = "allow" if decision.get("behavior") == "allow" else "deny"
-            self.decided_lb.setText("Allowed — Claude is continuing" if self._decided == "allow" else "Declined")
-            for b in (self.allow_btn, self.always_btn, self.deny_btn, self.open_btn):
+            self._decided = "allow" if allowed else "deny"
+            self.decided_lb.setText("Allowed — Claude is continuing" if allowed else "Declined")
+            for b in (*buttons, self.open_btn):
                 b.hide()
             self.decided_lb.show()
             QTimer.singleShot(900, self._reset)
 
         def bad(_e: Any) -> None:
             self._busy = False
-            for b in (self.allow_btn, self.always_btn, self.deny_btn):
+            for b in buttons:
                 b.setEnabled(True)
 
-        store.respond(self.sid, str(perm.get("requestId") or ""), decision).then(ok).catch(bad)
+        call.then(ok).catch(bad)
+
+    def allow_all(self) -> None:
+        """Answer this request for every helper of the lead, or every repository of the dispatch job, now and
+        later (web CardPanel.tsx allowAllHelpers; dispatch's "Allow for all")."""
+        perm = self._perm
+        if not perm or self._busy or not (self._helper or self._job):
+            return
+        rid = str(perm.get("requestId") or "")
+        call = (
+            store.call("helpers.allow", {"leadId": str(self._helper.get("leadId")), "requestId": rid})
+            if self._helper
+            else store.call("dispatch.allow", {"id": self._job, "requestId": rid})
+        )
+        self._send(call, True)
 
     def _reset(self) -> None:
         self._decided = ""
@@ -728,7 +733,7 @@ class NoteBox(QWidget):
         self.submit_btn.setEnabled(False)
         self._on_submit(text)
 
-    def eventFilter(self, obj: QObject, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj: QObject, e: QEvent) -> bool:
         if obj is self.edit and e.type() == QEvent.Type.KeyPress:
             k = e.key()
             if k == Qt.Key.Key_Escape:
@@ -761,18 +766,19 @@ class WaitOption(LayoutButton):
         lay.addWidget(self.hint)
         for w in (self.label, self.hint):
             w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
+        self.label.setFont(theme.font_ui(theme.FS_SMALL))
+        self.hint.setFont(theme.font_ui(theme.FS_MICRO))
+        theme.tint(self.hint, fg="text_3")
+        self.set_look(bg="raised", hover="fill_1/raised", line="hair_2/raised", radius=theme.R2)
+        self._tint()
 
-    def _paint(self) -> None:
-        t = theme.tokens()
-        self.label.setStyleSheet(f"color: {t.text}; font-size: {theme.FS_SMALL}px; background: transparent;")
-        self.hint.setStyleSheet(f"color: {t.text_3}; font-size: {theme.FS_MICRO}px; background: transparent;")
-        self.setStyleSheet(
-            f"#waitopt {{ background: {t.raised}; border: 1px solid {theme.blend(t.hair_2, t.raised).name()}; border-radius: {theme.R2}px; text-align: left; }}"
-            f" #waitopt:hover:!disabled {{ border-color: {t.accent_line}; }}"
-            f" #waitopt:disabled {{ color: {t.text_4}; }}"
-        )
+    def _tint(self) -> None:
+        theme.tint(self.label, fg="text" if self.isEnabled() else "text_4")
+
+    def changeEvent(self, e) -> None:
+        super().changeEvent(e)
+        if e.type() == QEvent.Type.EnabledChange:
+            self._tint()
 
 
 class WaitPicker(QWidget):
@@ -870,6 +876,21 @@ class WaitPicker(QWidget):
         return False
 
 
+class _Edged(QWidget):
+    """A plain surface with one hairline, along its top or its bottom (``.bd-panel-h``, ``.bd-actions``)."""
+
+    def __init__(self, edge: str, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.edge = edge
+        bind(theme.theme.changed, self, lambda _t: self.update())
+
+    def paintEvent(self, _e) -> None:
+        t = theme.tokens()
+        p = QPainter(self)
+        y = 0 if self.edge == "top" else self.height() - 1
+        p.fillRect(0, y, self.width(), 1, theme.blend(t.hair, t.chrome))
+
+
 class Panel(QFrame):
     """``.bd-panel``: the chosen card in full — its intent, what Claude is asking or why it stopped, the
     handoff report when there is one, the ledger, and at the bottom the actions its state allows."""
@@ -888,15 +909,11 @@ class Panel(QFrame):
         self.action_buttons: List[ActionButton] = []
         self._when_labels: List[tuple] = []
         self._built_for: tuple = ()
-        self.setObjectName("bdpanel")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setFixedWidth(PANEL_W)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
-        head = QWidget()
-        head.setObjectName("bdpanelhead")
-        head.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        head = _Edged("bottom")
         hl = QVBoxLayout(head)
         hl.setContentsMargins(16, 12, 16, 10)
         hl.setSpacing(4)
@@ -904,6 +921,7 @@ class Panel(QFrame):
         meta.setSpacing(4)
         self.meta = ElideLabel()
         self.meta.setFont(theme.font_mono(theme.FS_MICRO))
+        theme.tint(self.meta, fg="text_4")
         meta.addWidget(self.meta, 1)
         self.open_btn = IconButton("arrow-up-right", "Open the conversation", 14)
         self.open_btn.clicked.connect(lambda: self.board.act(self.sid, "open"))
@@ -928,25 +946,19 @@ class Panel(QFrame):
         self.body_lay.addStretch(1)
         self.scroll.setWidget(self.body)
         lay.addWidget(self.scroll, 1)
-        self.actions = QWidget()
-        self.actions.setObjectName("bdactions")
-        self.actions.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.actions = _Edged("top")
         self.actions_lay = QVBoxLayout(self.actions)
         self.actions_lay.setContentsMargins(16, 10, 16, 10)
         self.actions_lay.setSpacing(6)
         lay.addWidget(self.actions)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
+        bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def _paint(self) -> None:
+    def paintEvent(self, _e) -> None:
+        # the chrome surface with a hairline down its left edge (``.bd-panel``)
         t = theme.tokens()
-        line = theme.blend(t.hair, t.chrome).name()
-        self.setStyleSheet(
-            f"#bdpanel {{ background: {t.chrome}; border-left: 1px solid {line}; }}"
-            f" #bdpanelhead {{ border-bottom: 1px solid {line}; }}"
-            f" #bdactions {{ border-top: 1px solid {line}; }}"
-        )
-        self.meta.setStyleSheet(f"color: {t.text_4}; font-size: {theme.FS_MICRO}px; background: transparent;")
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor(t.chrome))
+        p.fillRect(0, 0, 1, self.height(), theme.blend(t.hair, t.chrome))
 
     # ---- building
     def _sec(self, title: str, extra: Optional[QWidget] = None) -> QVBoxLayout:
@@ -957,8 +969,10 @@ class Panel(QFrame):
         hl = QHBoxLayout()
         hl.setSpacing(4)
         h = QLabel(title.upper())
-        t = theme.tokens()
-        h.setStyleSheet(f"color: {t.text_4}; font-size: {theme.FS_MICRO}px; font-weight: 600; letter-spacing: 0.06em;")
+        hf = theme.font_ui(theme.FS_MICRO, 600)
+        hf.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 106)
+        h.setFont(hf)
+        theme.tint(h, fg="text_4")
         hl.addWidget(h)
         if extra is not None:
             hl.addWidget(extra)
@@ -1178,15 +1192,11 @@ class Panel(QFrame):
         rows = [("Asked", str(r.get("asked") or ""), "text"), ("Did", str(r.get("did") or ""), "text")]
         files = r.get("files") or []
         for i, (k, v, color) in enumerate(rows):
-            dt = QLabel(k)
-            dt.setStyleSheet(f"color: {t.text_4}; font-size: {theme.FS_SMALL}px; background: transparent;")
-            gl.addWidget(dt, i, 0, Qt.AlignmentFlag.AlignTop)
+            gl.addWidget(_dt(k), i, 0, Qt.AlignmentFlag.AlignTop)
             gl.addWidget(Text(v, theme.FS_SMALL, 400, color, lh=1.5), i, 1)
         n = len(rows)
         if files:
-            dt = QLabel("Changed")
-            dt.setStyleSheet(f"color: {t.text_4}; font-size: {theme.FS_SMALL}px; background: transparent;")
-            gl.addWidget(dt, n, 0, Qt.AlignmentFlag.AlignTop)
+            gl.addWidget(_dt("Changed"), n, 0, Qt.AlignmentFlag.AlignTop)
             fl = QVBoxLayout()
             fl.setSpacing(1)
             for f in files:
@@ -1194,7 +1204,7 @@ class Panel(QFrame):
                     f'{f.get("path")} <span style="color:{t.ok}">+{f.get("add", 0)}</span> <span style="color:{t.err}">−{f.get("del", 0)}</span>'
                 )
                 lb.setFont(theme.font_mono(theme.FS_MICRO))
-                lb.setStyleSheet(f"color: {t.text_2}; background: transparent;")
+                theme.tint(lb, fg="text_2")
                 lb.setWordWrap(True)
                 fl.addWidget(lb)
             holder = QWidget()
@@ -1206,15 +1216,12 @@ class Panel(QFrame):
             ("Unverified", str(r.get("unverified") or "nothing"), "warn"),
             ("Decide", str(r.get("ask") or "none"), "accent_text"),
         ):
-            dt = QLabel(k)
-            dt.setStyleSheet(f"color: {t.text_4}; font-size: {theme.FS_SMALL}px; background: transparent;")
-            gl.addWidget(dt, n, 0, Qt.AlignmentFlag.AlignTop)
+            gl.addWidget(_dt(k), n, 0, Qt.AlignmentFlag.AlignTop)
             gl.addWidget(Text(v, theme.FS_SMALL, 500 if k == "Decide" else 400, color, lh=1.5), n, 1)
             n += 1
         return box
 
     def _ledger(self, events: List[Json], now: float) -> QWidget:
-        t = theme.tokens()
         host = QWidget()
         vl = QVBoxLayout(host)
         vl.setContentsMargins(0, 0, 0, 0)
@@ -1222,23 +1229,21 @@ class Panel(QFrame):
         for e in events:
             row = QHBoxLayout()
             row.setSpacing(8)
-            dot = QLabel()
+            tone = {"me": "accent", "run": "info", "ok": "ok", "err": "err"}.get(str(e.get("tone") or ""), "text_4")
+            dot = Box(bg=tone, radius=3.5)
             dot.setFixedSize(7, 7)
-            color = {"me": t.accent, "run": t.info, "ok": t.ok, "err": t.err}.get(str(e.get("tone") or ""), t.text_4)
-            dot.setStyleSheet(f"background: {color}; border-radius: 3px;")
             row.addWidget(dot, 0, Qt.AlignmentFlag.AlignTop)
             col = QVBoxLayout()
             col.setSpacing(2)
             top = QHBoxLayout()
             top.setSpacing(6)
             lb = QLabel(str(e["label"]))
-            lb.setStyleSheet(
-                f"color: {t.text}; font-size: {theme.FS_SMALL}px; font-weight: 500; background: transparent;"
-            )
+            lb.setFont(theme.font_ui(theme.FS_SMALL, 500))
+            theme.tint(lb, fg="text")
             top.addWidget(lb)
             when = QLabel(time_ago(float(e["at"]), now))
             when.setFont(theme.font_mono(theme.FS_MICRO))
-            when.setStyleSheet(f"color: {t.text_4}; background: transparent;")
+            theme.tint(when, fg="text_4")
             top.addWidget(when)
             top.addStretch(1)
             col.addLayout(top)
@@ -1270,13 +1275,13 @@ class Panel(QFrame):
         store.set_intent(sid, text).then(done)
 
 
-class NewCard(QFrame):
+class NewCard(Box):
     """``.bd-new``: a card being written, at the top of the backlog: a title, two or three sentences of
     intent, the folder it is about, and whether Claude works in its own worktree. Enter keeps it in the
     backlog; Ctrl+Enter hands it to Claude straight away."""
 
     def __init__(self, on_done: Callable[[Optional[str]], None], parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
+        super().__init__(bg="raised", line="accent_line", radius=theme.R2, line_w=1.5, parent=parent)
         self._on_done = on_done
         self._busy = ""
         self._git: Optional[Json] = None
@@ -1289,13 +1294,18 @@ class NewCard(QFrame):
             if r and r not in recents and len(recents) < 5:
                 recents.append(r)
         self.cwd = recents[0] if recents else str(info.get("home") or "")
-        self.setObjectName("bdnew")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(12, 10, 10, 10)
         lay.setSpacing(8)
         self.title = QLineEdit()
         self.title.setObjectName("bdnewtitle")
+        self.title.setFont(theme.font_ui(theme.FS_UI, 500))
+        theme.tint(self.title, fg="text", bg="transparent")
+        # geometry and palette roles only: the hairline under the title, the link colour when it has focus
+        self.title.setStyleSheet(
+            "QLineEdit#bdnewtitle { background: transparent; border: none; border-bottom: 1px solid palette(dark); padding: 2px 0 5px; }"
+            " QLineEdit#bdnewtitle:focus { border-bottom-color: palette(link); }"
+        )
         self.title.setPlaceholderText("What is the work?")
         self.title.setAccessibleName("What is the work?")
         self.title.installEventFilter(self)
@@ -1351,8 +1361,6 @@ class NewCard(QFrame):
         acts_host = QWidget()
         acts_host.setLayout(acts)
         lay.addWidget(acts_host)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
         self._set_cwd(self.cwd)
         QTimer.singleShot(0, self.title.setFocus)
 
@@ -1368,37 +1376,32 @@ class NewCard(QFrame):
         hl.setContentsMargins(7, 0, 7, 0)
         lb = QLabel(text)
         lb.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        lb.setStyleSheet("background: transparent;")
+        lb.setFont(theme.font_ui(theme.FS_MICRO))
         hl.addWidget(lb)
         b.label = lb  # type: ignore[attr-defined]
         b.setFixedHeight(18)
+        self._chip_look(b, False)
         return b
 
-    def _paint(self) -> None:
-        t = theme.tokens()
-        self.setStyleSheet(
-            f"#bdnew {{ background: {t.raised}; border: 1.5px solid {t.accent_line}; border-radius: {theme.R2}px; }}"
-            f" #bdnewtitle {{ background: transparent; border: none; border-bottom: 1px solid {theme.blend(t.hair_2, t.raised).name()}; padding: 2px 0 5px; color: {t.text}; font-size: {theme.FS_UI}px; font-weight: 500; }}"
-            f" #bdnewtitle:focus {{ border-bottom-color: {t.accent_line}; }}"
-            f" #bdchip {{ background: {theme.blend(t.fill_1, t.raised).name()}; color: {t.text_2}; border: none; border-radius: 9px; font-size: {theme.FS_MICRO}px; }}"
-            f" #bdchip:hover {{ background: {theme.blend(t.fill_2, t.raised).name()}; color: {t.text}; }}"
-            f' #bdchip[on="true"] {{ background: {theme.blend(t.accent_wash, t.raised).name()}; color: {t.accent_text}; }}'
-        )
-        for b in self.chips:
-            b.label.setStyleSheet(
-                f"background: transparent; color: {t.accent_text if b.property('on') == 'true' else t.text_2}; font-size: {theme.FS_MICRO}px;"
-            )  # type: ignore[attr-defined]
-        self.other.label.setStyleSheet(f"background: transparent; color: {t.text_2}; font-size: {theme.FS_MICRO}px;")  # type: ignore[attr-defined]
+    @staticmethod
+    def _chip_look(b: LayoutButton, on: bool) -> None:
+        """``.bd-new-chip`` and its ``.on`` state: a quiet fill, the accent wash when it is the chosen folder."""
+        if on:
+            b.set_look(bg="accent_wash/raised", hover="accent_wash/raised", radius=9)
+            theme.tint(b.label, fg="accent_text")  # type: ignore[attr-defined]
+        else:
+            b.set_look(bg="fill_1/raised", hover="fill_2/raised", radius=9)
+            theme.tint(b.label, fg="text_2")  # type: ignore[attr-defined]
 
     def _set_cwd(self, d: str) -> None:
         self.cwd = d
         for b in self.chips:
-            b.setProperty("on", "true" if b.property("dir") == d else "false")
-            _repolish(b)
+            on = b.property("dir") == d
+            b.setProperty("on", "true" if on else "false")
+            self._chip_look(b, on)
         in_recents = any(b.property("dir") == d for b in self.chips)
         self.other.label.setText("Other…" if in_recents else (basename(d) or "Folder…"))  # type: ignore[attr-defined]
         self.other.setToolTip(tildify(d, (store.info or {}).get("home")))
-        self._paint()
         # a worktree only makes sense in a repository; the switch follows the folder
         if not d:
             return
@@ -1465,7 +1468,7 @@ class NewCard(QFrame):
         self.error.setText(text)
         self.error.show()
 
-    def eventFilter(self, obj: QObject, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj: QObject, e: QEvent) -> bool:
         if e.type() == QEvent.Type.KeyPress:
             k = e.key()
             ctrl = bool(e.modifiers() & Qt.KeyboardModifier.ControlModifier)
@@ -1506,7 +1509,7 @@ class _KeyWatch(QObject):
         else:
             app.removeEventFilter(self)
 
-    def eventFilter(self, _obj: QObject, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, _obj: QObject, e: QEvent) -> bool:
         try:
             return self._page.key_event(e)
         except RuntimeError:  # the page is gone; the filter is on its way out with it
@@ -1563,7 +1566,7 @@ class Board(QWidget):
         root.addWidget(strip)
         # the andon
         self.andon = LayoutButton()
-        self.andon.setObjectName("bdandon")
+        self.andon.set_look(bg="err_wash/canvas", line="err_wash/err_wash/canvas", radius=theme.R3)
         self.andon.setCursor(Qt.CursorShape.PointingHandCursor)
         self.andon.setAccessibleName("Stopped")
         al = QHBoxLayout(self.andon)
@@ -1573,10 +1576,16 @@ class Board(QWidget):
         self.andon_ico.setFixedSize(14, 14)
         al.addWidget(self.andon_ico)
         self.andon_b = QLabel("Stopped")
+        self.andon_b.setFont(theme.font_ui(theme.FS_SMALL, 600))
+        theme.tint(self.andon_b, fg="err")
         al.addWidget(self.andon_b)
         self.andon_text = ElideLabel()
+        self.andon_text.setFont(theme.font_ui(theme.FS_SMALL))
+        theme.tint(self.andon_text, fg="text_2")
         al.addWidget(self.andon_text, 1)
         self.andon_go = QLabel("Look →")
+        self.andon_go.setFont(theme.font_ui(theme.FS_SMALL))
+        theme.tint(self.andon_go, fg="err")
         al.addWidget(self.andon_go)
         for w in (self.andon_ico, self.andon_b, self.andon_text, self.andon_go):
             w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
@@ -1661,14 +1670,14 @@ class Board(QWidget):
         self.refresh()
 
     # ---- lifecycle
-    def showEvent(self, e) -> None:  # noqa: N802
+    def showEvent(self, e) -> None:
         super().showEvent(e)
         self._timer.start()
         self._clock.start()
         self._keys.watch(True)
         self.load_state()
 
-    def hideEvent(self, e) -> None:  # noqa: N802
+    def hideEvent(self, e) -> None:
         super().hideEvent(e)
         self._timer.stop()
         self._clock.stop()
@@ -1677,14 +1686,6 @@ class Board(QWidget):
     def _paint(self) -> None:
         t = theme.tokens()
         self.andon_ico.setPixmap(icons.pixmap("circle-alert", t.err, 14))
-        self.andon.setStyleSheet(
-            f"#bdandon {{ background: {theme.blend(t.err_wash, t.canvas).name()}; border: 1px solid {theme.blend(t.err_wash, theme.blend(t.err_wash, t.canvas).name()).name()}; border-radius: {theme.R3}px; text-align: left; }}"
-        )
-        self.andon_b.setStyleSheet(
-            f"color: {t.err}; font-size: {theme.FS_SMALL}px; font-weight: 600; background: transparent;"
-        )
-        self.andon_text.setStyleSheet(f"color: {t.text_2}; font-size: {theme.FS_SMALL}px; background: transparent;")
-        self.andon_go.setStyleSheet(f"color: {t.err}; font-size: {theme.FS_SMALL}px; background: transparent;")
         self.refresh()
 
     # ---- data

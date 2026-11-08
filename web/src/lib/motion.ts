@@ -1,5 +1,5 @@
 // Shared motion helpers. Durations and curves mirror the tokens in styles/tokens.css.
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
 
 export const EASE = 'cubic-bezier(0.22, 1, 0.36, 1)';
 export const EASE_EXIT = 'cubic-bezier(0.4, 0, 1, 1)';
@@ -30,6 +30,12 @@ export function reducedMotion() {
 }
 
 /**
+ * A row's place in a list that eases in one row after another: the stylesheet (motion.css) delays its
+ * entrance by --i beats. The one way a stagger is said, whatever the beat.
+ */
+export const stagger = (i: number) => ({ '--i': i }) as CSSProperties;
+
+/**
  * Leaving gracefully. React removes an element the instant its state says so; a menu, a sheet or a
  * toast then vanishes between two frames, which is the single thing that makes an interface feel
  * abrupt. This hook keeps a still copy of the element on screen for a moment after it unmounts and
@@ -43,13 +49,13 @@ export function useExitGhost(ref: RefObject<HTMLElement | null>, opts: { duratio
   const o = useRef(opts);
   o.current = opts;
   useLayoutEffect(() => {
-    // The element is read at unmount on purpose: that is the last frame to copy.
+    // The element the ref holds for the component's life (each caller's root): copied as it is at unmount.
+    const el = ref.current;
     return () => {
-      const el = ref.current; // eslint-disable-line react-hooks/exhaustive-deps
       if (!el || !el.isConnected || reducedMotion() || document.hidden) return;
       ghost(el, o.current);
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [ref]);
 }
 
 /** Make the still copy of an element and play its exit on it. See useExitGhost. */
@@ -88,7 +94,7 @@ export function ghost(el: HTMLElement, { duration = 220, className = 'leaving', 
     copy.style.height = `${rect.height}px`;
     copy.style.margin = '0';
     copy.style.transform = 'none';
-    copy.style.zIndex = String(Math.max(2000, zIndexOf(el)));
+    copy.style.zIndex = 'var(--z-ghost)';
   }
   copy.style.pointerEvents = 'none';
   copy.classList.add(className);
@@ -181,15 +187,7 @@ export function useFlipRows(ref: RefObject<HTMLElement | null>, selector: string
       }
     }
     last.current = next;
-  }, [deps]); // eslint-disable-line react-hooks/exhaustive-deps
-}
-
-function zIndexOf(el: HTMLElement) {
-  for (let n: HTMLElement | null = el; n; n = n.parentElement) {
-    const z = parseInt(getComputedStyle(n).zIndex, 10);
-    if (!Number.isNaN(z)) return z;
-  }
-  return 0;
+  }, [ref, selector, deps]);
 }
 
 const LATIN = /[A-Za-z0-9_'’-]/;
@@ -225,7 +223,6 @@ export function useSmoothText(text: string, live: boolean): string {
       setShown(text.length);
       return;
     }
-    let frame = 0;
     const tick = () => {
       const full = textRef.current.length;
       let cur = shownRef.current;
@@ -233,15 +230,10 @@ export function useSmoothText(text: string, live: boolean): string {
         raf.current = null;
         return;
       }
-      // Each reveal re-renders the block being written; for a long reply that is real work, so a
-      // long one advances every other frame (in bigger steps) and reads the same.
-      const long = full > 6000;
-      if (long && frame++ % 2) {
-        raf.current = requestAnimationFrame(tick);
-        return;
-      }
+      // Each reveal re-renders only the block being written (Markdown), so it costs the same early
+      // in a reply as late in a long one, and every frame can advance.
       const backlog = full - cur;
-      const step = Math.max(1, Math.ceil((backlog * (long ? 2 : 1)) / (liveRef.current ? 9 : 3)));
+      const step = Math.max(1, Math.ceil(backlog / (liveRef.current ? 9 : 3)));
       let next = Math.min(full, cur + step);
       // Do not stop in the middle of a Latin word; CJK text can break after any character.
       const s = textRef.current;
@@ -288,4 +280,16 @@ export function useThrottled<T>(value: T, ms: number): T {
     }
   }, [value, ms]);
   return shown;
+}
+
+/**
+ * Let the browser draw a frame and handle input before going on: long work done in slices awaits this
+ * between them. A message, not a timer: nested timers are clamped to 4 ms.
+ */
+export function yieldToEvents() {
+  return new Promise<void>((done) => {
+    const ch = new MessageChannel();
+    ch.port1.onmessage = () => done();
+    ch.port2.postMessage(null);
+  });
 }

@@ -8,7 +8,6 @@ friends); each widget's docstring names its rule."""
 from __future__ import annotations
 
 import html
-import math
 import re
 import time
 from datetime import datetime
@@ -19,13 +18,14 @@ from PySide6.QtGui import QColor, QPainter, QPen
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
 from ... import icons, theme
+from ...canvas.pixels import hline, vline
 from ...lib.fmt import duration, plural, short_model, time_ago, tokens
 from ...lib.workflow import WorkflowCounts, agent_state, parse_workflow_meta, workflow_columns, workflow_counts
 from ...store import store
-from ..ui.bits import Clickable, Spinner
+from ..ui.bits import Clickable, Indicator, Pill, Spinner
 from ..ui.collapse import Collapse
 from ..ui.signals import bind
-from .right_panel import Btn, Card, Refresher, Section, elide, empty_text, lbl
+from .right_panel import Btn, Card, EmptyState, Refresher, Section, elide, lbl
 
 Json = Dict[str, Any]
 STATUS_LABEL = {"completed": "Completed", "failed": "Failed", "stopped": "Stopped", "running": "Running"}
@@ -95,6 +95,15 @@ def reconstruct_todos(sid: str) -> Optional[List[Json]]:
     return todos if isinstance(todos, list) else None
 
 
+def _wf_shape(t: Json) -> Any:
+    """What a workflow card is built from: its phases and whether it has a log. Agents arriving, their
+    states and figures are not in it: the card follows those in place."""
+    wf = t.get("workflow")
+    if not isinstance(wf, dict):
+        return None
+    return (len([p for p in wf.get("phases") or [] if p]), bool(wf.get("logs")))
+
+
 def _in_workflow(t: Json, workflows: List[Json]) -> bool:
     """Sub-agents a workflow spawned are drawn inside the workflow; everything else lists on its own."""
     if t.get("type") != "local_agent" or not t.get("ownedBySubagent"):
@@ -124,7 +133,7 @@ class Bar(QWidget):
         self._parts = parts
         self.update()
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -142,7 +151,7 @@ class Bar(QWidget):
             x += w
 
 
-class TodoBox(QWidget):
+class TodoBox(Indicator):
     """The 15px circle before a to-do (``.todo-box``): a hairline ring, a breathing dot while in
     progress, a tick on a filled disc when done."""
 
@@ -150,22 +159,9 @@ class TodoBox(QWidget):
         super().__init__(parent)
         self.status = status
         self.setFixedSize(15, 15)
-        self._t0 = time.monotonic()
-        self._timer = QTimer(self)
-        self._timer.setInterval(50)
-        self._timer.timeout.connect(self.update)
-        bind(theme.theme.changed, self, lambda _t: self.update())
+        self.set_live(status == "in_progress")
 
-    def showEvent(self, e) -> None:  # noqa: N802
-        if self.status == "in_progress" and not store.reduced_motion:
-            self._timer.start()
-        super().showEvent(e)
-
-    def hideEvent(self, e) -> None:  # noqa: N802
-        self._timer.stop()
-        super().hideEvent(e)
-
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -180,29 +176,10 @@ class TodoBox(QWidget):
         if self.status == "in_progress":
             p.setPen(Qt.PenStyle.NoPen)
             dot = QColor(t.text)
-            if self._timer.isActive():  # @keyframes breathe: 1.4s ease-in-out between 0.45 and 1
-                phase = (time.monotonic() - self._t0) % 1.4 / 1.4
-                dot.setAlphaF(0.45 + 0.55 * (0.5 + 0.5 * math.cos(phase * 2 * math.pi)))
+            if self.moving:  # @keyframes breathe: 1.4s ease-in-out between 0.45 and 1
+                dot.setAlphaF(theme.breath(time.monotonic(), 1.4, 0.45))
             p.setBrush(dot)
             p.drawEllipse(QPointF(7.5, 7.5), 2.5, 2.5)
-
-
-class TintSpinner(Spinner):
-    """The shared spinner in a token's colour (``.wf-mark.running`` is the accent)."""
-
-    def __init__(self, size: int = 12, tone: str = "text_3", parent: Optional[QWidget] = None) -> None:
-        super().__init__(size, parent)
-        self._tone = tone
-
-    def paintEvent(self, _e) -> None:  # noqa: N802
-        t = theme.tokens()
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        pen = QPen(QColor(getattr(t, self._tone)), 1.6)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        p.setPen(pen)
-        ang = int(((time.monotonic() - self._t0) % 1.0) * 360)
-        p.drawArc(QRectF(1.5, 1.5, self._size - 3, self._size - 3), -ang * 16, 270 * 16)
 
 
 class StateMark(QWidget):
@@ -217,10 +194,10 @@ class StateMark(QWidget):
         if st == "running":
             lay = QHBoxLayout(self)
             lay.setContentsMargins(1, 2, 1, 2)
-            lay.addWidget(TintSpinner(12, "accent_text"))
+            lay.addWidget(Spinner(12, "accent_text"))
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -237,7 +214,6 @@ class HoverRow(QWidget):
 
     def __init__(self, radius: int = theme.R1, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self._hover = False
         self.open = False
         self.radius = radius
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
@@ -248,18 +224,8 @@ class HoverRow(QWidget):
         self.open = open_
         self.update()
 
-    def enterEvent(self, e) -> None:  # noqa: N802
-        self._hover = True
-        self.update()
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:  # noqa: N802
-        self._hover = False
-        self.update()
-        super().leaveEvent(e)
-
-    def paintEvent(self, _e) -> None:  # noqa: N802
-        if self._hover or self.open:
+    def paintEvent(self, _e) -> None:
+        if self.underMouse() or self.open:
             t = theme.tokens()
             p = QPainter(self)
             p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -268,22 +234,15 @@ class HoverRow(QWidget):
             p.drawRoundedRect(QRectF(self.rect()), self.radius, self.radius)
 
 
-class Chip(QLabel):
+class Chip(Pill):
     """A tiny pill: ``.wf-chip`` (×2) and ``.wf-phase-kind`` (parallel)."""
 
     def __init__(self, text: str, round_: bool = False, parent: Optional[QWidget] = None) -> None:
-        super().__init__(text, parent)
-        self._round = round_
-        self._paint()
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-
-    def _paint(self) -> None:
-        t = theme.tokens()
-        f = theme.font_ui(10)
-        self.setStyleSheet(
-            f'font-family: "{f.family()}"; font-size: 10px; color: {t.text_3}; background: {theme.blend(t.fill_2, t.raised).name()}; '
-            f"border-radius: {7 if self._round else 4}px; padding: 0 {5 if self._round else 4}px;"
-        )
+        super().__init__(text, bg="fill_2/raised", radius=7 if round_ else 4, parent=parent)
+        pad = 5 if round_ else 4
+        self.setContentsMargins(pad, 0, pad, 0)
+        self.setFont(theme.font_ui(10))
+        theme.tint(self, fg="text_3")
 
 
 # ---------------------------------------------------------------- rows
@@ -332,14 +291,14 @@ class TaskRow(Card):
         ml = QVBoxLayout(main)
         ml.setContentsMargins(0, 0, 0, 0)
         ml.setSpacing(2)
-        title = elide(
+        self.title = elide(
             lbl(
                 str(t.get("description") or t.get("subagentType") or t.get("type") or ""),
                 theme.FS_UI,
                 tone="muted" if done else "",
             )
         )
-        ml.addWidget(title)
+        ml.addWidget(self.title)
         sub = QWidget()
         sl = QHBoxLayout(sub)
         sl.setContentsMargins(0, 0, 0, 0)
@@ -358,11 +317,29 @@ class TaskRow(Card):
         ml.addWidget(sub)
         lay.addWidget(main, 1)
         if not done:
-            stop = Btn("Stop", icon="circle-stop", kind="danger", size="sm", tooltip="Stop this task")
+            stop = Btn("Stop", icon="circle-stop", kind="danger-text", size="sm", tooltip="Stop this task")
             stop.clicked.connect(lambda: store.call("session.stopTask", {"id": sid, "taskId": t.get("id")}))
             lay.addWidget(stop)
         self._paint_icon()
         bind(theme.theme.changed, self, lambda _t: self._paint_icon())
+
+    def sync(self, t: Json) -> None:
+        """The same task, a step further: the title and the live line follow without a rebuild. (Not
+        ``update``: that is QWidget's repaint, which the card calls on a theme switch with no task.)"""
+        if t == self.task:
+            return
+        self.task = t
+        self.title.setText(str(t.get("description") or t.get("subagentType") or t.get("type") or ""))
+        if self._done:
+            parts = [str(t.get("status") or "")]
+            if t.get("endedAt"):
+                parts.append(time_ago(float(t["endedAt"])))
+            if t.get("summary"):
+                parts.append(str(t["summary"])[:120])
+            self.sub.setText(" · ".join(parts))
+        else:
+            self.sub.setText(self._live_text())
+        self._paint_icon()
 
     def _live_text(self) -> str:
         t = self.task
@@ -389,7 +366,7 @@ class TaskRow(Card):
         else:
             self.ico.setPixmap(icons.pixmap("square-terminal" if t.get("type") == "local_bash" else "bot", tk.text, 13))
 
-    def paintEvent(self, e) -> None:  # noqa: N802
+    def paintEvent(self, e) -> None:
         if not self._done:
             super().paintEvent(e)
 
@@ -401,6 +378,9 @@ class AgentRow(QWidget):
     def __init__(self, a: Json, now: float, subs: List[Json], parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         st = agent_state(a)
+        self.a = a
+        self.st = st
+        self._sub_ids = [str(t.get("id")) for t in subs]
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
@@ -432,29 +412,15 @@ class AgentRow(QWidget):
             iso = QLabel()
             iso.setPixmap(icons.pixmap("git-branch" if a["isolation"] == "worktree" else "cloud", tk.text_4, 10))
             top.addWidget(iso)
-        ran = 0.0
-        if a.get("startedAt"):
-            end = now if st == "running" else float(a.get("lastProgressAt") or a.get("updatedAt") or now)
-            ran = end - float(a["startedAt"])
-        end_parts = []
-        if a.get("model"):
-            end_parts.append(short_model(str(a["model"])))
-        if ran > 1500:
-            end_parts.append(duration(ran))
         top.addStretch(1)
-        if end_parts:
-            top.addWidget(lbl("  ".join(end_parts), theme.FS_MICRO, color="text_4"))
+        self.end_lbl = lbl(self._end_text(a, now), theme.FS_MICRO, color="text_4")
+        self.end_lbl.setVisible(bool(self.end_lbl.text()))
+        top.addWidget(self.end_lbl)
         ml.addLayout(top)
-        if st == "running":
-            what = a.get("lastToolSummary") or (f"Using {a['lastToolName']}" if a.get("lastToolName") else "Thinking…")
-        elif st in ("error", "blocked"):
-            what = str(a.get("error") or "").split("\n")[0]
-        elif st == "queued":
-            what = "Waiting for a slot"
-        else:
-            what = str(a.get("resultPreview") or "").split("\n")[0]
-        if what:
-            ml.addWidget(elide(lbl(str(what), theme.FS_MICRO, tone="err" if st in ("error", "blocked") else "faint")))
+        what = self._what_text(a)
+        self.what_lbl = elide(lbl(what, theme.FS_MICRO, tone="err" if st in ("error", "blocked") else "faint"))
+        self.what_lbl.setVisible(bool(what))
+        ml.addWidget(self.what_lbl)
         rl.addWidget(main, 1)
         lay.addWidget(self.row)
         self.body = Collapse(lambda: self._build_body(a), False)
@@ -468,6 +434,47 @@ class AgentRow(QWidget):
             for i, t in enumerate(subs):
                 sl.addWidget(SubAgentRow(t, now, elbow=True, last=i == len(subs) - 1))
             lay.addWidget(subw)
+
+    def _end_text(self, a: Json, now: float) -> str:
+        st = self.st
+        ran = 0.0
+        if a.get("startedAt"):
+            end = now if st == "running" else float(a.get("lastProgressAt") or a.get("updatedAt") or now)
+            ran = end - float(a["startedAt"])
+        parts = []
+        if a.get("model"):
+            parts.append(short_model(str(a["model"])))
+        if ran > 1500:
+            parts.append(duration(ran))
+        return "  ".join(parts)
+
+    def _what_text(self, a: Json) -> str:
+        st = self.st
+        if st == "running":
+            return str(
+                a.get("lastToolSummary") or (f"Using {a['lastToolName']}" if a.get("lastToolName") else "Thinking…")
+            )
+        if st in ("error", "blocked"):
+            return str(a.get("error") or "").split("\n")[0]
+        if st == "queued":
+            return "Waiting for a slot"
+        return str(a.get("resultPreview") or "").split("\n")[0]
+
+    def sync(self, a: Json, now: float, subs: List[Json]) -> bool:
+        """A progress tick: the texts follow in place. False when the row must be rebuilt (its state
+        or its sub-agents changed), which the phase does."""
+        if agent_state(a) != self.st or [str(t.get("id")) for t in subs] != self._sub_ids:
+            return False
+        self.a = a
+        end = self._end_text(a, now)
+        if end != self.end_lbl.text():
+            self.end_lbl.setText(end)
+            self.end_lbl.setVisible(bool(end))
+        what = self._what_text(a)
+        if what != self.what_lbl.text():
+            self.what_lbl.setText(what)
+            self.what_lbl.setVisible(bool(what))
+        return True
 
     def _toggle(self) -> None:
         self.body.toggle()
@@ -542,15 +549,15 @@ class SubAgentRow(QWidget):
             lay.addWidget(end)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         if not self._elbow:
             return
         t = theme.tokens()
         p = QPainter(self)
         c = theme.blend(t.hair_3, t.raised)
         # the elbow: a stem down from the agent's mark, and a short arm into this row's mark
-        p.fillRect(QRectF(1, 0, 1, self.height() if not self._last else 10), c)
-        p.fillRect(QRectF(1, 9, 7, 1), c)
+        vline(p, 1, 0, self.height() if not self._last else 10, c)
+        hline(p, 1, 9, 7, c)
 
 
 class PhaseRow(QWidget):
@@ -569,6 +576,10 @@ class PhaseRow(QWidget):
     ) -> None:
         super().__init__(parent)
         self.state, self.last = state, last
+        self.c = c
+        self.index = index
+        self.rows: List[QWidget] = list(agents)
+        self._agent_ids = [int(a.get("index") or 0) for a in c.agents]
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 4 if last else 10)
         lay.setSpacing(9)
@@ -589,34 +600,28 @@ class PhaseRow(QWidget):
         hl = QHBoxLayout(head)
         hl.setContentsMargins(0, 0, 0, 0)
         hl.setSpacing(6)
-        title = lbl(
+        self.title = lbl(
             str(c.phase.get("title") or ""),
             theme.FS_SMALL,
             500 if state == "pending" else 550,
             tone="faint" if state == "pending" else "",
         )
-        hl.addWidget(title)
+        hl.addWidget(self.title)
         kind = c.phase.get("kind")
         if kind and kind != "sequential":
             hl.addWidget(Chip(str(kind), round_=True))
         hl.addStretch(1)
-        if state not in ("done", "error"):
-            failed_n = sum(1 for s in states if s in ("error", "blocked"))
-            if state == "running":
-                st_text = f"running · {failed_n} failed" if failed_n else "running"
-            else:
-                st_text = "queued" if index == active_idx else "pending"
-            hl.addWidget(
-                lbl(
-                    st_text,
-                    theme.FS_MICRO,
-                    tone="accent" if state == "running" else "",
-                    color="" if state == "running" else "text_4",
-                )
-            )
+        self.st_lbl = lbl(
+            self._st_text(state, states, index, active_idx),
+            theme.FS_MICRO,
+            tone="accent" if state == "running" else "",
+            color="" if state == "running" else "text_4",
+        )
+        self.st_lbl.setVisible(state not in ("done", "error"))
+        hl.addWidget(self.st_lbl)
         cl.addWidget(head)
         agents_w = QWidget()
-        al = QVBoxLayout(agents_w)
+        self.agents_lay = al = QVBoxLayout(agents_w)
         al.setContentsMargins(0, 4, 0, 0)
         al.setSpacing(1)
         for w in agents:
@@ -625,7 +630,74 @@ class PhaseRow(QWidget):
         lay.addWidget(col, 1)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    @staticmethod
+    def _st_text(state: str, states: List[str], index: int, active_idx: int) -> str:
+        failed_n = sum(1 for s in states if s in ("error", "blocked"))
+        if state == "running":
+            return f"running · {failed_n} failed" if failed_n else "running"
+        return "queued" if index == active_idx else "pending"
+
+    def set_state(self, state: str, states: List[str], active_idx: int) -> None:
+        """The phase's own state (pending → running → done) in place: the node, the rail, the title's weight."""
+        if state != self.state:
+            self.state = state
+            self.node.state = state
+            self.node.update()
+            pending = state == "pending"
+            self.title.setFont(theme.font_ui(theme.FS_SMALL, 500 if pending else 550))
+            theme.tint(self.title, fg="text_3" if pending else "text")
+            theme.tint(self.st_lbl, fg="accent_text" if state == "running" else "text_4")
+            self.update()
+        text = self._st_text(state, states, self.index, active_idx)
+        if text != self.st_lbl.text():
+            self.st_lbl.setText(text)
+        self.st_lbl.setVisible(state not in ("done", "error"))
+
+    def sync(self, c: Any, state: str, states: List[str], active_idx: int, now: float, by_agent: Dict) -> bool:
+        """A progress tick. Agents that arrived are inserted, an agent whose state changed gets a new
+        row, the phase's own state follows; False only when agents went away (then the card rebuilds)."""
+        ids = [int(a.get("index") or 0) for a in c.agents]
+        if any(i not in ids for i in self._agent_ids):
+            return False
+        self.c = c
+        self.set_state(state, states, active_idx)
+        self.setUpdatesEnabled(False)
+        try:
+            self._sync_rows(c, ids, now, by_agent)
+        finally:
+            self.setUpdatesEnabled(True)
+        return True
+
+    def _sync_rows(self, c: Any, ids: List[int], now: float, by_agent: Dict) -> None:
+        if ids != self._agent_ids:
+            # new agents: the ghost line goes, the rows arrive in index order
+            for w in [w for w in self.rows if not isinstance(w, AgentRow)]:
+                self.agents_lay.removeWidget(w)
+                w.hide()
+                w.deleteLater()
+            self.rows = [w for w in self.rows if isinstance(w, AgentRow)]
+            have = {row.a.get("index"): row for row in self.rows if isinstance(row, AgentRow)}
+            rows: List[QWidget] = []
+            for i, a in enumerate(c.agents):
+                idx = int(a.get("index") or 0)
+                row = have.get(idx)
+                if row is None:
+                    row = AgentRow(a, now, by_agent.get(idx, []))
+                    self.agents_lay.insertWidget(i, row)
+                rows.append(row)
+            self.rows = rows
+            self._agent_ids = ids
+        for i, a in enumerate(c.agents):
+            row = self.rows[i]
+            subs = by_agent.get(int(a.get("index") or 0), [])
+            if isinstance(row, AgentRow) and not row.sync(a, now, subs):
+                fresh = AgentRow(a, now, subs)
+                self.agents_lay.replaceWidget(row, fresh)
+                row.hide()
+                row.deleteLater()
+                self.rows[i] = fresh
+
+    def paintEvent(self, _e) -> None:
         if self.last:
             return
         t = theme.tokens()
@@ -638,7 +710,7 @@ class PhaseRow(QWidget):
                 int(ok.green() * 0.55 + line.green() * 0.45),
                 int(ok.blue() * 0.55 + line.blue() * 0.45),
             )
-        p.fillRect(QRectF(9, 20, 1, self.height() - 20 + 1), line)
+        vline(p, 9, 20, self.height() - 20 + 1, line)
 
 
 class PhaseNode(QWidget):
@@ -650,7 +722,7 @@ class PhaseNode(QWidget):
         self.setFixedSize(18, 18)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -658,7 +730,7 @@ class PhaseNode(QWidget):
         if self.state in ("done", "error"):
             p.setBrush(QColor(t.ok if self.state == "done" else t.err))
             p.drawEllipse(QRectF(0, 0, 18, 18))
-            p.drawPixmap(3.5, 3.5, icons.pixmap("check" if self.state == "done" else "x", "#ffffff", 11))
+            p.drawPixmap(3.5, 3.5, icons.pixmap("check" if self.state == "done" else "x", t.accent_ink, 11))
             return
         p.setBrush(theme.qcolor(t.raised))
         p.drawEllipse(QRectF(0, 0, 18, 18))
@@ -708,19 +780,7 @@ class WorkflowDetail(Card):
         tl.setSpacing(1)
         self.name = elide(lbl(str(task.get("workflowName") or task.get("description") or "Workflow"), theme.FS_UI, 550))
         tl.addWidget(self.name)
-        c = self.counts
-        sub = (
-            f"{c.done} of {c.total} agents done"
-            if c.total
-            else ("Starting" if live else STATUS_LABEL.get(str(task.get("status")), str(task.get("status"))))
-        )
-        if c.running:
-            sub += f" · {c.running} running"
-        if c.error:
-            sub += f" · {c.error} failed"
-        if elapsed > 0:
-            sub += f" · {duration(elapsed)}"
-        self.sub = elide(lbl(sub, theme.FS_MICRO, tone="faint"))
+        self.sub = elide(lbl(self._sub_text(live, elapsed), theme.FS_MICRO, tone="faint"))
         tl.addWidget(self.sub)
         hl.addWidget(title, 1)
         if live:
@@ -737,8 +797,14 @@ class WorkflowDetail(Card):
         self.head.setAccessibleName(self.name.text())
         lay.addWidget(self.head)
         self.bar_wrap: Optional[QWidget] = None
+        self.bar: Optional[Bar] = None
+        self._phase_rows: List[PhaseRow] = []
+        self.tokens_lbl: Optional[QLabel] = None
+        self.log_btn: Optional[Btn] = None
+        self._lay = lay
+        c = self.counts
         if c.total:
-            bar = Bar(2)
+            self.bar = bar = Bar(2)
             bar.set_parts([(c.done / c.total, "ok"), (c.running / c.total, "accent"), (c.error / c.total, "err")])
             self.bar_wrap = QWidget()
             bl = QHBoxLayout(self.bar_wrap)
@@ -750,6 +816,104 @@ class WorkflowDetail(Card):
         Clickable(self.head).clicked.connect(self._toggle)
         self._paint()
         bind(theme.theme.changed, self, lambda _t: self._paint())
+
+    def _sub_text(self, live: bool, elapsed: float) -> str:
+        c = self.counts
+        task = self.task
+        sub = (
+            f"{c.done} of {c.total} agents done"
+            if c.total
+            else ("Starting" if live else STATUS_LABEL.get(str(task.get("status")), str(task.get("status"))))
+        )
+        if c.running:
+            sub += f" · {c.running} running"
+        if c.error:
+            sub += f" · {c.error} failed"
+        if elapsed > 0:
+            sub += f" · {duration(elapsed)}"
+        return sub
+
+    def sync(self, task: Json, all_tasks: List[Json]) -> None:
+        """A progress tick of a run whose shape did not change: the figures, the bar and the rows
+        follow in place; nothing is built unless an agent's state changed (then its row)."""
+        self.task = task
+        agents = [a for a in ((task.get("workflow") or {}).get("agents") or []) if a]
+        self.counts = workflow_counts(agents)
+        live = task.get("status") == "running"
+        now = time.time() * 1000
+        elapsed = (float(task.get("endedAt") or now) - float(task["startedAt"])) if task.get("startedAt") else 0
+        sub = self._sub_text(live, elapsed)
+        if sub != self.sub.text():
+            self.sub.setText(sub)
+        c = self.counts
+        if self.bar is not None and c.total:
+            self.bar.set_parts([(c.done / c.total, "ok"), (c.running / c.total, "accent"), (c.error / c.total, "err")])
+        if self._phase_rows:
+            m = store.models.get(self.sid)
+            tool = m.tools.get(str(task.get("toolUseId") or "")) if m else None
+            meta = parse_workflow_meta(_str(tool.input if tool else None, "script"))
+            cols = workflow_columns(task, meta)
+            by_agent = self._subs_by_agent(agents, all_tasks)
+            states_of = [[agent_state(a) for a in col.agents] for col in cols]
+            active_idx = next((i for i, st in enumerate(states_of) if any(s in ("running", "queued") for s in st)), -1)
+            ok = len(cols) == len(self._phase_rows)
+            if ok:
+                for i, (col, row) in enumerate(zip(cols, self._phase_rows)):
+                    state = self._phase_state(col, states_of[i], i, active_idx, live)
+                    if not row.sync(col, state, states_of[i], active_idx, now, by_agent):
+                        ok = False
+                        break
+            if not ok:
+                # the run changed shape (an agent arrived, a phase finished): the body again, in place
+                fresh = Collapse(lambda: self._build_body(all_tasks, live, now), self.body.is_open)
+                self._lay.replaceWidget(self.body, fresh)
+                self.body.hide()
+                self.body.deleteLater()
+                self.body = fresh
+        if self.tokens_lbl is not None:
+            usage = task.get("usage") or {}
+            self.tokens_lbl.setText(f"{tokens(int(usage.get('total_tokens') or 0))} tokens")
+        logs = (task.get("workflow") or {}).get("logs") or []
+        if self.log_btn is not None and logs:
+            self.log_btn.setText(f"Log · {len(logs)}")
+
+    def _subs_by_agent(self, agents: List[Json], all_tasks: List[Json]) -> Dict[int, List[Json]]:
+        task = self.task
+        subs = [x for x in all_tasks if _in_workflow(x, [task])]
+        by_agent: Dict[int, List[Json]] = {}
+        for s in subs:
+            owners = [
+                a
+                for a in agents
+                if a.get("startedAt")
+                and s["startedAt"] >= a["startedAt"]
+                and (
+                    agent_state(a) == "running"
+                    or not a.get("lastProgressAt")
+                    or s["startedAt"] <= a["lastProgressAt"] + 2000
+                )
+            ]
+            owners.sort(key=lambda a: -(a.get("startedAt") or 0))
+            key = int(owners[0]["index"]) if owners else -1
+            by_agent.setdefault(key, []).append(s)
+        return by_agent
+
+    def _phase_state(self, c: Any, states: List[str], i: int, active_idx: int, live: bool) -> str:
+        if not c.agents:
+            return (
+                "done"
+                if (active_idx != -1 and i < active_idx) or (not live and self.counts.total > 0 and active_idx == -1)
+                else "pending"
+            )
+        if all(s in ("done", "cached") for s in states):
+            return "done"
+        if "running" in states:
+            return "running"
+        if any(s in ("error", "blocked") for s in states) and "queued" not in states:
+            return "error"
+        if "queued" in states and active_idx == i:
+            return "running"
+        return "pending"
 
     def _toggle(self) -> None:
         self.body.toggle()
@@ -769,24 +933,12 @@ class WorkflowDetail(Card):
         lay.setContentsMargins(11, 10, 8, 4)
         lay.setSpacing(0)
         agents = [a for a in ((task.get("workflow") or {}).get("agents") or []) if a]
-        subs = [x for x in all_tasks if _in_workflow(x, [task])]
-        by_agent: Dict[int, List[Json]] = {}
-        for s in subs:
-            owners = [
-                a
-                for a in agents
-                if a.get("startedAt")
-                and s["startedAt"] >= a["startedAt"]
-                and (
-                    agent_state(a) == "running"
-                    or not a.get("lastProgressAt")
-                    or s["startedAt"] <= a["lastProgressAt"] + 2000
-                )
-            ]
-            owners.sort(key=lambda a: -(a.get("startedAt") or 0))
-            key = int(owners[0]["index"]) if owners else -1
-            by_agent.setdefault(key, []).append(s)
-        cols = self.cols
+        by_agent = self._subs_by_agent(agents, all_tasks)
+        m = store.models.get(self.sid)
+        tool = m.tools.get(str(task.get("toolUseId") or "")) if m else None
+        cols = workflow_columns(task, parse_workflow_meta(_str(tool.input if tool else None, "script")))
+        self.cols = cols
+        self._phase_rows = []
         if not cols:
             empty = lbl(
                 "Waiting for the first agent…" if live else "No agents were reported for this run.",
@@ -800,29 +952,15 @@ class WorkflowDetail(Card):
         )
         for i, c in enumerate(cols):
             states = [agent_state(a) for a in c.agents]
-            if not c.agents:
-                state = (
-                    "done"
-                    if (active_idx != -1 and i < active_idx)
-                    or (not live and self.counts.total > 0 and active_idx == -1)
-                    else "pending"
-                )
-            elif all(s in ("done", "cached") for s in states):
-                state = "done"
-            elif "running" in states:
-                state = "running"
-            elif any(s in ("error", "blocked") for s in states) and "queued" not in states:
-                state = "error"
-            elif "queued" in states and active_idx == i:
-                state = "running"
-            else:
-                state = "pending"
+            state = self._phase_state(c, states, i, active_idx, live)
             rows: List[QWidget] = [AgentRow(a, now, by_agent.get(int(a.get("index") or 0), [])) for a in c.agents]
             if not c.agents:
                 ghost = lbl("No agents" if state == "done" else "Not started yet", theme.FS_MICRO, color="text_4")
                 ghost.setContentsMargins(6, 3, 6, 3)
                 rows.append(ghost)
-            lay.addWidget(PhaseRow(c, i, state, states, active_idx, i == len(cols) - 1, rows))
+            prow = PhaseRow(c, i, state, states, active_idx, i == len(cols) - 1, rows)
+            self._phase_rows.append(prow)
+            lay.addWidget(prow)
         orphans = by_agent.get(-1) or []
         if orphans:
             ow = QWidget()
@@ -842,7 +980,7 @@ class WorkflowDetail(Card):
         logs = (task.get("workflow") or {}).get("logs") or []
         log_body: Optional[Collapse] = None
         if logs:
-            log_btn = Btn(f"Log · {len(logs)}", icon="chevron-right", kind="foot", icon_size=12)
+            log_btn = self.log_btn = Btn(f"Log · {len(logs)}", icon="chevron-right", kind="foot", icon_size=12)
             fl.addWidget(log_btn)
             log_body = Collapse(lambda: self._build_log(logs), False)
 
@@ -852,13 +990,16 @@ class WorkflowDetail(Card):
 
             log_btn.clicked.connect(toggle_log)
         if live:
-            stop = Btn("Stop", icon="circle-stop", kind="danger", size="xs", icon_size=12, tooltip="Stop this workflow")
+            stop = Btn(
+                "Stop", icon="circle-stop", kind="danger-text", size="xs", icon_size=12, tooltip="Stop this workflow"
+            )
             stop.clicked.connect(self._stop)
             fl.addWidget(stop)
         fl.addStretch(1)
         usage = task.get("usage") or {}
         if int(usage.get("total_tokens") or 0) > 0:
-            fl.addWidget(lbl(f"{tokens(int(usage['total_tokens']))} tokens", theme.FS_MICRO, tone="faint"))
+            self.tokens_lbl = lbl(f"{tokens(int(usage['total_tokens']))} tokens", theme.FS_MICRO, tone="faint")
+            fl.addWidget(self.tokens_lbl)
         lay.addWidget(foot)
         if log_body is not None:
             lay.addWidget(log_body)
@@ -910,6 +1051,8 @@ class TasksPanel(QWidget):
         lay.addWidget(self.scroll)
         self._sections: List[Section] = []
         self._rows: List[TaskRow] = []
+        self._wf_cards: List[WorkflowDetail] = []
+        self._empty_state: Optional[EmptyState] = None
         self._tick = QTimer(self)
         self._tick.setInterval(1000)
         self._tick.timeout.connect(lambda: [r.tick() for r in self._rows])
@@ -920,29 +1063,34 @@ class TasksPanel(QWidget):
         rt = store.rt_of(self.sid)
         tasks: List[Json] = list(rt.get("tasks") or []) if rt else []
         todos = reconstruct_todos(self.sid)
-        key = (
-            rt.rev if rt else 0,
-            [
-                (
-                    t.get("id"),
-                    t.get("status"),
-                    t.get("progress"),
-                    t.get("lastTool"),
-                    (t.get("workflow") or {}).get("updatedAt"),
-                )
-                for t in tasks
-            ],
+        shape = (
+            [(t.get("id"), t.get("status"), _wf_shape(t)) for t in tasks],
             todos,
         )
-        if key == self._key:
+        if shape == self._key:
+            # the same tasks in the same states: the running rows and the workflow cards follow in place
+            by_id = {t.get("id"): t for t in tasks}
+            for row in self._rows:
+                t = by_id.get(row.task.get("id"))
+                if t is not None:
+                    row.sync(t)
+            for card in self._wf_cards:
+                t = by_id.get(card.task.get("id"))
+                if t is not None:
+                    card.sync(t, tasks)
             return
-        self._key = key
+        self._key = shape
         for s in self._sections:
             self._lay.removeWidget(s)
             s.setParent(None)
             s.deleteLater()
         self._sections = []
+        if self._empty_state is not None:
+            self._lay.removeWidget(self._empty_state)
+            self._empty_state.deleteLater()
+            self._empty_state = None
         self._rows = []
+        self._wf_cards = []
         workflows = [t for t in tasks if t.get("type") == "local_workflow" and not t.get("ambient")]
         own = [
             t
@@ -953,8 +1101,17 @@ class TasksPanel(QWidget):
         finished = list(reversed([t for t in own if t.get("status") != "running"][-12:]))
         done = sum(1 for t in (todos or []) if isinstance(t, dict) and t.get("status") == "completed")
 
-        s = Section("To-do list")
+        if not todos and not workflows and not running and not finished:
+            self._empty_state = e = EmptyState(
+                "list-checks",
+                "Nothing on the list yet.",
+                "Claude's plan for multi-step work, its workflows and background commands appear here.",
+            )
+            self._lay.insertWidget(0, e)
+            self._tick.stop()
+            return
         if todos:
+            s = Section("To-do list")
             s.head_faint(f"{done} of {len(todos)} done")
             bar = Bar(4)
             bar.set_parts([(done / len(todos), "text_2")])
@@ -967,26 +1124,24 @@ class TasksPanel(QWidget):
                 if isinstance(t, dict):
                     ll.addWidget(_todo_row(t))
             s.add(lst)
-        else:
-            s.add(empty_text("Claude's plan for multi-step work appears here."))
-        self._add_section(s)
+            self._add_section(s)
 
         if workflows:
             s = Section("Workflows")
             s.body.setSpacing(8)
             for t in reversed(workflows):
-                s.add(WorkflowDetail(t, self.sid, tasks))
+                card = WorkflowDetail(t, self.sid, tasks)
+                self._wf_cards.append(card)
+                s.add(card)
             self._add_section(s)
 
-        s = Section("Running now")
         if running:
+            s = Section("Running now")
             for t in running:
                 row = TaskRow(t, self.sid, False)
                 self._rows.append(row)
                 s.add(row)
-        else:
-            s.add(empty_text("No background commands or agents running."))
-        self._add_section(s)
+            self._add_section(s)
 
         if finished:
             s = Section("Finished")

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from harness import app_client, mock_server  # noqa: F401
+from harness import app_client, mock_server
 from PySide6.QtCore import Qt
 
 MOCK_PORT = 5431
@@ -173,4 +173,5 @@ def test_schedule_menu_opens_the_dialog(app_client):
     assert dialogs.current("schedule").title_lb.text() == "New schedule"
     c.store.set_dialog("schedule", None)
     c.wait_until(lambda: dialogs.current("schedule") is None, 3, "dialog closes")
-    assert not hasattr(c.win.sidebar, "page_inbox"), "the Inbox page should be gone from the sidebar"
+    # The Inbox stays beside the board (dispatch reports land there); the Control room row is what went.
+    assert not hasattr(c.win.sidebar, "page_overview"), "the Control room row should be gone from the sidebar"

@@ -3,7 +3,7 @@ import type { SessionSummary } from '../../lib/types';
 import type { Runtime } from '../../lib/store';
 import { cardState, cardLine, isSchedule } from '../../lib/board';
 import { basename, cost, duration, shortModel } from '../../lib/format';
-import { WorkingMark } from '../ui/bits';
+import { WorkingMark } from '../ui/brand';
 
 const CHIP: Record<string, string> = { review: 'To review', prompt: 'Asking', running: 'Working', queued: 'Queued', stuck: 'Stopped', wait: 'Waiting', done: 'Done', backlog: '' };
 
@@ -28,7 +28,11 @@ export const Card = memo(function Card({ s, rt, selected, now, titles, onSelect,
     <article className={`bd-card ${state}${selected ? ' sel' : ''}`} data-card={s.id} data-state={state} draggable={!schedule} role="button" tabIndex={0} onClick={onSelect} onDoubleClick={onOpen} onKeyDown={(e) => e.key === ' ' && (e.preventDefault(), onSelect())}>
       <span className="bd-stripe" aria-hidden="true" />
       <div className="bd-card-top">
-        <span className="ellipsis">{basename(s.project || s.cwd)}{s.worktree ? ` · ${s.worktree.branch.replace(/^pilcrow\//, '')}` : ''}</span>
+        <span className="ellipsis">
+          {rt?.helper || s.helper ? `helper of ${rt?.helper?.leadTitle || 'a lead session'} · ` : ''}
+          {basename(s.project || s.cwd)}
+          {s.worktree ? ` · ${s.worktree.branch.replace(/^pilcrow\//, '')}` : ''}
+        </span>
         {schedule ? <span className="bd-chip wait">Scheduled</span> : CHIP[state] ? <span className={`bd-chip ${state}`}>{CHIP[state]}</span> : null}
       </div>
       <div className="bd-card-title">{s.title}</div>

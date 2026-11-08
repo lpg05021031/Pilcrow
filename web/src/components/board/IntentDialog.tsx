@@ -8,8 +8,8 @@ import { Dialog } from '../ui/Dialog';
  * session needs to be work on the board.
  */
 export function IntentDialog() {
-  const spec = useStore((s) => s.dialogs.intent)!;
-  const session = useStore((s) => s.sessions.find((x) => x.id === spec.id));
+  const spec = useStore((s) => s.dialogs.intent);
+  const session = useStore((s) => s.sessions.find((x) => x.id === spec?.id));
   const [text, setText] = useState(session?.intent || '');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -20,7 +20,7 @@ export function IntentDialog() {
     if (busy) return;
     setBusy(true);
     try {
-      await setIntent(spec.id, text);
+      if (spec) await setIntent(spec.id, text);
       close();
     } catch (e) {
       setError(errText(e));

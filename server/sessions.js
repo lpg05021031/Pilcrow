@@ -12,12 +12,35 @@ import * as memory from './memory.js';
 import { boardFields, drainQueue } from './board.js';
 import * as handoff from './handoff.js';
 import * as git from './git.js';
-import { AsyncQueue, uuid, IS_ROOT, log, xdg, slugify, cleanEnv, slash } from './util.js';
+import { repos } from './repos.js';
+import { AsyncQueue, uuid, IS_ROOT, log, xdg, slugify, cleanEnv, slash, VERSION, AppError } from './util.js';
+import { applyAssistant, applyCompact, fromHistory } from './usage.js';
 
 export const bus = new EventEmitter();
+/** Where other modules (helpers.js) extend a session: in-process MCP servers to attach, permission
+ *  decisions Pilcrow takes itself, fields added to `state()`, and a say on a decision as it is given. */
+/**
+ * @type {{
+ *   mcpServers: ((session: Session) => import('@anthropic-ai/claude-agent-sdk').McpSdkServerConfigWithInstance | null)[],
+ *   permission: ((session: Session, toolName: string, input: any) => import('@anthropic-ai/claude-agent-sdk').PermissionResult | null)[],
+ *   state: ((session: Session) => object | null)[],
+ *   respond: ((session: Session, request: any, decision: any) => any)[],
+ * }}
+ */
+export const extensions = { mcpServers: [], permission: [], state: [], respond: [] };
+function mcpOption(session) {
+  /** @type {Record<string, import('@anthropic-ai/claude-agent-sdk').McpServerConfig>} */
+  const servers = {};
+  for (const fn of extensions.mcpServers) {
+    const s = fn(session);
+    if (s) servers[s.name] = s;
+  }
+  return Object.keys(servers).length ? { mcpServers: servers } : {};
+}
 
 /** Spend over the last few hours, per session, for the control room's burn chart. */
 export const costLog = {
+  /** @type {{ at: number, id: string, delta: number }[]} */
   entries: [],
   add(id, delta) {
     this.entries.push({ at: Date.now(), id, delta });
@@ -31,11 +54,49 @@ export const costLog = {
 bus.setMaxListeners(50);
 
 // Messages that only matter while they happen; they are forwarded but not kept in the transcript.
-const TRANSIENT_SYSTEM = new Set(['thinking_tokens', 'hook_started', 'hook_progress', 'hook_response', 'status', 'session_state_changed', 'background_tasks_changed', 'task_progress', 'commands_changed', 'files_persisted']);
-const APP_VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version || '1.0.0';
+const TRANSIENT_SYSTEM = new Set(['thinking_tokens', 'hook_started', 'hook_progress', 'hook_response', 'status', 'session_state_changed', 'background_tasks_changed', 'commands_changed', 'files_persisted']);
+// …and those the state carries (`tasks`), so the windows get them from there: a workflow's progress is
+// the whole run again on every tick, and no client reads the raw message.
+const STATE_ONLY_SYSTEM = new Set(['task_progress']);
+const OUTBOX_MS = 16; // messages reach the clients in one batch per frame
+const STATE_SOON_MS = 250; // a stream of small state changes (a workflow's agents): at most one state this often
+const DRAIN_MS = 50; // after a turn ends, before the next held message goes in
+const REAP_EVERY_MS = 60_000;
+const STDERR_TAIL = 8000; // characters of Claude Code's stderr kept for an error report
+const TASK_PROMPT_MAX = 200; // no view shows a task's prompt; enough to tell tasks apart in a log
+const MAX_TOOL_USES = 400;
+const MAX_TASKS = 100; // finished tasks kept for the panel; running ones always stay
+// Characters of each string in a waiting request's input that the windows get: a card shows a path, a URL
+// or the start of a command, never a whole file a Write would create (the server keeps the whole input).
+const PENDING_INPUT_MAX = 2000;
+const MCP_AUTH_POLL_MS = 2000; // after an MCP sign-in starts, look for the server's reconnect this often…
+const MCP_AUTH_POLLS = 90; // …for three minutes
+
+/** Processes Pilcrow is shutting down on purpose (idle, settings change): their end is not an error.
+ *  Kept per process, so a later crash of the session's next process is still reported. */
+const closing = new WeakSet();
+/** Set once the server is quitting (SessionManager.stop): from then on nothing starts a process, not
+ *  a held message draining nor a request that lands while the others close. */
+let quitting = false;
+/** Sessions deleted while this server runs. A process that was still closing can write its transcript
+ *  back after the file was removed, and a list read before the delete can land after it: neither may
+ *  bring the session back into the list or reopen it. */
+const removed = new Set();
+const REMOVE_WAIT_MS = 5000; // how long a delete waits for the session's process to end
+const RECHECK_MS = 1500; // and when it looks again for a transcript written back
+
+/**
+ * MCP sign-in calls that newer Claude Code builds have and the SDK's types do not list yet; each is
+ * checked before use.
+ * @typedef {import('@anthropic-ai/claude-agent-sdk').Query & {
+ *   mcpAuthenticate?: (name: string) => Promise<any>,
+ *   mcpSubmitOAuthCallbackUrl?: (name: string, url: string) => Promise<any>,
+ *   mcpClearAuth?: (name: string) => Promise<any>,
+ * }} Query
+ */
 
 function childEnv() {
-  return cleanEnv({ CLAUDE_AGENT_SDK_CLIENT_APP: `pilcrow/${APP_VERSION}` });
+  return cleanEnv({ CLAUDE_AGENT_SDK_CLIENT_APP: `pilcrow/${VERSION}` });
 }
 
 /** A short, human line for a tool call: the file it touched or the command it ran. */
@@ -58,20 +119,23 @@ function titleFromPrompt(p) {
   return line.length > 72 ? line.slice(0, 70).replace(/\s+\S*$/, '') + '…' : line;
 }
 
-function textOfContent(content) {
-  if (typeof content === 'string') return content;
-  return (content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
-}
-
 /**
  * A workflow (the Workflow tool) reports its agents, phases and log lines through task_progress. The
  * list is usually cumulative, one entry per agent/phase index; keep the latest per index, and the
  * log in order, so the UI can draw the whole run from one object.
  */
-const WF_PREVIEW = 600;
+// Each field is cut to what the workflow view shows of it, since the whole run goes to every window with
+// every state: an agent's prompt, result and error in a box of about ten lines, what it is doing on one
+// line, and the log a line each.
+const WF_CAPS = { promptPreview: 600, resultPreview: 600, error: 600, lastToolSummary: 120 };
+const WF_LOG_LINE = 300;
+const WF_LOGS = 200;
+const cut = (s, n) => (s.length > n ? s.slice(0, n) + '…' : s);
+/** A value with every string in it cut to `n` characters. */
+const capStrings = (v, n) => (typeof v === 'string' ? cut(v, n) : Array.isArray(v) ? v.map((x) => capStrings(x, n)) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, capStrings(x, n)])) : v);
 function trimWf(a) {
   const o = { ...a };
-  for (const k of ['promptPreview', 'resultPreview', 'error', 'lastToolSummary']) if (typeof o[k] === 'string' && o[k].length > WF_PREVIEW) o[k] = o[k].slice(0, WF_PREVIEW) + '…';
+  for (const [k, n] of Object.entries(WF_CAPS)) if (typeof o[k] === 'string') o[k] = cut(o[k], n);
   delete o.promptFramed;
   return o;
 }
@@ -86,13 +150,13 @@ function mergeWorkflowProgress(t, list) {
     } else if (it.type === 'workflow_phase' && Number.isInteger(it.index) && it.index >= 0 && it.index < 200) {
       wf.phases[it.index] = { index: it.index, title: typeof it.title === 'string' ? it.title.slice(0, 200) : `Phase ${it.index + 1}`, kind: it.kind };
     } else if (it.type === 'workflow_log' && typeof it.message === 'string') {
-      logs.push(it.message.slice(0, 1000));
+      logs.push(cut(it.message, WF_LOG_LINE));
     }
   }
   if (logs.length) {
     const same = logs.length >= wf.logs.length && wf.logs.every((m, i) => m.message === logs[i]);
     if (same) wf.logs = logs.map((message, i) => ({ at: wf.logs[i]?.at || Date.now(), message }));
-    else for (const message of logs) if (wf.logs.length < 300) wf.logs.push({ at: Date.now(), message });
+    else for (const message of logs) if (wf.logs.length < WF_LOGS) wf.logs.push({ at: Date.now(), message });
   }
   // Agents may arrive without their phase ever being announced; give them one so the graph has a column.
   for (const a of wf.agents) {
@@ -108,6 +172,7 @@ class Session {
     this.id = id;
     this.cwd = slash(cwd);
     this.persisted = persisted; // a transcript exists on disk, so start with `resume`
+    /** @type {Query | null} the running Claude Code process */
     this.q = null;
     this.input = null;
     this.status = persisted ? 'stopped' : 'idle';
@@ -115,24 +180,30 @@ class Session {
     this.inflight = [];
     this.loaded = !persisted;
     this.loading = null;
+    /** @type {Map<string, { req: Record<string, any>, shown: Record<string, any>, resolve: (d: any) => void }>} requestId -> a permission request waiting for the person */
     this.pending = new Map();
     this.tasks = new Map();
+    /** Bumped whenever a task changes; a routine state carries `tasks` only when it moved since the last one
+     *  sent (emitState), so a finished workflow is not sent again with every status change. */
+    this.tasksRev = 0;
+    this.tasksSent = -1;
     this.bgTasks = [];
     this.init = null;
     this.commands = null;
     this.models = null;
-    const saved = store.getMeta(id) || {};
-    this.usage = { contextTokens: 0, contextWindow: saved.contextWindow || 0, costUsd: saved.costUsd || 0, outputTokens: 0, model: null };
+    const meta = store.getMeta(id) || {};
+    this.usage = { contextTokens: 0, contextWindow: meta.contextWindow || 0, costUsd: meta.costUsd || 0, outputTokens: 0, model: null, afterCompact: false };
     this.suggestion = null;
     this.error = null;
     this.stderrTail = '';
     this.compacting = false;
     this.mcp = []; // last known MCP server statuses for this process
     this.mcpTimer = null;
+    this.mcpAuthTimer = undefined;
+    this._stateSoon = null;
     this.lastActivity = Date.now();
     this.outbox = [];
     this.flushTimer = null;
-    const meta = store.getMeta(id) || {};
     this.mode = meta.mode || store.getConfig().defaultMode || 'default';
     this.model = meta.model || store.getConfig().defaultModel || '';
     this.effort = meta.effort || store.getConfig().defaultEffort || '';
@@ -142,12 +213,22 @@ class Session {
     this.held = [];
     /** tool_use id -> { name, input } for tools in flight, so a tool_result can be read back. */
     this.toolUses = new Map();
+    /** The turn's file-touching tool calls so far; one timeline step covers them when the turn settles. */
+    this.turnTools = [];
     /** What Claude is doing right now, for views that do not load the transcript. */
     this.activity = null;
     this.turnStartedAt = null;
     this.processStartedAt = null;
     /** The last thing Claude said in a finished turn, for overviews. */
     this.lastReply = null;
+    /** A scheduled run with nobody watching: permissions are declined with a reason (schedules.js). */
+    this.unattended = false;
+    this.unattendedDenials = 0;
+    /** @type {Promise<void> | null} Claude Code starting (ensureStarted), shared by the requests that wait for it */
+    this.starting = null;
+    /** @type {Promise<void> | null} the running process's message loop; settles when the process has ended */
+    this.consumed = null;
+    this.draining = false; // a held message is being handed over (drainHeld)
   }
 
   get meta() {
@@ -158,9 +239,15 @@ class Session {
     return this.status === 'running' || this.status === 'requires_action' || this.status === 'starting';
   }
 
-  state() {
+  /**
+   * What the windows draw the session from. `full` adds what stays put for a process's life (what
+   * Claude Code said at init, its commands and models): session.open and the state sent when those
+   * arrive carry it, the routine updates leave it out, and the windows keep a key's last value when
+   * an update leaves it out (store.ts onState, the Qt store's _on_state).
+   */
+  state(full = false) {
     const init = this.init;
-    return {
+    const st = {
       id: this.id,
       status: this.status,
       live: Boolean(this.q),
@@ -179,13 +266,18 @@ class Session {
       turnStartedAt: this.turnStartedAt,
       processStartedAt: this.processStartedAt,
       lastReply: this.lastReply,
-      unattended: Boolean(this.unattended),
-      unattendedDenials: this.unattendedDenials || 0,
-      pending: [...this.pending.values()].map((p) => p.req),
+      unattended: this.unattended,
+      unattendedDenials: this.unattendedDenials,
+      pending: [...this.pending.values()].map((p) => p.shown),
       tasks: [...this.tasks.values()],
       bgTasks: this.bgTasks,
       queued: [...this.queuedUuids],
-      held: this.held.map((h) => ({ uuid: h.uuid, text: h.text, images: h.images.length, files: h.files.map((f) => f.name), at: h.at })),
+      held: this.held.map((h) => ({ uuid: h.uuid, text: h.text, images: h.images.length, files: h.files.map((f) => f.name), at: h.at, note: h.note || null, from: h.from || null })),
+      ...Object.assign({}, ...extensions.state.map((fn) => fn(this) || {})),
+    };
+    if (!full) return st;
+    return {
+      ...st,
       init: init
         ? {
             version: init.claude_code_version,
@@ -207,67 +299,98 @@ class Session {
     };
   }
 
-  emitState() {
-    bus.emit('state', this.state());
+  /** @param {boolean} [full] with the part that changes only when Claude Code (re)starts (state()) */
+  emitState(full = false) {
+    if (this._stateSoon) {
+      clearTimeout(this._stateSoon);
+      this._stateSoon = null;
+    }
+    const st = this.state(full);
+    // Tasks unchanged since the last state: left out, and the windows keep the ones they have.
+    if (!full && this.tasksSent === this.tasksRev) delete st.tasks;
+    this.tasksSent = this.tasksRev;
+    bus.emit('state', st);
+  }
+
+  /** State for a stream of small changes (a workflow's agents reporting): at most one every
+   *  STATE_SOON_MS, so sixty agents do not mean sixty states a second to every window. */
+  emitStateSoon() {
+    if (this._stateSoon) return;
+    this._stateSoon = setTimeout(() => {
+      this._stateSoon = null;
+      this.emitState();
+    }, STATE_SOON_MS);
   }
 
   out(msg) {
     this.outbox.push(msg);
-    if (!this.flushTimer) {
-      this.flushTimer = setTimeout(() => {
-        this.flushTimer = null;
-        const msgs = this.outbox.splice(0);
-        if (msgs.length) bus.emit('msgs', { id: this.id, msgs });
-      }, 16);
-    }
+    this.flushTimer ??= setTimeout(() => this.flushOut(), OUTBOX_MS);
+  }
+
+  flushOut() {
+    clearTimeout(this.flushTimer);
+    this.flushTimer = null;
+    const msgs = this.outbox.splice(0);
+    if (msgs.length) bus.emit('msgs', { id: this.id, msgs });
   }
 
   async loadHistory() {
     if (this.loaded) return;
-    if (!this.loading) {
-      this.loading = (async () => {
-        const msgs = await history.loadTranscript(this.id, this.cwd);
-        const seen = new Set(this.messages.map((m) => m.uuid));
-        this.messages = [...msgs.filter((m) => !seen.has(m.uuid)), ...this.messages];
-        this.recomputeFromHistory(msgs);
-        this.loaded = true;
-      })();
-    }
+    this.loading ??= (async () => {
+      const msgs = await history.loadTranscript(this.id, this.cwd);
+      const seen = new Set(this.messages.map((m) => m.uuid));
+      this.messages = [...msgs.filter((m) => !seen.has(m.uuid)), ...this.messages];
+      this.recomputeFromHistory(msgs);
+      this.loaded = true;
+    })().finally(() => (this.loading = null));
     await this.loading;
   }
 
-  recomputeFromHistory(msgs) {
-    for (let i = msgs.length - 1; i >= 0; i--) {
-      const m = msgs[i];
-      if (m.type === 'assistant' && !m.parent_tool_use_id && m.message?.usage) {
-        this.applyUsage(m.message);
-        break;
-      }
+  /**
+   * Let go of the transcript of a session nobody is using (no process, nothing pending): it can be
+   * megabytes, and the server runs for weeks. The next open reads it from disk again.
+   */
+  release() {
+    if (!this.persisted || !this.loaded || this.loading || this.q || this.starting || this.pending.size || this.held.length) return false;
+    this.messages = [];
+    this.inflight = [];
+    this.toolUses.clear();
+    this.loaded = false;
+    return true;
+  }
+
+  /** Keep every running task and only the newest finished ones: a long session runs thousands. */
+  trimTasks() {
+    for (const [id, t] of this.tasks) {
+      if (this.tasks.size <= MAX_TASKS) break;
+      if (t.status !== 'running' && t.status !== 'pending') this.tasks.delete(id);
     }
   }
 
+  recomputeFromHistory(msgs) {
+    fromHistory(this.usage, msgs);
+  }
+
   applyUsage(message) {
-    const u = message.usage || {};
-    const total = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.output_tokens || 0);
-    if (total > 0) this.usage.contextTokens = total;
-    if (message.model) this.usage.model = message.model;
+    applyAssistant(this.usage, message);
   }
 
   async snapshot() {
     await this.loadHistory();
-    return { state: this.state(), messages: this.messages, inflight: this.inflight };
+    return { state: this.state(true), messages: this.messages, inflight: this.inflight };
   }
 
   /** Start Claude Code for this session once, even when several requests arrive together. */
   ensureStarted() {
-    if (this.q && !this.q.pilcrowClosing) return Promise.resolve();
+    if (quitting) return Promise.reject(new AppError('failed', 'Pilcrow is quitting.'));
+    if (this.q && !closing.has(this.q)) return Promise.resolve();
     if (!this.starting) {
       this.starting = (async () => {
         // A process that is shutting down (idle timeout, settings change) cannot take new messages:
         // let it finish, then start a fresh one.
-        if (this.q?.pilcrowClosing) {
+        if (this.q && closing.has(this.q)) {
           await Promise.race([this.consumed, new Promise((r) => setTimeout(r, 5000))]);
-          if (this.q?.pilcrowClosing) this.q = null; // gave up waiting; its consume() will see it was replaced
+          if (this.q && closing.has(this.q)) this.q = null; // gave up waiting; its consume() will see it was replaced
         }
         if (!this.q) await this.startProcess();
       })().finally(() => (this.starting = null));
@@ -302,8 +425,10 @@ class Session {
     const input = new AsyncQueue();
     // What earlier sessions in this project learned rides along in the system prompt.
     const memoryText = cfg.memoryInject === false ? '' : memory.promptFor(memory.projectOf(this));
-    // Finished work ends with a handoff section the workboard reads (docs/WORKBOARD.md §6).
-    const appendText = [memoryText, cfg.handoffReport === false ? '' : handoff.HANDOFF_PROMPT].filter(Boolean).join('\n\n');
+    // …and the repositories the person registered, so their own names for them land in the right folders;
+    // finished work ends with a handoff section the workboard reads (docs/WORKBOARD.md §6).
+    const appendText = [memoryText + repos.promptFor(), cfg.handoffReport === false ? '' : handoff.HANDOFF_PROMPT].filter(Boolean).join('\n\n');
+    /** @type {import('@anthropic-ai/claude-agent-sdk').Options} */
     const options = {
       cwd: this.cwd,
       pathToClaudeCodeExecutable: claude.path,
@@ -315,12 +440,13 @@ class Session {
       env: childEnv(),
       canUseTool: (name, toolInput, opts) => this.askPermission(name, toolInput, opts),
       stderr: (d) => {
-        this.stderrTail = (this.stderrTail + d).slice(-8000);
+        this.stderrTail = (this.stderrTail + d).slice(-STDERR_TAIL);
       },
       promptSuggestions: cfg.promptSuggestions !== false,
       perTaskStopAffordance: true,
       // Lets the UI restore files to how they were before any earlier message (like /rewind).
       enableFileCheckpointing: true,
+      ...mcpOption(this),
     };
     if (!IS_ROOT) options.allowDangerouslySkipPermissions = true;
     if (this.model) options.model = this.model;
@@ -348,7 +474,14 @@ class Session {
   async consume(q, input) {
     let err = null;
     try {
-      for await (const msg of q) this.onMessage(msg);
+      for await (const msg of q) {
+        // One message Pilcrow cannot read must not end the session; the next one may be fine.
+        try {
+          this.onMessage(msg);
+        } catch (e) {
+          log('message not handled', this.id, msg?.type, msg?.subtype, e);
+        }
+      }
     } catch (e) {
       err = e;
     }
@@ -365,13 +498,15 @@ class Session {
     this.queuedUuids.clear();
     this.turnStartedAt = null;
     this.activity = null;
+    this.recordTurn(); // a turn the process did not finish still changed files
     // Nothing is streaming any more, and background work died with the process.
     this.inflight = [];
     this.bgTasks = [];
     for (const t of this.tasks.values()) {
       if (t.status === 'running' || t.status === 'pending') Object.assign(t, { status: 'stopped', endedAt: Date.now() });
     }
-    if (err && !q.pilcrowClosing) {
+    this.tasksRev++;
+    if (err && !closing.has(q)) {
       const detail = (this.stderrTail || '').trim().split('\n').slice(-12).join('\n');
       this.error = [err.message, detail].filter(Boolean).join('\n');
       this.status = 'error';
@@ -427,6 +562,7 @@ class Session {
           .catch((e) => log('handoff failed', e?.message));
         // A slot came free: the oldest queued card starts.
         drainQueue().catch((e) => log('queue drain failed', e?.message));
+        this.recordTurn();
         this.markDelivered(msg.user_message_uuids || (msg.user_message_uuid ? [msg.user_message_uuid] : null));
         if (!(msg.queued_turn_count > 0)) {
           this.status = 'idle';
@@ -438,13 +574,14 @@ class Session {
         if (msg.is_error && msg.subtype !== 'success') this.error = (msg.errors || []).join('\n') || null;
         this.emitState();
         bus.emit('list-changed');
-        if (this.status === 'idle') setTimeout(() => this.drainHeld(), 50);
+        if (this.status === 'idle') setTimeout(() => this.drainHeld(), DRAIN_MS);
         if (this.mcp.length) this.scheduleMcpRefresh(300);
         if (this.status === 'idle' && memory.worthIt(this)) memory.distill(this).catch((e) => log('memory distill failed', this.id, e?.message));
         break;
       }
       case 'system':
         this.onSystem(msg);
+        if (STATE_ONLY_SYSTEM.has(msg.subtype)) return;
         if (TRANSIENT_SYSTEM.has(msg.subtype)) {
           this.out(msg);
           return;
@@ -480,7 +617,7 @@ class Session {
     for (const c of content) {
       if (c?.type === 'tool_use') {
         this.toolUses.set(c.id, { name: c.name, input: c.input, at: Date.now(), sub: Boolean(msg.parent_tool_use_id) });
-        if (this.toolUses.size > 400) this.toolUses.delete(this.toolUses.keys().next().value);
+        if (this.toolUses.size > MAX_TOOL_USES) this.toolUses.delete(this.toolUses.keys().next().value);
         if (!msg.parent_tool_use_id) this.setActivity({ kind: 'tool', tool: c.name, label: toolLabel(c.name, c.input, this.cwd) });
       } else if (c?.type === 'text' && c.text && !msg.parent_tool_use_id) this.setActivity({ kind: 'text', label: c.text.replace(/\s+/g, ' ').trim().slice(0, 140) });
       else if (c?.type === 'thinking' && !msg.parent_tool_use_id) this.setActivity({ kind: 'thinking', label: 'Thinking' });
@@ -495,8 +632,20 @@ class Session {
     const use = this.toolUses.get(c.tool_use_id);
     if (!use) return;
     this.toolUses.delete(c.tool_use_id);
-    if (!snapshots.FILE_TOOLS.has(use.name) || store.getConfig().timeline === false) return;
-    snapshots.record(this, { kind: 'tool', tool: use.name, toolUseId: c.tool_use_id, label: toolLabel(use.name, use.input, this.cwd) });
+    if (snapshots.FILE_TOOLS.has(use.name) && store.getConfig().timeline !== false) this.turnTools.push({ tool: use.name, toolUseId: c.tool_use_id, label: toolLabel(use.name, use.input, this.cwd) });
+  }
+
+  /**
+   * The timeline step for the file-touching tool calls of a turn, taken once the turn settles: a
+   * snapshot costs six git processes, and a busy turn makes dozens of calls. It points at the first
+   * call, where the changes began.
+   */
+  recordTurn() {
+    const tools = this.turnTools.splice(0);
+    if (!tools.length || quitting) return; // quitting: no git process may start after stop()
+    const [first] = tools;
+    const label = tools.length === 1 ? first.label : `${first.label} and ${tools.length - 1} more`;
+    snapshots.record(this, { kind: 'tool', tool: [...new Set(tools.map((t) => t.tool))].join(', '), toolUseId: first.toolUseId, label });
   }
 
   markDelivered(uuids) {
@@ -512,7 +661,7 @@ class Session {
         this.init = msg;
         if (msg.permissionMode) this.mode = msg.permissionMode;
         if (this.status === 'starting') this.status = 'running';
-        this.emitState();
+        this.emitState(true);
         if (!this.commands) this.refreshCapabilities();
         this.scheduleMcpRefresh(1500);
         break;
@@ -530,28 +679,38 @@ class Session {
         else if (msg.state === 'idle' && !this.pending.size) this.status = 'idle';
         this.emitState();
         bus.emit('list-changed');
-        if (this.status === 'idle') setTimeout(() => this.drainHeld(), 50);
+        if (this.status === 'idle') setTimeout(() => this.drainHeld(), DRAIN_MS);
         break;
       case 'task_started':
-        this.tasks.set(msg.task_id, { id: msg.task_id, runId: msg.run_id, toolUseId: msg.tool_use_id, parentTaskId: msg.parent_task_id, description: msg.description, type: msg.task_type, subagentType: msg.subagent_type, workflowName: msg.workflow_name, ownedBySubagent: Boolean(msg.owned_by_subagent), background: msg.is_backgrounded, ambient: msg.ambient, status: 'running', startedAt: Date.now(), prompt: typeof msg.prompt === 'string' ? msg.prompt.slice(0, 4000) : undefined });
+        this.tasksRev++;
+        this.trimTasks();
+        this.tasks.set(msg.task_id, { id: msg.task_id, runId: msg.run_id, toolUseId: msg.tool_use_id, parentTaskId: msg.parent_task_id, description: msg.description, type: msg.task_type, subagentType: msg.subagent_type, workflowName: msg.workflow_name, ownedBySubagent: Boolean(msg.owned_by_subagent), background: msg.is_backgrounded, ambient: msg.ambient, status: 'running', startedAt: Date.now(), prompt: typeof msg.prompt === 'string' ? msg.prompt.slice(0, TASK_PROMPT_MAX) : undefined });
         this.emitState();
         break;
       case 'task_updated': {
+        this.tasksRev++;
         const t = this.tasks.get(msg.task_id);
         if (t) Object.assign(t, msg.patch?.status ? { status: msg.patch.status } : {}, msg.patch?.description ? { description: msg.patch.description } : {}, msg.patch?.is_backgrounded !== undefined ? { background: msg.patch.is_backgrounded } : {});
         this.emitState();
         break;
       }
       case 'task_progress': {
+        this.tasksRev++;
         const t = this.tasks.get(msg.task_id);
         if (t) {
           Object.assign(t, { usage: msg.usage, lastTool: msg.last_tool_name, summary: msg.summary || t.summary, progress: msg.description });
           if (Array.isArray(msg.workflow_progress)) mergeWorkflowProgress(t, msg.workflow_progress);
         }
-        this.emitState();
+        this.emitStateSoon();
         break;
       }
+      case 'compact_boundary':
+        // the context is a summary now; its size comes with the next reply (usage.js)
+        applyCompact(this.usage, msg.compact_metadata);
+        this.emitState();
+        break;
       case 'task_notification': {
+        this.tasksRev++;
         const t = this.tasks.get(msg.task_id) || { id: msg.task_id };
         Object.assign(t, { status: msg.status, summary: msg.summary, outputFile: msg.output_file, usage: msg.usage || t.usage, toolUseId: msg.tool_use_id || t.toolUseId, endedAt: Date.now(), reason: msg.reason });
         if (t.workflow) for (const a of t.workflow.agents) if (a && (a.state === 'start' || a.state === 'progress')) a.state = msg.status === 'completed' ? 'done' : 'error';
@@ -565,7 +724,7 @@ class Session {
         break;
       case 'commands_changed':
         this.commands = msg.commands;
-        this.emitState();
+        this.emitState(true);
         break;
       default:
         break;
@@ -579,17 +738,22 @@ class Session {
       const [commands, models] = await Promise.all([q.supportedCommands().catch(() => null), q.supportedModels().catch(() => null)]);
       if (commands) this.commands = commands;
       if (models) this.models = models;
-      this.emitState();
+      this.emitState(true);
     } catch (e) {
       log('capabilities failed', e?.message);
     }
   }
 
   askPermission(toolName, input, opts) {
+    // Decisions Pilcrow takes itself (a helper's read-only tools, a start in an allowed repository).
+    for (const fn of extensions.permission) {
+      const d = fn(this, toolName, input);
+      if (d) return Promise.resolve(d);
+    }
     if (this.unattended) {
       // A scheduled run has nobody to ask. Say so, so Claude works around it instead of waiting.
       const why = toolName === 'AskUserQuestion' ? 'This session runs on a schedule with nobody watching, so questions cannot be answered. Decide yourself and say what you assumed.' : 'This session runs on a schedule with nobody watching, so this action cannot be approved. Do what you can without it and report what you skipped.';
-      this.unattendedDenials = (this.unattendedDenials || 0) + 1;
+      this.unattendedDenials++;
       return Promise.resolve({ behavior: 'deny', message: why });
     }
     return new Promise((resolve) => {
@@ -620,9 +784,12 @@ class Session {
         this.emitState();
       };
       opts.signal?.addEventListener('abort', () => done({ behavior: 'deny', message: 'Cancelled' }));
-      this.pending.set(requestId, { req, resolve: done });
+      // What the windows get: the input cut down, except where the card hands it back as updatedInput
+      // (a question's answers, a plan approved), which needs it whole; respond() fills the rest from `req`.
+      const shown = req.interactive ? req : { ...req, input: capStrings(input, PENDING_INPUT_MAX) };
+      this.pending.set(requestId, { req, shown, resolve: done });
       this.status = 'requires_action';
-      bus.emit('permission', { id: this.id, request: req });
+      bus.emit('permission', { id: this.id, request: req, shown });
       this.emitState();
       bus.emit('list-changed');
     });
@@ -631,47 +798,59 @@ class Session {
   respond(requestId, decision) {
     const p = this.pending.get(requestId);
     if (!p) return false;
-    const d = { ...decision };
+    let d = { ...decision };
+    for (const fn of extensions.respond) d = fn(this, p.req, d) || d;
     if (d.behavior === 'allow' && !d.updatedInput) d.updatedInput = p.req.input;
     if (d.behavior === 'deny' && !d.message) d.message = 'The user declined this action.';
     p.resolve(d);
     return true;
   }
 
-  async send({ text = '', images = [], files = [], clientUuid, shouldQuery, now = false }) {
+  /**
+   * @typedef {{ mediaType: string, data: string }} Image
+   * @typedef {{ name: string, text: string }} File
+   * @typedef {{ text?: string, images?: Image[], files?: File[], shouldQuery?: boolean, note?: string | null, from?: string | null }} Message
+   */
+  /** `note` marks a message Pilcrow wrote (a helper's news to its lead); `from` says who sent it
+   *  when it was not the person ('lead'). Both ride on the record for the clients to draw it apart.
+   *  @param {Message & { clientUuid?: string, now?: boolean }} msg */
+  async send({ text = '', images = [], files = [], clientUuid, shouldQuery, now = false, note = null, from = null }) {
     await this.ensureStarted();
     if (!text && !images.length && !files.length) return null;
     const u = clientUuid || uuid();
     const busy = this.isBusy() && this.status !== 'starting';
     if (busy && now) {
       // Steer: stop the current step, then deliver as soon as the turn is over.
-      this.held.unshift({ uuid: u, text, images, files, at: Date.now(), shouldQuery });
+      this.held.unshift({ uuid: u, text, images, files, at: Date.now(), shouldQuery, note, from });
       this.emitState();
       await this.interrupt();
       return u;
     }
     if (busy) {
-      this.held.push({ uuid: u, text, images, files, at: Date.now(), shouldQuery });
+      this.held.push({ uuid: u, text, images, files, at: Date.now(), shouldQuery, note, from });
       this.emitState();
       return u;
     }
-    return this.deliver({ uuid: u, text, images, files, shouldQuery });
+    return this.deliver({ uuid: u, text, images, files, shouldQuery, note, from });
   }
 
-  /** Push one message into the running Claude Code process. */
-  deliver({ uuid: u, text = '', images = [], files = [], shouldQuery }) {
+  /** Push one message into the running Claude Code process. @param {Message & { uuid: string }} msg */
+  deliver({ uuid: u, text = '', images = [], files = [], shouldQuery, note = null, from = null }) {
+    const input = this.input;
+    if (!input) throw new AppError('failed', 'Claude Code is not running for this session.');
     const content = [];
     for (const img of images) content.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType, data: img.data } });
     for (const f of files) content.push({ type: 'text', text: `<attached_file name="${f.name}">\n${f.text}\n</attached_file>` });
     if (text) content.push({ type: 'text', text });
     if (!content.length) return null;
-    const rec = { type: 'user', uuid: u, message: { role: 'user', content }, parent_tool_use_id: null, session_id: this.id, timestamp: new Date().toISOString(), _local: true };
+    const rec = { type: 'user', uuid: u, message: { role: 'user', content }, parent_tool_use_id: null, session_id: this.id, timestamp: new Date().toISOString(), _local: true, ...(note ? { _note: note } : {}), ...(from ? { _from: from } : {}) };
     this.messages.push(rec);
     this.out(rec);
     const sdkMsg = { type: 'user', message: { role: 'user', content }, parent_tool_use_id: null, uuid: u, session_id: this.id };
     if (shouldQuery === false) sdkMsg.shouldQuery = false;
-    this.input.push(sdkMsg);
+    input.push(sdkMsg);
     if (!this.turnStartedAt) this.turnStartedAt = Date.now();
+    this.recordTurn(); // a message steering a turn in progress: what was done so far comes first
     if (store.getConfig().timeline !== false) snapshots.record(this, { kind: 'message', uuid: u, label: text.replace(/\s+/g, ' ').trim().slice(0, 120) });
     this.setActivity({ kind: 'thinking', label: 'Thinking' });
     this.suggestion = null;
@@ -791,6 +970,7 @@ class Session {
   /** Restore files to their state before the given user message. `dryRun` only reports what would change. */
   async rewind(messageId, dryRun = true) {
     await this.ensureStarted();
+    if (!this.q) throw new AppError('failed', 'Claude Code is not running for this session.');
     const r = await this.q.rewindFiles(messageId, { dryRun });
     if (!dryRun && r.canRewind) log('rewound files', this.id, messageId, r.filesChanged?.length);
     return r;
@@ -843,19 +1023,20 @@ class Session {
     if (typeof this.q.mcpAuthenticate !== 'function') throw new Error('This Claude Code build cannot start MCP sign-in from here; run `claude mcp` in a terminal');
     const r = await this.q.mcpAuthenticate(name);
     log('mcp auth started', this.id, name, r?.redirectScheme, r?.callbackPort);
-    // Poll for the reconnect that follows a completed sign-in.
+    // Poll for the reconnect that follows a completed sign-in; close() or a new sign-in stops it.
+    clearTimeout(this.mcpAuthTimer);
     let tries = 0;
     const tick = () => {
-      tries++;
+      this.mcpAuthTimer = undefined;
       this.mcpStatus()
         .then((list) => {
           const s = (list || []).find((x) => x.name === name);
           if (s && s.status !== 'needs-auth' && s.status !== 'pending') return;
-          if (tries < 90) setTimeout(tick, 2000).unref?.();
+          if (++tries < MCP_AUTH_POLLS && this.q) this.mcpAuthTimer = setTimeout(tick, MCP_AUTH_POLL_MS);
         })
         .catch(() => {});
     };
-    setTimeout(tick, 2500).unref?.();
+    this.mcpAuthTimer = setTimeout(tick, MCP_AUTH_POLL_MS);
     return r || null;
   }
 
@@ -882,9 +1063,15 @@ class Session {
     return r?.skills?.length ?? null;
   }
 
+  /** End the Claude Code process (the session stays and starts again on demand), and the timers with it. */
   close() {
+    clearTimeout(this._stateSoon);
+    clearTimeout(this.mcpTimer);
+    clearTimeout(this.mcpAuthTimer);
+    this._stateSoon = this.mcpTimer = this.mcpAuthTimer = undefined;
+    this.flushOut(); // what is batched for the clients goes now, not after the process is gone
     if (!this.q) return;
-    this.q.pilcrowClosing = true; // per process, so a later crash of a new process is still reported
+    closing.add(this.q);
     try {
       this.input?.close();
       this.q.close();
@@ -897,7 +1084,12 @@ class Session {
 class SessionManager {
   constructor() {
     this.sessions = new Map();
-    this.reaper = setInterval(() => this.reap(), 60_000);
+    this.reaper = null;
+  }
+
+  /** Start reaping idle sessions (main.start; never at import, so tests stay free of timers). */
+  start() {
+    this.reaper ??= setInterval(() => this.reap(), REAP_EVERY_MS);
     this.reaper.unref?.();
   }
 
@@ -913,15 +1105,16 @@ class SessionManager {
   async get(id) {
     let s = this.sessions.get(id);
     if (s) return s;
+    if (removed.has(id)) throw new AppError('not_found', 'This session was deleted.');
     const meta = store.getMeta(id) || {};
     let cwd = meta.cwd;
-    let persisted = Boolean(history.findTranscriptFile(id));
+    let persisted = Boolean(await history.findTranscriptFile(id));
     if (!cwd) {
       const info = (await history.listHistory()).find((x) => x.sessionId === id);
       cwd = info?.cwd;
       if (info) persisted = true;
     }
-    if (!cwd) throw new Error('Unknown session: ' + id);
+    if (!cwd) throw new AppError('not_found', 'Unknown session: ' + id);
     s = new Session(id, { cwd, persisted });
     this.sessions.set(id, s);
     return s;
@@ -938,55 +1131,46 @@ class SessionManager {
     // First sight of a session (one from before this rule, or one made in the terminal): it takes
     // the place its file time gives it today, and keeps it. Claude Code and the process's own exit
     // keep writing to transcripts long after a turn, and none of those writes is a reason to move.
+    // Kept in memory only: listing is a read and never writes; the next real save carries it.
     const touched = fileTime || meta.createdAt || Date.now();
-    store.setMeta(id, { touched });
+    store.setMeta(id, { touched }, { persist: false });
     return touched;
+  }
+
+  /**
+   * A row of the list, from Pilcrow's metadata and what Claude Code's transcript says (`h`; null for a
+   * session created here that has not reached disk yet).
+   */
+  rowOf(id, meta, h) {
+    return {
+      id,
+      title: meta.title || h?.customTitle || (meta.firstPrompt ? titleFromPrompt(meta.firstPrompt) : null) || h?.summary || h?.firstPrompt || (h ? 'Untitled session' : 'New session'),
+      firstPrompt: h?.firstPrompt,
+      cwd: slash(h?.cwd || meta.cwd),
+      project: slash(meta.worktree?.repoRoot || meta.project || h?.cwd || meta.cwd),
+      gitBranch: meta.worktree?.branch || h?.gitBranch || null,
+      lastModified: h ? this.orderOf(id, meta, h.lastModified) : meta.touched || meta.createdAt,
+      createdAt: h ? h.createdAt : meta.createdAt,
+      archived: Boolean(meta.archived),
+      pinned: Boolean(meta.pinned),
+      worktree: meta.worktree || null,
+      scheduled: meta.scheduled || null,
+      ...boardFields(meta),
+      dispatch: meta.dispatch || null,
+      helper: meta.helper ? { leadId: meta.helper.leadId, name: meta.helper.name, state: meta.helper.state || null } : null,
+      lead: meta.lead ? { since: meta.lead.since, count: (meta.lead.helpers || []).length } : null,
+      status: h ? 'stopped' : 'idle',
+      live: false,
+    };
   }
 
   async list() {
     const hist = await history.listHistory();
     const out = new Map();
     const metaAll = store.meta;
-    for (const h of hist) {
-      const meta = metaAll[h.sessionId] || {};
-      out.set(h.sessionId, {
-        id: h.sessionId,
-        title: meta.title || h.customTitle || (meta.firstPrompt ? titleFromPrompt(meta.firstPrompt) : null) || h.summary || h.firstPrompt || 'Untitled session',
-        firstPrompt: h.firstPrompt,
-        cwd: slash(h.cwd || meta.cwd),
-        project: slash(meta.worktree?.repoRoot || meta.project || h.cwd),
-        gitBranch: meta.worktree?.branch || h.gitBranch,
-        lastModified: this.orderOf(h.sessionId, meta, h.lastModified),
-        createdAt: h.createdAt,
-        archived: Boolean(meta.archived),
-        pinned: Boolean(meta.pinned),
-        worktree: meta.worktree || null,
-        scheduled: meta.scheduled || null,
-        ...boardFields(meta),
-        status: 'stopped',
-        live: false,
-      });
-    }
-    // Sessions created here that have not reached disk yet.
-    for (const [id, meta] of Object.entries(metaAll)) {
-      if (out.has(id) || !meta.cwd || !this.sessions.has(id)) continue;
-      out.set(id, {
-        id,
-        title: meta.title || (meta.firstPrompt ? titleFromPrompt(meta.firstPrompt) : null) || 'New session',
-        cwd: meta.cwd,
-        project: meta.worktree?.repoRoot || meta.project || meta.cwd,
-        gitBranch: meta.worktree?.branch || null,
-        lastModified: meta.touched || meta.createdAt,
-        createdAt: meta.createdAt,
-        archived: Boolean(meta.archived),
-        pinned: Boolean(meta.pinned),
-        worktree: meta.worktree || null,
-        scheduled: meta.scheduled || null,
-        ...boardFields(meta),
-        status: 'idle',
-        live: false,
-      });
-    }
+    for (const h of hist) if (!removed.has(h.sessionId)) out.set(h.sessionId, this.rowOf(h.sessionId, metaAll[h.sessionId] || {}, h));
+    // …and the sessions created here that have not reached disk yet
+    for (const [id, meta] of Object.entries(metaAll)) if (!out.has(id) && meta.cwd && this.sessions.has(id)) out.set(id, this.rowOf(id, meta, null));
     for (const s of this.sessions.values()) {
       const e = out.get(s.id);
       if (!e) continue;
@@ -1012,7 +1196,9 @@ class SessionManager {
       const repoName = path.basename(info.mainRoot || info.root);
       const root = cfg.worktreeRoot || path.join(xdg('data'), 'worktrees');
       const dir = path.join(root, repoName, `${slug}-${id.slice(0, 6)}`);
-      const wt = await git.createWorktree({ repo: info.mainRoot || info.root, base: worktree.base || info.branch || 'HEAD', branch: `pilcrow/${slug}`, dir });
+      const made = await git.createWorktree({ repo: info.mainRoot || info.root, base: worktree.base || info.branch || 'HEAD', branch: `pilcrow/${slug}`, dir });
+      if (!made.ok) throw new Error(made.output);
+      const wt = made.worktree;
       meta.cwd = slash(wt.path);
       meta.project = slash(wt.repoRoot);
       meta.worktree = wt;
@@ -1029,13 +1215,29 @@ class SessionManager {
   }
 
   async remove(id, { removeWorktree = false } = {}) {
+    removed.add(id);
     const s = this.sessions.get(id);
     const meta = store.getMeta(id) || {};
-    if (s) s.close();
+    const dir = meta.cwd || s?.cwd;
     this.sessions.delete(id);
-    await history.remove(id, meta.cwd || s?.cwd);
+    if (s) {
+      // let the process end before its transcript goes: one still closing writes the file back
+      const running = s.q ? s.consumed : null;
+      s.close();
+      if (running) await Promise.race([running.catch(() => {}), new Promise((r) => setTimeout(r, REMOVE_WAIT_MS))]);
+    }
+    await history.remove(id, dir);
+    // and if it wrote the file back anyway (it outlived the wait), remove that too
+    setTimeout(() => {
+      history
+        .findTranscriptFile(id)
+        .then((f) => (f ? history.remove(id, dir) : undefined))
+        .catch(() => {});
+    }, RECHECK_MS).unref?.();
+    void snapshots.forget(meta.cwd || s?.cwd, id); // packing the shadow repository is not waited for
     if (removeWorktree && meta.worktree) await git.removeWorktree({ repoRoot: meta.worktree.repoRoot, dir: meta.worktree.path, branch: meta.worktree.branch, deleteBranch: true });
     store.deleteMeta(id);
+    bus.emit('removed', { id, meta });
     bus.emit('list-changed');
   }
 
@@ -1046,6 +1248,7 @@ class SessionManager {
     bus.emit('list-changed');
   }
 
+  /** @param {string} id @param {{ upToMessageId?: string, title?: string }} [opts] */
   async fork(id, { upToMessageId, title } = {}) {
     const s = await this.get(id);
     const meta = store.getMeta(id) || {};
@@ -1056,11 +1259,20 @@ class SessionManager {
     return { id: r.sessionId };
   }
 
+  /**
+   * Every minute: close the Claude Code process of a session idle past the timeout, and, once it is
+   * closed, let go of its transcript. Background work and pending permissions keep both.
+   */
   reap() {
-    const mins = store.getConfig().idleTimeoutMin || 30;
+    const idleMs = (store.getConfig().idleTimeoutMin || 30) * 60e3;
     for (const s of this.sessions.values()) {
+      if (Date.now() - s.lastActivity <= idleMs || s.pending.size) continue;
+      if (!s.q) {
+        if (s.release()) log('released idle session', s.id);
+        continue;
+      }
       const backgroundWork = s.bgTasks.length > 0 || [...s.tasks.values()].some((t) => t.status === 'running');
-      if (s.q && s.status === 'idle' && !s.pending.size && !backgroundWork && Date.now() - s.lastActivity > mins * 60_000) {
+      if (s.status === 'idle' && !backgroundWork) {
         log('closing idle session', s.id);
         s.close();
       }
@@ -1072,10 +1284,13 @@ class SessionManager {
     return [...this.sessions.values()].filter((s) => s.q && s.isBusy()).map((s) => ({ id: s.id, cwd: s.cwd, status: s.status }));
   }
 
-  closeAll() {
+  /** Stop reaping and close every Claude Code process; none starts again (the server is quitting). */
+  stop() {
+    quitting = true;
+    clearInterval(this.reaper);
+    this.reaper = null;
     for (const s of this.sessions.values()) s.close();
   }
 }
 
 export const sessions = new SessionManager();
-export { textOfContent };

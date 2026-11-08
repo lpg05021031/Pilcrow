@@ -10,7 +10,7 @@ const CUSTOM = '__custom';
  * lists, and a free-form ID for anything else. `typing` is true while the person types a custom ID, so
  * callers that save on every change can wait for `onCommit` instead.
  */
-export function ModelSelect({ value, onChange, onCommit }: { value: string; onChange: (v: string, typing: boolean) => void; onCommit?: () => void }) {
+export function ModelSelect({ value, onChange, onCommit, id, label }: { value: string; onChange: (v: string, typing: boolean) => void; onCommit?: () => void; id?: string; label?: string }) {
   const gw = useGatewayModels();
   useEffect(() => {
     loadGatewayModels();
@@ -27,6 +27,8 @@ export function ModelSelect({ value, onChange, onCommit }: { value: string; onCh
   return (
     <div className="model-select">
       <Select
+        id={id}
+        label={label}
         value={custom ? CUSTOM : value}
         width={320}
         onChange={(v) => {
@@ -39,6 +41,7 @@ export function ModelSelect({ value, onChange, onCommit }: { value: string; onCh
       {custom && (
         <input
           className="input mono"
+          aria-label="Model ID"
           value={value}
           autoFocus
           spellCheck={false}

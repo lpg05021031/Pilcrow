@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { ExternalLink, KeyRound, CircleCheck, ClipboardPaste } from 'lucide-react';
 import { useStore, call, setDialog, toast } from '../lib/store';
 import { Dialog } from './ui/Dialog';
-import { Spinner, copyText } from './ui/bits';
+import { Spinner } from './ui/bits';
+import { copy } from './ui/clipboard';
 
 interface AuthStart {
   authUrl?: string;
@@ -13,22 +14,22 @@ interface AuthStart {
   state?: string;
 }
 
+const close = () => setDialog('mcpAuth', null);
+
 /**
  * OAuth sign-in to an MCP server. Claude Code runs the flow and listens for the browser's redirect on
  * localhost; Pilcrow opens the sign-in page, watches the server's status and offers a paste box for
  * the cases where the redirect cannot reach this machine.
  */
-export function McpAuthDialog() {
-  const spec = useStore((s) => s.dialogs.mcpAuth)!;
-  const rt = useStore((s) => s.rt[spec.sessionId]);
-  const status = rt?.mcp?.find((m) => m.name === spec.name)?.status;
+export function McpAuthDialog({ spec }: { spec: { sessionId: string; name: string } }) {
+  const status = useStore((s) => s.rt[spec.sessionId]?.mcp?.find((m) => m.name === spec.name)?.status);
   const [start, setStart] = useState<AuthStart | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pasted, setPasted] = useState('');
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const opened = useRef(false);
-  const close = () => setDialog('mcpAuth', null);
+
 
   useEffect(() => {
     let alive = true;
@@ -58,7 +59,7 @@ export function McpAuthDialog() {
       }, 900);
       return () => clearTimeout(t);
     }
-  }, [status, start]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [status, start, spec.name]);
 
   const submitPasted = async () => {
     const url = pasted.trim();
@@ -86,7 +87,7 @@ export function McpAuthDialog() {
       footer={
         <>
           {start?.authUrl && !done && (
-            <button className="btn sm ghost" onClick={() => copyText(start.authUrl!).then(() => toast('Link copied', 'success'))}>
+            <button className="btn sm ghost" onClick={() => copy(start.authUrl || '', 'Link')}>
               Copy link
             </button>
           )}
@@ -124,7 +125,7 @@ export function McpAuthDialog() {
                 : 'When the provider sends you back, Claude Code finishes the sign-in. If the browser ends on a page it cannot open, paste that page’s address below.'}
             </div>
             <div className="mcp-auth-paste">
-              <input className="input mono" placeholder="http://localhost:…/callback?code=…" value={pasted} onChange={(e) => setPasted(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submitPasted()} />
+              <input aria-label="Address the browser ended on" className="input mono" placeholder="http://localhost:…/callback?code=…" value={pasted} onChange={(e) => setPasted(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submitPasted()} />
               <button className="btn sm" disabled={!pasted.trim() || busy} onClick={submitPasted}>
                 {busy ? <Spinner size={12} /> : <ClipboardPaste size={13} />} Use
               </button>

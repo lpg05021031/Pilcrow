@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { X, CircleCheck, ArrowUpRight, Pencil, CalendarClock } from 'lucide-react';
 import type { PermissionDecision, SessionSummary, WaitCondition } from '../../lib/types';
-import { respond, setIntent, decideCard, type Runtime } from '../../lib/store';
+import { respond, setIntent, decideCard, call, type Runtime } from '../../lib/store';
 import { actionsFor, ledgerOf, permSummary, describeWait, isSchedule, scheduleActions, quickWaits, type CardState, type Lane } from '../../lib/board';
 import { basename, cost, timeAgo } from '../../lib/format';
 import { suggestionLabel } from '../tools/Permission';
@@ -301,6 +301,19 @@ function Permission({ s, perm, now, onOpen }: { s: SessionSummary; perm: NonNull
   const allow = () => decide({ behavior: 'allow', decisionClassification: 'user_temporary' });
   const always = () => decide({ behavior: 'allow', updatedPermissions: perm.suggestions, decisionClassification: 'user_permanent' });
   const deny = () => decide({ behavior: 'deny', message: 'The user declined this action.', decisionClassification: 'user_reject' });
+  // a helper's request can be answered for every helper of its lead at once (HELPERS.md §5.6)
+  const helperOf = s.helper || null;
+  const allowAllHelpers = async () => {
+    if (busy || !helperOf) return;
+    setBusy(true);
+    try {
+      await call('helpers.allow', { leadId: helperOf.leadId, requestId: perm.requestId });
+      setDecided('allow');
+      setTimeout(() => (setDecided(null), setBusy(false)), 900);
+    } catch {
+      setBusy(false);
+    }
+  };
   useEffect(() => {
     if (perm.interactive) return;
     const onKey = (e: KeyboardEvent) => {
@@ -343,6 +356,11 @@ function Permission({ s, perm, now, onOpen }: { s: SessionSummary; perm: NonNull
           {allowAlways && (
             <button className="btn sm" onClick={always} disabled={busy} title={suggestionLabel(perm.suggestions[0], s.cwd)}>
               Always allow<span className="key">2</span>
+            </button>
+          )}
+          {helperOf && (
+            <button className="btn sm" onClick={allowAllHelpers} disabled={busy} title="Answer every helper of this lead that asks the same thing, now and later">
+              Allow for all helpers
             </button>
           )}
           <button className={`btn sm ${perm.defaultToNo ? 'primary' : 'ghost'}`} onClick={deny} disabled={busy}>

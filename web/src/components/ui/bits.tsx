@@ -1,51 +1,24 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { LoaderCircle, Copy, Check } from 'lucide-react';
-import type { SessionStatus } from '../../lib/types';
+// Small controls and indicators shared across the app.
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { LoaderCircle, PanelLeftOpen } from 'lucide-react';
+import { setUi, useStore } from '../../lib/store';
+import { isWorking, type SessionStatus } from '../../lib/types';
 import { tokens } from '../../lib/format';
 import { useExitGhost, useCountUp } from '../../lib/motion';
+import { useInk } from './hooks';
 
-/** The Pilcrow mark: an alignment pilcrow with a safelight core. */
-/** The pilcrow mark. `tight` crops to the ink so it sits in a row like any other icon. */
-export function Mark({ size = 20, className = '', tight = false }: { size?: number; className?: string; tight?: boolean }) {
-  return (
-    <svg className={`mark ${className}`} width={tight ? Math.round((size * 14) / 16) : size} height={size} viewBox={tight ? '4.5 4 14 16' : '0 0 24 24'} aria-hidden="true">
-      <circle cx="10.6" cy="9.2" r="4.1" fill="var(--accent)" />
-      <rect x="10.6" y="5.1" width="6.6" height="1.9" rx="0.5" fill="currentColor" />
-      <rect x="12.4" y="5.1" width="1.9" height="13.8" rx="0.5" fill="currentColor" />
-      <rect x="15.3" y="5.1" width="1.9" height="13.8" rx="0.5" fill="currentColor" />
-    </svg>
-  );
-}
-
-/** The app icon itself, as a tile: the mark a person sees in the taskbar, so the empty states feel like the app and not a diagram. */
-export function AppIcon({ size = 56, className = '' }: { size?: number; className?: string }) {
-  return (
-    <svg className={`app-icon ${className}`} width={size} height={size} viewBox="0 0 256 256" aria-hidden="true">
-      <rect width="256" height="256" rx="60" fill="#1f1f1f" />
-      <circle cx="105" cy="98" r="43.5" fill="#d97757" className="app-icon-bowl" />
-      <rect x="105" y="55" width="69" height="20.5" rx="4.5" fill="#fafafa" />
-      <rect x="123.5" y="55" width="20.5" height="146" rx="4.5" fill="#fafafa" />
-      <rect x="153" y="55" width="20.5" height="146" rx="4.5" fill="#fafafa" />
-    </svg>
+/** A page header's way back to the sidebar while it is hidden (Ctrl+B does the same). */
+export function ShowSidebarButton() {
+  const sidebar = useStore((s) => s.ui.sidebar);
+  return sidebar ? null : (
+    <button className="icon-btn head-sidebar" title="Show sidebar (Ctrl+B)" aria-label="Show sidebar" onClick={() => setUi({ sidebar: true })}>
+      <PanelLeftOpen size={16} />
+    </button>
   );
 }
 
 export function Spinner({ size = 14 }: { size?: number }) {
   return <LoaderCircle size={size} className="spin" />;
-}
-
-/** The pilcrow at work: the bowl breathes in Claude's orange while the stems hold still. */
-export function WorkingMark({ size = 16 }: { size?: number }) {
-  return (
-    <svg className="working-mark" width={size} height={size} viewBox="4.5 4 14 16" aria-hidden="true">
-      <circle className="wm-bowl" cx="10.6" cy="9.2" r="4.1" />
-      <g className="wm-stems" fill="currentColor">
-        <rect x="10.6" y="5.1" width="6.6" height="1.9" rx="0.5" />
-        <rect x="12.4" y="5.1" width="1.9" height="13.8" rx="0.5" />
-        <rect x="15.3" y="5.1" width="1.9" height="13.8" rx="0.5" />
-      </g>
-    </svg>
-  );
 }
 
 export function Switch({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label?: string }) {
@@ -59,18 +32,8 @@ export function Switch({ on, onChange, label }: { on: boolean; onChange: (v: boo
  */
 export function Seg<T extends string>({ value, options, onChange, size, className = '', label }: { value: T; options: { value: T; label: ReactNode; disabled?: boolean; title?: string }[]; onChange: (v: T, e: React.MouseEvent<HTMLButtonElement>) => void; size?: 'sm'; className?: string; label?: string }) {
   const ref = useRef<HTMLDivElement>(null);
-  const [thumb, setThumb] = useState<{ x: number; w: number } | null>(null);
+  const thumb = useInk(ref, 'button.on', `${value}:${options.length}`);
   const [settled, setSettled] = useState(false);
-  useLayoutEffect(() => {
-    const measure = () => {
-      const el = ref.current?.querySelector<HTMLElement>('button.on');
-      setThumb(el ? { x: el.offsetLeft, w: el.offsetWidth } : null);
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    if (ref.current) ro.observe(ref.current);
-    return () => ro.disconnect();
-  }, [value, options.length]);
   // The thumb's first position is not a move.
   useEffect(() => {
     const t = requestAnimationFrame(() => setSettled(true));
@@ -78,12 +41,28 @@ export function Seg<T extends string>({ value, options, onChange, size, classNam
   }, []);
   return (
     <div ref={ref} className={`seg${size ? ` ${size}` : ''}${settled ? ' settled' : ''} ${className}`} role="radiogroup" aria-label={label}>
-      {thumb && <span className="seg-thumb" aria-hidden="true" style={{ transform: `translateX(${thumb.x}px)`, width: thumb.w }} />}
+      {thumb && <span className="seg-thumb" aria-hidden="true" style={{ transform: `translateX(${thumb.left}px)`, width: thumb.width }} />}
       {options.map((o) => (
         <button key={o.value} type="button" role="radio" aria-checked={o.value === value} className={o.value === value ? 'on' : ''} disabled={o.disabled} title={o.title} onClick={(e) => onChange(o.value, e)}>
           {o.label}
         </button>
       ))}
+    </div>
+  );
+}
+
+/**
+ * A labelled form row: the label names the control that takes the `id` it is handed (a <Select> also
+ * keeps its current value in its name). Rows with several controls name each one with aria-label.
+ */
+export function Field({ label, children }: { label: ReactNode; children: (id: string) => ReactNode }) {
+  const id = useId();
+  return (
+    <div className="field">
+      <label htmlFor={id} id={`${id}-label`}>
+        {label}
+      </label>
+      {children(id)}
     </div>
   );
 }
@@ -129,13 +108,13 @@ export function Leave({ className = '', duration = 220, children, ...rest }: Rea
   );
 }
 
-/** Status mark for lists: only states that deserve attention get one; idle shows nothing. */
+/**
+ * Status mark for lists: only states that deserve attention get one; idle shows nothing. It is the
+ * row's only word on its state, so it is an image with a name a screen reader says, besides the tip.
+ */
 export function StatusGlyph({ status, pending, unread }: { status: SessionStatus | undefined; pending?: number; unread?: boolean }) {
-  if (pending || status === 'requires_action') return <span className="glyph needs" title="Needs your input" />;
-  if (status === 'running' || status === 'starting') return <span className="glyph running" title="Working" />;
-  if (status === 'error') return <span className="glyph error" title="Stopped with an error" />;
-  if (unread) return <span className="glyph unread" title="New activity" />;
-  return null;
+  const [kind, name] = pending || status === 'requires_action' ? ['needs', 'Needs your input'] : isWorking(status) ? ['running', 'Working'] : status === 'error' ? ['error', 'Stopped with an error'] : unread ? ['unread', 'New activity'] : [];
+  return kind ? <span className={`glyph ${kind}`} role="img" aria-label={name} title={name} /> : null;
 }
 
 export function ContextRing({ used, total, size = 18 }: { used: number; total: number; size?: number }) {
@@ -185,85 +164,5 @@ export function Resizer({ onResize, side }: { onResize: (dx: number) => void; si
         e.preventDefault();
       }}
     />
-  );
-}
-
-export function Collapsible({ open, children }: { open: boolean; children: ReactNode }) {
-  return open ? <>{children}</> : null;
-}
-
-export function useNow(intervalMs = 1000, active = true) {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    if (!active) return;
-    const t = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(t);
-  }, [intervalMs, active]);
-  return now;
-}
-
-/** Focus an element unless the user is busy elsewhere (a dialog, the palette, another text field). */
-export function focusIfFree(el: HTMLElement | null | undefined) {
-  if (!el) return;
-  const a = document.activeElement as HTMLElement | null;
-  const busy = a && a !== document.body && a !== el && (a.closest('[role="dialog"], .palette, .dialog') || a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' || a.isContentEditable);
-  if (busy || document.querySelector('.palette, .dialog')) return;
-  el.focus();
-}
-
-/** Copy to the clipboard. Falls back to the legacy path when the async API is unavailable or refused. */
-export async function copyText(text: string) {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return;
-    }
-  } catch {
-    /* fall through */
-  }
-  const ta = document.createElement('textarea');
-  ta.value = text;
-  ta.setAttribute('readonly', '');
-  ta.style.cssText = 'position:fixed;opacity:0;pointer-events:none';
-  const prev = document.activeElement as HTMLElement | null;
-  document.body.appendChild(ta);
-  ta.select();
-  const ok = document.execCommand('copy');
-  ta.remove();
-  prev?.focus?.();
-  if (!ok) throw new Error('Copy was blocked');
-}
-
-/** Copy with a check-mark confirmation in place, instead of a toast. */
-export function CopyButton({ text, title = 'Copy', size = 13 }: { text: string; title?: string; size?: number }) {
-  const [done, setDone] = useState(false);
-  return (
-    <button
-      className={`icon-btn sm copy-btn${done ? ' done' : ''}`}
-      title={done ? 'Copied' : title}
-      onClick={() =>
-        copyText(text).then(
-          () => {
-            setDone(true);
-            setTimeout(() => setDone(false), 1300);
-          },
-          () => {},
-        )
-      }
-    >
-      {done ? <Check size={size} /> : <Copy size={size} />}
-    </button>
-  );
-}
-
-/** A keyboard shortcut drawn as separate keycaps ("Ctrl+K" → Ctrl K), the same way everywhere. */
-export function Keys({ combo, className = '' }: { combo: string; className?: string }) {
-  const parts = combo === '+' ? ['+'] : combo.split(/\+(?!$)/);
-  return (
-    <span className={`keys ${className}`}>
-      {parts.map((k, i) => (
-        <kbd key={i}>{k}</kbd>
-      ))}
-    </span>
   );
 }

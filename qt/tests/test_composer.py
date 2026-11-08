@@ -6,9 +6,7 @@ from __future__ import annotations
 import time
 
 import pytest
-from harness import app_client, mock_server  # noqa: F401
-
-MOCK_PORT = 5371
+from harness import app_client, mock_server
 
 
 @pytest.fixture(autouse=True)
@@ -50,7 +48,10 @@ def _open(c, sid: str = "sess-login"):
 
 
 def _idle(c, sid: str) -> None:
-    c.wait_until(lambda: c.store.rt[sid].status == "idle" and not c.store.rt[sid].busy, 20, "idle")
+    # and the frame's rt_changed has gone out (the store coalesces a session's changes per frame)
+    c.wait_until(
+        lambda: c.store.rt[sid].status == "idle" and not c.store.rt[sid].busy and not c.store._dirty, 20, "idle"
+    )
 
 
 # ---------------------------------------------------------------- pure helpers
@@ -70,7 +71,7 @@ def test_column_width_is_the_golden_section_of_the_pane():
 def test_shadow_pixmap_has_a_gaussian_edge_and_is_cached():
     from PySide6.QtWidgets import QApplication
 
-    from pilcrow_qt.widgets.composer import _shadow_pixmap
+    from pilcrow_qt.widgets.ui.bits import _shadow_pixmap
 
     QApplication.instance() or QApplication([])
     pm = _shadow_pixmap(200, 40, 24, 0.5)
@@ -85,11 +86,11 @@ def test_shadow_pixmap_has_a_gaussian_edge_and_is_cached():
 
 
 def test_color_mix_interpolates_premultiplied():
-    from pilcrow_qt.widgets.composer import _color_mix
+    from pilcrow_qt.theme import mix
 
     # color-mix(in srgb, plan 50%, hair-2): the browser reports color(srgb .306 .766 .593 / .72)... for the
     # 65% focus ring; the 50% mix carries half the plan's alpha plus half the hairline's
-    c = _color_mix("#3bbd8c", 0.65, "rgba(255, 255, 255, 0.2)")
+    c = mix("#3bbd8c", 0.65, "rgba(255, 255, 255, 0.2)")
     assert abs(c.alphaF() - 0.72) < 0.01
     assert abs(c.redF() - 0.306) < 0.02 and abs(c.greenF() - 0.766) < 0.02
 
@@ -249,34 +250,31 @@ def test_mode_menu_opens_above_the_chip_and_picks(app_client):
     comp = v.composer
     sid = v.sid
     comp.mode_btn.click()
-    c.wait_until(lambda: comp.menu.is_open, 3, "menu")
+    c.wait_until(lambda: comp.menu is not None and comp.menu.is_open, 3, "menu")
+    m = comp.menu
     assert comp.mode_btn.is_open
-    labels = [it.get("label") for it in comp.menu.items]
+    labels = [it.get("label") for it in m.menu.items]
     assert labels == ["Ask before edits", "Edit automatically", "Plan mode", "Auto", "Bypass permissions"]
-    assert comp.menu.items[0]["checked"] and comp.menu.items[-1]["danger"]
-    panel = comp.menu.panel_rect()
-    assert int(panel.width()) == 372
-    assert int(panel.height()) == 5 + 5 * 49 + 4 + 5
-    host = comp.menu.parentWidget()
-    anchor = comp.mode_btn.mapTo(host, QPoint(0, 0))
-    assert comp.menu.x() + int(panel.x()) == anchor.x()
-    assert comp.menu.y() + int(panel.bottom()) == anchor.y() - 6
-    # keyboard: down twice, Enter picks Plan mode
-    QTest.keyClick(c.win, Qt.Key.Key_Down)
-    QTest.keyClick(c.win, Qt.Key.Key_Down)
-    QTest.keyClick(c.win, Qt.Key.Key_Down)
-    assert comp.menu.active == 2
-    QTest.keyClick(c.win, Qt.Key.Key_Return)
-    assert not comp.menu.is_open and not comp.mode_btn.is_open
+    assert m.menu.items[0]["checked"] and m.menu.items[-1]["danger"]
+    assert m.width() == 372
+    assert m.height() == 5 + round(5 * 48.8 + 4) + 5  # padding, five rows with a hint, 1px apart
+    anchor = comp.mode_btn.mapTo(m.parentWidget(), QPoint(0, 0))
+    assert m.x() == anchor.x() and m.y() + m.height() == anchor.y() - 6  # over the chip, 6px off
+    # keyboard: down three times, Enter picks Plan mode
+    for _ in range(3):
+        QTest.keyClick(m, Qt.Key.Key_Down)
+    assert m.menu._active == 2
+    QTest.keyClick(m, Qt.Key.Key_Return)
+    assert not m.is_open and not comp.mode_btn.is_open
     c.wait_until(lambda: c.store.rt[sid].get("mode") == "plan", 5, "plan picked")
     # the chip toggles it closed again; Escape closes too
     comp.mode_btn.click()
     c.wait_until(lambda: comp.menu.is_open, 3, "menu again")
     comp.mode_btn.click()
-    assert not comp.menu.is_open
+    assert not comp.menu.is_open and not comp.mode_btn.is_open
     comp.mode_btn.click()
     c.wait_until(lambda: comp.menu.is_open, 3, "menu once more")
-    QTest.keyClick(c.win, Qt.Key.Key_Escape)
+    QTest.keyClick(comp.menu, Qt.Key.Key_Escape)
     assert not comp.menu.is_open
     c.store.set_mode(sid, "default")
     c.wait_until(lambda: c.store.rt[sid].get("mode") == "default", 5, "default")
@@ -289,17 +287,32 @@ def test_model_menu_aligns_right_and_lists_the_gateway(app_client):
     v = _open(c)
     comp = v.composer
     comp.model_btn.click()
-    c.wait_until(lambda: comp.menu.is_open and len(comp.menu.items) >= 4, 5, "model menu")
-    c.wait_until(lambda: any(it.get("mono") for it in comp.menu.items), 5, "gateway models")
-    headings = [it["heading"] for it in comp.menu.items if it.get("heading")]
+    c.wait_until(lambda: comp.menu is not None and comp.menu.is_open, 5, "model menu")
+    items = comp.menu.menu.items
+    assert len(items) >= 4 and any(it.get("mono") for it in items), "the gateway's models"
+    headings = [it["heading"] for it in items if it.get("heading")]
     assert headings[0] == "Model" and headings[1].startswith("On ")
-    panel = comp.menu.panel_rect()
-    assert int(panel.width()) == 320
-    host = comp.menu.parentWidget()
-    anchor = comp.model_btn.mapTo(host, QPoint(0, 0))
-    assert comp.menu.x() + int(panel.right()) == anchor.x() + comp.model_btn.width()  # QRectF.right() is x + w
-    comp.menu.close_menu()
-    assert not comp.menu.is_open
+    m = comp.menu
+    assert m.width() == 320
+    anchor = comp.model_btn.mapTo(m.parentWidget(), QPoint(0, 0))
+    assert m.x() + m.width() == anchor.x() + comp.model_btn.width()
+    m.dismiss()
+    assert not m.is_open and not comp.model_btn.is_open
+
+
+def test_menu_rows_unfold_one_after_another():
+    from PySide6.QtWidgets import QApplication
+
+    from pilcrow_qt.widgets.ui.menu import ROW_MS, STAGGER_MS, Menu
+
+    QApplication.instance() or QApplication([])
+    menu = Menu([{"label": "a"}, {"heading": "h"}, {"label": "b"}, {"label": "c"}])
+    span = ROW_MS + STAGGER_MS * 3
+    menu.reveal.value = STAGGER_MS / span  # 11 ms in: the first row has begun, the second not yet
+    assert menu.row_reveal(0) > 0 and menu.row_reveal(1) == 0
+    menu.reveal.value = 1.0
+    assert all(menu.row_reveal(i) == 1.0 for i in range(3))
+    assert [r.order for r in menu.rows if r is not None] == [0, 1, 2]
 
 
 # ---------------------------------------------------------------- attachments, drag, queue
@@ -347,7 +360,7 @@ def test_queue_tray_above_the_card(app_client):
     from PySide6.QtCore import Qt
     from PySide6.QtTest import QTest
 
-    from pilcrow_qt.widgets.composer import QueueItem
+    from pilcrow_qt.widgets.queue_tray import QueueItem
 
     c = app_client
     v = _open(c)
@@ -424,3 +437,33 @@ def test_screenshot(app_client):
     v.composer.edit.setFocus()
     c.sleep(300)
     assert c.shot("composer").exists()
+
+
+def test_a_press_anywhere_outside_takes_the_focus_and_the_halo_off(app_client):
+    """As in the web, any press outside the composer ends its focus, also on parts of the window that do
+    not take the focus themselves (the conversation, the session's header, the sidebar's empty space);
+    a press inside it keeps it."""
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    c = app_client
+    v = _open(c)
+    comp = v.composer
+    win = c.win
+
+    def focus_then_press(w, at=None) -> bool:
+        comp.edit.setFocus()
+        c.wait_until(lambda: comp.box.focused, 3, "focused")
+        QTest.mouseClick(w, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at or QPoint(5, 5))
+        c.sleep(30)
+        return comp.box.focused
+
+    vp = v.transcript.view.viewport()
+    assert not focus_then_press(vp, QPoint(vp.width() - 10, 4)), "the conversation"
+    assert not focus_then_press(v.header if hasattr(v, "header") else v, QPoint(200, 10)), "the header"
+    side = win.sidebar
+    assert not focus_then_press(side, QPoint(side.width() // 2, side.height() - 60)), "the sidebar's empty space"
+    c.wait_until(lambda: comp.box.focus_t.value < 0.01, 3, "the halo gone")
+    # inside the composer: still focused
+    assert focus_then_press(comp.bar, QPoint(comp.bar.width() // 2, comp.bar.height() // 2)), "the composer's bar"
+    comp.edit.clearFocus()

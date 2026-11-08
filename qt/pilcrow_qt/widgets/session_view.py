@@ -9,32 +9,33 @@ Composer stacked. The git information behind the crumbs and the diffstat is refr
 from __future__ import annotations
 
 import math
+import re
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import QPoint, QPointF, Qt, QTimer, Signal
+from PySide6.QtCore import QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFontMetrics, QPainter
 from PySide6.QtWidgets import (
-    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
-    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
 from .. import icons, theme
-from ..lib.fmt import basename, cost, tildify
-from ..store import ConfirmSpec, store
+from ..canvas.transcript import Transcript
+from ..lib.fmt import basename, cost, duration, err_text, plural, tildify
+from ..lib.workflow import running_workflow
+from ..store import VIEW_MODES, ConfirmSpec, store
 from .composer import Composer, LayoutButton
 from .folder_picker import FolderPicker
 from .mcp_notice import McpNotice
-from .sidebar import IconBtn
-from .ui.bits import Mark, copy_text, hairline, label
-from .ui.menu import show_menu
+from .ui.bits import Box, IconButton, Indicator, Mark, button, copy_text, hairline, label, paint_box
+from .ui.button import Btn, chip_button
+from .ui.menu import Popover, host_for, show_menu
 from .ui.signals import bind
 
 Json = Dict[str, Any]
@@ -42,6 +43,7 @@ Json = Dict[str, Any]
 STATUS_TEXT = {
     "running": "Working",
     "starting": "Starting",
+    "leading": "Leading",
     "requires_action": "Needs you",
     "idle": "Ready",
     "stopped": "Ready",
@@ -56,52 +58,251 @@ EXAMPLES = [
 ]
 
 
-def running_workflow(tasks: Optional[List[Json]]) -> Optional[str]:
-    for t in tasks or []:
-        if t.get("type") == "local_workflow" and t.get("status") == "running":
-            return str(t.get("workflowName") or t.get("description") or "workflow")
-    return None
+HELPER_TONE = {
+    "queued": "text_4",
+    "preparing": "accent",
+    "running": "accent",
+    "needs_action": "warn",
+    "done": "ok",
+    "failed": "err",
+    "stopped": "text_3",
+    "skipped": "text_4",
+}
+HELPER_ACTIVE = ("queued", "preparing", "running", "needs_action")
 
 
-def _make_transcript(session_id: str, cwd: str) -> QWidget:
-    """The real Transcript when it is there, otherwise a stand-in with the same surface so this page runs alone."""
-    try:
-        from .transcript.view import Transcript
+class HelperChip(QPushButton):
+    """``.helper-chip``: one helper on the bar — a dot in its state's colour, its name, a short state.
+    The bar places it by hand (no QLayout), so a change of text moves nothing outside the bar."""
 
-        return Transcript(session_id, cwd)
-    except Exception as e:  # noqa: BLE001 — the transcript is built separately; this page must not depend on it
-        print(f"[session_view] transcript unavailable, using a placeholder: {e!r}")
-        return _TranscriptPlaceholder()
+    H = 22
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.h: Json = {}
+        self._text = ""
+        self._name = self._where = self._state = ""
+        self._key: Optional[tuple] = None
+        self.w = 0
+        self.setAutoDefault(False)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.clicked.connect(lambda _c=False: self.h.get("id") and store.open_session(str(self.h["id"])))
+        bind(theme.theme.changed, self, lambda _t: self.update())
+
+    def sync(self, h: Json) -> bool:
+        """Take the helper's state; True when what the chip shows changed (its width may have)."""
+        self.h = h
+        st = str(h.get("state") or "")
+        word = "needs you" if st == "needs_action" else st.replace("_", " ")
+        extra = ""
+        if st == "running":
+            extra = duration(float(h.get("elapsedMs") or 0))
+        elif st == "done" and int(h.get("files") or 0):
+            extra = f"+{int(h.get('add') or 0)} −{int(h.get('del') or 0)}"
+        elif st in ("queued", "skipped", "stopped", "failed") and h.get("reason"):
+            extra = str(h.get("reason"))
+        name = str(h.get("name") or "")
+        # the repository it works in, when that is not already its name: a lead's helpers are often
+        # in other repositories, and the bar is where the person looks to see who is where
+        folder = str(h.get("folder") or h.get("cwd") or "")
+        repo = basename(folder) if folder else ""
+        self._name = name
+        self._where = f" · {repo}" if repo and repo != name else ""
+        self._state = f" · {word}" + (f" · {extra}" if extra else "")
+        text = name + self._where + self._state
+        tip = "\n".join(
+            x
+            for x in (
+                str(h.get("lastLine") or ""),
+                tildify(folder, str((store.info or {}).get("home") or "")),
+                str(h.get("branch") or ""),
+            )
+            if x
+        )
+        key = (st, text, tip)
+        if key == self._key:
+            return False
+        self._key = key
+        self._text = text
+        self.setAccessibleName(text)
+        self.setToolTip(tip)
+        fm = QFontMetrics(theme.font_ui(theme.FS_SMALL, 500))
+        self.w = min(320, 9 + 8 + 7 + fm.horizontalAdvance(text) + 16)
+        self.update()
+        return True
+
+    def text(self) -> str:  # type: ignore[override]
+        return self._text
+
+    def paintEvent(self, _e) -> None:
+        t = theme.tokens()
+        st = str(self.h.get("state") or "")
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        warm = st == "needs_action"
+        bg = theme.blend(
+            getattr(t, "warn_wash", t.fill_1) if warm else (t.fill_2 if self.underMouse() else t.fill_1), t.canvas
+        )
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(bg)
+        p.drawRoundedRect(QRectF(self.rect()), 11, 11)
+        p.setBrush(QColor(getattr(t, HELPER_TONE.get(st, "text_4"))))
+        if st == "queued":
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.setPen(QColor(t.text_4))
+        p.drawEllipse(QRectF(9, 7, 8, 8))
+        f = theme.font_ui(theme.FS_SMALL, 500)
+        p.setFont(f)
+        fm = QFontMetrics(f)
+        x, right = 24, self.width() - 10
+        # the name in the ink, where it works quieter, the state after; the last that fits is elided
+        for seg, ink in ((self._name, t.text), (self._where, t.text_3), (self._state, t.text_2)):
+            if not seg or x >= right:
+                continue
+            shown = fm.elidedText(seg, Qt.TextElideMode.ElideRight, right - x)
+            p.setPen(QColor(ink))
+            p.drawText(QRect(x, 0, right - x, self.height()), Qt.AlignmentFlag.AlignVCenter, shown)
+            x += fm.horizontalAdvance(shown)
+        p.end()
 
 
-class _TranscriptPlaceholder(QScrollArea):
-    """What the page shows for the conversation until the Transcript lands: the empty state, or nothing."""
+class HelpersBar(QWidget):
+    """``.helpers-bar`` (HELPERS.md §6.1): under a lead's header, one chip per helper, the cost, Review.
+    Drawn from ``session.state`` alone; it is the whole picture while the cards scroll away.
 
-    def __init__(self) -> None:
-        super().__init__()
-        self.setWidgetResizable(True)
-        self.setFrameShape(QFrame.Shape.NoFrame)
-        self._host = QWidget()
-        self._lay = QVBoxLayout(self._host)
-        self._lay.setContentsMargins(0, 0, 0, 0)
-        self._lay.addStretch(1)
-        self.setWidget(self._host)
-        self._empty: Optional[QWidget] = None
+    The bar has no QLayout: its children are placed in ``_place`` from their own widths, so a helper's
+    state ticking (elapsed time, a new last line) repaints a chip and moves nothing else — the
+    conversation, the composer and the header see no layout pass. Only the bar appearing or going
+    (the first helper, the last one gone) reaches the session view's layout."""
 
-    def set_empty(self, w: QWidget) -> None:
-        if self._empty is not None:
-            self._empty.deleteLater()
-        self._empty = w
-        self._lay.insertWidget(0, w, 0, Qt.AlignmentFlag.AlignHCenter)
+    H = 34
+    PAD_L = 18
+    PAD_R = 14
+    GAP = 6
 
-    def open_find(self) -> None:
-        pass
+    def __init__(self, sid: str, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.sid = sid
+        self.chips: List[HelperChip] = []
+        self._ids: List[str] = []
+        self._shown = 0
+        self.setObjectName("helpers-bar")
+        self.setFixedHeight(self.H)
+        # opaque: a chip repainting dirties the bar alone, not the shell, the card and the stack under it
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.cost = label("", tone="faint", size="micro")
+        self.more = label("", tone="faint", size="micro")
+        self.more.hide()
+        self.review = button(
+            "Review",
+            kind="ghost",
+            size="xs",
+            icon="eye",
+            on_click=lambda: store.set_ui(panel=True, panel_tab="changes"),
+            tooltip="The helpers' changes together, in the Changes panel",
+        )
+        for w in (self.cost, self.more, self.review):
+            w.setParent(self)
+        self.review.hide()
+        self.hide()
+        bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def scroll_to_bottom(self) -> None:
-        self.verticalScrollBar().setValue(self.verticalScrollBar().maximum())
+    def sizeHint(self) -> QSize:
+        return QSize(240, self.H)
 
-    def set_scrolled_callback(self, fn: Callable[[bool], None]) -> None:
-        self.verticalScrollBar().valueChanged.connect(lambda v: fn(v > 0))
+    def minimumSizeHint(self) -> QSize:
+        return QSize(0, self.H)
+
+    def sync(self, helpers: List[Json], lead: Json) -> None:
+        if not helpers:
+            if not self.isHidden():
+                self.hide()
+            return
+        ids = [str(h.get("id")) for h in helpers]
+        changed = False
+        if ids != self._ids:
+            for c in self.chips:
+                c.hide()
+                c.deleteLater()
+            self.chips = [HelperChip(self) for _ in helpers]
+            self._ids = ids
+            changed = True
+        for c, h in zip(self.chips, helpers):
+            changed = c.sync(h) or changed
+        usd = float(lead.get("cost") or 0)
+        cost_text = cost(usd) if usd else ""
+        if cost_text != self.cost.text():
+            self.cost.setText(cost_text)
+            changed = True
+        review = any(h.get("state") in ("done", "failed", "stopped") and int(h.get("files") or 0) > 0 for h in helpers)
+        if review != self.review.isVisibleTo(self):
+            self.review.setVisible(review)
+            changed = True
+        if self.isHidden():
+            self.show()
+            changed = True
+        if changed:
+            self._place()
+
+    def _place(self) -> None:
+        """Chips from the left, the cost and Review from the right; chips that do not fit give way to
+        a ``+N`` count. Geometry only — nothing here reaches a layout above the bar."""
+        w = self.width()
+        y_chip = (self.H - HelperChip.H) // 2
+        right = w - self.PAD_R
+        if self.review.isVisibleTo(self):
+            rh = self.review.sizeHint()
+            self.review.setGeometry(right - rh.width(), (self.H - rh.height()) // 2, rh.width(), rh.height())
+            right -= rh.width() + 8
+        if self.cost.text():
+            ch = self.cost.sizeHint()
+            self.cost.setGeometry(right - ch.width(), (self.H - ch.height()) // 2, ch.width(), ch.height())
+            self.cost.show()
+            right -= ch.width() + 8
+        else:
+            self.cost.hide()
+        x = self.PAD_L
+        shown = 0
+        more_w = 0
+        for i, c in enumerate(self.chips):
+            rest = len(self.chips) - i
+            if rest > 1:
+                fm = QFontMetrics(theme.font_ui(theme.FS_MICRO))
+                more_w = fm.horizontalAdvance(f"+{rest - 1}") + self.GAP
+            else:
+                more_w = 0
+            if x + c.w > right - (more_w if rest > 1 else 0) and i > 0:
+                break
+            c.setGeometry(x, y_chip, c.w, HelperChip.H)
+            if c.isHidden():
+                c.show()
+            x += c.w + self.GAP
+            shown += 1
+        for c in self.chips[shown:]:
+            if not c.isHidden():
+                c.hide()
+        hidden = len(self.chips) - shown
+        if hidden > 0:
+            self.more.setText(f"+{hidden}")
+            mh = self.more.sizeHint()
+            self.more.setGeometry(x, (self.H - mh.height()) // 2, mh.width(), mh.height())
+            self.more.setToolTip(", ".join(str(c.h.get("name")) for c in self.chips[shown:]))
+            self.more.show()
+        elif not self.more.isHidden():
+            self.more.hide()
+        self._shown = shown
+
+    def resizeEvent(self, e) -> None:
+        super().resizeEvent(e)
+        self._place()
+
+    def paintEvent(self, _e) -> None:
+        t = theme.tokens()
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor(t.canvas))
+        p.fillRect(0, self.height() - 1, self.width(), 1, theme.blend(t.hair, t.canvas))
+        p.end()
 
 
 class SessionView(QWidget):
@@ -116,7 +317,7 @@ class SessionView(QWidget):
         self._git_timer.timeout.connect(self._fetch_git)
         self._git_cwd = ""
         self._git_tick = ""
-        self._picker: Optional[QFrame] = None
+        self._picker: Optional[Popover] = None
         self._title_edit: Optional[QLineEdit] = None
         self._status_seen = ""
         self.setObjectName("session")
@@ -128,12 +329,14 @@ class SessionView(QWidget):
         # ---- header
         self.head = QWidget()
         self.head.setObjectName("session-head")
+        # The head sits in the rounded sheet (main_window.Card) and must not paint over its corners.
+        self.head.setStyleSheet("#session-head { background: transparent; }")
         self.head.setFixedHeight(theme.HEADER_H)
         hl = QHBoxLayout(self.head)
         hl.setContentsMargins(20, 0, 10, 0)
         hl.setSpacing(12)
         # .icon-btn.head-sidebar: 28px, shown only while the sidebar is hidden
-        self.side_btn = IconBtn("panel-left-open", "Show sidebar (Ctrl+B)", 16, 28)
+        self.side_btn = IconButton("panel-left-open", "Show sidebar (Ctrl+B)", 16, "text_3", box=28, over="chrome")
         self.side_btn.clicked.connect(lambda: store.set_ui(sidebar=True))
         hl.addWidget(self.side_btn)
 
@@ -180,10 +383,10 @@ class SessionView(QWidget):
         self.diffstat.hide()
         self.diffstat.clicked.connect(self._toggle_changes)
         al.addWidget(self.diffstat)
-        self.panel_btn = IconBtn("panel-right", "Side panel (Ctrl+\\)", 16, 28)
+        self.panel_btn = IconButton("panel-right", "Side panel (Ctrl+\\)", 16, "text_3", box=28, over="chrome")
         self.panel_btn.clicked.connect(lambda: store.set_ui(panel=not store.ui.panel))
         al.addWidget(self.panel_btn)
-        self.menu_btn = IconBtn("ellipsis", "Session actions", 16, 28)
+        self.menu_btn = IconButton("ellipsis", "Session actions", 16, "text_3", box=28, over="chrome")
         self.menu_btn.clicked.connect(self.open_menu)
         al.addWidget(self.menu_btn)
         hl.addWidget(actions)
@@ -191,6 +394,7 @@ class SessionView(QWidget):
         self.head_line = hairline()
         self.head_line.hide()
         root.addWidget(self.head_line)
+        self._narrow = False
 
         # ---- notices
         self.mcp = McpNotice(self.sid)
@@ -198,10 +402,17 @@ class SessionView(QWidget):
         self.error_bar = ErrorBar(self.sid)
         self.error_bar.hide()
         root.addWidget(self.error_bar)
+        # a lead's helpers, one chip each (HELPERS.md §6.1)
+        self.helpers_bar = HelpersBar(self.sid)
+        root.addWidget(self.helpers_bar)
+        self.lead_crumb: Optional[CrumbButton] = None
+        self._lead_id = ""
+        self.job_crumb: Optional[CrumbButton] = None  # a dispatch run: the job it runs for
+        self._job_id = ""
 
         # ---- conversation and composer
         cwd = self.cwd
-        self.transcript = _make_transcript(self.sid, cwd)
+        self.transcript = Transcript(self.sid, cwd)
         self.empty = SessionEmpty(session, cwd, self)
         self.transcript.set_empty(self.empty)
         self.transcript.set_scrolled_callback(self._set_scrolled)
@@ -252,6 +463,14 @@ class SessionView(QWidget):
     def open_find(self) -> None:
         self.transcript.open_find()
 
+    def resizeEvent(self, e) -> None:
+        super().resizeEvent(e)
+        # The web's container queries: under 560px the crumbs go, the title keeps the room.
+        narrow = self.width() < 560
+        if narrow != self._narrow:
+            self._narrow = narrow
+            self.crumbs.setVisible(not narrow)
+
     def _on_rt(self, sid: str) -> None:
         if sid != self.sid:
             return
@@ -268,10 +487,6 @@ class SessionView(QWidget):
         self.head_line.setVisible(bool(on))
 
     def _paint(self) -> None:
-        t = theme.tokens()
-        # The head sits in the rounded sheet (main_window.Card) and must not paint over its corners.
-        self.head.setStyleSheet("#session-head { background: transparent; }")
-        _ = t
         self.render()
 
     # ---------------------------------------------------------------- rendering
@@ -303,7 +518,40 @@ class SessionView(QWidget):
             )
         status = self.status
         tasks = r.get("tasks") if r else None
-        self.pill.set_status(status, running_workflow(tasks) if status == "running" else None)
+        helpers = [h for h in ((r.get("helpers") if r else None) or []) if isinstance(h, dict)]
+        active_helpers = [h for h in helpers if h.get("state") in HELPER_ACTIVE]
+        if status in ("idle", "stopped") and active_helpers:
+            # the lead itself is quiet, its helpers are not: live work, in the accent
+            self.pill.set_status("leading", f"{len(active_helpers)} of {plural(len(helpers), 'helper')}")
+        else:
+            wf = running_workflow(tasks) if status == "running" else None
+            self.pill.set_status(
+                status, str(wf.get("workflowName") or wf.get("description") or "workflow") if wf else None
+            )
+        self.helpers_bar.sync(helpers, (r.get("lead") if r else None) or {})
+        helper = r.get("helper") if r and isinstance(r.get("helper"), dict) else None
+        if helper and helper.get("leadId"):
+            if self.lead_crumb is None:
+                # a link up to the lead: the arrow says where it goes, no chevron (it is not a chooser)
+                self.lead_crumb = CrumbButton("Open the lead session", icon="corner-left-up", chevron=False)
+                self.lead_crumb.clicked.connect(lambda: self._lead_id and store.open_session(self._lead_id))
+                self.crumbs.layout().addWidget(self.lead_crumb)
+            self._lead_id = str(helper.get("leadId"))
+            self.lead_crumb.set_text(f"Lead · {helper.get('leadTitle') or 'a lead session'}")
+            self.lead_crumb.show()
+        elif self.lead_crumb is not None:
+            self.lead_crumb.hide()
+        d = s.get("dispatch") if isinstance(s.get("dispatch"), dict) else None
+        if d and d.get("jobId"):
+            if self.job_crumb is None:
+                self.job_crumb = CrumbButton("Open the job", icon="corner-left-up", chevron=False)
+                self.job_crumb.clicked.connect(lambda: self._job_id and store.open_job(self._job_id))
+                self.crumbs.layout().addWidget(self.job_crumb)
+            self._job_id = str(d.get("jobId"))
+            self.job_crumb.set_text(f"run of {d.get('name') or 'a job'}")
+            self.job_crumb.show()
+        elif self.job_crumb is not None:
+            self.job_crumb.hide()
         changes = int(git.get("changed") or 0) + int(git.get("untracked") or 0)
         self.diffstat.setVisible(bool(git.get("isRepo")) and changes > 0)
         if changes > 0:
@@ -381,44 +629,52 @@ class SessionView(QWidget):
         edit.finished.connect(done)
 
     def pick_folder(self) -> None:
-        if self._picker is not None:
-            self._picker.close()
+        """The folder chooser in a popover under the folder chip (``FolderPicker`` in the web)."""
+        if self._picker is not None and self._picker.is_open:
+            self._picker.dismiss()
             return
-        pop = QFrame(self, Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint)
-        pop.setObjectName("popover")
-        pop.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        pop.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
-        t = theme.tokens()
-        glass, line = theme.blend(t.glass, t.canvas).name(), theme.blend(t.hair_2, t.raised).name()
-        pop.setStyleSheet(f"#popover {{ background: {glass}; border: 1px solid {line}; border-radius: {theme.R3}px; }}")
-        lay = QVBoxLayout(pop)
-        lay.setContentsMargins(1, 1, 1, 1)
+        host = host_for(self)
+        if host is None:
+            return
+        pop = Popover(host, 380)
+        pop.lay.setContentsMargins(0, 0, 0, 0)
         cwd = self.cwd
 
         def picked(d: str) -> None:
-            pop.close()
+            pop.dismiss()
             if d != cwd:
                 store.set_cwd(self.sid, d).catch(lambda _e: None)
 
         picker = FolderPicker(cwd, picked)
-        lay.addWidget(picker)
+        pop.set_content(picker)
+        pop.closed.connect(lambda: self.folder_btn.set_on(False))
         self._picker = pop
+        pop.open_at(self.folder_btn, "bottom-start")
         self.folder_btn.set_on(True)
-
-        def closed(*_a: Any) -> None:
-            self._picker = None
-            try:
-                self.folder_btn.set_on(False)
-            except RuntimeError:
-                pass
-
-        pop.destroyed.connect(closed)
-        pop.move(self.folder_btn.mapToGlobal(QPoint(0, self.folder_btn.height() + 4)))
-        pop.show()
         picker.q.setFocus()
 
     def open_menu(self) -> None:
         show_menu(self.menu_items(), self.menu_btn, 250, align_right=True)
+
+    def project_root(self) -> str:
+        """The repository this session works on: the worktree's main checkout, else the project folder."""
+        s = self.session
+        return str((s.get("worktree") or {}).get("repoRoot") or s.get("project") or self.cwd)
+
+    def register_repo(self) -> None:
+        """Register this session's repository (REPOSITORIES.md), or open its entry when it has one."""
+        root = self.project_root()
+        if store.repo_for(root):
+            store.set_dialog("settings", "repos")
+            return
+
+        def ok(e: Json) -> None:
+            store.toast(
+                f"Registered {e.get('name')} · names, policy and notes are in Settings → Repositories", "success"
+            )
+            store.set_dialog("settings", "repos")
+
+        store.call("repos.register", {"path": root}).then(ok).catch(lambda e: store.toast(err_text(e), "error"))
 
     def menu_items(self) -> List[Json]:
         s, r, sid = self.session, self.rt, self.sid
@@ -438,9 +694,14 @@ class SessionView(QWidget):
                 "icon": "square-terminal",
                 "on_select": lambda: store.set_ui(panel=True, panel_tab="terminal"),
             },
+            {
+                "label": "Repository settings…" if store.repo_for(self.project_root()) else "Register this repository…",
+                "hint": "Names, aliases, policy and notes for helpers and Dispatch",
+                "icon": "folder-git-2",
+                "on_select": self.register_repo,
+            },
             {"separator": True},
         ]
-        from ..store import VIEW_MODES
 
         for v in VIEW_MODES:
             items.append(
@@ -484,6 +745,24 @@ class SessionView(QWidget):
                 "on_select": lambda: store.archive_session(sid, not s.get("archived")),
             }
         )
+        if r is not None and isinstance(r.get("helper"), dict):
+            items.append(
+                {
+                    "label": "Detach from lead",
+                    "hint": "An ordinary session from now on; the lead is told",
+                    "icon": "git-branch",
+                    "on_select": lambda: store.call("helpers.detach", {"id": sid}),
+                }
+            )
+        helpers_n = len([h for h in ((r.get("helpers") if r else None) or []) if isinstance(h, dict)])
+        # a lead's helpers go with it when asked (HELPERS.md §5.10); a worktree session asks about its tree
+        checkbox = (
+            {"label": f"Also delete its {plural(helpers_n, 'helper')} and their worktrees", "value": False}
+            if helpers_n
+            else {"label": f"Also remove the worktree and branch {wt.get('branch')}", "value": False}
+            if wt
+            else None
+        )
         items.append(
             {
                 "label": "Delete…",
@@ -493,13 +772,12 @@ class SessionView(QWidget):
                     ConfirmSpec(
                         title="Delete this session?",
                         body="The conversation history is removed from ~/.claude. "
-                        "Files Claude changed stay as they are.",
+                        "Files Claude changed stay as they are."
+                        + (" Its helpers stay as sessions unless you ask." if helpers_n else ""),
                         confirm="Delete session",
                         danger=True,
-                        checkbox={"label": f"Also remove the worktree and branch {wt.get('branch')}", "value": False}
-                        if wt
-                        else None,
-                        on_confirm=lambda checked: store.delete_session(sid, checked),
+                        checkbox=checkbox,
+                        on_confirm=lambda checked: store.delete_session(sid, checked, checked and helpers_n > 0),
                     )
                 ),
             }
@@ -508,10 +786,26 @@ class SessionView(QWidget):
 
 
 class _TitleLabel(QLabel):
+    """The session's title: it gives way to the crumbs and the actions and ends in … when cut."""
+
     double_clicked = Signal()
 
-    def mouseDoubleClickEvent(self, _e) -> None:  # noqa: N802
+    def mouseDoubleClickEvent(self, _e) -> None:
         self.double_clicked.emit()
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(40, super().minimumSizeHint().height())
+
+    def paintEvent(self, _e) -> None:
+        p = QPainter(self)
+        p.setFont(self.font())
+        p.setPen(self.palette().color(self.foregroundRole()))
+        r = self.contentsRect()
+        p.drawText(
+            r,
+            int(self.alignment()) | Qt.TextFlag.TextSingleLine,
+            self.fontMetrics().elidedText(self.text(), Qt.TextElideMode.ElideRight, r.width()),
+        )
 
 
 class _TitleEdit(QLineEdit):
@@ -526,13 +820,13 @@ class _TitleEdit(QLineEdit):
         self.setAccessibleName("Session title")
         self.returnPressed.connect(lambda: self._finish(True))
 
-    def keyPressEvent(self, e) -> None:  # noqa: N802
+    def keyPressEvent(self, e) -> None:
         if e.key() == Qt.Key.Key_Escape:
             self._finish(False)
             return
         super().keyPressEvent(e)
 
-    def focusOutEvent(self, e) -> None:  # noqa: N802
+    def focusOutEvent(self, e) -> None:
         super().focusOutEvent(e)
         self._finish(True)
 
@@ -557,33 +851,43 @@ class Crumb(QWidget):
         self.ico = QLabel()
         lay.addWidget(self.ico)
         self.lb = QLabel()
+        self.lb.setFont(theme.font_ui(theme.FS_SMALL))
         lay.addWidget(self.lb)
+        self._painted = False
         bind(theme.theme.changed, self, lambda _t: self._paint())
 
     def set(self, icon: str, text: str, tone: str = "") -> None:
+        if (icon, text, tone) == (self._icon, self._text, self._tone) and self._painted:
+            return
         self._icon, self._text, self._tone = icon, text, tone
+        self._painted = True
         self._paint()
 
     def text(self) -> str:
         return self._text
 
     def _paint(self) -> None:
-        t = theme.tokens()
-        color = t.plan if self._tone == "plan" else t.text_3
+        name = "plan" if self._tone == "plan" else "text_3"
         if self._icon:
-            self.ico.setPixmap(icons.pixmap(self._icon, color, 12))
+            self.ico.setPixmap(icons.pixmap(self._icon, getattr(theme.tokens(), name), 12))
         fm = QFontMetrics(self.lb.font())
         self.lb.setText(fm.elidedText(self._text, Qt.TextElideMode.ElideRight, 220))
-        self.lb.setStyleSheet(f"color: {color}; font-size: {theme.FS_SMALL}px;")
+        theme.tint(self.lb, fg=name)
 
 
 class CrumbButton(LayoutButton):
     """The folder crumb while the folder can still be changed (``.crumb-btn``): a quiet button with a chevron."""
 
-    def __init__(self, tooltip: str, parent: Optional[QWidget] = None) -> None:
+    def __init__(
+        self, tooltip: str, parent: Optional[QWidget] = None, icon: str = "folder", chevron: bool = True
+    ) -> None:
+        """``icon`` leads the words; ``chevron`` says it opens a chooser (the folder) rather than going
+        somewhere (the lead of a helper, the job of a run)."""
         super().__init__(parent)
         self._on = False
         self._text = ""
+        self._icon = icon
+        self._chevron = chevron
         self.setFlat(True)
         self.setFixedHeight(22)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -595,13 +899,17 @@ class CrumbButton(LayoutButton):
         self.ico = QLabel()
         lay.addWidget(self.ico)
         self.lb = QLabel()
+        self.lb.setFont(theme.font_ui(theme.FS_SMALL))
         lay.addWidget(self.lb)
         self.chev = QLabel()
         lay.addWidget(self.chev)
+        self.set_look(hover="fill_2/canvas", on="fill_2/canvas", radius=theme.R2)
         bind(theme.theme.changed, self, lambda _t: self._paint())
         self._paint()
 
     def set_text(self, text: str) -> None:
+        if text == self._text:
+            return
         self._text = text
         self._paint()
 
@@ -609,22 +917,23 @@ class CrumbButton(LayoutButton):
         return self._text
 
     def set_on(self, on: bool) -> None:
+        if on == self._on:
+            return
         self._on = on
         self._paint()
 
     def _paint(self) -> None:
         t = theme.tokens()
-        color = t.text if self._on else t.text_2
-        self.ico.setPixmap(icons.pixmap("folder", color, 12))
-        self.chev.setPixmap(icons.pixmap("chevron-down", color, 11))
+        name = "text" if self._on else "text_2"
+        color = getattr(t, name)
+        self.ico.setPixmap(icons.pixmap(self._icon, color, 12))
+        self.chev.setVisible(self._chevron)
+        if self._chevron:
+            self.chev.setPixmap(icons.pixmap("chevron-down", color, 11))
         self.lb.setText(QFontMetrics(self.lb.font()).elidedText(self._text, Qt.TextElideMode.ElideRight, 220))
-        self.lb.setStyleSheet(f"color: {color}; font-size: {theme.FS_SMALL}px;")
-        fill = theme.blend(t.fill_2, t.canvas).name()
-        bg = fill if self._on else "transparent"
-        self.setStyleSheet(
-            f"QPushButton {{ border: none; border-radius: {theme.R2}px; background: {bg}; }}"
-            f" QPushButton:hover {{ background: {fill}; }}"
-        )
+        theme.tint(self.lb, fg=name)
+        self.look_active = self._on
+        self.update()
 
 
 class StatusPill(QWidget):
@@ -633,7 +942,6 @@ class StatusPill(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.status = ""
-        self._t0 = time.monotonic()
         self.setFixedHeight(22)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(4, 0, 4, 0)
@@ -644,6 +952,10 @@ class StatusPill(QWidget):
         lay.addWidget(self.lb)
         self.link = QPushButton()
         self.link.setFlat(True)
+        self.link.setStyleSheet(
+            f"QPushButton {{ border: none; padding: 0; background: transparent; font-size: {theme.FS_SMALL}px; }}"
+            " QPushButton:hover { text-decoration: underline; }"
+        )
         self.link.setCursor(Qt.CursorShape.PointingHandCursor)
         self.link.setToolTip("Show the workflow in the Tasks panel")
         self.link.setAccessibleName("Show the workflow in the Tasks panel")
@@ -651,60 +963,57 @@ class StatusPill(QWidget):
         lay.addWidget(self.link)
         bind(theme.theme.changed, self, lambda _t: self._paint())
 
-    def set_status(self, status: str, workflow: Optional[str] = None) -> None:
+    def set_status(self, status: str, workflow: Optional[str] = None, label: Optional[str] = None) -> None:
+        """``status`` picks the colour and the dot; ``label`` replaces the status word (a job's own)."""
+        if (status, workflow, label) == getattr(self, "_shown_status", None):
+            return
+        self._shown_status = (status, workflow, label)
         self.status = status
         show = bool(status) and status not in ("idle", "stopped")
         self.setVisible(show)
         if not show:
             self.dot.set_live(False)
             return
-        self.lb.setText(STATUS_TEXT.get(status, status))
+        self.lb.setText(label or STATUS_TEXT.get(status, status))
         self.link.setVisible(bool(workflow))
         if workflow:
             self.link.setText(f"· {workflow}")
-        self.dot.set_live(status in ("running", "starting"))
+        self.dot.set_live(status in ("running", "starting", "leading"))
         self._paint()
 
     def text(self) -> str:
         return self.lb.text()
 
     def _paint(self) -> None:
-        t = theme.tokens()
-        color = t.accent_text if self.status == "requires_action" else t.err if self.status == "error" else t.text_3
-        weight = 600 if self.status == "requires_action" else 500
-        self.lb.setStyleSheet(f"color: {color}; font-size: {theme.FS_SMALL}px; font-weight: {weight};")
-        self.link.setStyleSheet(
-            f"QPushButton {{ border: none; padding: 0; color: {color}; font-size: {theme.FS_SMALL}px; }}"
-            " QPushButton:hover { text-decoration: underline; }"
+        name = (
+            "accent_text"
+            if self.status in ("requires_action", "leading")
+            else "err"
+            if self.status == "error"
+            else "text_3"
         )
-        self.dot.color = color
+        weight = 600 if self.status == "requires_action" else 500
+        self.lb.setFont(theme.font_ui(theme.FS_SMALL, weight))
+        theme.tint(self.lb, fg=name)
+        theme.tint(self.link, fg=name)
+        self.dot.color = getattr(theme.tokens(), name)
         self.dot.update()
 
 
-class _Dot(QWidget):
+class _Dot(Indicator):
+    """The status pill's dot, breathing while the session works."""
+
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.color = ""
         self.setFixedSize(6, 6)
-        self._t0 = time.monotonic()
-        self._timer = QTimer(self)
-        self._timer.setInterval(60)
-        self._timer.timeout.connect(self.update)
 
-    def set_live(self, on: bool) -> None:
-        if on and not store.reduced_motion:
-            self._timer.start()
-        else:
-            self._timer.stop()
-        self.update()
-
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         c = QColor(self.color or theme.tokens().text_3)
-        if self._timer.isActive():
-            phase = (time.monotonic() - self._t0) % 1.2 / 1.2
-            c.setAlphaF(0.45 + 0.55 * (0.5 - 0.5 * math.cos(phase * 2 * math.pi)))
+        if self.moving:
+            c.setAlphaF(theme.breath(time.monotonic(), 1.2, 0.45))
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(c)
         p.drawEllipse(QPointF(3, 3), 3, 3)
@@ -720,43 +1029,47 @@ class Diffstat(LayoutButton):
         self.setFixedHeight(26)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         lay = QHBoxLayout(self)
-        lay.setContentsMargins(9, 0, 9, 0)
+        lay.setContentsMargins(9, 0, 13, 0)  # 4px of the right is the pill's margin
         lay.setSpacing(6)
         self.add = QLabel()
         self.dele = QLabel()
+        for lb in (self.add, self.dele):
+            lb.setFont(theme.font_ui(theme.FS_SMALL, 600))
         lay.addWidget(self.add)
         lay.addWidget(self.dele)
         self.add_n = self.del_n = 0
+        self.set_look(bg="fill_1/canvas", hover="fill_2/canvas", on="fill_2/canvas", line="hair/canvas", radius=13)
         bind(theme.theme.changed, self, lambda _t: self._paint())
         self._paint()
 
+    def paintEvent(self, _e) -> None:
+        t = theme.tokens()
+        bg = self.look_on if self._on else self.look_hover if (self.underMouse() and self.isEnabled()) else self.look_bg
+        p = QPainter(self)
+        r = QRectF(self.rect()).adjusted(0, 0, -4, 0)  # margin-right: 4px
+        paint_box(p, r, theme.resolve(bg, t), theme.resolve(self.look_line, t), self.look_radius)
+
     def set_values(self, ins: int, dele: int, changes: int) -> None:
+        if (ins, dele, changes) == (self.add_n, self.del_n, getattr(self, "_changes", None)):
+            return
+        self._changes = changes
         self.add_n, self.del_n = ins, dele
         self.setToolTip(f"{changes} changed file{'s' if changes > 1 else ''} — review (Alt+1)")
         self.setAccessibleName(self.toolTip())
         self._paint()
 
     def set_on(self, on: bool) -> None:
+        if on == self._on:
+            return
         self._on = on
         self._paint()
 
     def _paint(self) -> None:
-        t = theme.tokens()
         self.add.setText(f"+{self.add_n}")
         self.dele.setText(f"−{self.del_n}")
-        self.add.setStyleSheet(
-            f"color: {t.ok if self.add_n else t.text_4}; font-size: {theme.FS_SMALL}px; font-weight: 600;"
-        )
-        self.dele.setStyleSheet(
-            f"color: {t.err if self.del_n else t.text_4}; font-size: {theme.FS_SMALL}px; font-weight: 600;"
-        )
-        bg = theme.blend(t.fill_2 if self._on else t.fill_1, t.canvas).name()
-        hover = theme.blend(t.fill_2, t.canvas).name()
-        line = theme.blend(t.hair, t.canvas).name()
-        self.setStyleSheet(
-            f"QPushButton {{ background: {bg}; border: 1px solid {line}; border-radius: 13px; margin-right: 4px; }}"
-            f" QPushButton:hover {{ background: {hover}; }}"
-        )
+        theme.tint(self.add, fg="ok" if self.add_n else "text_4")
+        theme.tint(self.dele, fg="err" if self.del_n else "text_4")
+        self.update()
 
 
 class ErrorBar(QWidget):
@@ -766,9 +1079,8 @@ class ErrorBar(QWidget):
         super().__init__(parent)
         self.sid = session_id
         self._error = ""
-        host = QWidget()
+        host = Box(bg="err_wash/canvas", radius=theme.R3)
         host.setObjectName("session-error")
-        host.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         outer = QVBoxLayout(self)
         outer.setContentsMargins(20, 4, 20, 0)
         outer.addWidget(host)
@@ -776,28 +1088,24 @@ class ErrorBar(QWidget):
         lay.setContentsMargins(14, 8, 8, 8)
         lay.setSpacing(10)
         self.text = QLabel()
+        self.text.setFont(theme.font_ui(theme.FS_SMALL))
+        theme.tint(self.text, fg="err")
         self.text.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         lay.addWidget(self.text, 1)
-        self.btn = QPushButton()
-        self.btn.setProperty("fs", "sm")
+        self.btn = Btn(size="sm", icon_size=13)
         self.btn.clicked.connect(self._act)
         lay.addWidget(self.btn)
         self.host = host
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
 
     def set_error(self, error: str) -> None:
-        import re
-
         self._error = error
         self.text.setText(error.split("\n")[0])
-        t = theme.tokens()
         if re.search(r"Settings|not found|No Claude Code", error, re.I):
             self.btn.setText("Settings")
-            self.btn.setIcon(icons.icon("settings-2", t.text_2, 13))
+            self.btn.set_icon_name("settings-2")
         else:
             self.btn.setText("Retry")
-            self.btn.setIcon(icons.icon("rotate-ccw", t.text_2, 13))
+            self.btn.set_icon_name("rotate-ccw")
         self.btn.setAccessibleName(self.btn.text())
 
     def _act(self) -> None:
@@ -805,13 +1113,6 @@ class ErrorBar(QWidget):
             store.set_dialog("settings", "claude")
         else:
             store.insert_into_composer(self.sid, "continue")
-
-    def _paint(self) -> None:
-        t = theme.tokens()
-        self.host.setStyleSheet(
-            f"#session-error {{ background: {theme.blend(t.err_wash, t.canvas).name()}; border-radius: {theme.R3}px; }}"
-        )
-        self.text.setStyleSheet(f"color: {t.err}; font-size: {theme.FS_SMALL}px;")
 
 
 class SessionEmpty(QWidget):
@@ -842,11 +1143,8 @@ class SessionEmpty(QWidget):
         pl.addStretch(1)
         self.path = label("", tone="faint", mono=True)
         pl.addWidget(self.path)
-        self.change = QPushButton("Change folder")
-        self.change.setProperty("kind", "link")
-        self.change.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.change.setAccessibleName("Change folder")
-        self.change.clicked.connect(view.pick_folder)
+        self.change = button("Change folder", kind="link", icon="folder", on_click=view.pick_folder)
+        self.change.setIconSize(QSize(12, 12))
         self.change.hide()
         pl.addWidget(self.change)
         pl.addStretch(1)
@@ -855,9 +1153,8 @@ class SessionEmpty(QWidget):
         self.git.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.git.hide()
         lay.addWidget(self.git)
-        self.mem = QPushButton()
-        self.mem.setProperty("kind", "ghost")
-        self.mem.setProperty("fs", "sm")
+        self.mem = button(kind="ghost", size="sm", icon="book-marked")
+        self.mem.setIconSize(QSize(12, 12))
         self.mem.setToolTip("Notes from earlier sessions in this folder ride along in this session")
         self.mem.clicked.connect(lambda: store.set_dialog("settings", "memory"))
         self.mem.hide()
@@ -868,29 +1165,11 @@ class SessionEmpty(QWidget):
         el = _Flow(self.examples)
         self.example_buttons: List[QPushButton] = []
         for e in EXAMPLES:
-            b = QPushButton(e)
-            b.setFlat(True)
-            b.setFixedHeight(32)
-            b.setCursor(Qt.CursorShape.PointingHandCursor)
-            b.setAccessibleName(e)
+            b = chip_button(e, h=32, px=14, fs=theme.FS_UI)
             b.clicked.connect(lambda _c=False, text=e: store.insert_into_composer(self.sid, text, True))
             el.add(b)
             self.example_buttons.append(b)
         lay.addWidget(self.examples, 0, Qt.AlignmentFlag.AlignHCenter)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
-
-    def _paint(self) -> None:
-        t = theme.tokens()
-        self.change.setIcon(icons.icon("folder", t.text_2, 12))
-        self.mem.setIcon(icons.icon("book-marked", t.text_2, 12))
-        fill, line = theme.blend(t.fill_1, t.canvas).name(), theme.blend(t.hair, t.canvas).name()
-        for b in self.example_buttons:
-            b.setStyleSheet(
-                f"QPushButton {{ height: 32px; padding: 0 14px; border-radius: 16px; font-size: {theme.FS_UI}px;"
-                f" color: {t.text_2}; background: {fill}; border: 1px solid {line}; }}"
-                f" QPushButton:hover {{ background: {theme.blend(t.fill_2, t.canvas).name()}; color: {t.text}; }}"
-            )
 
     def refresh_state(self, session: Json, git: Optional[Json], cwd: str, fresh: bool) -> None:
         home = (store.info or {}).get("home")

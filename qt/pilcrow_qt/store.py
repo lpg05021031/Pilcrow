@@ -8,17 +8,22 @@ frame per session, coalesced).
 
 from __future__ import annotations
 
+import logging
+import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Set
 
-from PySide6.QtCore import QObject, QTimer, Signal
-from PySide6.QtGui import QGuiApplication, Qt
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from PySide6.QtGui import QGuiApplication
 
 from . import theme as theme_mod
+from .canvas.clock import clock
 from .lib.fmt import err_text, set_home
 from .lib.transcript_model import TranscriptModel
 from .rpc import Call, RpcError, rpc
+
+log = logging.getLogger(__name__)
 
 Json = Dict[str, Any]
 
@@ -70,6 +75,9 @@ class Runtime:
         return self.st.get(key, default)
 
 
+LOAD_SLICE = 300  # messages modelled per event-loop turn while a conversation opens
+
+
 @dataclass
 class Ui:
     sidebar: bool = True
@@ -81,6 +89,7 @@ class Ui:
     diff_mode: str = "unified"
     view: str = "normal"
     return_to: Optional[str] = None  # where Esc takes a session opened from the workboard
+    font_scale: float = 1.0
 
 
 @dataclass
@@ -104,11 +113,16 @@ class ConfirmSpec:
 
 
 class Store(QObject):
-    """The application state. One instance, :data:`store`."""
+    """The application state. One instance, :data:`store`.
+
+    A session's runtime changes in bursts (streamed messages, ``session.state`` events, :meth:`patch_rt`),
+    so all three are coalesced: ``rt_changed(sid)`` fires at most once per session per 16 ms frame
+    (:meth:`mark_dirty`). Every other signal fires as its state changes."""
 
     connected_changed = Signal(bool)
     info_changed = Signal(object)
     config_changed = Signal(object)
+    repos_changed = Signal(object)  # the repositories registry (REPOSITORIES.md), a list of entries
     sessions_changed = Signal(object)  # list of SessionSummary dicts
     active_changed = Signal(object)  # session id or None
     rt_changed = Signal(str)  # session id (coalesced to one per frame)
@@ -122,6 +136,10 @@ class Store(QObject):
     fs_changed = Signal(int)
     timeline_changed = Signal(str)
     sched_changed = Signal(int)
+    inbox_unread_changed = Signal(int)
+    dispatch_changed = Signal(object)  # {"id": job id, "removed"?: bool} per change; None after a full reload
+    dispatch_view_changed = Signal(object)  # None = the board, "new" = the composer, else a job id
+    playbooks_changed = Signal(object)  # the list of playbooks
     gateway_models_changed = Signal(object)
     lightbox_changed = Signal(object)
     find_open_changed = Signal(bool)
@@ -129,6 +147,8 @@ class Store(QObject):
     notify = Signal(str, str, str)  # session id, title, body
     attention = Signal()
     sent = Signal(str)  # a message went out for this session: the transcript goes to its live end
+    term_data = Signal(object)  # {"id", "data"}: a terminal's output (the Terminal tab)
+    term_exit = Signal(object)  # {"id", "code"}: a terminal's process ended
 
     def __init__(self) -> None:
         super().__init__()
@@ -155,22 +175,29 @@ class Store(QObject):
         self.unread: Dict[str, bool] = {}
         self.page = "session"
         self.sched_rev = 0
+        # dispatch: job summaries and their runs, kept in line by dispatch.changed deltas
+        self.jobs: Dict[str, Json] = {}
+        self.job_runs: Dict[str, Dict[str, Json]] = {}
+        self.jobs_loaded = False
+        self.dispatch_view: Optional[str] = None
+        self.playbooks: List[Json] = []
         self.gateway_models: Any = None  # None | "loading" | GatewayModels dict
         self.timeline: Dict[str, List[Json]] = {}
         self.lightbox: Optional[str] = None
         self.find_open = False
-        self.reduced_motion = False
         self.models: Dict[str, TranscriptModel] = {}
         self._dirty: set = set()
         self._flush_timer = QTimer(self)
         self._flush_timer.setSingleShot(True)
         self._flush_timer.setInterval(16)
+        self._flush_timer.setTimerType(Qt.TimerType.PreciseTimer)  # Windows: 16 ms, not the 15.6 ms grid's 31
         self._flush_timer.timeout.connect(self._flush_dirty)
         self._list_timer = QTimer(self)
         self._list_timer.setSingleShot(True)
         self._list_timer.timeout.connect(self._fetch_sessions)
         self._list_force = False
         self._list_waiters: List[Callable[[], None]] = []
+        self._deleted: Set[str] = set()  # sessions deleted from here: a list read before the delete may still land
         self._buffered: Dict[str, List[Json]] = {}
         self._opening: set = set()
         self._toast_seq = 0
@@ -181,6 +208,16 @@ class Store(QObject):
         self._ui_save_timer.timeout.connect(self._save_ui)
 
     # ---------------------------------------------------------------- models
+    @property
+    def reduced_motion(self) -> bool:
+        """No animations (``--lite``, ``PILCROW_LITE``, or the system's own setting): kept by the
+        clock everything that moves runs on."""
+        return clock.reduced_motion
+
+    @reduced_motion.setter
+    def reduced_motion(self, on: bool) -> None:
+        clock.reduced_motion = on
+
     def get_model(self, sid: str) -> TranscriptModel:
         m = self.models.get(sid)
         if m is None:
@@ -188,6 +225,8 @@ class Store(QObject):
         return m
 
     def mark_dirty(self, sid: str) -> None:
+        """Announce ``rt_changed(sid)`` on the next frame: every change to a session within 16 ms
+        (streamed messages, state events, patches) reaches the listeners as one emit."""
         self._dirty.add(sid)
         if not self._flush_timer.isActive():
             self._flush_timer.start()
@@ -197,17 +236,17 @@ class Store(QObject):
         self._dirty.clear()
         for sid in ids:
             m = self.models.get(sid)
-            if m is None:
-                continue
-            r = self.rt.setdefault(sid, Runtime(loaded=True))
-            r.rev = m.rev
-            self.rt_changed.emit(sid)
+            if m is not None:
+                m.refresh_inputs()  # the tool inputs that streamed since the last flush, parsed once
+                self.rt.setdefault(sid, Runtime(loaded=True)).rev = m.rev
+            if sid in self.rt:
+                self.rt_changed.emit(sid)
 
     def patch_rt(self, sid: str, **patch: Any) -> Runtime:
         r = self.rt.setdefault(sid, Runtime())
         for k, v in patch.items():
             setattr(r, k, v)
-        self.rt_changed.emit(sid)
+        self.mark_dirty(sid)
         return r
 
     def rt_of(self, sid: Optional[str]) -> Optional[Runtime]:
@@ -255,7 +294,6 @@ class Store(QObject):
 
     def _humanize(self, text: str, level: str, action: Optional[Dict[str, Any]]) -> tuple:
         """Known failure texts said in plain words, with the way out attached."""
-        import re
 
         if level != "error":
             return text, action
@@ -293,8 +331,13 @@ class Store(QObject):
         rpc.on("sessions.changed", lambda _d: self.refresh_sessions())
         rpc.on("schedules.changed", lambda _d: self._bump_sched())
         rpc.on("memory.changed", lambda _d: self._bump_sched())
-        rpc.on("inbox.changed", lambda _d: self._bump_sched())
+        rpc.on("repos.changed", self._on_repos)
+        rpc.on("inbox.changed", self._on_inbox)
+        rpc.on("dispatch.changed", self._on_dispatch)
+        rpc.on("dispatch.playbooks", lambda _d: self.load_playbooks())
         rpc.on("timeline.step", self._on_timeline_step)
+        rpc.on("term.data", self.term_data.emit)
+        rpc.on("term.exit", self.term_exit.emit)
         hints = QGuiApplication.styleHints()
         if hasattr(hints, "colorSchemeChanged"):
             hints.colorSchemeChanged.connect(lambda _s: self.apply_theme())
@@ -321,6 +364,9 @@ class Store(QObject):
             self.info_changed.emit(info)
             self.config_changed.emit(config)
             self.load_gateway_models()
+            rpc.call("inbox.list").then(lambda r: self._set_inbox_unread(int((r or {}).get("unread") or 0)))
+            self.load_jobs()
+            self.load_playbooks()
             self._apply_config_ui(config)
             self.apply_theme()
             self.refresh_sessions()
@@ -337,10 +383,10 @@ class Store(QObject):
                     self.open_session(last)
 
         rpc.call("app.info").then(lambda r: (pending.__setitem__("info", r or {}), ready())).catch(
-            lambda e: print("[store] app.info failed", e)
+            lambda e: log.warning("app.info failed: %s", e)
         )
         rpc.call("config.get").then(lambda r: (pending.__setitem__("config", r or {}), ready())).catch(
-            lambda e: print("[store] config.get failed", e)
+            lambda e: log.warning("config.get failed: %s", e)
         )
 
     def _on_msgs(self, d: Json) -> None:
@@ -382,13 +428,14 @@ class Store(QObject):
         prev_status = prev.status if prev else ""
         r = self.rt.setdefault(sid, Runtime())
         r.st = {**r.st, **st}
-        self.rt_changed.emit(sid)
+        self.mark_dirty(sid)
         changed = False
+        vals = (r.st.get("status"), r.st.get("live"), len(r.st.get("pending") or []))
         for s in self.sessions:
-            if s.get("id") == sid:
-                s["status"] = st.get("status")
-                s["live"] = st.get("live")
-                s["pending"] = len(st.get("pending") or [])
+            if s.get("id") == sid and (s.get("status"), s.get("live"), s.get("pending")) != vals:
+                # only a change the list shows re-emits it: a lead's helpers ticking (HELPERS.md) or a
+                # cost update does not rebuild the sidebar
+                s["status"], s["live"], s["pending"] = vals
                 changed = True
         if changed:
             self.sessions_changed.emit(self.sessions)
@@ -420,6 +467,97 @@ class Store(QObject):
             self.unread[sid] = True
             self.unread_changed.emit(self.unread)
         self.permission_asked.emit(sid, req)
+
+    def _on_inbox(self, unread: Any) -> None:
+        if isinstance(unread, int):
+            self._set_inbox_unread(unread)
+        self._bump_sched()
+
+    def _set_inbox_unread(self, n: int) -> None:
+        self.inbox_unread = n
+        self.inbox_unread_changed.emit(n)
+
+    # ---------------------------------------------------------------- dispatch
+    def load_jobs(self) -> None:
+        def ok(lst: Any) -> None:
+            self.jobs = {str(j.get("id")): j for j in lst if isinstance(j, dict)} if isinstance(lst, list) else {}
+            self.jobs_loaded = True
+            self.dispatch_changed.emit(None)
+
+        rpc.call("dispatch.list").then(ok).catch(lambda _e: None)
+
+    def load_playbooks(self) -> None:
+        def ok(lst: Any) -> None:
+            self.playbooks = [p for p in lst if isinstance(p, dict)] if isinstance(lst, list) else []
+            self.playbooks_changed.emit(self.playbooks)
+
+        rpc.call("dispatch.playbooks").then(ok).catch(lambda _e: None)
+
+    def _on_dispatch(self, d: Json) -> None:
+        if not isinstance(d, dict):
+            return
+        jid = str(d.get("id") or "")
+        if not jid:
+            return
+        if d.get("removed"):
+            self.jobs.pop(jid, None)
+            self.job_runs.pop(jid, None)
+            if self.dispatch_view == jid:
+                self.dispatch_view = None
+                self.dispatch_view_changed.emit(None)
+            self.dispatch_changed.emit({"id": jid, "removed": True})
+            return
+        job = d.get("job")
+        if isinstance(job, dict):
+            self.jobs[jid] = job
+        runs = d.get("runs")
+        if isinstance(runs, list):
+            cur = self.job_runs.setdefault(jid, {})
+            if d.get("all"):
+                cur.clear()
+            for r in runs:
+                if isinstance(r, dict) and r.get("id"):
+                    cur[str(r["id"])] = r
+        self.dispatch_changed.emit({"id": jid})
+
+    def fetch_job(self, jid: str, done: Optional[Callable[[], None]] = None) -> None:
+        def ok(r: Any) -> None:
+            if not isinstance(r, dict):
+                return
+            job = r.get("job")
+            if isinstance(job, dict):
+                self.jobs[jid] = job
+            self.job_runs[jid] = {str(x["id"]): x for x in (r.get("runs") or []) if isinstance(x, dict) and x.get("id")}
+            self.dispatch_changed.emit({"id": jid})
+            if done is not None:
+                done()
+
+        self.call("dispatch.get", {"id": jid}, quiet=True).then(ok).catch(lambda _e: None)
+
+    def runs_of(self, jid: str) -> List[Json]:
+        """A job's runs in the server's order, the superseded (retried) ones left out."""
+        return [r for r in self.job_runs.get(jid, {}).values() if not r.get("superseded")]
+
+    @property
+    def dispatch_needs(self) -> int:
+        """Requests waiting across jobs, plus the canaries waiting to be read: the sidebar's badge."""
+        n = 0
+        for j in self.jobs.values():
+            if j.get("state") in ("running", "reviewing"):
+                n += int(j.get("needsAction") or 0) + (1 if j.get("canaryWaiting") else 0)
+        return n
+
+    def show_dispatch(self, view: Optional[str] = None) -> None:
+        """The board (None), the composer ("new") or a job's view (its id)."""
+        self.dispatch_view = view
+        if view not in (None, "new"):
+            self.fetch_job(str(view))
+        self.dispatch_view_changed.emit(view)
+        if self.page != "dispatch":
+            self.show_page("dispatch")
+
+    def open_job(self, jid: str) -> None:
+        self.show_dispatch(jid)
 
     def _on_timeline_step(self, d: Json) -> None:
         sid, step = d.get("id"), d.get("step")
@@ -454,6 +592,9 @@ class Store(QObject):
             self.ui.diff_mode = ui["diffMode"]
         if ui.get("view") in [v["id"] for v in VIEW_MODES]:
             self.ui.view = ui["view"]
+        if isinstance(ui.get("fontScale"), (int, float)) and ui["fontScale"] in theme_mod.SCALE_STEPS:
+            self.ui.font_scale = float(ui["fontScale"])
+            theme_mod.theme.set_scale(self.ui.font_scale)
         self.ui_changed.emit(self.ui)
 
     def apply_theme(self) -> None:
@@ -486,6 +627,28 @@ class Store(QObject):
 
         return self.call("config.set", patch).then(done)
 
+    # ---- the repositories registry (REPOSITORIES.md)
+    @property
+    def repos(self) -> List[Json]:
+        return [e for e in (self.config or {}).get("repos") or [] if isinstance(e, dict)]
+
+    def _on_repos(self, d: Json) -> None:
+        if self.config is None:
+            return
+        self.config = {**self.config, "repos": list((d or {}).get("repos") or [])}
+        self.config_changed.emit(self.config)
+        self.repos_changed.emit(self.config["repos"])
+
+    def repo_for(self, path: str) -> Optional[Json]:
+        """The registered repository whose folder holds ``path`` (the deepest one), or None."""
+        p = str(path or "").rstrip("/")
+        best: Optional[Json] = None
+        for e in self.repos:
+            ep = str(e.get("path") or "").rstrip("/")
+            if ep and (p == ep or p.startswith(ep + "/")) and (best is None or len(ep) > len(str(best.get("path")))):
+                best = e
+        return best
+
     def set_ui(self, **patch: Any) -> None:
         for k, v in patch.items():
             setattr(self.ui, k, v)
@@ -505,9 +668,24 @@ class Store(QObject):
                     "panelW": u.panel_w,
                     "diffMode": u.diff_mode,
                     "view": u.view,
+                    "fontScale": u.font_scale,
                 }
             },
         )
+
+    def zoom(self, d: int) -> None:
+        """Ctrl+= / Ctrl+- / Ctrl+0: the conversation's text one step larger or smaller, or back."""
+        steps = theme_mod.SCALE_STEPS
+        if d == 0:
+            nxt = 1.0
+        else:
+            i = min(range(len(steps)), key=lambda k: abs(steps[k] - self.ui.font_scale))
+            nxt = steps[max(0, min(len(steps) - 1, i + d))]
+        if nxt == self.ui.font_scale:
+            return
+        self.set_ui(font_scale=nxt)
+        theme_mod.theme.set_scale(nxt)
+        self.toast(f"Text {round(nxt * 100)}%", "info")
 
     def cycle_view(self) -> None:
         ids = [v["id"] for v in VIEW_MODES]
@@ -539,6 +717,8 @@ class Store(QObject):
             prev = {s.get("id"): s for s in self.sessions}
             out: List[Json] = []
             for s in fresh:
+                if s.get("id") in self._deleted:
+                    continue
                 p = prev.get(s.get("id"))
                 out.append(p if p is not None and _same_summary(p, s) else s)
             self.sessions = out
@@ -573,19 +753,38 @@ class Store(QObject):
         self.patch_rt(sid, loading=True)
 
         def ok(snap: Json) -> None:
-            self._opening.discard(sid)
+            # The snapshot goes into the model in slices, one per event-loop turn, so a long
+            # conversation never holds the window: the view shows the rows it has under the loading
+            # skeleton and the rest follow. Live messages wait in the buffer until the end.
+            msgs = list(snap.get("messages") or [])
+            inflight = list(snap.get("inflight") or [])
             m = TranscriptModel()
-            m.push_all(snap.get("messages") or [])
-            m.push_all(snap.get("inflight") or [])
             self.models[sid] = m
             r = self.rt.setdefault(sid, Runtime())
             r.st = {**r.st, **(snap.get("state") or {})}
             r.meta = snap.get("meta") or {}
-            r.loaded, r.loading, r.rev = True, False, m.rev
-            self.rt_changed.emit(sid)
-            extra = self._buffered.pop(sid, None)
-            if extra:
-                self._on_msgs({"id": sid, "msgs": extra})
+
+            def slice_(i: int) -> None:
+                if self.models.get(sid) is not m:
+                    return  # the session was closed or reopened under us
+                m.push_all(msgs[i : i + LOAD_SLICE])
+                nxt = i + LOAD_SLICE
+                if nxt < len(msgs):
+                    m.refresh_inputs()
+                    r.rev = m.rev
+                    self.rt_changed.emit(sid)
+                    QTimer.singleShot(0, lambda: slice_(nxt))
+                    return
+                m.push_all(inflight)
+                m.refresh_inputs()
+                self._opening.discard(sid)
+                r.loaded, r.loading, r.rev = True, False, m.rev
+                self.rt_changed.emit(sid)
+                extra = self._buffered.pop(sid, None)
+                if extra:
+                    self._on_msgs({"id": sid, "msgs": extra})
+
+            slice_(0)
 
         def bad(e: RpcError) -> None:
             self._opening.discard(sid)
@@ -709,18 +908,35 @@ class Store(QObject):
     def rename_session(self, sid: str, title: str) -> Call:
         return self.call("session.rename", {"id": sid, "title": title}).then(lambda _r: self.refresh_sessions(True))
 
-    def delete_session(self, sid: str, remove_worktree: bool = False) -> Call:
+    def delete_session(self, sid: str, remove_worktree: bool = False, remove_helpers: bool = False) -> Call:
+        # gone from the list at once: the server waits for the session's process to end before it
+        # answers, and a list read before the delete may still land after it (``_fetch_sessions``)
+        ids = {sid}
+        if remove_helpers:
+            ids.update(
+                str(s.get("id"))
+                for s in self.sessions
+                if isinstance(s.get("helper"), dict) and str(s["helper"].get("leadId")) == sid
+            )
+        self._deleted |= ids
+        self.sessions = [s for s in self.sessions if str(s.get("id")) not in ids]
+        self.sessions_changed.emit(self.sessions)
+        if self.active_id in ids:
+            self.active_id = None
+            self.active_changed.emit(None)
+
         def done(_r: Any) -> None:
-            self.models.pop(sid, None)
-            self.rt.pop(sid, None)
-            if self.active_id == sid:
-                self.active_id = None
-                self.active_changed.emit(None)
-            self.sessions = [s for s in self.sessions if s.get("id") != sid]
-            self.sessions_changed.emit(self.sessions)
+            for i in ids:
+                self.models.pop(i, None)
+                self.rt.pop(i, None)
             self.refresh_sessions(True)
 
-        return self.call("session.delete", {"id": sid, "removeWorktree": remove_worktree}).then(done)
+        def failed(_e: Any) -> None:
+            self._deleted -= ids  # it is still there: show it again
+            self.refresh_sessions(True)
+
+        c = self.call("session.delete", {"id": sid, "removeWorktree": remove_worktree, "removeHelpers": remove_helpers})
+        return c.then(done).catch(failed)
 
     def archive_session(self, sid: str, archived: bool) -> Call:
         return self.call("session.archive", {"id": sid, "archived": archived}).then(
@@ -749,8 +965,8 @@ class Store(QObject):
         self.set_ui(panel=True, panel_tab="files")
 
     def show_page(self, page: str) -> None:
-        # The control room and the inbox became the workboard; a saved or scripted old name lands there.
-        if page in ("overview", "inbox"):
+        # The control room became the workboard; a saved or scripted old name lands there.
+        if page == "overview":
             page = "board"
         if page != "session":
             self.ui.return_to = None

@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QKeySequence, QPainter, QPen, QShortcut
-from PySide6.QtWidgets import QApplication, QLineEdit, QPlainTextEdit, QTextEdit, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QLineEdit, QPlainTextEdit, QTextEdit, QWidget
 
 from ... import theme
 from ...lib.fmt import rel_path
@@ -20,8 +20,9 @@ from ...lib.tools_meta import str_
 from ...lib.transcript_model import ToolItem
 from ...store import store
 from ..ui import bits
+from ..ui.button import Btn
 from ..ui.signals import bind
-from .bodies.common import Hairline, IconLabel, Row, faint, mono_family, restyle, rich, vbox
+from .bodies.common import Hairline, NeedsDot, Row, caption, faint, mono_family, rich, vbox
 from .ctx import ToolCtx
 
 Json = Dict[str, Any]
@@ -155,9 +156,15 @@ class PermissionCard(QWidget):
                 else default_title(perm, cwd)
             )
         self.title_text = title or ""
+        if self.orphan:
+            cap = Row(spacing=8, margins=(0, 0, 0, 8))
+            cap.add(NeedsDot())
+            cap.add(caption("Needs your permission", not stale))
+            cap.stretch()
+            lay.addWidget(cap)
         if title:
             t = bits.label(title, wrap=True)
-            restyle(t, lambda tk: f"QLabel {{ font-size: {theme.FS_UI}px; font-weight: 600; color: {tk.text}; }}")
+            t.setFont(theme.font_ui(theme.FS_BODY, 600))
             lay.addWidget(t)
         desc = perm.get("description") or ""
         sub: List[str] = []
@@ -188,10 +195,10 @@ class PermissionCard(QWidget):
         default_no = bool(perm.get("defaultToNo"))
         self.allow_btn = bits.button("Allow", kind="" if default_no else "primary", on_click=self.allow)
         self.allow_btn.setAccessibleName("Allow")
-        restyle(self.allow_btn, lambda tk: _perm_button(tk, "" if default_no else "primary"))
+        _perm_button(self.allow_btn)
         actions.add(self.allow_btn)
         if self.first and not default_no:
-            actions.add(_key("1"))
+            actions.add(key_badge("1"))
         self.always_btn = None
         if self.allow_always:
             self.always_btn = bits.button(
@@ -200,25 +207,20 @@ class PermissionCard(QWidget):
                 tooltip="\n".join(describe_suggestion(s, cwd) for s in suggestions),
             )
             self.always_btn.setAccessibleName("Always allow")
-            restyle(self.always_btn, lambda tk: _perm_button(tk, ""))
+            _perm_button(self.always_btn)
             actions.add(self.always_btn)
             if self.first:
-                actions.add(_key("2"))
+                actions.add(key_badge("2"))
         self.deny_btn = bits.button("Deny", kind="primary" if default_no else "ghost", on_click=self.deny)
         self.deny_btn.setAccessibleName("Deny")
-        restyle(self.deny_btn, lambda tk: _perm_button(tk, "primary" if default_no else "ghost"))
+        _perm_button(self.deny_btn)
         actions.add(self.deny_btn)
         if self.first:
-            actions.add(_key("3" if self.allow_always else "2"))
+            actions.add(key_badge("3" if self.allow_always else "2"))
         actions.stretch()
-        self.note_link = bits.button("Tell Claude what to do instead", kind="ghost", size="sm", on_click=self.show_note)
+        self.note_link = bits.button("Tell Claude what to do instead", kind="more", size="sm", on_click=self.show_note)
         self.note_link.setAccessibleName("Tell Claude what to do instead")
-        restyle(
-            self.note_link,
-            lambda tk: (
-                f"QPushButton {{ color: {tk.text_3}; padding: 4px 6px; }} QPushButton:hover {{ color: {tk.text}; }}"
-            ),
-        )
+        self.note_link.override = {"px": 6}
         actions.add(self.note_link)
         lay.addWidget(actions)
 
@@ -243,7 +245,7 @@ class PermissionCard(QWidget):
         self.feedback.returnPressed.connect(lambda: self.deny() if self.feedback.text().strip() else None)
         self.feedback_row.add(self.feedback, 1)
         hint = Row(spacing=5)
-        hint.add(IconLabel("corner-down-left", "text_3", 12))
+        hint.add(bits.IconLabel("corner-down-left", "text_3", 12))
         hint.add(faint("sends it and declines this step", size="micro"))
         self.feedback_row.add(hint)
         self.feedback_row.setVisible(False)
@@ -320,59 +322,55 @@ class PermissionCard(QWidget):
         elif key == ("3" if self.allow_always else "2"):
             self.deny()
 
-    def keyPressEvent(self, e) -> None:  # noqa: N802
+    def keyPressEvent(self, e) -> None:
         if e.key() == Qt.Key.Key_Escape and self.feedback_row.isVisible():
             self.hide_note()
             return
         super().keyPressEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         # A request that lost its tool row keeps a card of its own (`.perm.orphan`).
         if not self.orphan:
             return
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(QPen(t.color("hair_2"), 1))
+        p.setPen(QPen(t.color("hair_2" if self.stale else "accent_ring"), 1 if self.stale else 1.5))
         p.setBrush(t.color("raised"))
-        p.drawRoundedRect(QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5), 12, 12)
+        p.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 12, 12)
 
 
-def _key(k: str) -> QWidget:
-    """`.perm-key`: the number that answers, a 16px ringed box in text-4 next to its button."""
-    lb = bits.label(k, size="micro")
-    lb.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    lb.setFixedHeight(16)
-    lb.setMinimumWidth(16)
-    restyle(
-        lb,
-        lambda t: (
-            f"QLabel {{ color: {t.text_4}; font-size: 11px; font-weight: 600; padding: 0 3px; border-radius: 4px; "
-            f"border: 1px solid {theme.blend(t.hair_2, t.raised).name()}; }}"
-        ),
-    )
-    return lb
+class KeyBadge(QLabel):
+    """`.perm-key`: the number that answers, a 16px ringed box in text-4 next to its button. Every card
+    that waits on the person draws its keys this way."""
+
+    def __init__(self, k: str, parent: Optional[QWidget] = None) -> None:
+        super().__init__(k, parent)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setFixedHeight(16)
+        self.setMinimumWidth(16)
+        self.setContentsMargins(3, 0, 3, 0)
+        self.setFont(theme.font_ui(11, 600))
+        theme.tint(self, fg="text_4")
+        bind(theme.theme.changed, self, lambda _t: self.update())
+
+    def paintEvent(self, e) -> None:
+        t = theme.tokens()
+        p = QPainter(self)
+        bits.paint_box(p, QRectF(self.rect()), None, theme.blend(t.hair_2, t.raised), 4)
+        p.end()
+        super().paintEvent(e)
 
 
-def _perm_button(t: theme.Tokens, kind: str) -> str:
-    """`.perm-actions .btn`: 28px tall, 11px sides, 13px text, 7px corners; primary in the accent,
-    the default on a quiet fill, ghost bare in text-2."""
-    base = (
-        f"min-height: 28px; max-height: 28px; padding: 0 11px; font-size: {theme.FS_UI}px; font-weight: 500; "
-        f"border-radius: 7px; border: none;"
-    )
-    if kind == "primary":
-        return (
-            f"QPushButton {{ {base} background: {t.accent}; color: {t.accent_ink}; }} "
-            f"QPushButton:hover {{ background: {t.accent_2}; }} "
-            f"QPushButton:disabled {{ background: {theme.blend(t.fill_2, t.raised).name()}; color: {t.text_4}; }}"
-        )
-    if kind == "ghost":
-        return (
-            f"QPushButton {{ {base} background: transparent; color: {t.text_2}; }} "
-            f"QPushButton:hover {{ background: {theme.blend(t.fill_2, t.raised).name()}; color: {t.text}; }}"
-        )
-    return (
-        f"QPushButton {{ {base} background: {theme.blend(t.fill_2, t.raised).name()}; color: {t.text}; }} "
-        f"QPushButton:hover {{ background: {theme.blend(t.fill_3, t.raised).name()}; }}"
-    )
+key_badge = KeyBadge
+
+
+def perm_button(b: Btn) -> Btn:
+    """`.perm-actions .btn`: 28px tall, 11px sides, 13px text, 7px corners (the kind gives the colours).
+    The buttons of every card that waits on the person share these metrics."""
+    b.override = {"h": 28, "px": 11, "fs": theme.FS_UI, "fw": 500, "r": 7}
+    b.updateGeometry()
+    return b
+
+
+_perm_button = perm_button

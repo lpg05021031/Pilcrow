@@ -65,18 +65,26 @@ FOLD_W = 12  # the fold gutter's column
 Run = Tuple[int, int, object]  # (column, length, token type)
 
 
+_LEXERS: Dict[str, object] = {}
+
+
 def lexer_for_path(path: str):
-    """The Pygments lexer for a path, or None when the language is unknown (plain text)."""
+    """The Pygments lexer for a path, or None when the language is unknown (plain text). One lexer
+    per language: finding one by name is a millisecond, and a change touches a hundred files."""
     if lex is None:
         return None
     lang = lang_from_path(path)
     name = _LEXER_ALIAS.get(lang, lang)
     if name == "text":
         return None
+    if name in _LEXERS:
+        return _LEXERS[name]
     try:
-        return get_lexer_by_name(name, stripnl=False, ensurenl=False)
+        lexer = get_lexer_by_name(name, stripnl=False, ensurenl=False)
     except ClassNotFound:
-        return None
+        lexer = None
+    _LEXERS[name] = lexer
+    return lexer
 
 
 def token_color(ttype, t: theme.Tokens) -> Tuple[Optional[QColor], bool]:
@@ -210,7 +218,7 @@ class PygmentsHighlighter(QSyntaxHighlighter):
                     col += len(part)
         return lines
 
-    def highlightBlock(self, text: str) -> None:  # noqa: N802
+    def highlightBlock(self, text: str) -> None:
         if self._lexer is None:
             return
         if self._stale:
@@ -242,10 +250,10 @@ class LineNumberArea(QWidget):
         super().__init__(editor)
         self._editor = editor
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         return QSize(self._editor.gutter_width(), 0)
 
-    def paintEvent(self, e) -> None:  # noqa: N802
+    def paintEvent(self, e) -> None:
         self._editor.paint_gutter(e)
 
 
@@ -299,7 +307,7 @@ class CodeEditor(QTextEdit):
         self.setTextCursor(cur)
         self.highlighter.rehighlight()
 
-    def setPlainText(self, text: str) -> None:  # noqa: N802
+    def setPlainText(self, text: str) -> None:
         super().setPlainText(text)
         self._apply_line_height()
 
@@ -318,7 +326,7 @@ class CodeEditor(QTextEdit):
             block = block.next()
         cur.endEditBlock()
 
-    def blockCount(self) -> int:  # noqa: N802
+    def blockCount(self) -> int:
         return self.document().blockCount()
 
     def goto_line(self, line: int) -> None:
@@ -343,7 +351,7 @@ class CodeEditor(QTextEdit):
         return out
 
     # ---------------------------------------------------------------- keys
-    def keyPressEvent(self, e: QKeyEvent) -> None:  # noqa: N802
+    def keyPressEvent(self, e: QKeyEvent) -> None:
         key, mods = e.key(), e.modifiers()
         ctrl = bool(mods & Qt.KeyboardModifier.ControlModifier)
         if ctrl and key == Qt.Key.Key_S:
@@ -412,7 +420,7 @@ class CodeEditor(QTextEdit):
             return False
         return len(nxt.text()) - len(nxt.text().lstrip()) > indent
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         super().resizeEvent(e)
         cr = self.contentsRect()
         self.gutter.setGeometry(QRect(cr.left(), cr.top(), self.gutter_width(), cr.height()))
@@ -470,15 +478,11 @@ class CodeEditor(QTextEdit):
         self.gutter.update()
 
     def _apply_theme(self) -> None:
-        t = theme.tokens()
         self.setFont(theme.font_mono())
-        # The font goes in the stylesheet too: the app stylesheet's ``*`` rule would override setFont.
-        mono = theme._MONO_FAMILY or "monospace"
-        self.setStyleSheet(
-            f"QTextEdit#code-editor {{ background: {t.canvas}; color: {t.text}; border: none; padding: 0; "
-            f'font-family: "{mono}"; font-size: {theme.MONO_SIZE}px; '
-            f"selection-background-color: {theme.blend(t.selection, t.canvas).name()}; selection-color: {t.text}; }}"
-        )
+        css = "QTextEdit#code-editor { background: palette(window); border: none; padding: 0; }"
+        if self.styleSheet() != css:
+            self.setStyleSheet(css)
+        theme.tint(self, highlight="selection/canvas", highlighted_text="text")
         self._tint_current_line()
         self._update_gutter_width()
 

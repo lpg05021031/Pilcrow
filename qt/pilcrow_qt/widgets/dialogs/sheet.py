@@ -30,9 +30,9 @@ from PySide6.QtWidgets import (
 
 from ... import icons, theme
 from ...store import store
-from ..ui.bits import IconButton, hairline
+from ..ui.bits import Box, IconButton, hairline
 from ..ui.signals import bind
-from .parts import Backdrop, Text, sheet_css
+from .parts import Backdrop, Text, sheet_bg, sheet_line
 
 SHEET_TOP = 0.09  # the sheet sits 9% of the way down, like the web's `padding: 9vh`
 SHEET_MAX_H = 860
@@ -41,7 +41,7 @@ SHEET_MAX_H = 860
 class _BodyScroll(QScrollArea):
     """A scroll area whose size hint is its content's, so the sheet can be as tall as it needs."""
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         w = self.widget()
         if w is None:
             return super().sizeHint()
@@ -82,11 +82,9 @@ class Sheet(QDialog):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
         self.setStyleSheet("QDialog { background: transparent; }")
 
-        self.frame = QFrame(self)
+        self.frame = Box(bg=sheet_bg, line=sheet_line, radius=theme.R4, parent=self)
         self.frame.setObjectName("sheet")
-        self.frame.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.frame.setStyleSheet(sheet_css(theme.tokens()))
-        bind(theme.theme.changed, self.frame, lambda t: self.frame.setStyleSheet(sheet_css(t)))
+        self.frame.setContentsMargins(1, 1, 1, 1)  # inside the painted line, as inside the web's border
         fl = QVBoxLayout(self.frame)
         fl.setContentsMargins(0, 0, 0, 0)
         fl.setSpacing(0)
@@ -216,14 +214,14 @@ class Sheet(QDialog):
                 pass
         self.deleteLater()
 
-    def reject(self) -> None:  # noqa: N802
+    def reject(self) -> None:
         if self._closed:
             return
         self._closed = True
         store.set_dialog(self.key, self.off_value)
         self.dismiss()
 
-    def accept(self) -> None:  # noqa: N802
+    def accept(self) -> None:
         self.reject()
 
     def submit(self) -> None:
@@ -241,7 +239,7 @@ class Sheet(QDialog):
             return True
         return super().event(e)
 
-    def keyPressEvent(self, e) -> None:  # noqa: N802
+    def keyPressEvent(self, e) -> None:
         if e.key() == Qt.Key.Key_Escape:
             self.reject()
             return
@@ -250,19 +248,19 @@ class Sheet(QDialog):
             return
         super().keyPressEvent(e)
 
-    def mousePressEvent(self, e) -> None:  # noqa: N802
+    def mousePressEvent(self, e) -> None:
         if not self.frame.geometry().contains(e.position().toPoint()):
             self.reject()
             return
         super().mousePressEvent(e)
 
-    def eventFilter(self, obj: QObject, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj: QObject, e: QEvent) -> bool:
         if obj is self._host and e.type() == QEvent.Type.Resize and not self._closed:
             self.setGeometry(self._host.rect())
             self.place()
         return False
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         p = QPainter(self)
         bd = getattr(self, "backdrop", None)
         if bd is not None:

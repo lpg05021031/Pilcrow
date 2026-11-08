@@ -130,6 +130,29 @@ def tool_meta(name: str, tool_input: Optional[ToolInput], cwd: Optional[str] = N
     if name in ("ListMcpResourcesTool", "ReadMcpResourceTool"):
         verb = "Read resource" if name == "ReadMcpResourceTool" else "List resources"
         return ToolMeta("plug", verb, s("uri") or s("server") or "")
+    if name.startswith("mcp__helpers__"):
+        # the lead's tools (HELPERS.md): named by what happened, not by the server
+        tool = name[len("mcp__helpers__") :]
+        icon, verb = {
+            "start": ("arrow-up-right", "Started helper"),
+            "wait": ("clock", "Waited for"),
+            "read": ("eye", "Read helper"),
+            "send": ("send", "Told helper"),
+            "stop": ("square", "Stopped helper"),
+            "list": ("list", "Listed helpers"),
+        }.get(tool, ("arrow-up-right", f"Helpers · {tool}"))
+        if tool == "wait":
+            names = i.get("names") if isinstance(i.get("names"), list) else None
+            target = ", ".join(str(n) for n in names) if names else "all helpers"
+        elif tool == "list":
+            target = ""
+        else:
+            target = s("name")
+            where = s("repo") or (_short(s("cwd"), cwd) if s("cwd") else "")
+            # "api → web-ui": sent to another repository; nothing when the name already says it
+            if tool == "start" and where and where != target:
+                target = f"{target} → {where}"
+        return ToolMeta(icon, verb, target)
     if name.startswith("mcp__"):
         parts = name.split("__")
         server = parts[1] if len(parts) > 1 else ""
@@ -193,3 +216,29 @@ def file_path_of(name: str, tool_input: Optional[ToolInput]) -> Optional[str]:
     if not tool_input:
         return None
     return str_(tool_input, "file_path") or str_(tool_input, "notebook_path") or None
+
+
+# ---------------------------------------------------------------- helpers (HELPERS.md): one vocabulary for every surface
+# A helper's state as a colour token (the bar's chips, the cards' rows, a note's dot, the sidebar) and as a word.
+HELPER_TONE = {
+    "done": "ok",
+    "failed": "err",
+    "running": "accent",
+    "preparing": "accent",
+    "needs_action": "warn",
+    "stopped": "text_3",
+    "queued": "text_4",
+    "skipped": "text_4",
+}
+HELPER_RING = ("queued", "skipped")  # drawn as a ring, not a disc: nothing has happened yet
+HELPER_HEADER_PREFIX = "You are a helper started by another Pilcrow session"
+
+
+def helper_word(state: str) -> str:
+    return "needs you" if state == "needs_action" else state.replace("_", " ")
+
+
+def helper_text_tone(state: str) -> str:
+    """The token a state word is written in (accent reads as accent_text)."""
+    tone = HELPER_TONE.get(state, "text_3")
+    return "accent_text" if tone == "accent" else tone

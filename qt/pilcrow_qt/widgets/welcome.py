@@ -8,18 +8,21 @@ column is the golden section of the pane (``--col``), the box 640px wide, the ic
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import List, Optional
 
 from PySide6.QtCore import QEvent, QObject, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QRadialGradient
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QPlainTextEdit, QPushButton, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QPlainTextEdit, QSizePolicy, QVBoxLayout, QWidget
 
 from .. import icons, theme
 from ..lib.fmt import basename, tildify
 from ..store import store
-from .dialogs.parts import Keys, LayoutButton, Text, page_column
-from .ui.bits import IconButton, Spinner
+from .dialogs.parts import Keys, LayoutButton, Text
+from .ui.bits import Box, IconButton, IconLabel, paint_box
+from .ui.button import Btn, chip_button
+from .ui.send import SendButton
 from .ui.signals import bind
 
 ICON = 72
@@ -33,7 +36,6 @@ def greeting(name: Optional[str], hour: Optional[int] = None) -> str:
     if not name:
         return part
     # An OS login like "tester" reads better as a name; leave real names ("Lin Wei-Ting") alone.
-    import re
 
     shown = name[0].upper() + name[1:] if re.match(r"^[a-z][a-z0-9._-]*$", name) else name
     return f"{part}, {shown}"
@@ -41,7 +43,7 @@ def greeting(name: Optional[str], hour: Optional[int] = None) -> str:
 
 def column(width: int) -> int:
     """``--col`` in the welcome: the pane less its 24px padding."""
-    return page_column(width, 24)
+    return theme.column_width(width - 48)
 
 
 class AppIcon(QWidget):
@@ -53,7 +55,7 @@ class AppIcon(QWidget):
         self.setFixedSize(size, size)
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         s = self._size / 256.0
         p = QPainter(self)
@@ -74,6 +76,7 @@ class FolderButton(LayoutButton):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)  # Qt repaints it on enter and leave
         self.setObjectName("cbtn")
         self.setAutoDefault(False)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -92,21 +95,13 @@ class FolderButton(LayoutButton):
         lay.addWidget(self.chev)
         for w in (self.ico, self.label, self.chev):
             w.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
+        self.set_look(hover="fill_2/raised", radius=theme.R2)
+        bind(theme.theme.changed, self, lambda _t: self.update())
 
     def set_folder(self, name: str) -> None:
         self.label.setText(name or "Choose a folder")
 
-    def _paint(self) -> None:
-        t = theme.tokens()
-        self.setStyleSheet(
-            f"#cbtn {{ background: transparent; border: none; border-radius: {theme.R2}px; padding: 0; min-height: 30px; max-height: 30px; }}"
-            f" #cbtn:hover {{ background: {theme.blend(t.fill_2, t.raised).name()}; }}"
-        )
-        self.update()
-
-    def paintEvent(self, e) -> None:  # noqa: N802
+    def paintEvent(self, e) -> None:
         super().paintEvent(e)
         t = theme.tokens()
         hover = self.underMouse()
@@ -116,92 +111,6 @@ class FolderButton(LayoutButton):
         p.drawPixmap(self.chev.x(), self.chev.y(), icons.pixmap("chevron-down", t.text if hover else t.text_2, 12))
         self.label.set_color("text" if hover else "text_2")
 
-    def enterEvent(self, e) -> None:  # noqa: N802
-        self.update()
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:  # noqa: N802
-        self.update()
-        super().leaveEvent(e)
-
-
-class SendButton(QPushButton):
-    """``.send``: a 32px circle; a quiet ring until there is text, then Claude's orange."""
-
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self.setAutoDefault(False)
-        self.setFixedSize(32, 32)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip("Start (Enter)")
-        self.setAccessibleName("Start")
-        self.setStyleSheet("QPushButton { background: transparent; border: none; padding: 0; }")
-        self._ready = False
-        self._busy = False
-        self.spinner = Spinner(14, self)
-        self.spinner.move(9, 9)
-        self.spinner.hide()
-        bind(theme.theme.changed, self, lambda _t: self.update())
-
-    def set_state(self, ready: bool, busy: bool) -> None:
-        self._ready, self._busy = ready, busy
-        self.spinner.setVisible(busy)
-        self.update()
-
-    def paintEvent(self, _e) -> None:  # noqa: N802
-        t = theme.tokens()
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        r = QRectF(0.5, 0.5, 31, 31)
-        if self._ready:
-            p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor(t.accent_2 if self.underMouse() and self.isEnabled() else t.accent))
-            p.drawEllipse(QRectF(0, 0, 32, 32))
-            ink = t.accent_ink
-        else:
-            p.setPen(theme.blend(t.hair_2, t.raised))
-            p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawEllipse(r)
-            ink = t.text_3
-        if not self._busy:
-            p.drawPixmap(8, 8, icons.pixmap("arrow-up", ink, 16, stroke=2.25))
-
-    def enterEvent(self, e) -> None:  # noqa: N802
-        self.update()
-        super().enterEvent(e)
-
-    def leaveEvent(self, e) -> None:  # noqa: N802
-        self.update()
-        super().leaveEvent(e)
-
-
-class WelcomeChip(QPushButton):
-    """``.folder-chip``: a recent folder as a 26px pill; ``on`` marks the chosen one."""
-
-    def __init__(self, text: str, tooltip: str, parent: Optional[QWidget] = None) -> None:
-        super().__init__(text, parent)
-        self.setObjectName("wchip")
-        self.setAutoDefault(False)
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip(tooltip)
-        self.setAccessibleName(text)
-        self._on = False
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
-
-    def set_on(self, on: bool) -> None:
-        self._on = on
-        self._paint()
-
-    def _paint(self) -> None:
-        t = theme.tokens()
-        bg = theme.blend(t.fill_2 if self._on else t.fill_1, t.canvas).name()
-        line = theme.blend(t.hair_3 if self._on else t.hair, bg).name()
-        self.setStyleSheet(
-            f"#wchip {{ min-height: 24px; max-height: 24px; padding: 0 10px; border-radius: 13px; font-size: {theme.FS_SMALL}px; font-weight: 400; color: {t.text if self._on else t.text_2}; background: {bg}; border: 1px solid {line}; }}"
-            f" #wchip:hover {{ background: {theme.blend(t.fill_2, t.canvas).name()}; color: {t.text}; }}"
-        )
-
 
 class WelcomeBox(QFrame):
     """``.composer.welcome-composer``: the box that starts a session. ``submitted`` carries the text."""
@@ -209,7 +118,7 @@ class WelcomeBox(QFrame):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("wbox")
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._focus = False
         self.setFixedWidth(BOX_W)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(1, 1, 1, 1)
@@ -222,6 +131,10 @@ class WelcomeBox(QFrame):
         self.edit.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.edit.setFixedHeight(74)
         self.edit.setTabChangesFocus(False)
+        self.edit.setStyleSheet(
+            f"#winput {{ background: transparent; border: none; padding: 10px 12px 0 12px; font-size: {theme.FS_BODY}px; }}"
+        )
+        theme.tint(self.edit, fg="text", placeholder="text_3", highlight="selection/raised")
         self.edit.installEventFilter(self)
         lay.addWidget(self.edit)
         bar = QWidget()
@@ -232,36 +145,29 @@ class WelcomeBox(QFrame):
         bl.addWidget(self.folder_btn)
         bl.addStretch(1)
         bl.addSpacing(2)
-        self.send = SendButton()
+        self.send = SendButton("Start")
         bl.addWidget(self.send)
         lay.addWidget(bar)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
+        bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def _paint(self) -> None:
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
-        self.setStyleSheet(
-            f"#wbox {{ background: {t.raised}; border: 1px solid {theme.blend(t.hair_2, t.raised).name()}; border-radius: {theme.R4}px; }}"
-            f' #wbox[focus="true"] {{ border-color: {theme.blend(t.hair_3, t.raised).name()}; }}'
-            f" #winput {{ background: transparent; border: none; padding: 10px 12px 0 12px; font-size: {theme.FS_BODY}px; color: {t.text}; selection-background-color: {theme.blend(t.selection, t.raised).name()}; }}"
-        )
-        pal = self.edit.palette()
-        pal.setColor(pal.ColorRole.PlaceholderText, theme.qcolor(t.text_3))
-        self.edit.setPalette(pal)
+        p = QPainter(self)
+        line = theme.blend(t.hair_3 if self._focus else t.hair_2, t.raised)
+        paint_box(p, QRectF(self.rect()), QColor(t.raised), line, theme.R4)
 
     def text(self) -> str:
         return self.edit.toPlainText()
 
-    def eventFilter(self, obj: QObject, e: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, obj: QObject, e: QEvent) -> bool:
         if obj is self.edit:
             if e.type() == QEvent.Type.KeyPress and e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
                 if not (e.modifiers() & Qt.KeyboardModifier.ShiftModifier):
                     self.send.click()
                     return True
             elif e.type() in (QEvent.Type.FocusIn, QEvent.Type.FocusOut):
-                self.setProperty("focus", "true" if e.type() == QEvent.Type.FocusIn else "false")
-                self.style().unpolish(self)
-                self.style().polish(self)
+                self._focus = e.type() == QEvent.Type.FocusIn
+                self.update()
         return super().eventFilter(obj, e)
 
 
@@ -271,7 +177,7 @@ class Welcome(QWidget):
         self.picked = ""
         self.busy = False
         self.recents: List[str] = []
-        self.chips: List[WelcomeChip] = []
+        self.chips: List[Btn] = []
 
         self.side_btn = IconButton("panel-left-open", "Show sidebar (Ctrl+B)", 16, parent=self)
         self.side_btn.setFixedSize(28, 28)
@@ -401,7 +307,7 @@ class Welcome(QWidget):
         self.chips = []
         if len(self.recents) > 1:
             for r in self.recents:
-                ch = WelcomeChip(basename(r), tildify(r, home))
+                ch = chip_button(basename(r), tildify(r, home))
                 ch.set_on(r == cwd)
                 ch.clicked.connect(lambda _c=False, path=r: self.pick(path))
                 self.chips_lay.insertWidget(self.chips_lay.count() - 1, ch)
@@ -444,7 +350,7 @@ class Welcome(QWidget):
 
     def _sync_send(self) -> None:
         ready = bool(self.box.text().strip())
-        self.box.send.set_state(ready, self.busy)
+        self.box.send.set_state(ready, busy=self.busy)
         self.box.send.setEnabled(ready and not self.busy and store.connected)
 
     def go(self) -> None:
@@ -468,7 +374,7 @@ class Welcome(QWidget):
         ).then(lambda _r: (self.box.edit.setPlainText(""), done())).catch(done)
 
     # ---- geometry and the glow
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         col = column(self.width())
         self.inner.setFixedWidth(col)
         self.box.setFixedWidth(max(640, min(int(round(col * 0.618)), col - 48, 1080)) if col > 1035 else BOX_W)
@@ -477,7 +383,7 @@ class Welcome(QWidget):
             lay.setContentsMargins(24, 40, 24, int(round(self.height() * 0.10)))
         super().resizeEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         # [data-theme='dark'] .welcome-icon { filter: drop-shadow(0 18px 44px rgba(217,119,87,.22)) }
         t = theme.tokens()
         if not t.dark or not self.icon.isVisible():
@@ -500,19 +406,11 @@ class Welcome(QWidget):
 
 def _notice(text: str) -> QFrame:
     """``.notice.error``: a line with a warning icon on a red wash."""
-    t = theme.tokens()
-    f = QFrame()
+    f = Box(bg="err_wash/canvas", radius=theme.R3)
     f.setObjectName("notice")
-    f.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-    f.setStyleSheet(
-        f"#notice {{ background: {theme.blend(t.err_wash, t.canvas).name()}; border-radius: {theme.R3}px; }}"
-    )
     lay = QHBoxLayout(f)
     lay.setContentsMargins(14, 10, 14, 10)
     lay.setSpacing(10)
-    ico = QWidget()
-    ico.setFixedSize(14, 14)
-    lay.addWidget(ico, 0, Qt.AlignmentFlag.AlignTop)
-    ico.paintEvent = lambda _e, w=ico: QPainter(w).drawPixmap(0, 0, icons.pixmap("circle-alert", t.err, 14))  # type: ignore[method-assign]
+    lay.addWidget(IconLabel("circle-alert", "err", 14), 0, Qt.AlignmentFlag.AlignTop)
     lay.addWidget(Text(text, theme.FS_UI, 400, "text", 1.45))
     return f

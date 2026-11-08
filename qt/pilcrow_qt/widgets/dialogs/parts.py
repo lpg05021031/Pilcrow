@@ -4,25 +4,18 @@ labels that elide. Everything paints from the theme tokens and follows a theme c
 from __future__ import annotations
 
 import math
-from typing import List, Optional
+import time
+from typing import Dict, List, Optional
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QFontMetricsF, QPainter, QPalette
-from PySide6.QtWidgets import QAbstractButton, QFrame, QHBoxLayout, QLabel, QPushButton, QSizePolicy, QWidget
+from PySide6.QtCore import Qt as _Qt
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QFontMetricsF, QPainter, QPalette, QTextLayout, QTextOption
+from PySide6.QtWidgets import QAbstractButton, QFrame, QHBoxLayout, QLabel, QSizePolicy, QWidget
 
 from ... import theme
+from ...canvas.pixels import hline
+from ..ui.bits import Box, LayoutButton, Pill, paint_box  # noqa: F401 - LayoutButton is re-exported
 from ..ui.signals import bind
-
-
-def mix(a: str, b: str, weight: float) -> QColor:
-    """``color-mix(in srgb, a weight%, b)`` for two tokens (translucent ones are first laid on the canvas)."""
-    t = theme.tokens()
-    ca, cb = theme.blend(a, t.canvas), theme.blend(b, t.canvas)
-    return QColor(
-        int(round(ca.red() * weight + cb.red() * (1 - weight))),
-        int(round(ca.green() * weight + cb.green() * (1 - weight))),
-        int(round(ca.blue() * weight + cb.blue() * (1 - weight))),
-    )
 
 
 class Card(QFrame):
@@ -34,9 +27,8 @@ class Card(QFrame):
         self._radius = radius
         self._focused = False
         self._tone = ""
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        bind(theme.theme.changed, self, lambda _t: self.update())
 
     def set_focused(self, on: bool) -> None:
         if on != self._focused:
@@ -49,19 +41,21 @@ class Card(QFrame):
             self._paint()
 
     def _paint(self) -> None:
+        self.update()
+
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
-        bg = t.raised
-        if self._tone == "needs":
-            bg = mix(t.accent_wash, t.raised, 0.3).name()
-        elif self._tone == "decided":
-            bg = t.raised
-        border = t.text_3 if self._focused else theme.blend(t.hair_2, t.canvas).name()
-        hover = t.text_3 if self._focused else theme.blend(t.hair_3, t.canvas).name()
-        name = self.metaObject().className()
-        self.setStyleSheet(
-            f"{name} {{ background: {bg}; border: 1px solid {border}; border-radius: {self._radius}px; }} "
-            f"{name}:hover {{ border-color: {hover}; }}"
+        bg = (
+            theme.mix(theme.blend(t.accent_wash, t.canvas), 0.3, t.raised)
+            if self._tone == "needs"
+            else QColor(t.raised)
         )
+        if self._focused:
+            line = QColor(t.text_3)
+        else:
+            line = theme.blend(t.hair_3 if self.underMouse() else t.hair_2, t.canvas)
+        p = QPainter(self)
+        paint_box(p, QRectF(self.rect()), bg, line, self._radius)
 
 
 class Well(QFrame):
@@ -70,38 +64,29 @@ class Well(QFrame):
     def __init__(self, radius: int = 8, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._radius = radius
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
+        bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def _paint(self) -> None:
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
-        name = self.metaObject().className()
-        self.setStyleSheet(
-            f"{name} {{ background: {t.inset}; border: 1px solid {theme.blend(t.hair, t.inset).name()}; border-radius: {self._radius}px; }}"
-        )
+        p = QPainter(self)
+        paint_box(p, QRectF(self.rect()), QColor(t.inset), theme.blend(t.hair, t.inset), self._radius)
 
 
-class Badge(QLabel):
+class Badge(Pill):
     """A count in a pill (``.ov-count``)."""
 
     def __init__(self, n: int = 0, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
+        super().__init__(bg="fill_2/canvas", radius=10, parent=parent)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setFixedHeight(20)
         self.setMinimumWidth(20)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
+        self.setContentsMargins(6, 0, 6, 0)
+        self.setFont(theme.font_ui(11, 600))
+        theme.tint(self, fg="text_2")
         self.set_count(n)
 
     def set_count(self, n: int) -> None:
         self.setText(str(n))
-
-    def _paint(self) -> None:
-        t = theme.tokens()
-        self.setStyleSheet(
-            f"QLabel {{ background: {theme.blend(t.fill_2, t.canvas).name()}; color: {t.text_2}; border-radius: 10px; padding: 0 6px; font-size: 11px; font-weight: 600; }}"
-        )
 
 
 class Kbd(QLabel):
@@ -115,26 +100,25 @@ class Kbd(QLabel):
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setFixedHeight(18)
         self.setMinimumWidth(18)
-        bind(theme.theme.changed, self, lambda _t: self._paint())
-        self._paint()
+        self.setContentsMargins(5, 0, 5, 0)
+        self.setFont(theme.font_ui(10.5 if quiet else 11, 500))
+        theme.tint(self, fg="text_4" if bare else "text_3")
+        bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def _paint(self) -> None:
-        t = theme.tokens()
-        font = f"font-size: {'10.5' if self._quiet else '11'}px; font-weight: 500;"
-        if self._bare:
-            self.setStyleSheet(f"QLabel {{ background: transparent; color: {t.text_4}; padding: 0 5px; {font} }}")
-            return
-        bg = "transparent" if self._quiet else theme.blend(t.fill_2, t.canvas).name()
-        border = f"border: 1px solid {theme.blend(t.hair_2, t.canvas).name()};" if self._quiet else ""
-        # the web's inset 0 -1px hair under the cap: a one-pixel darker bottom edge
-        bottom = (
-            ""
-            if self._quiet
-            else f"border-bottom: 1px solid {theme.blend(t.hair, theme.blend(t.fill_2, t.canvas).name()).name()};"
-        )
-        self.setStyleSheet(
-            f"QLabel {{ background: {bg}; {border} {bottom} color: {t.text_3}; border-radius: {theme.R1}px; padding: 0 5px; {font} }}"
-        )
+    def paintEvent(self, e) -> None:
+        if not self._bare:
+            t = theme.tokens()
+            p = QPainter(self)
+            r = QRectF(self.rect())
+            if self._quiet:
+                paint_box(p, r, None, theme.blend(t.hair_2, t.canvas), theme.R1)
+            else:
+                fill = theme.blend(t.fill_2, t.canvas)
+                paint_box(p, r, fill, None, theme.R1)
+                # the web's inset 0 -1px hair under the cap: a one-pixel darker bottom edge
+                hline(p, theme.R1, r.height() - 1, r.width() - 2 * theme.R1, theme.blend(t.hair, fill.name()))
+            p.end()
+        super().paintEvent(e)
 
 
 class Keys(QWidget):
@@ -175,10 +159,10 @@ class Switch(QAbstractButton):
         self.toggled.connect(lambda _c: self.update())
         bind(theme.theme.changed, self, lambda _t: self.update())
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         return QSize(34, 20)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         t = theme.tokens()
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -193,13 +177,13 @@ class Switch(QAbstractButton):
         shadow = QColor(0, 0, 0, 77)  # 0 1px 3px rgba(0,0,0,.3), as two soft rings
         p.setBrush(shadow)
         p.drawEllipse(QRectF(x - 0.5, 2.5, 17, 17))
-        p.setBrush(QColor("#ffffff"))
+        p.setBrush(QColor(t.accent_ink))  # white on either track, like the web's knob
         p.drawEllipse(QRectF(x, 2, 16, 16))
 
 
 def switch_off(t: theme.Tokens) -> QColor:
-    """The off track: ``[data-theme='dark'] .switch:not(.on)`` is ``#3a3a3e``; light uses fill-3 over the page."""
-    return QColor("#3a3a3e") if t.dark else theme.blend(t.fill_3, t.canvas)
+    """The off track (``.switch:not(.on)``), laid on the page."""
+    return theme.blend(t.switch_off, t.canvas)
 
 
 # ---------------------------------------------------------------- the floating materials
@@ -218,15 +202,14 @@ def sheet_bg(t: theme.Tokens) -> QColor:
     )
 
 
-def sheet_css(t: theme.Tokens) -> str:
-    """The ``#sheet`` frame: the dialog material with the web's faint light edge, 16px corners."""
-    bg = sheet_bg(t).name()
-    return f"#sheet {{ background: {bg}; border: 1px solid {theme.blend(t.hair, bg).name()}; border-radius: {theme.R4}px; }}"
+def sheet_line(t: theme.Tokens) -> QColor:
+    """The sheet's edge: the hair over its material."""
+    return theme.over(theme.qcolor(t.hair), sheet_bg(t))
 
 
-def popover_bg(t: theme.Tokens) -> QColor:
-    """``.popover``: glass over the blurred page (what the eye sees is close to glass over raised)."""
-    return theme.blend(t.glass, t.raised)
+def well_line(t: theme.Tokens) -> QColor:
+    """A well's edge: the hair over its surface."""
+    return theme.over(theme.qcolor(t.hair), well_bg(t))
 
 
 def toast_bg(t: theme.Tokens) -> QColor:
@@ -242,23 +225,6 @@ def well_bg(t: theme.Tokens, surface: Optional[str] = None) -> QColor:
     return theme.qcolor(t.inset)
 
 
-class LayoutButton(QPushButton):
-    """A QPushButton sized by the widgets laid out inside it (a plain QPushButton ignores its layout, and
-    would never shrink below its size hint)."""
-
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
-        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
-
-    def sizeHint(self) -> QSize:  # noqa: N802
-        lay = self.layout()
-        return lay.sizeHint() if lay is not None else super().sizeHint()
-
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
-        lay = self.layout()
-        return lay.minimumSize() if lay is not None else super().minimumSizeHint()
-
-
 class ElideLabel(QLabel):
     """A single-line label that elides at the end instead of widening its row (``.ellipsis``)."""
 
@@ -267,10 +233,10 @@ class ElideLabel(QLabel):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.setMinimumWidth(24)
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         return QSize(24, super().minimumSizeHint().height())
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         p = QPainter(self)
         p.setFont(self.font())
         p.setPen(self.palette().color(QPalette.ColorRole.WindowText))
@@ -283,28 +249,16 @@ class ElideLabel(QLabel):
         )
 
 
-def page_column(width: int, padding: int = 0) -> int:
-    """``--col`` as the web resolves it inside a pane: clamp(640px, min(61.8%, 100% - 48px), 1080px) of
-    the pane less ``padding`` on each side (the welcome pads 24px; the workboard none)."""
-    inner = width - 2 * padding
-    return max(640, min(int(round(inner * 0.618)), inner - 48, 1080))
-
-
-def half_hairline(surface: str) -> QFrame:
+def half_hairline(surface: str) -> QWidget:
     """A 0.5px CSS hairline (``.ovr + .ovr``, ``.cust-row``): one pixel of the hair at half strength."""
-    f = QFrame()
-    f.setFixedHeight(1)
-    f.setFrameShape(QFrame.Shape.NoFrame)
 
-    def paint(t: theme.Tokens) -> None:
+    def colour(t: theme.Tokens) -> QColor:
         c = theme.qcolor(t.hair)
         c.setAlphaF(c.alphaF() / 2)
-        f.setStyleSheet(
-            f"background: {theme.blend(c.name(QColor.NameFormat.HexArgb), getattr(t, surface, surface)).name()};"
-        )
+        return theme.over(c, theme.qcolor(getattr(t, surface, surface)))
 
-    paint(theme.tokens())
-    bind(theme.theme.changed, f, paint)
+    f = Box(bg=colour)
+    f.setFixedHeight(1)
     return f
 
 
@@ -312,7 +266,7 @@ def hint(text: str, wrap: bool = True) -> QLabel:
     """A quiet explanatory line (``.hint``)."""
     lb = QLabel(text)
     lb.setWordWrap(wrap)
-    lb.setProperty("tone", "faint")
+    theme.tint(lb, fg="text_3")
     lb.setProperty("fs", "small")
     return lb
 
@@ -320,23 +274,8 @@ def hint(text: str, wrap: bool = True) -> QLabel:
 def field_label(text: str) -> QLabel:
     """The label above a form field (``.field > label``)."""
     lb = QLabel(text)
-    t = theme.tokens()
-    lb.setStyleSheet(f"color: {t.text_2}; font-size: {theme.FS_SMALL}px; font-weight: 550;")
-    return lb
-
-
-def styled(lb: QLabel, color: str = "", size: float = 0, weight: int = 0, mono: bool = False) -> QLabel:
-    """Give a label an explicit colour, size and weight from the tokens (for the handful of one-off styles)."""
-    parts: List[str] = []
-    if color:
-        parts.append(f"color: {color};")
-    if size:
-        parts.append(f"font-size: {size}px;")
-    if weight:
-        parts.append(f"font-weight: {weight};")
-    if mono:
-        lb.setFont(theme.font_mono())
-    lb.setStyleSheet(" ".join(parts))
+    lb.setFont(theme.font_ui(theme.FS_SMALL, 550))
+    theme.tint(lb, fg="text_2")
     return lb
 
 
@@ -359,9 +298,6 @@ class Backdrop:
         self.ms = 0.0
         if host is None or _BLUR_OK is False or host.width() < 2 or host.height() < 2:
             return
-        import time
-
-        from PySide6.QtCore import Qt as _Qt
 
         t0 = time.perf_counter()
         try:
@@ -375,7 +311,7 @@ class Backdrop:
             self.pixmap = small.scaled(
                 pm.size(), _Qt.AspectRatioMode.IgnoreAspectRatio, _Qt.TransformationMode.SmoothTransformation
             )
-        except Exception:  # noqa: BLE001 — no snapshot, no blur
+        except Exception:  # no snapshot, no blur
             self.pixmap = None
         self.ms = (time.perf_counter() - t0) * 1000
         if _BLUR_OK is None:
@@ -388,11 +324,6 @@ class Backdrop:
         if self.pixmap is not None and not self.pixmap.isNull():
             p.drawPixmap(0, 0, self.pixmap)
         p.fillRect(w.rect(), theme.qcolor(t.scrim))
-
-
-def blur_enabled() -> Optional[bool]:
-    """Whether the blurred backdrop is on (None until the first sheet measured it)."""
-    return _BLUR_OK
 
 
 # ---------------------------------------------------------------- text laid out like the browser
@@ -437,6 +368,9 @@ class Text(QWidget):
         self._align = align
         self._lines: List[str] = []
         self._laid_w = -1
+        # the lines at each width asked for: a layout pass asks several widths in a row, and a
+        # neighbour's change asks them all again
+        self._laid: Dict[int, List[str]] = {}
         # Vertically Preferred, not Fixed: a box layout caps a Fixed item at its one-line size hint
         # before it asks for the height-for-width, and the extra lines would be cut off.
         sp = QSizePolicy(
@@ -446,20 +380,33 @@ class Text(QWidget):
         sp.setHeightForWidth(wrap)
         self.setSizePolicy(sp)
         self._max_w = 0
-        bind(theme.theme.changed, self, lambda _t: self.update())
+        bind(theme.theme.changed, self, lambda _t: self._relayout())
+
+    def _relayout(self) -> None:
+        self._laid.clear()
+        self._laid_w = -1
+        self.updateGeometry()
+        self.update()
+
+    def _advance(self, text: str) -> float:
+        return QFontMetricsF(self.qfont()).horizontalAdvance(text) if text else 0.0
 
     # ---- the QLabel-shaped bits callers use
     def text(self) -> str:
         return self._text
 
-    def setText(self, text: str) -> None:  # noqa: N802
+    def setText(self, text: str) -> None:
         if text != self._text:
+            # one line as wide as before (a clock, a count): the layout need not run again
+            same_box = not self._wrap and self._advance(text) == self._advance(self._text)
             self._text = text
+            self._laid.clear()
             self._laid_w = -1
-            self.updateGeometry()
+            if not same_box:
+                self.updateGeometry()
             self.update()
 
-    def setAlignment(self, a: Qt.AlignmentFlag) -> None:  # noqa: N802
+    def setAlignment(self, a: Qt.AlignmentFlag) -> None:
         self._align = a
         self.update()
 
@@ -470,18 +417,14 @@ class Text(QWidget):
     def set_max_width(self, w: int) -> None:
         """``max-width`` on a block of text: lines wrap at ``w`` even when the column is wider."""
         self._max_w = w
-        self._laid_w = -1
-        self.updateGeometry()
-        self.update()
+        self._relayout()
 
     def set_font(self, size: Optional[float] = None, weight: Optional[int] = None) -> None:
         if size is not None:
             self._size = size
         if weight is not None:
             self._weight = weight
-        self._laid_w = -1
-        self.updateGeometry()
-        self.update()
+        self._relayout()
 
     # ---- metrics
     def qfont(self) -> QFont:
@@ -502,7 +445,10 @@ class Text(QWidget):
             width = min(width, self._max_w)
         if width == self._laid_w:
             return self._lines
-        from PySide6.QtGui import QTextLayout, QTextOption
+        known = self._laid.get(width)
+        if known is not None:
+            self._lines, self._laid_w = known, width
+            return known
 
         lay = QTextLayout(self._text, self.qfont())
         opt = QTextOption()
@@ -517,27 +463,30 @@ class Text(QWidget):
             line.setLineWidth(max(1, width))
             lines.append(self._text[line.textStart() : line.textStart() + line.textLength()].rstrip("\n"))
         lay.endLayout()
+        if len(self._laid) >= 12:
+            self._laid.clear()
+        self._laid[width] = lines
         self._lines, self._laid_w = lines, width
         return lines
 
-    def hasHeightForWidth(self) -> bool:  # noqa: N802
+    def hasHeightForWidth(self) -> bool:
         return self._wrap
 
-    def heightForWidth(self, w: int) -> int:  # noqa: N802
+    def heightForWidth(self, w: int) -> int:
         n = max(1, len(self._layout(w))) if self._text else 0
         return int(round(n * self.line_px()))
 
-    def sizeHint(self) -> QSize:  # noqa: N802
+    def sizeHint(self) -> QSize:
         fm = QFontMetricsF(self.qfont())
         w = int(math.ceil(fm.horizontalAdvance(self._text))) + 1
         return QSize(w, int(round(self.line_px())) if self._text or not self._wrap else 0)
 
-    def minimumSizeHint(self) -> QSize:  # noqa: N802
+    def minimumSizeHint(self) -> QSize:
         if self._wrap:
             return QSize(24, int(round(self.line_px())) if self._text else 0)
         return self.sizeHint()
 
-    def resizeEvent(self, e) -> None:  # noqa: N802
+    def resizeEvent(self, e) -> None:
         if self._wrap:
             self._layout(self.width())
             h = self.heightForWidth(self.width())
@@ -545,7 +494,7 @@ class Text(QWidget):
                 self.updateGeometry()
         super().resizeEvent(e)
 
-    def paintEvent(self, _e) -> None:  # noqa: N802
+    def paintEvent(self, _e) -> None:
         if not self._text:
             return
         t = theme.tokens()

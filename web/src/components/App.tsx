@@ -1,23 +1,35 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { WifiOff, RefreshCw } from 'lucide-react';
-import { useStore, setUi, setDialog, openSession, interrupt, native, quickNewSession, type PanelTab, cycleView, showPage } from '../lib/store';
+import { useStore, setUi, setDialog, native, quickNewSession } from '../lib/store';
+import { isBusy } from '../lib/types';
+import { shortcutFor } from '../lib/shortcuts';
 import { Sidebar } from './Sidebar';
 import { SessionView } from './SessionView';
 import { RightPanel } from './RightPanel';
 import { Welcome } from './Welcome';
-import { Board } from './Board';
-import { IntentDialog } from './board/IntentDialog';
-import { NewSessionDialog } from './NewSessionDialog';
-import { SettingsDialog } from './SettingsDialog';
-import { McpAuthDialog } from './McpAuthDialog';
-import { CommandPalette, ShortcutsDialog, ConfirmDialog, Toasts, Lightbox, quitApp } from './Overlays';
-import { Resizer } from './ui/bits';
-import { Slot } from './ui/Slot';
 
-const TAB_KEYS: Record<string, PanelTab> = { '1': 'changes', '2': 'files', '3': 'terminal', '4': 'preview', '5': 'tasks', '6': 'history', '7': 'info' };
+import { NewSessionDialog } from './NewSessionDialog';
+import { McpAuthDialog } from './McpAuthDialog';
+import { CommandPalette, ShortcutsDialog, ConfirmDialog, Toasts, Lightbox } from './Overlays';
+import { Resizer } from './ui/bits';
+import { useWindowKey } from './ui/keys';
+import { Slot } from './ui/Slot';
+import { ErrorBoundary } from './ui/ErrorBoundary';
+
+// The pages and the settings sheet a window may never open load on first use, each a chunk of its own,
+// so a window parses only what the conversation needs before its first rows.
+const Board = lazy(() => import('./Board').then((m) => ({ default: m.Board })));
+const IntentDialog = lazy(() => import('./board/IntentDialog').then((m) => ({ default: m.IntentDialog })));
+const InboxPage = lazy(() => import('./Inbox').then((m) => ({ default: m.InboxPage })));
+const DispatchPage = lazy(() => import('./dispatch/Page').then((m) => ({ default: m.DispatchPage })));
+const SettingsDialog = lazy(() => import('./SettingsDialog').then((m) => ({ default: m.SettingsDialog })));
+
+const PAGE_NAMES = { session: 'The conversation', board: 'The workboard', inbox: 'The inbox', dispatch: 'Dispatch' };
 
 export function App() {
-  const ui = useStore((s) => s.ui);
+  // The layout fields read here, each on its own: dragging a width re-renders only what shows it.
+  const sidebar = useStore((s) => s.ui.sidebar);
+  const panel = useStore((s) => s.ui.panel);
   const dialogs = useStore((s) => s.dialogs);
   const activeId = useStore((s) => s.activeId);
   const sessions = useStore((s) => s.sessions);
@@ -28,71 +40,17 @@ export function App() {
   const session = sessions.find((s) => s.id === activeId) || null;
   const waiting = sessions.filter((s) => s.status === 'requires_action').length;
 
+  const title = `${waiting ? `(${waiting}) ` : ''}${page === 'board' ? 'Workboard — ' : page === 'inbox' ? 'Inbox — ' : page === 'dispatch' ? 'Dispatch — ' : session ? `${session.title} — ` : ''}Pilcrow`;
   useEffect(() => {
-    document.title = `${waiting ? `(${waiting}) ` : ''}${page === 'board' ? 'Workboard — ' : session ? `${session.title} — ` : ''}Pilcrow`;
-  }, [waiting, session?.title, page]); // eslint-disable-line react-hooks/exhaustive-deps -- only the title is read
+    document.title = title;
+  }, [title]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const mod = e.ctrlKey || e.metaKey;
-      const st = useStore.getState();
-      if (mod && !e.shiftKey && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        setDialog('palette', !st.dialogs.palette);
-      } else if (mod && e.key.toLowerCase() === 'n') {
-        e.preventDefault();
-        if (e.shiftKey) setDialog('newSession', {});
-        else quickNewSession();
-      } else if (mod && e.key.toLowerCase() === 'b' && !e.shiftKey) {
-        e.preventDefault();
-        setUi({ sidebar: !st.ui.sidebar });
-      } else if (e.ctrlKey && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'o') {
-        e.preventDefault();
-        cycleView();
-      } else if (mod && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'o') {
-        e.preventDefault();
-        showPage(st.page === 'board' ? 'session' : 'board');
-      } else if (mod && e.key === '\\') {
-        e.preventDefault();
-        setUi({ panel: !st.ui.panel });
-      } else if (mod && e.key === ',') {
-        e.preventDefault();
-        setDialog('settings', true);
-      } else if (mod && !e.shiftKey && e.key.toLowerCase() === 'q' && !native()) {
-        // In the desktop app the window menu owns Ctrl+Q; in a browser window we ask the server to quit.
-        e.preventDefault();
-        quitApp();
-      } else if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f' && st.activeId) {
-        // The file editor and the terminal keep their own Ctrl+F.
-        const t = e.target as HTMLElement | null;
-        if (t?.closest?.('.cm-editor, .xterm')) return;
-        e.preventDefault();
-        window.dispatchEvent(new Event('pilcrow:find'));
-      } else if (mod && e.key === '/') {
-        e.preventDefault();
-        setDialog('shortcuts', true);
-      } else if (e.altKey && !mod && TAB_KEYS[e.key] && st.activeId) {
-        e.preventDefault();
-        const tab = TAB_KEYS[e.key];
-        setUi(st.ui.panel && st.ui.panelTab === tab ? { panel: false } : { panel: true, panelTab: tab });
-      } else if (mod && e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
-        e.preventDefault();
-        const list = st.sessions.filter((s) => !s.archived);
-        const i = list.findIndex((s) => s.id === st.activeId);
-        const next = list[e.key === 'ArrowDown' ? Math.min(list.length - 1, i + 1) : Math.max(0, i - 1)];
-        if (next) openSession(next.id);
-      } else if (e.key === 'Escape' && st.activeId && !Object.values(st.dialogs).some(Boolean)) {
-        const rt = st.rt[st.activeId];
-        const target = e.target as HTMLElement;
-        const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
-        if (!typing && (rt?.status === 'running' || rt?.status === 'starting')) interrupt(st.activeId);
-        // A session opened from the workboard goes back to it, on the same card.
-        else if (!typing && st.page === 'session' && st.ui.returnTo === 'board') showPage('board');
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  useWindowKey((e) => {
+    const hit = shortcutFor(e);
+    if (!hit) return;
+    e.preventDefault();
+    hit.run(hit.index);
+  });
 
   // Commands from the desktop window menu.
   useEffect(
@@ -125,16 +83,16 @@ export function App() {
   }, [booting, bootDone]);
   // The side panel glides shut when the page changes away from a session; it keeps showing that
   // session while it goes, rather than emptying first.
-  const panelOpen = Boolean(session && page === 'session' && ui.panel);
+  const panelOpen = Boolean(session && page === 'session' && panel);
   const lastPanelSession = useRef(session);
   if (session) lastPanelSession.current = session;
   const panelSession = session || lastPanelSession.current;
   const shell = (
-    <div className={`app${ui.sidebar ? '' : ' no-side'}`}>
-      <Slot open={ui.sidebar} side="left">
+    <div className={`app${sidebar ? '' : ' no-side'}`}>
+      <Slot open={sidebar} side="left">
         <Sidebar />
       </Slot>
-      {ui.sidebar && <Resizer side="left" onResize={resizeSidebar} />}
+      {sidebar && <Resizer side="left" onResize={resizeSidebar} />}
       <main className="main">
         {!connected && everConnected && (
           <div className="offline">
@@ -142,19 +100,30 @@ export function App() {
           </div>
         )}
         <UpdateNotice />
-        {page === 'board' ? <Board /> : session ? <SessionView key={session.id} session={session} /> : <Welcome />}
+        {/* A page that fails to draw says so in place; the sidebar and the rest of the window keep working. */}
+        <ErrorBoundary key={page === 'session' ? session?.id : page} label={PAGE_NAMES[page]}>
+          <Suspense fallback={null}>{page === 'board' ? <Board /> : page === 'inbox' ? <InboxPage /> : page === 'dispatch' ? <DispatchPage /> : session ? <SessionView key={session.id} session={session} /> : <Welcome />}</Suspense>
+        </ErrorBoundary>
         <Toasts />
       </main>
       {panelOpen && <Resizer side="right" onResize={resizePanel} />}
       <Slot open={panelOpen} side="right" className="panel-shell">
-        {panelSession && <RightPanel key={panelSession.id} session={panelSession} />}
+        {panelSession && (
+          <ErrorBoundary key={panelSession.id} label="The side panel">
+            <RightPanel session={panelSession} />
+          </ErrorBoundary>
+        )}
       </Slot>
-      {dialogs.newSession && <NewSessionDialog />}
-      {dialogs.settings && config && <SettingsDialog />}
+      {dialogs.newSession && <NewSessionDialog spec={dialogs.newSession} />}
+      {dialogs.settings && config && (
+        <Suspense fallback={null}>
+          <SettingsDialog config={config} />
+        </Suspense>
+      )}
       {dialogs.palette && <CommandPalette />}
       {dialogs.shortcuts && <ShortcutsDialog />}
-      {dialogs.confirm && <ConfirmDialog />}
-      {dialogs.mcpAuth && <McpAuthDialog />}
+      {dialogs.confirm && <ConfirmDialog spec={dialogs.confirm} />}
+      {dialogs.mcpAuth && <McpAuthDialog spec={dialogs.mcpAuth} />}
       {dialogs.intent && <IntentDialog />}
       <Lightbox />
     </div>
@@ -219,7 +188,7 @@ function compareVersions(a: string, b: string) {
 function UpdateNotice() {
   const connected = useStore((s) => s.connected);
   const server = useStore((s) => s.info?.version);
-  const busy = useStore((s) => s.sessions.some((x) => x.status === 'running' || x.status === 'starting' || x.status === 'requires_action'));
+  const busy = useStore((s) => s.sessions.some((x) => isBusy(x.status)));
   const newer = Boolean(connected && server && server !== __APP_VERSION__ && compareVersions(server, __APP_VERSION__) > 0);
   // A newer Pilcrow is installed and nothing is mid-flight: pick it up without asking. While Claude
   // is working, the window stays as it is and the line below offers the reload instead.
@@ -236,7 +205,7 @@ function UpdateNotice() {
     if (tried === server) return;
     const t = setTimeout(() => {
       try {
-        sessionStorage.setItem('pilcrow.reloadedFor', server!);
+        sessionStorage.setItem('pilcrow.reloadedFor', server || '');
       } catch {
         /* fine */
       }

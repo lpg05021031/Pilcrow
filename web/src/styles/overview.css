@@ -1,0 +1,498 @@
+/* ================================================================ overview
+   The control room (Overview). */
+
+/* ================================================================ control room
+   One page for every session at once. Four tiles say the state of the fleet; under them the cards
+   that need you first, then the work in flight, then what finished today and what it cost. Cards are
+   quiet; the only colour is the state mark, the amber of a prompt waiting on you, and the live mark. */
+.overview {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.ov-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3_5);
+  height: var(--header-h);
+  padding: 0 var(--sp-5);
+}
+.ov-title {
+  margin: 0;
+  font-size: var(--fs-title);
+  font-weight: 600;
+  letter-spacing: -0.012em;
+}
+.ov-sum {
+  font-size: var(--fs-small);
+  color: var(--text-3);
+}
+.ov-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  container-type: inline-size;
+  padding: var(--sp-4_5) var(--sp-5) var(--sp-12);
+  display: grid;
+  gap: var(--sp-7);
+  align-content: start;
+  width: min(var(--col), 100%);
+  box-sizing: border-box;
+  margin: 0 auto;
+}
+
+/* ---- the four tiles */
+.ov-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-2_5);
+}
+@container (max-width: 640px) {
+  .ov-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+.ov-tile {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-width: 0;
+  padding: var(--sp-3) var(--sp-3_5);
+  border-radius: var(--r-6);
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+  text-align: left;
+}
+.ov-tile:hover {
+  box-shadow: var(--card-shadow-hover);
+  transform: translateY(-1px);
+}
+.ov-tile:active {
+  transform: scale(0.98);
+}
+.ov-tile-ico {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--r-4);
+  background: var(--fill-1);
+  color: var(--text-2);
+}
+.ov-tile.live .ov-tile-ico {
+  color: var(--text);
+}
+.ov-tile.accent .ov-tile-ico {
+  background: var(--accent-wash);
+  color: var(--accent-text);
+}
+.ov-tile.accent .ov-tile-v {
+  color: var(--accent-text);
+}
+.ov-tile-main {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.ov-tile-v {
+  font-size: var(--fs-display);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+.ov-tile-k {
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ov-tile-sub {
+  color: var(--text-3);
+}
+
+/* ---- sections */
+.ov-sec {
+  display: grid;
+  gap: var(--sp-2_5);
+  scroll-margin-top: 8px;
+}
+.ov-h {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  font-size: var(--fs-h);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.ov-h .glyph {
+  margin: 0 var(--sp-0_5);
+}
+.ov-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 var(--sp-1_5);
+  border-radius: var(--r-4);
+  background: var(--fill-1);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+.ov-h-end {
+  margin-left: auto;
+  font-weight: 450;
+  font-size: var(--fs-small);
+  color: var(--text-3);
+}
+.ov-two {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(260px, 2fr);
+  gap: var(--sp-7);
+}
+@container (max-width: 760px) {
+  .ov-two {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.ov-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(290px, 1fr));
+  gap: var(--sp-2_5);
+}
+.ov-queue {
+  display: grid;
+  gap: var(--sp-2_5);
+}
+.ov-empty {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3_5) var(--sp-4);
+  border-radius: var(--r-5);
+  background: var(--fill-1);
+  color: var(--text-2);
+  font-size: var(--fs-small);
+  line-height: 1.5;
+}
+.ov-empty > svg {
+  flex: none;
+  color: var(--text-3);
+}
+
+/* ---- cards */
+.ovc {
+  position: relative;
+  display: grid;
+  gap: var(--sp-2_25);
+  padding: var(--sp-3_25) 15px var(--sp-3);
+  border-radius: var(--r-6);
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+  text-align: left;
+  cursor: pointer;
+}
+.ovc:hover {
+  box-shadow: var(--card-shadow-hover);
+}
+.ovc.focused {
+  box-shadow: 0 0 0 1.5px var(--text-3);
+}
+.ovc.needs {
+  cursor: default;
+  padding-left: 19px; /* the side inset, moved over by the 3px rail and a hair */
+  background: color-mix(in srgb, var(--accent-wash) 30%, var(--card));
+}
+.ovc-rail {
+  position: absolute;
+  left: 0;
+  top: 12px;
+  bottom: 12px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+.ovc.needs.decided {
+  background: var(--card);
+  opacity: 0.7;
+}
+.ovc.needs.decided .ovc-rail {
+  background: var(--ok);
+}
+.ovc-decided {
+  color: var(--ok);
+}
+.ovc-head {
+  display: grid;
+  gap: var(--sp-0_5);
+  min-width: 0;
+}
+.ovc-title {
+  font-weight: 560;
+  font-size: var(--fs-ui);
+  letter-spacing: -0.004em;
+}
+.ovc-proj {
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+}
+.ovc-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2_5);
+}
+.ovc-row .ovc-head {
+  flex: 1;
+}
+.ovc-live {
+  flex: none;
+  display: inline-flex;
+  margin-top: 1px;
+  color: var(--text-3);
+}
+
+.ovc-wait {
+  font-size: var(--fs-micro);
+  color: var(--accent-text);
+  white-space: nowrap;
+  padding-top: var(--sp-0_5);
+  font-variant-numeric: tabular-nums;
+}
+.ovc-act {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  font-size: var(--fs-small);
+  color: var(--text-2);
+}
+.ovc-act > svg {
+  flex: none;
+  color: var(--text-3);
+}
+.ovc-act.quiet {
+  color: var(--text-3);
+}
+.ovc-wf {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1_75);
+  font-size: var(--fs-micro);
+  color: var(--text-2);
+}
+.ovc-wf > svg {
+  color: var(--text-3);
+}
+.ovc-bar {
+  flex: 1;
+  height: 3px;
+  margin: 0;
+}
+.ovc-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+}
+.ovc-foot > span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.ovc-hot {
+  margin-left: var(--sp-1_25);
+  color: var(--accent-text);
+}
+.ovc-well {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-2_5);
+  border-radius: var(--r-3);
+  background: var(--inset);
+  box-shadow: inset 0 0 0 0.5px var(--hair);
+  font-size: var(--fs-small);
+}
+.ovc-perm-tool {
+  flex: none;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.ovc-perm-what {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+.ovc-perm-what.mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+}
+.ovc-perm-note {
+  margin-top: -4px;
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+}
+.ovc-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1_5);
+  flex-wrap: wrap;
+  font-size: var(--fs-small);
+}
+.ovc-actions .btn .key {
+  margin-left: var(--sp-1_5);
+}
+
+/* ---- finished today: a grouped list */
+.ov-list {
+  display: grid;
+  padding: var(--sp-1);
+  border-radius: var(--r-5);
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+}
+.ovr {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-2_5);
+  width: 100%;
+  padding: var(--sp-2_25) var(--sp-2_5);
+  border-radius: var(--r-3);
+  text-align: left;
+}
+.ovr + .ovr {
+  border-top: 0.5px solid var(--hair);
+}
+.ovr:hover,
+.ovr.focused {
+  background: var(--fill-1);
+}
+.ovr-mark {
+  display: inline-flex;
+  justify-content: center;
+}
+.ovr-ok {
+  color: var(--text-3);
+}
+.ovr-main {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.ovr-title {
+  font-size: var(--fs-small);
+}
+.ovr.unread .ovr-title {
+  font-weight: 560;
+  color: var(--text);
+}
+.ovr-sub {
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+}
+.ovr-end {
+  display: inline-flex;
+  gap: var(--sp-2_5);
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+/* on the hovered or focused row's fill --text-3 falls short of 4.5:1 (tokens.css) */
+.ovr:hover .ovr-sub,
+.ovr:hover .ovr-end,
+.ovr.focused .ovr-sub,
+.ovr.focused .ovr-end {
+  color: var(--text);
+}
+
+/* ---- spend */
+.spend {
+  display: grid;
+  gap: var(--sp-3_5);
+  padding: var(--sp-3_5) var(--sp-4);
+  border-radius: var(--r-5);
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+}
+.spend-hour {
+  display: grid;
+  gap: var(--sp-2);
+}
+.spend-hour-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: var(--fs-micro);
+  color: var(--text-3);
+}
+.spend-hour-label strong {
+  color: var(--text);
+  font-weight: 600;
+  font-size: var(--fs-small);
+}
+.spend-bars {
+  display: block;
+  width: 100%;
+  height: 42px;
+}
+.spend-bars rect {
+  fill: var(--fill-2);
+}
+.spend-bars rect.on {
+  fill: var(--text-3);
+}
+.spend-bars rect.now {
+  fill: var(--accent);
+}
+.spend-bars rect.base {
+  fill: var(--hair-2);
+}
+.spend-axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: var(--fs-tiny);
+  color: var(--text-3);
+}
+.spend-top {
+  display: grid;
+  gap: var(--sp-1_5);
+}
+.spend-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 88px auto;
+  align-items: center;
+  gap: var(--sp-2_5);
+  font-size: var(--fs-micro);
+  color: var(--text-2);
+  text-align: left;
+  padding: var(--sp-0_5) 0;
+}
+.spend-row:hover {
+  color: var(--text);
+}
+.spend-bar {
+  height: 4px;
+  border-radius: var(--r-pill);
+  background: var(--fill-2);
+  overflow: hidden;
+}
+.spend-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: var(--r-pill);
+  background: var(--text-4);
+}
+.spend-row:first-child .spend-bar > span {
+  background: var(--accent);
+}
