@@ -395,7 +395,7 @@ WebSocket JSON-RPC、同樣的事件），並有一個腳本化的 Claude——�
 頁面上而後面的工作另外摺起、權限卡（1 允許、Deny 告知 Claude）、archive 不重畫其他列、側欄順序不自己跑、
 送出後移到最上、品牌與列圖示對齊、400 回合一秒內開啟且只畫附近的頁並落到底部、Latest 在新內容到達時出現、
 點了就消失、從歷史送出會回到底並跟著回覆走、打字時對話相對 composer 零位移、Find 畫出全部並逐一跳、
-切走再切回落在同一處、Control room 的格子不溢出不被切、等待中的卡片可以直接批准。
+切走再切回落在同一處、工作台的五欄不橫向溢出、審核中的卡可以直接從面板核准與拖到 Done。
 失敗時截圖在 `test/out/`。`--grep 文字` 只跑名稱符合的；`--headed` 看得到視窗。
 
 Playwright 的 Chromium 需要 `npx playwright install chromium`；下載不到時會改用機器上的 Chrome / Edge，
@@ -403,7 +403,7 @@ Playwright 的 Chromium 需要 `npx playwright install chromium`；下載不到�
 
 `test:webkit`（`test/webkit/run.mjs` + `driver.py`）需要 Linux、`python3-gi`、`gir1.2-webkit2-4.1`、`python3-gi-cairo`，
 沒有顯示器時用 `xvfb-run`；找不到就印一行 skipped 並視為通過（CI 要強制時設 `PILCROW_REQUIRE_WEBKIT=1`）。
-它檢查 Chromium 代替不了的部分：Control room 的上緣有畫出來、捲動長對話時每一格都有內容、串流時視角跟著回覆。
+它檢查 Chromium 代替不了的部分：工作台的上緣與五欄有畫出來且不被切、捲動長對話時每一格都有內容、串流時視角跟著回覆。
 
 ### 發佈
 

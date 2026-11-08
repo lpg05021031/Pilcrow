@@ -441,7 +441,7 @@ async function measureSwitch(page, id, other) {
 
 const tsx = (...names) => names.map((f) => readFileSync(join(ROOT, 'web', 'src', 'components', `${f}.tsx`), 'utf8')).join('');
 const sixty = () => {
-  const code = tsx('Transcript', 'Composer', 'Sidebar', 'Overview');
+  const code = tsx('Transcript', 'Composer', 'Sidebar', 'Board');
   return code.slice(0, code.lastIndexOf('\n', 60_000));
 };
 const ev = (event) => ({ type: 'stream_event', parent_tool_use_id: null, event });

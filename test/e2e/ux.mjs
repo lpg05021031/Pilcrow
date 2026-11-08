@@ -294,9 +294,9 @@ test('every screen draws, and every control on it has a name a screen reader can
   await page.keyboard.press('Escape');
   await page.waitForSelector('.dialog', { state: 'detached', timeout: 3000 });
   await page.keyboard.press('Control+Shift+O');
-  await page.waitForSelector('.ov-stats', { timeout: 5000 });
+  await page.waitForSelector('.bd-lanes', { timeout: 5000 });
   await settled(page);
-  await scan('control room');
+  await scan('workboard');
   await page.click('.side-page:has-text("Inbox")');
   await page.waitForSelector('.inbox-main .run', { timeout: 5000 });
   await page.waitForSelector('.inbox-rail .sched', { timeout: 5000 });
@@ -498,9 +498,9 @@ test('light theme: no surface is left dark', async ({ page }) => {
   await settled(page);
   n += await sample('toast');
   await page.keyboard.press('Control+Shift+O');
-  await page.waitForSelector('.ov-stats', { timeout: 5000 });
+  await page.waitForSelector('.bd-lanes', { timeout: 5000 });
   await settled(page);
-  n += await sample('control room');
+  n += await sample('workboard');
   expect(n > 20, `sampled enough surfaces (${n})`);
   expect(!dark.length, `dark surfaces in the light theme:\n${dark.join('\n')}`);
 });
@@ -519,10 +519,13 @@ test('reduced motion: nothing waits, menus and dialogs open at once, the app sti
     );
     expect(timing.length >= 4 && timing.every(([d, t]) => d === 0 && t < 0.01), `menu rows neither wait nor play (${JSON.stringify(timing)})`);
     await page.keyboard.press('Escape');
-    await page.keyboard.press('Control+Shift+O');
-    await page.waitForSelector('.ov-stats', { timeout: 5000 });
+    // The inbox is the screen with staggered entrances (the workboard has none); give it one report to draw.
+    await ctl.call('mock.answer', { method: 'inbox.list', result: { unread: 1, items: [{ id: 'run-rm', scheduleId: null, scheduleName: 'Nightly tests', sessionId: 'sess-login', cwd: '/home/tester/code/pilcrow', startedAt: Date.now() - 120e3, endedAt: Date.now() - 60e3, durationMs: 60e3, status: 'ok', reason: '', summary: 'Ran the suite.', cost: 0.12, files: [], read: false }] } });
+    await page.click('.side-page:has-text("Inbox")');
+    await page.waitForSelector('.inbox-day [style*="--i"]', { timeout: 5000 });
     await settled(page);
     const staggered = await page.evaluate(() => [...document.querySelectorAll('[style*="--i"]')].map((el) => getComputedStyle(el).animationDelay));
+    await ctl.call('mock.answer', { method: 'inbox.list', result: null });
     expect(staggered.length > 0 && staggered.every((d) => parseFloat(d) === 0), `staggered entrances do not wait (${staggered.join(', ')})`);
     await page.keyboard.press('Control+k');
     await page.waitForSelector('.palette');

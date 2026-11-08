@@ -111,21 +111,23 @@ def t_app_loads():
     wait_for('document.querySelector(".sidebar .side-row") !== null', timeout=30, label='the app to load')
 
 
-def t_control_room_top_edge():
-    """2.8.11: the control room's header and the stat tiles are painted, with air between them."""
+def t_workboard_top_edge():
+    """2.8.11 / 3.1.0: the workboard's strip and its five lanes are painted, with air between them, nothing cut."""
     run_js('(document.querySelector(".side-page")?.click(), true)')
-    wait_for('document.querySelector(".ov-stats") !== null', label='control room')
+    wait_for('document.querySelector(".bd-lanes") !== null', label='workboard')
     r = run_js('''(() => {
-      const head = document.querySelector('.ov-head').getBoundingClientRect();
-      const stats = document.querySelector('.ov-stats').getBoundingClientRect();
-      const tiles = [...document.querySelectorAll('.ov-tile')].map(t => { const b = t.getBoundingClientRect(); return { l: b.left, r: b.right, w: t.scrollWidth, cw: t.clientWidth }; });
-      return { headTop: head.top, gap: stats.top - head.bottom, statsL: stats.left, statsR: stats.right, tiles };
+      const strip = document.querySelector('.bd-strip').getBoundingClientRect();
+      const lanes = document.querySelector('.bd-lanes').getBoundingClientRect();
+      const each = [...document.querySelectorAll('.bd-lane')].map(t => { const b = t.getBoundingClientRect(); return { l: b.left, r: b.right, w: t.scrollWidth, cw: t.clientWidth }; });
+      return { stripTop: strip.top, gap: lanes.top - strip.bottom, lanesL: lanes.left, lanesR: lanes.right, each, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth };
     })()''')
-    assert r['headTop'] >= 0, f'header is above the viewport: {r}'
-    assert r['gap'] >= 12, f'stat tiles sit too close under the header: gap {r["gap"]}'
-    for t in r['tiles']:
-        assert t['l'] >= r['statsL'] - 1 and t['r'] <= r['statsR'] + 1, f'tile outside the row: {t}'
-        assert t['w'] <= t['cw'] + 1, f'tile content overflows: {t}'
+    assert r['stripTop'] >= 0, f'the strip is above the viewport: {r}'
+    assert r['gap'] >= 8, f'the lanes sit too close under the strip: gap {r["gap"]}'
+    assert len(r['each']) == 5, f'expected five lanes, got {len(r["each"])}'
+    assert r['overflow'] == 0, f'the page scrolls sideways by {r["overflow"]}px'
+    for t in r['each']:
+        assert t['l'] >= r['lanesL'] - 1 and t['r'] <= r['lanesR'] + 1, f'lane outside the row: {t}'
+        assert t['w'] <= t['cw'] + 1, f'lane content overflows: {t}'
     run_js('(document.querySelector(".side-page.on")?.click(), true)')
 
 
@@ -179,7 +181,7 @@ def t_streaming_frames_have_content():
 
 checks = [
     ('app loads', t_app_loads),
-    ('control room top edge', t_control_room_top_edge),
+    ('workboard top edge', t_workboard_top_edge),
     ('scrolling draws rows', t_scroll_rows_have_content),
     ('streaming keeps content', t_streaming_frames_have_content),
 ]

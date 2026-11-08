@@ -65,7 +65,7 @@ jobs:
   qt:
     name: Qt client (Python 3.9, offscreen)
     needs: checks
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # ubuntu-latest (26.04) has no Python 3.9 build for setup-python
     env:
       QT_QPA_PLATFORM: offscreen
     steps:
