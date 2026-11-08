@@ -357,6 +357,32 @@ class MemoryPage(QWidget):
         return box
 
 
+def note_meta(n: Json) -> str:
+    """The line under a note: where it came from, when, and how it fared with the sessions that read it."""
+    if n.get("kind") == "manual":
+        who = "You"
+    elif n.get("source") == "reject":
+        who = "From your correction" + (f" on {n['sessionTitle']}" if n.get("sessionTitle") else "")
+    else:
+        who = str(n.get("sessionTitle") or "A session")
+    parts = [f"{who} · {time_ago(n.get('at'))}"]
+    tally = [
+        t
+        for t in (
+            f"helped {n['helpful']}" if n.get("helpful") else "",
+            f"misled {n['harmful']}" if n.get("harmful") else "",
+        )
+        if t
+    ]
+    if tally:
+        parts.append(", ".join(tally))
+    if n.get("standing") == "retired":
+        parts.append("retired")
+    elif n.get("standing") == "confirmed" and n.get("kind") != "manual" and not n.get("pinned"):
+        parts.append("confirmed")
+    return " · ".join(parts)
+
+
 def _setting(title: str, hint_text: str, control: QWidget) -> QWidget:
     """``.mem-setting``: title + hint on the left, the control on the right."""
     w = QWidget()
@@ -416,8 +442,7 @@ class NoteRow(Panel):
         ml = QHBoxLayout(meta)
         ml.setContentsMargins(0, 0, 0, 0)
         ml.setSpacing(4)
-        who = "You" if n.get("kind") == "manual" else str(n.get("sessionTitle") or "A session")
-        ml.addWidget(label(f"{who} · {time_ago(n.get('at'))}", tone="faint", size="micro"), 1)
+        ml.addWidget(label(note_meta(n), tone="faint", size="micro"), 1)
         pin = IconButton(
             "pin-off" if n.get("pinned") else "pin", "Unpin" if n.get("pinned") else "Pin — never forgotten", 12
         )

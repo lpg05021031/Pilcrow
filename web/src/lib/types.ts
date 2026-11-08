@@ -431,10 +431,18 @@ export interface MemoryNote {
   at: number;
   text: string;
   kind: 'auto' | 'manual';
+  /** Where it came from: the end of a turn, a correction you gave on the workboard, or your own hand. */
+  source?: 'turn' | 'reject' | 'hand';
   sessionId: string | null;
   sessionTitle: string | null;
   pinned: boolean;
   editedAt?: number;
+  /** Sessions that read it and had their work approved. */
+  helpful?: number;
+  /** Corrections that named it misleading. */
+  harmful?: number;
+  /** Confirmed by you or by outcomes, fresh, or retired (misled more than it helped; never handed on). */
+  standing?: 'confirmed' | 'fresh' | 'retired';
 }
 /** One session's touch on a file, from the timeline. */
 export interface FileTouch {

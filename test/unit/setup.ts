@@ -11,6 +11,9 @@ process.env.USERPROFILE = home;
 process.env.XDG_CONFIG_HOME = path.join(home, '.config');
 process.env.XDG_DATA_HOME = path.join(home, '.local', 'share');
 process.env.XDG_STATE_HOME = path.join(home, '.local', 'state');
+// On Windows the server keeps its files under the profile folders instead; point those at the same home.
+process.env.APPDATA = path.join(home, 'AppData', 'Roaming');
+process.env.LOCALAPPDATA = path.join(home, 'AppData', 'Local');
 process.env.CLAUDE_CONFIG_DIR = path.join(home, '.claude');
 // Commits made by the code under test need an identity, and must not depend on the developer's signing setup.
 fs.writeFileSync(path.join(home, '.gitconfig'), '[user]\n\tname = Pilcrow Test\n\temail = test@pilcrow.invalid\n[commit]\n\tgpgsign = false\n[init]\n\tdefaultBranch = main\n');

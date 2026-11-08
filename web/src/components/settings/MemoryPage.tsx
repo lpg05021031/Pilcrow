@@ -84,7 +84,7 @@ export function MemoryPage({ config }: { config: Config }) {
         <BookMarked size={16} />
         <div>
           <div className="cust-intro-title">Project memory</div>
-          <div className="hint">What earlier sessions learned about a folder — decisions, dead ends, conventions — handed to every new session there. Pin what must never be forgotten; edit anything that drifts.</div>
+          <div className="hint">What earlier sessions learned about a folder — decisions, dead ends, conventions — handed to every new session there. A correction you give on the workboard can become a note too, and approvals count for the notes a session read. Pin what must never be forgotten; edit anything that drifts.</div>
         </div>
       </div>
 
@@ -193,8 +193,11 @@ function NoteRow({ n, now, onPatch, onRemove }: { n: MemoryNote; now: number; on
     if (text.trim() && text.trim() !== n.text) await onPatch({ text: text.trim() });
     setEditing(false);
   };
+  const retired = n.standing === 'retired';
+  const origin = n.kind === 'manual' ? 'You' : n.source === 'reject' ? `From your correction${n.sessionTitle ? ` on ${n.sessionTitle}` : ''}` : n.sessionTitle || 'A session';
+  const tally = [n.helpful ? `helped ${n.helpful}` : '', n.harmful ? `misled ${n.harmful}` : ''].filter(Boolean).join(', ');
   return (
-    <div className={`mem-note${n.pinned ? ' pinned' : ''}`}>
+    <div className={`mem-note${n.pinned ? ' pinned' : ''}${retired ? ' retired' : ''}`} title={retired ? 'Retired: it misled sessions more than it helped, so new sessions no longer get it. Pin it to hand it on again.' : undefined}>
       {editing ? (
         <div className="mem-edit">
           <textarea aria-label="Note" className="textarea" rows={2} autoFocus value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => (e.key === 'Enter' && (e.metaKey || e.ctrlKey) ? commit() : e.key === 'Escape' ? (setText(n.text), setEditing(false)) : null)} />
@@ -214,7 +217,9 @@ function NoteRow({ n, now, onPatch, onRemove }: { n: MemoryNote; now: number; on
       )}
       <div className="mem-meta">
         <span className="faint ellipsis">
-          {n.kind === 'manual' ? 'You' : n.sessionTitle || 'A session'} · {timeAgo(n.at, now)}
+          {origin} · {timeAgo(n.at, now)}
+          {tally ? ` · ${tally}` : ''}
+          {retired ? ' · retired' : n.standing === 'confirmed' && n.kind !== 'manual' && !n.pinned ? ' · confirmed' : ''}
         </span>
         <span className="grow" />
         <button className="icon-btn sm" onClick={() => onPatch({ pinned: !n.pinned })} title={n.pinned ? 'Unpin' : 'Pin — never forgotten'} aria-label={n.pinned ? 'Unpin' : 'Pin — never forgotten'}>

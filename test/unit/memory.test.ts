@@ -96,6 +96,83 @@ describe('distilling', () => {
   });
 });
 
+describe('how a note stands (docs/PLAYBOOK.md)', () => {
+  it('reads an old file as fresh notes, and knows confirmed from retired', () => {
+    const cwd = project();
+    const file = path.join(xdg('data'), 'memory', `${folderKey(cwd)}.json`);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ cwd, notes: [{ id: 'old', at: 1, text: 'An old note without counters', kind: 'auto', sessionId: null, sessionTitle: null, pinned: false }], distills: {} }));
+    const [old] = memory.list(cwd).notes;
+    expect(old).toMatchObject({ helpful: 0, harmful: 0, standing: 'fresh' });
+    expect(memory.standing({ kind: 'manual' })).toBe('confirmed');
+    expect(memory.standing({ kind: 'auto', pinned: true, harmful: 5 })).toBe('confirmed');
+    expect(memory.standing({ kind: 'auto', helpful: 2, harmful: 1 })).toBe('confirmed');
+    expect(memory.standing({ kind: 'auto', helpful: 1, harmful: 2 })).toBe('retired');
+    expect(memory.standing({ kind: 'auto', helpful: 0, harmful: 1 })).toBe('fresh');
+  });
+
+  it('hands on pinned and confirmed notes first, and approvals count for the notes a session read', () => {
+    const cwd = project();
+    const fresh = memory.add(cwd, { text: 'Fresh: the dev server wants port 5173', kind: 'auto' });
+    const good = memory.add(cwd, { text: 'Good: run the e2e tests from test/e2e', kind: 'auto' });
+    const bad = memory.add(cwd, { text: 'Bad: the API returns dollars', kind: 'auto' });
+    const pinned = memory.add(cwd, { text: 'Pinned: never commit the fixtures', kind: 'auto' });
+    memory.update(cwd, pinned.id, { pinned: true });
+    store.setMeta('s-ok', { playbook: [good.id, fresh.id] });
+    store.setMeta('s-ok2', { playbook: [good.id] });
+    expect(memory.credit({ id: 's-ok', cwd })).toEqual({ helped: 2 });
+    expect(memory.credit({ id: 's-ok2', cwd })).toEqual({ helped: 1 });
+    expect(memory.credit({ id: 'none', cwd })).toEqual({ helped: 0 });
+    const notes = memory.list(cwd).notes;
+    expect(notes.find((x) => x.id === good.id)).toMatchObject({ helpful: 2, standing: 'confirmed' });
+    expect(notes.find((x) => x.id === bad.id)?.standing).toBe('fresh');
+    const handed = memory.inject(cwd);
+    expect(handed.ids.slice(0, 2)).toEqual([pinned.id, good.id]);
+    expect(handed.ids).toContain(fresh.id);
+    expect(handed.ids).toContain(bad.id);
+    expect(handed.text).toContain('CLAUDE.md and your own memory come first');
+    store.deleteMeta('s-ok');
+    store.deleteMeta('s-ok2');
+  });
+
+  it("skips what CLAUDE.md or Claude Code's own memory already says", () => {
+    const cwd = path.join(process.env.HOME || '', `proj-${++n}`);
+    fs.mkdirSync(cwd, { recursive: true });
+    fs.writeFileSync(path.join(cwd, 'CLAUDE.md'), '# Rules\n\n- Use pnpm, never npm, in this repository.\n');
+    const memDir = path.join(memory.claudeProjectDir(cwd), 'memory');
+    fs.mkdirSync(memDir, { recursive: true });
+    fs.writeFileSync(path.join(memDir, 'ports.md'), '---\nname: ports\n---\n\nThe dev server listens on port 5173 and the API on 8787.\n');
+    memory.add(cwd, { text: 'Use pnpm and never npm in this repository', kind: 'auto' });
+    memory.add(cwd, { text: 'The dev server listens on port 5173, the API on 8787', kind: 'auto' });
+    const kept = memory.add(cwd, { text: 'The fixtures under test/fixtures are generated; edit the generator', kind: 'auto' });
+    expect(memory.inject(cwd).ids).toEqual([kept.id]);
+    expect(memory.similar('Tests need Docker to be running locally', 'Docker must be running locally for the tests')).toBe(true);
+    expect(memory.similar('Tests need Docker to be running locally', 'The API returns cents, not dollars')).toBe(false);
+    expect(memory.similar('extra 0', 'extra 1')).toBe(false); // short notes must match word for word
+    expect(memory.similar('Use pnpm', 'use pnpm.')).toBe(true);
+  });
+
+  it('turns a correction into a rule and counts the notes that misled', async () => {
+    const cwd = project();
+    const misleading = memory.add(cwd, { text: 'Prices are stored in dollars', kind: 'auto' });
+    const fine = memory.add(cwd, { text: 'Tests run with vitest', kind: 'auto' });
+    store.setMeta('s-rej', { playbook: [misleading.id, fine.id], title: 'Fix the cart total', report: { did: 'Rounded the totals', unverified: '', turn: 5 }, turnEnd: 5 });
+    sdk.reply = '- Prices are stored in cents; divide by 100 only when rendering.\n- Tests run with vitest\nMISLED: 1';
+    const r = await memory.reflect({ id: 's-rej', cwd, messages: [] }, 'No — the API already returns cents, you rounded twice.');
+    expect(r.misled).toEqual([misleading.id]);
+    expect(r.added.map((x: any) => [x.text, x.source])).toEqual([['Prices are stored in cents; divide by 100 only when rendering.', 'reject']]);
+    expect(sdk.prompts.at(-1)).toContain('1. Prices are stored in dollars');
+    expect(sdk.prompts.at(-1)).toContain('Did: Rounded the totals');
+    sdk.reply = 'MISLED: 1';
+    await memory.reflect({ id: 's-rej', cwd, messages: [] }, 'Still wrong.');
+    const notes = memory.list(cwd).notes;
+    expect(notes.find((x) => x.id === misleading.id)).toMatchObject({ harmful: 2, standing: 'retired' });
+    expect(memory.inject(cwd).ids).not.toContain(misleading.id);
+    expect(await memory.reflect({ id: 's-rej', cwd, messages: [] }, '')).toEqual({ added: [], misled: [] });
+    store.deleteMeta('s-rej');
+  });
+});
+
 describe('the notes file', () => {
   it('is written off the event loop, and at once on quit', async () => {
     const cwd = project();

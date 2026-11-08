@@ -423,8 +423,11 @@ class Session {
     this.emitState();
     const meta = this.meta;
     const input = new AsyncQueue();
-    // What earlier sessions in this project learned rides along in the system prompt.
-    const memoryText = cfg.memoryInject === false ? '' : memory.promptFor(memory.projectOf(this));
+    // What earlier sessions in this project learned rides along in the system prompt; which notes went
+    // along is kept, so an approval or a correction on the workboard can count for or against them.
+    const handed = cfg.memoryInject === false ? { text: '', ids: [] } : memory.inject(memory.projectOf(this));
+    const memoryText = handed.text;
+    store.setMeta(this.id, { playbook: handed.ids });
     // …and the repositories the person registered, so their own names for them land in the right folders;
     // finished work ends with a handoff section the workboard reads (docs/WORKBOARD.md §6).
     const appendText = [memoryText + repos.promptFor(), cfg.handoffReport === false ? '' : handoff.HANDOFF_PROMPT].filter(Boolean).join('\n\n');

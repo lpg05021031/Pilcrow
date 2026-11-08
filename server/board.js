@@ -7,6 +7,7 @@ import { store } from './config.js';
 import { sessions, bus, costLog } from './sessions.js';
 import * as git from './git.js';
 import * as schedules from './schedules.js';
+import * as memory from './memory.js';
 import { which, run, log } from './util.js';
 
 const DECISIONS = new Set(['approve', 'reject', 'answer', 'park', 'wait', 'wake', 'stop', 'start', 'steer']);
@@ -312,6 +313,12 @@ export async function decide(id, { kind, note = '', turn }) {
     store.setMeta(id, { reviewedTurn: meta.turnEnd || at });
     bus.emit('list-changed');
     wakeDependents(id).catch(() => {});
+    // The notes this session read stood up to your review (docs/PLAYBOOK.md §4).
+    try {
+      memory.credit(s);
+    } catch (e) {
+      log('memory credit failed', id, e?.message);
+    }
     return { ok: true, commit, output: r.output };
   }
   if (kind === 'reject' || kind === 'answer') {
@@ -319,6 +326,8 @@ export async function decide(id, { kind, note = '', turn }) {
     record(id, { at, kind, note: text, turn: forTurn });
     store.setMeta(id, { reviewedTurn: meta.turnEnd || at });
     bus.emit('list-changed');
+    // A correction may hold a rule for later sessions; the run that reads it must not hold up the reply.
+    if (kind === 'reject') memory.reflect(s, text).catch((e) => log('memory reflect failed', id, e?.message));
     await s.send({ text });
     return { ok: true };
   }

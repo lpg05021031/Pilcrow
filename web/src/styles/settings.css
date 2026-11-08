@@ -445,6 +445,10 @@
   box-shadow: var(--card-shadow);
   position: relative;
 }
+.mem-note.retired .mem-text {
+  color: var(--text-3);
+  text-decoration: line-through;
+}
 .mem-note.pinned .mem-text::before {
   content: '';
   display: inline-block;
