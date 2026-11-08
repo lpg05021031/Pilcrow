@@ -2,6 +2,7 @@ import { memo, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { EASE, reducedMotion } from '../lib/motion';
 import { Plus, Search, Settings, Sun, Moon, Monitor, ChevronRight, Archive, FolderGit2, GitBranch, Pin, Ellipsis, Pencil, GitFork, Trash, PinOff, ArchiveRestore, X, SquarePen, SlidersHorizontal, PanelLeftClose, LayoutGrid, Inbox } from 'lucide-react';
 import { foldingRows, useStore, openSession, setDialog, setTheme, setUi, archiveSession, pinSession, forkSession, deleteSession, confirmAction, renameSession, quickNewSession, showPage } from '../lib/store';
+import { laneOf } from '../lib/board';
 import type { SessionSummary } from '../lib/types';
 import { basename, timeAgo, tildify } from '../lib/format';
 import { fuzzyScore } from '../lib/fuzzy';
@@ -40,7 +41,7 @@ export function Sidebar() {
     if (q.trim()) list = list.filter((s) => fuzzyScore(q, `${s.title} ${basename(s.project || s.cwd)}`));
     // The conversation on screen never jumps into "Needs you": you are already looking at it, and its
     // row shows the amber mark where it is. Only other sessions gather there.
-    const attention = list.filter((s) => s.id !== activeId && (s.status === 'requires_action' || (s.pending || 0) > 0));
+    const attention = list.filter((s) => s.id !== activeId && laneOf(s) === 'me');
     const pinned = list.filter((s) => s.pinned && !attention.includes(s));
     const rest = list.filter((s) => !attention.includes(s) && !pinned.includes(s));
     const map = new Map<string, Group>();
@@ -53,7 +54,7 @@ export function Sidebar() {
     return { attention, pinned, groups, archivedCount: sessions.filter((s) => s.archived).length };
   }, [sessions, q, ui.showArchived, activeId]);
   const working = sessions.filter((s) => !s.archived && (s.status === 'running' || s.status === 'starting')).length;
-  const needsAll = sessions.filter((s) => !s.archived && (s.status === 'requires_action' || (s.pending || 0) > 0)).length;
+  const needsAll = sessions.filter((s) => laneOf(s) === 'me').length;
 
   const theme = config?.theme || 'system';
   const nextTheme = theme === 'system' ? 'dark' : theme === 'dark' ? 'light' : 'system';
@@ -89,9 +90,9 @@ export function Sidebar() {
           )}
         </label>
         <div className="side-pages">
-          <button className={`side-page${page === 'overview' ? ' on' : ''}`} onClick={() => showPage(page === 'overview' ? 'session' : 'overview')} title="Every session at a glance (Ctrl+Shift+O)">
+          <button className={`side-page${page === 'board' ? ' on' : ''}`} onClick={() => showPage(page === 'board' ? 'session' : 'board')} title="The workboard: every piece of work by whose hands it is in (Ctrl+Shift+O)">
             <LayoutGrid size={15} />
-            <span className="grow">Control room</span>
+            <span className="grow">Workboard</span>
             {needsAll > 0 ? <span className="side-page-n needs tnum">{needsAll}</span> : working > 0 ? <span className="side-page-n tnum">{working}</span> : null}
           </button>
           <button className={`side-page${page === 'inbox' ? ' on' : ''}`} onClick={() => showPage(page === 'inbox' ? 'session' : 'inbox')} title="Results of scheduled sessions">

@@ -9,6 +9,7 @@ import { resolveClaude } from './claude.js';
 import * as history from './history.js';
 import * as snapshots from './snapshots.js';
 import * as memory from './memory.js';
+import { boardFields } from './board.js';
 import * as git from './git.js';
 import { AsyncQueue, uuid, IS_ROOT, log, xdg, slugify, cleanEnv, slash } from './util.js';
 
@@ -412,7 +413,10 @@ class Session {
         const entry = (model && mu[model]) || Object.values(mu)[0];
         if (entry?.contextWindow) this.usage.contextWindow = entry.contextWindow;
         this.usage.outputTokens = Object.values(mu).reduce((s, x) => s + (x.outputTokens || 0), 0);
-        store.setMeta(this.id, { contextWindow: this.usage.contextWindow || null, costUsd: this.usage.costUsd || null, turnEnd: Date.now() });
+        const turnEnd = Date.now();
+        // A turn the board stopped is reviewed by that very decision; its end must not ask for review again.
+        store.setMeta(this.id, { contextWindow: this.usage.contextWindow || null, costUsd: this.usage.costUsd || null, turnEnd, ...(this.autoReview ? { reviewedTurn: turnEnd } : {}) });
+        this.autoReview = false;
         this.markDelivered(msg.user_message_uuids || (msg.user_message_uuid ? [msg.user_message_uuid] : null));
         if (!(msg.queued_turn_count > 0)) {
           this.status = 'idle';
@@ -948,6 +952,7 @@ class SessionManager {
         pinned: Boolean(meta.pinned),
         worktree: meta.worktree || null,
         scheduled: meta.scheduled || null,
+        ...boardFields(meta),
         status: 'stopped',
         live: false,
       });
@@ -967,6 +972,7 @@ class SessionManager {
         pinned: Boolean(meta.pinned),
         worktree: meta.worktree || null,
         scheduled: meta.scheduled || null,
+        ...boardFields(meta),
         status: 'idle',
         live: false,
       });

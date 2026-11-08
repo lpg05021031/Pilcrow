@@ -5,7 +5,7 @@ import { Sidebar } from './Sidebar';
 import { SessionView } from './SessionView';
 import { RightPanel } from './RightPanel';
 import { Welcome } from './Welcome';
-import { Overview } from './Overview';
+import { Board } from './Board';
 import { InboxPage } from './Inbox';
 import { NewSessionDialog } from './NewSessionDialog';
 import { SettingsDialog } from './SettingsDialog';
@@ -29,7 +29,7 @@ export function App() {
   const waiting = sessions.filter((s) => s.status === 'requires_action').length;
 
   useEffect(() => {
-    document.title = `${waiting ? `(${waiting}) ` : ''}${page === 'overview' ? 'Control room — ' : page === 'inbox' ? 'Inbox — ' : session ? `${session.title} — ` : ''}Pilcrow`;
+    document.title = `${waiting ? `(${waiting}) ` : ''}${page === 'board' ? 'Workboard — ' : page === 'inbox' ? 'Inbox — ' : session ? `${session.title} — ` : ''}Pilcrow`;
   }, [waiting, session?.title, page]); // eslint-disable-line react-hooks/exhaustive-deps -- only the title is read
 
   useEffect(() => {
@@ -51,7 +51,7 @@ export function App() {
         cycleView();
       } else if (mod && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'o') {
         e.preventDefault();
-        showPage(st.page === 'overview' ? 'session' : 'overview');
+        showPage(st.page === 'board' ? 'session' : 'board');
       } else if (mod && e.key === '\\') {
         e.preventDefault();
         setUi({ panel: !st.ui.panel });
@@ -86,6 +86,8 @@ export function App() {
         const target = e.target as HTMLElement;
         const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
         if (!typing && (rt?.status === 'running' || rt?.status === 'starting')) interrupt(st.activeId);
+        // A session opened from the workboard goes back to it, on the same card.
+        else if (!typing && st.page === 'session' && st.ui.returnTo === 'board') showPage('board');
       }
     };
     window.addEventListener('keydown', onKey);
@@ -140,7 +142,7 @@ export function App() {
           </div>
         )}
         <UpdateNotice />
-        {page === 'overview' ? <Overview /> : page === 'inbox' ? <InboxPage /> : session ? <SessionView key={session.id} session={session} /> : <Welcome />}
+        {page === 'board' ? <Board /> : page === 'inbox' ? <InboxPage /> : session ? <SessionView key={session.id} session={session} /> : <Welcome />}
         <Toasts />
       </main>
       {panelOpen && <Resizer side="right" onResize={resizePanel} />}

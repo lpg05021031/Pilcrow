@@ -1,0 +1,627 @@
+/* ================================================================ workboard
+   One lane per pair of hands the work can be in; one card per session that is work. The lanes are
+   quiet insets on the page; a card is a raised surface with a hairline. The accent is spent on one
+   thing: the lane and the cards that need you. docs/WORKBOARD.md. */
+.board-page {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--canvas);
+}
+
+/* the strip: today's date and five figures */
+.bd-strip {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  padding: 14px 20px 8px;
+  min-height: var(--header-h);
+}
+.bd-strip .head-sidebar {
+  align-self: center;
+}
+.bd-title {
+  font-size: var(--fs-title);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0 4px 0 0;
+}
+.bd-fact {
+  font-size: var(--fs-small);
+  color: var(--text-2);
+}
+.bd-fact b {
+  font-weight: 500;
+  color: var(--text);
+}
+.bd-fact.hot b {
+  color: var(--accent-text);
+}
+.bd-limit.full b {
+  color: var(--warn);
+}
+
+/* the andon: only when Claude stopped and cannot go on */
+.bd-andon {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 20px 4px;
+  padding: 7px 12px;
+  border-radius: var(--r-3);
+  background: var(--err-wash);
+  color: var(--err);
+  font-size: var(--fs-small);
+  text-align: left;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--err) 30%, transparent);
+}
+.bd-andon b {
+  font-weight: 600;
+}
+.bd-andon > span.ellipsis {
+  color: var(--text-2);
+  min-width: 0;
+}
+.bd-andon-go {
+  margin-left: auto;
+  flex: none;
+}
+
+.bd-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* lanes */
+.bd-lanes {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(224px, 1fr);
+  gap: 12px;
+  padding: 8px 20px 44px;
+  overflow: auto;
+  align-items: start;
+}
+.bd-lane {
+  display: flex;
+  flex-direction: column;
+  min-height: 120px;
+  max-height: 100%;
+  border-radius: var(--r-3);
+  background: var(--inset);
+  box-shadow: inset 0 0 0 0.5px var(--hair);
+}
+.bd-lane-h {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 10px 5px 12px;
+  font-size: var(--fs-small);
+  font-weight: 600;
+  color: var(--text-2);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--inset);
+  border-radius: var(--r-3) var(--r-3) 0 0;
+}
+.bd-lane-mark {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--hair-3);
+}
+.bd-lane.agent .bd-lane-mark {
+  background: var(--info);
+}
+.bd-lane.wait .bd-lane-mark {
+  background: var(--text-4);
+}
+.bd-lane.me .bd-lane-mark {
+  background: var(--accent);
+}
+.bd-lane.me .bd-lane-title {
+  color: var(--accent-text);
+}
+.bd-lane.done .bd-lane-mark {
+  background: var(--ok);
+}
+.bd-lane-key {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  font-weight: 500;
+  color: var(--text-4);
+}
+.bd-lane-n {
+  font-weight: 500;
+  color: var(--text-4);
+}
+.bd-lane-n.full {
+  color: var(--warn);
+}
+.bd-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 8px 10px;
+  overflow: auto;
+  min-height: 0;
+}
+.bd-empty {
+  color: var(--text-4);
+  font-size: var(--fs-small);
+  padding: 8px 6px 6px;
+}
+
+/* cards */
+.bd-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 9px 10px 8px 12px;
+  border-radius: var(--r-2);
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+  cursor: pointer;
+  transition:
+    box-shadow var(--t-fast) var(--ease),
+    transform var(--t-fast) var(--ease);
+}
+.bd-card:hover {
+  box-shadow: var(--card-shadow-hover);
+}
+.bd-card.sel {
+  box-shadow:
+    0 0 0 1.5px var(--accent),
+    var(--card-shadow);
+}
+.bd-card:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 1px;
+}
+.bd-stripe {
+  position: absolute;
+  left: 0;
+  top: 9px;
+  bottom: 9px;
+  width: 3px;
+  border-radius: 2px;
+}
+.bd-card.review .bd-stripe {
+  background: var(--accent);
+}
+.bd-card.prompt .bd-stripe {
+  background: var(--warn);
+}
+.bd-card.running .bd-stripe {
+  background: var(--info);
+}
+.bd-card.stuck .bd-stripe {
+  background: var(--err);
+}
+.bd-card-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-micro);
+  color: var(--text-4);
+  font-family: var(--font-mono);
+}
+.bd-card-top .ellipsis {
+  min-width: 0;
+}
+.bd-chip {
+  margin-left: auto;
+  flex: none;
+  font-family: var(--font-ui);
+  font-size: var(--fs-micro);
+  font-weight: 500;
+  line-height: 16px;
+  padding: 0 6px;
+  border-radius: var(--r-5);
+  background: var(--fill-1);
+  color: var(--text-2);
+}
+.bd-chip.review {
+  background: var(--accent-wash);
+  color: var(--accent-text);
+}
+.bd-chip.prompt {
+  background: var(--warn-wash);
+  color: var(--warn);
+}
+.bd-chip.running {
+  background: var(--info-wash);
+  color: var(--info);
+}
+.bd-chip.stuck {
+  background: var(--err-wash);
+  color: var(--err);
+}
+.bd-chip.done {
+  background: var(--ok-wash);
+  color: var(--ok);
+}
+.bd-card-title {
+  font-size: var(--fs-ui);
+  font-weight: 500;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-wrap: pretty;
+}
+.bd-card-line {
+  font-size: var(--fs-small);
+  color: var(--text-3);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.bd-card-line.ask {
+  color: var(--accent-text);
+}
+.bd-card-line.err {
+  color: var(--err);
+}
+.bd-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 14px;
+  font-size: var(--fs-micro);
+  color: var(--text-4);
+}
+.bd-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.bd-av {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: inline-grid;
+  place-items: center;
+  font-size: 9px;
+  font-weight: 600;
+  background: var(--info-wash);
+  color: var(--info);
+  flex: none;
+}
+.bd-av.me {
+  width: auto;
+  padding: 0 5px;
+  border-radius: var(--r-5);
+  background: var(--accent-wash);
+  color: var(--accent-text);
+}
+.bd-delta {
+  font-family: var(--font-mono);
+}
+.bd-delta .add,
+.bd-report .add {
+  color: var(--ok);
+}
+.bd-delta .del,
+.bd-report .del {
+  color: var(--err);
+}
+
+/* the panel */
+.bd-panel {
+  width: 360px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-left: 1px solid var(--hair);
+  background: var(--chrome);
+  margin-bottom: 32px;
+}
+.bd-panel-h {
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid var(--hair);
+}
+.bd-panel-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--text-4);
+}
+.bd-panel-meta .ellipsis {
+  flex: 1;
+  min-width: 0;
+}
+.bd-panel-title {
+  margin: 4px 0 4px;
+  font-size: var(--fs-title);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+  text-wrap: balance;
+}
+.bd-panel-where {
+  font-size: var(--fs-small);
+  color: var(--text-3);
+}
+.bd-panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.bd-sec h4 {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 0 5px;
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-4);
+}
+.bd-sec h4 .icon-btn {
+  opacity: 0;
+  transition: opacity var(--t-fast);
+}
+.bd-sec:hover h4 .icon-btn,
+.bd-sec h4 .icon-btn:focus-visible {
+  opacity: 1;
+}
+.bd-intent {
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.bd-intent.err {
+  color: var(--err);
+}
+.bd-hint {
+  margin: 0;
+  font-size: var(--fs-small);
+  color: var(--text-4);
+}
+
+.bd-report {
+  background: var(--raised);
+  box-shadow: 0 0 0 0.5px var(--hair-2);
+  border-radius: var(--r-3);
+  padding: 8px 12px 10px;
+}
+.bd-report dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr);
+  gap: 6px 10px;
+  font-size: var(--fs-small);
+}
+.bd-report dt {
+  color: var(--text-4);
+}
+.bd-report dd {
+  margin: 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.bd-report dd.mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro);
+  color: var(--text-2);
+}
+.bd-report dd.warn {
+  color: var(--warn);
+}
+.bd-report dd.ask {
+  color: var(--accent-text);
+  font-weight: 500;
+}
+
+.bd-ledger {
+  position: relative;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.bd-ledger::before {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 6px;
+  bottom: 6px;
+  width: 1px;
+  background: var(--hair-2);
+}
+.bd-ev {
+  position: relative;
+  font-size: var(--fs-small);
+  color: var(--text-2);
+}
+.bd-ev::before {
+  content: '';
+  position: absolute;
+  left: -15px;
+  top: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-4);
+  box-shadow: 0 0 0 2px var(--chrome);
+}
+.bd-ev.tone-me::before {
+  background: var(--accent);
+}
+.bd-ev.tone-run::before {
+  background: var(--info);
+}
+.bd-ev.tone-ok::before {
+  background: var(--ok);
+}
+.bd-ev.tone-err::before {
+  background: var(--err);
+}
+.bd-ev b {
+  color: var(--text);
+  font-weight: 500;
+}
+.bd-ev-when {
+  margin-left: 6px;
+  color: var(--text-4);
+  font-size: var(--fs-micro);
+}
+.bd-ev-note {
+  display: block;
+  margin-top: 2px;
+  padding-left: 8px;
+  border-left: 2px solid var(--hair-2);
+  color: var(--text-3);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.bd-perm-well {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: var(--r-2);
+  background: var(--inset);
+  box-shadow: inset 0 0 0 0.5px var(--hair);
+}
+.bd-perm-tool {
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  color: var(--text-3);
+}
+.bd-perm-what {
+  font-size: var(--fs-small);
+  overflow-wrap: anywhere;
+}
+.bd-perm-what.mono {
+  font-family: var(--font-mono);
+  font-size: var(--mono-size);
+}
+.bd-perm-wait {
+  margin-top: 4px;
+  font-size: var(--fs-micro);
+}
+.bd-perm-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  align-items: center;
+}
+.bd-perm-row.ok {
+  color: var(--ok);
+  font-size: var(--fs-small);
+}
+
+.bd-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--hair);
+  background: var(--chrome);
+}
+.bd-actions .btn .key {
+  margin-left: 4px;
+}
+.bd-actions-cost {
+  margin-left: auto;
+  font-size: var(--fs-micro);
+}
+.bd-note {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.bd-note-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.bd-note-row .bd-hint {
+  margin-left: auto;
+}
+
+/* the key legend */
+.bd-keys {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 14px;
+  padding: 6px 16px;
+  font-size: var(--fs-micro);
+  color: var(--text-4);
+  background: color-mix(in srgb, var(--canvas) 88%, transparent);
+  backdrop-filter: blur(10px);
+  border-top: 1px solid var(--hair);
+  pointer-events: none;
+}
+.bd-keys span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.bd-keys kbd {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.4;
+  padding: 0 4px;
+  border-radius: var(--r-1);
+  background: var(--fill-1);
+  box-shadow: 0 0 0 0.5px var(--hair-2);
+  color: var(--text-3);
+}
+
+@media (max-width: 1100px) {
+  .bd-panel {
+    width: 320px;
+  }
+}
+@media (max-width: 900px) {
+  .bd-body {
+    position: relative;
+  }
+  .bd-panel {
+    position: absolute;
+    inset: 0 0 0 auto;
+    width: min(92%, 380px);
+    box-shadow: var(--shadow-float);
+    margin-bottom: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bd-card {
+    transition: none;
+  }
+}

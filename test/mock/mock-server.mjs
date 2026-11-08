@@ -74,8 +74,13 @@ const now = Date.now();
 /** @type {Map<string, Sess>} */
 const sessions = new Map();
 class Sess {
-  constructor({ id, title, cwd, touched, archived = false, pinned = false, messages = [] }) {
+  constructor({ id, title, cwd, touched, archived = false, pinned = false, messages = [], intent, turnEnd, reviewedTurn, decisions = [] }) {
     this.id = id;
+    // workboard (docs/WORKBOARD.md): a session with an intent is a card
+    this.intent = intent;
+    this.turnEnd = turnEnd;
+    this.reviewedTurn = reviewedTurn;
+    this.decisions = decisions;
     this.title = title;
     this.cwd = cwd;
     this.touched = touched;
@@ -105,7 +110,7 @@ class Sess {
     this.extra = {}; // fields the tests lay over state() (mock.patch): tasks, mcp, …
   }
   summary() {
-    return { id: this.id, title: this.title, firstPrompt: this.messages[0]?.message?.content?.[0]?.text, cwd: this.cwd, project: this.cwd, gitBranch: 'main', lastModified: this.touched, createdAt: this.createdAt, archived: this.archived, pinned: this.pinned, worktree: null, scheduled: null, status: this.status, live: this.live, pending: this.pending.size };
+    return { id: this.id, title: this.title, firstPrompt: this.messages[0]?.message?.content?.[0]?.text, cwd: this.cwd, project: this.cwd, gitBranch: 'main', lastModified: this.touched, createdAt: this.createdAt, archived: this.archived, pinned: this.pinned, worktree: null, scheduled: null, intent: this.intent, turnEnd: this.turnEnd, reviewedTurn: this.reviewedTurn, decisions: this.decisions.length ? this.decisions : undefined, costUsd: this.usage.costUsd || undefined, status: this.status, live: this.live, pending: this.pending.size };
   }
   state() {
     return {
@@ -143,7 +148,7 @@ function seed() {
   seq = 0;
   const t0 = now - 2 * 3600e3;
   const s1 = new Sess({
-    id: 'sess-login', title: 'Fix the login redirect bug', cwd: PROJ, touched: now - 25 * 60e3,
+    id: 'sess-login', title: 'Fix the login redirect bug', cwd: PROJ, touched: now - 25 * 60e3, intent: 'Signing in should return people to the page they came from. Done when the `next` parameter survives the form and the tests pass.', turnEnd: now - 25 * 60e3,
     messages: [
       ...turn('sess-login', t0, { prompt: 'The login page redirects to /undefined after signing in. Can you find out why?', narration: "I'll look at how the redirect target is read after sign-in.", tools: [GREP('redirect'), READ('web/src/lib/auth.ts', 120), READ('server/routes/login.js', 88)], reply: 'The redirect target comes from `?next=` but the login form never forwards that parameter, so `next` is undefined by the time the server redirects. The fix is to carry it through the form as a hidden field.' }),
       ...turn('sess-login', t0 + 15 * 60e3, { prompt: 'Please fix it and run the tests.', narration: 'Adding the hidden field and a guard on the server side.', tools: [EDIT('web/src/lib/auth.ts', "const next = params.get('next')", "const next = params.get('next') || '/'"), BASH('npm test', 'Run the test suite', 'Test Suites: 12 passed\nTests: 148 passed')], reply: 'Done. The form now forwards `next`, the server falls back to `/` when it is missing, and all 148 tests pass.' }),
@@ -151,12 +156,12 @@ function seed() {
     ],
   });
   const s2 = new Sess({
-    id: 'sess-tests', title: 'Write tests for the parser', cwd: PROJ, touched: now - 3 * 3600e3,
+    id: 'sess-tests', title: 'Write tests for the parser', cwd: PROJ, touched: now - 3 * 3600e3, intent: 'Unit tests for lib/partialJson.ts covering the cases the transcript relies on.', turnEnd: now - 3 * 3600e3, reviewedTurn: now - 3 * 3600e3, decisions: [{ at: now - 3 * 3600e3 + 90e3, kind: 'approve', commit: '7f3a9c1', turn: now - 3 * 3600e3 }],
     messages: [...turn('sess-tests', now - 3.5 * 3600e3, { prompt: 'Write unit tests for lib/partialJson.ts', tools: [READ('web/src/lib/partialJson.ts', 40), { ...EDIT('test/unit/partialJson.test.ts', '', ''), name: 'Write', input: { file_path: `${PROJ}/test/unit/partialJson.test.ts`, content: 'import { describe } from "vitest";' } }, BASH('npx vitest run', 'Run the unit tests', 'Tests 8 passed')], reply: 'Eight tests cover complete JSON, open strings, nested containers, dangling keys and escapes. They all pass.' })],
   });
   const s3 = new Sess({ id: 'sess-site', title: 'Deploy the marketing site', cwd: OTHER, touched: now - 1 * DAY, messages: [...turn('sess-site', now - DAY - 600e3, { prompt: 'Deploy to staging', tools: [BASH('npm run deploy:staging', 'Deploy', 'Deployed https://staging.example.com')], reply: 'Deployed to staging.' })] });
   const s4 = new Sess({ id: 'sess-old', title: 'Old archived exploration', cwd: OTHER, touched: now - 9 * DAY, archived: true, messages: [...turn('sess-old', now - 9 * DAY, { prompt: 'Explain the build', reply: 'It uses Vite.' })] });
-  const s5 = new Sess({ id: 'sess-empty', title: 'New session', cwd: PROJ, touched: now - 40 * 60e3 });
+  const s5 = new Sess({ id: 'sess-empty', title: 'New session', cwd: PROJ, touched: now - 40 * 60e3, intent: 'Add j / k keyboard movement to the Needs you section of the sidebar.' });
   for (const s of [s1, s2, s3, s4, s5]) sessions.set(s.id, s);
   if (LONG > 0) {
     const msgs = [];
@@ -306,6 +311,11 @@ async function runTurn(s, text) {
   }
   if (s.turnSeq !== mine) return;
   s.status = 'idle';
+  s.turnEnd = Date.now();
+  if (s.autoReview) {
+    s.reviewedTurn = s.turnEnd;
+    s.autoReview = false;
+  }
   s.activity = null;
   s.turnStartedAt = null;
   s.inflight = [];
@@ -481,12 +491,42 @@ const methods = {
   'project.fileHistory': () => ({}),
   'schedules.list': () => [],
   'inbox.list': () => ({ unread: 0, items: [] }),
+  'board.state': () => methods['fleet.state'](),
+  'session.intent': ({ id, intent }) => {
+    S(id).intent = String(intent || '').trim() || undefined;
+    listChanged();
+    return { intent: S(id).intent || '' };
+  },
+  'session.decide': ({ id, kind, note = '' }) => {
+    const s = S(id);
+    const at = Date.now();
+    const d = { at, kind, note: note || undefined, turn: s.turnEnd };
+    if (kind === 'approve') d.commit = 'c0ffee1';
+    s.decisions = [...s.decisions, d];
+    if (kind === 'approve' || kind === 'park' || kind === 'reject' || kind === 'answer') s.reviewedTurn = s.turnEnd || at;
+    if (kind === 'stop') {
+      s.reviewedTurn = s.turnEnd || at;
+      s.autoReview = true;
+      s.aborted = true;
+    }
+    listChanged();
+    if (kind === 'reject' || kind === 'answer') methods['session.send']({ id, text: note });
+    return { ok: true, commit: d.commit || null };
+  },
+  'session.start': ({ id, text }) => {
+    const s = S(id);
+    s.decisions = [...s.decisions, { at: Date.now(), kind: 'start' }];
+    listChanged();
+    return { ok: true, uuid: methods['session.send']({ id, text: text || s.intent || '' }) };
+  },
   'fleet.state': () => {
     const live = Object.fromEntries([...sessions.values()].filter((s) => s.live).map((s) => [s.id, s.state()]));
     const dayStart = new Date();
     dayStart.setHours(0, 0, 0, 0);
     const perSession = [...sessions.values()].filter((s) => s.touched >= dayStart.getTime() && s.usage.costUsd > 0).map((s) => ({ id: s.id, title: s.title, cost: s.usage.costUsd })).sort((a, b) => b.cost - a.cost);
-    return { live, today: { cost: perSession.reduce((a, b) => a + b.cost, 0), sessions: perSession.length, perSession: perSession.slice(0, 8) }, spend: perSession.map((p) => ({ at: Date.now() - 600e3, id: p.id, delta: p.cost })) };
+    const done = [...sessions.values()].filter((s) => s.decisions.at(-1)?.kind === 'approve' && s.decisions.at(-1).at >= dayStart.getTime()).length;
+    const running = [...sessions.values()].filter((s) => s.status === 'running' || s.status === 'starting').length;
+    return { live, today: { cost: perSession.reduce((a, b) => a + b.cost, 0), sessions: perSession.length, done, perSession: perSession.slice(0, 8) }, spend: perSession.map((p) => ({ at: Date.now() - 600e3, id: p.id, delta: p.cost })), limit: { max: 3, running } };
   },
   'timeline.steps': ({ id }) => ({ cwd: S(id).cwd, enabled: false, reason: 'Timeline is off in the mock', steps: [] }),
   'models.gateway': () => ({ ok: true, base: 'https://gateway.example.com', url: 'https://gateway.example.com/v1/models', models: [{ id: 'claude-mock-1', displayName: 'Claude Mock 1', created: null }, { id: 'claude-mock-fast', displayName: 'Claude Mock Fast', created: null }], fetchedAt: Date.now() }),

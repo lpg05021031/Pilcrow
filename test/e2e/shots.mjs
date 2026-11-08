@@ -103,7 +103,10 @@ try {
   await key('Escape', 400);
 
   await key('Control+Shift+O', 900);
-  await shot('overview');
+  await shot('board');
+  await page.click('.bd-card[data-card="sess-login"]');
+  await sleep(500);
+  await shot('board-panel');
   await page.click('button[title="Results of scheduled sessions"]');
   await sleep(900);
   await shot('inbox');

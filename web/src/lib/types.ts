@@ -28,6 +28,45 @@ export interface SessionSummary {
   pending?: number;
   /** Started by a schedule; such sessions live in the inbox rather than the sidebar. */
   scheduled?: { id: string; name: string; at: number; manual?: boolean } | null;
+  // ---- workboard (docs/WORKBOARD.md). All optional; a plain conversation has none of them.
+  /** Two or three sentences on what the work is and when it is done. A session with one is a card. */
+  intent?: string;
+  /** When Claude's last turn ended. */
+  turnEnd?: number;
+  /** The turn end you last reviewed; equal to `turnEnd` means this turn has been dealt with. */
+  reviewedTurn?: number;
+  /** Your decisions on the card, oldest first. */
+  decisions?: Decision[];
+  costUsd?: number;
+  wait?: WaitCondition | null;
+  report?: HandoffReport | null;
+}
+
+export type DecisionKind = 'approve' | 'reject' | 'answer' | 'park' | 'wait' | 'wake' | 'stop' | 'start' | 'steer';
+export interface Decision {
+  at: number;
+  kind: DecisionKind;
+  /** The rejection comment, the answer, the steer, or the wait condition described. */
+  note?: string;
+  /** The commit an approval made. */
+  commit?: string;
+  /** The turn end the decision was about. */
+  turn?: number;
+}
+export type WaitCondition = { kind: 'time'; at: number; prompt?: string } | { kind: 'ci'; cwd: string; branch: string; prompt?: string; since: number } | { kind: 'session'; id: string; prompt?: string };
+export interface HandoffReport {
+  asked: string;
+  did: string;
+  files: { path: string; add: number; del: number }[];
+  unverified: string;
+  ask: string;
+  turn: number;
+}
+export interface BoardState {
+  live: Record<string, SessionState>;
+  today: { cost: number; sessions: number; done: number; perSession: { id: string; title: string; cost: number }[] };
+  spend: { at: number; id: string; delta: number }[];
+  limit: { max: number; running: number };
 }
 
 export interface PermissionSuggestion {
@@ -233,6 +272,7 @@ export interface Config {
   memoryAuto?: boolean;
   memoryInject?: boolean;
   memoryModel?: string;
+  maxConcurrent?: number;
   recentProjects: string[];
   ui: Record<string, unknown>;
 }

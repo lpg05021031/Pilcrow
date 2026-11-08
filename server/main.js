@@ -11,7 +11,7 @@ import { resolveSettings } from '@anthropic-ai/claude-agent-sdk';
 import { store, CONFIG_DIR } from './config.js';
 import { resolveClaude } from './claude.js';
 import { gatewayModels } from './models.js';
-import { sessions, bus, costLog } from './sessions.js';
+import { sessions, bus } from './sessions.js';
 import * as history from './history.js';
 import * as git from './git.js';
 import * as files from './files.js';
@@ -20,6 +20,7 @@ import * as customize from './customize.js';
 import * as snapshots from './snapshots.js';
 import * as schedules from './schedules.js';
 import * as memory from './memory.js';
+import * as board from './board.js';
 import { which, log, xdg, HOME, IS_ROOT, IS_WIN, slash, readJson, writeJson, debounce, expandHome, run, privateDir } from './util.js';
 
 // Old environment variable names keep working after the rename.
@@ -242,24 +243,11 @@ export async function start({ shell = 'none', port, quiet = false, onQuit } = {}
     'inbox.markRead': ({ ids }) => schedules.markRead(ids || null),
     'inbox.remove': ({ id }) => schedules.removeItem(id),
     // ---- control room: every live session at a glance, plus spend
-    'fleet.state': async () => {
-      const list = await sessions.list();
-      const live = Object.fromEntries(sessions.live().map((s) => [s.id, s.state()]));
-      const dayStart = new Date();
-      dayStart.setHours(0, 0, 0, 0);
-      let todayCost = 0;
-      let todaySessions = 0;
-      const perSession = [];
-      for (const s of list) {
-        const m = store.getMeta(s.id) || {};
-        if ((s.lastModified || 0) >= dayStart.getTime() && m.costUsd) {
-          todayCost += m.costUsd;
-          todaySessions++;
-          perSession.push({ id: s.id, title: s.title, cost: m.costUsd });
-        }
-      }
-      return { live, today: { cost: todayCost, sessions: todaySessions, perSession: perSession.sort((a, b) => b.cost - a.cost).slice(0, 8) }, spend: costLog.since(Date.now() - 3600e3) };
-    },
+    'fleet.state': () => board.state(), // older Qt windows still ask by this name
+    'board.state': () => board.state(),
+    'session.intent': ({ id, intent }) => board.setIntent(id, intent),
+    'session.decide': ({ id, kind, note, turn }) => board.decide(id, { kind, note, turn }),
+    'session.start': ({ id, text }) => board.start(id, text),
     // ---- time machine
     'timeline.steps': async ({ id }) => snapshots.steps(await S(id)),
     'timeline.diff': async ({ id, from, to }) => snapshots.diff(await S(id), { from, to }),

@@ -5,11 +5,12 @@ import { rpc } from './rpc';
 import { TranscriptModel } from './transcript';
 import { setHome } from './format';
 import { EASE_EXIT, reducedMotion } from './motion';
-import type { AppInfo, Config, SessionState, SessionSummary, PermissionMode, Effort, RawMsg, GatewayModels, TimelineStep, PermissionDecision } from './types';
+import type { AppInfo, Config, SessionState, SessionSummary, PermissionMode, Effort, RawMsg, GatewayModels, TimelineStep, PermissionDecision, DecisionKind } from './types';
 import type { PilcrowNative } from './globals';
 import { errText } from './format';
 
 export type PanelTab = 'changes' | 'files' | 'terminal' | 'preview' | 'tasks' | 'history' | 'info';
+export type Page = 'session' | 'board' | 'inbox';
 
 export interface Runtime extends Partial<SessionState> {
   rev: number;
@@ -50,6 +51,8 @@ interface Ui {
   diffMode: 'unified' | 'split';
   /** How much of Claude's work the transcript shows: tools summarised, plus thinking, or every step opened. */
   view: ViewMode;
+  /** Where Esc takes a session opened from the workboard. */
+  returnTo?: 'board' | null;
 }
 export type ViewMode = 'normal' | 'thinking' | 'verbose';
 export const VIEW_MODES: { id: ViewMode; label: string; hint: string }[] = [
@@ -97,7 +100,7 @@ interface State {
   /** Timeline steps per session, pushed by the server as they are recorded. */
   timeline: Record<string, TimelineStep[]>;
   /** What the main column shows: the open session, or one of the app-wide pages. */
-  page: 'session' | 'overview' | 'inbox';
+  page: Page;
   /** Unread results in the inbox (scheduled runs). */
   inboxUnread: number;
   /** Bumped when schedules or the inbox change on the server. */
@@ -696,8 +699,26 @@ export function openFile(path: string, line?: number) {
   setUi({ panel: true, panelTab: 'files' });
 }
 
-export function showPage(page: 'session' | 'overview' | 'inbox') {
-  set({ page });
+export function showPage(page: Page) {
+  set({ page, ...(page !== 'session' ? { ui: { ...get().ui, returnTo: null } } : {}) });
+}
+
+// ---- workboard (docs/WORKBOARD.md)
+export const setIntent = (id: string, intent: string) => call('session.intent', { id, intent }).then(() => refreshSessions(true));
+/** A decision on a card; the server records it and does what it implies (commit, resend, stop). */
+export async function decideCard(id: string, kind: DecisionKind, note?: string) {
+  const r = await call<{ ok: boolean; commit?: string | null }>('session.decide', { id, kind, note });
+  if (kind === 'approve') toast(r.commit ? `Committed ${r.commit.slice(0, 7)}` : 'Approved — nothing left to commit', 'success');
+  else if (kind === 'reject') toast('Sent back to Claude', 'info');
+  else if (kind === 'stop') toast('Stopping', 'info');
+  await refreshSessions(true);
+  if (kind === 'approve') bumpFs();
+  return r;
+}
+/** Hand a backlog card to Claude: its intent becomes the first message. */
+export async function startCard(id: string, text?: string) {
+  await call('session.start', { id, text });
+  await refreshSessions(true);
 }
 
 export function setTimeline(id: string, steps: TimelineStep[]) {

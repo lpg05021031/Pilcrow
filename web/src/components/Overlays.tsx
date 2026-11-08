@@ -63,7 +63,7 @@ export function CommandPalette() {
       { id: 'side', label: 'Toggle sidebar', icon: PanelLeft, kbd: 'Ctrl+B', group: 'Actions', run: () => setUi({ sidebar: !useStore.getState().ui.sidebar }) },
       { id: 'panel', label: 'Toggle side panel', icon: PanelRight, kbd: 'Ctrl+\\', group: 'Actions', run: () => setUi({ panel: !useStore.getState().ui.panel }) },
       { id: 'view', label: 'Cycle view: Normal → Thinking → Verbose', icon: Eye, kbd: 'Ctrl+O', group: 'Actions', run: () => cycleView() },
-      { id: 'overview', label: 'Control room', hint: 'Every session at a glance; answer prompts in place', icon: LayoutGrid, kbd: 'Ctrl+Shift+O', group: 'Actions', run: () => showPage('overview') },
+      { id: 'board', label: 'Workboard', hint: 'Every piece of work by whose hands it is in; approve, send back, answer in place', icon: LayoutGrid, kbd: 'Ctrl+Shift+O', group: 'Actions', run: () => showPage('board') },
       { id: 'skills', label: 'Skills…', hint: 'Personal and project skills', icon: ScrollText, group: 'Actions', run: () => setDialog('settings', 'skills') },
       { id: 'mcp', label: 'MCP servers…', hint: 'Add, sign in, reconnect', icon: Plug, group: 'Actions', run: () => setDialog('settings', 'mcp') },
       ...(activeId
@@ -168,7 +168,7 @@ const SHORTCUTS: [string, string][] = [
   ['Ctrl+\\', 'Toggle side panel'],
   ['Ctrl+O', 'Cycle view: Normal, Thinking, Verbose'],
   ['Alt+1 … 7', 'Changes, Files, Terminal, Preview, Tasks, Timeline, Session'],
-  ['Ctrl+Shift+O', 'Control room'],
+  ['Ctrl+Shift+O', 'Workboard'],
   ['Ctrl+Alt+↑ / ↓', 'Previous / next session'],
   ['Enter', 'Send (Shift+Enter for a new line)'],
   ['Shift+Tab', 'Cycle permission mode'],

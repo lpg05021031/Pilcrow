@@ -224,7 +224,8 @@ test('archive: the row folds away and the other rows keep their DOM', async ({ p
 
 test('sidebar order: a list refresh keeps the order; sending moves the session up', async ({ page }) => {
   await open(page, 'sess-login');
-  const order = () => page.evaluate(() => [...document.querySelectorAll('.side-list [data-sid]')].map((r) => r.dataset.sid));
+  // The project groups only: "Needs you" and "Pinned" sit above them and are ordered by their own rules.
+  const order = () => page.evaluate(() => [...document.querySelectorAll('.side-list .side-group:not(.section) [data-sid]')].map((r) => r.dataset.sid));
   const a = await order();
   await ctl.call('session.rename', { id: 'sess-old', title: 'Old archived exploration' }); // a refresh that moves nothing
   await sleep(500);
@@ -359,45 +360,53 @@ test('switching away and back lands on the same spot', async ({ page }) => {
   expect((await page.locator('.jump').count()) === 1, 'Latest should offer the way back down');
 });
 
-test('control room: tiles fit their row and sit below the header', async ({ page }) => {
-  await page.locator('.side-page', { hasText: 'Control room' }).click();
-  await page.waitForSelector('.ov-stats', { timeout: 5000 });
+test('workboard: five lanes, and the seeded sessions land in the right ones', async ({ page }) => {
+  await page.locator('.side-page', { hasText: 'Workboard' }).click();
+  await page.waitForSelector('.bd-lanes', { timeout: 5000 });
   await sleep(400);
   const r = await page.evaluate(() => {
-    const head = document.querySelector('.ov-head').getBoundingClientRect();
-    const stats = document.querySelector('.ov-stats').getBoundingClientRect();
-    const tiles = [...document.querySelectorAll('.ov-tile')].map((t) => {
-      const b = t.getBoundingClientRect();
-      return { l: Math.round(b.left), r: Math.round(b.right), overflow: t.scrollWidth - t.clientWidth, h: Math.round(b.height) };
-    });
-    return { headTop: head.top, gap: stats.top - head.bottom, statsL: stats.left, statsR: stats.right, tiles };
+    const lanes = [...document.querySelectorAll('.bd-lane')].map((l) => ({ key: [...l.classList].find((c) => c !== 'bd-lane'), cards: [...l.querySelectorAll('.bd-card')].map((c) => c.dataset.card) }));
+    const body = document.querySelector('.bd-lanes');
+    return { lanes, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, lanesWide: body.scrollWidth > body.clientWidth + 1 };
   });
-  expect(r.headTop >= 0, `the header starts above the viewport (${r.headTop})`);
-  expect(r.gap >= 12, `the tiles sit ${r.gap}px under the header; 12px is the floor`);
-  expect(r.tiles.length === 4, `expected four tiles, found ${r.tiles.length}`);
-  for (const t of r.tiles) {
-    expect(t.l >= r.statsL - 1 && t.r <= r.statsR + 1, `a tile sticks out of its row: ${JSON.stringify(t)}`);
-    expect(t.overflow <= 1, `tile content is clipped: ${JSON.stringify(t)}`);
-  }
-  const heights = new Set(r.tiles.map((t) => t.h));
-  expect(heights.size === 1, `tiles differ in height: ${[...heights].join(', ')}`);
+  expect(r.lanes.map((l) => l.key).join(',') === 'backlog,agent,wait,me,done', `lanes are ${r.lanes.map((l) => l.key).join(',')}`);
+  const lane = (k) => r.lanes.find((l) => l.key === k).cards;
+  expect(lane('me').includes('sess-login'), 'the finished, unreviewed session should need you');
+  expect(lane('done').includes('sess-tests'), 'the approved session should be done');
+  expect(lane('backlog').includes('sess-empty'), 'the session with an intent and no turns should be in the backlog');
+  expect(!r.lanes.some((l) => l.cards.includes('sess-site')), 'a plain conversation at rest is not a card');
+  expect(r.overflow === 0, `the page scrolls sideways by ${r.overflow}px`);
+  expect(await page.locator('.bd-card[data-card="sess-login"] .bd-chip', { hasText: 'To review' }).isVisible(), 'the review card has no chip');
 });
 
-test('control room: a working session shows as a card with its activity; a waiting one can be answered', async ({ page }) => {
+test('workboard: approving a review card commits it and moves it to Done', async ({ page }) => {
+  await page.locator('.side-page', { hasText: 'Workboard' }).click();
+  await page.click('.bd-card[data-card="sess-login"]');
+  await page.waitForSelector('.bd-panel', { timeout: 5000 });
+  expect(await page.locator('.bd-panel-title', { hasText: 'Fix the login redirect bug' }).isVisible(), 'the panel does not show the chosen card');
+  expect(await page.locator('.bd-ledger .bd-ev').count() >= 2, 'the ledger should list the intent and the turn');
+  await page.locator('.bd-actions .btn.primary', { hasText: 'Approve' }).click();
+  await page.waitForSelector('.bd-lane.done .bd-card[data-card="sess-login"]', { timeout: 5000 });
+  expect(await page.locator('.bd-lane.me .bd-card[data-card="sess-login"]').count() === 0, 'the card is still in Needs you');
+  // the sidebar's Needs you section follows the same rule
+  expect(await page.locator('.side-section-label', { hasText: 'Needs you' }).count() === 0, 'the sidebar still says something needs you');
+});
+
+test('workboard: a permission waiting on a card can be allowed from the panel', async ({ page }) => {
   await ctl.call('mock.pace', { ms: 40 });
   await ctl.call('session.send', { id: 'sess-empty', text: 'please ask permission before running a command' });
-  await page.locator('.side-page', { hasText: 'Control room' }).click();
-  await page.waitForSelector('.ovc.needs', { timeout: 15_000 });
-  expect(await page.locator('.ovc.needs .ovc-perm-tool', { hasText: 'Bash' }).isVisible(), 'the waiting card does not name the tool');
-  const card = page.locator('.ovc.needs').first();
+  await page.locator('.side-page', { hasText: 'Workboard' }).click();
+  await page.waitForSelector('.bd-card.prompt', { timeout: 15_000 });
+  const card = page.locator('.bd-card.prompt').first();
+  const lane = await page.locator('.bd-lane.me').boundingBox();
   const box = await card.boundingBox();
-  const grid = await page.locator('.ov-queue').boundingBox();
-  expect(box.width > 300 && box.height > 60, `the card is squashed: ${JSON.stringify(box)}`);
-  expect(box.x >= grid.x - 1 && box.x + box.width <= grid.x + grid.width + 1, 'the card leaves its column');
-  await card.locator('.btn.primary').click(); // Allow (the primary choice; "Always allow" sits beside it)
-  await page.waitForSelector('.ovc.needs', { state: 'detached', timeout: 15_000 });
-  const working = await page.locator('.ovc.busy').count();
-  expect(working >= 0, 'no crash after answering');
+  expect(box.x >= lane.x - 1 && box.x + box.width <= lane.x + lane.width + 1, 'the card leaves its lane');
+  await card.click();
+  await page.waitForSelector('.bd-perm-tool', { timeout: 5000 });
+  expect(await page.locator('.bd-perm-tool', { hasText: 'Bash' }).isVisible(), 'the panel does not name the tool');
+  await page.locator('.bd-perm-row .btn.primary').click(); // Allow
+  await page.waitForSelector('.bd-card.prompt', { state: 'detached', timeout: 15_000 });
+  await page.waitForSelector('.bd-lane.agent .bd-card[data-card="sess-empty"], .bd-lane.me .bd-card[data-card="sess-empty"]', { timeout: 15_000 });
 });
 
 // ---------------------------------------------------------------- run
