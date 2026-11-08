@@ -91,14 +91,13 @@ class MainWindow(QMainWindow):
         self.panel_resizer.released.connect(lambda: store.set_ui(panel_w=self.panel_host.width()))
         self.body.set_parts(self.sidebar, self.main, self.panel_host, self.side_resizer, self.panel_resizer)
 
-        # pages: welcome / session / overview / inbox (built lazily where heavy)
+        # pages: welcome / session / board (built lazily where heavy)
         from .welcome import Welcome
 
         self.welcome = Welcome()
         self.pages.addWidget(self.welcome)
         self.session_view: Optional[QWidget] = None
-        self.overview: Optional[QWidget] = None
-        self.inbox: Optional[QWidget] = None
+        self.board: Optional[QWidget] = None
         self.panel: Optional[QWidget] = None
 
         self.boot = Boot(self)
@@ -160,20 +159,13 @@ class MainWindow(QMainWindow):
     def _route(self) -> None:
         page = store.page
         session = store.active_session()
-        if page == "overview":
-            if self.overview is None:
-                from .overview import Overview
+        if page == "board":
+            if self.board is None:
+                from .board import Board
 
-                self.overview = Overview()
-                self.pages.addWidget(self.overview)
-            self.pages.setCurrentWidget(self.overview)
-        elif page == "inbox":
-            if self.inbox is None:
-                from .inbox import InboxPage
-
-                self.inbox = InboxPage()
-                self.pages.addWidget(self.inbox)
-            self.pages.setCurrentWidget(self.inbox)
+                self.board = Board()
+                self.pages.addWidget(self.board)
+            self.pages.setCurrentWidget(self.board)
         elif session is not None:
             from .session_view import SessionView
 
@@ -195,15 +187,7 @@ class MainWindow(QMainWindow):
     def _set_title(self) -> None:
         waiting = sum(1 for s in store.sessions if s.get("status") == "requires_action")
         session = store.active_session()
-        head = (
-            "Control room — "
-            if store.page == "overview"
-            else "Inbox — "
-            if store.page == "inbox"
-            else f"{session.get('title')} — "
-            if session
-            else ""
-        )
+        head = "Workboard — " if store.page == "board" else f"{session.get('title')} — " if session else ""
         self.setWindowTitle(f"{f'({waiting}) ' if waiting else ''}{head}{self._title}")
 
     def _on_ui(self) -> None:
@@ -267,7 +251,7 @@ class MainWindow(QMainWindow):
         sc("Ctrl+Shift+N", lambda: store.set_dialog("newSession", {}))
         sc("Ctrl+B", lambda: store.set_ui(sidebar=not store.ui.sidebar))
         sc("Ctrl+O", store.cycle_view)
-        sc("Ctrl+Shift+O", lambda: store.show_page("session" if store.page == "overview" else "overview"))
+        sc("Ctrl+Shift+O", lambda: store.show_page("session" if store.page == "board" else "board"))
         sc("Ctrl+\\", lambda: store.set_ui(panel=not store.ui.panel))
         sc("Ctrl+,", lambda: store.set_dialog("settings", True))
         sc("Ctrl+Q", self._quit)
@@ -319,6 +303,9 @@ class MainWindow(QMainWindow):
         )
         if sid and r is not None and not typing and r.status in ("running", "starting"):
             store.interrupt(sid)
+        # A session opened from the workboard goes back to it, on the same card.
+        elif not typing and store.page == "session" and store.ui.return_to == "board":
+            store.show_page("board")
 
     def _quit(self) -> None:
         store.call("app.quit").then(lambda _r: self.close()).catch(lambda _e: self.close())

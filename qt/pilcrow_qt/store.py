@@ -80,6 +80,7 @@ class Ui:
     show_archived: bool = False
     diff_mode: str = "unified"
     view: str = "normal"
+    return_to: Optional[str] = None  # where Esc takes a session opened from the workboard
 
 
 @dataclass
@@ -121,7 +122,6 @@ class Store(QObject):
     fs_changed = Signal(int)
     timeline_changed = Signal(str)
     sched_changed = Signal(int)
-    inbox_unread_changed = Signal(int)
     gateway_models_changed = Signal(object)
     lightbox_changed = Signal(object)
     find_open_changed = Signal(bool)
@@ -154,7 +154,6 @@ class Store(QObject):
         self.fs_rev = 0
         self.unread: Dict[str, bool] = {}
         self.page = "session"
-        self.inbox_unread = 0
         self.sched_rev = 0
         self.gateway_models: Any = None  # None | "loading" | GatewayModels dict
         self.timeline: Dict[str, List[Json]] = {}
@@ -294,7 +293,7 @@ class Store(QObject):
         rpc.on("sessions.changed", lambda _d: self.refresh_sessions())
         rpc.on("schedules.changed", lambda _d: self._bump_sched())
         rpc.on("memory.changed", lambda _d: self._bump_sched())
-        rpc.on("inbox.changed", self._on_inbox)
+        rpc.on("inbox.changed", lambda _d: self._bump_sched())
         rpc.on("timeline.step", self._on_timeline_step)
         hints = QGuiApplication.styleHints()
         if hasattr(hints, "colorSchemeChanged"):
@@ -322,7 +321,6 @@ class Store(QObject):
             self.info_changed.emit(info)
             self.config_changed.emit(config)
             self.load_gateway_models()
-            rpc.call("inbox.list").then(lambda r: self._set_inbox_unread(int((r or {}).get("unread") or 0)))
             self._apply_config_ui(config)
             self.apply_theme()
             self.refresh_sessions()
@@ -422,15 +420,6 @@ class Store(QObject):
             self.unread[sid] = True
             self.unread_changed.emit(self.unread)
         self.permission_asked.emit(sid, req)
-
-    def _on_inbox(self, unread: Any) -> None:
-        if isinstance(unread, int):
-            self._set_inbox_unread(unread)
-        self._bump_sched()
-
-    def _set_inbox_unread(self, n: int) -> None:
-        self.inbox_unread = n
-        self.inbox_unread_changed.emit(n)
 
     def _on_timeline_step(self, d: Json) -> None:
         sid, step = d.get("id"), d.get("step")
@@ -618,7 +607,12 @@ class Store(QObject):
         prompt: Optional[str] = None,
         images: Optional[List[Json]] = None,
         title: Optional[str] = None,
+        intent: Optional[str] = None,
+        open: bool = True,
+        made_cb: Optional[Callable[[str], None]] = None,
     ) -> Call:
+        """``open=False`` keeps the page where it is (a card written on the workboard); ``made_cb`` gets the
+        new id once the list has it."""
         params: Json = {
             "cwd": cwd,
             "worktree": worktree or None,
@@ -626,6 +620,7 @@ class Store(QObject):
             "model": model,
             "effort": effort,
             "title": title,
+            "intent": intent,
         }
         call = self.call("session.create", {k: v for k, v in params.items() if v is not None})
 
@@ -633,6 +628,10 @@ class Store(QObject):
             sid = r["id"]
 
             def opened() -> None:
+                if made_cb:
+                    made_cb(sid)
+                if not open:
+                    return
                 self.open_session(sid)
                 if (prompt and prompt.strip()) or images:
                     self.send_message(sid, prompt or "", images=images or []).catch(
@@ -750,8 +749,59 @@ class Store(QObject):
         self.set_ui(panel=True, panel_tab="files")
 
     def show_page(self, page: str) -> None:
+        # The control room and the inbox became the workboard; a saved or scripted old name lands there.
+        if page in ("overview", "inbox"):
+            page = "board"
+        if page != "session":
+            self.ui.return_to = None
         self.page = page
         self.page_changed.emit(page)
+
+    # ---------------------------------------------------------------- workboard (docs/WORKBOARD.md)
+    def board_state(self) -> Call:
+        return self.call("board.state", {}, quiet=True)
+
+    def set_intent(self, sid: str, intent: str) -> Call:
+        return self.call("session.intent", {"id": sid, "intent": intent}).then(lambda _r: self.refresh_sessions(True))
+
+    def decide_card(self, sid: str, kind: str, note: Optional[str] = None) -> Call:
+        """A decision on a card; the server records it and does what it implies (commit, resend, stop)."""
+
+        def done(r: Any) -> None:
+            r = r if isinstance(r, dict) else {}
+            if kind == "approve":
+                commit = r.get("commit")
+                self.toast(f"Committed {str(commit)[:7]}" if commit else "Approved — nothing left to commit", "success")
+            elif kind == "reject":
+                self.toast("Sent back to Claude", "info")
+            elif kind == "stop":
+                self.toast("Stopping", "info")
+            self.refresh_sessions(True)
+            if kind == "approve":
+                self.bump_fs()
+
+        c = self.call("session.decide", {"id": sid, "kind": kind, "note": note})
+        c.then(done)
+        return c
+
+    def start_card(self, sid: str, text: Optional[str] = None) -> Call:
+        """Hand a backlog card to Claude: its intent becomes the first message."""
+
+        def done(r: Any) -> None:
+            if isinstance(r, dict) and r.get("queued"):
+                self.toast("Queued: Claude is at the limit, it starts when a slot frees", "info")
+            self.refresh_sessions(True)
+
+        c = self.call("session.start", {"id": sid, "text": text})
+        c.then(done)
+        return c
+
+    def set_wait(self, sid: str, wait: Optional[Json]) -> Call:
+        """Set or clear what a card waits for; the server wakes it when the condition is met."""
+        return self.call("session.wait", {"id": sid, "wait": wait}).then(lambda _r: self.refresh_sessions(True))
+
+    def run_schedule(self, sched_id: str) -> Call:
+        return self.call("schedules.runNow", {"id": sched_id})
 
     def set_timeline(self, sid: str, steps: List[Json]) -> None:
         self.timeline[sid] = steps

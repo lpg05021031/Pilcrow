@@ -25,7 +25,7 @@ export const Card = memo(function Card({ s, rt, selected, now, titles, onSelect,
   const add = files?.reduce((a, f) => a + f.add, 0) || 0;
   const del = files?.reduce((a, f) => a + f.del, 0) || 0;
   return (
-    <article className={`bd-card ${state}${selected ? ' sel' : ''}`} data-card={s.id} role="button" tabIndex={0} onClick={onSelect} onDoubleClick={onOpen} onKeyDown={(e) => e.key === ' ' && (e.preventDefault(), onSelect())}>
+    <article className={`bd-card ${state}${selected ? ' sel' : ''}`} data-card={s.id} data-state={state} draggable={!schedule} role="button" tabIndex={0} onClick={onSelect} onDoubleClick={onOpen} onKeyDown={(e) => e.key === ' ' && (e.preventDefault(), onSelect())}>
       <span className="bd-stripe" aria-hidden="true" />
       <div className="bd-card-top">
         <span className="ellipsis">{basename(s.project || s.cwd)}{s.worktree ? ` · ${s.worktree.branch.replace(/^pilcrow\//, '')}` : ''}</span>

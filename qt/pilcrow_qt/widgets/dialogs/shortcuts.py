@@ -19,7 +19,7 @@ SHORTCUTS: List[Tuple[str, str]] = [
     ("Ctrl+\\", "Toggle side panel"),
     ("Ctrl+O", "Cycle view: Normal, Thinking, Verbose"),
     ("Alt+1 … 7", "Changes, Files, Terminal, Preview, Tasks, Timeline, Session"),
-    ("Ctrl+Shift+O", "Control room"),
+    ("Ctrl+Shift+O", "Workboard"),
     ("Ctrl+Alt+↑ / ↓", "Previous / next session"),
     ("Enter", "Send (Shift+Enter for a new line)"),
     ("Shift+Tab", "Cycle permission mode"),

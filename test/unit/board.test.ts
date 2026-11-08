@@ -1,11 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { actionsFor, awaitsReview, cardLine, cardState, laneOf, ledgerOf, scheduleCard, step } from '../../web/src/lib/board';
+import { actionsFor, awaitsReview, cardLine, cardState, dropAction, laneOf, ledgerOf, scheduleCard, step } from '../../web/src/lib/board';
 import type { Lane } from '../../web/src/lib/board';
 import type { SessionSummary } from '../../web/src/lib/types';
+import cases from './board-cases.json';
 
 const NOW = new Date(2026, 10, 8, 10, 30).getTime();
 const base: SessionSummary = { id: 's', title: 'Fix the login redirect', cwd: '/p', project: '/p', archived: false, pinned: false, worktree: null, status: 'idle', live: false, createdAt: NOW - 3600e3 };
 const card = (patch: Partial<SessionSummary>): SessionSummary => ({ ...base, intent: 'Carry ?next through the login form.', ...patch });
+
+describe('shared lane cases (test/unit/board-cases.json, also run by the Qt port)', () => {
+  const rel = (v: unknown): unknown => (typeof v === 'number' ? NOW + v * 1000 : v);
+  for (const c of cases.cases) {
+    it(c.name, () => {
+      const patch = Object.fromEntries(Object.entries(c.session).map(([k, v]) => [k, ['turnEnd', 'reviewedTurn', 'createdAt'].includes(k) ? rel(v) : k === 'decisions' && Array.isArray(v) ? v.map((d) => ({ ...d, at: rel(d.at) })) : v]));
+      const s = { ...cases.base, createdAt: NOW - 3600e3, ...patch } as unknown as SessionSummary;
+      const rt = (c.rt || undefined) as Parameters<typeof laneOf>[1];
+      expect(laneOf(s, rt, NOW)).toBe(c.lane);
+      expect(cardState(s, rt, NOW)).toBe(c.state);
+    });
+  }
+});
 
 describe('laneOf', () => {
   it('keeps plain conversations off the board unless they are doing something', () => {
@@ -101,6 +115,22 @@ describe('ledgerOf', () => {
     expect(l[1].note).toBe('opus-5-5 · $0.40');
     expect(l[2].note).toBe('No QWebEngine.');
     expect(l[4].label).toBe('Committed abc1234');
+  });
+});
+
+describe('dropAction', () => {
+  it('maps a drop onto a lane to that lane\'s action, and refuses the rest', () => {
+    expect(dropAction('backlog', 'agent')).toBe('start');
+    expect(dropAction('wait', 'agent')).toBe('wake');
+    expect(dropAction('stuck', 'agent')).toBe('send');
+    expect(dropAction('review', 'done')).toBe('approve');
+    expect(dropAction('backlog', 'done')).toBeNull();
+    expect(dropAction('review', 'wait')).toBe('wait');
+    expect(dropAction('running', 'backlog')).toBe('stop');
+    expect(dropAction('wait', 'backlog')).toBe('unwait');
+    expect(dropAction('review', 'backlog')).toBe('park');
+    expect(dropAction('backlog', 'me')).toBeNull();
+    expect(dropAction('review', 'me')).toBeNull();
   });
 });
 

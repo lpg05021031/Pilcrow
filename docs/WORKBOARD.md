@@ -368,6 +368,14 @@ SessionView 標題列選單加「寫成卡片」：開一個只有意圖欄的�
 
 ## 15. 進度
 
+- 第 4 階段（2026-11-08）：Web 拖放完成：`dropAction(state, lane)` 決定放到哪一欄等於做什麼，非法目標變淡、合法目標亮框，
+  拖曳中不改選取（否則側板一開版面就位移）；共用案例檔 `test/unit/board-cases.json` 由 web 與 Qt 的單元測試各跑一次。
+  Qt 移植完成：`qt/pilcrow_qt/lib/board.py` 一對一移植（含 `drop_action`）、`widgets/board.py` 取代 overview.py 與 inbox.py、
+  Store 加 board_state / set_intent / decide_card / start_card / set_wait / run_schedule、Sidebar 的 Workboard 列與 Needs you 用
+  `lane_of`、`test_lib_board.py` 跑共用案例、`test_board.py` 七個案例對照 e2e、snap 多了 board / board-panel / board-new / board-wait。
+  Qt 尚未做的：欄間拖放（lib 已有 `drop_action`，widget 待接）、卡片標題與說明行的兩行截斷、側板 320px 與覆蓋層兩個斷點、
+  日期採英文格式而非系統地區設定。
+
 - 第 3 階段（2026-11-08）：`session.wait` 與三種條件（時間、CI 用 `gh run list` 每 2 分鐘輪詢、相依在核准時喚醒）；
   `board.tick` 每 30 秒跑；`maxConcurrent` 上限與排隊（`meta.queued`，turn end 與 tick 遞補；手動送訊息不受限）；
   排程觸發前以虛擬卡出現在「等待中」，排程清單與新增移到該欄標題的選單；排程啟動的 session 帶 `intent`，跑完進「需要你」。

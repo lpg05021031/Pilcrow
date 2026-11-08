@@ -2,13 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PanelLeftOpen, CircleAlert, Plus, CalendarClock } from 'lucide-react';
 import { useStore, call, openSession, setUi, decideCard, startCard, setWait, toast } from '../lib/store';
 import type { BoardState, Schedule, SessionSummary, WaitCondition } from '../lib/types';
-import { LANES, laneOf, cardState, step, actionsFor, scheduleCard, scheduleActions, isSchedule, SCHEDULE_PREFIX, type Lane } from '../lib/board';
+import { LANES, laneOf, cardState, step, actionsFor, dropAction, scheduleCard, scheduleActions, isSchedule, SCHEDULE_PREFIX, type Lane } from '../lib/board';
 import { cost, timeAgo } from '../lib/format';
 import { useNow, Num } from './ui/bits';
 import { MenuButton, type MenuItem } from './ui/Popover';
 import { typingElsewhere } from './tools/Permission';
 import { Card } from './board/Card';
 import { CardPanel, type PanelMode } from './board/CardPanel';
+import type { CardState as CardStateT } from '../lib/board';
 import { NewCard } from './board/NewCard';
 import { ScheduleDialog } from './ScheduleDialog';
 
@@ -33,6 +34,10 @@ export function Board() {
   const [sel, setSel] = useState<string | null>(remembered);
   const [mode, setMode] = useState<PanelMode>(null);
   const [creating, setCreating] = useState(false);
+  /** The card being dragged and the lane under it, for the lanes' highlight. */
+  const [drag, setDrag] = useState<{ id: string; state: CardStateT; over: Lane | null } | null>(null);
+  // The same, readable before React has re-rendered: dragover can arrive before the state lands.
+  const dragRef = useRef<{ id: string; state: CardStateT; over: Lane | null } | null>(null);
   const now = useNow(1000, true);
   const box = useRef<HTMLDivElement>(null);
 
@@ -237,9 +242,51 @@ export function Board() {
       )}
 
       <div className="bd-body">
-        <div className="bd-lanes">
+        <div
+          className="bd-lanes"
+          onDragStart={(e) => {
+            const el = (e.target as HTMLElement).closest<HTMLElement>('.bd-card[draggable="true"]');
+            if (!el) return;
+            const id = el.dataset.card!;
+            const st = el.dataset.state as CardStateT;
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', id);
+            // Not selected here: opening the panel would shift the lanes under the pointer mid-drag.
+            dragRef.current = { id, state: st, over: null };
+            setDrag(dragRef.current);
+          }}
+          onDragEnd={() => {
+            dragRef.current = null;
+            setDrag(null);
+          }}
+          onDragOver={(e) => {
+            const d = dragRef.current;
+            if (!d) return;
+            const lane = (e.target as HTMLElement).closest<HTMLElement>('.bd-lane')?.dataset.lane as Lane | undefined;
+            const ok = lane ? dropAction(d.state, lane) : null;
+            if (ok) {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = 'move';
+            }
+            const over = ok ? lane! : null;
+            if (over !== d.over) {
+              dragRef.current = { ...d, over };
+              setDrag(dragRef.current);
+            }
+          }}
+          onDrop={(e) => {
+            const d = dragRef.current;
+            if (!d) return;
+            const lane = (e.target as HTMLElement).closest<HTMLElement>('.bd-lane')?.dataset.lane as Lane | undefined;
+            const action = lane ? dropAction(d.state, lane) : null;
+            e.preventDefault();
+            dragRef.current = null;
+            setDrag(null);
+            if (action) act(d.id, action);
+          }}
+        >
           {LANES.map((lane, i) => (
-            <section key={lane.key} className={`bd-lane ${lane.key}`} aria-label={lane.title}>
+            <section key={lane.key} className={`bd-lane ${lane.key}${drag ? (drag.over === lane.key ? ' over' : dropAction(drag.state, lane.key) ? '' : ' no') : ''}`} data-lane={lane.key} aria-label={lane.title}>
               <div className="bd-lane-h">
                 <span className="bd-lane-mark" aria-hidden="true" />
                 <span className="bd-lane-title">{lane.title}</span>
@@ -306,6 +353,7 @@ export function Board() {
         <span>
           <kbd>n</kbd> new
         </span>
+        <span>drag a card onto a lane to do that lane's action</span>
       </footer>
     </div>
   );

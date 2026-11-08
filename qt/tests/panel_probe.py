@@ -26,9 +26,9 @@ try:
         except Exception:
             print("FAILED", tab)
             traceback.print_exc()
-    c.store.show_page("inbox")
-    c.sleep(600)
-    c.shot("inbox-page")
+    c.store.show_page("board")
+    c.sleep(900)
+    c.shot("board-page")
     c.close()
 finally:
     mock.kill()

@@ -248,12 +248,12 @@ class CommandPalette(Sheet):
             ),
             Cmd("view", "Cycle view: Normal → Thinking → Verbose", "eye", "Actions", s.cycle_view, "", "Ctrl+O"),
             Cmd(
-                "overview",
-                "Control room",
+                "board",
+                "Workboard",
                 "layout-grid",
                 "Actions",
-                lambda: s.show_page("overview"),
-                "Every session at a glance; answer prompts in place",
+                lambda: s.show_page("board"),
+                "Every piece of work by whose hands it is in; approve, send back, answer in place",
                 "Ctrl+Shift+O",
             ),
             Cmd(

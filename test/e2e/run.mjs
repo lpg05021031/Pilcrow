@@ -471,6 +471,18 @@ test('workboard: the Waiting lane menu lists schedules and opens the dialog for 
   expect(await page.locator('.side-page', { hasText: 'Inbox' }).count() === 0, 'the Inbox page should be gone from the sidebar');
 });
 
+test('workboard: dragging a review card onto Done approves it; onto Needs you does nothing', async ({ page }) => {
+  await page.locator('.side-page', { hasText: 'Workboard' }).click();
+  await page.waitForSelector('.bd-card[data-card="sess-login"]', { timeout: 5000 });
+  // a lane that takes no drop is dimmed while the drag is on; the card stays where it was
+  await page.dragAndDrop('.bd-card[data-card="sess-empty"]', '.bd-lane.me .bd-cards');
+  await sleep(300);
+  expect(await page.locator('.bd-lane.backlog .bd-card[data-card="sess-empty"]').count() === 1, 'a backlog card must not land in Needs you');
+  await page.dragAndDrop('.bd-card[data-card="sess-login"]', '.bd-lane.done .bd-cards');
+  await page.waitForSelector('.bd-lane.done .bd-card[data-card="sess-login"]', { timeout: 5000 });
+  expect(await page.locator('.bd-lane.no').count() === 0, 'lanes should not stay dimmed after the drop');
+});
+
 // ---------------------------------------------------------------- run
 
 const chosen = tests.filter((t) => !grep || t.name.includes(grep));

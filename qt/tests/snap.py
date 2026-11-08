@@ -1,6 +1,6 @@
 """Open the client against a mock server offscreen, run a scripted scenario, save screenshots.
 
-    python qt/tests/snap.py [--port 5300] [--out test/out] [--scenario welcome|session|...] [--theme dark|light]
+    python qt/tests/snap.py [--port 5300] [--out test/out] [--scenario welcome|session|board|board-panel|board-new|board-wait|...] [--theme dark|light]
 
 Used while building the client (the screenshots are how the work is checked without a display) and
 by the pytest suite. Exits non-zero when the scenario raises.
@@ -121,8 +121,38 @@ def scenario_steps(name: str, win, store, out: Path):
         return [wait_loaded, (200, lambda: shot(win, out, "welcome"))]
     if name == "session":
         return [wait_loaded, (900, lambda: store.open_session("sess-login")), (300, lambda: shot(win, out, "session"))]
-    if name == "overview":
-        return [wait_loaded, (500, lambda: store.show_page("overview")), (300, lambda: shot(win, out, "overview"))]
+    if name == "board":
+        return [wait_loaded, (500, lambda: store.show_page("board")), (700, lambda: shot(win, out, "board"))]
+    if name == "board-panel":
+        return [
+            wait_loaded,
+            (500, lambda: store.show_page("board")),
+            (700, lambda: win.board.select("sess-login")),
+            (400, lambda: shot(win, out, "board-panel")),
+        ]
+    if name == "board-new":
+
+        def fill() -> None:
+            win.board.new_card.title.setText("Rename the config file")
+            win.board.new_card.intent.setPlainText(
+                "config.json becomes pilcrow.json; the loader reads both for a version."
+            )
+
+        return [
+            wait_loaded,
+            (500, lambda: store.show_page("board")),
+            (700, lambda: win.board.set_creating(True)),
+            (300, fill),
+            (300, lambda: shot(win, out, "board-new")),
+        ]
+    if name == "board-wait":
+        return [
+            wait_loaded,
+            (500, lambda: store.show_page("board")),
+            (700, lambda: win.board.select("sess-empty")),
+            (300, lambda: win.board.set_mode("wait")),
+            (400, lambda: shot(win, out, "board-wait")),
+        ]
     if name == "light":
         return [
             wait_loaded,

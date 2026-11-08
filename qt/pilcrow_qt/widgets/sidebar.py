@@ -1,6 +1,6 @@
 """The sidebar (a port of web/src/components/Sidebar.tsx).
 
-Brand and the new-session row at the top, then the search row, the Control room and Inbox pages
+Brand and the new-session row at the top, then the search row, the Workboard page
 under a hairline, the session list grouped by project with "Needs you" and "Pinned" sections above
 it, and Settings, archive and appearance at the foot. Every measure is app.css's: 30px rows with
 8px of padding and 6px corners, 24px group heads 14px below the rows above them, a 10px gutter.
@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import icons, theme
+from ..lib.board import lane_of
 from ..lib.fmt import basename, tildify, time_ago
 from ..lib.fuzzy import fuzzy_score
 from ..store import ConfirmSpec, store
@@ -118,16 +119,10 @@ class Sidebar(QWidget):
         pl = QVBoxLayout(pages)
         pl.setContentsMargins(0, 4 + 6, 0, 0)  # margin-top 4px, padding-top 6px
         pl.setSpacing(1)
-        self.page_overview = NavButton("layout-grid", "Control room")
-        self.page_overview.setToolTip("Every session at a glance (Ctrl+Shift+O)")
-        self.page_overview.clicked.connect(
-            lambda: store.show_page("session" if store.page == "overview" else "overview")
-        )
-        self.page_inbox = NavButton("inbox", "Inbox")
-        self.page_inbox.setToolTip("Results of scheduled sessions")
-        self.page_inbox.clicked.connect(lambda: store.show_page("session" if store.page == "inbox" else "inbox"))
-        pl.addWidget(self.page_overview)
-        pl.addWidget(self.page_inbox)
+        self.page_board = NavButton("layout-grid", "Workboard")
+        self.page_board.setToolTip("The workboard: every piece of work by whose hands it is in (Ctrl+Shift+O)")
+        self.page_board.clicked.connect(lambda: store.show_page("session" if store.page == "board" else "board"))
+        pl.addWidget(self.page_board)
         tl.addWidget(pages)
         root.addWidget(top)
 
@@ -170,7 +165,6 @@ class Sidebar(QWidget):
         bind(store.unread_changed, self, lambda _u: self.rebuild())
         bind(store.ui_changed, self, lambda _u: self._on_ui())
         bind(store.page_changed, self, lambda _p: self._on_page())
-        bind(store.inbox_unread_changed, self, lambda _n: self._on_page())
         bind(store.config_changed, self, lambda _c: self._on_config())
         bind(theme.theme.changed, self, lambda _t: self._on_config())
         self._on_config()
@@ -216,16 +210,10 @@ class Sidebar(QWidget):
             self.rebuild()
 
     def _on_page(self) -> None:
-        self.page_overview.set_on(store.page == "overview")
-        self.page_inbox.set_on(store.page == "inbox")
+        self.page_board.set_on(store.page == "board")
         working = sum(1 for s in store.sessions if not s.get("archived") and s.get("status") in ("running", "starting"))
-        needs = sum(
-            1
-            for s in store.sessions
-            if not s.get("archived") and (s.get("status") == "requires_action" or (s.get("pending") or 0) > 0)
-        )
-        self.page_overview.set_count(needs if needs else working, "needs" if needs else "")
-        self.page_inbox.set_count(store.inbox_unread, "unread")
+        needs = sum(1 for s in store.sessions if lane_of(s) == "me")
+        self.page_board.set_count(needs if needs else working, "needs" if needs else "")
 
     def _tick(self) -> None:
         for r in self._rows.values():
@@ -240,7 +228,7 @@ class Sidebar(QWidget):
         q = self._q.strip()
         lst = [s for s in sessions if (s.get("archived") if show_archived else not s.get("archived"))]
         if not q:
-            # Runs started by a schedule live in the inbox; the active one still shows so its row can be found.
+            # Runs started by a schedule are cards on the workboard; the active one still shows so its row can be found.
             lst = [s for s in lst if not s.get("scheduled") or s.get("id") == active]
         else:
             lst = [
@@ -249,11 +237,7 @@ class Sidebar(QWidget):
                 if fuzzy_score(q, f"{s.get('title', '')} {basename(s.get('project') or s.get('cwd') or '')}")
             ]
         # The conversation on screen never jumps into "Needs you": you are already looking at it.
-        attention = [
-            s
-            for s in lst
-            if s.get("id") != active and (s.get("status") == "requires_action" or (s.get("pending") or 0) > 0)
-        ]
+        attention = [s for s in lst if s.get("id") != active and lane_of(s) == "me"]
         pinned = [s for s in lst if s.get("pinned") and s not in attention]
         rest = [s for s in lst if s not in attention and s not in pinned]
         groups: Dict[str, List[Json]] = {}
@@ -641,7 +625,7 @@ class _SearchEdit(QLineEdit):
 
 
 class _Pages(QWidget):
-    """``.side-pages``: the Control room and Inbox rows under a hairline (inset 0 1px 0 var(--hair))."""
+    """``.side-pages``: the Workboard row under a hairline (inset 0 1px 0 var(--hair))."""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)

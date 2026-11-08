@@ -121,6 +121,25 @@ export function actionsFor(state: CardState, rt?: Partial<SessionState>): CardAc
   }
 }
 
+/**
+ * Dropping a card on a lane means "do that lane's action". Only lanes with a legal action accept;
+ * "Needs you" never does, since a card gets there by Claude handing work back, not by being put there.
+ */
+export function dropAction(state: CardState, lane: Lane): CardAction['id'] | null {
+  switch (lane) {
+    case 'agent':
+      return state === 'backlog' ? 'start' : state === 'wait' ? 'wake' : state === 'stuck' ? 'send' : null;
+    case 'wait':
+      return state === 'backlog' || state === 'review' || state === 'wait' ? 'wait' : null;
+    case 'done':
+      return state === 'review' ? 'approve' : null;
+    case 'backlog':
+      return state === 'running' || state === 'queued' ? 'stop' : state === 'wait' ? 'unwait' : state === 'review' || state === 'stuck' ? 'park' : null;
+    case 'me':
+      return null;
+  }
+}
+
 // ---- schedules as cards
 
 export const SCHEDULE_PREFIX = 'sched:';

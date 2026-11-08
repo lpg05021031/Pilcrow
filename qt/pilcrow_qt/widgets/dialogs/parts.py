@@ -285,7 +285,7 @@ class ElideLabel(QLabel):
 
 def page_column(width: int, padding: int = 0) -> int:
     """``--col`` as the web resolves it inside a pane: clamp(640px, min(61.8%, 100% - 48px), 1080px) of
-    the pane less ``padding`` on each side (the welcome pads 24px; the control room and inbox none)."""
+    the pane less ``padding`` on each side (the welcome pads 24px; the workboard none)."""
     inner = width - 2 * padding
     return max(640, min(int(round(inner * 0.618)), inner - 48, 1080))
 

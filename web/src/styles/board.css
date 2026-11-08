@@ -97,6 +97,19 @@
   background: var(--inset);
   box-shadow: inset 0 0 0 0.5px var(--hair);
 }
+.bd-lane.over {
+  box-shadow: inset 0 0 0 1.5px var(--accent-line);
+  background: color-mix(in srgb, var(--accent-wash) 60%, var(--inset));
+}
+.bd-lane.no {
+  opacity: 0.55;
+}
+.bd-card[draggable='true'] {
+  cursor: grab;
+}
+.bd-card[draggable='true']:active {
+  cursor: grabbing;
+}
 .bd-lane-h {
   display: flex;
   align-items: center;

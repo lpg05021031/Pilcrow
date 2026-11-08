@@ -1,0 +1,24 @@
+{
+  "$comment": "Lane and state cases for the workboard, run by test/unit/board.test.ts (web/src/lib/board.ts) and qt/tests/test_lib_board.py (qt/pilcrow_qt/lib/board.py). `now` is 2026-11-08 10:30 local; times are offsets from it in seconds. A session starts from `base` with `session` laid over it; `rt` is the live state or null.",
+  "base": { "id": "s", "title": "Fix the login redirect", "cwd": "/p", "project": "/p", "archived": false, "pinned": false, "worktree": null, "status": "idle", "live": false, "createdAt": -3600, "intent": "Carry ?next through the login form." },
+  "cases": [
+    { "name": "a plain conversation at rest is not on the board", "session": { "intent": null, "turnEnd": -60 }, "rt": null, "lane": null, "state": null },
+    { "name": "a plain conversation that is running is with Claude", "session": { "intent": null, "status": "running" }, "rt": null, "lane": "agent", "state": "running" },
+    { "name": "a plain conversation that is asking needs you", "session": { "intent": null, "status": "requires_action" }, "rt": null, "lane": "me", "state": "prompt" },
+    { "name": "archived is never on the board", "session": { "archived": true, "status": "running" }, "rt": null, "lane": null, "state": null },
+    { "name": "an intent and no turns is the backlog", "session": {}, "rt": null, "lane": "backlog", "state": "backlog" },
+    { "name": "a finished, unreviewed turn needs review", "session": { "turnEnd": -60 }, "rt": null, "lane": "me", "state": "review" },
+    { "name": "a prompt beats a review", "session": { "turnEnd": -60, "status": "requires_action", "pending": 1 }, "rt": null, "lane": "me", "state": "prompt" },
+    { "name": "a pending request in the live state is a prompt too", "session": {}, "rt": { "pending": [{ "requestId": "r", "toolName": "Bash", "input": {}, "suggestions": [] }] }, "lane": "me", "state": "prompt" },
+    { "name": "approved today is done", "session": { "turnEnd": -60, "reviewedTurn": -60, "decisions": [{ "at": -30, "kind": "approve", "commit": "abc1234" }] }, "rt": null, "lane": "done", "state": "done" },
+    { "name": "set aside goes back to the backlog", "session": { "turnEnd": -60, "reviewedTurn": -60, "decisions": [{ "at": -30, "kind": "park" }] }, "rt": null, "lane": "backlog", "state": "backlog" },
+    { "name": "stopped goes back to the backlog", "session": { "turnEnd": -60, "reviewedTurn": -60, "decisions": [{ "at": -30, "kind": "stop" }] }, "rt": null, "lane": "backlog", "state": "backlog" },
+    { "name": "approved yesterday is no longer done", "session": { "turnEnd": -86400, "reviewedTurn": -86400, "decisions": [{ "at": -86399, "kind": "approve" }] }, "rt": null, "lane": "backlog", "state": "backlog" },
+    { "name": "a new turn after an approval asks again", "session": { "turnEnd": -10, "reviewedTurn": -60, "decisions": [{ "at": -50, "kind": "approve" }] }, "rt": null, "lane": "me", "state": "review" },
+    { "name": "running wins over an unreviewed turn", "session": { "turnEnd": -60, "status": "running" }, "rt": null, "lane": "agent", "state": "running" },
+    { "name": "an error is stuck, with Claude", "session": { "status": "error", "turnEnd": -60 }, "rt": null, "lane": "agent", "state": "stuck" },
+    { "name": "a wait condition is its own lane", "session": { "wait": { "kind": "ci", "cwd": "/p", "branch": "pilcrow/x", "since": 0 } }, "rt": null, "lane": "wait", "state": "wait" },
+    { "name": "queued is with Claude", "session": { "queued": { "text": "go", "at": 0 } }, "rt": null, "lane": "agent", "state": "queued" },
+    { "name": "a queued card that starts is running", "session": { "queued": { "text": "go", "at": 0 }, "status": "starting" }, "rt": null, "lane": "agent", "state": "running" }
+  ]
+}
