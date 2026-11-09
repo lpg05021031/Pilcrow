@@ -25,7 +25,8 @@
     "test:perf": "node test/e2e/perf.mjs",
     "test:ux": "node test/e2e/ux.mjs",
     "release": "node scripts/release.mjs",
-    "installers": "python scripts/make-installers.py --verify"
+    "installers": "python scripts/make-installers.py --verify",
+    "patch": "python scripts/make-patch.py --verify"
   },
   "engines": {
     "node": ">=20"

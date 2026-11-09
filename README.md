@@ -284,6 +284,9 @@ ssh -L 47117:127.0.0.1:47117 遠端主機
 ## 更新與移除
 
 - **更新**：執行新版的安裝檔即可（會保留 `node_modules`，舊版多出來的檔案會被清掉）
+- **只套差異**：每一版另外附 `pilcrow-patch.sh`，只含上一版到這一版改動的檔案（例如 3.1.0 的工作台與 playbook），
+  一樣是純文字、不需要建置工具；`bash pilcrow-patch.sh` 會先確認 `~/pilcrow` 是它所針對的版本，套件沒變就不碰 `node_modules`。
+  全新安裝或版本差太多時仍用完整的安裝檔。產生方式：`npm run patch`（`scripts/make-patch.py`，預設從上一個 Release commit 算起）
 - **移除**：
 
   ```bash

@@ -1,0 +1,238 @@
+#!/usr/bin/env bash
+# ============================================================================
+#  Pilcrow {{VERSION}} — 更新檔（patch）
+#  從 {{BASE_VERSION}} 更新到 {{VERSION}}：只含這兩版之間改動的檔案（{{COUNT}} 個）
+#
+#  套用在已經用 pilcrow-install.sh 裝好的 Pilcrow 上；全新安裝請用 pilcrow-install.sh。
+#  跟完整安裝檔一樣是純文字：原始碼以文字直接寫在下面，建置好的介面以 base64 內附，
+#  不需要建置工具；套件沒有變動時也不會碰 npm。
+#  請先「存成檔案」再用 bash 執行，不要直接貼進 shell。
+#
+#    bash pilcrow-patch.sh            更新 ~/pilcrow
+#    bash pilcrow-patch.sh --help     所有選項
+# ============================================================================
+if [ -z "${BASH_VERSION:-}" ]; then echo "請用 bash 執行：bash $0" >&2; exit 1; fi
+set -euo pipefail
+
+PILCROW_VERSION={{VERSION}}
+PILCROW_BASE_VERSION={{BASE_VERSION}}
+PILCROW_PATCH_UI={{UI}}
+PILCROW_PATCH_NPM={{NPM}}
+
+if [ -t 1 ]; then
+  C_B=$'\e[1m'; C_G=$'\e[32m'; C_Y=$'\e[33m'; C_R=$'\e[31m'; C_A=$'\e[38;5;179m'; C_0=$'\e[0m'
+else
+  C_B=; C_G=; C_Y=; C_R=; C_A=; C_0=
+fi
+say()  { printf '%s\n' "$*"; }
+step() { printf '\n%s==>%s %s%s%s\n' "$C_A" "$C_0" "$C_B" "$*" "$C_0"; }
+ok()   { printf '  %s✓%s %s\n' "$C_G" "$C_0" "$*"; }
+warn() { printf '  %s!%s %s\n' "$C_Y" "$C_0" "$*"; }
+die()  { printf '\n%s✗ %s%s\n' "$C_R" "$*" "$C_0" >&2; exit 1; }
+
+pilcrow_usage() {
+  cat <<'USAGE'
+Pilcrow 更新檔 — 把已安裝的 Pilcrow {{BASE_VERSION}} 更新到 {{VERSION}}
+
+  bash pilcrow-patch.sh [選項]
+
+  --dir PATH        Pilcrow 的安裝位置（預設 ~/pilcrow，也可用環境變數 PILCROW_DIR）
+  --files-only      只寫出檔案與介面，不執行 npm install、不重啟背景的舊版
+  -h, --help        顯示這段說明
+
+  PILCROW_FORCE=1   安裝位置的版本不是 {{BASE_VERSION}} 也照套（只建議在你知道自己在做什麼時用）
+
+這個檔案只含 {{BASE_VERSION}} → {{VERSION}} 的差異；全新安裝、或版本差太多時，請改用完整的 pilcrow-install.sh。
+USAGE
+}
+
+pilcrow_target_dir() {
+  local dir="${PILCROW_DIR:-$HOME/pilcrow}" prev=""
+  for a in "$@"; do
+    case "$a" in
+      --dir=*) dir="${a#--dir=}" ;;
+    esac
+    [ "$prev" = "--dir" ] && dir="$a"
+    prev="$a"
+  done
+  case "$dir" in "~"*) dir="$HOME${dir#\~}" ;; esac
+  [ -d "$dir" ] || die "找不到資料夾 $dir。更新檔只能套在已安裝的 Pilcrow 上；全新安裝請用 pilcrow-install.sh。"
+  (cd "$dir" && pwd)
+}
+
+pilcrow_installed_version() {
+  sed -n 's/^  "version": "\([^"]*\)".*/\1/p' "$1/package.json" 2>/dev/null | head -1
+}
+
+pilcrow_check_target() {
+  local D="$1" v
+  [ -f "$D/package.json" ] && [ -f "$D/bin/pilcrow" ] && [ -d "$D/server" ] \
+    || die "$D 不像是 Pilcrow 的安裝位置（沒有 package.json、bin/pilcrow 或 server/）。請用 --dir 指定，或改用完整安裝檔。"
+  v="$(pilcrow_installed_version "$D")"
+  if [ "$v" = "$PILCROW_VERSION" ]; then
+    ok "這裡已經是 $v；重新套用一次（可以安心重跑）"
+  elif [ "$v" = "$PILCROW_BASE_VERSION" ]; then
+    ok "目前安裝的是 Pilcrow $v"
+  elif [ "${PILCROW_FORCE:-0}" = 1 ]; then
+    warn "目前安裝的是 ${v:-未知版本}，不是 $PILCROW_BASE_VERSION；PILCROW_FORCE=1，照套"
+  else
+    die "目前安裝的是 Pilcrow ${v:-未知版本}，這個更新檔是給 $PILCROW_BASE_VERSION 用的。請改用完整的 pilcrow-install.sh（或設定 PILCROW_FORCE=1 強制套用）。"
+  fi
+  if [ -f "$D/.pilcrow-partial" ]; then warn "上一次安裝沒有跑完（.pilcrow-partial）；這次會重寫這批檔案"; fi
+}
+
+pilcrow_verify() {
+  # pilcrow_verify DIR SUMS LABEL
+  local D="$1" sums="$2" label="$3"
+  if ! command -v sha256sum >/dev/null 2>&1; then
+    warn "找不到 sha256sum，略過檔案驗證"
+    return 0
+  fi
+  local bad
+  bad=$(cd "$D" && printf '%s\n' "$sums" | sha256sum -c 2>/dev/null | grep -v ': OK$' || true)
+  if [ -n "$bad" ]; then
+    printf '%s\n' "$bad" | sed 's/^/    /' >&2
+    die "$label：上面這些檔案缺少或內容不對（通常是貼上時少了一截或被改到）。請重新複製完整的更新檔、存檔後再執行一次。"
+  fi
+  ok "$label：$(printf '%s\n' "$sums" | grep -c .) 個檔案驗證通過"
+}
+
+pilcrow_remove_old() {
+  # Files this version no longer has, and every stale cache or interface chunk that would get in the way:
+  # the interface decodes *every* ui.tgz.b64.* chunk in the folder, so chunks left over from the old
+  # version would corrupt it.
+  local D="$1" n=0 f
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    case "$f" in /* | *..*) continue ;; esac
+    if [ -e "$D/$f" ]; then rm -f -- "$D/$f" && n=$((n + 1)); fi
+  done <<<"$(pilcrow_removed)"
+  if [ "$PILCROW_PATCH_UI" = 1 ]; then rm -f "$D"/web/ui-bundle/ui.tgz.b64.* "$D"/web/ui-bundle/ui.tgz.sha256 2>/dev/null || true; fi
+  find "$D/qt" -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
+  [ "$n" -gt 0 ] && ok "移除 $PILCROW_BASE_VERSION 留下、$PILCROW_VERSION 不再有的 $n 個檔案"
+  return 0
+}
+
+pilcrow_update_manifest() {
+  # .pilcrow-manifest lists what the installer wrote, so the next full installer can prune what it
+  # no longer ships. Keep it true after a patch: old list, minus what was removed, plus what was written.
+  local D="$1" m="$D/.pilcrow-manifest" tmp
+  tmp="$(mktemp "$D/.pilcrow-manifest.XXXXXX")"
+  {
+    if [ -f "$m" ]; then
+      grep -vxF -f <(pilcrow_removed) "$m" | { if [ "$PILCROW_PATCH_UI" = 1 ]; then grep -v '^web/ui-bundle/ui\.tgz\.' || true; else cat; fi; }
+    fi
+    pilcrow_written
+  } | grep -v '^$' | LC_ALL=C sort -u >"$tmp"
+  mv -f "$tmp" "$m"
+}
+
+pilcrow_ui() {
+  # Unpack the prebuilt interface that ships inside this file (no bundler needed on this machine).
+  local D="$1" B="$1/web/ui-bundle"
+  step "準備介面"
+  local chunks
+  chunks="$(cd "$B" 2>/dev/null && LC_ALL=C ls ui.tgz.b64.* 2>/dev/null || true)"
+  [ -n "$chunks" ] || die "更新檔裡沒有內附的介面（web/ui-bundle）。請重新複製完整的更新檔。"
+  command -v base64 >/dev/null 2>&1 || die "找不到 base64 指令（coreutils）"
+  local tmp="$D/web/.ui-unpack"
+  rm -rf "$tmp"; mkdir -p "$tmp"
+  (cd "$B" && cat $chunks) | base64 -d >"$tmp/ui.tgz" 2>/dev/null || { rm -rf "$tmp"; die "介面解碼失敗，請重新複製完整的更新檔。"; }
+  if command -v sha256sum >/dev/null 2>&1; then
+    [ "$(sha256sum <"$tmp/ui.tgz" | cut -d' ' -f1)" = "$(cut -d' ' -f1 <"$B/ui.tgz.sha256")" ] \
+      || { rm -rf "$tmp"; die "介面驗證失敗，請重新複製完整的更新檔。"; }
+  fi
+  tar -xzf "$tmp/ui.tgz" -C "$tmp" 2>/dev/null && [ -f "$tmp/dist/index.html" ] \
+    || { rm -rf "$tmp"; die "介面解壓失敗（需要 tar 與 gzip）。"; }
+  rm -rf "$D/web/dist"
+  mv "$tmp/dist" "$D/web/dist"
+  rm -rf "$tmp"
+  ok "介面已就緒（更新檔內附建置好的版本，這台機器不需要建置）"
+}
+
+pilcrow_npm() {
+  local D="$1"
+  step "安裝 npm 套件（這版的套件有變動）"
+  cd "$D"
+  local args=(install --no-audit --no-fund --no-update-notifier --omit=dev --loglevel=error)
+  if ! npm "${args[@]}"; then
+    warn "依 lockfile 安裝失敗（可能是內部 registry 沒有某些版本），改用 registry 上有的相容版本重試"
+    mv -f package-lock.json .package-lock.json.pilcrow 2>/dev/null || true
+    cp -f package.json .package.json.pilcrow
+    node -e 'const fs=require("fs");const p=JSON.parse(fs.readFileSync("package.json","utf8"));delete p.devDependencies;fs.writeFileSync("package.json",JSON.stringify(p,null,2)+"\n")' \
+      || die "無法暫時調整 package.json"
+    local rc=0
+    npm "${args[@]}" --no-package-lock || rc=$?
+    mv -f .package.json.pilcrow package.json
+    mv -f .package-lock.json.pilcrow package-lock.json 2>/dev/null || true
+    [ "$rc" = 0 ] || die "npm install 失敗。請確認 npm 能連到 registry（npm config get registry），再重新執行更新檔。"
+  fi
+  ok "套件安裝完成"
+}
+
+pilcrow_main() {
+  local FILES_ONLY=0
+  for a in "$@"; do case "$a" in -h | --help) pilcrow_usage; exit 0 ;; --files-only) FILES_ONLY=1 ;; esac; done
+  printf '%sPilcrow %s 更新檔%s（%s → %s）\n' "$C_B" "$PILCROW_VERSION" "$C_0" "$PILCROW_BASE_VERSION" "$PILCROW_VERSION"
+  local D; D="$(pilcrow_target_dir "$@")"
+  step "檢查安裝位置 $D"
+  pilcrow_check_target "$D"
+
+  step "寫出改動的檔案"
+  touch "$D/.pilcrow-partial"
+  pilcrow_remove_old "$D"
+  wrote=0
+  pilcrow_write_all "$D"
+  ok "寫出 $wrote 個檔案"
+  pilcrow_verify "$D" "$(pilcrow_sums_all)" "原始碼"
+  pilcrow_update_manifest "$D"
+
+  if [ "$PILCROW_PATCH_UI" = 1 ]; then pilcrow_ui "$D"; else ok "介面沒有變動"; fi
+  if [ "$FILES_ONLY" = 1 ]; then
+    rm -f "$D/.pilcrow-partial"
+    step "完成（只寫出檔案與介面）"
+    [ "$PILCROW_PATCH_NPM" = 1 ] && say "  下一步：cd $D && npm install --omit=dev"
+    say "  關掉所有 Pilcrow 視窗再打開，就是 $PILCROW_VERSION。"
+    return 0
+  fi
+  if [ "$PILCROW_PATCH_NPM" = 1 ]; then
+    command -v npm >/dev/null 2>&1 || die "找不到 npm；這版的套件有變動，需要 npm install。"
+    pilcrow_npm "$D"
+  else
+    ok "套件沒有變動，不碰 node_modules"
+  fi
+  rm -f "$D/.pilcrow-partial"
+
+  # An older Pilcrow still running would keep serving old code to new windows ("unknown method").
+  step "重新啟動背景的舊版"
+  "$D/bin/pilcrow" --restart-outdated 2>/dev/null || warn "沒能確認背景的 Pilcrow；請關掉所有視窗再打開"
+
+  printf '\n%s%sPilcrow %s 更新完成%s\n' "$C_B" "$C_G" "$PILCROW_VERSION" "$C_0"
+  say "  啟動：應用程式選單 → Pilcrow，或執行  $D/bin/pilcrow"
+  say "  這版改了什麼：$D/CHANGELOG.md"
+}
+
+# Files {{BASE_VERSION}} had that {{VERSION}} does not.
+pilcrow_removed() {
+  cat <<'PILCROW_REMOVED_EOF'
+{{REMOVED}}
+PILCROW_REMOVED_EOF
+}
+# Files this patch writes.
+pilcrow_written() {
+  cat <<'PILCROW_WRITTEN_EOF'
+{{WRITTEN}}
+PILCROW_WRITTEN_EOF
+}
+pilcrow_write_all() {
+  local D="$1"
+{{WRITE_ALL}}
+}
+pilcrow_sums_all() {
+  cat <<'PILCROW_SUMS_EOF'
+{{SUMS}}
+PILCROW_SUMS_EOF
+}
+
+# Everything above only defines functions; nothing runs unless this last line arrived intact.
+pilcrow_main "$@"
