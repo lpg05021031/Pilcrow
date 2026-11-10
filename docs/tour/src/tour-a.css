@@ -1,0 +1,46 @@
+/* Tour layer. Everything here is prefixed tx- so it cannot touch the real stylesheet above. */
+:root{--tx-stage:color-mix(in srgb,var(--chrome) 58%,#000);--tx-io:cubic-bezier(.45,0,.55,1)}
+[data-theme=light]{--tx-stage:color-mix(in srgb,var(--chrome) 91%,#000)}
+.tx-root{position:fixed;inset:0;overflow:hidden;background:var(--tx-stage);color:var(--text);font-family:var(--font-ui);font-size:13px}
+.tx-scale{position:absolute;left:0;top:0;transform-origin:0 0;display:flex;flex-direction:column;padding:10px 10px 0}
+.tx-stage{position:relative;flex:1;min-height:0;border-radius:12px;overflow:hidden;container-type:size;background:var(--chrome);box-shadow:0 0 0 1px var(--hair-2),0 24px 60px -18px rgba(0,0,0,.55)}
+.tx-stage.tx-rise{animation:tx-win 760ms var(--ease) both}
+.tx-stage>.app{width:100%;height:100%}
+.tx-stage .panel{max-width:max(300px,min(40cqw,calc(100cqw - 760px)))}
+.tx-stage .welcome{padding-bottom:10cqh}
+.tx-stage .session-empty{padding-top:12cqh}
+.tx-stage textarea{caret-color:var(--accent)}
+.tx-narrow .tx-stage .sidebar{display:none}
+.tx-narrow .tx-stage .app>.main{margin-left:var(--sp-2)}
+.tx-narrow .tx-stage .panel{position:absolute;inset:0 0 0 auto;z-index:5;max-width:92%;box-shadow:var(--shadow-sheet)}
+.tx-narrow .tx-stage .bd-keys,.tx-narrow .tx-stage .welcome-keys{display:none}
+.tx-press{transform:scale(.95)!important;filter:brightness(1.15);transition:transform 140ms var(--ease),filter 140ms}
+
+/* dock: where the talk is, what the stop claims, how to move */
+.tx-dock{flex:none;display:flex;align-items:center;gap:20px;height:88px;padding:0 8px}
+.tx-dock.tx-rise{animation:tx-rise 600ms var(--ease) 300ms both}
+.tx-main{flex:1;min-width:0}
+.tx-meta{display:flex;align-items:center;gap:10px;height:20px;font-size:12px;color:var(--text-3);white-space:nowrap}
+.tx-num{font:500 11.5px var(--font-mono);color:var(--accent-text);font-variant-numeric:tabular-nums}
+.tx-segs{display:flex;gap:4px;margin-left:4px}
+.tx-seg{width:18px;height:3px;border-radius:2px;background:var(--fill-2);transition:background 300ms,width 300ms var(--ease)}
+.tx-seg.seen{background:var(--text-3)}
+.tx-seg.cur{background:var(--accent);width:30px}
+.tx-hint{margin-left:6px;color:var(--accent-text);font-weight:600}
+.tx-say{margin-top:3px;font-size:22px;font-weight:600;letter-spacing:-.018em;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tx-say span{display:inline-block;animation:tx-rise 520ms var(--ease) both}
+.tx-keys{display:flex;align-items:center;gap:14px;color:var(--text-3);font-size:12px;white-space:nowrap}
+.tx-keys span{display:inline-flex;align-items:center;gap:5px}
+.tx-nav{display:flex;gap:6px}
+.tx-nav button{display:grid;place-items:center;width:38px;height:38px;padding:0;border:0;border-radius:50%;background:none;color:var(--text-2);cursor:pointer;box-shadow:inset 0 0 0 1px var(--hair-2);transition:background 180ms,transform 180ms var(--spring)}
+.tx-nav button:hover{background:var(--fill-1);color:var(--text)}
+.tx-nav button:active{transform:scale(.92)}
+.tx-nav button:disabled{opacity:.35;cursor:default}
+.tx-nav .tx-next{background:var(--accent-solid);color:#fff;box-shadow:none}
+.tx-nav .tx-next:hover{background:var(--accent-solid);filter:brightness(1.08);color:#fff}
+.tx-nav .tx-next.wait{animation:tx-nudge 1.8s var(--tx-io) infinite}
+.tx-nav svg,.tx-x svg{width:16px;height:16px}
+.tx-narrow .tx-keys,.tx-narrow .tx-chap{display:none}
+.tx-narrow .tx-dock{gap:10px;height:84px}
+.tx-narrow .tx-say{font-size:17px;white-space:normal}
+@media (max-width:1120px){.tx-keys{display:none}}

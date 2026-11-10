@@ -28,6 +28,7 @@ Changes / Files / Terminal / Preview / Tasks / Session 面板。
 | `DISPATCH.md` | 跨 repo 派工（Dispatch）的設計與現況：一份 brief、一組 repo、每個 repo 一個 worktree 裡的 session；先 plan、先跑 canary、一個權限答所有 repo、一次 review、一次收尾 |
 | `HELPERS.md` | 跨 session 協調（Helpers）的設計與現況：一個 session 帶領其他 session，每個 helper 有自己的資料夾、worktree 與 brief，怎麼拆由模型逐回合決定；lead 等、讀、指示、收攏，變更在一個地方一起 review |
 | `REPOSITORIES.md` | Repositories 註冊表的設計與現況：你維護的一份清單——每個 repo 的名字與別名、policy、預設值、給 agent 的常備 notes；Helpers 與 Dispatch 都讀它，模型用你的話就找得到 repo |
+| `docs/tour/` | 互動導覽：單一 HTML 檔（`pilcrow-tour.html`），以真實介面的畫面重播一段工作過程，逐站介紹各項功能；擷取與建置腳本、導覽層原始檔與說明見 [docs/tour/README.md](docs/tour/README.md) |
 | `CHANGELOG.md` | 版本紀錄 |
 
 ---
