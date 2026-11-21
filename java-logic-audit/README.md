@@ -17,10 +17,10 @@ This is a work in progress, built milestone by milestone (design section 18).
 | M2 | `audit-model`, `audit-characterize`, `audit-review`, the judge script | built; on sample 1 a model derived by fresh agents covers all 57 behaviours of the reviewed model. Not yet run on a real system |
 | M3 | `audit-verify`: failures injected into every step, random sequences with rules of the data | built and run on sample 1. Not built: comparing paths that should agree (preview against commit), relations between calls, rules derived from the code's own checks |
 | M4 | `audit-verify` also runs two commands at once, stopping one between its database steps | built and run on sample 1: one stop per schedule, pairs chosen from cases that share a starting situation |
-| M5–M6 | PRD trace, assurance, report, more stacks | not started |
+| M5 | `audit-spec`, `audit-assure`, `audit-report`, `audit-rerun` | built; the scripts are run on sample 1. Not built: mutation testing beyond the guard canary, and seeds taken from the project's history |
+| M6 | A second stack (Spring Boot 2, MyBatis, MySQL, Gradle, JUnit 4) and a hostile sample | not started: everything so far has run on one sample, on Spring Boot 3, JPA, PostgreSQL and Maven |
 
-Commands that belong to a later milestone are named by `audit-status` as the next step but are not
-installed yet.
+No command has been run on a real system yet.
 
 ## Try it
 
@@ -38,7 +38,7 @@ It asks what you want (two short questions), writes your answers once to `audit/
 starts preflight. Run `/java-logic-audit:audit-status <system>` at any time to see where you are and the
 exact next command.
 
-## What exists so far
+## What exists
 
 | Command | What you get |
 |---|---|
@@ -50,6 +50,10 @@ exact next command.
 | `audit-characterize <system>` | Every case of every command executed on the application: what agrees is pinned, what differs or would surprise a caller becomes a question with the cases that show it |
 | `audit-review <system> [flagged\|all]` | Your answers to those questions, kept for good. "Not intended" becomes a defect that the cases reproduce until the code changes |
 | `audit-verify <system> [faults\|races\|sequences\|all]` | Whether two commands at the same time leave what one after the other would; what a failure in the middle of a call leaves behind (data in between, something sent that was not kept, a retry that does not converge); and rules of the data checked after every call of random sequences, with the shortest sequence that breaks one |
+| `audit-spec <system> <file>` | Your specification, clause by clause, against what was observed. Readers that never see the code write what each clause requires; a script ties it to a case and says where the two agree, differ, or cannot be compared, and which behaviour no clause speaks about |
+| `audit-assure <system> [recheck\|canary\|seeds <file>\|all]` | How far the audit itself can be trusted: every finding handed to a reader who is told nothing but the statement and the evidence; every cited check switched off in a copy of the code to see whether a case notices; defects you supply seeded one at a time |
+| `audit-report <system>` | Findings, the verdict per entity with its seven checks, what was run, open questions, decisions and an empty sign-off, in one self-contained `REPORT.html` |
+| `audit-rerun <system>` | After the code changed: which cases are still valid, which must run again, what behaves differently than pinned, which findings are fixed |
 | `audit-status <system>` | Progress, what is stale, the next command |
 
 Preflight writes four files under `audit/<system>/`:
@@ -89,8 +93,23 @@ The verify step adds `model/invariants.json` (candidate rules from fixed templat
 what the runs showed about each; written by `scripts/invariants.py`) and the runs of the failure and
 sequence checks.
 
-What the verdict can say today: an entity is at most "reviewed in part", because one of the seven
-checks behind "reviewed completely" (the guard canary) is not built yet. The verdict says so itself.
+The later steps add:
+
+| Path | Written by | Contents |
+|---|---|---|
+| `spec/sections.json`, `spec/vocabulary.json` | `scripts/spec.py split` | The document cut at its headings, and the names an analyst is given: commands, variables, values. Nothing about behaviour |
+| `spec/raw/` | the command | Every reply of an analyst and of the second reader, unchanged |
+| `spec/clauses.json`, `spec/expectations.json`, `SPEC_TRACE.md` | `scripts/spec.py join` | Clauses whose quote stands word for word in the document, each expectation with the case it was tied to and the result |
+| `assure/recheck/` | the command | Every reply of an independent reader, unchanged |
+| `assure/canary.json` | `scripts/canary.py` | For each cited check: whether a case noticed when it was switched off |
+| `assure/seeds.json` | `scripts/seed_run.py` | For each seeded defect: which checks noticed |
+| `ASSURANCE.md` | `scripts/assure.py` | The three together |
+| `REPORT.html` | `scripts/build_report.py` | The report |
+
+What the verdict can say: an entity is "reviewed completely" only when all seven checks pass, and several
+of them cannot pass without something the plugin cannot give itself: a database confirmed to match
+production, a person's confirmation of at least one rule of the data, and a complete canary run with no
+survivor. The verdict names the check that held it back.
 
 Settings live in `INTENT.md` (`language`, `budget`), not in plugin options: every command reads files, so
 a second person or a fresh session continues from the same state.
@@ -116,6 +135,7 @@ python3 -m unittest discover -s java-logic-audit/scripts/tests -v
 
 The tests compare the scanner's output on the samples under `fixtures/` with reviewed expected profiles
 (`fixtures/expected/`), and check the reviewed command model of sample 1
-(`fixtures/expected/orders-jpa.model/`), which the plugin's own derivation is measured against. Scripts
+(`fixtures/expected/orders-jpa.model/`), which the plugin's own derivation is measured against. `fixtures/`
+also holds a specification for sample 1 and sixteen seeded defects with what noticed each. Scripts
 are Python 3.8+, standard library only. The harness itself (`assets/auditkit/`) is exercised by running
 it on sample 1, which needs a JDK, Maven and a local PostgreSQL.

@@ -97,6 +97,9 @@ def build(workspace, system):
             parts.append("<p class='muted'>Waiting for a person's answer to %s.</p>" % e(f.get("question")))
         if f.get("reservations"):
             parts.append("<p>Reservations: %s</p>" % e("; ".join(judge.RESERVATIONS.get(m, m) for m in f["reservations"])))
+        if f.get("recheck"):
+            parts.append("<p class='muted'>Independent recheck: %s%s</p>" % (
+                e(f["recheck"]["verdict"]), " — " + e(f["recheck"].get("reason")) if f["recheck"].get("reason") else ""))
         where = [("Code", ", ".join(f.get("cites") or [])), ("Cases", ", ".join((f.get("cells") or []) + (f.get("cases") or [])[:12]))]
         parts.append("<p class='muted'>%s</p>" % " &nbsp; ".join("%s: <code>%s</code>" % (k, e(v)) for k, v in where if v))
     if findings.get("unconfirmed"):

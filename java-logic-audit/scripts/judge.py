@@ -259,7 +259,20 @@ RESERVATIONS = {
     "synthetic-state": "the starting state held rows written directly, not through commands",
     "mock-boundary": "an outside system's stand-in answered with a default it was not configured for",
     "uncontrolled-time": "the case depends on the date and time was not under control",
+    "recheck-weakened": "a reader given only the statement and the evidence found a weakness or another possible explanation",
+    "recheck-refuted": "a reader given only the statement and the evidence concluded that the evidence does not show it",
 }
+RECHECK_VERDICTS = ("stands", "weakened", "refuted")
+RECHECK_KEPT = ("verdict", "reason", "evidence_shows_it", "evidence_note", "state_by_commands_only", "state_note", "cited_code",
+                "code_note", "signs_of_intent", "other_explanation")
+
+
+def recheck_of(adir, finding_id, fingerprint):
+    """What an independent reader said about this finding as it is now; None when nobody did, or about an older form of it."""
+    reply = _lib.read_json(os.path.join(adir, "assure", "recheck", finding_id + ".json"))
+    if not isinstance(reply, dict) or reply.get("fingerprint") != fingerprint or reply.get("verdict") not in RECHECK_VERDICTS:
+        return None
+    return {k: reply[k] for k in RECHECK_KEPT if k in reply}
 
 
 def matrix_runs(adir):
@@ -448,6 +461,9 @@ def findings(workspace, system):
         if fp not in ids:
             ids[fp] = nxt
             nxt += 1
+        recheck = recheck_of(adir, "F-%03d" % ids[fp], fp)
+        if recheck and recheck["verdict"] != "stands":
+            marks = set(marks) | {"recheck-" + recheck["verdict"]}
         entry = {
             "id": "F-%03d" % ids[fp], "fingerprint": fp, "class": cls, "basis": basis, "kind": q["kind"],
             "title": q["title"], "statement": q["observed"], "question": q["id"],
@@ -458,6 +474,8 @@ def findings(workspace, system):
             "cells": q["cells"], "cases": q.get("cases", []), "cites": q["cites"], "anchor": handler, "evidence": per_cell,
             "severity": None,
         }
+        if recheck:
+            entry["recheck"] = recheck
         (unconfirmed if status == "unconfirmed" else out).append(entry)
     out.sort(key=lambda f: f["id"])
     result = {"schema": 1, "next": nxt, "ids": ids,
@@ -487,6 +505,11 @@ def render_findings(system, r):
                   "- **What:** " + f["statement"]]
         if f["reservations"]:
             lines.append("- **Reservations:** " + "; ".join(RESERVATIONS[m] for m in f["reservations"]))
+        if f.get("recheck"):
+            lines.append("- **Independent recheck:** %s%s" % (f["recheck"]["verdict"],
+                                                             " — " + " ".join(str(f["recheck"]["reason"]).split()) if f["recheck"].get("reason") else ""))
+            for s in f["recheck"].get("signs_of_intent") or []:
+                lines.append("  - a sign that it may be intended: `%s` — %s" % (s.get("where"), " ".join(str(s.get("what")).split())))
         if f["cells"]:
             lines.append("- **Cells:** " + ", ".join(f["cells"]))
         if f.get("cases"):

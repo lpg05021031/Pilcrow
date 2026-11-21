@@ -337,7 +337,8 @@ def main(argv=None):
         print("%d sections: %s" % (len(sections), ", ".join("%s (lines %d-%d)" % (x["id"], x["first_line"], x["last_line"]) for x in sections)))
     elif args.cmd == "brief":
         import json
-        print(json.dumps(brief(workspace, args.system, args.section, args.check), indent=1, ensure_ascii=False))
+        # One line: the vocabulary is long, and an analyst reads it as well without the white space.
+        print(json.dumps(brief(workspace, args.system, args.section, args.check), ensure_ascii=False, separators=(",", ":")))
     else:
         out = join(workspace, args.system)
         e = out["expectations"]

@@ -114,5 +114,5 @@ Read `audit/$system/SPEC_TRACE.md`. Show what each script printed, unchanged, an
   specification is silent on is where undocumented rules live.
 
 Do not soften any of it and do not judge which side is right. End with the next step:
-`/java-logic-audit:audit-review $system` when a question is open, otherwise
-`/java-logic-audit:audit-report $system`.
+`/java-logic-audit:audit-review $system` when a flagged question is open, otherwise
+`/java-logic-audit:audit-assure $system`.
