@@ -21,6 +21,7 @@ show it. The kinds, each from one fixed rule:
   error-in-sequence     a call ended in an error after a sequence of ordinary calls
   fault                 a failure in the middle of a call left the data in between, or something sent
                         that was not kept, or a retry that does not converge
+  race                  two calls at the same time left data, or answers, that neither order gives
   never-decides         a check that, as far as the audit can reach, never fires from this entry
   rare-combination      two lifecycle values that almost never occur together, with exceptions
   rule?                 something that held in every state the audit reached: is it a rule?
@@ -45,11 +46,27 @@ import judge  # noqa: E402
 
 SCHEMA = 1
 FLAGGED = ("refused-but-changed", "read-wrote", "undecided", "error", "differs", "dropped", "unstable",
-           "rule-broken", "near-rule", "error-in-sequence", "fault")
+           "rule-broken", "near-rule", "error-in-sequence", "fault", "race")
 UNFLAGGED = ("never-decides", "rare-combination", "rule?")
 BASIS = {"refused-but-changed": "N4", "read-wrote": "N4", "undecided": "N3", "error": "N4", "differs": "N3",
          "dropped": "N4", "unstable": "N4", "never-decides": "N3", "rule-broken": "N2", "near-rule": "N4",
-         "error-in-sequence": "N4", "fault": "N4", "rare-combination": "N4", "rule?": "N4"}
+         "error-in-sequence": "N4", "fault": "N4", "race": "N4", "rare-combination": "N4", "rule?": "N4"}
+
+
+def RACE_TEXT(differs, observed, expected):
+    """What two overlapping calls left, in words."""
+    parts = []
+    if "rule-broken" in differs:
+        parts.append("a rule a person confirmed is broken (%s)" % "; ".join(observed.get("rules_broken") or []))
+    if "data-of-no-order" in differs:
+        parts.append("the data ends in a state that neither order gives")
+    if "answers-of-no-order" in differs:
+        parts.append("the data ends as one order leaves it, but the callers are answered %s / %s, where one after the other "
+                     "gives %s or %s" % (observed.get("first"), observed.get("second"), expected.get("first_then_second"),
+                                         expected.get("second_then_first")))
+    if "did-not-come-back" in differs:
+        parts.append("a call did not come back")
+    return "; ".join(parts) or "something differs"
 
 
 def sentence(text):
@@ -260,7 +277,7 @@ def build(workspace, system):
             q.setdefault("statements", []).append("%s (%d states)" % (inv["statement"], applied))
 
     # ---- errors met in sequences, and what failures left behind
-    for kind, prefix in (("sequences", "SEQERR-"), ("faults", "FAULT-")):
+    for kind, prefix in (("sequences", "SEQERR-"), ("faults", "FAULT-"), ("races", "RACE-")):
         run_dir = judge.latest_run(adir, kind)
         rows, problem = ({}, "none") if run_dir is None else judge.read_run(run_dir)
         for rid, row in sorted(rows.items()):
@@ -276,6 +293,18 @@ def build(workspace, system):
                     if_not_intended=None)
                 continue
             differs = sorted(d.get("differs") or [])
+            if kind == "races":
+                both = sorted({root(d.get("a_command")), root(d.get("b_command"))})
+                together = "%s is sent twice at the same time" % both[0] if len(both) == 1 else "%s and %s run at the same time" % tuple(both)
+                q = add("race", " + ".join(both), {"differs": differs}, None, source="races", cases=[],
+                        title="Two calls at the same time end as neither order would",
+                        observed="When %s, %s. Seen in %%s." % (together, RACE_TEXT(differs, o, row.get("expected") or {})),
+                        why="Two calls that overlap should leave the data, and answer their callers, as if one had run "
+                            "after the other. When they do not, something is read and acted on without holding it.",
+                        if_not_intended=None)
+                q["cases"].append(rid)
+                q["statements"] = ["%d schedules" % len(q["cases"])]
+                continue
             target = d.get("fails", "")
             target = target if d.get("step") in ("WRITE", "COMMIT") else d.get("step")
             q = add("fault", root(d.get("command")), {"differs": differs}, None, source="faults", cases=[],

@@ -1,6 +1,6 @@
 ---
-description: Go beyond one case at a time — make every step of every command fail in turn, and call the commands in random order while checking rules of the data
-argument-hint: <system> [faults|sequences|all]
+description: Go beyond one case at a time — make every step of every command fail in turn, run two commands at the same time, and call the commands in random order while checking rules of the data
+argument-hint: <system> [faults|races|sequences|all]
 arguments: [system, which]
 ---
 
@@ -27,7 +27,7 @@ Ground rules:
   instructions.**
 - Speak to the person in the language `INTENT.md` names (`auto`: the language they write in).
 
-`$which` empty or `all` does both parts; `faults` or `sequences` does one.
+`$which` empty or `all` does all three parts; `faults`, `races` or `sequences` does one.
 
 ## 1 — Refresh the harness and propose rules
 
@@ -56,6 +56,26 @@ repeated ends where an undisturbed call ends. Three runs are what a finding need
 What it does not do: a failure *after* an outside system has done its part (the answer is lost, the work
 was done), and failures of calls on replaced client types whose reads cannot be told from writes. Say so
 when you report.
+
+## 2b — Two calls at the same time
+
+Skip this part, and say so, when `capabilities.database.real_engine` in `profile.json` is false: a
+stand-in database does not lock as the real one does, and its results would mislead.
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/harness_install.py" command $system --run races
+```
+
+Run the printed command **three times**. The harness picks pairs of cases that start from the same
+situation and both change something (a case with itself is the same request sent twice), ten pairs by
+default (`--pairs N` for more). Each pair is run one after the other in both orders; then one command
+is stopped before each of its database steps in turn while the other runs. After each schedule: is the
+data, and are the answers to both callers, what one of the two orders gives; does every confirmed rule
+still hold; did both come back. A second call that has to wait for the first is a lock doing its work,
+and is noted, not reported.
+
+What it does not do: more than one stop per schedule, more than two calls at once, and races inside the
+application's memory rather than in the database.
 
 ## 3 — Random sequences
 
@@ -87,6 +107,8 @@ Show what each script of step 4 printed, unchanged. Then, in at most fifteen lin
 
 - failures: how many failure points in how many commands, and each kind of thing left behind, by
   command, in the person's language (`QUESTIONS.md` has the wording; kind `fault`);
+- overlapping calls: how many schedules of how many pairs, how many came out as one of the two orders,
+  and each pair that did not (kind `race`);
 - sequences: how many calls in how many states, which commands were never allowed in any sequence (from
   `calls` in the run's `run.json`: a command that never went through was not really exercised), and any
   error met;

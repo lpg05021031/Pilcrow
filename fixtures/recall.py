@@ -12,6 +12,7 @@ runs the three mechanical checks on the changed code:
   rules    random sequences: a confirmed rule of the data is broken
   errors   random sequences: a call ends in an error that the unchanged code never showed
   faults   failures injected into every step: something is left behind that the unchanged code did not leave
+  races    two calls at the same time: data or answers that neither order gives, where the unchanged code gave one
 
 This measures what the checks built from the *unchanged* code catch when the code then changes: the
 recall of the audit's own tests. It does not measure whether an audit started from scratch on the
@@ -29,6 +30,7 @@ import subprocess
 import sys
 
 SKIP = {"target", "runs", "logs", "model_raw", ".git"}
+ROUTES = ("pins", "rules", "errors", "faults", "races")
 
 
 def read_run(run_dir):
@@ -53,7 +55,7 @@ def latest(adir, kind):
 
 def signals(adir):
     """What each check shows in the runs under one audit directory."""
-    out = {"pins": [], "rules": [], "errors": [], "faults": [], "ran": {}}
+    out = {"pins": [], "rules": [], "errors": [], "faults": [], "races": [], "ran": {}}
     matrix = latest(adir, "matrix")
     out["ran"]["matrix"] = len(matrix)
     for rid, row in sorted(matrix.items()):
@@ -76,6 +78,13 @@ def signals(adir):
             detail = row.get("detail") or {}
             out["faults"].append("%s %s %s: %s" % (detail.get("command"), detail.get("step"), detail.get("fails"),
                                                    ",".join(detail.get("differs") or [])))
+    races = latest(adir, "races")
+    out["ran"]["races"] = len(races)
+    for rid, row in sorted(races.items()):
+        if row.get("result") == "MISMATCH":
+            detail = row.get("detail") or {}
+            out["races"].append("%s + %s: %s" % (detail.get("a_command"), detail.get("b_command"), ",".join(detail.get("differs") or [])))
+    out["races"] = sorted(set(out["races"]))
     return out
 
 
@@ -100,7 +109,7 @@ def apply(defect, workspace):
 def run_checks(workspace, system):
     adir = os.path.join(workspace, "audit", system)
     os.makedirs(os.path.join(adir, "logs"), exist_ok=True)
-    for run, extra in (("matrix", ["-Daudit.mode=verify"]), ("faults", []), ("sequences", [])):
+    for run, extra in (("matrix", ["-Daudit.mode=verify"]), ("faults", []), ("sequences", []), ("races", [])):
         with open(os.path.join(adir, "logs", "recall-%s.log" % run), "w") as log:
             subprocess.call(["mvn", "-B", "-o", "-q", "-f", "pom-audit.xml", "-Paudit", "test",
                              "-Daudit.dir=" + adir, "-Daudit.run=" + run] + extra,
@@ -130,8 +139,8 @@ def main(argv=None):
         copy_workspace(args.baseline, workspace)
         apply(defect, workspace)
         seen = signals(run_checks(workspace, args.system))
-        new = {k: [x for x in seen[k] if x not in base[k]] for k in ("pins", "rules", "errors", "faults")}
-        routes = [k for k in ("pins", "rules", "errors", "faults") if new[k]]
+        new = {k: [x for x in seen[k] if x not in base[k]] for k in ROUTES}
+        routes = [k for k in ROUTES if new[k]]
         broke = not all(seen["ran"].values())
         results.append({"id": defect["id"], "category": defect["category"], "what": defect["what"],
                         "detected": bool(routes), "routes": routes, "did_not_run": [k for k, n in seen["ran"].items() if not n],
@@ -151,7 +160,7 @@ def main(argv=None):
     out = os.path.join(os.path.dirname(os.path.abspath(args.defects)), "results.json")
     if not args.only:
         with open(out, "w", encoding="utf-8") as fh:
-            json.dump({"schema": 1, "baseline_already_showed": {k: len(base[k]) for k in ("pins", "rules", "errors", "faults")},
+            json.dump({"schema": 1, "baseline_already_showed": {k: len(base[k]) for k in ROUTES},
                        "summary": summary, "results": results}, fh, indent=2)
             fh.write("\n")
     print("\nnoticed %d of %d; %d of them by something other than a changed pin" % (

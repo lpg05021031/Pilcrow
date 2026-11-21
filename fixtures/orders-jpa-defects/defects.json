@@ -121,6 +121,22 @@
       "find": "        return new LineView(line.getId(), line.getLineNo(), line.getSku(), line.getQty(), line.getShippedQty(),",
       "replace": "        return new LineView(line.getId(), line.getLineNo(), line.getSku(), line.getShippedQty(), line.getQty(),",
       "what": "Reading an order shows a line's quantity and shipped quantity swapped; the stored data is right."
+    },
+    {
+      "id": "concurrency-1",
+      "category": "concurrency",
+      "file": "src/main/java/com/example/orders/service/OrderService.java",
+      "find": "        return headers.findByIdForUpdate(id).orElseThrow(() -> new NotFoundException(\"order\", id));",
+      "replace": "        return headers.findById(id).orElseThrow(() -> new NotFoundException(\"order\", id));",
+      "what": "Confirming and cancelling an order no longer lock it: two of them at once both read the order as it was."
+    },
+    {
+      "id": "concurrency-2",
+      "category": "concurrency",
+      "file": "src/main/java/com/example/orders/service/ShipmentService.java",
+      "find": "headers.findByIdForUpdate(headerId)",
+      "replace": "headers.findById(headerId)",
+      "what": "Applying a shipment no longer locks the order: two shipments of the same line at once both read it as it was."
     }
   ]
 }

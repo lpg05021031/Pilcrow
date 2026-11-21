@@ -235,6 +235,35 @@ class Verify(unittest.TestCase):
         self.run_of("faults", [self.fault_row("FAULT-0001-WRITE-1", []), self.fault_row("FAULT-0001-COMMIT-1", [], "COMMIT", "commit")])
         self.assertEqual(judge.findings(self.tmp, "s")["findings"][0]["status"], "fixed")
 
+    def race_row(self, rid, differs, same_as="neither"):
+        return {"id": rid, "result": "MISMATCH" if differs else "MATCH",
+                "expected": {"first_then_second": "ALLOWED / REJECTED DUP", "second_then_first": "REJECTED DUP / ALLOWED"},
+                "observed": {"first": "REJECTED CONFLICT", "second": "ALLOWED", "same_as": same_as, "rules_broken": []},
+                "detail": {"a": "CMD-ship|base", "b": "CMD-ship|base", "a_command": "CMD-ship", "b_command": "CMD-ship",
+                           "first": "a", "stopped_after_steps": 1, "differs": differs}}
+
+    def test_overlapping_calls_become_a_question_a_finding_and_an_item_of_the_verdict(self):
+        self.assertIn("no run with overlapping calls", self.items()["concurrency"]["detail"])
+        rows = [self.race_row("RACE-01-A00", []), self.race_row("RACE-01-A01", ["answers-of-no-order"]),
+                self.race_row("RACE-01-B01", ["answers-of-no-order"])]
+        for _ in range(3):
+            self.run_of("races", rows)
+        qs = [q for q in build_questions.build(self.tmp, "s")["questions"] if q["kind"] == "race"]
+        self.assertEqual(len(qs), 1)
+        self.assertEqual(qs[0]["cases"], ["RACE-01-A01", "RACE-01-B01"])
+        self.assertIn("CMD-ship is sent twice at the same time", qs[0]["observed"])
+        self.assertIn("REJECTED CONFLICT / ALLOWED", qs[0]["observed"])
+        self.assertIn("Seen in 2 schedules", qs[0]["observed"])
+        f = [x for x in judge.findings(self.tmp, "s")["findings"] if x["kind"] == "race"][0]
+        self.assertEqual((f["status"], f["grade"], f["class"]), ("reproduced", "A", "anomaly"))
+        item = self.items()["concurrency"]
+        self.assertEqual(item["result"], "pass")
+        self.assertIn("3 schedules of 1 pairs", item["detail"])
+        self.write("profile.json", {"capabilities": {"matches_production": "unconfirmed", "database": {"real_engine": True}}})
+        self.assertEqual(self.items()["concurrency"]["result"], "could-not-pass")
+        self.write("profile.json", {"capabilities": {"matches_production": "confirmed", "database": {"real_engine": False}}})
+        self.assertIn("stand-in", self.items()["concurrency"]["detail"])
+
     # ---- the verdict's items 3 and 4
 
     def items(self):

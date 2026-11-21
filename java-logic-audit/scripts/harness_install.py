@@ -39,7 +39,7 @@ KIT = os.path.join(PLUGIN, "assets", "auditkit")
 VERSIONS = os.path.join(PLUGIN, "assets", "build", "versions.json")
 AUDIT_POM = "pom-audit.xml"
 DEFAULT_CLOCK = "2030-03-15T10:00:00Z"    # a fixed "now" for every case: a Friday, far from a month or year end
-RUNS = ("smoke", "matrix", "faults", "sequences")
+RUNS = ("smoke", "matrix", "faults", "sequences", "races")
 MODES = ("record", "verify")
 
 
@@ -203,7 +203,7 @@ allprojects {
             tasks.withType(Test).configureEach {
                 useJUnitPlatform()
                 filter { includeTestsMatching 'auditkit.*Runner' }
-                ['audit.dir', 'audit.run', 'audit.mode', 'audit.command', 'audit.case', 'audit.seed', 'audit.sequences', 'audit.steps'].each { key ->
+                ['audit.dir', 'audit.run', 'audit.mode', 'audit.command', 'audit.case', 'audit.seed', 'audit.sequences', 'audit.steps', 'audit.pairs'].each { key ->
                     if (System.getProperty(key) != null) { systemProperty key, System.getProperty(key) }
                 }
             }
@@ -295,7 +295,7 @@ def settings(workspace, system):
     return {"file": rel, "written": True, "todo": todo}
 
 
-def command(workspace, system, run, mode=None, case=None, only_command=None, seed=None, sequences=None, steps=None):
+def command(workspace, system, run, mode=None, case=None, only_command=None, seed=None, sequences=None, steps=None, pairs=None):
     if run not in RUNS:
         _lib.die("unknown run %r: one of %s" % (run, ", ".join(RUNS)))
     if mode is not None and mode not in MODES:
@@ -310,7 +310,7 @@ def command(workspace, system, run, mode=None, case=None, only_command=None, see
     for key, value in (("mode", mode), ("case", case), ("command", only_command)):
         if value is not None:
             props += " -Daudit.%s=%s" % (key, value)
-    for key, value in (("seed", seed), ("sequences", sequences), ("steps", steps)):
+    for key, value in (("seed", seed), ("sequences", sequences), ("steps", steps), ("pairs", pairs)):
         if value is not None:
             props += " -Daudit.%s=%d" % (key, int(value))
     if p["build_tool"] == "maven":
@@ -337,6 +337,7 @@ def main(argv=None):
             s.add_argument("--seed", type=int, help="for sequences: the seed everything random follows from (default 1)")
             s.add_argument("--sequences", type=int, help="for sequences: how many (default 50)")
             s.add_argument("--steps", type=int, help="for sequences: calls in each (default 20)")
+            s.add_argument("--pairs", type=int, help="for races: how many pairs of commands (default 10)")
     args = ap.parse_args(argv)
     workspace = os.path.abspath(args.workspace)
 
@@ -358,7 +359,7 @@ def main(argv=None):
             print("  to settle: " + item)
     else:
         print(command(workspace, args.system, args.run, args.mode, args.case, args.only,
-                      args.seed, args.sequences, args.steps))
+                      args.seed, args.sequences, args.steps, args.pairs))
     return 0
 
 

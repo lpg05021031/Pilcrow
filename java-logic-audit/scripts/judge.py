@@ -250,7 +250,7 @@ def render_capabilities(c):
 REPRODUCED_RUNS = 3
 CLASS_BY_BASIS = {"N3": "inconsistency", "N4": "anomaly", "N5": "anomaly"}
 FINDING_KINDS = ("refused-but-changed", "read-wrote", "undecided", "error", "differs", "dropped", "unstable",
-                 "rule-broken", "near-rule", "error-in-sequence", "fault")
+                 "rule-broken", "near-rule", "error-in-sequence", "fault", "race")
 CLASS_BY_KIND = {"rule-broken": "defect"}          # a rule a person confirmed: breaking it needs no further answer
 RESERVATIONS = {
     "substitute-engine": "the database is a stand-in, not the real engine",
@@ -428,7 +428,7 @@ def findings(workspace, system):
             accepted.append({"question": q["id"], "decision": decision["id"], "title": q["title"], "observed": q["observed"],
                              "note": decision.get("note", "")})
             continue
-        if q.get("source") in ("sequences", "faults"):
+        if q.get("source") in ("sequences", "faults", "races"):
             status, per_cell, marks = run_evidence(adir, q, caps)
         else:
             status, per_cell, marks = cell_evidence(adir, q, decision, cells, commands, runs, caps)
@@ -526,7 +526,11 @@ but at least one could not pass, and **reviewed insufficiently** when any item f
 4. Faults injected — passes when every command that changes the entity had each step of a successful call
    fail in turn. Fails when such a command had no failure injected. Could not pass when the harness
    cannot place a failure, when no fault run was made, or when some failure points could not be run.
-5–6. Concurrency, guard canary — not in this version: they could not pass.
+5. Concurrency explored — passes when pairs of overlapping calls involving a command of the entity were
+   run on the real engine, confirmed to match production. Could not pass when no such run was made, no
+   pair involved the entity, the engine is a stand-in or unconfirmed. Fails when a pair could not be run.
+   Only pairs within the budget are explored, with one stop each; the item says how many.
+6. Guard canary — not in this version: it could not pass.
 7. Source untouched — passes when every source, test and build file matches the manifest. Fails otherwise.
 
 Open questions and the missing sign-off belong to people; they are listed and do not change the verdict."""
@@ -569,6 +573,25 @@ def faults_item(own_cells, commands, rows, run, caps):
     return ("pass", "%d failure points injected in %d commands" % (points, len(changing)))
 
 
+def races_item(own_cells, rows, run, caps):
+    commands = {c["command"] for c in own_cells}
+    if not run:
+        return ("could-not-pass", "no run with overlapping calls has been made")
+    mine = [r for r in rows.values() if {(r.get("detail") or {}).get("a_command"), (r.get("detail") or {}).get("b_command")} & commands]
+    schedules = [r for r in mine if r.get("result") in ("MATCH", "MISMATCH")]
+    if any(r.get("result") == "ERROR" for r in mine):
+        return ("fail", "%d pairs involving this entity could not be run" % sum(1 for r in mine if r.get("result") == "ERROR"))
+    if not schedules:
+        return ("could-not-pass", "no pair of overlapping calls involved a command that changes this entity")
+    database = caps.get("database") or {}
+    if database.get("real_engine") is False:
+        return ("could-not-pass", "the database is a stand-in: it does not lock as the real engine does")
+    if caps.get("matches_production") != "confirmed":
+        return ("could-not-pass", "%d schedules run, but the database was not confirmed to match production" % len(schedules))
+    pairs = {(r["detail"].get("a"), r["detail"].get("b")) for r in schedules}
+    return ("pass", "%d schedules of %d pairs of overlapping calls, one stop each" % (len(schedules), len(pairs)))
+
+
 def verdict(workspace, system):
     import manifest as manifest_mod
     adir = _lib.audit_dir(workspace, system)
@@ -592,6 +615,8 @@ def verdict(workspace, system):
     rules = (_lib.read_json(os.path.join(model, "invariants.json"), {}) or {}).get("invariants", [])
     caps = (_lib.read_json(os.path.join(adir, "profile.json"), {}) or {}).get("capabilities") or {}
     seq_run, fault_run = latest_run(adir, "sequences"), latest_run(adir, "faults")
+    race_run = latest_run(adir, "races")
+    race_rows = read_run(race_run)[0] if race_run else {}
     seq_rows = read_run(seq_run)[0] if seq_run else {}
     fault_rows = read_run(fault_run)[0] if fault_run else {}
 
@@ -622,8 +647,8 @@ def verdict(workspace, system):
         items["reconciled"] = ("fail", "open: " + ", ".join(unresolved)) if unresolved else ("pass", "no open difference")
         items["invariants"] = invariants_item(target, rules, seq_rows, seq_run)
         items["faults"] = faults_item(own, commands, fault_rows, fault_run, caps)
-        for key in ("concurrency", "canary"):
-            items[key] = ("could-not-pass", NOT_IN_THIS_VERSION)
+        items["concurrency"] = races_item(own, race_rows, race_run, caps)
+        items["canary"] = ("could-not-pass", NOT_IN_THIS_VERSION)
         items["source"] = ("pass", "%d files match the manifest" % source["tracked"]) if source["status"] == "untouched" else (
             "fail", "%d added, %d removed, %d modified since the manifest" % (
                 len(source["added"]), len(source["removed"]), len(source["modified"])))

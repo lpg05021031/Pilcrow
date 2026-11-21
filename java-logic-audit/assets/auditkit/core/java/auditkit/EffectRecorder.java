@@ -79,6 +79,7 @@ public final class EffectRecorder {
                 .listener(new QueryExecutionListener() {
                     @Override
                     public void beforeQuery(ExecutionInfo info, List<QueryInfo> queries) {
+                        Interleave.step();
                         for (QueryInfo q : queries) {
                             if (Faults.isWrite(verbOf(q.getQuery()))) {
                                 Faults.at(Faults.WRITE, "a write to " + tableOf(q.getQuery()));
@@ -112,6 +113,7 @@ public final class EffectRecorder {
                     @Override
                     public void beforeMethod(MethodExecutionContext context) {
                         if (context.getTarget() instanceof java.sql.Connection && context.getMethod().getName().equals("commit")) {
+                            Interleave.step();
                             Faults.at(Faults.COMMIT, "the commit");
                         }
                     }
