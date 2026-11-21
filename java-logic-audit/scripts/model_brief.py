@@ -99,6 +99,22 @@ def cmd_shards(workspace, system, pattern=None):
     }
 
 
+def cmd_changed(workspace, system):
+    """After the code changed: the groups whose readers were given a file that is no longer what they read."""
+    import manifest as manifest_mod
+    adir, shards, _themap = load(workspace, system)
+    result = manifest_mod.check(workspace, os.path.join(adir, "manifest.json"))
+    files = sorted(set(result["modified"]) | set(result["removed"]))
+    groups = []
+    for s in shards:
+        touched = sorted(f for f in files if f in s.get("files", []))
+        if touched:
+            groups.append({"name": s["name"], "entry_points": s.get("entries", []), "changed_files": touched})
+    return {"system": system, "source": result["status"], "modified": result["modified"], "removed": result["removed"],
+            "added": result["added"], "groups_read_from_changed_files": groups,
+            "note": "a file that was added belongs to no group yet: only modelling again can place it"}
+
+
 def cmd_mine(workspace, system, name):
     adir, shards, themap = load(workspace, system)
     shard = shard_named(shards, name)
@@ -256,7 +272,7 @@ def cmd_triage(workspace, system, command_id=None):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name, extra in (("shards", None), ("mine", "shard"), ("referee", "shard"), ("recipes", "shard"), ("triage", None)):
+    for name, extra in (("shards", None), ("changed", None), ("mine", "shard"), ("referee", "shard"), ("recipes", "shard"), ("triage", None)):
         p = sub.add_parser(name)
         p.add_argument("system")
         if extra:
@@ -267,7 +283,7 @@ def main(argv=None):
             p.add_argument("--command")
         if name in ("referee", "recipes"):
             p.add_argument("--part", type=int, default=1)
-        if name != "shards":
+        if name not in ("shards", "changed"):
             p.add_argument("--file", action="store_true",
                            help="write the brief to a file under model_raw/briefs/ and print its path, for an agent to read")
         p.add_argument("--workspace", default=".")
@@ -275,6 +291,8 @@ def main(argv=None):
     workspace = os.path.abspath(args.workspace)
     if args.cmd == "shards":
         out = cmd_shards(workspace, args.system, args.pattern)
+    elif args.cmd == "changed":
+        out = cmd_changed(workspace, args.system)
     elif args.cmd == "mine":
         out = cmd_mine(workspace, args.system, args.shard)
     elif args.cmd == "referee":

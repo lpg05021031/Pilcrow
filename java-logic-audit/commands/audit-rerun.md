@@ -31,9 +31,14 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/manifest.py" check . --manifest audit/$sy
 `untouched`: say that nothing changed since the audit recorded the source, and stop unless the person
 asked for the checks to be run again anyway. Otherwise list the files added, removed and modified.
 
-For each changed file, name the groups of entry points whose readers were given it: it is listed under
-`files` of that group in `audit/$system/shards.json`. The model of those groups was read from the old
-code. Their checks may have moved, and new ones are not in the model at all.
+Then list the groups whose readers were given a file that changed:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_brief.py" changed $system
+```
+
+The model of those groups was read from the old code. Their checks may have moved, and new ones are not
+in the model at all.
 
 ## 2 — Run everything again
 
