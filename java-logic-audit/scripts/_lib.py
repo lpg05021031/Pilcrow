@@ -92,6 +92,29 @@ def inside(root, path):
     return real == root_real or real.startswith(root_real + os.sep)
 
 
+BUILD_FILES = ("pom.xml", "build.gradle", "build.gradle.kts")
+AUDIT_OUTPUT = ("runs", "logs", "model_raw", "assure")
+
+
+def copy_workspace(src, dst):
+    """A copy of a workspace to try something on, without what is rebuilt or does not matter for a run.
+
+    Left out: version control, Gradle's cache, the output directory of a build (a `target` or `build`
+    directory beside a build file; a source package that happens to be called `build` is kept), and under
+    audit/<system>/ the runs, logs, raw replies and assurance files of the original.
+    """
+    import shutil
+
+    def leave_out(directory, names):
+        out = [n for n in names if n in (".git", ".gradle")]
+        if any(os.path.isfile(os.path.join(directory, b)) for b in BUILD_FILES):
+            out += [n for n in names if n in ("target", "build")]
+        if os.path.basename(os.path.dirname(directory)) == "audit":
+            out += [n for n in names if n in AUDIT_OUTPUT]
+        return out
+    shutil.copytree(src, dst, ignore=leave_out)
+
+
 def walk_files(root, skip_dirs=SKIP_DIRS, skip_audit_sources=True):
     """Yield paths relative to root, with forward slashes, in sorted order.
 

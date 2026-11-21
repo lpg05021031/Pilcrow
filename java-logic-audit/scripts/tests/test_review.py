@@ -295,6 +295,11 @@ class Chain(System):
         self.assertEqual(self.finding(qs["refused-but-changed"])["status"], "reproduced")
         # the refusal no longer writes: one run on the changed application
         self.run_matrix("record", fixed=("CELL-0002",), code="after")
+        self.assertEqual(self.finding(qs["refused-but-changed"])["status"], "unconfirmed")   # runs without a mark are kept: mixed evidence
+        for name in sorted(os.listdir(os.path.join(self.adir, "runs")))[:3]:                 # the three earlier runs carried a mark too
+            run = self.read("runs/%s/run.json" % name)
+            run["code"] = "before"
+            self.write("runs/%s/run.json" % name, run)
         rec = reconcile.reconcile(self.tmp, "s")
         self.assertEqual(rec["unstable"], [])                       # a changed case is not an unstable one
         self.assertEqual(len([r for r in rec["runs_set_aside"] if "before it changed" in r["problem"]]), 3)

@@ -44,7 +44,6 @@ import harness_install  # noqa: E402
 import judge  # noqa: E402
 
 SCHEMA = 1
-SKIP = {"target", "build", ".gradle", "runs", "logs", "model_raw", ".git", "assure"}
 ROUTES = ("pins", "rules", "errors", "faults", "races")
 CHECKS = (("matrix", "verify"), ("faults", None), ("sequences", None), ("races", None))
 LAID_OVER = ("decision", "spec")        # a case that already differs from what a person or the specification says
@@ -156,7 +155,7 @@ def run(workspace, system, defects_file, only=None, kinds=None, keep_in=None, sa
         try:
             if os.path.exists(copy):
                 shutil.rmtree(copy)
-            shutil.copytree(workspace, copy, ignore=lambda _d, names: [n for n in names if n in SKIP])
+            _lib.copy_workspace(workspace, copy)
             apply(defect, copy)
             seen = signals(run_checks(copy, system, kinds), kinds)
         finally:

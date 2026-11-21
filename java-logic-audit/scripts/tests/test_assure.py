@@ -110,3 +110,27 @@ class Seeds(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Copies(unittest.TestCase):
+    def test_a_trial_copy_leaves_out_build_output_and_old_results_but_not_source_that_shares_a_name(self):
+        import shutil
+        import tempfile
+        sys.path.insert(0, os.path.dirname(HERE))
+        import _lib
+        tmp = tempfile.mkdtemp()
+        try:
+            src = os.path.join(tmp, "ws")
+            for path in ("pom.xml", "target/classes/A.class", "src/main/java/com/x/build/Plan.java", "src/main/java/com/x/target/Aim.java",
+                         ".git/HEAD", "audit/s/model/matrix.json", "audit/s/runs/matrix-1/run.json", "audit/s/logs/a.log",
+                         "audit/s/build/audit.init.gradle", "sub/build.gradle", "sub/build/libs/a.jar", "sub/src/A.java"):
+                os.makedirs(os.path.dirname(os.path.join(src, path)), exist_ok=True)
+                open(os.path.join(src, path), "w").close()
+            dst = os.path.join(tmp, "copy")
+            _lib.copy_workspace(src, dst)
+            have = sorted(os.path.relpath(os.path.join(d, n), dst) for d, _s, files in os.walk(dst) for n in files)
+            self.assertEqual(have, ["audit/s/build/audit.init.gradle", "audit/s/model/matrix.json", "pom.xml",
+                                    "src/main/java/com/x/build/Plan.java", "src/main/java/com/x/target/Aim.java",
+                                    "sub/build.gradle", "sub/src/A.java"])
+        finally:
+            shutil.rmtree(tmp)

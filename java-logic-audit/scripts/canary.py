@@ -53,7 +53,6 @@ import harness_install  # noqa: E402
 import judge  # noqa: E402
 
 SCHEMA = 1
-SKIP = {"target", "build", ".gradle", "runs", "logs", "model_raw", ".git", "assure"}
 THROW = re.compile(r"throw\s+new\b[^;]*;", re.S)
 IF = re.compile(r"\bif\s*\(")
 OR_ELSE_THROW = re.compile(r"\.\s*orElseThrow\s*\(")
@@ -199,7 +198,7 @@ def run(workspace, system, only=None, limit=None):
         tmp = tempfile.mkdtemp(prefix="audit-canary-")
         try:
             copy = os.path.join(tmp, "workspace")
-            shutil.copytree(workspace, copy, ignore=lambda _d, names: [x for x in names if x in SKIP])
+            _lib.copy_workspace(workspace, copy)
             with open(os.path.join(copy, place["file"]), "w", encoding="utf-8") as fh:
                 fh.write(changed)
             line = shlex.split(harness_install.command(copy, system, "matrix", mode="verify", only_command=",".join(rest_on_it))) + extra
