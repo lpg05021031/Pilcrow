@@ -76,6 +76,11 @@ public final class HttpDouble implements ClientHttpRequestFactory {
                         throw failure;
                     }
                 }
+                try {
+                    auditkit.Faults.at(auditkit.Faults.EXT, method + " " + url);
+                } catch (auditkit.Faults.Injected e) {
+                    throw new IOException(e.getMessage());        // what a connection that drops looks like to the client
+                }
                 int status = 501;
                 String body = "{}";
                 boolean unconfigured = true;

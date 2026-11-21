@@ -41,6 +41,55 @@ public final class Snapshot {
         return out;
     }
 
+    /**
+     * The same snapshot without key columns: primary keys and the columns that refer to them.
+     * After a failed attempt the database has handed out numbers it will not hand out again, so a
+     * second attempt gets other keys; what must be the same is everything else.
+     */
+    public static Map<String, List<Map<String, String>>> withoutKeys(Map<String, List<Map<String, String>>> snapshot) {
+        Map<String, List<Map<String, String>>> out = new TreeMap<String, List<Map<String, String>>>();
+        try {
+            Connection c = EffectRecorder.raw().getConnection();
+            try {
+                for (String table : DbReset.tables(c)) {
+                    java.util.Set<String> keys = new java.util.HashSet<String>();
+                    for (String k : primaryKey(c, table)) {
+                        keys.add(k.toLowerCase(Locale.ROOT));
+                    }
+                    String schema = null;
+                    try {
+                        schema = c.getSchema();
+                    } catch (SQLException e) {
+                        // unsupported
+                    } catch (AbstractMethodError e) {
+                        // unsupported
+                    }
+                    ResultSet rs = c.getMetaData().getImportedKeys(c.getCatalog(), schema, table);
+                    try {
+                        while (rs.next()) {
+                            keys.add(rs.getString("FKCOLUMN_NAME").toLowerCase(Locale.ROOT));
+                        }
+                    } finally {
+                        rs.close();
+                    }
+                    List<Map<String, String>> rows = new ArrayList<Map<String, String>>();
+                    List<Map<String, String>> original = snapshot.get(table.toLowerCase(Locale.ROOT));
+                    for (Map<String, String> row : original == null ? new ArrayList<Map<String, String>>() : original) {
+                        Map<String, String> kept = new LinkedHashMap<String, String>(row);
+                        kept.keySet().removeAll(keys);
+                        rows.add(kept);
+                    }
+                    out.put(table.toLowerCase(Locale.ROOT), rows);
+                }
+            } finally {
+                c.close();
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("snapshot failed", e);
+        }
+        return out;
+    }
+
     private static List<Map<String, String>> rows(Connection c, String table) throws SQLException {
         List<String> keys = primaryKey(c, table);
         StringBuilder sql = new StringBuilder("SELECT * FROM ").append(quote(c, table));

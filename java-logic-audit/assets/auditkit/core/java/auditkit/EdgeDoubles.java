@@ -75,6 +75,7 @@ public final class EdgeDoubles {
                         throw failure;
                     }
                 }
+                Faults.at("messaging".equals(kind) ? Faults.PUB : Faults.EXT, type.getSimpleName() + "." + m.getName());
                 Class<?> returns = m.getReturnType();
                 boolean returnsValue = returns != void.class;
                 List<String> args = new ArrayList<String>();

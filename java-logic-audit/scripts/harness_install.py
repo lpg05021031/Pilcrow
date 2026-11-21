@@ -39,7 +39,7 @@ KIT = os.path.join(PLUGIN, "assets", "auditkit")
 VERSIONS = os.path.join(PLUGIN, "assets", "build", "versions.json")
 AUDIT_POM = "pom-audit.xml"
 DEFAULT_CLOCK = "2030-03-15T10:00:00Z"    # a fixed "now" for every case: a Friday, far from a month or year end
-RUNS = ("smoke", "matrix")
+RUNS = ("smoke", "matrix", "faults", "sequences")
 MODES = ("record", "verify")
 
 
