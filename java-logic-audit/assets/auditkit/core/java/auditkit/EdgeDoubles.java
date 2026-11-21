@@ -61,12 +61,17 @@ public final class EdgeDoubles {
         if (existing != null) {
             return existing;
         }
-        Object mock = recording(type, kind);
+        Object mock = recording(type, kind, type.getName(), "");
         DOUBLES.put(type.getName(), mock);
         return mock;
     }
 
-    private static Object recording(final Class<?> type, final String kind) {
+    /**
+     * A recording stand-in for a type. root and prefix say where it hangs: an object a double hands out
+     * (a sub-service) is a stand-in too, and its methods are answered under the double it came from as
+     * "getSubService.method".
+     */
+    private static Object recording(final Class<?> type, final String kind, final String root, final String prefix) {
         final Map<String, Object> nested = new LinkedHashMap<String, Object>();
         return Mockito.mock(type, Mockito.withSettings().stubOnly().defaultAnswer(new Answer<Object>() {
             @Override
@@ -89,7 +94,7 @@ public final class EdgeDoubles {
                 for (Object arg : invocation.getArguments()) {
                     args.add(render(arg));
                 }
-                JsonNode configured = answerFor(type.getName(), m.getName());
+                JsonNode configured = answerFor(root, prefix + m.getName());
                 Object answered = null;
                 Throwable thrown = null;
                 String unreadable = null;
@@ -98,7 +103,7 @@ public final class EdgeDoubles {
                         if (configured.hasNonNull("throws")) {
                             thrown = failure(configured.get("throws").asText(), configured.path("message").asText("refused by the audit's stand-in"));
                         } else if (returnsValue) {
-                            answered = read(configured.get("returns"), invocation.getArguments(), m);
+                            answered = read(configured, invocation.getArguments(), m);
                         }
                     } catch (Exception e) {
                         unreadable = String.valueOf(e.getMessage());
@@ -137,7 +142,7 @@ public final class EdgeDoubles {
                     synchronized (nested) {
                         Object child = nested.get(m.getName());
                         if (child == null) {
-                            child = recording(returns, kind);
+                            child = recording(returns, kind, root, prefix + m.getName() + ".");
                             nested.put(m.getName(), child);
                         }
                         return child;
@@ -162,11 +167,22 @@ public final class EdgeDoubles {
         return null;
     }
 
-    /** The configured value, filled from the call's arguments and read as the method's return type. */
-    static Object read(JsonNode returns, Object[] arguments, Method m) {
+    /**
+     * The configured value, filled from the call's arguments and read as the method's return type, or as
+     * the class the answer names under "as" when the method's own return type does not say (a generic one).
+     */
+    static Object read(JsonNode answer, Object[] arguments, Method m) throws ClassNotFoundException {
+        JsonNode returns = answer.get("returns");
+        com.fasterxml.jackson.databind.JavaType target = answer.hasNonNull("as")
+                ? answers().getTypeFactory().constructType(Class.forName(answer.get("as").asText()))
+                : answers().getTypeFactory().constructType(m.getGenericReturnType());
         if (returns == null || returns.isNull()) {
-            return answers().convertValue(AuditConfig.JSON.getNodeFactory().nullNode(),
-                    answers().getTypeFactory().constructType(m.getGenericReturnType()));
+            return answers().convertValue(AuditConfig.JSON.getNodeFactory().nullNode(), target);
+        }
+        if (!answer.hasNonNull("as") && returns.isContainerNode()
+                && (m.getGenericReturnType() instanceof java.lang.reflect.TypeVariable || m.getReturnType() == Object.class)) {
+            throw new IllegalArgumentException("the method's return type is generic, so the answer must name the class the "
+                    + "application reads the result as: \"as\": \"<class name>\"");
         }
         ObjectNode context = AuditConfig.JSON.createObjectNode();
         ArrayNode args = context.putArray("args");
@@ -174,7 +190,7 @@ public final class EdgeDoubles {
             args.add(asJson(arg));
         }
         JsonNode filled = Expr.fillLenient(returns, context);
-        return answers().convertValue(filled, answers().getTypeFactory().constructType(m.getGenericReturnType()));
+        return answers().convertValue(filled, target);
     }
 
     private static com.fasterxml.jackson.databind.ObjectMapper answerMapper;
@@ -233,12 +249,13 @@ public final class EdgeDoubles {
         List<String> problems = new ArrayList<String>();
         for (JsonNode a : doubleNode.path("answers")) {
             String name = a.path("method").asText("");
-            List<Method> named = new ArrayList<Method>();
-            for (Method m : type.getMethods()) {
-                if (m.getName().equals(name)) {
-                    named.add(m);
-                }
+            String[] path = name.split("\\.");
+            Class<?> owner = type;                       // "getSubService.method": through the objects the double hands out
+            for (int i = 0; i < path.length - 1 && owner != null; i++) {
+                List<Method> step = methodsNamed(owner, path[i]);
+                owner = step.isEmpty() ? null : step.get(0).getReturnType();
             }
+            List<Method> named = owner == null ? new ArrayList<Method>() : methodsNamed(owner, path[path.length - 1]);
             if (named.isEmpty()) {
                 problems.add(type.getName() + " has no method " + name);
                 continue;
@@ -249,7 +266,7 @@ public final class EdgeDoubles {
                 } else {
                     for (Method m : named) {
                         if (m.getReturnType() != void.class) {
-                            read(a.get("returns"), new Object[m.getParameterTypes().length], m);
+                            read(a, new Object[m.getParameterTypes().length], m);
                         }
                     }
                 }
@@ -258,6 +275,16 @@ public final class EdgeDoubles {
             }
         }
         return problems;
+    }
+
+    private static List<Method> methodsNamed(Class<?> type, String name) {
+        List<Method> named = new ArrayList<Method>();
+        for (Method m : type.getMethods()) {
+            if (m.getName().equals(name)) {
+                named.add(m);
+            }
+        }
+        return named;
     }
 
     public static Map<String, Object> all() {

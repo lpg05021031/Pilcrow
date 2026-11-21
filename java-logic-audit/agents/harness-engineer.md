@@ -137,6 +137,11 @@ says nothing about the application:
   judge what it was sent: a case can then decide what the outside system "says" by what it sends, and
   one configuration serves the paid and the failed notice alike.
 - `throws` names an exception class to throw instead, for a method whose ordinary result is a failure.
+- When the method's declared return type is generic (`<T> T createOrder(...)`), the answer must name the
+  class the application reads the result as: `"as": "com.example.pay.PayOrderResult"`. Take it from the
+  variable the application assigns the result to.
+- A method of an object the double hands out (a sub-service: `payClient.getRefundService().refund(...)`)
+  is answered under the double itself, as `"method": "getRefundService.refund"`.
 - Give answers only to methods the application's code reads the result of, with the `file:line` of that
   use in your reply. Realistic values: prefer the ones the project's own tests stub.
 
