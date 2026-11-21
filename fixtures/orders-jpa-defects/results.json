@@ -1,0 +1,369 @@
+{
+  "schema": 1,
+  "baseline_already_showed": {
+    "pins": 0,
+    "rules": 0,
+    "errors": 0,
+    "faults": 2
+  },
+  "summary": {
+    "defects": 14,
+    "noticed": 11,
+    "noticed_without_pins": 8,
+    "by_category": {
+      "guard": {
+        "defects": 2,
+        "noticed": 2,
+        "without_pins": 2
+      },
+      "cascade": {
+        "defects": 2,
+        "noticed": 2,
+        "without_pins": 1
+      },
+      "transaction": {
+        "defects": 2,
+        "noticed": 1,
+        "without_pins": 1
+      },
+      "messaging": {
+        "defects": 2,
+        "noticed": 2,
+        "without_pins": 1
+      },
+      "pair path": {
+        "defects": 2,
+        "noticed": 1,
+        "without_pins": 0
+      },
+      "numeric": {
+        "defects": 2,
+        "noticed": 2,
+        "without_pins": 2
+      },
+      "data mapping": {
+        "defects": 2,
+        "noticed": 1,
+        "without_pins": 1
+      }
+    }
+  },
+  "results": [
+    {
+      "id": "guard-1",
+      "category": "guard",
+      "what": "A line's quantity can be changed to less than what has already shipped: the check is gone.",
+      "detected": true,
+      "routes": [
+        "pins",
+        "errors"
+      ],
+      "did_not_run": [],
+      "counts": {
+        "pins": 2,
+        "rules": 0,
+        "errors": 2,
+        "faults": 0
+      },
+      "examples": {
+        "pins": [
+          "CMD-previewChange.QTY|newQty=below-shipped",
+          "CMD-proposeChange.QTY|newQty=below-shipped"
+        ],
+        "errors": [
+          "CMD-previewChange.QTY IllegalStateException",
+          "CMD-proposeChange.QTY IllegalStateException"
+        ]
+      }
+    },
+    {
+      "id": "guard-2",
+      "category": "guard",
+      "what": "An order can be cancelled as a whole although something on it has shipped.",
+      "detected": true,
+      "routes": [
+        "pins",
+        "rules"
+      ],
+      "did_not_run": [],
+      "counts": {
+        "pins": 1,
+        "rules": 2,
+        "errors": 0,
+        "faults": 0
+      },
+      "examples": {
+        "pins": [
+          "CMD-cancelOrder|shipped=true"
+        ],
+        "rules": [
+          "no schedule_line row with status SHIPPED belongs to a order_line row with status CANCELLED",
+          "no order_line row with status CLOSED belongs to a order_header row with status CANCELLED"
+        ]
+      }
+    },
+    {
+      "id": "cascade-1",
+      "category": "cascade",
+      "what": "A shipment that closes the last open line no longer re-derives the order: it stays CONFIRMED.",
+      "detected": true,
+      "routes": [
+        "pins"
+      ],
+      "did_not_run": [],
+      "counts": {
+        "pins": 1,
+        "rules": 0,
+        "errors": 0,
+        "faults": 0
+      },
+      "examples": {
+        "pins": [
+          "CMD-applyShipment|completes=order"
+        ]
+      }
+    },
+    {
+      "id": "cascade-2",
+      "category": "cascade",
+      "what": "Cancelling an order cancels its lines but leaves their planned deliveries planned.",
+      "detected": true,
+      "routes": [
+        "pins",
+        "rules"
+      ],
+      "did_not_run": [],
+      "counts": {
+        "pins": 2,
+        "rules": 1,
+        "errors": 0,
+        "faults": 0
+      },
+      "examples": {
+        "pins": [
+          "CMD-cancelOrder|base",
+          "CMD-cancelOrder|order=CONFIRMED"
+        ],
+        "rules": [
+          "no schedule_line row with status PLANNED belongs to a order_line row with status CANCELLED"
+        ]
+      }
+    },
+    {
+      "id": "transaction-1",
+      "category": "transaction",
+      "what": "The event is recorded in a transaction of its own, so it stays when the change it describes is rolled back.",
+      "detected": true,
+      "routes": [
+        "faults"
+      ],
+      "did_not_run": [],
+      "counts": {
+        "pins": 0,
+        "rules": 0,
+        "errors": 0,
+        "faults": 57
+      },
+      "examples": {
+        "faults": [
+          "CMD-applyShipment COMMIT commit: atomicity,retry-diverges",
+          "CMD-applyShipment WRITE INSERT processed_message: atomicity,retry-diverges",
+          "CMD-applyShipment WRITE UPDATE order_line: atomicity,retry-diverges"
+        ]
+      }
+    },
+    {
+      "id": "transaction-2",
+      "category": "transaction",
+      "what": "Confirming an order swallows a failure to record its event: the order is confirmed and nobody is told.",
+      "detected": false,
+      "routes": [],
+      "did_not_run": [],
+      "counts": {
+        "pins": 0,
+        "rules": 0,
+        "errors": 0,
+        "faults": 0
+      },
+      "examples": {}
+    },
+    {
+      "id": "messaging-1",
+      "category": "messaging",
+      "what": "Confirming an order publishes its event directly, before the transaction commits.",
+      "detected": true,
+      "routes": [
+        "pins",
+        "faults"
+      ],
+      "did_not_run": [],
+      "counts": {
+        "pins": 1,
+        "rules": 0,
+        "errors": 0,
+        "faults": 3
+      },
+      "examples": {
+        "pins": [
+          "CMD-confirmOrder|base"
+        ],
+        "faults": [
+          "CMD-confirmOrder COMMIT commit: sent-not-kept,sent-again-on-retry",
+          "CMD-confirmOrder WRITE INSERT outbox_event: sent-not-kept,sent-again-on-retry",
+          "CMD-confirmOrder WRITE UPDATE order_header: sent-not-kept,sent-again-on-retry"
+        ]
+      }
+    },
+    {
+      "id": "messaging-2",
+      "category": "messaging",
+      "what": "An applied shipment message is no longer remembered, so its id does not protect against anything.",
+      "detected": true,
+      "routes": [
+        "pins"
+      ],
+      "did_not_run": [],
+      "counts": {
+        "pins": 3,
+        "rules": 0,
+        "errors": 0,
+        "faults": 0
+      },
+      "examples": {
+        "pins": [
+          "CMD-applyShipment|base",
+          "CMD-applyShipment|completes=line",
+          "CMD-applyShipment|completes=order"
+        ]
+      }
+    },
+    {
+      "id": "pair-1",
+      "category": "pair path",
+      "what": "The preview of cancelling a line skips the checks: it shows a result where proposing and committing refuse.",
+      "detected": true,
+      "routes": [
+        "pins"
+      ],
+      "did_not_run": [],
+      "counts": {
+        "pins": 5,
+        "rules": 0,
+        "errors": 0,
+        "faults": 0
+      },
+      "examples": {
+        "pins": [
+          "CMD-previewChange.CANCEL|order=CLOSED",
+          "CMD-previewChange.CANCEL|order=CANCELLED",
+          "CMD-previewChange.CANCEL|line=CLOSED"
+        ]
+      }
+    },
+    {
+      "id": "pair-2",
+      "category": "pair path",
+      "what": "The preview reports the change of amount with the wrong sign; what is committed is right.",
+      "detected": false,
+      "routes": [],
+      "did_not_run": [],
+      "counts": {
+        "pins": 0,
+        "rules": 0,
+        "errors": 0,
+        "faults": 0
+      },
+      "examples": {}
+    },
+    {
+      "id": "numeric-1",
+      "category": "numeric",
+      "what": "The order total counts cancelled lines too.",
+      "detected": true,
+      "routes": [
+        "pins",
+        "rules"
+      ],
+      "did_not_run": [],
+      "counts": {
+        "pins": 6,
+        "rules": 1,
+        "errors": 0,
+        "faults": 0
+      },
+      "examples": {
+        "pins": [
+          "CMD-cancelOrder|base",
+          "CMD-cancelOrder|order=CONFIRMED",
+          "CMD-commitChange.CANCEL|base"
+        ],
+        "rules": [
+          "order_header.total_amount equals the sum of order_line.qty x unit_price over its order_line rows whose status is not CANCELLED"
+        ]
+      }
+    },
+    {
+      "id": "numeric-2",
+      "category": "numeric",
+      "what": "A shipment adds the whole line's quantity to what has shipped, not the delivery's.",
+      "detected": true,
+      "routes": [
+        "pins",
+        "rules"
+      ],
+      "did_not_run": [],
+      "counts": {
+        "pins": 1,
+        "rules": 2,
+        "errors": 0,
+        "faults": 0
+      },
+      "examples": {
+        "pins": [
+          "CMD-applyShipment|base"
+        ],
+        "rules": [
+          "order_line.shipped_qty equals the sum of schedule_line.qty over its schedule_line rows whose status is SHIPPED",
+          "no schedule_line row with status PLANNED belongs to a order_line row with status CLOSED"
+        ]
+      }
+    },
+    {
+      "id": "mapping-1",
+      "category": "data mapping",
+      "what": "A new line takes its quantity from its first delivery only, not from all of them.",
+      "detected": true,
+      "routes": [
+        "rules"
+      ],
+      "did_not_run": [],
+      "counts": {
+        "pins": 0,
+        "rules": 2,
+        "errors": 0,
+        "faults": 0
+      },
+      "examples": {
+        "rules": [
+          "order_line.shipped_qty is never larger than order_line.qty",
+          "no schedule_line row with status PLANNED belongs to a order_line row with status CLOSED"
+        ]
+      }
+    },
+    {
+      "id": "mapping-2",
+      "category": "data mapping",
+      "what": "Reading an order shows a line's quantity and shipped quantity swapped; the stored data is right.",
+      "detected": false,
+      "routes": [],
+      "did_not_run": [],
+      "counts": {
+        "pins": 0,
+        "rules": 0,
+        "errors": 0,
+        "faults": 0
+      },
+      "examples": {}
+    }
+  ]
+}

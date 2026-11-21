@@ -69,6 +69,8 @@ def observed_parts(row):
     o = row.get("observed") or {}
     out = {"outcome": (o.get("outcome") or "").lower(), "code": o.get("code")}
     for part in PINNED_PARTS[2:]:
+        if part == "response_sha" and part not in o:
+            continue        # a run made by a harness that did not record the answer yet: nothing known, not "no answer"
         out[part] = o.get(part) if o.get(part) is not None else {"after": {}, "response_sha": None}.get(part, [])
     return out
 
@@ -76,7 +78,7 @@ def observed_parts(row):
 def unstable_parts(results):
     """The parts in which executed runs of the same cell did not agree."""
     seen = [observed_parts(r["row"]) for r in results if r["row"].get("result") in EXECUTED]
-    return [part for part in PINNED_PARTS if len({_lib.canonical(s[part]) for s in seen}) > 1]
+    return [part for part in PINNED_PARTS if len({_lib.canonical(s[part]) for s in seen if part in s}) > 1]
 
 
 def classify(cell, results):

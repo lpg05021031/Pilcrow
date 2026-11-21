@@ -167,11 +167,25 @@ class Reconcile(unittest.TestCase):
 
     def test_what_the_caller_was_answered_is_pinned_too(self):
         c = self.cells
-        self.run_dir("matrix-1", [row(c[0], "MATCH", seen("ALLOWED", response_sha="aaaa")), row(c[1], "MATCH", seen("REJECTED"))])
+        self.run_dir("matrix-1", [row(c[0], "MATCH", seen("ALLOWED", response_sha="aaaa")),
+                                  row(c[1], "MATCH", seen("REJECTED", response_sha=None))])
         reconcile.reconcile(self.tmp, "s", pin=True)
         pinned = self.read("model/expected.json")["cells"]
         self.assertEqual(pinned["CMD-a|base"]["response_sha"], "aaaa")
         self.assertIsNone(pinned["CMD-a|status=DONE"]["response_sha"])       # it answered nothing, and that is pinned
+
+    def test_a_run_from_before_answers_were_recorded_is_not_read_as_a_different_answer(self):
+        c = self.cells
+        older = seen("ALLOWED")
+        self.assertNotIn("response_sha", older)
+        self.run_dir("matrix-1", [row(c[0], "MATCH", older)])
+        self.run_dir("matrix-2", [row(c[0], "MATCH", seen("ALLOWED", response_sha="aaaa"))])
+        self.run_dir("matrix-3", [row(c[0], "MATCH", seen("ALLOWED", response_sha="aaaa"))], mode="verify")
+        out = reconcile.reconcile(self.tmp, "s", repin=True)
+        self.assertEqual(out["unstable"], [])
+        self.assertEqual(self.read("model/expected.json")["cells"]["CMD-a|base"]["response_sha"], "aaaa")
+        self.run_dir("matrix-4", [row(c[0], "MISMATCH", seen("ALLOWED", response_sha="bbbb"), differs=["response_sha"])], mode="verify")
+        self.assertEqual(reconcile.reconcile(self.tmp, "s")["unstable"][0]["parts"], ["response_sha"])
 
     def test_a_pin_for_a_case_that_is_no_longer_executed_is_dropped(self):
         self.first_run()
