@@ -659,6 +659,11 @@ def scan(root, module=None, env=True):
         m.group(1).split(".")[-1] for m in re.finditer(
             r"@(?:MockBean|MockitoBean|SpyBean|MockitoSpyBean|Mock)\b(?:\([^)]*\))?\s+"
             r"(?:(?:private|protected|public)\s+)?([\w.]+)(?:<[^;]*>)?\s+\w+\s*;", test_code)))
+    # Images the tests start, e.g. new PostgreSQLContainer<>("postgres:16-alpine"): the engine version
+    # the existing tests really run against.
+    test_code_s = "\n".join(sources[f][1] for f in test_java if f in sources)
+    images = sorted(set(re.findall(
+        r'(?:Container(?:<[^>()]*>)?\s*\(\s*|DockerImageName\.parse\(\s*)"([A-Za-z0-9][\w./\-]*:[\w.\-]+)"', test_code_s)))
     tests = {
         "files": len(test_java),
         "frameworks": sorted(testfw),
@@ -667,6 +672,7 @@ def scan(root, module=None, env=True):
         "testcontainers": "testcontainers" in facets.get("tests", set()) or bool(re.search(r"\bimport\s+org\.testcontainers\b", test_code)),
         "wiremock": "wiremock" in facets.get("tests", set()),
         "substitute_db": sorted(d for d in dbs if d in SUBSTITUTE_DBS),
+        "container_images": images,
         "mocked_types": mocked,
     }
     connections = scan_connections(base, files, os.environ if env else None)

@@ -130,6 +130,7 @@
         "testcontainers": { "type": "boolean" },
         "wiremock": { "type": "boolean" },
         "substitute_db": { "type": "array", "items": { "type": "string" } },
+        "container_images": { "type": "array", "items": { "type": "string" } },
         "mocked_types": { "type": "array", "items": { "type": "string" } },
         "database_source": { "type": "string", "enum": ["container", "substitute", "test-config", "main-config", "none"] }
       }

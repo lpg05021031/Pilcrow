@@ -66,6 +66,7 @@
     "testcontainers": false,
     "wiremock": false,
     "substitute_db": [],
+    "container_images": [],
     "mocked_types": [],
     "database_source": "none"
   },

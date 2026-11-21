@@ -48,6 +48,8 @@ class FixtureProfiles(unittest.TestCase):
 
     def test_sample1_orders_is_applicable_and_supported(self):
         p = self.check("orders-jpa")
+        self.assertEqual(["postgres:16-alpine"], p["tests"]["container_images"])
+        self.assertEqual("container", p["tests"]["database_source"])
         self.assertEqual("full", p["applicability"]["verdict"])
         self.assertEqual("supported", p["support"]["verdict"])
 

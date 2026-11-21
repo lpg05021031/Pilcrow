@@ -152,6 +152,9 @@
     "testcontainers": true,
     "wiremock": false,
     "substitute_db": [],
+    "container_images": [
+      "postgres:16-alpine"
+    ],
     "mocked_types": [
       "Connection",
       "PricingClient"
