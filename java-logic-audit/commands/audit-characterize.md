@@ -44,14 +44,19 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_brief.py" recipes $system "<group n
 ```
 
 preceded by: *"Work out how each case is reached. Your reply is one JSON object as described under 'When
-you are asked for recipes'."* Run the groups one after another, so that each sees the fixtures the
-earlier ones defined (`fixtures_that_exist` in its brief): after each reply, save it as
-`audit/$system/model_raw/recipes-<group>.json` (the name is printed by
-`model_store.py name recipes "<group name>"`) and run
+you are asked for recipes'."* When the brief says `"parts"` is more than 1, the group has too many cases
+for one reader: get `--part 2` and so on, each for another agent, one after the other. Save each reply as
+`audit/$system/model_raw/recipes-<group>.json` (`recipes-<group>-2.json` for a second part; the name comes
+from `model_store.py name recipes "<group name>"`), and after each one run
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_store.py" recipes $system
 ```
+
+so that the next brief holds the fixtures defined so far. Do the group that creates the main entity
+first and alone (when unsure, the one with the most entry points): its fixtures are the ladder the
+others climb. Then the remaining groups in parallel, at most four at a time; fixture names carry the
+group's prefix, so they cannot collide.
 
 Skip a group whose reply is already saved, unless the model changed for it. Then build the matrix:
 

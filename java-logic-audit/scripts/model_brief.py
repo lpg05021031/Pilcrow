@@ -4,7 +4,7 @@
     python3 model_brief.py shards  <system> [--pattern TEXT] [--workspace DIR]
     python3 model_brief.py mine    <system> <shard> [--workspace DIR]
     python3 model_brief.py referee <system> <group> [--part N] [--workspace DIR]
-    python3 model_brief.py recipes <system> <shard> [--workspace DIR]
+    python3 model_brief.py recipes <system> <group> [--part N] [--workspace DIR]
     python3 model_brief.py triage  <system> [--command CMD-x] [--workspace DIR]
 
 Each prints one JSON object: the brief of one agent. The briefs are built from the map and the facts,
@@ -15,7 +15,9 @@ what another reader said.
   mine      one group: its entry points as the map has them, the files to read, the tables
   referee   the commands proposed for one group, at most eight at a time: only their guards and
             branches with the lines they cite. `parts` says how many briefs the group needs
-  recipes   one group's commands, an index of every command that a step may call, the tables
+  recipes   one group's commands, an index of every command that a step may call, the tables. A
+            group with many cases is given in parts (`parts` says how many); the variants of one
+            entry point stay together
   triage    the cells of the last run that were not executed or did not agree, each with what was
             expected, what happened and where the evidence is. Without --command: which commands
             have such cells. With it: the whole brief for that command
@@ -144,14 +146,38 @@ def cmd_referee(workspace, system, group, part=1):
                           "claims": claims_of(c)} for c in batch]}
 
 
-def cmd_recipes(workspace, system, name):
+RECIPE_CASES = 60          # about what one reader works out with care in one go
+
+
+def recipe_parts(own):
+    """Split a group's commands into parts of at most RECIPE_CASES cases, keeping variants of one entry together."""
+    roots = {}
+    for c in own:
+        roots.setdefault((c.get("variant") or {}).get("of") or c["id"], []).append(c)
+    parts, current, size = [], [], 0
+    for root in sorted(roots):
+        cases = sum(1 + sum(len(v.get("domain", [])) - 1 for v in c.get("vars", [])) for c in roots[root])
+        if current and size + cases > RECIPE_CASES:
+            parts.append(current)
+            current, size = [], 0
+        current += roots[root]
+        size += cases
+    if current:
+        parts.append(current)
+    return parts
+
+
+def cmd_recipes(workspace, system, name, part=1):
     adir, shards, themap = load(workspace, system)
     shard = shard_named(shards, name)
     handlers = {e.get("handler") for e in themap.get("entries", []) if e.get("id") in set(shard.get("entries", []))}
     commands = (_lib.read_json(os.path.join(adir, "model", "commands.json"), {}) or {}).get("commands")
     if commands is None:
         _lib.die("audit/%s/model/commands.json not found: run audit-model first" % system)
-    own = [c for c in commands if c.get("handler") in handlers]
+    parts = recipe_parts([c for c in commands if c.get("handler") in handlers]) or [[]]
+    if not 1 <= part <= len(parts):
+        _lib.die("group %s has %d part(s)" % (name, len(parts)))
+    own = parts[part - 1]
     cases = {}
     for c in own:
         base = c.get("base", {})
@@ -160,13 +186,15 @@ def cmd_recipes(workspace, system, name):
     harness = _lib.read_json(os.path.join(adir, "harness.json"), {}) or {}
     existing = (_lib.read_json(os.path.join(adir, "model", "fixtures.json"), {}) or {}).get("fixtures", {})
     return {
-        "task": "recipes", "system": system, "group": name, "format": FORMAT,
+        "task": "recipes", "system": system, "group": name, "part": part, "parts": len(parts), "format": FORMAT,
         "commands": own,
         "cases_to_reach": cases,
         "commands_a_step_may_call": [{"id": c["id"], "title": c.get("title"), "binding": c.get("binding"),
                                       "returns": next((e.get("returns") for e in themap.get("entries", [])
                                                        if e.get("handler") == c.get("handler")), None)} for c in commands],
         "fixtures_that_exist": existing,
+        "commands_that_have_recipes": sorted((_lib.read_json(os.path.join(adir, "model", "recipes.json"), {}) or {})
+                                             .get("recipes", {})),
         "fixture_prefix": name.split(":")[-1],
         "files": shard.get("files", []),
         "tables": tables(adir, themap),
@@ -228,7 +256,7 @@ def main(argv=None):
             p.add_argument("--pattern")
         if name == "triage":
             p.add_argument("--command")
-        if name == "referee":
+        if name in ("referee", "recipes"):
             p.add_argument("--part", type=int, default=1)
         p.add_argument("--workspace", default=".")
     args = ap.parse_args(argv)
@@ -240,7 +268,7 @@ def main(argv=None):
     elif args.cmd == "referee":
         out = cmd_referee(workspace, args.system, args.shard, args.part)
     elif args.cmd == "recipes":
-        out = cmd_recipes(workspace, args.system, args.shard)
+        out = cmd_recipes(workspace, args.system, args.shard, args.part)
     else:
         out = cmd_triage(workspace, args.system, args.command)
     json.dump(out, sys.stdout, ensure_ascii=False, indent=1)

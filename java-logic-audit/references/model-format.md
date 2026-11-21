@@ -195,7 +195,10 @@ their base value. A deviation gives only what differs from the base recipe: anot
 - `also`: other variables that necessarily differ in that case (a closed order has shipped). The case
   is then about that combination, and the prediction is worked out for it.
 - `unreachable`: instead of a recipe, one sentence with lines saying why no sequence of commands gives
-  this case (a foreign key, a check at an earlier step). Only when you can show it.
+  this value at all (a foreign key, a check at an earlier step). Only when you can show it. When the
+  value does occur, but only together with a value an earlier guard refuses (no open line, which only a
+  cancelled order has), that is not unreachable: give the recipe with `also`. The case is executed, and
+  the later guard is reported as one that never decides.
 - `"same_as": "CMD-other"`: the command has the same cases and recipes as another (preview and propose).
 - A case you could not work out is left out. It is then reported as not executed, which is the truth.
 
