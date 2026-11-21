@@ -5,11 +5,13 @@ import auditkit.Outcome;
 import auditkit.SutDriver;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.lang.reflect.Array;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.springframework.context.ConfigurableApplicationContext;
@@ -35,6 +37,11 @@ public final class SpringDriver implements SutDriver {
     private final ObjectMapper mapper;
     private final List<String> rejections;
     private final String codePath;
+    private final String resultPath;                    // JSON pointer to the code in the body, or null
+    private final List<String> resultAllowed;
+    private final List<String> resultError;
+    private final List<JsonNode> sessions;
+    private final Map<String, JsonNode> signedIn = new LinkedHashMap<String, JsonNode>();
 
     public SpringDriver(ConfigurableApplicationContext context) {
         this.context = context;
@@ -49,6 +56,23 @@ public final class SpringDriver implements SutDriver {
         this.rejections = AuditConfig.load().texts("rejections");
         String path = AuditConfig.load().text("error_code_path");
         this.codePath = path == null ? "code" : path.replaceFirst("^\\$\\.", "");
+        JsonNode result = AuditConfig.load().harness().path("result_code");
+        this.resultPath = result.hasNonNull("path")
+                ? "/" + result.get("path").asText().replaceFirst("^\\$\\.", "").replace('.', '/') : null;
+        this.resultAllowed = texts(result.path("allowed"));
+        this.resultError = texts(result.path("error"));
+        this.sessions = new ArrayList<JsonNode>();
+        for (JsonNode session : AuditConfig.load().harness().path("auth").path("sessions")) {
+            this.sessions.add(session);
+        }
+    }
+
+    private static List<String> texts(JsonNode array) {
+        List<String> out = new ArrayList<String>();
+        for (JsonNode x : array) {
+            out.add(x.asText());
+        }
+        return out;
     }
 
     private static MockMvc buildMvc(ConfigurableApplicationContext context) {
@@ -93,6 +117,119 @@ public final class SpringDriver implements SutDriver {
         throw new IllegalArgumentException("unknown binding kind '" + kind + "' in " + command.path("id").asText());
     }
 
+    /**
+     * Signs in every user harness.json names under auth.sessions, with the application's own sign-in
+     * request, and keeps each answer: the headers of later requests are built from it. Signing in
+     * happens here, after the reset and before the first step, so it is never part of an observed call.
+     */
+    @Override
+    public void beginScenario() throws Exception {
+        signIn();
+    }
+
+    /** Signs the named users in and says who was. */
+    public List<String> signIn() throws Exception {
+        signedIn.clear();
+        if (mvc == null) {
+            return new ArrayList<String>(signedIn.keySet());
+        }
+        for (JsonNode session : sessions) {
+            JsonNode login = session.path("login");
+            if (!login.hasNonNull("path")) {
+                continue;
+            }
+            String name = session.path("name").asText("default");
+            // A password that is not part of the repository's own test data is named as ${env.AUDIT_...}: never written down.
+            ObjectNode ctx = AuditConfig.JSON.createObjectNode();
+            ObjectNode env = ctx.putObject("env");
+            for (Map.Entry<String, String> e : System.getenv().entrySet()) {
+                if (e.getKey().startsWith("AUDIT_")) {
+                    env.put(e.getKey(), e.getValue());
+                }
+            }
+            MockHttpServletRequestBuilder request = MockMvcRequestBuilders.request(
+                    HttpMethod.valueOf(login.path("method").asText("POST").toUpperCase()), login.get("path").asText());
+            if (login.hasNonNull("query")) {
+                Iterator<Map.Entry<String, JsonNode>> qs = auditkit.Expr.fillLenient(login.get("query"), ctx).fields();
+                while (qs.hasNext()) {
+                    Map.Entry<String, JsonNode> q = qs.next();
+                    request = request.param(q.getKey(), q.getValue().asText());
+                }
+            }
+            if (login.hasNonNull("body")) {
+                request = request.contentType(MediaType.APPLICATION_JSON)
+                        .content(AuditConfig.JSON.writeValueAsBytes(auditkit.Expr.fillLenient(login.get("body"), ctx)));
+            }
+            Outcome answer = outcomeOf(mvc.perform(request).andReturn().getResponse());
+            if (!Outcome.ALLOWED.equals(answer.kind)) {
+                throw new IllegalStateException("signing in as '" + name + "' (" + login.get("path").asText() + ") was "
+                        + answer.kind + (answer.code == null ? "" : " " + answer.code)
+                        + ": the user must exist in the base data, and harness.json must name the request that signs it in");
+            }
+            ObjectNode kept = AuditConfig.JSON.createObjectNode();
+            kept.set("login", answer.response == null ? AuditConfig.JSON.createObjectNode() : answer.response);
+            signedIn.put(name, kept);
+        }
+        return new ArrayList<String>(signedIn.keySet());
+    }
+
+    /** The headers a request carries: the fixed ones, those of the signed-in user it is sent as, and the binding's own. */
+    private MockHttpServletRequestBuilder withHeaders(MockHttpServletRequestBuilder request, JsonNode binding, JsonNode params,
+                                                      String path) {
+        Iterator<Map.Entry<String, JsonNode>> hs = AuditConfig.load().harness().path("auth").path("headers").fields();
+        while (hs.hasNext()) {
+            Map.Entry<String, JsonNode> h = hs.next();
+            request = request.header(h.getKey(), h.getValue().asText());
+        }
+        // "_session" in a case's parameters says as whom the call is made: a session's name, or "none" for nobody.
+        String wanted = params != null && params.hasNonNull("_session") ? params.get("_session").asText() : null;
+        for (JsonNode session : sessions) {
+            String name = session.path("name").asText("default");
+            if ("none".equals(wanted)) {
+                break;
+            }
+            boolean mine = wanted != null ? wanted.equals(name)
+                    : !session.hasNonNull("paths") || java.util.regex.Pattern.compile(session.get("paths").asText()).matcher(path).find();
+            if (!mine || !signedIn.containsKey(name)) {
+                continue;
+            }
+            Iterator<Map.Entry<String, JsonNode>> own = auditkit.Expr.fillLenient(session.path("headers"), signedIn.get(name)).fields();
+            while (own.hasNext()) {
+                Map.Entry<String, JsonNode> h = own.next();
+                if (!h.getValue().isNull()) {
+                    request = request.header(h.getKey(), h.getValue().asText());
+                }
+            }
+            break;          // one user per request
+        }
+        if (binding.hasNonNull("headers")) {
+            Iterator<Map.Entry<String, JsonNode>> own = auditkit.Expr.fillLenient(binding.get("headers"), params).fields();
+            while (own.hasNext()) {
+                Map.Entry<String, JsonNode> h = own.next();
+                if (!h.getValue().isNull()) {
+                    request = request.header(h.getKey(), h.getValue().asText());
+                }
+            }
+        }
+        return request;
+    }
+
+    /** The parameters without the ones that only steer the harness (their names start with an underscore). */
+    private static JsonNode withoutReserved(JsonNode params) {
+        if (params == null || !params.isObject()) {
+            return params;
+        }
+        ObjectNode out = AuditConfig.JSON.createObjectNode();
+        Iterator<Map.Entry<String, JsonNode>> fields = params.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> f = fields.next();
+            if (!f.getKey().startsWith("_")) {
+                out.set(f.getKey(), f.getValue());
+            }
+        }
+        return out;
+    }
+
     private Outcome http(JsonNode binding, JsonNode params) throws Exception {
         if (mvc == null) {
             throw new IllegalStateException("this application has no web layer to send an HTTP request through");
@@ -109,14 +246,10 @@ public final class SpringDriver implements SutDriver {
         }
         MockHttpServletRequestBuilder request = MockMvcRequestBuilders.request(
                 HttpMethod.valueOf(binding.get("method").asText().toUpperCase()), path, pathValues.toArray());
-        JsonNode headers = AuditConfig.load().harness().path("auth").path("headers");
-        Iterator<Map.Entry<String, JsonNode>> hs = headers.fields();
-        while (hs.hasNext()) {
-            Map.Entry<String, JsonNode> h = hs.next();
-            request = request.header(h.getKey(), h.getValue().asText());
-        }
+        request = withHeaders(request, binding, params, path);
+        JsonNode sent = withoutReserved(params);
         if (binding.hasNonNull("query")) {
-            JsonNode query = auditkit.Expr.fillLenient(binding.get("query"), params);
+            JsonNode query = auditkit.Expr.fillLenient(binding.get("query"), sent);
             Iterator<Map.Entry<String, JsonNode>> qs = query.fields();
             while (qs.hasNext()) {
                 Map.Entry<String, JsonNode> q = qs.next();
@@ -127,15 +260,51 @@ public final class SpringDriver implements SutDriver {
         }
         if (binding.hasNonNull("body")) {
             JsonNode body = binding.get("body").isTextual() && binding.get("body").asText().equals("$")
-                    ? params : auditkit.Expr.fillLenient(binding.get("body"), params);
+                    ? sent : auditkit.Expr.fillLenient(binding.get("body"), sent);
             request = request.contentType(MediaType.APPLICATION_JSON).content(AuditConfig.JSON.writeValueAsBytes(body));
         }
         MockHttpServletResponse response;
         try {
-            response = mvc.perform(request).andReturn().getResponse();
+            response = followed(mvc.perform(request).andReturn().getResponse(), binding, params, path);
         } catch (Exception e) {
             return failure(e);
         }
+        return outcomeOf(response);
+    }
+
+    /**
+     * An answer that sends the caller on to another address of this same application (a security filter
+     * that redirects whoever is not signed in to a page saying so) is read as what is found there: that
+     * is what the caller is told. A redirect to anywhere else is left as it is.
+     */
+    private MockHttpServletResponse followed(MockHttpServletResponse response, JsonNode binding, JsonNode params,
+                                             String firstPath) throws Exception {
+        for (int hop = 0; hop < 3; hop++) {
+            int status = response.getStatus();
+            String to = response.getRedirectedUrl();
+            if (to == null || !(status == 301 || status == 302 || status == 303)) {
+                break;
+            }
+            to = to.replaceFirst("^https?://localhost(:\\d+)?(?=/)", "").replaceFirst(";[^?#]*", "");
+            if (!to.startsWith("/") || to.startsWith("//")) {
+                break;
+            }
+            java.net.URI next;
+            try {
+                next = java.net.URI.create(to);
+            } catch (IllegalArgumentException e) {
+                break;
+            }
+            response = mvc.perform(withHeaders(MockMvcRequestBuilders.get(next), binding, params, firstPath)).andReturn().getResponse();
+        }
+        return response;
+    }
+
+    /**
+     * How a call ended, from its answer. By the HTTP status; and for an application that always answers
+     * 200 and says in the body whether it refused (harness.json result_code), by that code.
+     */
+    private Outcome outcomeOf(MockHttpServletResponse response) throws Exception {
         int status = response.getStatus();
         String text = response.getContentAsString();
         JsonNode json = null;
@@ -147,6 +316,19 @@ public final class SpringDriver implements SutDriver {
             }
         }
         if (status >= 200 && status < 400) {
+            if (resultPath != null && json != null && json.isObject()) {
+                JsonNode value = json.at(resultPath);
+                if (value.isValueNode() && !value.isNull()) {
+                    String code = value.asText();
+                    if (resultAllowed.contains(code)) {
+                        return new Outcome(Outcome.ALLOWED, null, status, json, null);
+                    }
+                    if (resultError.contains(code)) {
+                        return new Outcome(Outcome.ERROR, code, status, json, "result code " + code);
+                    }
+                    return new Outcome(Outcome.REJECTED, code, status, json, null);
+                }
+            }
             return new Outcome(Outcome.ALLOWED, null, status, json, null);
         }
         String code = json != null && json.isObject() && json.path(codePath).isValueNode() && !json.path(codePath).isNull()

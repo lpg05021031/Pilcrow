@@ -122,6 +122,69 @@ class Install(Workspace):
             harness_install.command(self.ws, "orders", "anything-else")
 
 
+class Reactor(unittest.TestCase):
+    """An application module built from sibling modules of the same Maven build."""
+
+    POM = """<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>2.1.5.RELEASE</version>
+  </parent>
+  <groupId>s</groupId>
+  <artifactId>%s</artifactId>
+  <version>1</version>
+%s</project>
+"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="jla-test-")
+        dep = "    <dependency><groupId>s</groupId><artifactId>%s</artifactId><version>1</version></dependency>\n"
+        write(self.tmp, "pom.xml", self.POM % ("shop", "  <packaging>pom</packaging>\n  <modules>\n    <module>shop-db</module>\n"
+                                               "    <module>shop-all</module>\n  </modules>\n"))
+        write(self.tmp, "shop-db/pom.xml", self.POM % ("shop-db", "  <dependencies>\n    <dependency><groupId>mysql</groupId>"
+              "<artifactId>mysql-connector-java</artifactId></dependency>\n  </dependencies>\n"))
+        write(self.tmp, "shop-all/pom.xml", self.POM % ("shop-all", "  <dependencies>\n" + dep % "shop-db" +
+              "    <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId>"
+              "</dependency>\n  </dependencies>\n"))
+        write(self.tmp, "shop-all/src/main/java/s/Application.java",
+              "package s;\n@SpringBootApplication\npublic class Application {}\n")
+        self.adir = os.path.join(self.tmp, "audit", "shop")
+        write(self.adir, "INTENT.md", INTENT.replace("module: .", "module: shop-all"))
+        write(self.adir, "profile.json", json.dumps(preflight_scan.scan(self.tmp, module="shop-all", env=False)))
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_the_module_is_run_through_the_reactor_with_its_siblings(self):
+        p = harness_install.plan(self.tmp, "shop")
+        self.assertEqual({"file": "pom-audit.xml", "artifact": "shop-all"}, p["reactor"])
+        # Spring Boot 2.1 manages JUnit 5.3: the api and the engine, not yet the one artifact for both.
+        self.assertEqual(["org.junit.jupiter:junit-jupiter-api", "org.junit.jupiter:junit-jupiter-engine"],
+                         [d["ga"] for d in p["dependencies"] if "junit" in d["ga"]])
+        harness_install.build_entry(self.tmp, "shop")
+        with open(os.path.join(self.tmp, "pom-audit.xml"), encoding="utf-8") as fh:
+            root = fh.read()
+        self.assertIn("<module>shop-all/pom-audit.xml</module>", root)
+        self.assertIn("<module>shop-db</module>", root)
+        with open(os.path.join(self.tmp, "pom.xml"), encoding="utf-8") as fh:
+            self.assertNotIn("pom-audit", fh.read())                     # the project's own build is as it was
+        with open(os.path.join(self.tmp, "shop-all", "pom-audit.xml"), encoding="utf-8") as fh:
+            own = fh.read()
+        ET.fromstring(own)
+        self.assertIn("<maven.test.skip>false</maven.test.skip>", own)
+        self.assertIn("<skipTests>false</skipTests>", own)
+        cmd = harness_install.command(self.tmp, "shop", "smoke")
+        self.assertIn("-f pom-audit.xml -pl :shop-all -am -Paudit -DskipTests test", cmd)
+
+    def test_a_single_module_build_has_no_reactor_entry(self):
+        write(self.adir, "INTENT.md", INTENT.replace("module: .", "module: shop-db"))
+        write(self.adir, "profile.json", json.dumps(preflight_scan.scan(self.tmp, module="shop-db", env=False)))
+        self.assertIsNone(harness_install.plan(self.tmp, "shop")["reactor"])
+
+
 class Capabilities(Workspace):
     ENGINE = {"product": "PostgreSQL", "version": "16.15", "major": 16, "minor": 15,
               "default_isolation": "READ_COMMITTED"}

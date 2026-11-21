@@ -53,6 +53,21 @@ belong in this file at all: the harness takes them from the environment.
 }
 ```
 
+Only when the application needs them (each is explained below, and left out otherwise):
+
+```json
+{
+  "database": { "source": "environment", "permission": "...", "property_prefixes": ["spring.datasource.druid"] },
+  "schema": ["shop-db/sql/shop_table.sql"],
+  "keep_tables": ["region"],
+  "result_code": { "path": "errno", "allowed": ["0"], "error": ["-1", "502"] },
+  "auth": { "sessions": [ { "name": "user", "paths": "^/wx/",
+                            "login": { "method": "POST", "path": "/wx/auth/login",
+                                       "body": { "username": "user123", "password": "${env.AUDIT_LOGIN_USER_PASSWORD}" } },
+                            "headers": { "X-Shop-Token": "${login.data.token}" } } ] }
+}
+```
+
 **`application`** — the class annotated `@SpringBootApplication` in the module being audited. The profile
 lists the candidates.
 
@@ -61,6 +76,21 @@ lists the candidates.
 in `permission`, with any password replaced by `[redacted]`: this is the record that a person allowed the
 harness to empty that database. The address and the credentials are never written here; the harness reads
 them from `AUDIT_DB_URL`, `AUDIT_DB_USER` and `AUDIT_DB_PASSWORD`.
+
+The harness gives those three to the application as `spring.datasource.url`, `.username` and `.password`.
+When the application reads its connection from other property names (a connection pool configured under
+its own prefix, such as `spring.datasource.druid.url`), list each such prefix in
+**`database.property_prefixes`**: the same three values are then set under it too. Find the prefix where
+the `DataSource` bean is built or bound (`@ConfigurationProperties`), and cite it.
+
+**`schema`** — only when nothing creates the tables at start-up (no migration tool runs, the mapping layer
+creates nothing): the SQL files that create them, in order, as paths from the workspace root or from
+`audit/<system>/`. The harness runs them once, before the application starts, and only when the database
+holds no table at all. Use the project's own files; never write a schema yourself.
+
+**`keep_tables`** — tables the reset must leave alone: large fixed reference data (regions, code tables)
+that no entry point writes and that is expensive to load before every case. A table any command writes
+never belongs here; the map's write sites say which those are.
 
 **`reuse_test_config`** — only for `project-container`: the test configuration classes the harness should
 load so that the database starts the way the project's own tests start it, typically a
@@ -123,9 +153,41 @@ where message handlers catch them:
 
 **`base_data`** — SQL files with reference data that must exist before any command can run (products,
 customers, code tables) when the application cannot create that data through its own entry points. Write
-them under `audit/<system>/fixtures/` and list the paths relative to `audit/<system>/`. Data for the
+them under `audit/<system>/fixtures/` and list the paths relative to `audit/<system>/`; a seed file the
+project already has may be listed where it is, by its path from the workspace root. Data for the
 entities under audit never goes here: the audit creates those through the application's own commands.
-Leave the list empty when nothing is needed.
+Leave the list empty when nothing is needed. The files are run after every reset, so a seed file of
+megabytes makes every case slow: then list the tables it fills that no command writes under `keep_tables`
+and put only the rest in a file of your own.
+
+**`result_code`** — only for an application that answers HTTP 200 whatever happened and says in the
+response body whether it refused (`{"errno": 0, ...}`, `{"code": "0000", "msg": ...}`). Without this,
+every refusal of such an application would be read as success. `path` is the field that holds the code
+(`errno`, or `head/code` for a nested one); `allowed` lists the values that mean the call was carried
+out; `error` lists the values that mean a failure nobody intended (the catch-all of the exception
+handler, "system error"), which the audit reports as errors and not as refusals. Every other value is a
+refusal with that code. Find them where the response object is built and where exceptions are mapped,
+and cite both. Leave the field out for an application that uses HTTP statuses.
+
+**`auth`** — only when requests are refused unless they carry something that says who is calling.
+`sessions` lists the users the harness signs in before every case, with the application's own sign-in
+request, so that the audit goes through the real security filters instead of around them:
+
+- `name` — your name for the user (`user`, `admin`);
+- `paths` — a regular expression: calls to a path that matches are sent as this user. Leave it out when
+  there is one kind of user for everything;
+- `login` — the request that signs the user in: `method`, `path`, and `body` (JSON) or `query`;
+- `headers` — the headers every call of this user then carries, built from the sign-in answer under
+  `login` (`"${login.data.token}"`, `"Bearer ${login.access_token}"`).
+
+The user must exist: in the project's own seed data (`base_data`), or created by a fixture file of yours.
+**A password is written here only when it already stands in the repository's own seed or test data** (a
+demo account the seed file creates); cite the line. Any other secret is named as `${env.AUDIT_...}` — an
+environment variable whose name starts with `AUDIT_` — and you say in your reply which variables a person
+must set. `"headers": { "X-Api-Version": "2" }` directly under `auth` gives headers every request
+carries, whoever sends it. When signing in needs something the harness cannot do (a captcha, a code sent
+by SMS, a third party's sign-in page), say so in `todo` with the lines: do not switch the security off
+with a property.
 
 ## Your reply
 

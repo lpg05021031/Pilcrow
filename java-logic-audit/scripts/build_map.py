@@ -266,9 +266,12 @@ def table_entities(schema, profile, wanted, entities):
         t = tables.get(name)
         if t is None or name in mapped:
             continue
+        # A status is kept as text or as a small number; a column of that name with another type (a date, a
+        # flag) is something else.
         lifecycle = [c["name"] for c in t.get("columns", [])
                      if c["name"] in declared.get(name, []) or
-                     (LIFECYCLE_NAME.search(c["name"]) and "char" in (c.get("type") or "").lower())]
+                     (LIFECYCLE_NAME.search(c["name"]) and re.search(r"char|text|enum|int", (c.get("type") or "").lower())
+                      and not re.search(r"bigint|bit|bool", (c.get("type") or "").lower()))]
         out["table:" + name] = {
             "id": "ENT-" + name, "class": None, "table": name,
             "primary_key": t.get("primary_key", []), "version_property": None,
@@ -476,16 +479,19 @@ def self_invocations(graph, transactions):
 
 
 def source_path(workspace, module, cls, types):
+    """Where a class is written: in the audited module, or in one of the sibling modules it is built from."""
     t = types.get(cls) or {}
     src = t.get("source")
     if not src:
         return None
     outer = cls.split("$", 1)[0]
     pkg = outer.rsplit(".", 1)[0].replace(".", "/") if "." in outer else ""
-    for root in ("src/main/java", "src/main/kotlin"):
-        rel = os.path.normpath(os.path.join(module, root, pkg, src)).replace(os.sep, "/")
-        if os.path.isfile(os.path.join(workspace, rel)):
-            return rel
+    modules = module if isinstance(module, (list, tuple)) else [module]
+    for mod in modules:
+        for root in ("src/main/java", "src/main/kotlin"):
+            rel = os.path.normpath(os.path.join(mod, root, pkg, src)).replace(os.sep, "/")
+            if os.path.isfile(os.path.join(workspace, rel)):
+                return rel
     return None
 
 
@@ -553,7 +559,11 @@ def build(workspace, system):
     graph = Graph(bytecode["types"])
     entries = build_entries(context, graph, base)
     entities = build_entities(jpa, schema, profile)
-    statements = sql_statements.statements(workspace, module)
+    # The application is its own module and the sibling modules it is built from (profile.json names them).
+    modules = [module] + [m for m in (profile.get("build", {}).get("sibling_modules") or []) if m != module]
+    statements = {}
+    for mod in modules:
+        statements.update(sql_statements.statements(workspace, mod))
     entities.update(table_entities(schema, profile, {s["table"] for s in statements.values() if s.get("table")}, entities))
     mutators = entity_mutators(graph, entities)
     repositories = jpa.get("repositories", [])
@@ -593,7 +603,7 @@ def build(workspace, system):
             "unresolved": len(unresolved),
         },
     }
-    shards = build_shards(workspace, module, graph, entries, entities, sites)
+    shards = build_shards(workspace, modules, graph, entries, entities, sites)
     _lib.write_json(os.path.join(adir, "map.json"), result)
     _lib.write_json(os.path.join(adir, "shards.json"), {"schema": 1, "shards": shards})
     with open(os.path.join(adir, "MAP.md"), "w", encoding="utf-8") as fh:

@@ -168,6 +168,61 @@ class SyntheticProjects(unittest.TestCase):
         root_scan = preflight_scan.scan(self.tmp, env=False)
         self.assertEqual(["app", "common"], root_scan["build"]["modules"])
 
+    def test_an_application_module_is_scanned_with_the_sibling_modules_it_is_built_from(self):
+        pom = """<?xml version="1.0"?>
+            <project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion>
+              <parent><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-parent</artifactId>
+                <version>2.1.5.RELEASE</version></parent>
+              <groupId>s</groupId><artifactId>%s</artifactId><version>1</version>%s</project>"""
+        dep = "<dependency><groupId>s</groupId><artifactId>%s</artifactId><version>1</version></dependency>"
+        write(self.tmp, "pom.xml", pom % ("shop", "<packaging>pom</packaging><modules><module>shop-db</module>"
+                                          "<module>shop-api</module><module>shop-all</module><module>shop-tools</module></modules>"))
+        write(self.tmp, "shop-db/pom.xml", pom % ("shop-db", "<dependencies><dependency><groupId>mysql</groupId>"
+              "<artifactId>mysql-connector-java</artifactId></dependency><dependency><groupId>org.mybatis.spring.boot</groupId>"
+              "<artifactId>mybatis-spring-boot-starter</artifactId><version>2.0.1</version></dependency></dependencies>"))
+        write(self.tmp, "shop-api/pom.xml", pom % ("shop-api", "<dependencies>" + dep % "shop-db" +
+              "<dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId>"
+              "</dependency></dependencies>"))
+        write(self.tmp, "shop-all/pom.xml", pom % ("shop-all", "<dependencies>" + dep % "shop-api" + "</dependencies>"))
+        write(self.tmp, "shop-tools/pom.xml", pom % ("shop-tools", ""))
+        write(self.tmp, "shop-all/src/main/java/s/Application.java",
+              "package s;\n@SpringBootApplication\npublic class Application {}\n")
+        write(self.tmp, "shop-api/src/main/java/s/ApiApplication.java",
+              "package s;\n@SpringBootApplication\npublic class ApiApplication {}\n")
+        write(self.tmp, "shop-api/src/main/java/s/OrderController.java", """package s;
+            @RestController
+            public class OrderController {
+                @PostMapping("/order/submit") public Object submit() { return null; }
+                @PostMapping("/order/cancel") public Object cancel() { return null; }
+            }""")
+        write(self.tmp, "shop-db/src/main/java/s/OrderMapper.java", "package s;\npublic interface OrderMapper {}\n")
+        write(self.tmp, "shop-db/src/main/resources/s/OrderMapper.xml", """<?xml version="1.0"?>
+            <mapper namespace="s.OrderMapper">
+              <update id="cancel">update shop_order set order_status = 102 where id = #{id}</update>
+            </mapper>""")
+        write(self.tmp, "shop-db/sql/shop_table.sql", """
+            CREATE TABLE `shop_order` (
+              `id` int(11) NOT NULL AUTO_INCREMENT,
+              `order_status` smallint(6) NOT NULL COMMENT 'state',
+              PRIMARY KEY (`id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='orders';
+        """)
+        write(self.tmp, "shop-tools/src/main/java/s/ToolController.java",
+              "package s;\n@RestController\npublic class ToolController { @GetMapping(\"/tool\") public void t() {} }\n")
+
+        p = preflight_scan.scan(self.tmp, module="shop-all", env=False)
+        self.assertEqual(["shop-api", "shop-db"], sorted(p["build"]["sibling_modules"]))     # not shop-tools
+        self.assertEqual(["s.Application"], p["framework"]["application_classes"])           # the module's own
+        self.assertEqual(2, p["entry_points"]["http"])
+        self.assertEqual(["mybatis"], p["persistence"])
+        self.assertEqual(["mysql"], p["database"]["engines"])
+        self.assertEqual(1, p["entities"]["mapper_statements"])
+        self.assertEqual([{"table": "shop_order", "columns": ["order_status"]}], p["entities"]["ddl_tables_with_lifecycle"])
+        self.assertEqual("full", p["applicability"]["verdict"])
+        self.assertEqual("supported", p["support"]["verdict"])
+        # A module with no siblings says nothing about them.
+        self.assertNotIn("sibling_modules", preflight_scan.scan(self.tmp, module="shop-tools", env=False)["build"])
+
     def test_out_of_scope_technology_is_static_only(self):
         write(self.tmp, "pom.xml", """<project><modelVersion>4.0.0</modelVersion>
             <parent><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-parent</artifactId>

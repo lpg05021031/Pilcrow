@@ -60,7 +60,17 @@ Placeholders in the path are filled from the parameters of the same name; you ma
 (`{id}` to `{orderId}`) so that two ids in one scenario do not collide. `body` is a template filled from
 the parameters (`"newQty": "${newQty}"`; a parameter that is not given becomes `null`), or `"$"` when the
 parameters as a whole are the request body. Fixed fields of a variant are written literally
-(`"type": "QTY"`).
+(`"type": "QTY"`). `"headers": { "X-Tenant": "${tenant}" }` adds request headers, filled the same way; the
+headers that say who is signed in are not written here (see "Who the caller is" below).
+
+**Who the caller is.** When the brief lists `signed_in_as`, the harness has signed those users in with the
+application's own sign-in request, and sends each call as the user whose `paths` pattern matches the
+command's path. A case asks for someone else with the parameter `_session` in a recipe's `with`: the name
+of another listed user, or `"none"` for a caller who is not signed in
+(`"who=nobody": { "with": { "_session": "none" } }`). A parameter whose name starts with an underscore
+steers the harness only and is never sent. A check on who is calling (not signed in, the wrong role) is a
+guard like any other, with a `param` variable for the caller. When the answer to a caller who is not let
+in is a redirect to another address of the same application, the harness reads what that address answers.
 
 A message handler or a scheduled task: `{ "kind": "bean", "bean": "shipmentListener", "method": "handle",
 "args": [ { "messageId": "${messageId}", "scheduleId": "${scheduleId}" } ] }`. Each element of `args` is
@@ -117,7 +127,11 @@ something must have shipped).
   normally and nothing changes: a duplicate message, a refusal that is caught and only logged), `error`
   (it fails in a way that is not a refusal).
 - `code`: the application's own code for the refusal, as the caller sees it. For an HTTP entry that is
-  the code field of the error response; when there is none, the status as text (`"404"`).
+  the code field of the error response; when there is none, the status as text (`"404"`). When the brief's
+  `refusals` holds `result_code`, the application answers HTTP 200 whatever happened and says in the body
+  whether it refused: the value at `result_code.path` is then the code (as text, `"501"`), a value listed
+  under `allowed` means the call was carried out, and one listed under `error` is a failure, not a
+  refusal. A method that returns such a refusal instead of throwing is a guard exactly as a throw is.
 - `cite`: the lines of the check, `path/from/workspace/root/File.java:82-84`: one range, the smallest
   that holds the check. Lines of executable code or of a declared constraint, never a comment.
 - `swallowed`: for `ignored`, the refusal that was caught, when there is one.

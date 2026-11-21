@@ -76,14 +76,31 @@ def plan(workspace, system):
     ]
     tests = profile.get("tests", {})
     if "junit5" not in tests.get("frameworks", []):
-        deps.append({"ga": "org.junit.jupiter:junit-jupiter",
-                     "version": None if managed else table["org.junit.jupiter:junit-jupiter"], "why": "the runners are JUnit 5 tests"})
+        # Spring Boot before 2.2 manages JUnit 5.3, which has the api and the engine but not yet the one artifact
+        # that stands for both.
+        old_boot = bool(re.match(r"^(1\.|2\.[01]\.)", profile["framework"].get("version") or ""))
+        for ga in (("org.junit.jupiter:junit-jupiter-api", "org.junit.jupiter:junit-jupiter-engine") if managed and old_boot
+                   else ("org.junit.jupiter:junit-jupiter",)):
+            deps.append({"ga": ga, "version": None if managed else table["org.junit.jupiter:junit-jupiter"],
+                         "why": "the runners are JUnit 5 tests"})
     if not tests.get("mockito"):
         deps.append({"ga": "org.mockito:mockito-core",
                      "version": None if managed else table["org.mockito:mockito-core"], "why": "recording doubles for outside systems"})
+    # A module that is built from sibling modules of the same Maven build is run through the reactor, so that a
+    # change in a sibling's source is compiled into the run instead of being taken from the local repository.
+    reactor = None
+    siblings = profile["build"].get("sibling_modules") or []
+    if profile["build"]["tool"] == "maven" and module != "." and siblings:
+        root_pom = _lib.read_text(os.path.join(workspace, "pom.xml")) or ""
+        own_pom = _lib.read_text(os.path.join(module_dir, "pom.xml")) or ""
+        listed = re.search(r"<module>\s*%s\s*</module>" % re.escape(module), root_pom)
+        artifact = re.search(r"<artifactId>\s*([^<\s]+)\s*</artifactId>", re.sub(r"<parent>.*?</parent>", "", own_pom, flags=re.S))
+        if listed and artifact:
+            reactor = {"file": AUDIT_POM, "artifact": artifact.group(1)}
     return {
         "system": system,
         "module": module,
+        "reactor": reactor,
         "build_tool": profile["build"]["tool"],
         "supported": fw == "spring-boot",
         "modules": modules,
@@ -135,6 +152,8 @@ def maven_profile(p, indent="    "):
     return "\n".join([
         indent + "<profile>",
         i1 + "<id>audit</id>",
+        # A project that switches its tests off as a rule (maven.test.skip) must still compile and run the audit's.
+        i1 + "<properties><maven.test.skip>false</maven.test.skip></properties>",
         i1 + "<dependencies>",
         deps,
         i1 + "</dependencies>",
@@ -159,6 +178,9 @@ def maven_profile(p, indent="    "):
         i4 + "<configuration>",
         i5 + "<includes><include>auditkit/**/*Runner.java</include></includes>",
         i5 + "<trimStackTrace>false</trimStackTrace>",
+        # Written out, so that -DskipTests (given to keep sibling modules from running their own tests) does not reach here.
+        i5 + "<skipTests>false</skipTests>",
+        i5 + "<skip>false</skip>",
         i4 + "</configuration>",
         i3 + "</plugin>",
         i2 + "</plugins>",
@@ -247,6 +269,20 @@ def build_entry(workspace, system):
         if changed:
             with open(path, "w", encoding="utf-8", newline="") as fh:
                 fh.write(new)
+        if p.get("reactor"):
+            # The root build, with the audited module named by its generated POM: the same reactor otherwise.
+            root_text = _lib.read_text(os.path.join(workspace, "pom.xml"))
+            root_new = re.sub(r"(<module>\s*)%s(\s*</module>)" % re.escape(p["module"]),
+                              lambda m: m.group(1) + p["module"] + "/" + AUDIT_POM + m.group(2), root_text, count=1)
+            m = re.match(r"\s*<\?xml[^>]*\?>\s*\n?", root_new)
+            at = m.end() if m else 0
+            root_new = root_new[:at] + HEADER.replace("the same build plus the 'audit' profile below",
+                                                    "the same modules, the audited one named by its own generated POM") + root_new[at:]
+            root_path = os.path.join(workspace, AUDIT_POM)
+            if _lib.read_text(root_path) != root_new:
+                changed = True
+                with open(root_path, "w", encoding="utf-8", newline="") as fh:
+                    fh.write(root_new)
     elif p["build_tool"] == "gradle":
         deps = "\n".join("                testImplementation '%s%s'" % (d["ga"], ":" + d["version"] if d.get("version") else "")
                          for d in p["dependencies"])
@@ -297,6 +333,13 @@ def settings(workspace, system):
                     "pattern, one example URL, status and a response body the application can read" % ", ".join(http))
     todo.append("rejections: the exception classes that mean a business refusal (the ones mapped to 4xx)")
     todo.append("base_data: SQL files with reference data that must exist before any command, if any")
+    todo.append("schema: the project's SQL files that create the tables, only when nothing creates them at start-up")
+    todo.append("result_code: only when the application answers HTTP 200 whatever happened and says in the response "
+                "body whether it refused: the field that holds the code, the values that mean done, the values that "
+                "mean a failure")
+    todo.append("auth.sessions: only when requests are refused unless they say who is calling: the sign-in request "
+                "of each kind of user and the headers built from its answer; a password that is not in the "
+                "repository's own seed data is named as ${env.AUDIT_...}, never written")
     todo.append("properties: application properties the harness must set, if any")
     todo.append("clock: keep the instant below when the application reads time from a java.time.Clock bean; "
                 "set it to null when the business rules need a particular date to start from, and name that date")
@@ -337,6 +380,9 @@ def command(workspace, system, run, mode=None, case=None, only_command=None, see
             props += " -Daudit.%s=%d" % (key, int(value))
     if p["build_tool"] == "maven":
         tool = "./mvnw" if os.path.isfile(os.path.join(workspace, "mvnw")) else "mvn"
+        if p.get("reactor"):
+            # The module and the sibling modules it is built from, in one build; only the audit's tests run.
+            return "%s -B -f %s -pl :%s -am -Paudit -DskipTests test %s" % (tool, p["reactor"]["file"], p["reactor"]["artifact"], props)
         return "%s -B -f %s -Paudit test %s" % (tool, entry["file"], props)
     tool = "./gradlew" if os.path.isfile(os.path.join(workspace, "gradlew")) else "gradle"
     task = "auditTest" if p["module"] == "." else ":%s:auditTest" % p["module"].replace("/", ":")

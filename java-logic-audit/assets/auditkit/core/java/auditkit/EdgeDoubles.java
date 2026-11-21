@@ -8,7 +8,6 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import org.mockito.Answers;
 import org.mockito.Mockito;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
@@ -66,7 +65,7 @@ public final class EdgeDoubles {
             public Object answer(InvocationOnMock invocation) throws Throwable {
                 Method m = invocation.getMethod();
                 if (m.getDeclaringClass() == Object.class) {
-                    return Answers.RETURNS_DEFAULTS.answer(invocation);
+                    return Mockito.RETURNS_DEFAULTS.answer(invocation);
                 }
                 FaultHook hook = faultHook;
                 if (hook != null) {
@@ -107,7 +106,7 @@ public final class EdgeDoubles {
                         return child;
                     }
                 }
-                return Answers.RETURNS_DEFAULTS.answer(invocation);
+                return Mockito.RETURNS_DEFAULTS.answer(invocation);
             }
         }));
     }

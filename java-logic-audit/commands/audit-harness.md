@@ -108,10 +108,10 @@ Keep the console output under `audit/$system/logs/` if you keep it. The run writ
 
 | Check | What it shows | Usual cause when it fails |
 |---|---|---|
-| SMOKE-1 | the application starts inside the harness | a bean that connects to an outside system at start-up: add that system's client type to `doubles`, or switch the feature off in `properties` |
+| SMOKE-1 | the application starts inside the harness | a bean that connects to an outside system at start-up: add that system's client type to `doubles`, or switch the feature off in `properties`; a table missing because nothing creates the tables at start-up (`schema`); a connection read from other property names than `spring.datasource.*` (`database.property_prefixes`) |
 | SMOKE-2 | the database is local or a container | the address is not local: this is the guard working; go back to step 4 |
 | SMOKE-3 | statements and commits are seen | the application does not take its connections from the data source bean |
-| SMOKE-4 | two resets leave the same state | a table the reset must not empty, or data the application needs at start-up: add it to `base_data` |
+| SMOKE-4 | two resets leave the same state, and every user named under `auth.sessions` can sign in from it | a table the reset must not empty (`keep_tables`), or data the application needs at start-up: add it to `base_data`; a user that does not exist after a reset, or a sign-in request that is not the application's |
 | SMOKE-5 | outside systems are replaced by recording doubles, and every HTTP rule answers its own example request | a type in `doubles` is not the one the application injects; an HTTP rule whose pattern does not match its example; HTTP clients not built from the shared builder |
 | SMOKE-6 | facts are extracted | usually follows from SMOKE-1 |
 

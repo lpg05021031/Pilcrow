@@ -1,5 +1,9 @@
 package auditkit.spring;
 
+import org.junit.jupiter.api.function.Executable;
+import org.junit.jupiter.api.TestFactory;
+import org.junit.jupiter.api.DynamicTest;
+import java.util.Collection;
 import auditkit.AuditConfig;
 import auditkit.ConnectionGuard;
 import auditkit.DbReset;
@@ -22,10 +26,6 @@ import javax.sql.DataSource;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.MethodOrderer;
-import org.junit.jupiter.api.Order;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.TestMethodOrder;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.context.ConfigurableApplicationContext;
 
@@ -36,7 +36,6 @@ import org.springframework.context.ConfigurableApplicationContext;
  * <p>Run with -Daudit.run=smoke. Without that property this class does nothing.
  */
 @EnabledIfSystemProperty(named = "audit.run", matches = "smoke")
-@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class SmokeRunner {
 
     private static ResultWriter results;
@@ -83,8 +82,49 @@ class SmokeRunner {
         }
     }
 
-    @Test
-    @Order(1)
+    /** The six checks, in order: a later one builds on what an earlier one showed. */
+    @TestFactory
+    Collection<DynamicTest> checks() {
+        List<DynamicTest> tests = new ArrayList<DynamicTest>();
+        tests.add(DynamicTest.dynamicTest("SMOKE-1", new Executable() {
+            @Override
+            public void execute() {
+                contextStarts();
+            }
+        }));
+        tests.add(DynamicTest.dynamicTest("SMOKE-2", new Executable() {
+            @Override
+            public void execute() {
+                databaseIsLocal();
+            }
+        }));
+        tests.add(DynamicTest.dynamicTest("SMOKE-3", new Executable() {
+            @Override
+            public void execute() {
+                sqlIsSeen();
+            }
+        }));
+        tests.add(DynamicTest.dynamicTest("SMOKE-4", new Executable() {
+            @Override
+            public void execute() {
+                resetIsRepeatable();
+            }
+        }));
+        tests.add(DynamicTest.dynamicTest("SMOKE-5", new Executable() {
+            @Override
+            public void execute() {
+                doublesRecord();
+            }
+        }));
+        tests.add(DynamicTest.dynamicTest("SMOKE-6", new Executable() {
+            @Override
+            public void execute() {
+                factsAreWritten();
+            }
+        }));
+        return tests;
+    }
+
     void contextStarts() {
         record("SMOKE-1", "the application context starts", new Check() {
             @Override
@@ -101,8 +141,6 @@ class SmokeRunner {
         });
     }
 
-    @Test
-    @Order(2)
     void databaseIsLocal() {
         record("SMOKE-2", "the database is local or a container, and a remote address is refused", new Check() {
             @Override
@@ -120,8 +158,6 @@ class SmokeRunner {
         });
     }
 
-    @Test
-    @Order(3)
     void sqlIsSeen() {
         record("SMOKE-3", "statements and commits pass through the proxy", new Check() {
             @Override
@@ -156,8 +192,6 @@ class SmokeRunner {
         });
     }
 
-    @Test
-    @Order(4)
     void resetIsRepeatable() {
         record("SMOKE-4", "two resets leave the database in the same state", new Check() {
             @Override
@@ -171,13 +205,13 @@ class SmokeRunner {
                 }
                 Map<String, Object> d = new LinkedHashMap<String, Object>();
                 d.put("tables", tables);
+                // The users harness.json signs in must be able to, from the data a reset leaves: a case starts there.
+                d.put("signed_in", new SpringDriver(context).signIn());
                 return d;
             }
         });
     }
 
-    @Test
-    @Order(5)
     void doublesRecord() {
         record("SMOKE-5", "every outside system named in harness.json is replaced by a recording double", new Check() {
             @Override
@@ -238,8 +272,6 @@ class SmokeRunner {
         });
     }
 
-    @Test
-    @Order(6)
     void factsAreWritten() {
         record("SMOKE-6", "schema, context, mapping and bytecode facts are written", new Check() {
             @Override

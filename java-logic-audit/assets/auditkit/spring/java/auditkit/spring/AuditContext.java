@@ -1,6 +1,7 @@
 package auditkit.spring;
 
 import auditkit.AuditConfig;
+import com.fasterxml.jackson.databind.JsonNode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -44,19 +45,31 @@ public final class AuditContext {
             args.add("--" + e.getKey() + "=" + e.getValue());
         }
         // A database offered by a person: its address and credentials come from the environment only.
+        // They are set under spring.datasource and under every other prefix harness.json names: a connection pool
+        // with its own starter reads its own properties (spring.datasource.druid, for one).
         String url = System.getenv("AUDIT_DB_URL");
         if (url != null && !url.trim().isEmpty()) {
-            args.add("--spring.datasource.url=" + url.trim());
+            List<String> prefixes = new ArrayList<String>();
+            prefixes.add("spring.datasource");
+            for (JsonNode p : config.harness().path("database").path("property_prefixes")) {
+                if (!prefixes.contains(p.asText())) {
+                    prefixes.add(p.asText());
+                }
+            }
             String user = System.getenv("AUDIT_DB_USER");
             String password = System.getenv("AUDIT_DB_PASSWORD");
-            if (user != null) {
-                args.add("--spring.datasource.username=" + user);
-            }
-            if (password != null) {
-                args.add("--spring.datasource.password=" + password);
+            for (String prefix : prefixes) {
+                args.add("--" + prefix + ".url=" + url.trim());
+                if (user != null) {
+                    args.add("--" + prefix + ".username=" + user);
+                }
+                if (password != null) {
+                    args.add("--" + prefix + ".password=" + password);
+                }
             }
         }
 
+        auditkit.DbReset.beforeStart();        // an application that reads its tables while starting needs them now
         SpringApplicationBuilder builder = new SpringApplicationBuilder(sources.toArray(new Class<?>[0]));
         List<String> profiles = config.texts("profiles");
         if (!profiles.isEmpty()) {

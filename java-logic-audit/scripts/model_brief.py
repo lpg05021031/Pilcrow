@@ -84,6 +84,12 @@ def stand_ins(harness):
             "note": "a call to a replaced type is recorded and returns nothing; an HTTP call no rule covers fails"}
 
 
+def callers(harness):
+    """Who the harness can send a call as: the users it signs in, by name, and the paths each is used for."""
+    return [{"name": s.get("name", "default"), "paths": s.get("paths")}
+            for s in (harness.get("auth") or {}).get("sessions", [])]
+
+
 def cmd_shards(workspace, system, pattern=None):
     adir, shards, themap = load(workspace, system)
     chosen = [s for s in shards if not pattern or pattern.lower() in s["name"].lower()]
@@ -127,7 +133,9 @@ def cmd_mine(workspace, system, name):
         "files": shard.get("files", []), "files_left_out": shard.get("files_left_out", 0),
         "tables": tables(adir, themap, wanted),
         "refusals": {"exception_types": harness.get("rejections", []),
-                     "error_code_field": harness.get("error_code_path", "code")},
+                     "error_code_field": harness.get("error_code_path", "code"),
+                     **({"result_code": harness["result_code"]} if harness.get("result_code") else {})},
+        **({"signed_in_as": callers(harness)} if callers(harness) else {}),
         "database": (_lib.read_json(os.path.join(adir, "facts", "schema.json"), {}) or {}).get("engine"),
     }
 
@@ -224,6 +232,7 @@ def cmd_recipes(workspace, system, name, part=1):
         "time_can_be_moved": bool(harness.get("clock")),
         "today_is": (harness.get("clock") or "")[:10] or None,
         "stand_ins": stand_ins(harness),
+        **({"signed_in_as": callers(harness)} if callers(harness) else {}),
     }
 
 

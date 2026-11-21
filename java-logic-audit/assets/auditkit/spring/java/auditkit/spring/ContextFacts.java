@@ -162,7 +162,7 @@ public final class ContextFacts {
                     methods.add(String.valueOf(m));
                 }
                 row.put("methods", new ArrayList<String>(methods));
-                row.put("patterns", new ArrayList<String>(new TreeSet<String>(e.getKey().getPatternValues())));
+                row.put("patterns", new ArrayList<String>(patternsOf(e.getKey())));
                 row.put("handler", owner.getName() + "#" + handler.getMethod().getName());
                 List<Map<String, Object>> params = new ArrayList<Map<String, Object>>();
                 for (MethodParameter p : handler.getMethodParameters()) {
@@ -309,5 +309,28 @@ public final class ContextFacts {
             default:
                 return String.valueOf(value);
         }
+    }
+    /**
+     * The paths of a mapping. Spring 5.3 and later answer getPatternValues(); before that the paths are
+     * in the patterns condition. Asked by reflection, so that this compiles against either.
+     */
+    @SuppressWarnings("unchecked")
+    private static TreeSet<String> patternsOf(Object mapping) {
+        TreeSet<String> out = new TreeSet<String>();
+        try {
+            out.addAll((java.util.Collection<String>) mapping.getClass().getMethod("getPatternValues").invoke(mapping));
+            return out;
+        } catch (ReflectiveOperationException e) {
+            // an older Spring
+        }
+        try {
+            Object condition = mapping.getClass().getMethod("getPatternsCondition").invoke(mapping);
+            if (condition != null) {
+                out.addAll((java.util.Collection<String>) condition.getClass().getMethod("getPatterns").invoke(condition));
+            }
+        } catch (ReflectiveOperationException e) {
+            // no paths can be read: the entry is listed without them
+        }
+        return out;
     }
 }

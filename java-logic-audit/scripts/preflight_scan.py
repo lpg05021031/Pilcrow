@@ -406,6 +406,55 @@ def scan_connections(root, files, environ=None):
 
 # ---- the scan -----------------------------------------------------------------------------------
 
+def sibling_modules(root, base):
+    """Directories of the other modules of the same build that the module at `base` depends on, directly or not.
+
+    An application is often one thin module that only starts what its sibling modules hold (the controllers
+    in one, the persistence in another). The audit is about the application, so what it is made of belongs
+    to the scan. Maven: dependencies on artifacts that sibling modules produce. Gradle: project(':x').
+    """
+    by_artifact, by_project = {}, {}
+    cur = base
+    while True:
+        pom = _lib.read_text(os.path.join(cur, "pom.xml"))
+        if pom:
+            for rel in parse_pom(pom)["modules"]:
+                d = os.path.normpath(os.path.join(cur, rel))
+                if os.path.isfile(d):                      # a module may be named by its POM file
+                    d = os.path.dirname(d)
+                text = _lib.read_text(os.path.join(d, "pom.xml")) if _lib.inside(root, d) else None
+                r = _safe_xml(text) if text else None
+                if r is not None and _txt(r, "artifactId"):
+                    by_artifact[_txt(r, "artifactId")] = d
+        for name in ("settings.gradle", "settings.gradle.kts"):
+            settings = _lib.read_text(os.path.join(cur, name))
+            if settings:
+                for rel in parse_settings(settings):
+                    d = os.path.normpath(os.path.join(cur, rel))
+                    if _lib.inside(root, d) and os.path.isdir(d):
+                        by_project[":" + rel.replace("/", ":")] = d
+        if cur == root:
+            break
+        cur = os.path.dirname(cur)
+    found, todo = [], [base]
+    while todo:
+        d = todo.pop()
+        wanted = []
+        pom = _lib.read_text(os.path.join(d, "pom.xml"))
+        if pom:
+            wanted += [by_artifact[a] for _g, a, _v, _s in parse_pom(pom)["deps"] if a in by_artifact]
+        for name in ("build.gradle", "build.gradle.kts"):
+            text = _lib.read_text(os.path.join(d, name))
+            if text:
+                wanted += [by_project[m.group(1)] for m in re.finditer(r"project\s*\(\s*(?:path\s*:\s*)?['\"](:[\w.\-:]+)['\"]", text)
+                           if m.group(1) in by_project]
+        for w in wanted:
+            if w != base and w not in found:
+                found.append(w)
+                todo.append(w)
+    return sorted(found)
+
+
 def scan(root, module=None, env=True):
     root = os.path.abspath(root)
     if not os.path.isdir(root):
@@ -418,6 +467,11 @@ def scan(root, module=None, env=True):
         _lib.die("module directory not found inside the repository: %s" % mod_rel)
 
     files = list(_lib.walk_files(base))
+    # The sibling modules the application is made of are part of it: their files are scanned too, named by
+    # their path from the module ("../orders-db/src/main/...").
+    siblings = sibling_modules(root, base) if mod_rel != "." else []
+    for d in siblings:
+        files += [os.path.relpath(os.path.join(d, f), base).replace(os.sep, "/") for f in _lib.walk_files(d)]
 
     # Build files: the module's own, and those of every ancestor up to the repository root
     # (parent POMs and root Gradle files carry versions and dependency management).
@@ -513,7 +567,7 @@ def scan(root, module=None, env=True):
     test_code = "\n".join(sources[f][0] for f in test_java if f in sources)
     all_imports = main_code + "\n" + test_code
 
-    app_classes, entities = [], []
+    app_classes, sibling_apps, entities = [], [], []
     for rel in main_java:
         if rel not in sources:
             continue
@@ -522,7 +576,9 @@ def scan(root, module=None, env=True):
         pkg = pkg.group(1) + "." if pkg else ""
         m = re.search(r"@SpringBootApplication\b[\s\S]{0,600}?\bclass\s+(\w+)", code)
         if m:
-            app_classes.append(pkg + m.group(1))
+            # The application is the one the audited module starts; a sibling module that can also be started
+            # on its own is not a second candidate.
+            (sibling_apps if rel.startswith("../") else app_classes).append(pkg + m.group(1))
         for m in re.finditer(r"@Entity\b", code):
             cm = re.search(r"\bclass\s+(\w+)", code[m.end():m.end() + 800])
             if not cm:
@@ -549,7 +605,9 @@ def scan(root, module=None, env=True):
             drl += 1
         elif low.endswith(".bpmn") or low.endswith(".bpmn20.xml"):
             bpmn += 1
-        if "/src/main/" not in "/" + rel:
+        # Schema scripts are kept in many places (sql/, db/, doc/): any .sql file of the application that is not
+        # a test's counts. Mapper files are only looked for among the main resources.
+        if "/src/test/" in "/" + rel or ("/src/main/" not in "/" + rel and not low.endswith(".sql")):
             continue
         if low.endswith(".xml") and "/resources/" in "/" + rel:
             text = _lib.read_text(os.path.join(base, rel))
@@ -565,7 +623,9 @@ def scan(root, module=None, env=True):
             sql = re.sub(r"--[^\n]*", "", re.sub(r"/\*.*?\*/", " ", text, flags=re.S))
             triggers += _count(r"(?i)\bcreate\s+(?:or\s+replace\s+)?(?:constraint\s+)?trigger\b", sql)
             procedures += _count(r"(?i)\bcreate\s+(?:or\s+replace\s+)?(?:procedure|function)\b", sql)
-            for tm in re.finditer(r"(?is)\bcreate\s+table\s+(?:if\s+not\s+exists\s+)?[`\"]?([\w.]+)[`\"]?\s*\((.*?)\)\s*;", sql):
+            # The closing bracket of the column list is the one after which nothing bracketed follows before the
+            # semicolon: MySQL writes the table's options there (ENGINE=..., COMMENT='...').
+            for tm in re.finditer(r"(?is)\bcreate\s+table\s+(?:if\s+not\s+exists\s+)?[`\"]?([\w.]+)[`\"]?\s*\((.*?)\)[^;()]*;", sql):
                 cols = [c.strip().split()[0].strip('`"') for c in re.split(r",(?![^(]*\))", tm.group(2)) if c.strip()]
                 life = [c for c in cols if STATUS_NAME.search(c)]
                 if life:
@@ -654,6 +714,11 @@ def scan(root, module=None, env=True):
 
     # ---- tests
     testfw = set(facets.get("testfw", set()))
+    # The test starter brings JUnit 5 from Spring Boot 2.2 on; before that it brings JUnit 4.
+    old_boot = bool(re.match(r"^(1\.|2\.[01]\.)", boot_version or ""))
+    if "spring-boot-starter-test" in artifacts and old_boot and not any(a.startswith("junit-jupiter") for a in artifacts):
+        testfw.discard("junit5")
+        testfw.add("junit4")
     if jupiter_excluded and not any(a.startswith("junit-jupiter") for a in artifacts):
         testfw.discard("junit5")
     if re.search(r"\bimport\s+org\.junit\.jupiter\b", test_code):
@@ -704,13 +769,14 @@ def scan(root, module=None, env=True):
             "jdk": jdk,
             "modules": sorted(set(modules)),
             "audit_profile_present": "audit" in maven_profiles,
+            **({"sibling_modules": [os.path.relpath(d, root).replace(os.sep, "/") for d in siblings]} if siblings else {}),
         },
         "framework": {
             "name": fw_name,
             "version": boot_version if fw_name == "spring-boot" else None,
             "web": web_kind,
             "namespace": "jakarta" if jakarta else ("javax" if javax else "none"),
-            "application_classes": app_classes,
+            "application_classes": app_classes or sibling_apps,
         },
         "persistence": sorted(persistence),
         "database": {

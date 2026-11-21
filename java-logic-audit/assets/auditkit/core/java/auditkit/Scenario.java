@@ -147,6 +147,7 @@ public final class Scenario {
         DbReset.reset();
         EdgeDoubles.clearCalls();
         AuditClock.reset();
+        driver.beginScenario();
         ObjectNode context = AuditConfig.JSON.createObjectNode();
         if (fixture != null) {
             runFixture(fixture, context, 0);
