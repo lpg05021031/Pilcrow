@@ -4,12 +4,13 @@
     "pins": 0,
     "rules": 0,
     "errors": 0,
-    "faults": 2
+    "faults": 2,
+    "races": 1
   },
   "summary": {
-    "defects": 14,
-    "noticed": 14,
-    "noticed_without_pins": 9,
+    "defects": 16,
+    "noticed": 16,
+    "noticed_without_pins": 11,
     "by_category": {
       "guard": {
         "defects": 2,
@@ -45,6 +46,11 @@
         "defects": 2,
         "noticed": 2,
         "without_pins": 1
+      },
+      "concurrency": {
+        "defects": 2,
+        "noticed": 2,
+        "without_pins": 2
       }
     }
   },
@@ -63,7 +69,8 @@
         "pins": 2,
         "rules": 0,
         "errors": 2,
-        "faults": 0
+        "faults": 0,
+        "races": 0
       },
       "examples": {
         "pins": [
@@ -90,7 +97,8 @@
         "pins": 1,
         "rules": 2,
         "errors": 0,
-        "faults": 0
+        "faults": 0,
+        "races": 0
       },
       "examples": {
         "pins": [
@@ -115,7 +123,8 @@
         "pins": 1,
         "rules": 0,
         "errors": 0,
-        "faults": 0
+        "faults": 0,
+        "races": 0
       },
       "examples": {
         "pins": [
@@ -130,14 +139,16 @@
       "detected": true,
       "routes": [
         "pins",
-        "rules"
+        "rules",
+        "races"
       ],
       "did_not_run": [],
       "counts": {
         "pins": 3,
         "rules": 1,
         "errors": 0,
-        "faults": 0
+        "faults": 0,
+        "races": 3
       },
       "examples": {
         "pins": [
@@ -147,6 +158,11 @@
         ],
         "rules": [
           "no schedule_line row with status PLANNED belongs to a order_line row with status CANCELLED"
+        ],
+        "races": [
+          "CMD-cancelOrder + CMD-confirmOrder: rule-broken",
+          "CMD-cancelOrder + CMD-createOrder: rule-broken",
+          "CMD-cancelOrder + CMD-relayOutbox: rule-broken"
         ]
       }
     },
@@ -163,7 +179,8 @@
         "pins": 0,
         "rules": 0,
         "errors": 0,
-        "faults": 57
+        "faults": 57,
+        "races": 0
       },
       "examples": {
         "faults": [
@@ -186,7 +203,8 @@
         "pins": 0,
         "rules": 0,
         "errors": 0,
-        "faults": 24
+        "faults": 24,
+        "races": 0
       },
       "examples": {
         "faults": [
@@ -210,7 +228,8 @@
         "pins": 1,
         "rules": 0,
         "errors": 0,
-        "faults": 3
+        "faults": 3,
+        "races": 0
       },
       "examples": {
         "pins": [
@@ -236,7 +255,8 @@
         "pins": 3,
         "rules": 0,
         "errors": 0,
-        "faults": 0
+        "faults": 0,
+        "races": 0
       },
       "examples": {
         "pins": [
@@ -259,7 +279,8 @@
         "pins": 5,
         "rules": 0,
         "errors": 0,
-        "faults": 0
+        "faults": 0,
+        "races": 0
       },
       "examples": {
         "pins": [
@@ -282,7 +303,8 @@
         "pins": 6,
         "rules": 0,
         "errors": 0,
-        "faults": 0
+        "faults": 0,
+        "races": 0
       },
       "examples": {
         "pins": [
@@ -299,14 +321,16 @@
       "detected": true,
       "routes": [
         "pins",
-        "rules"
+        "rules",
+        "races"
       ],
       "did_not_run": [],
       "counts": {
         "pins": 7,
         "rules": 1,
         "errors": 0,
-        "faults": 0
+        "faults": 0,
+        "races": 3
       },
       "examples": {
         "pins": [
@@ -316,6 +340,11 @@
         ],
         "rules": [
           "order_header.total_amount equals the sum of order_line.qty x unit_price over its order_line rows whose status is not CANCELLED"
+        ],
+        "races": [
+          "CMD-cancelOrder + CMD-confirmOrder: rule-broken",
+          "CMD-cancelOrder + CMD-createOrder: rule-broken",
+          "CMD-cancelOrder + CMD-relayOutbox: rule-broken"
         ]
       }
     },
@@ -326,14 +355,16 @@
       "detected": true,
       "routes": [
         "pins",
-        "rules"
+        "rules",
+        "races"
       ],
       "did_not_run": [],
       "counts": {
         "pins": 2,
         "rules": 2,
         "errors": 0,
-        "faults": 0
+        "faults": 0,
+        "races": 1
       },
       "examples": {
         "pins": [
@@ -343,6 +374,9 @@
         "rules": [
           "order_line.shipped_qty equals the sum of schedule_line.qty over its schedule_line rows whose status is SHIPPED",
           "no schedule_line row with status PLANNED belongs to a order_line row with status CLOSED"
+        ],
+        "races": [
+          "CMD-applyShipment + CMD-applyShipment: rule-broken"
         ]
       }
     },
@@ -353,14 +387,16 @@
       "detected": true,
       "routes": [
         "pins",
-        "rules"
+        "rules",
+        "races"
       ],
       "did_not_run": [],
       "counts": {
         "pins": 27,
         "rules": 2,
         "errors": 0,
-        "faults": 0
+        "faults": 0,
+        "races": 1
       },
       "examples": {
         "pins": [
@@ -371,6 +407,9 @@
         "rules": [
           "order_line.shipped_qty is never larger than order_line.qty",
           "no schedule_line row with status PLANNED belongs to a order_line row with status CLOSED"
+        ],
+        "races": [
+          "CMD-applyShipment + CMD-applyShipment: rule-broken"
         ]
       }
     },
@@ -387,13 +426,60 @@
         "pins": 20,
         "rules": 0,
         "errors": 0,
-        "faults": 0
+        "faults": 0,
+        "races": 0
       },
       "examples": {
         "pins": [
           "CMD-cancelOrder|base",
           "CMD-cancelOrder|order=CONFIRMED",
           "CMD-commitChange.CANCEL|base"
+        ]
+      }
+    },
+    {
+      "id": "concurrency-1",
+      "category": "concurrency",
+      "what": "Confirming and cancelling an order no longer lock it: two of them at once both read the order as it was.",
+      "detected": true,
+      "routes": [
+        "races"
+      ],
+      "did_not_run": [],
+      "counts": {
+        "pins": 0,
+        "rules": 0,
+        "errors": 0,
+        "faults": 0,
+        "races": 2
+      },
+      "examples": {
+        "races": [
+          "CMD-cancelOrder + CMD-confirmOrder: answers-of-no-order",
+          "CMD-cancelOrder + CMD-confirmOrder: data-of-no-order"
+        ]
+      }
+    },
+    {
+      "id": "concurrency-2",
+      "category": "concurrency",
+      "what": "Applying a shipment no longer locks the order: two shipments of the same line at once both read it as it was.",
+      "detected": true,
+      "routes": [
+        "races"
+      ],
+      "did_not_run": [],
+      "counts": {
+        "pins": 0,
+        "rules": 0,
+        "errors": 0,
+        "faults": 0,
+        "races": 2
+      },
+      "examples": {
+        "races": [
+          "CMD-applyShipment + CMD-applyShipment: answers-of-no-order",
+          "CMD-applyShipment + CMD-applyShipment: data-of-no-order"
         ]
       }
     }

@@ -1,0 +1,116 @@
+{
+  "schema": 1,
+  "module": ".",
+  "build": {
+    "tool": "gradle",
+    "wrapper": false,
+    "jdk": "11",
+    "modules": [],
+    "audit_profile_present": false
+  },
+  "framework": {
+    "name": "spring-boot",
+    "version": "2.7.18",
+    "web": "mvc",
+    "namespace": "javax",
+    "application_classes": [
+      "com.example.stock.StockApplication"
+    ]
+  },
+  "persistence": [
+    "mybatis"
+  ],
+  "database": {
+    "engines": [
+      "mysql"
+    ],
+    "migrations": [],
+    "migration_files": 0,
+    "db_side_logic": {
+      "triggers": 0,
+      "procedures": 0
+    }
+  },
+  "messaging": [],
+  "streaming": [],
+  "scheduling": [
+    {
+      "kind": "spring-scheduled",
+      "count": 1
+    }
+  ],
+  "outbound": [],
+  "entry_points": {
+    "controllers": 2,
+    "http": 7,
+    "message": 0,
+    "scheduled": 1
+  },
+  "entities": {
+    "count": 0,
+    "with_lifecycle": 0,
+    "jpa": [],
+    "mapper_xml": 1,
+    "mapper_statements": 7,
+    "ddl_tables_with_lifecycle": [
+      {
+        "table": "reservation",
+        "columns": [
+          "status"
+        ]
+      }
+    ]
+  },
+  "transactions": {
+    "annotated": 8
+  },
+  "tests": {
+    "files": 2,
+    "frameworks": [
+      "junit4"
+    ],
+    "mockito": true,
+    "spring_boot_tests": 1,
+    "testcontainers": false,
+    "wiremock": false,
+    "substitute_db": [],
+    "container_images": [],
+    "mocked_types": [],
+    "database_source": "test-config"
+  },
+  "non_java_logic": {
+    "drools_files": 0,
+    "bpmn_files": 0,
+    "engines": []
+  },
+  "connections": [
+    {
+      "file": "src/main/resources/application.properties",
+      "scope": "main",
+      "key": "spring.datasource.url",
+      "kind": "jdbc:mysql",
+      "host": "localhost",
+      "local": true,
+      "placeholder": true,
+      "env_override": false
+    },
+    {
+      "file": "src/test/resources/application-test.properties",
+      "scope": "test",
+      "key": "spring.datasource.url",
+      "kind": "jdbc:mysql",
+      "host": "localhost",
+      "local": true,
+      "placeholder": false,
+      "env_override": false
+    }
+  ],
+  "support": {
+    "verdict": "supported",
+    "out_of_scope": []
+  },
+  "applicability": {
+    "verdict": "full",
+    "reasons": []
+  }
+}

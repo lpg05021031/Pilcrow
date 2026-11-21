@@ -432,11 +432,16 @@ def scan(root, module=None, env=True):
 
     deps, plugins, modules, jdk, boot_version, maven_profiles = [], [], [], None, None, []
     has_maven = has_gradle = False
+    jupiter_excluded = False
     for p in build_paths:
         name = os.path.basename(p)
         text = _lib.read_text(p)
         if text is None:
             continue
+        # A project that stays on JUnit 4 takes JUnit 5 out of the test starter: then it is not there to build on.
+        if re.search(r"exclude\s+group\s*:\s*['\"]org\.junit\.jupiter['\"]|exclude\s*\(\s*group\s*=\s*\"org\.junit\.jupiter\"", text) or \
+                re.search(r"<exclusion>\s*<groupId>org\.junit\.jupiter</groupId>", text):
+            jupiter_excluded = True
         if name == "pom.xml":
             has_maven = True
             pom = parse_pom(text)
@@ -649,6 +654,8 @@ def scan(root, module=None, env=True):
 
     # ---- tests
     testfw = set(facets.get("testfw", set()))
+    if jupiter_excluded and not any(a.startswith("junit-jupiter") for a in artifacts):
+        testfw.discard("junit5")
     if re.search(r"\bimport\s+org\.junit\.jupiter\b", test_code):
         testfw.add("junit5")
     if re.search(r"\bimport\s+org\.junit\.(?:Test|Before|After|runner|Assert)\b", test_code):

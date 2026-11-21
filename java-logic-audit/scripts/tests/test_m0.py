@@ -53,6 +53,13 @@ class FixtureProfiles(unittest.TestCase):
         self.assertEqual("full", p["applicability"]["verdict"])
         self.assertEqual("supported", p["support"]["verdict"])
 
+    def test_sample2_stock_is_supported_on_gradle_mybatis_mysql_and_junit4(self):
+        p = self.check("stock-mybatis")
+        self.assertEqual(("gradle", "2.7.18", "javax"), (p["build"]["tool"], p["framework"]["version"], p["framework"]["namespace"]))
+        self.assertEqual((["mybatis"], ["mysql"]), (p["persistence"], p["database"]["engines"]))
+        self.assertEqual(["junit4"], p["tests"]["frameworks"])        # JUnit 5 is excluded from the test starter
+        self.assertEqual(("full", "supported"), (p["applicability"]["verdict"], p["support"]["verdict"]))
+
     def test_sample3_library_is_not_applicable(self):
         p = self.check("lib-pure")
         self.assertEqual("not-applicable", p["applicability"]["verdict"])

@@ -147,6 +147,30 @@ class Spec(System):
         self.assertEqual(out["sections_not_checked_by_a_second_reader"], [])
         self.assertEqual(self.read("model/expected.json")["cells"]["CMD-pay|frozen=true"]["source"], "observed")
 
+    def test_what_the_readers_reported_and_what_a_person_decided_otherwise_is_shown(self):
+        self.paying()
+        self.write("spec/raw/clauses-SEC-03.json", {"clauses": [
+            {"quote": "An event that arrives early is skipped.", "lines": [15, 15], "status": "testable",
+             "expectations": [{"command": "CMD-onEvent", "when": {"ready": "false"}, "outcome": "ignored"}]}], "instruction_shaped": [16]})
+        qs = {q["kind"]: q for q in build_questions.build(self.tmp, "s")["questions"]}
+        d = apply_decisions.record(self.tmp, "s", qs["dropped"]["id"], "not-intended", "an early event must not be lost")
+        apply_decisions.apply(self.tmp, "s")
+        out = spec.join(self.tmp, "s")
+        self.assertEqual(out["instruction_shaped_lines"], [16])
+        self.assertEqual(out["sections_not_read"], ["SEC-01"])
+        x = self.by_quote("An event that")[1][0]
+        self.assertEqual((x["result"], x["decided_otherwise"]), ("agrees", d["id"]))
+        trace = self.text("SPEC_TRACE.md")
+        self.assertIn("**agrees**, but decision %s says this behaviour is not intended" % d["id"], trace)
+        self.assertIn("read like instructions to an automated reader:** 16", trace)
+        self.assertEqual(self.read("model/expected.json")["cells"]["CMD-onEvent|ready=false"]["source"], "decision")
+
+    def test_a_section_without_expectations_needs_no_second_reader(self):
+        self.reply("SEC-01", [])
+        self.reply("SEC-03", [{"quote": "An event that arrives early is skipped.", "lines": [15, 15], "status": "untestable", "note": "early?"}])
+        self.paying()
+        self.assertEqual(spec.join(self.tmp, "s")["sections_not_checked_by_a_second_reader"], ["SEC-02"])
+
     def test_two_clauses_that_want_different_things_of_one_case_are_listed(self):
         self.paying({"quote": "An event that arrives early is skipped.", "lines": [15, 15], "status": "testable",
                      "expectations": [{"command": "CMD-pay", "when": {"amount": "zero"}, "outcome": "allowed"}]})

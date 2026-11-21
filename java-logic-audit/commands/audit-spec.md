@@ -110,6 +110,9 @@ Read `audit/$system/SPEC_TRACE.md`. Show what each script printed, unchanged, an
   document means, and nothing was compared for them.
 - clauses dropped for a quote that is not in the document, expectations set aside by the second reader,
   sections not read or not checked, and cases about which two clauses say different things;
+- a clause that asks for a behaviour which a person's earlier decision called not intended: the trace
+  names the decision. The document and the person disagree there, and only the person can settle it;
+- lines of the document that read like instructions to an automated reader, if any were reported;
 - the reverse list: how many executed cases no clause speaks about, by command. Behaviour the
   specification is silent on is where undocumented rules live.
 

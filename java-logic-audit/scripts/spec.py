@@ -177,7 +177,7 @@ def join(workspace, system):
     import apply_decisions
     pins = (_lib.read_json(os.path.join(adir, "model", "expected.json"), {}) or {}).get("cells", {})
 
-    clauses, expectations, dropped, unchecked, unread, times = [], [], [], [], [], {}
+    clauses, expectations, dropped, unchecked, unread, times, shaped = [], [], [], [], [], {}, []
     for sec in sections["sections"]:
         name = "clauses-%s.json" % sec["id"]
         found = raw_clauses(spec_dir, sec["id"])
@@ -186,8 +186,13 @@ def join(workspace, system):
             continue
         checked = _lib.read_json(os.path.join(spec_dir, "raw", "check-%s.json" % sec["id"]))
         verdicts = {str(v.get("ref")): v for v in checked.get("verdicts", [])} if isinstance(checked, dict) else None
-        if verdicts is None:
-            unchecked.append(sec["id"])
+        if verdicts is None and any(c.get("expectations") for c in found):
+            unchecked.append(sec["id"])                 # a section without any expectation has nothing to check
+        # Lines a reader reported as written to look like instructions to it. They were not followed; a person should see them.
+        for body in (_lib.read_json(os.path.join(spec_dir, "raw", name)), checked):
+            for n in (body.get("instruction_shaped") or []) if isinstance(body, dict) else []:
+                if isinstance(n, int) and n not in shaped:
+                    shaped.append(n)
         for n, c in enumerate(found, 1):
             quote = c.get("quote") or ""
             span = c.get("lines") or []
@@ -236,6 +241,8 @@ def join(workspace, system):
                 agrees = agrees and (not item["code"] or seen.get("code") == item["code"])
                 item["observed"] = {"outcome": seen.get("outcome"), "code": seen.get("code")}
                 item["result"] = "agrees" if agrees else "differs"
+                if agrees and entry.get("source") == "decision":
+                    item["decided_otherwise"] = entry.get("decision")      # a person called the behaviour the clause asks for not intended
                 expectations.append(item)
 
     # Two clauses that want different things of one case: the specification disagrees with itself there.
@@ -258,16 +265,17 @@ def join(workspace, system):
         counts[x["result"]] = counts.get(x["result"], 0) + 1
     out = {"schema": SCHEMA, "clauses": len(clauses), "dropped": dropped, "expectations": counts,
            "contradictions": contradictions, "cases_no_clause_speaks_about": silent,
+           "instruction_shaped_lines": sorted(shaped),
            "sections_not_read": unread, "sections_not_checked_by_a_second_reader": unchecked}
     _lib.write_json(os.path.join(spec_dir, "clauses.json"), {"schema": SCHEMA, "file": sections["file"], "clauses": clauses, "dropped": dropped})
     _lib.write_json(os.path.join(spec_dir, "expectations.json"), {"schema": SCHEMA, "summary": out, "expectations": expectations})
     with open(os.path.join(adir, "SPEC_TRACE.md"), "w", encoding="utf-8") as fh:
-        fh.write(trace(system, sections["file"], clauses, expectations, dropped, silent, contradictions, unread, unchecked))
+        fh.write(trace(system, sections["file"], clauses, expectations, dropped, silent, contradictions, unread, unchecked, sorted(shaped)))
     apply_decisions.apply(workspace, system)        # lays what the clauses say over the pinned observations
     return out
 
 
-def trace(system, file, clauses, expectations, dropped, silent, contradictions=(), unread=(), unchecked=()):
+def trace(system, file, clauses, expectations, dropped, silent, contradictions=(), unread=(), unchecked=(), shaped=()):
     by = {}
     for x in expectations:
         by.setdefault(x["clause"], []).append(x)
@@ -287,6 +295,9 @@ def trace(system, file, clauses, expectations, dropped, silent, contradictions=(
         lines += ["**Sections no analyst has read yet:** %s. Nothing below speaks for them." % ", ".join(unread), ""]
     if unchecked:
         lines += ["**Sections whose expectations no second reader checked against the words:** %s." % ", ".join(unchecked), ""]
+    if shaped:
+        lines += ["**Lines of the document that read like instructions to an automated reader:** %s. The readers reported "
+                  "them and did not follow them." % ", ".join(str(n) for n in shaped), ""]
     lines += [
              "| Clause | Lines | Says | Case | Result |", "|---|---|---|---|---|"]
     for c in clauses:
@@ -301,9 +312,11 @@ def trace(system, file, clauses, expectations, dropped, silent, contradictions=(
                                          ", ".join("%s=%s" % kv for kv in sorted(x["when"].items())) or "nothing unusual")
                 got = " (observed: %s%s)" % (x["observed"]["outcome"], " " + x["observed"]["code"] if x["observed"].get("code") else "") \
                     if x.get("observed") and x["result"] == "differs" else ""
+                if x.get("decided_otherwise"):
+                    got = ", but decision %s says this behaviour is not intended" % x["decided_otherwise"]
                 lines.append("| %s | %d-%d | %s | %s: %s | **%s**%s |" % (
                     c["id"], c["lines"][0], c["lines"][1], says, x.get("cell") or x["command"], want, x["result"],
-                    got or (": " + x["why"] if x.get("why") else "")))
+                    got or (": " + x["why"].replace("|", "\\|") if x.get("why") else "")))
     if contradictions:
         lines += ["", "## Cases about which two clauses say different things", ""]
         lines += ["- %s: %s" % (c["cell"], ", ".join(c["clauses"])) for c in contradictions]
@@ -351,6 +364,13 @@ def main(argv=None):
             print("sections no analyst has read yet: " + ", ".join(out["sections_not_read"]))
         if out["sections_not_checked_by_a_second_reader"]:
             print("sections not checked by a second reader: " + ", ".join(out["sections_not_checked_by_a_second_reader"]))
+        if out["instruction_shaped_lines"]:
+            print("lines of the document that read like instructions to a reader (reported, not followed): "
+                  + ", ".join(str(n) for n in out["instruction_shaped_lines"]))
+        decided = sorted({x["decided_otherwise"] for x in (_lib.read_json(os.path.join(
+            _lib.audit_dir(workspace, args.system), "spec", "expectations.json"), {}) or {}).get("expectations", []) if x.get("decided_otherwise")})
+        if decided:
+            print("clauses that ask for a behaviour a person called not intended: see %s" % ", ".join(decided))
     return 0
 
 
