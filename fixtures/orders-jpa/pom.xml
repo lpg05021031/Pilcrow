@@ -15,7 +15,7 @@
   <artifactId>orders</artifactId>
   <version>1.0.0</version>
   <name>orders</name>
-  <description>Verification sample 1: a three-level order system (header, line, schedule line)</description>
+  <description>Order management service</description>
 
   <properties>
     <java.version>17</java.version>

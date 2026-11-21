@@ -8,7 +8,7 @@
   <artifactId>money-utils</artifactId>
   <version>1.0.0</version>
   <packaging>jar</packaging>
-  <description>Verification sample 3a: a pure library. The audit method does not apply.</description>
+  <description>Money amounts and quantity-break pricing</description>
 
   <properties>
     <maven.compiler.release>17</maven.compiler.release>
