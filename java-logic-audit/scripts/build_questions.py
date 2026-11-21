@@ -22,6 +22,7 @@ show it. The kinds, each from one fixed rule:
   fault                 a failure in the middle of a call left the data in between, or something sent
                         that was not kept, or a retry that does not converge
   race                  two calls at the same time left data, or answers, that neither order gives
+  against-spec          a clause of the specification expects something else than was observed
   never-decides         a check that, as far as the audit can reach, never fires from this entry
   rare-combination      two lifecycle values that almost never occur together, with exceptions
   rule?                 something that held in every state the audit reached: is it a rule?
@@ -46,11 +47,12 @@ import judge  # noqa: E402
 
 SCHEMA = 1
 FLAGGED = ("refused-but-changed", "read-wrote", "undecided", "error", "differs", "dropped", "unstable",
-           "rule-broken", "near-rule", "error-in-sequence", "fault", "race")
+           "rule-broken", "near-rule", "error-in-sequence", "fault", "race", "against-spec")
 UNFLAGGED = ("never-decides", "rare-combination", "rule?")
 BASIS = {"refused-but-changed": "N4", "read-wrote": "N4", "undecided": "N3", "error": "N4", "differs": "N3",
          "dropped": "N4", "unstable": "N4", "never-decides": "N3", "rule-broken": "N2", "near-rule": "N4",
-         "error-in-sequence": "N4", "fault": "N4", "race": "N4", "rare-combination": "N4", "rule?": "N4"}
+         "error-in-sequence": "N4", "fault": "N4", "race": "N4", "rare-combination": "N4", "rule?": "N4",
+         "against-spec": "N1"}
 
 
 def RACE_TEXT(differs, observed, expected):
@@ -237,6 +239,31 @@ def build(workspace, system):
         q.setdefault("variants", [])
         if g["command"] not in q["variants"]:
             q["variants"].append(g["command"])
+
+    # ---- where the specification says something else than the code was seen to do
+    clauses = {c["id"]: c for c in (_lib.read_json(os.path.join(adir, "spec", "clauses.json"), {}) or {}).get("clauses", [])}
+    for x in (_lib.read_json(os.path.join(adir, "spec", "expectations.json"), {}) or {}).get("expectations", []):
+        if x.get("result") != "differs" or x.get("cell") not in cells:
+            continue
+        want = {"outcome_not": "allowed"} if x["outcome"] == "not-allowed" else {"outcome": x["outcome"]}
+        if x.get("code"):
+            want["code"] = x["code"]
+        clause = clauses.get(x["clause"], {})
+        said = "not allowed" if x["outcome"] == "not-allowed" else x["outcome"]
+        q = add("against-spec", root(x["command"]), {"clause": x["clause"], "want": want}, x["cell"],
+                title="The code does something else than the specification says",
+                observed="The specification says \"%s\" (%s, lines %s). By that these calls are to be %s%s, and they "
+                         "were observed otherwise: %%s." % (
+                             " ".join((clause.get("quote") or "").split()).replace("%", "%%"), x["clause"],
+                             "-".join(str(n) for n in clause.get("lines", [])) or "?", said,
+                             " (%s)" % x["code"] if x.get("code") else ""),
+                why="Either the code is wrong or the specification is out of date; the audit cannot tell which. "
+                    "\"Intended\" here means the code is right and the specification is not.",
+                if_not_intended=want)
+        q.setdefault("case_texts", []).append("%s with %s is %s%s" % (
+            x["command"], ", ".join("%s = %s" % kv for kv in sorted(x["when"].items())) or "nothing unusual",
+            x["observed"]["outcome"], " (%s)" % x["observed"]["code"] if x["observed"].get("code") else ""))
+        q["cites"].add("%s (specification, lines %s)" % (x["clause"], "-".join(str(n) for n in clause.get("lines", [])) or "?"))
 
     # ---- what the sequence runs showed about rules of the data
     invariants = (_lib.read_json(os.path.join(model, "invariants.json"), {}) or {}).get("invariants", [])

@@ -90,6 +90,9 @@ def build(workspace, system):
         parts.append("<p>%s</p>" % e(f["statement"]))
         if f.get("answer") == "not-intended":
             parts.append("<p class='muted'>A person answered: not intended (%s).</p>" % e(f.get("decision")))
+        elif f.get("kind") == "against-spec":
+            parts.append("<p class='muted'>Rests on the specification. A person can still answer %s: the document may be the one "
+                         "that is out of date.</p>" % e(f.get("question")))
         else:
             parts.append("<p class='muted'>Waiting for a person's answer to %s.</p>" % e(f.get("question")))
         if f.get("reservations"):
@@ -126,6 +129,16 @@ def build(workspace, system):
         by_status[r.get("status")] = by_status.get(r.get("status"), 0) + 1
     rows.append(["Rules of the data", e(", ".join("%s %s" % (v, k) for k, v in sorted(by_status.items())) or "none proposed")])
     rows.append(["Guard canary", e(", ".join("%s %s" % (v, k) for k, v in (canary.get("counts") or {}).items()) or "not run")])
+    spec = load("spec/expectations.json").get("summary")
+    if spec is None:
+        rows.append(["Specification", "not traced: no finding or verdict here rests on a specification"])
+    else:
+        silent = sum((spec.get("cases_no_clause_speaks_about") or {}).values())
+        rows.append(["Specification", e("%s clauses kept, %s dropped for a quote that is not in the document; expectations: %s; "
+                                        "%s executed cases no clause speaks about (SPEC_TRACE.md)" % (
+                                            spec.get("clauses"), len(spec.get("dropped") or []),
+                                            ", ".join("%s %s" % (v, k) for k, v in sorted((spec.get("expectations") or {}).items())) or "none",
+                                            silent))])
     db = caps.get("database") or {}
     rows.append(["Database", e("%s %s, %s; matches production: %s" % (db.get("engine"), db.get("major"), "real engine" if db.get("real_engine") else
                                                                     "stand-in", caps.get("matches_production")))])

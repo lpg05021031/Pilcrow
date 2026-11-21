@@ -24,8 +24,11 @@ def seen(outcome, code=None, **more):
     return o
 
 
-class Chain(unittest.TestCase):
-    """One small system: an HTTP command with a refusal that writes and a case nobody decides, and a message handler."""
+class System(unittest.TestCase):
+    """One small system: an HTTP command with a refusal that writes and a case nobody decides, and a message handler.
+
+    Holds no test itself, so that other test files can build on it.
+    """
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -99,6 +102,8 @@ class Chain(unittest.TestCase):
         }
         if "CELL-0002" in fixed:
             behaviour["CELL-0002"] = seen("REJECTED", "STALE")
+        if "CELL-0005" in fixed:
+            behaviour["CELL-0005"] = seen("REJECTED", "BAD")
         rows = []
         for c in self.cells:
             o = behaviour.get(c["id"]) or seen("IGNORED")          # a cell a test added: a dropped message
@@ -134,6 +139,9 @@ class Chain(unittest.TestCase):
         self.run_matrix("verify")
         reconcile.reconcile(self.tmp, "s", pin=True)
         return build_questions.build(self.tmp, "s")["questions"]
+
+
+class Chain(System):
 
     def test_each_kind_of_question_comes_from_its_rule(self):
         qs = {q["kind"]: q for q in self.characterize()}

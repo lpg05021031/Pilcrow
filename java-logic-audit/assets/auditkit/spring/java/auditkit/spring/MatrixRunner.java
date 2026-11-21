@@ -62,8 +62,8 @@ class MatrixRunner {
             if (onlyCase != null && !onlyCase.equals(id)) {
                 continue;
             }
-            if (onlyCommand != null && !onlyCommand.equals(cell.get("command").asText())) {
-                continue;
+            if (onlyCommand != null && !java.util.Arrays.asList(onlyCommand.split(",")).contains(cell.get("command").asText())) {
+                continue;       // audit.command names one command, or several separated by commas
             }
             tests.add(DynamicTest.dynamicTest(id, new Executable() {
                 @Override
@@ -71,9 +71,13 @@ class MatrixRunner {
                     String result = run(scenario, cell, verify);
                     if (verify && ResultWriter.MISMATCH.equals(result)) {
                         JsonNode expected = cell.path("expected");
-                        Assertions.fail("decision".equals(expected.path("source").asText())
+                        String source = expected.path("source").asText();
+                        Assertions.fail("decision".equals(source)
                                 ? id + ": the command still does what decision " + expected.path("decision").asText()
                                         + " says it must not; expected until the code changes"
+                                : "spec".equals(source)
+                                ? id + ": the command does something else than clause " + expected.path("clause").asText()
+                                        + " of the specification says; expected until the code or the specification changes"
                                 : id + ": what the command did differs from what was pinned; see the run's results.jsonl");
                     }
                 }

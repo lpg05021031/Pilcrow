@@ -250,8 +250,9 @@ def render_capabilities(c):
 REPRODUCED_RUNS = 3
 CLASS_BY_BASIS = {"N3": "inconsistency", "N4": "anomaly", "N5": "anomaly"}
 FINDING_KINDS = ("refused-but-changed", "read-wrote", "undecided", "error", "differs", "dropped", "unstable",
-                 "rule-broken", "near-rule", "error-in-sequence", "fault", "race")
-CLASS_BY_KIND = {"rule-broken": "defect"}          # a rule a person confirmed: breaking it needs no further answer
+                 "rule-broken", "near-rule", "error-in-sequence", "fault", "race", "against-spec")
+# A rule a person confirmed, a clause of the specification: going against either needs no further answer to be a defect.
+CLASS_BY_KIND = {"rule-broken": "defect", "against-spec": "defect"}
 RESERVATIONS = {
     "substitute-engine": "the database is a stand-in, not the real engine",
     "unconfirmed-version": "the database was not confirmed to match production",
@@ -280,6 +281,8 @@ def holds(question, decision, row):
     expected = row.get("expected") or {}
     if decision and decision.get("answer") == "not-intended" and expected.get("source") == "decision":
         return row.get("result") == "MISMATCH"        # compared against what the person said it must be
+    if question["kind"] == "against-spec" and expected.get("source") == "spec":
+        return row.get("result") == "MISMATCH"        # compared against what the specification says
     kind, flags = question["kind"], observed.get("flags") or []
     outcome = (observed.get("outcome") or "").lower()
     if kind == "refused-but-changed":
@@ -292,6 +295,11 @@ def holds(question, decision, row):
         return outcome == "ignored"
     if kind == "undecided":
         return outcome != "rejected" if (question.get("if_not_intended") or {}).get("outcome") == "rejected" else True
+    if kind == "against-spec":
+        want = question.get("if_not_intended") or {}
+        if "outcome_not" in want:
+            return outcome == want["outcome_not"]
+        return outcome != want.get("outcome") or ("code" in want and observed.get("code") != want["code"])
     if kind == "differs":
         want = question.get("if_not_intended") or {}
         return outcome != want.get("outcome") or ("code" in want and observed.get("code") != want["code"])

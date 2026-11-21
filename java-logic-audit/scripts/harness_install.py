@@ -300,8 +300,8 @@ def command(workspace, system, run, mode=None, case=None, only_command=None, see
         _lib.die("unknown run %r: one of %s" % (run, ", ".join(RUNS)))
     if mode is not None and mode not in MODES:
         _lib.die("unknown mode %r: one of %s" % (mode, ", ".join(MODES)))
-    for value in (case, only_command):
-        if value is not None and not re.match(r"^[A-Za-z0-9_.\-]+$", value):
+    for value in (case, only_command):                  # one id; for a command, several separated by commas
+        if value is not None and not re.match(r"^[A-Za-z0-9_.\-]+(,[A-Za-z0-9_.\-]+)*$", value):
             _lib.die("not an id: %r" % value)
     entry = build_entry(workspace, system)            # keep the build entry in step with the project's build file
     p = plan(workspace, system)

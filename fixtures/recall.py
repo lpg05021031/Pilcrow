@@ -59,7 +59,7 @@ def signals(adir):
     matrix = latest(adir, "matrix")
     out["ran"]["matrix"] = len(matrix)
     for rid, row in sorted(matrix.items()):
-        if row.get("result") == "MISMATCH" and (row.get("expected") or {}).get("source") != "decision":
+        if row.get("result") == "MISMATCH" and (row.get("expected") or {}).get("source") not in ("decision", "spec"):
             out["pins"].append((row.get("detail") or {}).get("key") or rid)
     sequences = latest(adir, "sequences")
     out["ran"]["sequences"] = len(sequences)

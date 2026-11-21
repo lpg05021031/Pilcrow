@@ -35,7 +35,15 @@ import _lib  # noqa: E402
 
 SCHEMA = 1
 ANSWERS = ("not-intended", "intended", "unsure")
-OWN_KEYS = ("source", "run", "left_out", "decision", "accepted_by", "observed")
+OWN_KEYS = ("source", "run", "left_out", "decision", "accepted_by", "observed", "clause", "spec")
+LAID_OVER = ("decision", "spec")        # an expectation laid over what was observed, which is kept beside it
+
+
+def seen(entry):
+    """What was observed for a pinned case, whatever expectation lies over it now."""
+    if entry.get("source") in LAID_OVER and isinstance(entry.get("observed"), dict):
+        return entry["observed"]
+    return {k: v for k, v in entry.items() if k not in OWN_KEYS or k in ("run", "left_out")}
 
 
 def load(adir):
@@ -100,15 +108,39 @@ def apply(workspace, system):
     path = os.path.join(model, "expected.json")
     pinned = _lib.read_json(path, {}) or {}
     cells = pinned.setdefault("cells", {})
-    report = {"not-intended": 0, "intended": 0, "unsure": 0, "cells_changed": 0, "without_effect": []}
+    report = {"not-intended": 0, "intended": 0, "unsure": 0, "cells_changed": 0, "without_effect": [], "from_specification": 0}
 
     # Start from the observation everywhere, so that a decision that was superseded leaves nothing behind.
     for entry in cells.values():
-        if entry.get("source") == "decision" and isinstance(entry.get("observed"), dict):
+        if entry.get("source") in LAID_OVER and isinstance(entry.get("observed"), dict):
             observed = entry["observed"]
             entry.clear()
             entry.update(observed)
         entry.pop("accepted_by", None)
+        entry.pop("spec", None)
+
+    # What a specification says lies over the observation and under what a person decided. Where the two
+    # agree the case only notes the clause it satisfies; where they differ the case expects what the clause says.
+    for x in (_lib.read_json(os.path.join(adir, "spec", "expectations.json"), {}) or {}).get("expectations", []):
+        entry = cells.get(x.get("key"))
+        if entry is None or x.get("result") not in ("agrees", "differs"):
+            continue
+        if x["result"] == "agrees":
+            if entry.get("source") != "spec" and x["clause"] not in entry.setdefault("spec", []):
+                entry["spec"].append(x["clause"])
+            continue
+        if entry.get("source") == "spec":
+            continue                    # two clauses about one case: the first one stands, the trace shows both
+        observed = seen(entry)
+        entry.clear()
+        if x["outcome"] == "not-allowed":
+            entry["outcome_not"] = "allowed"        # the clause does not say whether it is refused or skipped
+        else:
+            entry["outcome"] = x["outcome"]
+        if x.get("code"):
+            entry["code"] = x["code"]
+        entry.update({"source": "spec", "clause": x["clause"], "observed": observed})
+        report["from_specification"] += 1
 
     for d in latest(load(adir)["decisions"]).values():
         report[d["answer"]] += 1
@@ -120,6 +152,12 @@ def apply(workspace, system):
             if entry is None:
                 continue
             if d["answer"] == "intended":
+                if d.get("kind") == "against-spec" and entry.get("source") == "spec":
+                    # The person says the code is right and the specification is not: the observation stands again.
+                    observed = entry["observed"]
+                    entry.clear()
+                    entry.update(observed)
+                    report["from_specification"] -= 1
                 entry["accepted_by"] = d["id"]
                 continue
             patch = d.get("if_not_intended")
@@ -127,8 +165,10 @@ def apply(workspace, system):
                 if d["id"] not in report["without_effect"]:
                     report["without_effect"].append(d["id"])
                 continue
-            observed = {k: v for k, v in entry.items() if k not in OWN_KEYS or k in ("run", "left_out")}
-            wanted = {k: v for k, v in entry.items() if k not in OWN_KEYS}
+            observed = seen(entry)
+            if entry.get("source") == "spec":
+                report["from_specification"] -= 1
+            wanted = {k: v for k, v in observed.items() if k not in OWN_KEYS}
             if "outcome" in patch or "outcome_not" in patch:
                 # The person said what the result must (not) be; what the call then writes is not known yet.
                 wanted = {}
@@ -207,6 +247,8 @@ def main(argv=None):
         rep = apply(workspace, args.system)
         print("decisions in force: %d not-intended, %d intended, %d unsure; %d cells now expect something else than observed" % (
             rep["not-intended"], rep["intended"], rep["unsure"], rep["cells_changed"]))
+        if rep["from_specification"]:
+            print("%d cells expect what the specification says, which is not what was observed" % rep["from_specification"])
         if rep.get("rules_confirmed") or rep.get("rules_rejected"):
             print("rules of the data: %d confirmed, %d rejected" % (rep.get("rules_confirmed", 0), rep.get("rules_rejected", 0)))
         if rep["without_effect"]:

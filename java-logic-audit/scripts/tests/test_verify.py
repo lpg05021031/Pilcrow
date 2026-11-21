@@ -319,6 +319,17 @@ class Verify(unittest.TestCase):
         self.assertIn("if (q < 1) {", out)
         self.assertIn("go();", out)
         self.assertIsNone(canary_mod.without_throw(text, 7, 7))             # the cited lines hold no throw
+        how, out = canary_mod.switched_off(text, 3, 5)
+        self.assertEqual(how, "condition")
+        self.assertIn("if (false /* switched off by the audit's canary */ && (q < 1)) {", out)
+        self.assertIn("throw new", out)
+        nested = 'if (a.is(")") && (b || c)) { return; }\nx = repo.find(id)\n    .orElseThrow(() -> new NotFound("x(", id));\nfor (;;) {}\n'
+        self.assertIn('if (false /* switched off by the audit\'s canary */ && (a.is(")") && (b || c))) { return; }',
+                      canary_mod.switched_off(nested, 1, 1)[1])
+        how, out = canary_mod.switched_off(nested, 2, 3)
+        self.assertEqual(how, "lookup")
+        self.assertIn("x = repo.find(id)\n    .orElse(null /* refusal removed by the audit's canary */);\nfor", out)
+        self.assertEqual(canary_mod.switched_off(nested, 4, 4), (None, None))   # a loop: nothing to switch off
         places = canary_mod.places(
             [{"id": "CMD-a", "guards": [{"id": "G1", "outcome": "rejected", "code": "X", "cite": "src/A.java:3-5"},
                                          {"id": "G2", "outcome": "rejected", "cite": "src/A.java:9"}]},
@@ -328,6 +339,15 @@ class Verify(unittest.TestCase):
         self.assertEqual(len(by[3]["guards"]), 2)
         self.assertFalse(by[3]["all_never_decide"])       # CMD-b's cases can reach it
         self.assertTrue(by[9]["all_never_decide"])
+
+    def test_a_case_notices_when_its_result_is_not_what_it_was(self):
+        import canary as canary_mod
+        before = {"a|base": ("MATCH", ()), "b|x=1": ("MISMATCH", ("outcome",)), "c|base": ("MATCH", ()), "d|base": ("MISMATCH", ("written",))}
+        # a pinned case that now differs; a case a person called wrong that now meets what they said; one that differs elsewhere
+        after = {"a|base": ("MISMATCH", ("outcome",)), "b|x=1": ("MATCH", ()), "c|base": ("MATCH", ()), "d|base": ("MISMATCH", ("outcome",)),
+                 "new|base": ("MISMATCH", ("outcome",))}
+        self.assertEqual(canary_mod.noticed(before, after), ["a|base", "b|x=1", "d|base"])
+        self.assertEqual(canary_mod.noticed(before, dict(before)), [])
 
     # ---- the verdict's items 3 and 4
 

@@ -38,7 +38,7 @@ SCHEMA = 1
 PINNED_PARTS = ("outcome", "code", "after", "written", "created", "deleted", "published", "external", "response_sha")
 EXECUTED = ("MATCH", "MISMATCH")
 KEPT_SOURCES = ("decision", "spec")          # a pin from one of these is never replaced by an observation
-NOTES = ("source", "run", "left_out", "accepted_by", "decision", "observed")      # about the pin, not part of it
+NOTES = ("source", "run", "left_out", "accepted_by", "decision", "observed", "clause", "spec")     # about the pin, not part of it
 
 
 def load_runs(adir):
@@ -209,7 +209,7 @@ def reconcile(workspace, system, pin=False, repin=False):
                          "code": g.get("code") or g.get("swallowed"), "writes": g.get("writes"), "cite": g.get("cite")})
 
     # Against the expectation (a pin or a decision): what the latest verify run of each cell showed.
-    decided_otherwise, changed_since_pinned = [], []
+    decided_otherwise, changed_since_pinned, against_spec = [], [], []
     for cell in matrix["cells"]:
         verify = [r for r in results_for(cell, runs) if r["mode"] == "verify"]
         if not verify or verify[-1]["row"].get("result") != "MISMATCH":
@@ -219,6 +219,8 @@ def reconcile(workspace, system, pin=False, repin=False):
                 "differs": (verify[-1]["row"].get("detail") or {}).get("differs", [])}
         if expected.get("source") == "decision":
             decided_otherwise.append(dict(item, decision=expected.get("decision")))
+        elif expected.get("source") == "spec":
+            against_spec.append(dict(item, clause=expected.get("clause")))
         else:
             changed_since_pinned.append(item)
 
@@ -235,7 +237,8 @@ def reconcile(workspace, system, pin=False, repin=False):
         "unhandled": unhandled,
         "unstable": unstable,
         "guards_without_cell": dead,
-        "against_expectation": {"decided_otherwise": decided_otherwise, "changed_since_pinned": changed_since_pinned},
+        "against_expectation": {"decided_otherwise": decided_otherwise, "against_specification": against_spec,
+                                "changed_since_pinned": changed_since_pinned},
         "lifecycle": {"transitions": moves, "created_with": starts},
     }
 
@@ -298,6 +301,9 @@ def summary(out):
     if against.get("decided_otherwise"):
         extra.append("%d cells still do what a decision says they must not (%s)" % (
             len(against["decided_otherwise"]), ", ".join(sorted({x["decision"] or "?" for x in against["decided_otherwise"]}))))
+    if against.get("against_specification"):
+        extra.append("%d cells still do something else than the specification says (%s)" % (
+            len(against["against_specification"]), ", ".join(sorted({x["clause"] or "?" for x in against["against_specification"]}))))
     if against.get("changed_since_pinned"):
         extra.append("%d cells behave differently than pinned: %s" % (
             len(against["changed_since_pinned"]), ", ".join(x["cell"] for x in against["changed_since_pinned"][:10])))
