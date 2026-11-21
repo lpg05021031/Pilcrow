@@ -189,6 +189,7 @@ class Chain(unittest.TestCase):
         pinned = self.read("model/expected.json")["cells"]["CMD-pay|stale=true"]
         self.assertEqual((pinned["source"], pinned["decision"], pinned["written"]), ("decision", d["id"], []))
         self.assertEqual(pinned["outcome"], "rejected")                        # the rest of the observation still holds
+        self.assertNotIn("response_sha", pinned)                               # but not the answer: the right one is unknown
         self.assertEqual(pinned["observed"]["written"], ["payment.status"])
         self.save_matrix()
         self.run_matrix("verify")

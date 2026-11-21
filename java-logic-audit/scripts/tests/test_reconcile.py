@@ -165,6 +165,14 @@ class Reconcile(unittest.TestCase):
         reconcile.reconcile(self.tmp, "s", repin=True)
         self.assertEqual(self.read("model/expected.json")["cells"]["CMD-a|base"]["written"], ["t.a", "t.b"])
 
+    def test_what_the_caller_was_answered_is_pinned_too(self):
+        c = self.cells
+        self.run_dir("matrix-1", [row(c[0], "MATCH", seen("ALLOWED", response_sha="aaaa")), row(c[1], "MATCH", seen("REJECTED"))])
+        reconcile.reconcile(self.tmp, "s", pin=True)
+        pinned = self.read("model/expected.json")["cells"]
+        self.assertEqual(pinned["CMD-a|base"]["response_sha"], "aaaa")
+        self.assertIsNone(pinned["CMD-a|status=DONE"]["response_sha"])       # it answered nothing, and that is pinned
+
     def test_a_pin_for_a_case_that_is_no_longer_executed_is_dropped(self):
         self.first_run()
         reconcile.reconcile(self.tmp, "s", pin=True)

@@ -118,6 +118,7 @@ class MatrixRunner {
             observed.put("deleted", new ArrayList<String>(o.rows("removed")));
             observed.put("published", o.sent("PUB"));
             observed.put("external", o.sent("EXT"));
+            observed.put("response_sha", Scenario.fingerprint(o.outcome.response));     // what the caller was answered
             observed.put("flags", o.flags);
             if (o.outcome.error != null) {
                 observed.put("error", o.outcome.error);
@@ -175,7 +176,7 @@ class MatrixRunner {
     }
 
     /** The parts of an expectation that are compared when it names them. */
-    private static final String[] COMPARED = {"after", "written", "created", "deleted", "published", "external"};
+    private static final String[] COMPARED = {"after", "written", "created", "deleted", "published", "external", "response_sha"};
 
     /**
      * Where what happened differs from what was expected. The outcome word must agree; the code and
@@ -255,6 +256,7 @@ class MatrixRunner {
     private static Map<String, Object> evidence(Scenario.Observation o) {
         Map<String, Object> e = new LinkedHashMap<String, Object>();
         e.put("params", o.params);
+        e.put("response", o.outcome.response);
         e.put("database_host", ConnectionGuard.hostOf(ConnectionGuard.check(EffectRecorder.raw())));
         e.put("database_engine", engine());
         e.put("database_offered", System.getenv("AUDIT_DB_URL") != null);

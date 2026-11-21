@@ -132,6 +132,7 @@ def apply(workspace, system):
             if "outcome" in patch or "outcome_not" in patch:
                 # The person said what the result must (not) be; what the call then writes is not known yet.
                 wanted = {}
+            wanted.pop("response_sha", None)      # what the right answer to the caller looks like is not known either
             wanted.update(patch)
             entry.clear()
             entry.update(wanted)

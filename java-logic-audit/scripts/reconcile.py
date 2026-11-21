@@ -35,7 +35,7 @@ import _lib  # noqa: E402
 import judge  # noqa: E402
 
 SCHEMA = 1
-PINNED_PARTS = ("outcome", "code", "after", "written", "created", "deleted", "published", "external")
+PINNED_PARTS = ("outcome", "code", "after", "written", "created", "deleted", "published", "external", "response_sha")
 EXECUTED = ("MATCH", "MISMATCH")
 KEPT_SOURCES = ("decision", "spec")          # a pin from one of these is never replaced by an observation
 NOTES = ("source", "run", "left_out", "accepted_by", "decision", "observed")      # about the pin, not part of it
@@ -69,7 +69,7 @@ def observed_parts(row):
     o = row.get("observed") or {}
     out = {"outcome": (o.get("outcome") or "").lower(), "code": o.get("code")}
     for part in PINNED_PARTS[2:]:
-        out[part] = o.get(part) if o.get(part) is not None else ([] if part != "after" else {})
+        out[part] = o.get(part) if o.get(part) is not None else {"after": {}, "response_sha": None}.get(part, [])
     return out
 
 

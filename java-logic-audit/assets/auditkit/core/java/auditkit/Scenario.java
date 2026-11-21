@@ -93,6 +93,24 @@ public final class Scenario {
         }
     }
 
+    /** A short fingerprint of what a call answered, the same for the same content; null when it answered nothing. */
+    public static String fingerprint(JsonNode response) {
+        if (response == null || response.isNull()) {
+            return null;
+        }
+        try {
+            byte[] hash = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(sameForSameContent(response.toString()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder();
+            for (int i = 0; i < 8; i++) {
+                hex.append(String.format("%02x", hash[i]));
+            }
+            return hex.toString();
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
     private static final com.fasterxml.jackson.databind.ObjectMapper SORTED = new com.fasterxml.jackson.databind.ObjectMapper()
             .configure(com.fasterxml.jackson.databind.SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
 
