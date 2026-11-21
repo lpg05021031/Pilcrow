@@ -65,7 +65,8 @@ Show what each script printed, unchanged. Then:
   pinned"; `audit/$system/model/reconciliation.json` → `against_expectation.changed_since_pinned` has
   them all), grouped by command: each is either the intended effect of the change or a regression, and
   only the person knows which;
-- cases that still do what a decision says they must not;
+- cases that still do what a decision says they must not, and cases that still do something else than a
+  clause of the specification says (`reconcile.py` prints both counts);
 - rules a person confirmed that are now broken, and anything new the failure, overlap and sequence checks
   show;
 - the groups from step 1 whose model is out of date.
@@ -82,7 +83,10 @@ Ask before doing any of this; in a headless run, do none of it and say what wait
   their ids where their command and case are unchanged; decisions stay attached to their questions.
 - **Accept the new behaviour as the pinned one**, when the person says the changed cases are intended:
   `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/reconcile.py" $system --repin` after a matrix run in record
-  mode. Decisions are never overwritten by this.
+  mode. Decisions and what the specification says are never overwritten by this. When a specification
+  was traced (`audit/$system/spec/sections.json` exists), run
+  `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/spec.py" join $system` afterwards, so that each clause is compared
+  with the behaviour as it is now.
 - **Record the source as it is now**, so that later steps compare against it:
   `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/manifest.py" build . --out audit/$system/manifest.json`, and
   update `base_commit` in `INTENT.md` to the current commit.

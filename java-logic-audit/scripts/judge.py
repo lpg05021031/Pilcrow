@@ -250,7 +250,7 @@ def render_capabilities(c):
 REPRODUCED_RUNS = 3
 CLASS_BY_BASIS = {"N3": "inconsistency", "N4": "anomaly", "N5": "anomaly"}
 FINDING_KINDS = ("refused-but-changed", "read-wrote", "undecided", "error", "differs", "dropped", "unstable",
-                 "rule-broken", "near-rule", "error-in-sequence", "fault", "race", "against-spec")
+                 "rule-broken", "near-rule", "error-in-sequence", "fault", "race", "against-spec", "one-lets-through")
 # A rule a person confirmed, a clause of the specification: going against either needs no further answer to be a defect.
 CLASS_BY_KIND = {"rule-broken": "defect", "against-spec": "defect"}
 RESERVATIONS = {
@@ -308,6 +308,8 @@ def holds(question, decision, row):
         return outcome == "ignored"
     if kind == "undecided":
         return outcome != "rejected" if (question.get("if_not_intended") or {}).get("outcome") == "rejected" else True
+    if kind == "one-lets-through":
+        return outcome == "allowed"
     if kind == "against-spec":
         want = question.get("if_not_intended") or {}
         if "outcome_not" in want:

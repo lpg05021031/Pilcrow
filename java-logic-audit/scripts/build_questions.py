@@ -23,6 +23,7 @@ show it. The kinds, each from one fixed rule:
                         that was not kept, or a retry that does not converge
   race                  two calls at the same time left data, or answers, that neither order gives
   against-spec          a clause of the specification expects something else than was observed
+  one-lets-through      several commands refuse a situation with the same code, another lets it through
   never-decides         a check that, as far as the audit can reach, never fires from this entry
   rare-combination      two lifecycle values that almost never occur together, with exceptions
   rule?                 something that held in every state the audit reached: is it a rule?
@@ -47,12 +48,12 @@ import judge  # noqa: E402
 
 SCHEMA = 1
 FLAGGED = ("refused-but-changed", "read-wrote", "undecided", "error", "differs", "dropped", "unstable",
-           "rule-broken", "near-rule", "error-in-sequence", "fault", "race", "against-spec")
+           "rule-broken", "near-rule", "error-in-sequence", "fault", "race", "against-spec", "one-lets-through")
 UNFLAGGED = ("never-decides", "rare-combination", "rule?")
 BASIS = {"refused-but-changed": "N4", "read-wrote": "N4", "undecided": "N3", "error": "N4", "differs": "N3",
          "dropped": "N4", "unstable": "N4", "never-decides": "N3", "rule-broken": "N2", "near-rule": "N4",
          "error-in-sequence": "N4", "fault": "N4", "race": "N4", "rare-combination": "N4", "rule?": "N4",
-         "against-spec": "N1"}
+         "against-spec": "N1", "one-lets-through": "N3"}
 
 
 def RACE_TEXT(differs, observed, expected):
@@ -239,6 +240,39 @@ def build(workspace, system):
         q.setdefault("variants", [])
         if g["command"] not in q["variants"]:
             q["variants"].append(g["command"])
+
+    # ---- a situation that several commands refuse with the same code and another lets through
+    # The code disagreeing with itself: nothing outside it is needed to ask. Reads are left out (looking at a
+    # closed order is not acting on it), and so is anything refused with different codes, which is two rules.
+    by_situation = {}
+    for cell_id, state in sorted(rec.get("cells", {}).items()):
+        cell = cells.get(cell_id)
+        if not cell or not cell.get("deviation") or state["state"] not in ("agree", "differ"):
+            continue
+        if commands.get(cell["command"], {}).get("reads_only"):
+            continue
+        by_situation.setdefault(cell["deviation"], []).append((cell, state.get("outcome"), state.get("code")))
+    for situation, rows in sorted(by_situation.items()):
+        refused = [r for r in rows if r[1] == "rejected" and r[2]]
+        through = [r for r in rows if r[1] == "allowed"]
+        codes = {r[2] for r in refused}
+        refusing = sorted({root(r[0]["command"]) for r in refused})
+        if len(codes) != 1 or len(refusing) < 2 or not through or len({root(r[0]["command"]) for r in through}) >= len(refusing):
+            continue
+        for cell, _outcome, _code in through:
+            if root(cell["command"]) in refusing:
+                continue                              # one form of a command refuses, another does not: a variant, not a second command
+            q = add("one-lets-through", root(cell["command"]), {"case": situation, "code": sorted(codes)[0]}, cell["id"],
+                    title="Several commands refuse a situation and one lets it through",
+                    observed="With %s, %s refuse the call (%s); %s goes through." % (
+                        case_text(cell), ", ".join(refusing), sorted(codes)[0], root(cell["command"])),
+                    why="When several commands refuse the same situation with the same code and one does not, either "
+                        "that one is meant to be different or a check is missing there.",
+                    if_not_intended={"outcome": "rejected"})
+            for other, _o, _c in refused:
+                guard = other["static"].get("guard")
+                if guard:
+                    q["cites"].update(cites(other["command"], [guard]))
 
     # ---- where the specification says something else than the code was seen to do
     clauses = {c["id"]: c for c in (_lib.read_json(os.path.join(adir, "spec", "clauses.json"), {}) or {}).get("clauses", [])}

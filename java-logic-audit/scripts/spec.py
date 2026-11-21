@@ -52,6 +52,7 @@ import _lib  # noqa: E402
 SCHEMA = 1
 HEADING = re.compile(r"^(#{1,6})\s+(.*\S)\s*$")
 OUTCOMES = ("allowed", "rejected", "ignored", "not-allowed")
+SATISFIED_BY = {"allowed": {"allowed"}, "rejected": {"rejected"}, "ignored": {"ignored"}, "not-allowed": {"rejected", "ignored"}}
 
 
 def squeeze(text):
@@ -252,7 +253,8 @@ def join(workspace, system):
         if x.get("key"):
             wants.setdefault(x["key"], []).append(x)
     for key, group in sorted(wants.items()):
-        if any(a["outcome"] != b["outcome"] or (a["code"] and b["code"] and a["code"] != b["code"])
+        # They disagree when no single result would satisfy both: "not allowed" and "rejected" can both hold.
+        if any(not (SATISFIED_BY[a["outcome"]] & SATISFIED_BY[b["outcome"]]) or (a["code"] and b["code"] and a["code"] != b["code"])
                for a in group for b in group):
             contradictions.append({"cell": group[0]["cell"], "clauses": sorted({x["clause"] for x in group})})
 

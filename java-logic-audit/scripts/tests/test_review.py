@@ -104,6 +104,7 @@ class System(unittest.TestCase):
             behaviour["CELL-0002"] = seen("REJECTED", "STALE")
         if "CELL-0005" in fixed:
             behaviour["CELL-0005"] = seen("REJECTED", "BAD")
+        behaviour.update(getattr(self, "behaviour", {}))            # what a test says other cells do
         rows = []
         for c in self.cells:
             o = behaviour.get(c["id"]) or seen("IGNORED")          # a cell a test added: a dropped message
@@ -259,6 +260,32 @@ class Chain(System):
                          [("anomaly", ("CELL-0006",)), ("defect", ("CELL-0004",))])
         self.assertNotEqual(found[0]["id"], found[1]["id"])
         self.assertIn("only CELL-0004", self.text("DECISIONS.md"))
+
+    def test_a_situation_two_commands_refuse_alike_and_a_third_lets_through_is_asked_about(self):
+        for cmd in ("CMD-ship", "CMD-bill", "CMD-close", "CMD-look"):
+            self.commands.append({"id": cmd, "handler": "x.Orders#" + cmd, "target": "order", "binding": {"kind": "http"},
+                                  "reads_only": cmd == "CMD-look",
+                                  "guards": [{"id": "G1", "outcome": "rejected", "code": "ON_HOLD", "cite": "A.java:%d" % len(self.commands)}]})
+        self.write("model/commands.json", {"commands": self.commands})
+        n = len(self.cells)
+        for i, cmd in enumerate(("CMD-ship", "CMD-bill", "CMD-close", "CMD-look"), 1):
+            refused = cmd in ("CMD-ship", "CMD-bill")
+            self.cells.append({"id": "CELL-%04d" % (n + i), "key": cmd + "|hold=true", "command": cmd, "deviation": "hold=true",
+                               "given": {"hold": "true"}, "sha": "sha-x%d" % i, "with": {},
+                               "static": {"outcome": "rejected", "guard": "G1", "code": "ON_HOLD"} if refused
+                               else {"outcome": "allowed", "guard": None}})
+        self.behaviour = {"CELL-%04d" % (n + 1): seen("REJECTED", "ON_HOLD"), "CELL-%04d" % (n + 2): seen("REJECTED", "ON_HOLD"),
+                          "CELL-%04d" % (n + 3): seen("ALLOWED", written=["order.status"]), "CELL-%04d" % (n + 4): seen("ALLOWED")}
+        self.save_matrix()
+        qs = [q for q in self.characterize() if q["kind"] == "one-lets-through"]
+        self.assertEqual(len(qs), 1)                               # CMD-close; the read is not asked about
+        q = qs[0]
+        self.assertEqual((q["command"], q["cells"], q["flagged"], q["basis"]), ("CMD-close", ["CELL-%04d" % (n + 3)], True, "N3"))
+        self.assertIn("CMD-bill, CMD-ship refuse the call (ON_HOLD); CMD-close goes through", q["observed"])
+        self.assertEqual(len(q["cites"]), 2)                       # where the two others refuse
+        self.run_matrix("verify")
+        f = [x for x in judge.findings(self.tmp, "s")["findings"] if x["kind"] == "one-lets-through"][0]
+        self.assertEqual((f["class"], f["status"]), ("inconsistency", "reproduced"))
 
     def test_reconcile_names_the_cells_that_do_not_meet_a_decision(self):
         qs = {q["kind"]: q for q in self.characterize()}

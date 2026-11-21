@@ -176,6 +176,10 @@ class Spec(System):
                      "expectations": [{"command": "CMD-pay", "when": {"amount": "zero"}, "outcome": "allowed"}]})
         out = spec.join(self.tmp, "s")
         self.assertEqual([c["cell"] for c in out["contradictions"]], ["CELL-0005"])
+        # "must not happen" and "is refused" about one case do not disagree
+        self.paying({"quote": "A frozen account cannot pay.", "lines": [11, 11], "status": "testable",
+                     "expectations": [{"command": "CMD-pay", "when": {"frozen": "true"}, "outcome": "rejected"}]})
+        self.assertEqual(spec.join(self.tmp, "s")["contradictions"], [])
 
     def test_a_difference_is_expected_from_then_on_and_is_a_defect_resting_on_the_specification(self):
         self.paying()
