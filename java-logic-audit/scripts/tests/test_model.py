@@ -235,6 +235,24 @@ class Model(unittest.TestCase):
         self.mined(handler)
         self.assertEqual(self.render()["stats"]["commands"], 1)
 
+    def test_a_corrected_command_must_be_refereed_again(self):
+        self.mined(cancel())
+        self.write("model_raw/referee-entries-OrderController.json",
+                   {"verdicts": [{"command": "CMD-cancelOrder", "id": "G1", "verdict": "confirmed"},
+                                 {"command": "CMD-cancelOrder", "id": "G2", "verdict": "confirmed"}]})
+        self.write("model_raw/fix-01.json", {"cases": [{"cell": "CELL-0001", "kind": "model", "why": "a check was missing"}],
+                                             "commands": [cancel(title="Corrected")]})
+        self.render()
+        kept = self.read("model/commands.json")["commands"][0]
+        self.assertEqual([g["verified"] for g in kept["guards"]], [False, False])
+        self.assertEqual(self.read("model_result.json")["triage"][0]["kind"], "model")
+        self.write("model_raw/referee-fix-01-CMD-cancelOrder.json",
+                   {"verdicts": [{"command": "CMD-cancelOrder", "id": "G1", "verdict": "confirmed"},
+                                 {"command": "CMD-cancelOrder", "id": "G2", "verdict": "refuted", "reason": "not there"}]})
+        self.render()
+        kept = self.read("model/commands.json")["commands"][0]
+        self.assertEqual([(g["id"], g["verified"]) for g in kept["guards"]], [("G1", True)])
+
     def test_a_correction_replaces_or_removes_a_command(self):
         self.mined(cancel(), cancel(id="CMD-other"))
         self.write("model_raw/fix-01.json", {"remove_commands": ["CMD-other"], "commands": [cancel(title="Fixed")]})

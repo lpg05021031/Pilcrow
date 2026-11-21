@@ -81,9 +81,14 @@ def unstable_parts(results):
 
 def classify(cell, results):
     """One word for where a cell stands, from its latest result in record mode."""
+    # What the cell is now comes first: a result from when it could still be run says nothing about it.
+    if "unreachable" in cell:
+        return "unreachable", None
+    if "with" not in cell:
+        return "no-recipe", None
     record = [r for r in results if r["mode"] == "record"]
     if not record:
-        return "unreachable" if "unreachable" in cell else ("no-recipe" if "with" not in cell else "not-run"), None
+        return "not-run", None
     row = record[-1]["row"]
     result = row.get("result")
     if result == "MATCH":
@@ -221,7 +226,12 @@ def reconcile(workspace, system, pin=False, repin=False):
         path = os.path.join(model, "expected.json")
         pinned = _lib.read_json(path, {}) or {}
         known = pinned.setdefault("cells", {})
-        report = {"new": 0, "same": 0, "kept": 0, "changed": []}
+        report = {"new": 0, "same": 0, "kept": 0, "changed": [], "dropped": 0}
+        # An observation pinned for a case that no longer exists, or can no longer be executed, says nothing now.
+        runnable = {c["key"] for c in matrix["cells"] if "with" in c and "unreachable" not in c}
+        for key in [k for k, v in known.items() if k not in runnable and v.get("source") not in KEPT_SOURCES]:
+            del known[key]
+            report["dropped"] += 1
         for cell in matrix["cells"]:
             hit = latest.get(cell["id"])
             if not hit or hit["row"].get("result") not in EXECUTED:
@@ -271,8 +281,9 @@ def summary(out):
         extra.append("%d runs set aside as unreliable" % len(out["runs_set_aside"]))
     if "pin" in out:
         p = out["pin"]
-        extra.append("pinned %d new, %d unchanged, %d kept from decisions, %d observed differently than pinned%s" % (
-            p["new"], p["same"], p["kept"], len(p["changed"]), "" if not p["changed"] else " (see reconciliation.json)"))
+        extra.append("pinned %d new, %d unchanged, %d kept from decisions, %d observed differently than pinned%s%s" % (
+            p["new"], p["same"], p["kept"], len(p["changed"]), "" if not p["changed"] else " (see reconciliation.json)",
+            ", %d pins dropped for cases that are no longer executed" % p["dropped"] if p.get("dropped") else ""))
     return line + ("; " + "; ".join(extra) if extra else "")
 
 

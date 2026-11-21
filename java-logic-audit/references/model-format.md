@@ -204,11 +204,16 @@ their base value. A deviation gives only what differs from the base recipe: anot
 - `with` may be left out for a command without parameters.
 - `"same_as": "CMD-other"`: the command has the same cases and recipes as another (preview and propose).
 - A case you could not work out is left out. It is then reported as not executed, which is the truth.
+- The base recipe itself may be `{ "unreachable": "..." }` when the working case of a command cannot
+  arise (a safety-net task that earlier commands always pre-empt). Every deviation then gives its own
+  `fixture` and `with` in full.
 
 ## 7. How it is checked
 
 For every case the harness resets the database, runs the fixture and steps, and reads each variable's
 `sql`. If a value is not the one the case says, the case is reported as **state not reached** and not
 compared: fix the recipe or add `also`. Then it calls the command once and records the outcome, the code,
-the columns changed, rows created, messages sent. A guard that is missing, misplaced or has the wrong
+the columns changed, rows created, messages sent. A call that returns normally, changes nothing and
+sends nothing is recorded as `ignored`, whatever the reason: when that is what the code does in a case,
+the model needs a guard saying so (commands marked `reads_only` are the exception). A guard that is missing, misplaced or has the wrong
 code shows up as a difference between the prediction and the observation.

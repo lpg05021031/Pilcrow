@@ -246,6 +246,15 @@ class Chain(unittest.TestCase):
         self.assertEqual(len(r["waiting_for_people"]["open_flagged_questions"]), 4)
         self.assertIn("## The rules", self.text("VERDICT.md"))
 
+    def test_a_case_without_a_recipe_keeps_the_entity_from_passing_but_is_not_a_failure(self):
+        self.characterize()
+        del self.cells[3]["with"]
+        self.save_matrix()
+        reconcile.reconcile(self.tmp, "s")
+        item = {i["item"]: i for i in {e["entity"]: e for e in judge.verdict(self.tmp, "s")["entities"]}["inbox"]["items"]}["matrix"]
+        self.assertEqual(item["result"], "could-not-pass")
+        self.assertIn("CELL-0004", item["detail"])
+
     def test_verdict_fails_when_the_source_changed_or_a_cell_has_no_result(self):
         self.characterize()
         with open(os.path.join(self.tmp, "src", "main", "java", "A.java"), "a") as f:

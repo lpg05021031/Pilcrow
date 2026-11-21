@@ -9,6 +9,8 @@ Every reply of a reader is saved, unchanged, as one file under audit/<system>/mo
 
     mine-<group>.json      { "group", "commands": [...], "could_not_model": [...], "instruction_shaped": [...] }
     referee-<group>.json   { "verdicts": [ { "command", "id", "verdict", "cite", "reason" } ] }
+    referee-fix-<nn>-<command>.json   the same, for a command that a fix changed; it is read after the
+                           others, so its verdicts are the ones that count for that command
     recipes-<group>.json   { "group", "fixtures": {...}, "recipes": {...} }
     fix-<nn>.json          { "commands": [...], "remove_commands": [...], "fixtures": {...}, "recipes": {...},
                              "remove_fixtures": [...], "harness": [...], "left_as_found": [...] }
@@ -73,14 +75,23 @@ def collect(workspace, system):
         flagged += [x for x in body.get("instruction_shaped", []) if isinstance(x, dict)]
     verdicts, bad = replies(adir, "referee")
     gaps += ["%s is not a JSON object and was not used" % b for b in bad]
+    verdicts.sort(key=lambda nb: (nb[0].startswith("referee-fix-"), nb[0]))      # verdicts on corrected commands last
     for name, body in verdicts:
         flagged += [x for x in body.get("instruction_shaped", []) if isinstance(x, dict)]
         for v in body.get("verdicts", []):
             if isinstance(v, dict):
-                referee.append(dict(v, command=v.get("command") or body.get("command")))
+                entry = dict(v, command=v.get("command") or body.get("command"))
+                if name.startswith("referee-fix-"):
+                    entry["after_fix"] = True
+                referee.append(entry)
     fixes, bad = replies(adir, "fix")
     gaps += ["%s is not a JSON object and was not used" % b for b in bad]
+    triaged = []
     for name, body in fixes:
+        triaged += [dict(x, **{"from": name}) for x in body.get("cases", []) if isinstance(x, dict)]
+        for x in body.get("left_as_found", []):               # the earlier form of the same list
+            if isinstance(x, dict):
+                triaged.append(dict(x, kind="left-as-found", **{"from": name}))
         for cid in body.get("remove_commands", []):
             corrections.append({"remove": cid, "from": name})
         for c in body.get("commands", []):
@@ -89,8 +100,8 @@ def collect(workspace, system):
     ids = [c["id"] for c in commands]
     for dup in sorted({i for i in ids if ids.count(i) > 1}):
         gaps.append("the command id %s was returned by more than one group; the last one is used" % dup)
-    out = {"schema": 1, "commands": commands, "referee": referee, "corrections": corrections, "gaps": gaps,
-           "instruction_shaped": flagged}
+    out = {"schema": 1, "commands": commands, "referee": referee, "corrections": corrections, "triage": triaged,
+           "gaps": gaps, "instruction_shaped": flagged}
     _lib.write_json(os.path.join(adir, "model_result.json"), out)
     return out
 

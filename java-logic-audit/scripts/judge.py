@@ -453,7 +453,7 @@ but at least one could not pass, and **reviewed insufficiently** when any item f
 1. Matrix executed — passes when every cell of the commands that change the entity has a result for its
    present definition from a run made after the source was recorded, or is classed unreachable with a
    reason. Fails when a cell has no such result, or the harness could not answer an outside call.
-   Could not pass when a state was not reached by the recipes.
+   Could not pass when a state was not reached: no recipe was found for it, or the recipe did not get there.
 2. Model reconciled — passes when no difference between prediction and observation, and no case decided
    by no check, is left without a person's answer. Fails otherwise.
 3–6. Invariants, faults, concurrency, guard canary — not in this version: they could not pass.
@@ -492,14 +492,15 @@ def verdict(workspace, system):
         own = entities[target]
         states = {c["id"]: rec["cells"].get(c["id"], {"state": "not-run"}) for c in own}
         stale = [c for c, s in states.items() if s.get("run") and s["run"].split("matrix-")[-1] < stamp]
-        missing = [c for c, s in states.items() if s["state"] in ("not-run", "harness-gap", "runner-failed", "no-recipe")]
-        unreached = [c for c, s in states.items() if s["state"] in ("state-not-reached", "steps-failed")]
+        missing = [c for c, s in states.items() if s["state"] in ("not-run", "harness-gap", "runner-failed")]
+        unreached = [c for c, s in states.items() if s["state"] in ("state-not-reached", "steps-failed", "no-recipe")]
         items = {}
         if missing or stale:
             items["matrix"] = ("fail", "%d cells without a result%s" % (
                 len(missing), ", %d with a result older than the recorded source" % len(stale) if stale else ""))
         elif unreached:
-            items["matrix"] = ("could-not-pass", "%d cells whose state the recipes did not reach" % len(unreached))
+            items["matrix"] = ("could-not-pass", "%d cells whose state no recipe reached: %s" % (
+                len(unreached), ", ".join(sorted(unreached)[:8]) + (" ..." if len(unreached) > 8 else "")))
         else:
             items["matrix"] = ("pass", "%d cells executed, %d classed unreachable" % (
                 sum(1 for s in states.values() if s["state"] in ("agree", "differ")),

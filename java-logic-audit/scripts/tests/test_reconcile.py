@@ -165,6 +165,15 @@ class Reconcile(unittest.TestCase):
         reconcile.reconcile(self.tmp, "s", repin=True)
         self.assertEqual(self.read("model/expected.json")["cells"]["CMD-a|base"]["written"], ["t.a", "t.b"])
 
+    def test_a_pin_for_a_case_that_is_no_longer_executed_is_dropped(self):
+        self.first_run()
+        reconcile.reconcile(self.tmp, "s", pin=True)
+        self.cells[0]["unreachable"] = "found to be impossible"
+        self.write("model/matrix.json", {"cells": self.cells, "commands": {}})
+        out = reconcile.reconcile(self.tmp, "s", pin=True)
+        self.assertEqual(out["pin"]["dropped"], 1)
+        self.assertEqual(sorted(self.read("model/expected.json")["cells"]), ["CMD-a|status=DONE"])
+
     def test_a_decision_is_never_replaced_by_an_observation(self):
         self.write("model/expected.json", {"cells": {"CMD-a|base": {"outcome": "rejected", "source": "decision", "decision": "D-001"}}})
         self.first_run()

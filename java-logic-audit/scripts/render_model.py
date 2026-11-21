@@ -118,6 +118,12 @@ def render(workspace, system):
     for v in result.get("referee", []):
         if v.get("verdict") in VERDICTS:
             verdicts[(v.get("command"), v.get("id"))] = v
+    # A verdict is about the claim as it was. A command a fix replaced must be refereed again:
+    # verdicts given before the fix do not carry over, unless they came after it (referee-fix-...).
+    corrected = {fix["command"]["id"] for fix in result.get("corrections", []) if isinstance(fix.get("command"), dict)}
+    regiven = {(v.get("command"), v.get("id")) for v in result.get("referee", []) if v.get("after_fix")}
+    for key in [k for k in verdicts if k[0] in corrected and k not in regiven]:
+        del verdicts[key]
 
     kept, left_out, dropped = [], [], []
     counts = {"confirmed": 0, "relocated": 0, "refuted": 0, "unverified": 0, "bad_citation": 0}

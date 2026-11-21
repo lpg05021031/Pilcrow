@@ -114,12 +114,20 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/build_matrix.py" $system
 and the run and `reconcile.py` of step 2. When a full run takes more than five minutes, run only the
 commands that changed: add `--only <command id>` to the `command` line, once per command.
 
+A command that a reply corrected carries checks no referee has seen. After the rebuild, get its referee
+brief with `model_brief.py referee $system <command id>` (a command id works where a group name does),
+hand it to a fresh `code-reader` as in the model step, save the reply as
+`audit/$system/model_raw/referee-fix-<nn>-<command id>.json` with the `nn` of the fix, and run the first
+two rebuild lines again. Verdicts given before a fix do not carry over to the corrected command.
+
 What a reader lists under `harness` (an outside call without a configured answer) is given to the
 `harness-engineer` agent to settle in `harness.json`; nothing else in that file changes.
 
 Stop after three rounds, or sooner when a round changes nothing. What is still not executed then is
 reported as not executed; what still differs, or what a reader left as found, is not an error of this
-step: it becomes a question in step 5.
+step: it becomes a question in step 5. Each reply says, case by case, which kind it was; `model_store.py
+collect` gathers these under `triage` in `model_result.json`, which is where the counts of your report
+come from.
 
 ## 4 — Pin today's behaviour and check that it is stable
 

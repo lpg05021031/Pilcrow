@@ -125,10 +125,14 @@ evidence:
   query does not read what the check reads. Return the corrected command, whole.
 - **the harness lacks something** — an outside call had no configured answer. Say what the stand-in
   must answer; do not change the model to hide it.
-- **it is what the code does** — the model and the recipe are right and the application behaves
-  otherwise than its code reads. Leave both as they are and say why you are sure, with lines.
+- **left as found** — the model says what the code reads as, the recipe reaches the case, and the
+  application still does something else. You can point at the lines the prediction rests on and you
+  cannot find, in the code, why the run went differently. Leave model and recipe as they are and say
+  where you looked.
 
 Never change a prediction to match an observation you cannot explain from the code: that would erase
 the very difference the audit exists to find. Reply with one JSON object and nothing else:
-`{ "commands": [...], "recipes": { "CMD-x": {...} }, "fixtures": {...}, "harness": [ "..." ],
-"left_as_found": [ { "cell": "CELL-0042", "why": "...", "cite": "path:lines" } ] }`.
+`{ "cases": [ { "cell": "CELL-0042", "kind": "recipe" | "model" | "harness" | "left-as-found", "why": "...",
+"cite": "path:lines" } ], "commands": [...], "recipes": { "CMD-x": {...} }, "fixtures": {...},
+"harness": [ "..." ] }`: one entry in `cases` for every case you were given, then the corrected commands
+and recipe entries, each whole. A check you add or change in a command will be refereed again.
