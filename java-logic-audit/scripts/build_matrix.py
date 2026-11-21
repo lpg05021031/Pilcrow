@@ -92,6 +92,9 @@ def static_outcome(command, valuation):
     if taken:
         out["branches"] = [b["id"] for b in taken]
         out["writes_include"] = sorted({w for b in taken for w in b.get("writes", [])})
+        sends = sorted({x for b in taken for x in b.get("sends", [])})
+        if sends:
+            out["sends_include"] = sends
     return out
 
 
@@ -247,7 +250,7 @@ def fingerprint(cell, command, shared):
     """A hash of everything that decides what running the cell means. A result is for one fingerprint."""
     parts = {k: cell.get(k) for k in ("command", "deviation", "given", "fixture", "steps", "with", "unreachable")}
     parts["definition"] = {k: command.get(k) for k in ("binding", "vars", "reads_only")}
-    parts["predicted_writes"] = cell.get("static", {}).get("writes_include")
+    parts["predicted_writes"] = [cell.get("static", {}).get("writes_include"), cell.get("static", {}).get("sends_include")]
     parts["shared"] = shared
     return hashlib.sha256(json.dumps(parts, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
 

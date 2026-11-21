@@ -191,9 +191,13 @@ plugin 不提交也不推送。使用者自行決定何時提交 `audit/` 與 `s
 | `facts/*.json` | `audit-harness` | 機械事實：schema、context、實體對映、位元組碼 |
 | `map.json`、`MAP.md`、`shards.json` | `build_map.py` | 入口、實體、寫入點表、各狀態欄位由誰寫入、孤兒寫入點、給模型階段的切分 |
 | `map_resolved.json` | `audit-map` | 腳本讀不出、由 `code-reader` 判讀出的寫入（資料表、欄位、引用行） |
-| `model_result.json` | `audit-model` | workflow 的原始結果，含被否決與未驗證的項目 |
-| `model/*.json`、`MODEL.md` | `audit-model` | 實體、命令、矩陣、不變量、成對路徑、蛻變關係 |
-| `recipes.json`、`effects/*.json` | `audit-characterize` | 到達配方、每個命令的效果軌跡 |
+| `model_raw/*.json` | `audit-model`、`audit-characterize` | 每個 agent 的回覆，原樣保存：`mine-<組>`、`referee-<命令>`、`recipes-<組>`、`fix-<序號>` |
+| `model_result.json` | `model_store.py` | 由回覆彙整出的原始結果，含裁判判定與後續修正 |
+| `model/commands.json`、`model/render.json`、`MODEL.md` | `render_model.py` | 命令模型；被否決與被排除的項目；給人看的版本 |
+| `model/fixtures.json`、`model/recipes.json` | `model_store.py` | 起始情境與每一格的到達配方 |
+| `model/matrix.json`、`model/ids.json` | `build_matrix.py` | 矩陣格與靜態預測；永久的格子編號 |
+| `model/reconciliation.json` | `reconcile.py` | 每一格的執行狀態、差異、未執行原因、標記、不穩定的格子、觀察到的生命週期轉移 |
+| `model/expected.json` | `reconcile.py`、`apply_decisions.py` | 每一格的預期：鎖定的觀察或人的決策 |
 | `questions.json`、`QUESTIONS.md` | `audit-characterize`、`audit-verify`、`audit-spec` | 需要人回答的問題 |
 | `DECISIONS.json`、`DECISIONS.md` | `audit-review` | 人的回答，永久保存 |
 | `spec/clauses.json`、`spec/expectations.json`、`SPEC_TRACE.md` | `audit-spec` | 條款、預期、追溯矩陣、反向清單 |
@@ -320,36 +324,55 @@ flowchart LR
 
 ### 5.6 `audit-model <system> [pattern]`
 
-- **寫**：`model_result.json`、`model/*.json`、`MODEL.md`
+- **寫**：`model_raw/`（每個 agent 的回覆，原樣保存）、`model_result.json`、`model/commands.json`、`model/render.json`、`MODEL.md`
 - **做什麼**
-  1. 讀切分清單。給了 `pattern` 就只取符合的。
-  2. 估算 agent 數與 token 用量（16.1）。超過 12 個切分時用彈出式問答詢問：全部執行、只跑一部分、取消。
-  3. 呼叫 workflow `model-mine`（7.1）。沒有 Workflow 工具時改用 7.5 的替代做法。
-  4. 把 workflow 回傳的物件存成 `model_result.json`，執行 `render_model.py`。這個腳本做所有機械的部分：配發編號、由守衛主張展開矩陣格並算出靜態結果、比對同一欄位各寫入點的守衛得到不對稱清單、檢查生命週期欄位的讀寫一致性、對帳由上往下與由下往上兩個方向。
-  5. 回報：確認的主張數、被裁判否決的數量與兩三個例子、未驗證的數量、有缺口的切分。有缺口時提供只重跑那些切分的後續呼叫。
+  1. `model_brief.py shards` 列出要建模的入口群組與 agent 數。給了 `pattern` 就只取符合的。超過 12 組時用彈出式問答詢問：全部執行、只跑一部分、取消。
+  2. 每組一個 `code-reader`。它拿到的簡報由 `model_brief.py mine` 從地圖與機械事實產生：入口（處理方法、路徑、參數）、要讀的檔案、資料表與欄位、業務拒絕的例外型別。它回傳這組入口的命令（10.2）：每個命令的變數、依程式執行順序排列的守衛、寫入分支，每筆附 `檔案:行`。
+  3. 每個命令一個**新的** `code-reader` 擔任裁判。簡報由 `model_brief.py referee` 產生，只有主張與引用位置，看不到抽取者的推理、其他命令、檔案清單。判定：確認、引用位置錯誤（附正確位置）、否決。
+  4. 回覆逐一原樣存成 `model_raw/` 下的檔案。`model_store.py collect` 彙整成 `model_result.json`，`render_model.py` 產生模型。編排的工作階段不手改任何模型檔；要改，就再存一份回覆、重跑腳本。
+  5. `render_model.py` 只留下機械上站得住的主張：命令的處理方法必須是地圖上有的入口，HTTP 方法與路徑以地圖為準；被裁判否決的守衛移除；引用位置必須是工作區內存在的行；變數的查詢必須是單一 `SELECT`；不自洽的命令（守衛提到不存在的變數、基準情況被守衛拒絕）整個排除並列出原因。
+  6. 回報：命令數、沒有命令的入口、被否決的主張數與兩三個例子、被排除的命令、缺口。
 - **結尾**：下一個指令 `audit-characterize`。
+
+這個階段的產出是「主張」，還不是結論。主張對不對，由下一個階段逐格執行來確認。
 
 ### 5.7 `audit-characterize <system> [entity]`
 
-- **寫**：`recipes.json`、`effects/*.json`、矩陣各格的 `observed`、`questions.json`、`QUESTIONS.md`
+- **寫**：`model/fixtures.json`、`model/recipes.json`、`model/matrix.json`、`model/ids.json`、`model/reconciliation.json`、`model/expected.json`、`questions.json`、`QUESTIONS.md`、`findings.json`、`FINDINGS.md`、`VERDICT.json`、`VERDICT.md`
 - **做什麼**
-  1. `recipes.py` 在靜態狀態機上搜尋每個抽象狀態的到達配方。
-  2. 以一次建置呼叫執行矩陣（記錄模式）、每個命令的效果軌跡、讀取純度、成對路徑。執行器把結果寫入 `runs/`。
-  3. `reconcile.py` 比對靜態結果與觀察結果、三個事實來源、同一抽象狀態是否有不同反應。`mine_invariants.py` 由快照找候選不變量。
-  4. 每一筆差異交給 workflow `triage`（7.2）分類：模型要修、載具缺口、不一致、異常。模型要修的由腳本套用後只重跑受影響的格子，最多三輪。
-  5. `build_questions.py` 由以下項目產生問題：沒有守衛處理的格子、結果為非預期錯誤的格子、守衛不對稱、成對路徑差異、讀取路徑的寫入、候選不變量、沒有寫入點或沒有守衛讀取的狀態值、比對時要排除的易變欄位。
-- **結尾**：問題數。有問題時下一個指令是 `audit-review`，否則是 `audit-verify`。
+  1. **到達配方。** 每個入口群組一個 `code-reader`，依序執行，後面的看得到前面定義的起始情境。它讀程式後回傳起始情境與每一格的到達配方（10.5），回覆原樣存檔，`model_store.py recipes` 彙整，`build_matrix.py` 展開矩陣（11.2）。
+  2. **第一次執行。** 以記錄模式執行矩陣，`reconcile.py` 比對每一格的靜態預測與觀察結果。
+  3. **解釋不一致，最多三輪。** 沒執行到或不一致的格子，依命令交給 `code-reader` 分類（7.2）：配方錯、模型錯、載具缺口、或「程式就是這樣」。前三種回傳修正後的整筆命令或配方，存成 `fix-<nn>.json`，重建後只重跑受影響的命令。最後一種原樣保留。**不允許為了讓差異消失而改預測**：差異要嘛由讀程式解釋並修正模型，要嘛留下來問人。
+  4. **鎖定並檢查穩定度。** `reconcile.py --pin` 把每一格的觀察結果記為預期（`expected.json`，來源 `observed`），再以驗證模式執行兩次。同一格在相同條件下結果不同的部分列為不穩定，不納入鎖定。三次執行同時滿足 12.2「已重現」的次數要求。
+  5. **問題、問題清單、判定。** `build_questions.py`、`judge.py findings`、`judge.py verdict`，全部由腳本從結果檔計算。
+- **結尾**：有待回答的標記問題時，下一個指令是 `audit-review`，否則是 `audit-verify`。
+
+`build_questions.py` 的問題種類，每一種對應一條固定規則：
+
+| 種類 | 規則 | 預設標記 |
+|---|---|---|
+| `refused-but-changed` | 被拒絕或失敗的呼叫仍然改了資料 | 是 |
+| `read-wrote` | 模型標為讀取的命令有寫入 | 是 |
+| `undecided` | 這個情況沒有任何守衛或分支處理，結果是預設行為 | 是 |
+| `error` | 結果是非業務拒絕的錯誤 | 是 |
+| `differs` | 三輪之後仍與靜態預測不同 | 是 |
+| `dropped` | 訊息被收下後沒有任何效果，資料中不留痕跡，發送方也不知情 | 是 |
+| `unstable` | 相同條件下兩次結果不同 | 是 |
+| `never-decides` | 在可到達的範圍內，這個檢查從這個入口永遠不會成為決定者 | 否 |
+
+問題以指紋（種類、命令、觀察到的內容）對齊，重建時編號不變，已有的決策自動接上。
 
 ### 5.8 `audit-review <system> [flagged｜all]`
 
-- **寫**：`DECISIONS.json`、`DECISIONS.md`
+- **寫**：`DECISIONS.json`、`DECISIONS.md`；之後由腳本更新 `model/expected.json`、`questions.json`、`findings.json`、`VERDICT.*`
 - **做什麼**
-  1. 讀 `questions.json` 與既有決策，已決定的略過並說明數量。`flagged`（預設）只問影響資料正確性的問題；`all` 問全部。
-  2. 用彈出式問答詢問，每次最多四題，一題一個問題。內容：觀察到的行為、引用的程式位置、為什麼問、重現指令。選項固定三個：**不是本意**、**本意如此**、**不確定**。人可以改為輸入一段說明，照原話保存。
-  3. 人在請求裡已經寫明的決定（例如「Q-014 不是本意：已出貨的不能收回」）直接記錄，不再彈出。
+  1. 讀 `questions.json`，已回答的略過並說明數量。`flagged`（預設）只問有標記的；`all` 問全部。
+  2. 用彈出式問答詢問，每次最多四題，一題一個行為。內容依序是：觀察到什麼、為什麼問、程式位置、可以重跑的格子。選項固定三個：**不是本意**、**本意如此**、**不確定**。人可以改為輸入一段說明，照原話保存。指令不替人回答，也不加上自己的看法。
+  3. 人在請求裡已經寫明的決定直接記錄，不再彈出。
   4. 沒有問答工具也沒有寫明的決定時（無人值守的執行），全部保留為未決，不猜。
-  5. `apply_decisions.py` 套用決策的效果：候選不變量升為已確認或作廢、格子的預期結果翻轉或鎖定、差異被接受。模型檔只由這個腳本改，不手改。
-- **結尾**：說明三件事。標為「不是本意」的成為缺陷；「不確定」的維持待確認，不會被當成判定依據；決策永久保存，重跑不重問。下一個指令是 `audit-verify`。
+  5. `apply_decisions.py record` 記錄每個回答；`apply` 套用：「不是本意」把該問題各格的預期改成應有的行為（問題的 `if_not_intended`），來源標為 `decision`，原本的觀察保留在旁；「本意如此」保留觀察為預期並註記接受；「不確定」不改任何東西。同一問題之後的新回答會取代舊回答，舊紀錄不刪。
+  6. 以驗證模式再執行一次。被判為「不是本意」的格子此時**應該**失敗：它們現在是與人說的應有行為比對。之後重算問題清單與判定。
+- **結尾**：說明三件事。標為「不是本意」的成為缺陷，在程式修改前驗證會持續失敗；「不確定」的維持待確認，不會被當成判定依據；決策永久保存，重跑不重問。下一個指令是 `audit-verify`。
 
 ### 5.9 `audit-verify <system> [sequences｜relations｜faults｜concurrency｜all] [pattern]`
 
@@ -442,15 +465,14 @@ flowchart LR
 
 | 階段 | 做什麼 |
 |---|---|
-| 抽取（由上往下） | 每個入口群組一個 `code-reader`。回傳每個命令的守衛主張、寫入、對外效果、狀態轉移 |
-| 抽取（由下往上） | 每個實體一個 `code-reader`，從該實體各欄位的寫入點出發。回傳每個寫入點的支配守衛、生命週期欄位的判斷、候選不變量、成對路徑候選 |
-| 裁判 | 每筆主張一個 `code-reader`，只讀引用位置。判定：確認、否決、引用位置錯誤（附正確位置） |
-| 合併 | 同一行為在多處被報出時合為一筆，保留所有引用 |
-| 評審 | 標為關鍵的候選不變量各由兩個 `code-reader` 複核：一個重新推導是否忠實於程式，一個判斷它是業務限制還是實作的偶然 |
+| 抽取 | 每個入口群組一個 `code-reader`。回傳每個命令的變數、守衛（依執行順序）、寫入分支 |
+| 裁判 | 每個命令一個新的 `code-reader`，只拿到主張與引用位置。判定：確認、否決、引用位置錯誤（附正確位置） |
 
-切分依批次進行，每批抽取完成後先裁判再進下一批。只由註解或字串支持的主張一律否決。
+回傳的物件與指令自己逐一啟動 agent 時存下的回覆是同一種形狀，後續由同樣的腳本處理。只由註解或字串支持的主張一律否決。
 
-主張的粒度規則寫在提示裡：一個業務決定一筆守衛主張，不是一個分支一筆；一個業務限制一條不變量；純粹的管線程式碼（參數解析、格式化）不報。標為關鍵的不變量超過四分之一時，要求抽取者重新評定。
+主張的粒度規則寫在 `references/model-format.md`：一個業務決定一筆守衛，不是一個分支一筆；兩個條件只在同時成立時才有意義的，寫成一個多值變數；純粹的管線程式碼（參數解析、格式化）不建模。
+
+**由下往上的抽取（每個實體一個 reader，從寫入點回推支配的守衛）排在 M3**，與守衛不對稱（11.3）、候選不變量一起做。M2 的矩陣只用由上往下的結果；由下往上的那一半負責找出「同一欄位在別的入口沒有這個檢查」。
 
 ### 7.2 `triage`
 
@@ -500,10 +522,11 @@ Python 3.8 以上，只用標準函式庫。需要每次結果相同的工作都
 | `preflight_scan.py` | 由建置檔、依賴、設定檔辨識技術概況 |
 | `manifest.py` | 建立與比對來源檔案清單 |
 | `build_map.py` | 由 `facts/` 建出入口、實體、寫入點表、可到達關係 |
-| `make_shards.py` | 產生 `model-mine` 的切分清單 |
-| `render_model.py` | 由 workflow 結果建出模型檔：編號、展開矩陣、守衛不對稱、生命週期一致性、雙向對帳 |
-| `recipes.py` | 在狀態機上以廣度優先搜尋到達配方 |
-| `reconcile.py` | 靜態對觀察、三個事實來源、隱藏狀態 |
+| `model_brief.py` | 由地圖與機械事實產生每個 agent 的簡報：建模、裁判、配方、分類 |
+| `model_store.py` | 把 agent 的回覆（原樣存檔）彙整成 `model_result.json` 與配方檔 |
+| `render_model.py` | 由彙整結果建出命令模型，只留機械上站得住的主張 |
+| `build_matrix.py` | 以 base-choice 展開矩陣格、算靜態預測、配發永久編號、併入預期 |
+| `reconcile.py` | 靜態對觀察；只採信雜湊相符且對應目前定義的結果；鎖定觀察為預期 |
 | `mine_invariants.py` | 由快照以固定樣板找候選不變量 |
 | `build_questions.py` | 由各種差異產生問題 |
 | `apply_decisions.py` | 把決策的效果套用到模型檔 |
@@ -512,7 +535,7 @@ Python 3.8 以上，只用標準函式庫。需要每次結果相同的工作都
 | `prd_split.py`、`spec_join.py` | 切分 PRD；把預期接到格子與情境 |
 | `canary.py` | 守衛金絲雀 |
 | `seed_from_history.py`、`seed_run.py`、`recall.py` | 候選修復提交；套用補丁並執行；召回率與 Wilson 區間 |
-| `ids.py` | 配發編號、計算指紋、與上次對齊 |
+| `ids.py` | 與上次執行對齊問題編號（M5）。格子、問題、決策、問題清單的編號目前由各自的腳本以指紋配發並保存 |
 | `judge.py` | 能力、證據等級、問題狀態、每個實體的判定（第 12 節） |
 | `status.py` | 進度與過期判定 |
 | `build_report.py` | 生成 `REPORT.html` |
@@ -597,8 +620,10 @@ auditkit 是一組 Java 原始碼，複製到目標模組的 `src/audit/java/aud
 
 ### 9.5 決定性
 
-- 每個命令從同一初始狀態執行兩次。兩次結果中不同的欄位是不決定的（自動編號、時間戳、UUID），自動加入易變集合，並以首次出現的順序重新編號。
-- 有可注入的時鐘就固定時間；沒有的，與時間有關的案例由執行器標記 `uncontrolled-time`。
+- 每一格在相同條件下共執行三次（記錄一次、驗證兩次）。三次之間不同的部分是不決定的，列為不穩定並排除在鎖定之外；其餘的才成為預期。
+- 每一格都從重置後的資料庫開始，自動編號歸零，所以編號本身是決定的。
+- 應用有 `java.time.Clock` bean 時，執行器換上 `AuditClock`：時間固定在 `harness.json` 的 `clock` 所指的瞬間，只在配方的步驟要求時整天整天地移動，每一格開始時歸位。沒有 `Clock` bean 的，與時間有關的案例由判定腳本標記 `uncontrolled-time`。
+- 送出的訊息若是 JSON，以排序後的鍵比較：鍵的順序不帶語意，而應用可能每次啟動都不同。
 - 所有隨機序列記錄種子。
 
 ### 9.6 執行與結果檔
@@ -650,44 +675,62 @@ auditkit 是一組 Java 原始碼，複製到目標模組的 `src/audit/java/aud
 
 ```json
 {
-  "id": "CMD-changeLineQty",
-  "entry": "EP-0031",
-  "binding": { "kind": "http", "method": "PUT", "path": "/orders/{orderId}/lines/{lineId}/qty",
-               "body": { "qty": "${qty}" } },
-  "target": "ENT-order_line",
-  "kind": "set",
-  "state_atoms": ["shipped"],
-  "param_classes": [
-    { "id": "below-shipped", "params": { "qty": "${line.shipped_qty - 1}" } },
-    { "id": "at-shipped",    "params": { "qty": "${line.shipped_qty}" } },
-    { "id": "above-shipped", "params": { "qty": "${line.shipped_qty + 1}" } }
-  ]
+  "id": "CMD-cancelOrder",
+  "title": "Cancel an order as a whole",
+  "handler": "com.example.orders.web.OrderController#cancel",
+  "binding": { "kind": "http", "method": "POST", "path": "/orders/{orderId}/cancel" },
+  "target": "order_header",
+  "vars": [
+    { "name": "order", "kind": "state", "domain": ["DRAFT", "CONFIRMED", "CLOSED", "CANCELLED", "null"],
+      "sql": "select status from order_header where id = :orderId" },
+    { "name": "shipped", "kind": "state", "domain": ["false", "true"],
+      "sql": "select exists(select 1 from order_line where header_id = :orderId and shipped_qty > 0)" }
+  ],
+  "base": { "order": "DRAFT", "shipped": "false" },
+  "guards": [
+    { "id": "G1", "when": { "var": "order", "is": "null" }, "outcome": "rejected", "code": "NOT_FOUND",
+      "cite": "src/main/java/.../OrderService.java:112" },
+    { "id": "G2", "when": { "var": "order", "not_in": ["DRAFT", "CONFIRMED"] }, "outcome": "rejected",
+      "code": "ORDER_NOT_OPEN", "cite": "src/main/java/.../OrderService.java:82-84" },
+    { "id": "G3", "when": { "var": "shipped", "is": "true" }, "outcome": "rejected",
+      "code": "ORDER_ALREADY_SHIPPED", "cite": "src/main/java/.../OrderService.java:85-87" }
+  ],
+  "branches": []
 }
 ```
 
-`binding` 來自機械事實。`kind` 是 `set`、`increment`、`create`、`delete`、`transition`、`batch` 之一，決定適用哪些蛻變關係。
+- **變數**是這個命令的檢查會看的東西。`state` 是儲存資料上的事實，由一句回傳單一值的 `SELECT` 讀出，命令的參數以 `:名稱` 傳入；`param` 是參數值所屬的類別（低於已出貨量、等於原值、未提供），可以附一句 `SELECT` 讓執行器驗證實際使用的值確實屬於那個類別。
+- **`base`** 是一般成功呼叫的情況，所有守衛都放行。
+- **`guards`** 依程式的執行順序排列，第一個條件成立的決定結果：`rejected`（呼叫方被拒絕）、`ignored`（正常返回但什麼都沒變）、`error`。`swallowed` 記錄被接住只寫 log 的拒絕。
+- **`branches`** 是放行之後決定「多寫什麼」的條件，例如最後一筆交貨出貨後行項目關閉。`writes` 列出 `資料表.欄位`，執行器會檢查它們確實被寫入。
+- 入口的檢查取決於某個鑑別欄位時，每個值一個變體：`CMD-proposeChange.QTY`、`CMD-proposeChange.DATE`。
+
+`handler` 與 `binding` 的 HTTP 方法、路徑以地圖為準。完整的撰寫規則在 `references/model-format.md`，那份文件是抽取者的契約。
 
 ### 10.3 矩陣格
 
 ```json
 {
-  "id": "CELL-0142",
-  "command": "CMD-changeLineQty",
-  "state": { "status": "CONFIRMED", "atoms": { "shipped": true } },
-  "context": { "ENT-order_header.status": "OPEN" },
-  "param_class": "below-shipped",
-  "reach": "RCP-031",
-  "static":   { "outcome": "unhandled", "cites": ["OrderLineService.java:188-230"] },
-  "observed": { "outcome": "ALLOWED", "writes": ["order_line.qty", "order_header.total"],
-                "messages": ["line.changed"] },
-  "expected": { "outcome": "REJECTED", "source": "D-021" },
-  "spec_expected": { "outcome": "REJECTED", "source": "PRD-3.2.4-b" }
+  "id": "CELL-0025",
+  "key": "CMD-cancelOrder|shipped=true",
+  "command": "CMD-cancelOrder",
+  "deviation": "shipped=true",
+  "given": { "order": "CONFIRMED", "shipped": "true" },
+  "static": { "outcome": "rejected", "guard": "G3", "code": "ORDER_ALREADY_SHIPPED" },
+  "fixture": "partly-shipped", "steps": [], "with": { "orderId": "${order.id}" },
+  "sha": "5f0c…",
+  "expected": { "outcome": "rejected", "code": "ORDER_ALREADY_SHIPPED", "after": {…}, "written": [],
+                "created": [], "deleted": [], "published": [], "external": [], "source": "observed" }
 }
 ```
 
-靜態結果有四種：`allowed`、`rejected`、`unhandled`（沒有任何守衛針對這個情況做決定）、`unknown`。
+- `key` 是（命令、偏離）；`id` 由 `model/ids.json` 配發，格子消失後編號不再給別人。
+- `given` 是這一格宣稱的變數值。執行器在呼叫前讀每個變數的查詢，值不符就回報「狀態未到達」，不做比對。
+- `static` 是讀程式得到的預測：第一個成立的守衛決定結果；放行時列出成立的分支與它們要寫的欄位。偏離的變數沒有任何守衛或分支提到時，標 `unhandled`。
+- `sha` 是決定「執行這一格代表什麼」的所有內容的雜湊（命令的繫結與變數、配方、共用的起始情境）。結果檔記下當時的 `sha`，模型改動後舊結果自動不算數。
+- `expected` 來自 `model/expected.json`：人的決策（`decision`）、規格（`spec`）、或已鎖定的觀察（`observed`）。決策與規格不會被觀察覆蓋。
 
-`expected` 的來源依序是：人的決策、規格預期、已記錄的觀察結果。沒有決策也沒有規格時，預期就是觀察到的現況，這一格是鎖定的特徵化測試。
+記錄模式與 `static` 比對，只比結果與代碼（以及分支宣稱的寫入）。驗證模式與 `expected` 比對：結果、代碼、呼叫後的變數值、被修改的欄位、新增與刪除的資料表、對外送出的訊息與呼叫。JSON 內容的訊息以排序後的鍵比較。
 
 ### 10.4 不變量
 
@@ -788,21 +831,26 @@ auditkit 是一組 Java 原始碼，複製到目標模組的 `src/audit/java/aud
 
 ### 11.2 守衛誘導的抽象狀態
 
-守衛是支配一個拒絕或一個寫入的條件。拆成原子述詞後分兩類：
+守衛是支配一個拒絕或一個寫入的條件。它所測的東西成為命令的變數，分兩類：
 
-- **狀態述詞**只涉及實體與其父子實體的欄位，例如 `shipped_qty > 0`。
-- **參數述詞**把命令參數與實體欄位比較，例如 `qty >= shipped_qty`。
+- **狀態變數**只涉及實體與其父子實體的欄位，例如 `shipped_qty > 0`。
+- **參數類別**把命令參數與實體欄位比較，例如 `qty >= shipped_qty`，類別就是邊界：低於、等於、高於。
 
-抽象狀態由守衛切出來：兩個實體實例若讓所有相關述詞取相同的真值，就屬於同一個抽象狀態。「部分交貨」這類狀態因此不必事先給定，程式裡有守衛測它，它就會出現。
+抽象狀態由守衛切出來：「部分交貨」這類狀態不必事先給定，程式裡有守衛測它，它就成為某個變數的一個值。
 
-細分逐命令進行，以避免組合爆炸：
+變數逐命令決定，以避免組合爆炸：
 
-1. 主軸是顯式的狀態欄位值。
-2. 每個命令只依它自己的守衛所測的狀態述詞細分。
-3. 父子實體的狀態只在該命令的守衛有測時才進入格子的上下文。
-4. 參數述詞不拆狀態，而是產生參數類別與邊界值（比較對象的值、加一、減一）。
+1. 目標實體的生命週期欄位一定納入，即使這個命令沒有任何檢查讀它。「不看狀態就改資料」正是要看的。
+2. 父子實體的狀態只在這個命令的檢查有讀時才納入。
+3. 兩個條件只在同時成立時才有意義的（最後一個未結行項目的最後一筆數量），寫成一個多值變數，不寫成兩個布林。
 
-每個（命令、狀態值）的述詞組合數有上限（第 16 節）。超過時 `render_model.py` 保留被最多守衛引用的述詞，其餘列入未審範圍。
+**格子採 base-choice 展開**：一格是基準情況，其餘每一格只讓一個變數偏離基準、其他維持基準值。格數是各變數值域大小的總和，不是乘積。每個守衛測的每個值、每個邊界都至少被執行一次。
+
+變數之間有必然關聯時（已結案的訂單必然有出貨），配方以 `also` 說明這一格同時偏離的其他變數，靜態預測就依那個組合計算。讀程式後確定任何命令序列都到不了的格子，以 `unreachable` 附理由與行號，不執行，列為「主張」。
+
+這個展開方式不涵蓋兩個獨立變數同時偏離的情況。那一部分由 M3 的隨機序列補上。
+
+靜態預測另外給出一個副產品：**在可執行的格子裡從未成為決定者的守衛**。通常是因為前面的檢查總是先成立，或它所測的狀態到不了。樣本一有 19 個，全部在提交變更的路徑上：過期檢查擋在前面，後面的狀態檢查從這個入口永遠輪不到。
 
 ### 11.3 寫入點表與守衛不對稱
 
@@ -827,16 +875,23 @@ auditkit 是一組 Java 原始碼，複製到目標模組的 `src/audit/java/aud
 
 ### 11.5 到達配方與矩陣執行
 
-到達配方是把實體從空白帶到某個抽象狀態的最短命令序列，在靜態狀態機上以廣度優先搜尋，執行確認。
+到達配方是把資料帶到某一格所需的命令序列：一個具名的起始情境（可以接續另一個），加上這一格自己的步驟。狀態只經由命令建立，不直寫資料列。
 
-搜不到配方的狀態分三類：沒有任何程式寫入（成為問題）；有寫入點但在受審範圍外（以直寫建立，標 `synthetic-state`）；預算內沒找到（列入未審範圍）。
+配方由 `code-reader` 讀程式後提出，由執行確認，不在靜態狀態機上搜尋。理由：守衛誘導的狀態不是一張乾淨的狀態機，許多狀態（部分出貨、變更已過期）要靠特定參數與特定順序才到得了，讀得懂程式的 reader 比廣度優先搜尋更快找到，而每一份配方都會被執行器驗證，提錯了不會混過去。
 
-執行每一格：重置、執行配方、確認抽象狀態、快照、呼叫命令、快照、記錄結果與效果軌跡。
+執行每一格：重置、時鐘歸位、執行起始情境與步驟、讀每個變數的查詢並與這一格宣稱的值比對、快照、呼叫命令、快照、記錄結果與效果軌跡。
 
-執行中另做兩個檢查：
+- 值不符：回報「狀態未到達」，交回 reader 修配方或補 `also`。
+- 步驟中途被拒絕或出錯：回報哪一步，除非該步標了 `may_fail`。
+- 與時間有關的規則：步驟 `set_today` 把應用的時鐘往後移，使「提出時日期有效、提交時已過期」這類情況到得了。前提是應用從 `java.time.Clock` 取時間。
 
-- 觀察到的狀態轉移是否都在模型內。多出來的通常是級聯或推導狀態。
-- 相同抽象狀態對同一命令的同一參數類別是否有相同反應。不同就代表抽象漏了一個述詞。
+找不到配方的格子不猜，留空，回報為未執行，並反映在 12.3 的第 1 項。
+
+執行中由 `reconcile.py` 做三個檢查：
+
+- 觀察到的生命週期轉移，連同造成它的命令，全部列出。
+- 被拒絕的呼叫是否仍有寫入；標為讀取的命令是否有寫入。
+- 同一格在相同條件下重跑，結果是否相同。
 
 ### 11.6 檢驗準則
 
@@ -975,8 +1030,8 @@ PRD 的預期以資料表示，不寫成測試程式。
 
 | 狀態 | 條件 |
 |---|---|
-| 已重現 | 引用的案例中至少一個，在三次各自重置的執行中都是 `MISMATCH`，且結果檔比程式新 |
-| 已修復 | 引用的案例在最近一次執行中全部是 `MATCH` |
+| 已重現 | 引用的案例中至少一個，最近三次各自重置的執行都顯示這個行為，且結果對應格子目前的定義 |
+| 已修復 | 引用的案例都有執行，且最近的執行都不再顯示這個行為 |
 | 僅有主張 | 沒有執行證據；引用位置經裁判確認 |
 | 未證實 | 案例是 `ERROR`、`SKIPPED`、`HARNESS_GAP`，或沒有被執行 |
 
@@ -988,6 +1043,8 @@ PRD 的預期以資料表示，不寫成測試程式。
 
 未證實的不列為問題，另列在「未證實的候選」。
 
+「顯示這個行為」依問題種類判定：人已判為「不是本意」並套用到預期的，看驗證模式是否 `MISMATCH`；其餘看觀察結果本身（拒絕後仍有寫入的標記、結果為錯誤、訊息被丟棄）。歸類與依據：人判為「不是本意」的是缺陷，依據加上 N2；尚未回答的，依據 N3 的是不一致，N4、N5 的是異常；判為「本意如此」的列為被接受的差異，不是問題。
+
 保留標記由執行器寫入證據檔：
 
 | 標記 | 何時寫入 |
@@ -995,7 +1052,7 @@ PRD 的預期以資料表示，不寫成測試程式。
 | `substitute-engine` | 不是真實引擎 |
 | `unconfirmed-version` | 引擎未與正式環境核對 |
 | `synthetic-state` | 初始狀態含直寫的交易資料 |
-| `mock-boundary` | 該案例的判定取決於替身的行為 |
+| `mock-boundary` | 該案例中有外部呼叫由替身以未設定的預設值回應 |
 | `uncontrolled-time` | 案例與時間有關，但時間不可控 |
 
 ### 12.3 每個實體的審查判定
@@ -1238,6 +1295,12 @@ M2 結束是唯一的檢討點。矩陣一致率或問題清單的品質不達�
 | 13 | 不含形式化模型 | TLA+ 與 trace validation | 成本高；這類系統的併發問題在真實引擎上交錯更直接 |
 | 14 | 不含 hooks | 讀檔時自動附上分析結果 | 依賴尚在早期的功能；不影響正確性 |
 | 15 | 人的決定以彈出式問答取得，存成檔案 | 請人編輯問題清單檔 | 問答可以一題一題做、隨時停、不會格式錯誤 |
+| 18 | 矩陣格以 base-choice 展開：基準加上每次一個變數的偏離 | 所有變數值的乘積；成對組合 | 格數與守衛數同階，每個守衛測的每個值都被執行；乘積在第三個變數就失控。獨立變數同時偏離的情況交給隨機序列 |
+| 19 | 抽象狀態以「每個命令自己的變數加一句查詢」表示 | 每個實體一組全域的原子述詞 | 同一個實體在不同命令眼中要看的東西不同；查詢讓執行器能在呼叫前驗證狀態真的到了，配方錯了不會被當成行為 |
+| 20 | 到達配方由 reader 讀程式提出，由執行驗證 | 在靜態狀態機上做廣度優先搜尋 | 守衛誘導的狀態不是乾淨的狀態機，許多狀態要特定參數與順序才到得了；提錯的配方會被「狀態未到達」擋下 |
+| 21 | agent 的回覆原樣存檔，模型檔一律由腳本組裝 | 由編排的工作階段把回覆整理後寫入模型檔 | 編排者一旦動手整理，就分不清哪些是 reader 的主張、哪些是整理時加的；原樣存檔也讓中斷後可以續跑 |
+| 22 | 差異只能由讀程式解釋後修正模型，或原樣留給人回答；鎖定與決策分開存放 | 觀察到什麼就把預測改成什麼 | 把預測改成觀察等於把要找的差異抹掉 |
+| 23 | 記錄一次、驗證兩次後才談重現 | 單次執行即視為證據 | 樣本一第一次驗證就抓到事件內容的鍵順序每次啟動都不同；不穩定的部分要先被看見並排除在鎖定之外 |
 | 16 | 重置不使用交易回滾 | 以回滾作為最快的重置 | 效果軌跡、故障注入、交錯都需要真實的提交 |
 
 ## 20. 驗收時確認的假設
@@ -1259,6 +1322,8 @@ M2 結束是唯一的檢討點。矩陣一致率或問題清單的品質不達�
 - **抽象的完整性。** 抽象狀態由守衛切出。影響行為卻從未出現在守衛裡的欄位，只有在執行剛好走到時才會被發現。
 - **交錯的粒度。** 只在資料庫互動的邊界交錯。記憶體內的競爭只有靜態標記。
 - **模型的變異。** 同一 repo 兩次執行 `audit-model` 可能得到不同的主張。模型是經過裁判與執行確認的產出，不是決定性的建置產物；決定性的是執行結果與判定。
+- **單一偏離。** 矩陣一次只偏離一個變數。兩個獨立條件同時成立才出現的行為，要寫成一個多值變數才會有格子，否則留給隨機序列。
+- **時間。** 只有從 `java.time.Clock` 取時間的程式受控。直接呼叫 `LocalDate.now()` 的規則無法重現日期相關的情況，相關問題最高為 B 級。
 - **測試不是證明。** 所有執行證據都是抽樣。審查判定說明抽了多少，不保證沒抽到的部分沒有問題。
 - **規模。** 超過約十五萬行的 repo 要依模組分成多個 `<system>` 審查，跨系統的互動不在單次審查內。
 

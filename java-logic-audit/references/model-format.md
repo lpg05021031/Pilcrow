@@ -73,8 +73,12 @@ A variable is something a check of this command looks at. Two kinds:
   then checks that the value used really is in the class. `:today` is the application's current date.
 
 `domain` lists every value the checks tell apart, as text (`"true"`, `"null"`). For a comparison with a
-stored value, the classes are the boundaries: below, equal, above. `meaning` (optional) says in a few
-words what each class is.
+stored value, the classes are the boundaries: below, equal, above. `meaning` (optional) is an object that
+says in a few words what a value is: `{ "below-shipped": "less than what has shipped" }`.
+
+A command without parameters (a scheduled task) has no single row it is about. Its variables are facts
+about the data as a whole: "is there an event not yet sent", "is there a confirmed order with no open
+line".
 
 Rules:
 
@@ -110,6 +114,14 @@ One guard for one business decision: `status != DRAFT && status != CONFIRMED` is
 Validation annotations on a request body count as one guard per command with a `shape` variable whose
 values name each constraint. A lookup that fails (`orElseThrow`) is a guard.
 
+A guard need not be an `if`. When the code finds nothing to work on and returns (a loop over a query
+that gives no row, an early `return` for a message seen before), that is a guard with outcome `ignored`:
+cite the query or the loop. `code` is left out when the caller is given none, which is the usual case
+for `ignored`.
+
+What happens when an outside call fails (the broker is down, the price service times out) is not part
+of this model; faults are injected in a later step. Do not invent a variable for it.
+
 ## 5. Branches
 
 A branch is a condition under which an allowed call writes something more:
@@ -122,7 +134,11 @@ A branch is a condition under which an allowed call writes something more:
 ```
 
 Write a branch for every `if` that decides whether a lifecycle column changes, a row is created or a
-message is sent. `writes` names columns as `table.column`. The harness checks that they were written.
+message is sent. `writes` names columns as `table.column` (for a created row, any column of its table).
+`sends` (optional) names what goes out when the branch is taken: for each message or outside call, a
+piece of text that identifies it, such as the subject or the URL path (`"orders.events."`,
+`"/prices/"`). The harness checks that the columns were written and that something sent contains each
+text. `effect` is a sentence for people and is not checked.
 
 ## 6. Fixtures and recipes
 

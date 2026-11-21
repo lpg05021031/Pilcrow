@@ -208,6 +208,19 @@ class MatrixRunner {
                 break;
             }
         }
+        // ... and may name what must have gone out: a piece of the subject, the URL, the payload.
+        for (JsonNode piece : expected.path("sends_include")) {
+            boolean found = false;
+            for (String kind : new String[] {"PUB", "EXT"}) {
+                for (String sent : o.sent(kind)) {
+                    found = found || sent.contains(piece.asText());
+                }
+            }
+            if (!found) {
+                out.add("sends");
+                break;
+            }
+        }
         for (String part : COMPARED) {
             if (expected.has(part) && !expected.get(part).equals(seen.get(part))) {
                 out.add(part);
