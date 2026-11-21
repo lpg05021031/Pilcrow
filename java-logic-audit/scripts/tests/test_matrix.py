@@ -93,6 +93,19 @@ class Cells(unittest.TestCase):
         cells = build_matrix.cells_of(other, dict(RECIPES, **{"CMD-y": {"same_as": "CMD-x"}}))
         self.assertEqual(cells[0]["fixture"], "one")
 
+    def test_what_a_command_always_writes_and_what_a_refusal_writes_are_predicted(self):
+        c = command(writes=["x.status"], sends=["/prices/"])
+        c["guards"][1]["writes"] = ["x.expired"]
+        c["branches"] = [{"id": "B1", "when": {"var": "flag", "is": "true"}, "writes": ["y.total"], "sends": ["events."]}]
+        by = {x["deviation"]: x["static"] for x in build_matrix.cells_of(c, RECIPES)}
+        self.assertEqual(by[None]["writes_include"], ["x.status"])
+        self.assertEqual(by[None]["sends_include"], ["/prices/"])
+        self.assertEqual(by["flag=true"]["writes_include"], ["x.status", "y.total"])
+        self.assertEqual(by["flag=true"]["sends_include"], ["/prices/", "events."])
+        self.assertEqual(by["status=DONE"]["writes_include"], ["x.expired"])
+        self.assertNotIn("writes_include", by["qty=zero"])
+        self.assertNotIn("unhandled", by["flag=true"])
+
     def test_conditions(self):
         v = {"a": "1", "b": "x"}
         self.assertTrue(build_matrix.holds({"all": [{"var": "a", "is": 1}, {"var": "b", "in": ["x", "y"]}]}, v))

@@ -97,8 +97,10 @@ The brief has `"task": "recipes"`: the commands of one group with the cases to r
 step may call. Read `format`, sections 6 and 7. Work out, by reading the code, a sequence of commands
 that brings the data to each case, and return fixtures and recipes.
 
-- Prefix the fixtures you define with `fixture_prefix` and a hyphen, unless the brief lists a fixture
-  that already gives the situation: then use it.
+- `fixtures_that_exist` holds the fixtures earlier groups defined, with their steps. Use one of them
+  when it gives the situation you need, and continue it with `from` when it gives the start of it.
+  Prefix the fixtures you define yourself with `fixture_prefix` and a hyphen.
+- Return only the fixtures you define; never repeat or change one that exists.
 - Keep fixtures small and reuse them: a ladder of situations (created, confirmed, partly done, done,
   cancelled) serves most cases.
 - For every case think about what else must differ (`also`): a closed order has shipped lines.

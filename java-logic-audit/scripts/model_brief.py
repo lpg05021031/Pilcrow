@@ -166,7 +166,7 @@ def cmd_recipes(workspace, system, name):
         "commands_a_step_may_call": [{"id": c["id"], "title": c.get("title"), "binding": c.get("binding"),
                                       "returns": next((e.get("returns") for e in themap.get("entries", [])
                                                        if e.get("handler") == c.get("handler")), None)} for c in commands],
-        "fixtures_that_exist": sorted(existing),
+        "fixtures_that_exist": existing,
         "fixture_prefix": name.split(":")[-1],
         "files": shard.get("files", []),
         "tables": tables(adir, themap),

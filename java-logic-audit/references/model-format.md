@@ -9,7 +9,11 @@ without lines is dropped.
 
 A command is one way into the application from outside, with one set of checks. An entry point whose
 checks depend on a discriminator (a `type` field that selects a branch of a `switch`) is written as one
-command per value: `CMD-proposeChange.QTY`, `CMD-proposeChange.DATE`.
+command per value: `CMD-proposeChange.QTY`, `CMD-proposeChange.DATE`. The discriminator may also be a
+stored value (the type of the request being committed): the variants then share one binding, and the
+recipes are what make the stored value differ. The case in which the discriminator itself is missing or
+invalid belongs to none of the variants: when the code checks it, write it once as a variant of its own
+(`CMD-proposeChange.NONE`) whose binding leaves the field out.
 
 ```json
 {
@@ -111,6 +115,8 @@ something must have shipped).
 - `cite`: the lines of the check, `path/from/workspace/root/File.java:82-84`: one range, the smallest
   that holds the check. Lines of executable code or of a declared constraint, never a comment.
 - `swallowed`: for `ignored`, the refusal that was caught, when there is one.
+- `writes`: only when the refusal itself changes data that stays changed (a request marked expired and
+  committed before the caller is told no). Columns as `table.column`. Say how in `because`.
 - `because`: one sentence, only when the outcome is not obvious from the cited lines (the refusal is
   raised in one place and turned into a response in another).
 

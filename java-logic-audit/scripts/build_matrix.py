@@ -86,6 +86,8 @@ def static_outcome(command, valuation):
                 out["code"] = guard["code"]
             if guard.get("because"):
                 out["because"] = guard["because"]
+            if guard.get("writes"):
+                out["writes_include"] = sorted(guard["writes"])      # a refusal that itself changes data
             return out
     out = {"outcome": command.get("default_outcome", "allowed"), "guard": None}
     taken = [b for b in command.get("branches", []) if holds(b["when"], valuation)]
@@ -119,6 +121,9 @@ def check_command(command):
             problems.append("%s: state variable %s has no sql" % (cid, v["name"]))
     seen = set()
     for g in command.get("guards", []):
+        for w in g.get("writes", []):
+            if "." not in w:
+                problems.append("%s: guard %s writes %r; name the column as table.column" % (cid, g.get("id"), w))
         if g.get("outcome") not in OUTCOMES:
             problems.append("%s: guard %s has outcome %r" % (cid, g.get("id"), g.get("outcome")))
         if g.get("id") in seen:
