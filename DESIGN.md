@@ -164,6 +164,8 @@ java-logic-audit/
 
 `pom-audit.xml` 由腳本從 `pom.xml` 生成，每次執行前重新產生，內容是原檔加上一個 profile：把 `src/audit/java` 加為測試原始碼根目錄、加入 auditkit 需要的測試依賴、設定只執行 `auditkit` 套件下的執行器。
 
+受審模組由同一個 Maven 建置的其他模組組成時，另在根目錄生成一份 `pom-audit.xml`：內容是根 `pom.xml`，只把受審模組那一項改指向它自己的生成檔。執行時以 `-f pom-audit.xml -pl :<模組> -am` 經由 reactor 建置，所以其他模組的原始碼是當場編譯進這次執行的（金絲雀關掉的檢查、重跑時改過的程式都因此生效），而不是從本機倉庫取舊的 jar；其他模組自己的測試不執行。
+
 不直接在 `pom.xml` 內加區塊的原因：Maven 會把 `pom.xml` 打包進 jar（`META-INF/maven/`），所以對它的任何修改，即使只是一個不啟用的 profile，都會改變一般建置的產物。實測樣本一：加區塊時 jar 有一個項目不同；改用生成檔後逐位元組相同。
 
 plugin 不提交也不推送。使用者自行決定何時提交 `audit/` 與 `src/audit/`。
@@ -269,7 +271,7 @@ flowchart LR
 - **寫**：`PREFLIGHT.md`、`profile.json`、`manifest.json`、`answers.json`
 - **做什麼**：除了判定為不適用時直接結束，其餘每一項檢查都執行，不因前面失敗而停。
   - **檢查 1，記錄來源**：在執行任何東西之前先寫 `manifest.json`。已存在時不重寫，只比對並回報。
-  - **檢查 2，技術概況**：`preflight_scan.py` 由建置檔、依賴、註解、設定檔辨識建置工具、JDK、框架、持久化、資料庫、訊息、排程、對外呼叫、測試資產，並算出適用性與支援範圍。
+  - **檢查 2，技術概況**：`preflight_scan.py` 由建置檔、依賴、註解、設定檔辨識建置工具、JDK、框架、持久化、資料庫、訊息、排程、對外呼叫、測試資產，並算出適用性與支援範圍。受審模組只是一個負責啟動的薄殼、內容在同一個建置的其他模組時（Maven 的模組依賴、Gradle 的 `project(':x')`），那些模組一併掃描，記在 `profile.json` 的 `build.sibling_modules`；之後的地圖、切分、引用行、建置入口都依這份清單涵蓋它們。
   - **檢查 3，適用性**：依 1.1 與 1.2 判定完全適用、部分適用、不適用。**不適用時到此為止**：不問任何問題、不建置，寫一份簡短的報告後結束。
   - **檢查 4，問人**：只問第 13 節列的五題，每題都有「不知道」的選項。使用者已在訊息中回答的不再問；重跑時只問尚未回答的。回答照原話寫入 `answers.json`，憑證以 `[redacted]` 取代。
   - **檢查 5，工具**：JDK、建置工具、Docker（指令是否存在與 daemon 是否回應分開記錄）、`python3`。缺少時說明哪個指令會受影響。
@@ -307,7 +309,7 @@ flowchart LR
 
 - **寫**：`map.json`、`MAP.md`
 - **做什麼**
-  1. `build_map.py` 由 `facts/` 建出入口清單、命令的呼叫方式、實體與欄位、每個欄位的寫入點表、橫切邏輯的套用範圍。
+  1. `build_map.py` 由 `facts/` 建出入口清單、命令的呼叫方式、實體與欄位、每個欄位的寫入點表、橫切邏輯的套用範圍。MyBatis 的寫入語句由 `sql_statements.py` 從 mapper XML 與註解讀出表與欄位，產生器寫出的語句（由 `<trim>`、`<if>` 組成的欄位清單、條件中以 `${}` 代入的「by example」語句）也讀得出來；只有表或欄位本身在執行時才決定的語句列為待解。
   2. 腳本解不出來的寫入點（動態 SQL 的欄位集合、原生 SQL 字串、整個物件的欄位複製）列為待解。待解項目交給 `code-reader`，每個檔案一個，回傳欄位清單與引用行。
   3. 由呼叫關係算出每個寫入點可從哪些入口到達。到不了的列為孤兒寫入點。
   4. `make_shards.py` 產生 `audit-model` 要用的切分清單。
@@ -593,7 +595,6 @@ auditkit 是一組 Java 原始碼，複製到目標模組的 `src/audit/java/aud
   "http_doubles": [ { "method": "GET", "url": "^http://[^/]+/prices/[^/?]+\\?qty=\\d+$",
                       "example": "http://pricing.test/prices/SKU-1?qty=5",
                       "status": 200, "body": { "unitPrice": "10.00" } } ],
-  "auth": { "headers": { "X-User": "audit" } },
   "rejections": ["com.example.BusinessException"],
   "error_code_path": "code",
   "base_data": ["fixtures/base.sql"],
@@ -602,10 +603,32 @@ auditkit 是一組 Java 原始碼，複製到目標模組的 `src/audit/java/aud
 }
 ```
 
+只在應用需要時才出現的欄位：
+
+```json
+{
+  "database": { "source": "environment", "permission": "…", "property_prefixes": ["spring.datasource.druid"] },
+  "schema": ["shop-db/sql/shop_table.sql"],
+  "keep_tables": ["region"],
+  "result_code": { "path": "errno", "allowed": ["0"], "error": ["-1", "502"] },
+  "auth": { "headers": { "X-Api-Version": "2" },
+            "sessions": [ { "name": "user", "paths": "^/wx/",
+                            "login": { "method": "POST", "path": "/wx/auth/login",
+                                       "body": { "username": "user123", "password": "${env.AUDIT_LOGIN_USER_PASSWORD}" } },
+                            "headers": { "X-Shop-Token": "${login.data.token}" } } ] }
+}
+```
+
 - `doubles` 取代的是第三方的 client 介面；外部 HTTP 服務以 `http_doubles` 的規則回應，不取代應用自己的 client 類別。
 - `rejections` 決定一個結果被讀成業務拒絕還是錯誤。只列應用自己的例外型別。
 - `error_code_path` 是錯誤回應中代碼欄位的名稱，預設 `code`。
 - `clock` 是每一格開始時應用看到的「現在」。應用從 `java.time.Clock` bean 取時間時才生效。
+- `database.property_prefixes`：應用不從 `spring.datasource.*` 讀連線設定時（連線池有自己的前綴），執行器把同樣三個值也設在這些前綴下。
+- `schema`：啟動時沒有任何東西建立資料表的專案，列出專案自己的建表 SQL。只在資料庫完全沒有表時、於應用啟動之前執行一次。
+- `keep_tables`：重置時不清空的表，只給沒有任何命令寫入的大型固定參考資料。
+- `result_code`：給「一律回 HTTP 200，是否拒絕寫在回應內文」的應用。`path` 是代碼欄位；`allowed` 的值代表已執行；`error` 的值代表非預期的失敗；其餘的值都是帶該代碼的業務拒絕。沒有這個設定時，這類應用的每一次拒絕都會被讀成成功。
+- `auth.sessions`：每一格開始前，執行器用應用自己的登入請求登入這裡列出的使用者，之後的呼叫帶上由登入回應組出的標頭，所以審查走過真正的安全過濾器，而不是繞過它。呼叫預設以 `paths` 相符的使用者送出；案例可在參數中以保留名稱 `_session` 指定另一個使用者，或 `"none"`（未登入）。密碼只有在已經寫在專案自己的種子資料裡時才可以直接寫入，其餘一律以 `${env.AUDIT_…}` 指名環境變數。
+- 回應是導向同一個應用的另一個位址時（安全過濾器把未登入者導向「請登入」頁），執行器讀那個位址的回應，因為那才是呼叫者被告知的內容。
 - 資料庫的位址與帳密不在這個檔案裡，只經由環境變數傳入。引擎是否與正式環境一致由 `judge.py capabilities` 從煙霧測試的結果與人的回答算出，寫在 `profile.json`，是 B 級保留標記的來源之一。
 
 ### 9.3 結果的三種分類
@@ -622,7 +645,7 @@ auditkit 是一組 Java 原始碼，複製到目標模組的 `src/audit/java/aud
 
 - 基礎資料（產品、客戶、代碼表）可直接寫入。
 - 交易資料只能經由命令建立。某種實體在受審範圍內沒有建立它的命令時允許直寫，執行器在證據檔標記 `synthetic-state`。
-- 重置：清空所有應用資料表並重設自動編號，再植入基礎資料（PostgreSQL 以單一語句 `TRUNCATE … RESTART IDENTITY CASCADE`；MySQL 關閉外鍵檢查後逐表清空）。不使用交易回滾，因為效果軌跡需要真實的提交。
+- 重置：清空所有應用資料表（`keep_tables` 除外）並重設自動編號，再植入基礎資料（PostgreSQL 以單一語句 `TRUNCATE … RESTART IDENTITY CASCADE`；MySQL 關閉外鍵檢查後逐表清空）。不使用交易回滾，因為效果軌跡需要真實的提交。
 - 平行：需要平行時，執行器開多個 JVM 分叉，每個分叉用獨立的資料庫；屆時 PostgreSQL 改用範本資料庫複製。
 
 ### 9.5 決定性
@@ -1229,9 +1252,9 @@ v1 只有兩級：支援，或只有靜態模型。
 
 | 面向 | 支援 |
 |---|---|
-| 建置 | Maven、Gradle |
+| 建置 | Maven、Gradle；應用模組由同一個建置的其他模組組成時，連同那些模組一起掃描、一起編譯 |
 | JDK | 8 到 21 |
-| 框架 | Spring Boot 2.x 與 3.x，Spring MVC |
+| 框架 | Spring Boot 2.x 與 3.x，Spring MVC（已在 2.1、3.x 上執行過） |
 | 持久化 | JPA 與 Hibernate、MyBatis、Spring JDBC |
 | 資料庫 | PostgreSQL、MySQL |
 | 訊息 | Kafka、RabbitMQ、NATS、Spring 事件。一律以邊界替身處理 |
