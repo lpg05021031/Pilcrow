@@ -53,12 +53,19 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/assure.py" brief $system F-007
 ```
 
 It writes the brief to a file and prints two lines: `brief:` with that file's path and `reply:` with
-where the answer goes. Launch one `adversary` agent whose whole prompt is this sentence, with the path
-filled in: *"Your brief is the file `<brief path>`. Read it first, then do what it asks and reply with
-the JSON object it describes."* Add nothing else. Up to six at a time; they only read. Save each reply,
-unchanged, as the file named after `reply:` (`audit/$system/assure/recheck/F-007.json`). What is saved is the JSON object of the reply: an object in a code fence, or with a sentence
-around it, is saved alone, copied and not retyped. Only when the reply holds no complete JSON object, ask
-the same agent once to send it, and if that fails too leave the finding without a file. Never repair a reply, and never ask a reader to reconsider a verdict.
+where the answer goes (`audit/$system/assure/recheck/F-007.json`). Launch one `adversary` agent whose whole
+prompt is this sentence, with the path filled in: *"Your brief is the file `<brief path>`. Read it first,
+then do what it asks and write the JSON object it describes to the file it names under `save_reply_as`."*
+Add nothing else. Up to six at a time; they only read, and each writes one file: its reply.
+
+You do not copy, retype, tidy or repair a reply, and you never ask a reader to reconsider a verdict. When
+a reader has answered, check its file:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_store.py" check <reply path>
+```
+
+`ok` means it is one JSON object. Otherwise tell the same agent once what the check printed and let it write the file again; if it fails again, delete the file and leave the finding without a recheck.
 
 A finding whose saved reply carries the fingerprint the finding has now is not rechecked again.
 

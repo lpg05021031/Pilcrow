@@ -47,23 +47,20 @@ whole task:
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_brief.py" mine $system "<group name>" --file
 ```
 
-It prints `brief:` and the file's path. The agent's whole prompt is: *"Your brief is the file `<brief
-path>`. Read it first. Model these entry points. Your reply is one JSON object as described under 'When
-you are asked to model entry points'."* You do not paste the brief: the agent reads it, so nothing is
-retyped on the way. Add nothing about what you expect it to find. Run the groups in parallel, at most
-four at a time.
+It prints `brief:` with the file's path and `reply:` with where the answer goes
+(`audit/$system/model_raw/mine-<group>.json`). The agent's whole prompt is: *"Your brief is the file
+`<brief path>`. Read it first. Model these entry points. Your reply is one JSON object as described under
+'When you are asked to model entry points'; write it to the file the brief names under `save_reply_as`."*
+You do not paste the brief: the agent reads it, so nothing is retyped on the way. Add nothing about what
+you expect it to find. Run the groups in parallel, at most four at a time.
 
-Save each reply as it came, under the name this prints:
+The agent writes its reply itself, to the file printed after `reply:` (the brief names it too). You do not copy, retype or tidy a reply: what is in that file is what the agent said. When the agent has answered, check the file:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_store.py" name mine "<group name>"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_store.py" check <reply path>
 ```
 
-that is `audit/$system/model_raw/mine-<group>.json`. What is saved is the JSON object of the reply, exactly
-as the reader wrote it. A reader that put the object in a code fence, or a sentence before or after it,
-has still given its reply: save the object alone, copied from the reply and not retyped, and do not ask
-again. Only when the reply holds no complete JSON object, ask that reader once more for it; if it fails
-again, leave the group out (it will be reported as a gap). The same holds for every reply in this step.
+`ok` means it is one JSON object. Otherwise tell the same agent once what the check printed and let it write the file again; if it fails again, delete the file and leave it out (the group will be reported as a gap). The same holds for every reply in this step.
 
 Because every reply is a file, the step can be interrupted and started again: groups that already have
 a saved reply are skipped, and only what is missing is done. Without subagents, read
@@ -85,12 +82,13 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_brief.py" referee $system "<group n
 
 with the prompt: *"Your brief is the file `<brief path>`. Read it first. Referee these claims. Read only
 the cited lines and what you need around them. Your reply is one JSON object as described under 'When you
-are asked to referee a claim'."* The brief holds only the claims and the lines they cite: the referee is
-not shown the reader's reasoning or the files list. When a line `parts: N` is printed, the group has more
-than eight commands: get `--part 2` and so on, each for another fresh agent. Save each reply as `audit/$system/model_raw/referee-<group>.json`
-(`referee-<group>-2.json` for a second part; the name comes from `model_store.py name referee "<group
-name>"`). A group that already has its verdict files is not refereed again, unless its reader's reply was
-redone. Run the referees in parallel, at most four at a time.
+are asked to referee a claim'; write it to the file the brief names under `save_reply_as`."* The brief
+holds only the claims and the lines they cite: the referee is not shown the reader's reasoning or the
+files list. When a line `parts: N` is printed, the group has more than eight commands: get `--part 2` and
+so on, each for another fresh agent. The replies go to `audit/$system/model_raw/referee-<group>.json`
+(`referee-<group>-2.json` for a second part), written by the referees and checked as in step 2. A group
+that already has its verdict files is not refereed again, unless its reader's reply was redone. Run the
+referees in parallel, at most four at a time.
 
 ## 4 — Build the model (scripts do it)
 

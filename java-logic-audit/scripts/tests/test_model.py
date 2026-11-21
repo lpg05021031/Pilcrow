@@ -291,3 +291,46 @@ class DatabaseClock(unittest.TestCase):
         for sql in ("select expires_at < :now from r where id = :id", "select d < :today from r",
                     "select known_at, snow from r", "select now_playing from r"):
             self.assertIsNone(render_model.DB_CLOCK.search(sql), sql)
+
+
+class Replies(unittest.TestCase):
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.mkdtemp()
+        self.raw = os.path.join(self.tmp, "audit", "s", "model_raw")
+        os.makedirs(os.path.join(self.raw, "briefs"))
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp)
+
+    def put(self, name, text):
+        path = os.path.join(self.raw, name)
+        with open(path, "w") as f:
+            f.write(text)
+        return path
+
+    def test_a_reply_file_is_one_json_object_written_by_the_agent(self):
+        import model_store
+        self.assertIsNone(model_store.check_reply(self.put("mine-a.json", '{"commands": [{"sql": "select a < b from t"}]}')))
+        self.assertIn("does not exist", model_store.check_reply(os.path.join(self.raw, "mine-b.json")))
+        self.assertIn("not one JSON object", model_store.check_reply(self.put("mine-c.json", '```json\n{"commands": []}\n```')))
+        self.assertIn("not one JSON object", model_store.check_reply(self.put("mine-d.json", '[1, 2]')))
+        self.assertIn("empty", model_store.check_reply(self.put("mine-e.json", "  \n")))
+        # what a reply looks like after being copied from a display: the comparison became an entity, and the query two statements
+        self.assertIn("HTML entities", model_store.check_reply(self.put("mine-f.json", '{"sql": "select a &lt; b from t"}')))
+
+    def test_a_correction_gets_the_next_free_number_and_keeps_it_until_it_is_used(self):
+        import model_brief
+        self.put("fix-01.json", '{"commands": [{"id": "CMD-a"}]}')
+        self.put("fix-02.json", '{"commands": [{"id": "CMD-b"}, {"id": "CMD-a"}]}')
+        brief_a = os.path.join(self.raw, "briefs", "triage-CMD-a.json")
+        brief_b = os.path.join(self.raw, "briefs", "triage-CMD-b.json")
+        self.assertEqual(model_brief.next_fix(self.raw, brief_a), 3)
+        self.put("briefs/triage-CMD-a.json", json.dumps({"save_reply_as": "audit/s/model_raw/fix-03.json"}))
+        self.assertEqual(model_brief.next_fix(self.raw, brief_b), 4)          # another brief made meanwhile: not the same number
+        self.assertEqual(model_brief.next_fix(self.raw, brief_a), 3)          # asked again before it was answered: the same number
+        self.put("fix-03.json", '{"commands": []}')
+        self.assertEqual(model_brief.next_fix(self.raw, brief_a), 4)          # answered: the next round gets a new one
+        self.assertEqual((model_brief.latest_fix_of(self.raw, "CMD-a"), model_brief.latest_fix_of(self.raw, "CMD-b"),
+                          model_brief.latest_fix_of(self.raw, "CMD-c")), (2, 2, None))

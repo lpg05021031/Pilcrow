@@ -2,10 +2,14 @@
 """Assemble the model's inputs from the readers' replies, which are kept as they came.
 
     python3 model_store.py name    <kind> <name>
+    python3 model_store.py check   <reply file> [<reply file> ...]
     python3 model_store.py collect <system> [--workspace DIR]
     python3 model_store.py recipes <system> [--workspace DIR]
 
-Every reply of a reader is saved, unchanged, as one file under audit/<system>/model_raw/:
+Every reply of a reader is one file under audit/<system>/model_raw/, written by the reader itself at
+the place its brief names (model_brief.py --file prints it): nobody copies a reply, so nothing can
+change on the way. `check` says whether a reply file is one JSON object, and refuses one that holds
+HTML entities, which is what a reply looks like after being copied from a display.
 
     mine-<group>.json      { "group", "commands": [...], "could_not_model": [...], "instruction_shaped": [...] }
     referee-<group>.json   { "verdicts": [ { "command", "id", "verdict", "cite", "reason" } ] }
@@ -128,12 +132,29 @@ def recipes(workspace, system):
     return {"fixtures": len(fixtures), "commands_with_recipes": len(by_command), "notes": notes}
 
 
+def check_reply(path):
+    """None when the file is a reply an agent could have written, else what is wrong with it."""
+    if not os.path.isfile(path):
+        return "does not exist: the agent did not write its reply"
+    text = _lib.read_text(path)
+    if text is None or not text.strip():
+        return "is empty or cannot be read"
+    body = _lib.read_json(path)
+    if not isinstance(body, dict):
+        return "is not one JSON object (a code fence or a sentence around it does not belong in the file)"
+    if re.search(r"&(?:lt|gt|amp|quot|#\d+);", text):
+        return "holds HTML entities such as &gt;: it was copied from a display instead of being written by the agent"
+    return None
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
     n = sub.add_parser("name")
     n.add_argument("kind")
     n.add_argument("name")
+    c = sub.add_parser("check")
+    c.add_argument("files", nargs="+")
     for name in ("collect", "recipes"):
         p = sub.add_parser(name)
         p.add_argument("system")
@@ -142,6 +163,13 @@ def main(argv=None):
     if args.cmd == "name":
         print(file_name(args.kind, args.name))
         return 0
+    if args.cmd == "check":
+        bad = 0
+        for path in args.files:
+            problem = check_reply(path)
+            bad += 1 if problem else 0
+            print("%s: %s" % (path, problem or "ok"))
+        return 1 if bad else 0
     workspace = os.path.abspath(args.workspace)
     if args.cmd == "collect":
         out = collect(workspace, args.system)

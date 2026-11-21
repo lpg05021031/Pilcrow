@@ -47,14 +47,20 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/spec.py" brief $system SEC-01
 ```
 
 It writes the brief to a file and prints two lines: `brief:` with that file's path and `reply:` with
-where the answer goes. Launch one `spec-analyst` agent whose whole prompt is this sentence, with the
-path filled in: *"Your brief is the file `<brief path>`. Open that one file and no other, and reply with
-the JSON object it asks for."* You do not paste the brief and you do not open it yourself. Up to six
-agents at a time. Save each reply, unchanged, as the file named after `reply:`
-(`audit/$system/spec/raw/clauses-SEC-01.json`). What is saved is the JSON object of the reply: an object
-in a code fence, or with a sentence around it, is saved alone, copied and not retyped. Only when the reply
-holds no complete JSON object, ask the same agent once to send it, and if that fails too leave the section
-without a file: the script will report it as not read. Never repair a reply.
+where the answer goes (`audit/$system/spec/raw/clauses-SEC-01.json`). Launch one `spec-analyst` agent
+whose whole prompt is this sentence, with the path filled in: *"Your brief is the file `<brief path>`.
+Open that one file and no other, and write the JSON object it asks for to the file it names under
+`save_reply_as`."* You do not paste the brief and you do not open it yourself. Up to six agents at a
+time.
+
+The analyst writes its reply itself. You do not copy, retype, tidy or repair a reply: what is in that
+file is what the analyst said. When it has answered, check the file:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_store.py" check <reply path>
+```
+
+`ok` means it is one JSON object. Otherwise tell the same agent once what the check printed and let it write the file again; if it fails again, delete the file: the script will then report the section as not read.
 
 A section that is already saved from an earlier run is not read again unless the document changed
 (`split` writes its hash in `sections.json`; compare it with what you saw before, or ask).
@@ -68,8 +74,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/spec.py" brief $system SEC-01 --check
 ```
 
 Launch a **new** `spec-analyst` agent with the same one-sentence prompt and this brief's path: never the
-agent that wrote the expectations. Save its reply unchanged as the file named after `reply:`
-(`audit/$system/spec/raw/check-SEC-01.json`).
+agent that wrote the expectations. It writes its reply to `audit/$system/spec/raw/check-SEC-01.json`;
+check that file as in step 2.
 
 ## 4 — Tie the expectations to the cases (scripts do it)
 

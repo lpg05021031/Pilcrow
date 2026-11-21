@@ -44,13 +44,23 @@ agent as its whole task:
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_brief.py" recipes $system "<group name>" --file
 ```
 
-It prints `brief:` and the file's path. The agent's whole prompt is: *"Your brief is the file `<brief
-path>`. Read it first. Work out how each case is reached. Your reply is one JSON object as described under
-'When you are asked for recipes'."* You do not paste the brief. When a line `parts: N` is printed, the
-group has too many cases for one reader: get `--part 2` and so on, each for another agent, one after the
-other. Save each reply as
-`audit/$system/model_raw/recipes-<group>.json` (`recipes-<group>-2.json` for a second part; the name comes
-from `model_store.py name recipes "<group name>"`), and after each one run
+It prints `brief:` with the file's path and `reply:` with where the answer goes
+(`audit/$system/model_raw/recipes-<group>.json`, `recipes-<group>-2.json` for a second part). The agent's
+whole prompt is: *"Your brief is the file `<brief path>`. Read it first. Work out how each case is reached.
+Your reply is one JSON object as described under 'When you are asked for recipes'; write it to the file
+the brief names under `save_reply_as`."* You do not paste the brief. When a line `parts: N` is printed,
+the group has too many cases for one reader: get `--part 2` and so on, each for another agent, one after
+the other.
+
+The agent writes its reply itself. You do not copy, retype or tidy a reply: what is in that file is what
+the agent said. When the agent has answered, check the file:
+
+```bash
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_store.py" check <reply path>
+```
+
+`ok` means it is one JSON object. Otherwise tell the same agent once what the check printed and let it write the file again; if it fails again, delete the file and report the group as without recipes. The same holds for every reply in this step.
+After each recipes reply run
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_store.py" recipes $system
@@ -104,8 +114,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_brief.py" triage $system --command 
 ```
 
 with the prompt: *"Your brief is the file `<brief path>`. Read it first. Triage these cases. Your reply is
-one JSON object as described under 'When you are asked to triage'."* Save each reply as the next `audit/$system/model_raw/fix-<nn>.json`. Then rebuild and run
-again:
+one JSON object as described under 'When you are asked to triage'; write it to the file the brief names
+under `save_reply_as`."* The script gives each brief the next free `audit/$system/model_raw/fix-<nn>.json`
+and prints it after `reply:`. Check each reply file as in step 1. Then rebuild and run again:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_store.py" collect $system
@@ -119,9 +130,9 @@ commands that changed: add `--only <command id>` to the `command` line, once per
 
 A command that a reply corrected carries checks no referee has seen. After the rebuild, get its referee
 brief with `model_brief.py referee $system <command id> --file` (a command id works where a group name does),
-hand it to a fresh `code-reader` as in the model step, save the reply as
-`audit/$system/model_raw/referee-fix-<nn>-<command id>.json` with the `nn` of the fix, and run the first
-two rebuild lines again. Verdicts given before a fix do not carry over to the corrected command.
+hand it to a fresh `code-reader` as in the model step (the script names the reply
+`audit/$system/model_raw/referee-fix-<nn>-<command id>.json`, with the `nn` of the fix, and the referee
+writes it there), and run the first two rebuild lines again. Verdicts given before a fix do not carry over to the corrected command.
 
 What a reader lists under `harness` (an outside call without a configured answer) is given to the
 `harness-engineer` agent to settle in `harness.json`; nothing else in that file changes.

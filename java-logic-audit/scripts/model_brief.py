@@ -269,6 +269,37 @@ def cmd_triage(workspace, system, command_id=None):
             "cases": by_command.get(command_id, [])}
 
 
+def fix_numbers(raw):
+    import re
+    return {int(m.group(1)) for m in (re.match(r"fix-(\d+)\.json$", n) for n in (os.listdir(raw) if os.path.isdir(raw) else [])) if m}
+
+
+def next_fix(raw, brief_path):
+    """The number for the reply to a triage brief: the one it was promised before if nobody used it, else the next free one."""
+    import re
+    used = fix_numbers(raw)
+    promised = {}
+    briefs = os.path.join(raw, "briefs")
+    for name in os.listdir(briefs) if os.path.isdir(briefs) else []:
+        m = re.search(r"fix-(\d+)\.json$", (_lib.read_json(os.path.join(briefs, name), {}) or {}).get("save_reply_as") or "")
+        if name.startswith("triage-") and m:
+            promised[name] = int(m.group(1))
+    mine = promised.get(os.path.basename(brief_path))
+    if mine is not None and mine not in used:
+        return mine
+    return max(used | set(promised.values()) | {0}) + 1
+
+
+def latest_fix_of(raw, command_id):
+    """The number of the last correction that changed a command, or None."""
+    best = None
+    for n in sorted(fix_numbers(raw)):
+        body = _lib.read_json(os.path.join(raw, "fix-%02d.json" % n), {}) or {}
+        if any(isinstance(c, dict) and c.get("id") == command_id for c in body.get("commands", [])):
+            best = n
+    return best
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -302,14 +333,30 @@ def main(argv=None):
     else:
         out = cmd_triage(workspace, args.system, args.command)
     if getattr(args, "file", False):
-        # The agent reads the brief itself: nothing is retyped on the way, so nothing can change on the way.
+        # The agent reads the brief itself and writes its reply itself: nothing is retyped on the way in or
+        # on the way out, so nothing can change on the way.
         import re
+        import model_store
+        adir = _lib.audit_dir(workspace, args.system)
+        raw = os.path.join(adir, "model_raw")
         who = getattr(args, "shard", None) or getattr(args, "command", None) or "all"
         part = "-%d" % args.part if getattr(args, "part", 1) > 1 else ""
-        path = os.path.join(_lib.audit_dir(workspace, args.system), "model_raw", "briefs",
-                            "%s-%s%s.json" % (args.cmd, re.sub(r"[^A-Za-z0-9_.-]+", "_", who), part))
+        path = os.path.join(raw, "briefs", "%s-%s%s.json" % (args.cmd, re.sub(r"[^A-Za-z0-9_.-]+", "_", who), part))
+        if args.cmd == "triage" and not getattr(args, "command", None):
+            json.dump(out, sys.stdout, ensure_ascii=False, indent=1)     # the list of commands to look at: not a brief
+            sys.stdout.write("\n")
+            return 0
+        if args.cmd == "triage":
+            reply = "fix-%02d.json" % next_fix(raw, path)
+        elif args.cmd == "referee" and who.startswith("CMD-") and latest_fix_of(raw, who):
+            reply = "referee-fix-%02d-%s.json" % (latest_fix_of(raw, who), re.sub(r"[^A-Za-z0-9_.-]+", "-", who))
+        else:
+            name = model_store.file_name("mine" if args.cmd == "mine" else args.cmd, who)
+            reply = name[:-5] + part + ".json"
+        out["save_reply_as"] = os.path.relpath(os.path.join(raw, reply), workspace).replace(os.sep, "/")
         _lib.write_json(path, out)
         print("brief: %s" % os.path.relpath(path, workspace).replace(os.sep, "/"))
+        print("reply: %s" % out["save_reply_as"])
         if isinstance(out, dict) and out.get("parts", 1) > 1:
             print("parts: %d" % out["parts"])
         return 0
