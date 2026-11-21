@@ -49,6 +49,8 @@ counts. What the words mean:
   take effect, because the call does not go through the proxy.
 - **Unresolved** — a write the script could see but not read: SQL passed to `JdbcTemplate`, a native or
   modifying query. Step 2 settles these.
+- **Line** — the line the compiled class reports for the call. For a call written over several lines it
+  can be the last line of the call instead of the first.
 
 The call graph comes from compiled classes, with a call on an interface expanded to every implementation.
 It over-approximates: a path in the map may never run. It does not see reflection or dynamic proxies; the
@@ -84,8 +86,10 @@ look. Report what is there; do not judge whether it is intended. That is asked l
 - Orphan write sites, by id, with where they are.
 - Writes reached outside a transaction: the write site and the entry points.
 - Transactional methods called from their own class.
-- Columns of a lifecycle field (a status) that are written from more than one class: name the classes.
-  The next step compares the conditions each of them checks.
+- Lifecycle columns changed from more than one class, from the section *Lifecycle columns and who writes
+  them* (also `lifecycle_writers` in `map.json`): name the column and the classes. Setting the first value
+  when a row is created does not count as a change. The next step compares the conditions each of those
+  classes checks before it changes the column.
 - Message entry points with no destination found.
 - Tables with no mapped entity, and anything still unresolved.
 

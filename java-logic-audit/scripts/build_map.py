@@ -233,7 +233,8 @@ def build_entities(jpa, schema, profile):
             "references": refs,
             "collections": children,
             "lifecycle_candidates": lifecycle.get(cls, []),
-            "properties": {prop: p["columns"] for prop, p in e["properties"].items()},
+            "properties": dict({prop: p["columns"] for prop, p in e["properties"].items()},
+                               **({e["id"]["property"]: e["id"]["columns"]} if e["id"].get("property") else {})),
         }
     for e in by_class.values():
         for r in e["references"]:
@@ -384,6 +385,27 @@ def effective_transactions(graph, site, tx, handler_to_entries):
     return inside, bare
 
 
+def lifecycle_writers(entities, sites):
+    """For each lifecycle candidate of each entity: the classes that set it when a row is created, and
+    the classes that change it afterwards. A column changed from several classes is where the
+    conditions checked before the change are most likely to differ."""
+    out = []
+    for ent in sorted(entities.values(), key=lambda e: e["id"]):
+        for prop in ent["lifecycle_candidates"]:
+            for column in ent["properties"].get(prop, []):
+                rows = [s for s in sites if s["entity"] == ent["id"] and column in s["columns"]]
+                changed = collections.OrderedDict()
+                for s in rows:
+                    if s["kind"] != "create":
+                        changed.setdefault(class_of(s["site"]), []).append(s["id"])
+                out.append({
+                    "entity": ent["id"], "column": column,
+                    "set_at_creation_by": sorted({class_of(s["site"]) for s in rows if s["kind"] == "create"}),
+                    "changed_by": [{"class": c, "write_sites": ids} for c, ids in sorted(changed.items())],
+                })
+    return out
+
+
 def self_invocations(graph, transactions):
     """A transactional method called from another method of its own class: the call does not go through
     the proxy, so the annotation has no effect on that path."""
@@ -490,6 +512,7 @@ def build(workspace, system):
         "write_sites": sites,
         "orphan_write_sites": orphans,
         "unresolved": unresolved,
+        "lifecycle_writers": lifecycle_writers(entities, sites),
         "self_invocations": self_invocations(graph, context.get("transactions", [])),
         "tables_without_entity": unmapped_tables,
         "stats": {
@@ -513,6 +536,8 @@ def build(workspace, system):
 def render(m, shards):
     out = ["# Map of %s" % m["base_package"], "",
            "Built by `build_map.py` from the facts the harness extracted. Nothing in this file was written by hand.",
+           "", "Line numbers are the ones the compiled classes report. For a call written over several lines, the",
+           "line shown can be the last line of the call instead of the first.",
            "", "## Entry points", "", "| Id | Kind | What | Handler | Tables it can write |", "|---|---|---|---|---|"]
     for e in m["entries"]:
         what = ("%s %s" % (e["method"], e["path"])) if e["kind"] == "http" else \
@@ -526,8 +551,15 @@ def render(m, shards):
         out.append("| %s | `%s` | %s | %s | %s |" % (
             e["id"], simple(e["class"]), e["parent"]["entity"] if e["parent"] else "—",
             ", ".join(e["lifecycle_candidates"]) or "—", e["version_property"] or "—"))
-    if m["tables_without_entity"]:
-        out += ["", "Tables with no mapped entity: " + ", ".join("`%s`" % t for t in m["tables_without_entity"])]
+    out += ["", "Tables with no mapped entity: " + (", ".join("`%s`" % t for t in m["tables_without_entity"]) or "none")]
+    out += ["", "## Lifecycle columns and who writes them", "",
+            "A column changed from more than one class is where the conditions checked before the change can differ.",
+            "", "| Entity | Column | Set at creation by | Changed by |", "|---|---|---|---|"]
+    for w in m["lifecycle_writers"]:
+        changed = "; ".join("`%s` (%s)" % (simple(c["class"]), ", ".join(c["write_sites"])) for c in w["changed_by"])
+        out.append("| %s | %s | %s | %s |" % (
+            w["entity"], w["column"], ", ".join("`%s`" % simple(c) for c in w["set_at_creation_by"]) or "—",
+            changed or "nothing changes it after creation"))
     out += ["", "## Write sites", "",
             "One row per place outside an entity class that changes its columns. A row with no entry is an orphan:",
             "nothing known can reach it. `outside a transaction` names the entries from which the write is reached",

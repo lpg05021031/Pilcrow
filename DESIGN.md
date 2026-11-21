@@ -187,9 +187,10 @@ plugin 不提交也不推送。使用者自行決定何時提交 `audit/` 與 `s
 | `PREFLIGHT.md`、`profile.json` | `audit-preflight` | 五個回答、技術概況、適用性、各指令的就緒程度 |
 | `answers.json` | `audit-preflight` | 五個回答的原話，供後續指令讀取 |
 | `manifest.json` | `audit-preflight` | 主程式與既有測試的檔案清單與雜湊，用來檢查來源未被改動 |
-| `harness.json` | `audit-harness` | 載具設定（9.2） |
-| `facts/*.json` | `audit-harness` | 機械事實 |
-| `map.json`、`MAP.md` | `audit-map` | 入口、實體、寫入點表、孤兒寫入點 |
+| `harness.json`、`HARNESS.md` | `audit-harness` | 載具設定（9.2）；給人看的安裝說明與能力表 |
+| `facts/*.json` | `audit-harness` | 機械事實：schema、context、實體對映、位元組碼 |
+| `map.json`、`MAP.md`、`shards.json` | `build_map.py` | 入口、實體、寫入點表、各狀態欄位由誰寫入、孤兒寫入點、給模型階段的切分 |
+| `map_resolved.json` | `audit-map` | 腳本讀不出、由 `code-reader` 判讀出的寫入（資料表、欄位、引用行） |
 | `model_result.json` | `audit-model` | workflow 的原始結果，含被否決與未驗證的項目 |
 | `model/*.json`、`MODEL.md` | `audit-model` | 實體、命令、矩陣、不變量、成對路徑、蛻變關係 |
 | `recipes.json`、`effects/*.json` | `audit-characterize` | 到達配方、每個命令的效果軌跡 |
