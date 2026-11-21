@@ -72,6 +72,7 @@ class RaceRunner {
         try {
             run(results);
         } finally {
+            results.note("not_compared", new ArrayList<String>(Snapshot.setAside()));
             results.close();
             pool.shutdownNow();
         }
@@ -98,6 +99,8 @@ class RaceRunner {
             base.put("b_sha", pair.b.path("sha").asText(null));
             try {
                 Serial ab = serial(pair.a, pair.b);
+                // The same order once more: what two runs of one order disagree in is left out of the comparisons.
+                Snapshot.learn(ab.state, serial(pair.a, pair.b).state);
                 Serial ba = serial(pair.b, pair.a);
                 for (int side = 0; side < 2; side++) {
                     JsonNode first = side == 0 ? pair.a : pair.b;
@@ -285,7 +288,7 @@ class RaceRunner {
         }
         s.stepsOfFirst = lane.steps;
         s.second = answer(scenario.tryStep(second.get("command").asText(), second.get("with"), null, context));
-        s.state = Snapshot.withoutKeys(Snapshot.take());
+        s.state = Snapshot.take();          // as it is: what is left out of a comparison is decided when comparing
         return s;
     }
 
@@ -340,8 +343,10 @@ class RaceRunner {
             f2.cancel(true);
         }
         Map<String, List<Map<String, String>>> state = Snapshot.withoutKeys(Snapshot.take());
-        boolean asFirstThenSecond = state.equals(firstThenSecond.state) && a1.equals(firstThenSecond.first) && a2.equals(firstThenSecond.second);
-        boolean asSecondThenFirst = state.equals(secondThenFirst.state) && a2.equals(secondThenFirst.first) && a1.equals(secondThenFirst.second);
+        Map<String, List<Map<String, String>>> stateOfFirstThenSecond = Snapshot.withoutKeys(firstThenSecond.state);
+        Map<String, List<Map<String, String>>> stateOfSecondThenFirst = Snapshot.withoutKeys(secondThenFirst.state);
+        boolean asFirstThenSecond = state.equals(stateOfFirstThenSecond) && a1.equals(firstThenSecond.first) && a2.equals(firstThenSecond.second);
+        boolean asSecondThenFirst = state.equals(stateOfSecondThenFirst) && a2.equals(secondThenFirst.first) && a1.equals(secondThenFirst.second);
         List<String> broken = new ArrayList<String>();
         Connection c = EffectRecorder.raw().getConnection();
         try {
@@ -366,7 +371,7 @@ class RaceRunner {
             differs.add("rule-broken");
         }
         if (!hung && !asFirstThenSecond && !asSecondThenFirst) {
-            boolean stateOk = state.equals(firstThenSecond.state) || state.equals(secondThenFirst.state);
+            boolean stateOk = state.equals(stateOfFirstThenSecond) || state.equals(stateOfSecondThenFirst);
             differs.add(stateOk ? "answers-of-no-order" : "data-of-no-order");
         }
         detail.put("second_waited", waited);

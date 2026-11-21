@@ -46,6 +46,8 @@ class FaultRunner {
     @AfterAll
     static void finish() {
         if (results != null) {
+            // What the comparisons left out because two undisturbed runs do not agree in it: said, not hidden.
+            results.note("not_compared", new ArrayList<String>(Snapshot.setAside()));
             results.close();
         }
     }
@@ -119,8 +121,14 @@ class FaultRunner {
                 results.record("FAULT-" + number, ResultWriter.SKIPPED, null, null, detail, null);
                 return;
             }
-            Map<String, List<Map<String, String>>> wanted = Snapshot.withoutKeys(Snapshot.take());
+            Map<String, List<Map<String, String>>> once = Snapshot.take();
             List<String> cleanSent = goesOut(clean);
+            // The same call once more, undisturbed: what two undisturbed calls disagree in (a time of day, a
+            // number drawn at random) cannot tell a disturbed call from them, and is left out of the comparisons.
+            ObjectNode sameAgain = scenario.prepare(cell.path("fixture").asText(null), cell.get("steps"));
+            scenario.observe(command, cell.get("with"), sameAgain);
+            Snapshot.learn(once, Snapshot.take());
+            Map<String, List<Map<String, String>>> wanted = Snapshot.withoutKeys(once);
 
             // The steps of the undisturbed call, in order of kind.
             Map<String, Integer> steps = new LinkedHashMap<String, Integer>();

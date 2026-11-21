@@ -41,37 +41,180 @@ public final class Snapshot {
         return out;
     }
 
+    /** Columns that two executions of the same thing were seen to disagree in, as "table.column" ("table.*": the whole table). */
+    private static final java.util.Set<String> SET_ASIDE = java.util.Collections.synchronizedSet(new java.util.TreeSet<String>());
+    private static final Map<String, java.util.Set<String>> KEYS = new java.util.concurrent.ConcurrentHashMap<String, java.util.Set<String>>();
+    private static boolean timesLooked;
+
     /**
-     * The same snapshot without key columns: primary keys and the columns that refer to them.
-     * After a failed attempt the database has handed out numbers it will not hand out again, so a
-     * second attempt gets other keys; what must be the same is everything else.
+     * The form two snapshots are compared in: without key columns (primary keys and the columns that
+     * refer to them: after a failed attempt the database has handed out numbers it will not hand out
+     * again, so a second attempt gets other keys), and without the columns that cannot be the same in
+     * two executions of the same thing — a time read from a clock the audit does not hold, a number
+     * drawn at random. Which those are is learned (see learn) and, where the application's clock is
+     * not the audit's, every date and time column is one.
      */
     public static Map<String, List<Map<String, String>>> withoutKeys(Map<String, List<Map<String, String>>> snapshot) {
+        Map<String, List<Map<String, String>>> bare = keysRemoved(snapshot);
+        java.util.Set<String> aside = setAside();
+        if (aside.isEmpty()) {
+            return bare;
+        }
         Map<String, List<Map<String, String>>> out = new TreeMap<String, List<Map<String, String>>>();
+        for (Map.Entry<String, List<Map<String, String>>> t : bare.entrySet()) {
+            if (aside.contains(t.getKey() + ".*")) {
+                continue;
+            }
+            List<Map<String, String>> rows = new ArrayList<Map<String, String>>();
+            for (Map<String, String> row : t.getValue()) {
+                Map<String, String> kept = new LinkedHashMap<String, String>();
+                for (Map.Entry<String, String> col : row.entrySet()) {
+                    if (!aside.contains(t.getKey() + "." + col.getKey())) {
+                        kept.put(col.getKey(), col.getValue());
+                    }
+                }
+                rows.add(kept);
+            }
+            out.put(t.getKey(), rows);
+        }
+        return out;
+    }
+
+    /**
+     * Learns from two snapshots taken after the same thing was done twice, from the same start, which
+     * columns do not come out the same: they are left out of every later comparison. Without this, an
+     * application that stamps rows with the time of day would differ from itself and every comparison
+     * with a disturbed run would report a difference that is not one.
+     */
+    public static void learn(Map<String, List<Map<String, String>>> once, Map<String, List<Map<String, String>>> again) {
+        Map<String, List<Map<String, String>>> a = keysRemoved(once);
+        Map<String, List<Map<String, String>>> b = keysRemoved(again);
+        for (Map.Entry<String, List<Map<String, String>>> t : a.entrySet()) {
+            List<Map<String, String>> other = b.get(t.getKey());
+            if (other == null || other.size() != t.getValue().size()) {
+                SET_ASIDE.add(t.getKey() + ".*");
+                continue;
+            }
+            for (int i = 0; i < other.size(); i++) {
+                for (Map.Entry<String, String> col : t.getValue().get(i).entrySet()) {
+                    String theirs = other.get(i).get(col.getKey());
+                    if (col.getValue() == null ? theirs != null : !col.getValue().equals(theirs)) {
+                        SET_ASIDE.add(t.getKey() + "." + col.getKey());
+                    }
+                }
+            }
+        }
+    }
+
+    /** What comparisons leave out besides keys, as "table.column". */
+    public static java.util.Set<String> setAside() {
+        synchronized (Snapshot.class) {
+            if (!timesLooked) {
+                timesLooked = true;
+                if (!AuditClock.controlled()) {
+                    SET_ASIDE.addAll(temporalColumns());
+                }
+            }
+        }
+        synchronized (SET_ASIDE) {
+            return new java.util.TreeSet<String>(SET_ASIDE);
+        }
+    }
+
+    private static java.util.Set<String> temporalColumns() {
+        java.util.Set<String> out = new java.util.TreeSet<String>();
         try {
             Connection c = EffectRecorder.raw().getConnection();
             try {
+                String schema = null;
+                try {
+                    schema = c.getSchema();
+                } catch (SQLException e) {
+                    // unsupported
+                } catch (AbstractMethodError e) {
+                    // unsupported
+                }
                 for (String table : DbReset.tables(c)) {
-                    java.util.Set<String> keys = new java.util.HashSet<String>();
-                    for (String k : primaryKey(c, table)) {
-                        keys.add(k.toLowerCase(Locale.ROOT));
-                    }
-                    String schema = null;
-                    try {
-                        schema = c.getSchema();
-                    } catch (SQLException e) {
-                        // unsupported
-                    } catch (AbstractMethodError e) {
-                        // unsupported
-                    }
-                    ResultSet rs = c.getMetaData().getImportedKeys(c.getCatalog(), schema, table);
+                    ResultSet rs = c.getMetaData().getColumns(c.getCatalog(), schema, table, "%");
                     try {
                         while (rs.next()) {
-                            keys.add(rs.getString("FKCOLUMN_NAME").toLowerCase(Locale.ROOT));
+                            int type = rs.getInt("DATA_TYPE");
+                            if (type == java.sql.Types.DATE || type == java.sql.Types.TIME || type == java.sql.Types.TIMESTAMP
+                                    || type == 2013 || type == 2014) {          // the two "with time zone" types of JDBC 4.2
+                                out.add(table.toLowerCase(Locale.ROOT) + "." + rs.getString("COLUMN_NAME").toLowerCase(Locale.ROOT));
+                            }
                         }
                     } finally {
                         rs.close();
                     }
+                }
+            } finally {
+                c.close();
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("reading the column types failed", e);
+        }
+        return out;
+    }
+
+    /** The key columns of a table: its primary key, declared references, and columns named after another table. */
+    private static java.util.Set<String> keyColumns(Connection c, String table, List<String> tables) throws SQLException {
+        java.util.Set<String> known = KEYS.get(table);
+        if (known != null) {
+            return known;
+        }
+        java.util.Set<String> keys = new java.util.HashSet<String>();
+        for (String k : primaryKey(c, table)) {
+            keys.add(k.toLowerCase(Locale.ROOT));
+        }
+        String schema = null;
+        try {
+            schema = c.getSchema();
+        } catch (SQLException e) {
+            // unsupported
+        } catch (AbstractMethodError e) {
+            // unsupported
+        }
+        ResultSet rs = c.getMetaData().getImportedKeys(c.getCatalog(), schema, table);
+        try {
+            while (rs.next()) {
+                keys.add(rs.getString("FKCOLUMN_NAME").toLowerCase(Locale.ROOT));
+            }
+        } finally {
+            rs.close();
+        }
+        // Many schemas declare no references at all. A column named after another table and "_id"
+        // (order_id beside a table "order" or "shop_order") is taken for a reference to it.
+        rs = c.getMetaData().getColumns(c.getCatalog(), schema, table, "%");
+        try {
+            while (rs.next()) {
+                String column = rs.getString("COLUMN_NAME").toLowerCase(Locale.ROOT);
+                if (column.endsWith("_id") && column.length() > 3) {
+                    String stem = column.substring(0, column.length() - 3);
+                    for (String other : tables) {
+                        String name = other.toLowerCase(Locale.ROOT);
+                        if (name.equals(stem) || name.endsWith("_" + stem)) {
+                            keys.add(column);
+                            break;
+                        }
+                    }
+                }
+            }
+        } finally {
+            rs.close();
+        }
+        KEYS.put(table, keys);
+        return keys;
+    }
+
+    private static Map<String, List<Map<String, String>>> keysRemoved(Map<String, List<Map<String, String>>> snapshot) {
+        Map<String, List<Map<String, String>>> out = new TreeMap<String, List<Map<String, String>>>();
+        try {
+            Connection c = EffectRecorder.raw().getConnection();
+            try {
+                List<String> tables = DbReset.tables(c);
+                for (String table : tables) {
+                    java.util.Set<String> keys = keyColumns(c, table, tables);
                     List<Map<String, String>> rows = new ArrayList<Map<String, String>>();
                     List<Map<String, String>> original = snapshot.get(table.toLowerCase(Locale.ROOT));
                     for (Map<String, String> row : original == null ? new ArrayList<Map<String, String>>() : original) {
