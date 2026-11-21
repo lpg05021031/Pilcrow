@@ -358,6 +358,4 @@ In the session (not in the file), print your checks table, then end with two lin
   Otherwise write "none", and name the ⚠️ most worth settling, if there is one.
 - **Next step:** when a row is ❌, the next step is to fix it and run
   `/java-logic-audit:audit-preflight $system` again. Otherwise it is
-  `/java-logic-audit:audit-harness $system`; if the file `${CLAUDE_PLUGIN_ROOT}/commands/audit-harness.md`
-  does not exist, say that this command is not in this version of the plugin yet, and do not improvise
-  its work.
+  `/java-logic-audit:audit-harness $system`.

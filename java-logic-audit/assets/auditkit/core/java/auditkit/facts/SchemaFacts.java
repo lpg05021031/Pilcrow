@@ -19,6 +19,38 @@ public final class SchemaFacts {
     private SchemaFacts() {
     }
 
+    /**
+     * The isolation level the server gives a new connection. Asked of the server itself: what a driver's
+     * metadata answers here is a constant of the driver (one MySQL driver says READ COMMITTED whatever
+     * the server is set to), and a wrong answer would read as a difference from production.
+     */
+    static String serverDefault(Connection c, DatabaseMetaData meta) throws SQLException {
+        String product = String.valueOf(meta.getDatabaseProductName()).toLowerCase(Locale.ROOT);
+        String[] asks = product.contains("mysql") || product.contains("mariadb")
+                ? new String[] {"select @@global.transaction_isolation", "select @@global.tx_isolation"}
+                : product.contains("postgres") ? new String[] {"show default_transaction_isolation"} : new String[0];
+        for (String ask : asks) {
+            try {
+                java.sql.Statement st = c.createStatement();
+                try {
+                    ResultSet rs = st.executeQuery(ask);
+                    try {
+                        if (rs.next() && rs.getString(1) != null) {
+                            return rs.getString(1).trim().toUpperCase(Locale.ROOT).replace('-', '_').replace(' ', '_');
+                        }
+                    } finally {
+                        rs.close();
+                    }
+                } finally {
+                    st.close();
+                }
+            } catch (SQLException e) {
+                // an older server does not know this name: try the next, then the driver's answer
+            }
+        }
+        return isolation(meta.getDefaultTransactionIsolation());
+    }
+
     public static Map<String, Object> collect() throws SQLException {
         Map<String, Object> out = new LinkedHashMap<String, Object>();
         Connection c = EffectRecorder.raw().getConnection();
@@ -29,7 +61,7 @@ public final class SchemaFacts {
             engine.put("version", meta.getDatabaseProductVersion());
             engine.put("major", meta.getDatabaseMajorVersion());
             engine.put("minor", meta.getDatabaseMinorVersion());
-            engine.put("default_isolation", isolation(meta.getDefaultTransactionIsolation()));
+            engine.put("default_isolation", serverDefault(c, meta));
             engine.put("connection_isolation", isolation(c.getTransactionIsolation()));
             out.put("engine", engine);
 

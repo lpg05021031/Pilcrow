@@ -189,6 +189,4 @@ Show the printed line of each script of steps 4 and 5 unchanged. Then, in at mos
 Never call an open question a bug. Until a person answers, it is an observation with evidence.
 
 End with the next step: with open flagged questions, `/java-logic-audit:audit-review $system`; with none,
-`/java-logic-audit:audit-verify $system`. For either, if its file under `${CLAUDE_PLUGIN_ROOT}/commands/`
-does not exist, say that this command is not in this version of the plugin yet, and do not improvise
-its work.
+`/java-logic-audit:audit-verify $system`.

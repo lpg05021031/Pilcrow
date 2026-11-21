@@ -118,6 +118,4 @@ Show the script's line of counts unchanged, then in at most ten lines:
 Do not describe what the code does well or badly: no claim has been run yet. Say that `MODEL.md` is the
 readable form and that the next step executes it.
 
-End with the next step: `/java-logic-audit:audit-characterize $system`. If the file
-`${CLAUDE_PLUGIN_ROOT}/commands/audit-characterize.md` does not exist, say that this command is not in
-this version of the plugin yet, and do not improvise its work.
+End with the next step: `/java-logic-audit:audit-characterize $system`.

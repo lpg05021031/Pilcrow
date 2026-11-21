@@ -95,6 +95,4 @@ look. Report what is there; do not judge whether it is intended. That is asked l
 
 Write nothing else to disk: `MAP.md` already holds all of it.
 
-End with the next step: `/java-logic-audit:audit-model $system`. If the file
-`${CLAUDE_PLUGIN_ROOT}/commands/audit-model.md` does not exist, say that this command is not in this
-version of the plugin yet, and do not improvise its work.
+End with the next step: `/java-logic-audit:audit-model $system`.

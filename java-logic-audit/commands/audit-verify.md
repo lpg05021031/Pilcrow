@@ -126,6 +126,4 @@ End with the next step. With open flagged questions, or candidate rules not yet 
 `/java-logic-audit:audit-review $system all` (the word `all` includes the "is this a rule?" questions).
 After answers that confirm rules, this command is worth running again: the sequences then check them as
 rules. Otherwise the next step is `/java-logic-audit:audit-spec $system` when `INTENT.md` names a PRD, else
-`/java-logic-audit:audit-assure $system`. For either, if its file under `${CLAUDE_PLUGIN_ROOT}/commands/`
-does not exist, say that this command is not in this version of the plugin yet, and do not improvise
-its work.
+`/java-logic-audit:audit-assure $system`.

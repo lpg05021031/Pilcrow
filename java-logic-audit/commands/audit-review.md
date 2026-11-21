@@ -125,6 +125,4 @@ unchanged. Then say these things plainly:
 - decisions are in `DECISIONS.md` for good: a later run does not ask again, and a different answer later
   is recorded as a new decision that supersedes the old one.
 
-The plugin does not fix anything. End with the next step: `/java-logic-audit:audit-verify $system`. If the
-file `${CLAUDE_PLUGIN_ROOT}/commands/audit-verify.md` does not exist, say that this command is not in this
-version of the plugin yet, and do not improvise its work.
+The plugin does not fix anything. End with the next step: `/java-logic-audit:audit-verify $system`.

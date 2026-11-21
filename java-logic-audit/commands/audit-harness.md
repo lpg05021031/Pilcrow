@@ -160,6 +160,4 @@ In the session, show the capabilities output and end with two lines:
 - **Most important fix:** the one thing that would raise a ceiling or make a failing check pass; "none"
   when all six checks pass and every ceiling is A.
 - **Next step:** if a check still fails, fixing it and running `/java-logic-audit:audit-harness $system`
-  again. Otherwise `/java-logic-audit:audit-map $system`; if the file
-  `${CLAUDE_PLUGIN_ROOT}/commands/audit-map.md` does not exist, say that this command is not in this
-  version of the plugin yet, and do not improvise its work.
+  again. Otherwise `/java-logic-audit:audit-map $system`.
