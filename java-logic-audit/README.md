@@ -16,7 +16,8 @@ This is a work in progress, built milestone by milestone (design section 18).
 | M1 | auditkit core, `audit-harness`, `audit-map` | done |
 | M2 | `audit-model`, `audit-characterize`, `audit-review`, the judge script | built; on sample 1 a model derived by fresh agents covers all 57 behaviours of the reviewed model. Not yet run on a real system |
 | M3 | `audit-verify`: failures injected into every step, random sequences with rules of the data | built and run on sample 1. Not built: comparing paths that should agree (preview against commit), relations between calls, rules derived from the code's own checks |
-| M4–M6 | concurrency, PRD trace, assurance, report, more stacks | not started |
+| M4 | `audit-verify` also runs two commands at once, stopping one between its database steps | built and run on sample 1: one stop per schedule, pairs chosen from cases that share a starting situation |
+| M5–M6 | PRD trace, assurance, report, more stacks | not started |
 
 Commands that belong to a later milestone are named by `audit-status` as the next step but are not
 installed yet.
@@ -48,7 +49,7 @@ exact next command.
 | `audit-model <system> [pattern]` | The command model: for each entry point, the facts its checks look at, the checks in order, and what an allowed call writes. Claims with line numbers, each re-derived by a second reader |
 | `audit-characterize <system>` | Every case of every command executed on the application: what agrees is pinned, what differs or would surprise a caller becomes a question with the cases that show it |
 | `audit-review <system> [flagged\|all]` | Your answers to those questions, kept for good. "Not intended" becomes a defect that the cases reproduce until the code changes |
-| `audit-verify <system> [faults\|sequences\|all]` | What a failure in the middle of a call leaves behind (data in between, something sent that was not kept, a retry that does not converge); and rules of the data checked after every call of random sequences, with the shortest sequence that breaks one |
+| `audit-verify <system> [faults\|races\|sequences\|all]` | Whether two commands at the same time leave what one after the other would; what a failure in the middle of a call leaves behind (data in between, something sent that was not kept, a retry that does not converge); and rules of the data checked after every call of random sequences, with the shortest sequence that breaks one |
 | `audit-status <system>` | Progress, what is stale, the next command |
 
 Preflight writes four files under `audit/<system>/`:
@@ -88,9 +89,8 @@ The verify step adds `model/invariants.json` (candidate rules from fixed templat
 what the runs showed about each; written by `scripts/invariants.py`) and the runs of the failure and
 sequence checks.
 
-What the verdict can say today: an entity is at most "reviewed in part", because two of the seven
-checks behind "reviewed completely" (concurrency, guard canary) are not built yet. The verdict says so
-itself.
+What the verdict can say today: an entity is at most "reviewed in part", because one of the seven
+checks behind "reviewed completely" (the guard canary) is not built yet. The verdict says so itself.
 
 Settings live in `INTENT.md` (`language`, `budget`), not in plugin options: every command reads files, so
 a second person or a fresh session continues from the same state.
