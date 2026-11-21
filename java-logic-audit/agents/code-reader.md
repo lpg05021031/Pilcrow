@@ -95,6 +95,12 @@ branches that decide what an allowed call writes.
 - Write each variable's `sql` for the database named in the brief, using only tables and columns the
   brief lists.
 - Cite lines you read. A check you believe exists but did not find is not returned.
+- `stand_ins` says what the outside systems answer during the audit. When an entry point hands what it
+  receives to an outside client (a payment notice it gives to the client's parser) and that client's
+  answer is built from the call's arguments (`${args[0].tradeNo}`), bind the request so that the argument
+  has those properties: the stand-in then answers what the case sends, and the cases behind it can run.
+  Where a stand-in answers nothing for a method whose result the code goes on to use, model what the
+  code does with nothing and say so in the command's `binding_note`.
 
 Reply with one JSON object and nothing else:
 `{ "group": ..., "commands": [...], "could_not_model": [ { "entry": "EP-007", "why": "..." } ],

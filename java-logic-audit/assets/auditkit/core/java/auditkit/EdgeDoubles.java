@@ -203,7 +203,11 @@ public final class EdgeDoubles {
         return answerMapper;
     }
 
-    /** An argument as the templates see it: text that is JSON is read as JSON, an object by its properties. */
+    /**
+     * An argument as the templates see it: text that is JSON is read as JSON, text that is XML as an
+     * object with one property for each element under the root (by the element's name), and an object
+     * by its properties.
+     */
     static JsonNode asJson(Object arg) {
         if (arg == null) {
             return AuditConfig.JSON.getNodeFactory().nullNode();
@@ -220,6 +224,13 @@ public final class EdgeDoubles {
                     // not JSON after all
                 }
             }
+            if (text.startsWith("<")) {
+                try {
+                    return fromXml(text);
+                } catch (Exception e) {
+                    // not XML after all
+                }
+            }
             return AuditConfig.JSON.getNodeFactory().textNode(arg.toString());
         }
         try {
@@ -227,6 +238,30 @@ public final class EdgeDoubles {
         } catch (RuntimeException e) {
             return AuditConfig.JSON.getNodeFactory().textNode(String.valueOf(arg));
         }
+    }
+
+    /** The elements under an XML document's root as an object; nothing outside the text itself is ever fetched. */
+    static JsonNode fromXml(String text) throws Exception {
+        javax.xml.parsers.DocumentBuilderFactory f = javax.xml.parsers.DocumentBuilderFactory.newInstance();
+        f.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        f.setXIncludeAware(false);
+        f.setExpandEntityReferences(false);
+        org.w3c.dom.Document doc = f.newDocumentBuilder().parse(new org.xml.sax.InputSource(new java.io.StringReader(text)));
+        return element(doc.getDocumentElement());
+    }
+
+    private static JsonNode element(org.w3c.dom.Element e) {
+        ObjectNode out = AuditConfig.JSON.createObjectNode();
+        org.w3c.dom.NodeList children = e.getChildNodes();
+        boolean any = false;
+        for (int i = 0; i < children.getLength(); i++) {
+            if (children.item(i) instanceof org.w3c.dom.Element) {
+                org.w3c.dom.Element child = (org.w3c.dom.Element) children.item(i);
+                out.set(child.getTagName(), element(child));
+                any = true;
+            }
+        }
+        return any ? out : AuditConfig.JSON.getNodeFactory().textNode(e.getTextContent().trim());
     }
 
     private static Throwable failure(String className, String message) throws Exception {

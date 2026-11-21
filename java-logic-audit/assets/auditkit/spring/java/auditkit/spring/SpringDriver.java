@@ -214,11 +214,8 @@ public final class SpringDriver implements SutDriver {
         return request;
     }
 
-    /** The value a case gives a parameter that must not be in the request at all (as opposed to being sent as null). */
-    static final String ABSENT = "_absent";
-
     private static boolean isAbsent(JsonNode value) {
-        return value != null && value.isTextual() && ABSENT.equals(value.asText());
+        return auditkit.Sql.isAbsent(value);
     }
 
     /**

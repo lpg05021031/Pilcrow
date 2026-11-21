@@ -145,6 +145,7 @@ def cmd_mine(workspace, system, name):
                      **({"result_code": harness["result_code"]} if harness.get("result_code") else {})},
         **({"signed_in_as": {"users": callers(harness), "how": CALLERS_NOTE}} if callers(harness) else {}),
         "database": (_lib.read_json(os.path.join(adir, "facts", "schema.json"), {}) or {}).get("engine"),
+        "stand_ins": stand_ins(harness),
     }
 
 

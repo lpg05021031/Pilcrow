@@ -22,6 +22,13 @@ public final class Sql {
      * The first column of the first row, as text; "null" when there is no row or the value is null.
      * Booleans come back as "true" or "false" whatever the engine calls them.
      */
+    /** The value a case gives a parameter that must not be in the request at all (as opposed to being sent as null). */
+    public static final String ABSENT = "_absent";
+
+    public static boolean isAbsent(JsonNode value) {
+        return value != null && value.isTextual() && ABSENT.equals(value.asText());
+    }
+
     public static String scalar(String sql, JsonNode params) {
         // The queries come from a model written after reading untrusted code: only a single SELECT is run.
         String shape = sql == null ? "" : sql.trim().toLowerCase(java.util.Locale.ROOT);
@@ -44,8 +51,8 @@ public final class Sql {
                 try {
                     for (int i = 0; i < names.size(); i++) {
                         JsonNode v = params == null ? null : params.get(names.get(i));
-                        if (v == null || v.isNull()) {
-                            ps.setObject(i + 1, null);
+                        if (v == null || v.isNull() || isAbsent(v)) {
+                            ps.setObject(i + 1, null);          // a parameter the case leaves out of the request has no value
                         } else if (v.isIntegralNumber()) {
                             ps.setLong(i + 1, v.asLong());
                         } else if (v.isNumber()) {

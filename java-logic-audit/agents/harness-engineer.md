@@ -132,8 +132,10 @@ says nothing about the application:
 - `returns` is JSON that the method's return type is read from (its property names, as the class has
   them; a plain value for a number, a text or a boolean). Read the return type's class to get the names
   right: the smoke run fails the double when a method does not exist or its answer cannot be read.
-- `${args[0]}` is the call's first argument; an argument that is JSON text or an object is reached into
-  (`${args[0].tradeNo}`). Build an answer from the arguments wherever the outside system would echo or
+- `${args[0]}` is the call's first argument; an argument that is an object, JSON text or XML text is
+  reached into (`${args[0].tradeNo}`; for XML by the element names under the root, `${args[0].out_trade_no}`).
+  Name the properties as the application's caller really sends them: read the code that builds or
+  receives that text. Build an answer from the arguments wherever the outside system would echo or
   judge what it was sent: a case can then decide what the outside system "says" by what it sends, and
   one configuration serves the paid and the failed notice alike.
 - `throws` names an exception class to throw instead, for a method whose ordinary result is a failure.
