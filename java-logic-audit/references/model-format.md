@@ -13,7 +13,9 @@ command per value: `CMD-proposeChange.QTY`, `CMD-proposeChange.DATE`. The discri
 stored value (the type of the request being committed): the variants then share one binding, and the
 recipes are what make the stored value differ. The case in which the discriminator itself is missing or
 invalid belongs to none of the variants: when the code checks it, write it once as a variant of its own
-(`CMD-proposeChange.NONE`) whose binding leaves the field out.
+(`CMD-proposeChange.NONE`) whose binding leaves the field out. Such a variant has one variable with one
+value and one guard that refuses it; its base case is that refusal, which is allowed only for a command
+with nothing else to vary.
 
 ```json
 {

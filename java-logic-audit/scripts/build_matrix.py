@@ -146,7 +146,11 @@ def check_command(command):
             if "." not in w:
                 problems.append("%s: branch %s writes %r; name the column as table.column" % (cid, b.get("id"), w))
     base_valuation = {k: text(v) for k, v in base.items()}
-    if not problems and static_outcome(command, base_valuation)["outcome"] not in ("allowed", command.get("default_outcome", "allowed")):
+    # A refused base would hide every other case behind the guard that refuses it. A command with nothing
+    # else to vary (a variant that only exists to show one refusal) has no other case to hide.
+    other_cases = sum(len(v.get("domain", [])) - 1 for v in command.get("vars", []))
+    if not problems and other_cases > 0 \
+            and static_outcome(command, base_valuation)["outcome"] not in ("allowed", command.get("default_outcome", "allowed")):
         problems.append("%s: in the base case a guard already refuses; the base must be a case every guard lets through" % cid)
     return problems
 

@@ -125,6 +125,11 @@ class Checks(unittest.TestCase):
                       " ".join(build_matrix.check_command(command(base={"status": "GONE", "qty": "ok", "flag": False}))))
         self.assertIn("base must be a case every guard lets through",
                       " ".join(build_matrix.check_command(command(base={"status": "DONE", "qty": "ok", "flag": False}))))
+        # a variant that only shows one refusal has nothing a refused base could hide
+        only = command(vars=[{"name": "shape", "kind": "param", "domain": ["type-missing"]}], base={"shape": "type-missing"},
+                       guards=[{"id": "G1", "when": {"var": "shape", "is": "type-missing"}, "outcome": "rejected", "code": "INVALID"}])
+        self.assertEqual(build_matrix.check_command(only), [])
+        self.assertEqual(build_matrix.cells_of(only, {})[0]["static"]["code"], "INVALID")
         bad = command()
         bad["guards"].append({"id": "G9", "when": {"var": "nope", "is": 1}, "outcome": "rejected"})
         self.assertIn("mentions nope", " ".join(build_matrix.check_command(bad)))
