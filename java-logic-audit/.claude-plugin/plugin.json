@@ -1,6 +1,6 @@
 {
   "name": "java-logic-audit",
-  "version": "0.1.0",
+  "version": "0.9.0",
   "description": "Rigorous, evidence-graded audit of the business logic in a stateful Java backend: start with /java-logic-audit:audit, get a model of what the code actually does (entry points, entity states, a command-by-state matrix, invariants), have it executed against the real code, answer only the questions a person must answer, and receive findings whose grades are computed by a script from result files. The steps: preflight, harness, map, model, characterization, review, verification (failures injected into every step, two commands at the same time, random sequences against rules of the data), a clause-by-clause trace against a specification, checks of the audit's own work (an independent reader for every finding, a guard canary, seeded defects), a report, and a rerun after the code changes. Built and exercised on one sample (Spring Boot 3, JPA, PostgreSQL, Maven); not yet run on a real system.",
   "author": {
     "name": "java-logic-audit contributors"

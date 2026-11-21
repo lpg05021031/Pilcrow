@@ -33,6 +33,13 @@ Install it from this repository (Claude Code 2.1.275 or later):
 /plugin install java-logic-audit --marketplace lpg05021031/Pilcrow
 ```
 
+or, from the one-file installer (`python3 tools/make_installer.py` in this repository builds it), which
+unpacks the plugin as a marketplace in a local directory and prints the two commands to add and install it:
+
+```
+sh java-logic-audit-<version>.sh [directory]
+```
+
 or load it from a checkout without installing:
 
 ```
