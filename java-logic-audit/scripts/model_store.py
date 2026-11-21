@@ -74,6 +74,7 @@ def collect(workspace, system):
     verdicts, bad = replies(adir, "referee")
     gaps += ["%s is not a JSON object and was not used" % b for b in bad]
     for name, body in verdicts:
+        flagged += [x for x in body.get("instruction_shaped", []) if isinstance(x, dict)]
         for v in body.get("verdicts", []):
             if isinstance(v, dict):
                 referee.append(dict(v, command=v.get("command") or body.get("command")))
