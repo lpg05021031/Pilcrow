@@ -291,12 +291,11 @@ class Baseline(unittest.TestCase):
 
 
 class Manifest(unittest.TestCase):
-    POM = "<project>\n  <modelVersion>4.0.0</modelVersion>\n  <profiles>\n%s  </profiles>\n</project>\n"
-    BLOCK = "    <!-- java-logic-audit:begin -->\n    <profile><id>audit</id></profile>\n    <!-- java-logic-audit:end -->\n"
+    POM = "<project>\n  <modelVersion>4.0.0</modelVersion>\n</project>\n"
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp(prefix="jla-test-")
-        write(self.tmp, "pom.xml", self.POM % "")
+        write(self.tmp, "pom.xml", self.POM)
         write(self.tmp, "src/main/java/a/A.java", "class A {}\n")
         write(self.tmp, "src/test/java/a/ATest.java", "class ATest {}\n")
         self.path = os.path.join(self.tmp, "audit", "sys", "manifest.json")
@@ -308,16 +307,14 @@ class Manifest(unittest.TestCase):
     def test_untouched(self):
         self.assertEqual("untouched", manifest.check(self.tmp, self.path)["status"])
 
-    def test_the_plugins_own_files_and_block_are_allowed(self):
-        write(self.tmp, "pom.xml", self.POM % self.BLOCK)
+    def test_the_plugins_own_files_are_not_tracked(self):
+        write(self.tmp, "pom-audit.xml", self.POM.replace("</project>", "<profiles/></project>"))
         write(self.tmp, "src/audit/java/auditkit/Runner.java", "class Runner {}\n")
         write(self.tmp, "audit/sys/model/entities.json", "{}")
-        r = manifest.check(self.tmp, self.path)
-        self.assertEqual("untouched", r["status"])
-        self.assertEqual(["pom.xml"], r["audit_block_in"])
+        self.assertEqual("untouched", manifest.check(self.tmp, self.path)["status"])
 
-    def test_any_other_change_is_reported(self):
-        write(self.tmp, "pom.xml", (self.POM % self.BLOCK).replace("4.0.0", "4.0.1"))
+    def test_any_change_to_an_existing_file_is_reported(self):
+        write(self.tmp, "pom.xml", self.POM.replace("</project>", "  <!-- a comment -->\n</project>"))
         write(self.tmp, "src/main/java/a/A.java", "class A { int x; }\n")
         write(self.tmp, "src/main/java/a/New.java", "class New {}\n")
         os.remove(os.path.join(self.tmp, "src/test/java/a/ATest.java"))

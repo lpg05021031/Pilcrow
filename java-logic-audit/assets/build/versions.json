@@ -1,0 +1,15 @@
+{
+  "looked_up": "2026-11-21",
+  "note": "Versions the harness adds when the project's own dependency management does not provide them. Looked up on Maven Central on the date above; update them here, never from memory.",
+  "default": {
+    "net.ttddyy:datasource-proxy": "1.11.1",
+    "com.tngtech.archunit:archunit": "1.5.1",
+    "org.codehaus.mojo:build-helper-maven-plugin": "3.8.0",
+    "org.pitest:pitest-maven": "1.30.2",
+    "org.junit.jupiter:junit-jupiter": "5.12.2",
+    "org.mockito:mockito-core": "5.17.0"
+  },
+  "jdk8": {
+    "org.mockito:mockito-core": "4.11.0"
+  }
+}

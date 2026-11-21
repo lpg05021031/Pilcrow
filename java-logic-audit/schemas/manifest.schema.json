@@ -5,7 +5,6 @@
     "schema": { "type": "integer", "enum": [1] },
     "recorded": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T" },
     "count": { "type": "integer", "minimum": 0 },
-    "audit_block_present_at_record": { "type": "array", "items": { "type": "string" } },
     "files": {
       "type": "object",
       "additionalProperties": {
