@@ -1,0 +1,80 @@
+{
+  "schema": 1,
+  "module": ".",
+  "build": {
+    "tool": "maven",
+    "wrapper": false,
+    "jdk": "17",
+    "modules": [],
+    "audit_profile_present": false
+  },
+  "framework": {
+    "name": "none",
+    "version": null,
+    "web": "none",
+    "namespace": "none",
+    "application_classes": []
+  },
+  "persistence": [],
+  "database": {
+    "engines": [],
+    "migrations": [],
+    "migration_files": 0,
+    "db_side_logic": {
+      "triggers": 0,
+      "procedures": 0
+    }
+  },
+  "messaging": [],
+  "streaming": [],
+  "scheduling": [],
+  "outbound": [],
+  "entry_points": {
+    "controllers": 0,
+    "http": 0,
+    "message": 0,
+    "scheduled": 0
+  },
+  "entities": {
+    "count": 0,
+    "with_lifecycle": 0,
+    "jpa": [],
+    "mapper_xml": 0,
+    "mapper_statements": 0,
+    "ddl_tables_with_lifecycle": []
+  },
+  "transactions": {
+    "annotated": 0
+  },
+  "tests": {
+    "files": 1,
+    "frameworks": [
+      "junit5"
+    ],
+    "mockito": false,
+    "spring_boot_tests": 0,
+    "testcontainers": false,
+    "wiremock": false,
+    "substitute_db": [],
+    "mocked_types": []
+  },
+  "non_java_logic": {
+    "drools_files": 0,
+    "bpmn_files": 0,
+    "engines": []
+  },
+  "connections": [],
+  "support": {
+    "verdict": "static-only",
+    "out_of_scope": [
+      "framework:none"
+    ]
+  },
+  "applicability": {
+    "verdict": "not-applicable",
+    "reasons": [
+      "no-relational-persistence",
+      "library-without-entry-points"
+    ]
+  }
+}

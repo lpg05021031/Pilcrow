@@ -1,0 +1,225 @@
+{
+  "schema": 1,
+  "module": ".",
+  "build": {
+    "tool": "maven",
+    "wrapper": false,
+    "jdk": "17",
+    "modules": [],
+    "audit_profile_present": false
+  },
+  "framework": {
+    "name": "spring-boot",
+    "version": "3.5.16",
+    "web": "mvc",
+    "namespace": "jakarta",
+    "application_classes": [
+      "com.example.orders.OrdersApplication"
+    ]
+  },
+  "persistence": [
+    "jpa-hibernate"
+  ],
+  "database": {
+    "engines": [
+      "postgresql"
+    ],
+    "migrations": [
+      "flyway"
+    ],
+    "migration_files": 1,
+    "db_side_logic": {
+      "triggers": 0,
+      "procedures": 0
+    }
+  },
+  "messaging": [
+    {
+      "kind": "nats",
+      "listeners": 1,
+      "publishers": 1
+    },
+    {
+      "kind": "spring-events",
+      "listeners": 1,
+      "publishers": 0
+    }
+  ],
+  "streaming": [],
+  "scheduling": [
+    {
+      "kind": "spring-scheduled",
+      "count": 2
+    }
+  ],
+  "outbound": [
+    {
+      "kind": "restclient",
+      "files": 1
+    }
+  ],
+  "entry_points": {
+    "controllers": 2,
+    "http": 10,
+    "message": 1,
+    "scheduled": 2
+  },
+  "entities": {
+    "count": 6,
+    "with_lifecycle": 5,
+    "jpa": [
+      {
+        "class": "com.example.orders.domain.ChangeRequest",
+        "table": "change_request",
+        "lifecycle_fields": [
+          "status"
+        ]
+      },
+      {
+        "class": "com.example.orders.domain.OrderHeader",
+        "table": "order_header",
+        "lifecycle_fields": [
+          "status"
+        ]
+      },
+      {
+        "class": "com.example.orders.domain.OrderLine",
+        "table": "order_line",
+        "lifecycle_fields": [
+          "status"
+        ]
+      },
+      {
+        "class": "com.example.orders.domain.OutboxEvent",
+        "table": "outbox_event",
+        "lifecycle_fields": [
+          "status"
+        ]
+      },
+      {
+        "class": "com.example.orders.domain.ProcessedMessage",
+        "table": "processed_message",
+        "lifecycle_fields": []
+      },
+      {
+        "class": "com.example.orders.domain.ScheduleLine",
+        "table": "schedule_line",
+        "lifecycle_fields": [
+          "status"
+        ]
+      }
+    ],
+    "mapper_xml": 0,
+    "mapper_statements": 0,
+    "ddl_tables_with_lifecycle": [
+      {
+        "table": "change_request",
+        "columns": [
+          "status"
+        ]
+      },
+      {
+        "table": "order_header",
+        "columns": [
+          "status"
+        ]
+      },
+      {
+        "table": "order_line",
+        "columns": [
+          "status"
+        ]
+      },
+      {
+        "table": "outbox_event",
+        "columns": [
+          "status"
+        ]
+      },
+      {
+        "table": "schedule_line",
+        "columns": [
+          "status"
+        ]
+      }
+    ]
+  },
+  "transactions": {
+    "annotated": 13
+  },
+  "tests": {
+    "files": 3,
+    "frameworks": [
+      "junit5"
+    ],
+    "mockito": true,
+    "spring_boot_tests": 1,
+    "testcontainers": true,
+    "wiremock": false,
+    "substitute_db": [],
+    "mocked_types": [
+      "Connection",
+      "PricingClient"
+    ]
+  },
+  "non_java_logic": {
+    "drools_files": 0,
+    "bpmn_files": 0,
+    "engines": []
+  },
+  "connections": [
+    {
+      "file": "src/main/resources/application.properties",
+      "scope": "main",
+      "key": "orders.nats.url",
+      "kind": "nats",
+      "host": "localhost",
+      "local": true,
+      "placeholder": true
+    },
+    {
+      "file": "src/main/resources/application.properties",
+      "scope": "main",
+      "key": "orders.pricing.base-url",
+      "kind": "http",
+      "host": "pricing.internal.example",
+      "local": false,
+      "placeholder": false
+    },
+    {
+      "file": "src/main/resources/application.properties",
+      "scope": "main",
+      "key": "spring.datasource.url",
+      "kind": "jdbc:postgresql",
+      "host": "localhost",
+      "local": true,
+      "placeholder": true
+    },
+    {
+      "file": "src/test/resources/application-test.properties",
+      "scope": "test",
+      "key": "orders.nats.url",
+      "kind": "nats",
+      "host": "localhost",
+      "local": true,
+      "placeholder": false
+    },
+    {
+      "file": "src/test/resources/application-test.properties",
+      "scope": "test",
+      "key": "orders.pricing.base-url",
+      "kind": "http",
+      "host": "localhost",
+      "local": true,
+      "placeholder": false
+    }
+  ],
+  "support": {
+    "verdict": "supported",
+    "out_of_scope": []
+  },
+  "applicability": {
+    "verdict": "full",
+    "reasons": []
+  }
+}

@@ -1,0 +1,188 @@
+{
+  "type": "object",
+  "required": ["schema", "module", "build", "framework", "persistence", "database", "messaging", "streaming",
+               "scheduling", "outbound", "entry_points", "entities", "tests", "non_java_logic", "connections",
+               "size", "support", "applicability"],
+  "properties": {
+    "schema": { "type": "integer", "enum": [1] },
+    "module": { "type": "string" },
+    "build": {
+      "type": "object",
+      "required": ["tool", "wrapper", "jdk", "modules"],
+      "properties": {
+        "tool": { "type": "string", "enum": ["maven", "gradle", "unknown"] },
+        "wrapper": { "type": "boolean" },
+        "jdk": { "type": ["string", "null"], "pattern": "^[0-9]+$" },
+        "modules": { "type": "array", "items": { "type": "string" } },
+        "audit_profile_present": { "type": "boolean" }
+      }
+    },
+    "framework": {
+      "type": "object",
+      "required": ["name", "version", "web", "namespace", "application_classes"],
+      "properties": {
+        "name": { "type": "string" },
+        "version": { "type": ["string", "null"] },
+        "web": { "type": "string", "enum": ["mvc", "webflux", "none"] },
+        "namespace": { "type": "string", "enum": ["jakarta", "javax", "none"] },
+        "application_classes": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "persistence": { "type": "array", "items": { "type": "string" } },
+    "database": {
+      "type": "object",
+      "required": ["engines", "migrations", "db_side_logic"],
+      "properties": {
+        "engines": { "type": "array", "items": { "type": "string" } },
+        "migrations": { "type": "array", "items": { "type": "string" } },
+        "migration_files": { "type": "integer", "minimum": 0 },
+        "db_side_logic": {
+          "type": "object",
+          "required": ["triggers", "procedures"],
+          "properties": {
+            "triggers": { "type": "integer", "minimum": 0 },
+            "procedures": { "type": "integer", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "messaging": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "listeners", "publishers"],
+        "properties": {
+          "kind": { "type": "string" },
+          "listeners": { "type": "integer", "minimum": 0 },
+          "publishers": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "streaming": { "type": "array", "items": { "type": "string" } },
+    "scheduling": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "count"],
+        "properties": { "kind": { "type": "string" }, "count": { "type": "integer", "minimum": 0 } }
+      }
+    },
+    "outbound": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["kind", "files"],
+        "properties": { "kind": { "type": "string" }, "files": { "type": "integer", "minimum": 1 } }
+      }
+    },
+    "entry_points": {
+      "type": "object",
+      "required": ["http", "message", "scheduled"],
+      "properties": {
+        "controllers": { "type": "integer", "minimum": 0 },
+        "http": { "type": "integer", "minimum": 0 },
+        "message": { "type": "integer", "minimum": 0 },
+        "scheduled": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "entities": {
+      "type": "object",
+      "required": ["count", "with_lifecycle", "jpa", "ddl_tables_with_lifecycle"],
+      "properties": {
+        "count": { "type": "integer", "minimum": 0 },
+        "with_lifecycle": { "type": "integer", "minimum": 0 },
+        "jpa": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["class", "table", "lifecycle_fields"],
+            "properties": {
+              "class": { "type": "string" },
+              "table": { "type": ["string", "null"] },
+              "lifecycle_fields": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "mapper_xml": { "type": "integer", "minimum": 0 },
+        "mapper_statements": { "type": "integer", "minimum": 0 },
+        "ddl_tables_with_lifecycle": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["table", "columns"],
+            "properties": {
+              "table": { "type": "string" },
+              "columns": { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+            }
+          }
+        }
+      }
+    },
+    "transactions": { "type": "object" },
+    "tests": {
+      "type": "object",
+      "required": ["files", "frameworks", "testcontainers", "substitute_db", "mocked_types"],
+      "properties": {
+        "files": { "type": "integer", "minimum": 0 },
+        "frameworks": { "type": "array", "items": { "type": "string" } },
+        "mockito": { "type": "boolean" },
+        "spring_boot_tests": { "type": "integer", "minimum": 0 },
+        "testcontainers": { "type": "boolean" },
+        "wiremock": { "type": "boolean" },
+        "substitute_db": { "type": "array", "items": { "type": "string" } },
+        "mocked_types": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "non_java_logic": {
+      "type": "object",
+      "required": ["drools_files", "bpmn_files", "engines"],
+      "properties": {
+        "drools_files": { "type": "integer", "minimum": 0 },
+        "bpmn_files": { "type": "integer", "minimum": 0 },
+        "engines": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "connections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["file", "scope", "key", "kind", "host", "local"],
+        "properties": {
+          "file": { "type": "string" },
+          "scope": { "type": "string", "enum": ["main", "test"] },
+          "key": { "type": "string" },
+          "kind": { "type": "string" },
+          "host": { "type": "string" },
+          "local": { "type": ["boolean", "null"] },
+          "placeholder": { "type": "boolean" }
+        }
+      }
+    },
+    "size": { "type": "object" },
+    "support": {
+      "type": "object",
+      "required": ["verdict", "out_of_scope"],
+      "properties": {
+        "verdict": { "type": "string", "enum": ["supported", "static-only"] },
+        "out_of_scope": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "applicability": {
+      "type": "object",
+      "required": ["verdict", "reasons"],
+      "properties": {
+        "verdict": { "type": "string", "enum": ["full", "partial", "not-applicable"] },
+        "reasons": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "environment": { "type": "object" },
+    "baseline": {
+      "type": "object",
+      "required": ["command", "tests", "failures", "errors", "skipped", "status"],
+      "properties": {
+        "status": { "type": "string", "enum": ["passing", "failing", "none-executed"] }
+      }
+    },
+    "capabilities": { "type": "object" }
+  }
+}

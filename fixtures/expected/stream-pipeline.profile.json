@@ -1,0 +1,100 @@
+{
+  "schema": 1,
+  "module": ".",
+  "build": {
+    "tool": "gradle",
+    "wrapper": false,
+    "jdk": "21",
+    "modules": [],
+    "audit_profile_present": false
+  },
+  "framework": {
+    "name": "spring-boot",
+    "version": "3.5.16",
+    "web": "none",
+    "namespace": "none",
+    "application_classes": [
+      "com.example.clicks.ClickPipelineApplication"
+    ]
+  },
+  "persistence": [],
+  "database": {
+    "engines": [],
+    "migrations": [],
+    "migration_files": 0,
+    "db_side_logic": {
+      "triggers": 0,
+      "procedures": 0
+    }
+  },
+  "messaging": [
+    {
+      "kind": "kafka",
+      "listeners": 1,
+      "publishers": 1
+    }
+  ],
+  "streaming": [
+    "kafka-streams"
+  ],
+  "scheduling": [],
+  "outbound": [],
+  "entry_points": {
+    "controllers": 0,
+    "http": 0,
+    "message": 1,
+    "scheduled": 0
+  },
+  "entities": {
+    "count": 0,
+    "with_lifecycle": 0,
+    "jpa": [],
+    "mapper_xml": 0,
+    "mapper_statements": 0,
+    "ddl_tables_with_lifecycle": []
+  },
+  "transactions": {
+    "annotated": 0
+  },
+  "tests": {
+    "files": 1,
+    "frameworks": [
+      "junit5"
+    ],
+    "mockito": true,
+    "spring_boot_tests": 0,
+    "testcontainers": false,
+    "wiremock": false,
+    "substitute_db": [],
+    "mocked_types": []
+  },
+  "non_java_logic": {
+    "drools_files": 0,
+    "bpmn_files": 0,
+    "engines": []
+  },
+  "connections": [
+    {
+      "file": "src/main/resources/application.yml",
+      "scope": "main",
+      "key": "spring.kafka.bootstrap-servers",
+      "kind": "host",
+      "host": "localhost",
+      "local": true,
+      "placeholder": true
+    }
+  ],
+  "support": {
+    "verdict": "static-only",
+    "out_of_scope": [
+      "streaming:kafka-streams"
+    ]
+  },
+  "applicability": {
+    "verdict": "not-applicable",
+    "reasons": [
+      "no-relational-persistence",
+      "stream-processing"
+    ]
+  }
+}

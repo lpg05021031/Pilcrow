@@ -152,11 +152,10 @@ java-logic-audit/
   evals/                    plugin 自身的驗收案例
 ```
 
-`plugin.json` 的使用者設定只有三項：
+設定不放在 plugin 選項裡，而是寫在 `INTENT.md` 開頭的區塊，由每個指令讀取。這符合原則 P6：換一個人或新的工作階段，讀到的是同一份設定。
 
 | 設定 | 預設 | 作用 |
 |---|---|---|
-| `system` | 空 | 要跟隨的系統名稱。空值時取 `audit/` 下的第一個 |
 | `language` | `auto` | 給人看的產出所用的語言。`auto` 跟隨對話語言 |
 | `budget` | `quick` | `quick` 或 `deep`，對應第 16 節的預算表 |
 
@@ -182,8 +181,9 @@ plugin 不提交也不推送。使用者自行決定何時提交 `audit/` 與 `s
 
 | 檔案 | 產生者 | 內容 |
 |---|---|---|
-| `INTENT.md` | `audit` | 目標、範圍、基準 commit、語言 |
+| `INTENT.md` | `audit` | 目標、範圍、基準 commit、語言、預算 |
 | `PREFLIGHT.md`、`profile.json` | `audit-preflight` | 五個回答、技術概況、適用性、各指令的就緒程度 |
+| `answers.json` | `audit-preflight` | 五個回答的原話，供後續指令讀取 |
 | `manifest.json` | `audit-preflight` | 主程式與既有測試的檔案清單與雜湊，用來檢查來源未被改動 |
 | `harness.json` | `audit-harness` | 載具設定（9.2） |
 | `facts/*.json` | `audit-harness` | 機械事實 |

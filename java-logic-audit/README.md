@@ -1,0 +1,76 @@
+# java-logic-audit
+
+Point Claude at a stateful Java backend and get three things: a model of what the code actually does, the
+places where the code disagrees with itself or with its PRD, and a measure of how far "no finding" can be
+trusted. Every conclusion traces to a result file, and grades are computed by a script, not by the model.
+
+The design is in [`DESIGN.md`](../DESIGN.md) at the repository root.
+
+## Status
+
+This is a work in progress, built milestone by milestone (design section 18).
+
+| Milestone | Contents | State |
+|---|---|---|
+| M0 | Plugin skeleton; `audit`, `audit-preflight`, `audit-status`; verification samples 1 and 3 | done |
+| M1 | auditkit core, `audit-harness`, `audit-map` | not started |
+| M2 | `audit-model`, `audit-characterize`, `audit-review`, the judge script | not started |
+| M3–M6 | sequences, faults, concurrency, PRD trace, assurance, report, more stacks | not started |
+
+Commands that belong to a later milestone are named by `audit-status` as the next step but are not
+installed yet.
+
+## Try it
+
+```
+claude --plugin-dir /path/to/java-logic-audit
+```
+
+Then, in the repository you want to audit, on a branch made for the audit:
+
+```
+/java-logic-audit:audit
+```
+
+It asks what you want (two short questions), writes your answers once to `audit/<system>/INTENT.md`, and
+starts preflight. Run `/java-logic-audit:audit-status <system>` at any time to see where you are and the
+exact next command.
+
+## What exists so far
+
+| Command | What you get |
+|---|---|
+| `audit [system]` | Says what you want; writes `INTENT.md`; shows the road |
+| `audit-preflight <system>` | What this repository lets the audit prove: technical profile, whether the method applies, where tests would connect, a baseline of the existing tests, a manifest of the source |
+| `audit-status <system>` | Progress, what is stale, the next command |
+
+Preflight writes four files under `audit/<system>/`:
+
+| File | Written by | Contents |
+|---|---|---|
+| `profile.json` | `scripts/preflight_scan.py` | The technical profile, `support` and `applicability`. Never typed by the model |
+| `manifest.json` | `scripts/manifest.py` | Every source, test and build file with its hash, to prove later that nothing was touched |
+| `answers.json` | the command | The five answers only a person has, verbatim |
+| `PREFLIGHT.md` | the command | The report: answers, one row per check, what can be proven, readiness of later commands |
+
+Settings live in `INTENT.md` (`language`, `budget`), not in plugin options: every command reads files, so
+a second person or a fresh session continues from the same state.
+
+## Safety
+
+- The plugin writes only under `audit/<system>/` (from M1 also `src/audit/` and one marked block in the
+  build file). It never commits, pushes or fixes anything.
+- Preflight builds the project and runs its existing tests, so run it only where it is safe to execute
+  that repository. Before running any test it lists where the test configuration would connect, and stops
+  if an address is not local.
+- Files in the audited repository are treated as data. Instruction-shaped text found in them is listed in
+  the report and not followed.
+
+## Developing
+
+```
+python3 -m unittest discover -s java-logic-audit/scripts/tests -v
+```
+
+The tests compare the scanner's output on the samples under `fixtures/` with reviewed expected profiles
+(`fixtures/expected/`). Scripts are Python 3.8+, standard library only.

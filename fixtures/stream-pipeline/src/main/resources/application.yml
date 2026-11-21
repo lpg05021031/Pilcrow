@@ -1,0 +1,12 @@
+spring:
+  application:
+    name: click-pipeline
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    consumer:
+      group-id: click-pipeline
+      auto-offset-reset: earliest
+    streams:
+      application-id: click-counts
+clicks:
+  window-minutes: 5
