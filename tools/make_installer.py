@@ -22,6 +22,8 @@ import hashlib
 import io
 import json
 import os
+import re
+import subprocess
 import tarfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -163,6 +165,37 @@ def not_plain(data):
     return None
 
 
+HOSTED = re.compile(r"\b(?:github|gitlab|gitee)\.com[/:][\w.-]+|\bbitbucket\.org[/:][\w.-]+", re.I)
+MAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)*\.[A-Za-z]{2,}")
+
+
+def origin_owner():
+    """The account this checkout's `origin` belongs to, or None. Asked of git at build time, written nowhere."""
+    try:
+        url = subprocess.run(["git", "-C", ROOT, "remote", "get-url", "origin"], stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, universal_newlines=True, timeout=20).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return None
+    parts = [p for p in re.split(r"[/:]", re.sub(r"\.git$", "", url)) if p]
+    return parts[-2] if len(parts) >= 2 and len(parts[-2]) >= 3 else None
+
+
+def identifying(text, owner=None):
+    """What in a text names an account or a person: the first such thing, or None.
+
+    The installer is passed from hand to hand; it should say what the plugin is, not whose it is. Looked
+    for: an e-mail address, an address on a code hosting site with a path behind it, and the account
+    the checkout it is built from belongs to.
+    """
+    for line_no, line in enumerate(text.split("\n"), 1):
+        m = MAIL.search(line) or HOSTED.search(line)
+        if m:
+            return "line %d: %s" % (line_no, m.group(0))
+        if owner and owner.lower() in line.lower():
+            return "line %d: the account this checkout belongs to" % line_no
+    return None
+
+
 def archive(files):
     """A tar.gz with nothing in it that changes from one build to the next."""
     raw = io.BytesIO()
@@ -196,6 +229,14 @@ def main():
             odd.append("  %s, %s" % (name, why))
     if odd:
         raise SystemExit("not packed: every file must be plain ASCII text\n" + "\n".join(odd))
+    owner = origin_owner()
+    for name, path in files:
+        with open(path, encoding="ascii") as fh:
+            why = identifying(fh.read(), owner)
+        if why:
+            odd.append("  %s, %s" % (name, why))
+    if odd:
+        raise SystemExit("not packed: a file names an account or a person\n" + "\n".join(odd))
     data = archive(files)
     name = "%s-%s.sh" % (PLUGIN, version)
     os.makedirs(args.out, exist_ok=True)

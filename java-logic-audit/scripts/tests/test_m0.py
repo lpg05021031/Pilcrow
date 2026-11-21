@@ -277,6 +277,27 @@ class PlainText(unittest.TestCase):
         self.assertIn("line 2", make_installer.not_plain(b"one\ntwo\x1b[0m\n"))
         self.assertIn("not ASCII", make_installer.not_plain("warn\ufe0f\n".encode("utf-8")))     # a character that cannot be seen
 
+    def test_no_packed_file_names_an_account_or_a_person(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("make_installer", os.path.join(REPO, "tools", "make_installer.py"))
+        make_installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(make_installer)
+        owner = make_installer.origin_owner()           # None where this is not a checkout with a remote
+        odd = []
+        for name, path in make_installer.members():
+            with open(path, encoding="ascii") as fh:
+                why = make_installer.identifying(fh.read(), owner)
+            if why:
+                odd.append("%s, %s" % (name, why))
+        self.assertEqual([], odd)
+        found = make_installer.identifying
+        self.assertIsNone(found("claude plugin install java-logic-audit@java-logic-audit\nlook in `.github/workflows/`\n"))
+        self.assertIn("line 2", found("first\nwrite to someone@example.org\n"))
+        self.assertIn("github.com/some-account", found("clone https://github.com/some-account/project\n"))
+        self.assertIn("gitlab.com", found("git@gitlab.com:team/project.git\n"))
+        self.assertIn("account this checkout belongs to", found("--marketplace Some-Owner/project\n", "some-owner"))
+        self.assertIsNone(found("--marketplace <owner>/<repository>\n", "some-owner"))
+
 
 class Endpoints(unittest.TestCase):
     def test_hosts_and_locality(self):

@@ -65,7 +65,7 @@ Only when the application needs them (each is explained below, and left out othe
   "result_code": { "path": "errno", "allowed": ["0"], "error": ["-1", "502"] },
   "auth": { "sessions": [ { "name": "user", "paths": "^/wx/",
                             "login": { "method": "POST", "path": "/wx/auth/login",
-                                       "body": { "username": "user123", "password": "${env.AUDIT_LOGIN_USER_PASSWORD}" } },
+                                       "body": { "username": "demo-user", "password": "${env.AUDIT_LOGIN_USER_PASSWORD}" } },
                             "headers": { "X-Shop-Token": "${login.data.token}" } } ] }
 }
 ```

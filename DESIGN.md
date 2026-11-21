@@ -615,7 +615,7 @@ auditkit 是一組 Java 原始碼，複製到目標模組的 `src/audit/java/aud
   "auth": { "headers": { "X-Api-Version": "2" },
             "sessions": [ { "name": "user", "paths": "^/wx/",
                             "login": { "method": "POST", "path": "/wx/auth/login",
-                                       "body": { "username": "user123", "password": "${env.AUDIT_LOGIN_USER_PASSWORD}" } },
+                                       "body": { "username": "demo-user", "password": "${env.AUDIT_LOGIN_USER_PASSWORD}" } },
                             "headers": { "X-Shop-Token": "${login.data.token}" } } ] }
 }
 ```

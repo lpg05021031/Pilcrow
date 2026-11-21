@@ -51,10 +51,11 @@ runs took their answers from the request).
 
 ## Try it
 
-Install it from this repository (Claude Code 2.1.275 or later):
+Install it from the repository it is published in (Claude Code 2.1.275 or later), naming that repository
+as its hosting site shows it, owner and name:
 
 ```
-/plugin install java-logic-audit --marketplace lpg05021031/Pilcrow
+/plugin install java-logic-audit --marketplace <owner>/<repository>
 ```
 
 or, from the one-file installer (`python3 tools/make_installer.py` in this repository builds it), which
