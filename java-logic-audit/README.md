@@ -14,16 +14,40 @@ This is a work in progress, built milestone by milestone (design section 18).
 |---|---|---|
 | M0 | Plugin skeleton; `audit`, `audit-preflight`, `audit-status`; verification samples 1 and 3 | done |
 | M1 | auditkit core, `audit-harness`, `audit-map` | done |
-| M2 | `audit-model`, `audit-characterize`, `audit-review`, the judge script | built; on sample 1 a model derived by fresh agents covers all 57 behaviours of the reviewed model. Not yet run on a real system |
+| M2 | `audit-model`, `audit-characterize`, `audit-review`, the judge script | built; on sample 1 a model derived by fresh agents covers all 57 behaviours of the reviewed model; run on part of a real system (below) |
 | M3 | `audit-verify`: failures injected into every step, random sequences with rules of the data | built and run on sample 1. Not built: comparing paths that should agree (preview against commit), relations between calls, rules derived from the code's own checks |
 | M4 | `audit-verify` also runs two commands at once, stopping one between its database steps | built and run on sample 1: one stop per schedule, pairs chosen from cases that share a starting situation |
 | M5 | `audit-spec`, `audit-assure`, `audit-report`, `audit-rerun` | built, and each run through the plugin by a fresh headless session on sample 1. Not built: mutation testing beyond the guard canary, and seeds taken from the project's history |
 | M6 | A second stack (Spring Boot 2.7, MyBatis, MySQL 8, Gradle, JUnit 4) and a hostile sample | done: the whole road from `audit` to `audit-report` ran on sample 2 through the plugin, command by command, each in a fresh headless session; on the hostile sample no planted instruction was followed and every one was reported |
 
-What has not happened: no command has been run on a real system, and nothing was run in an interactive
-session with a person answering pop-up questions (the headless runs took their answers from the request).
-The samples are small (about 700 and 1,800 lines), so what they show is that each step works and what it
-costs to start, not how the cost grows.
+**On a real system.** The plugin was then run, headless, on litemall, an open-source shop back end nobody
+wrote for this purpose: Spring Boot 2.1, MyBatis, MySQL, a Maven build of five modules, about 20,000
+hand-written lines of Java beside 95,000 generated ones, 223 entry points in 55 groups. The front part
+(front door, preflight, harness, map) ran once with Sonnet 5.5 for about 1 USD; the harness agent set the
+real system up by itself and all six checks passed in the first round. Five connected groups (addresses,
+orders from both sides, the cart, one plain CRUD group: 37 entry points) were then taken from the model to
+the report with each of two models:
+
+| | Sonnet 5.5 | Opus 5.5 |
+|---|---|---|
+| model, characterize, verify, recheck, report | 18.19 USD | 39.61 USD |
+| for each entry point | 0.49 USD | 1.07 USD |
+| cases executed of those built | 255 of 349 | 287 of 377 |
+| findings; of those an independent reader let stand | 39; 23 | 32; 28 |
+
+What it found is real: reads of deleted rows that succeed, internal errors where a refusal was meant,
+order deletion, shipping and commenting that leave half-written data when a step fails, an order placed
+twice from one cart when two requests overlap, a payment and a cancellation that both succeed. Extrapolated
+to all 223 entry points that is about 110 USD with Sonnet and 240 USD with Opus, and eight to twelve hours,
+most of them machine time; it has not been run in full. The run exposed nine gaps, all closed since
+(design section 18): applications built from several modules, signed-in callers, result codes in the
+response body, generated mapper statements, stand-ins that must answer, and above all an application
+without a clock the harness can hold, which at first made every failure and every overlap look like a
+difference.
+
+What has not happened: no system has been audited in full, no person has answered the questions of a real
+system (`audit-review`), and nothing was run in an interactive session with pop-up questions (the headless
+runs took their answers from the request).
 
 ## Try it
 
