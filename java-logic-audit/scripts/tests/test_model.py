@@ -197,6 +197,17 @@ class Model(unittest.TestCase):
         self.assertEqual(report["dropped"][0]["id"], "G2")
         self.assertEqual(report["stats"]["guards"], {"confirmed": 0, "relocated": 1, "refuted": 1, "unverified": 0, "bad_citation": 0})
 
+    def test_a_referee_who_names_several_places_does_not_cost_the_claim(self):
+        self.mined(cancel())
+        self.write("model_raw/referee-CMD-cancelOrder.json", {"command": "CMD-cancelOrder", "verdicts": [
+            {"id": "G1", "verdict": "wrong-citation", "cite": "the check is at src/A.java:3, the write at src/A.java:4-5"},
+            {"id": "G2", "verdict": "wrong-citation", "cite": "somewhere in the service layer"}]})
+        report = self.render()
+        kept = {g["id"]: g for g in self.read("model/commands.json")["commands"][0]["guards"]}
+        self.assertEqual((kept["G1"]["cite"], kept["G1"]["also_at"], kept["G1"]["verified"]), ("src/A.java:3", ["src/A.java:4-5"], True))
+        self.assertFalse(kept["G2"]["verified"])                 # kept at the place the reader gave, and marked as not verified
+        self.assertEqual(report["dropped"], [])
+
     def test_a_citation_must_lead_to_lines_that_exist(self):
         bad = cancel()
         bad["guards"][0]["cite"] = "src/A.java:400"

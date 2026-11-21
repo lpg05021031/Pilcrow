@@ -39,6 +39,9 @@ FORBIDDEN_SQL = re.compile(r"(?i)\b(insert|update|delete|merge|drop|alter|trunca
 VERDICTS = ("confirmed", "wrong-citation", "refuted")
 
 
+FIRST_CITE = re.compile(r"[\w./$-]+\.\w+:\d+(?:-\d+)?")
+
+
 def check_cite(workspace, cite):
     """None when the citation points at existing lines of a file inside the workspace, else what is wrong."""
     m = CITE_RE.match(cite or "")
@@ -159,9 +162,18 @@ def render(workspace, system):
                                     "claim": g})
                     continue
                 if verdict and verdict["verdict"] == "wrong-citation" and verdict.get("cite"):
-                    g["cite"] = verdict["cite"]
-                    counts["relocated"] += 1
-                    g["verified"] = True
+                    # A referee may name several places for one behaviour ("A.java:60, A.java:61-62"). A citation is
+                    # one place: the first one that exists is taken, and the claim is not lost for the form of the answer.
+                    places = [p for p in FIRST_CITE.findall(str(verdict["cite"])) if check_cite(workspace, p) is None]
+                    if places:
+                        g["cite"] = places[0]
+                        if len(places) > 1:
+                            g["also_at"] = places[1:]
+                        counts["relocated"] += 1
+                        g["verified"] = True
+                    else:
+                        counts["unverified"] += 1
+                        g["verified"] = False       # the behaviour was confirmed to exist, but no usable place was given
                 elif verdict and verdict["verdict"] == "confirmed":
                     counts["confirmed"] += 1
                     g["verified"] = True
