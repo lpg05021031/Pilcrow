@@ -59,14 +59,16 @@ Save each reply as it came, under the name this prints:
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_store.py" name mine "<group name>"
 ```
 
-that is `audit/$system/model_raw/mine-<group>.json`. A reply that is not one JSON object is not saved:
-ask that reader once more for the object alone; if it fails again, leave the group out (it will be
-reported as a gap).
+that is `audit/$system/model_raw/mine-<group>.json`. What is saved is the JSON object of the reply, exactly
+as the reader wrote it. A reader that put the object in a code fence, or a sentence before or after it,
+has still given its reply: save the object alone, copied from the reply and not retyped, and do not ask
+again. Only when the reply holds no complete JSON object, ask that reader once more for it; if it fails
+again, leave the group out (it will be reported as a gap). The same holds for every reply in this step.
 
 Because every reply is a file, the step can be interrupted and started again: groups that already have
 a saved reply are skipped, and only what is missing is done. Without subagents, read
 `${CLAUDE_PLUGIN_ROOT}/agents/code-reader.md` and do each brief yourself, one group at a time, saving each
-result before starting the next.
+result before starting the next. "Without subagents" means that your tools hold nothing to launch an agent with. When they do, launch the plugin's agent (it is listed as `java-logic-audit:code-reader`); doing its work yourself in that case is not allowed. Say in your report which of the two happened.
 
 ## 3 — Referees
 

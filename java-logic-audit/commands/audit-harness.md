@@ -92,7 +92,7 @@ one) and prints what is left to settle. Settle it with the `harness-engineer` ag
 name, the module path, the list the script printed, and the database decision from step 3 (case 1 or
 case 2, and for case 2 the person's own words offering the database, with any secret replaced by
 `[redacted]`). Without subagents, read `${CLAUDE_PLUGIN_ROOT}/agents/harness-engineer.md` and do the same
-work yourself. When it is done, the `todo` list in `harness.json` holds only what truly could not be
+work yourself. "Without subagents" means that your tools hold nothing to launch an agent with. When they do, launch the plugin's agent (it is listed as `java-logic-audit:harness-engineer`); doing its work yourself in that case is not allowed. Say in your report which of the two happened. When it is done, the `todo` list in `harness.json` holds only what truly could not be
 settled.
 
 ## 5 — Prove it runs

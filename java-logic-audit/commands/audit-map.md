@@ -64,7 +64,7 @@ Each row under `unresolved` in `map.json` names a `site` (a method), a `line` an
 through. For each file that holds such rows, have the `code-reader` agent read that method and answer, for
 each row: which table is written, which columns, whether it creates, updates or deletes rows, and the
 lines that show it. Give the agent the file path, the rows, and nothing else to decide. Without
-subagents, read `${CLAUDE_PLUGIN_ROOT}/agents/code-reader.md` and do the same yourself.
+subagents, read `${CLAUDE_PLUGIN_ROOT}/agents/code-reader.md` and do the same yourself. "Without subagents" means that your tools hold nothing to launch an agent with. When they do, launch the plugin's agent (it is listed as `java-logic-audit:code-reader`); doing its work yourself in that case is not allowed. Say in your report which of the two happened.
 
 Write the answers to `audit/$system/map_resolved.json`, exactly as the reader gave them:
 

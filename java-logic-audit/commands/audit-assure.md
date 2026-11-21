@@ -56,9 +56,9 @@ It writes the brief to a file and prints two lines: `brief:` with that file's pa
 where the answer goes. Launch one `adversary` agent whose whole prompt is this sentence, with the path
 filled in: *"Your brief is the file `<brief path>`. Read it first, then do what it asks and reply with
 the JSON object it describes."* Add nothing else. Up to six at a time; they only read. Save each reply,
-unchanged, as the file named after `reply:` (`audit/$system/assure/recheck/F-007.json`). The reply must be one JSON object; when it
-is not, ask the same agent once to send only the object, and if that fails too leave the finding without
-a file. Never repair a reply, and never ask a reader to reconsider a verdict.
+unchanged, as the file named after `reply:` (`audit/$system/assure/recheck/F-007.json`). What is saved is the JSON object of the reply: an object in a code fence, or with a sentence
+around it, is saved alone, copied and not retyped. Only when the reply holds no complete JSON object, ask
+the same agent once to send it, and if that fails too leave the finding without a file. Never repair a reply, and never ask a reader to reconsider a verdict.
 
 A finding whose saved reply carries the fingerprint the finding has now is not rechecked again.
 

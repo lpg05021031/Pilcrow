@@ -51,9 +51,10 @@ where the answer goes. Launch one `spec-analyst` agent whose whole prompt is thi
 path filled in: *"Your brief is the file `<brief path>`. Open that one file and no other, and reply with
 the JSON object it asks for."* You do not paste the brief and you do not open it yourself. Up to six
 agents at a time. Save each reply, unchanged, as the file named after `reply:`
-(`audit/$system/spec/raw/clauses-SEC-01.json`). The reply must be one JSON object; when it is not, ask the
-same agent once to send only the object, and if that fails too leave the section without a file: the
-script will report it as not read. Never repair a reply.
+(`audit/$system/spec/raw/clauses-SEC-01.json`). What is saved is the JSON object of the reply: an object
+in a code fence, or with a sentence around it, is saved alone, copied and not retyped. Only when the reply
+holds no complete JSON object, ask the same agent once to send it, and if that fails too leave the section
+without a file: the script will report it as not read. Never repair a reply.
 
 A section that is already saved from an earlier run is not read again unless the document changed
 (`split` writes its hash in `sections.json`; compare it with what you saw before, or ask).
