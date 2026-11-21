@@ -196,6 +196,16 @@ def identifying(text, owner=None):
     return None
 
 
+def unpacked(installer_bytes):
+    """{name in the archive: content} of an installer this script wrote."""
+    payload = installer_bytes.split(b"\n__PAYLOAD_BELOW__\n", 1)[1]
+    out = {}
+    with tarfile.open(fileobj=io.BytesIO(base64.b64decode(payload))) as tar:
+        for m in tar.getmembers():
+            out[m.name] = tar.extractfile(m).read()
+    return out
+
+
 def archive(files):
     """A tar.gz with nothing in it that changes from one build to the next."""
     raw = io.BytesIO()
@@ -246,6 +256,11 @@ def main():
         fh.write(HEADER % {"version": version, "name": name, "sha256": hashlib.sha256(data).hexdigest()})
         fh.write(text)
     os.chmod(path, 0o755)
+    # One installer is kept beside the sources: the one they build. Earlier versions are removed.
+    for other in sorted(os.listdir(args.out)):
+        if re.fullmatch(re.escape(PLUGIN) + r"-[\w.]+\.sh", other) and other != name:
+            os.remove(os.path.join(args.out, other))
+            print("removed the earlier %s" % other)
     print("%s: %d files, %d KB packed, %d KB as a script" % (
         os.path.relpath(path, ROOT), len(files), len(data) // 1024, os.path.getsize(path) // 1024))
     return 0

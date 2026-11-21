@@ -8,7 +8,8 @@ backend.
 | [`DESIGN.md`](DESIGN.md) | The design (v1.0, in Traditional Chinese) |
 | [`java-logic-audit/`](java-logic-audit/) | The plugin: commands, agents, scripts, the test harness |
 | [`.claude-plugin/marketplace.json`](.claude-plugin/marketplace.json) | Lets Claude Code install the plugin from this repository |
-| [`tools/make_installer.py`](tools/make_installer.py) | Packs the plugin into one shell script (`dist/java-logic-audit-<version>.sh`) that unpacks it as a local marketplace on another machine |
+| [`tools/make_installer.py`](tools/make_installer.py) | Packs the plugin into one shell script that unpacks it as a local marketplace on another machine |
+| [`dist/`](dist/) | That script for the version in this checkout (`java-logic-audit-<version>.sh`): plain ASCII, nothing in it but the plugin's files. A test fails when it no longer holds exactly what the sources hold; `python3 tools/make_installer.py` rebuilds it |
 | [`fixtures/`](fixtures/) | Verification samples used to test the plugin itself |
 
 ## Verification samples

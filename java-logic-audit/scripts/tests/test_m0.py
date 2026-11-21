@@ -299,6 +299,33 @@ class PlainText(unittest.TestCase):
         self.assertIsNone(found("--marketplace <owner>/<repository>\n", "some-owner"))
 
 
+class Installer(unittest.TestCase):
+    """The installer kept in the repository is the one its sources build."""
+
+    def test_the_installer_in_dist_holds_exactly_the_files_of_this_checkout(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("make_installer", os.path.join(REPO, "tools", "make_installer.py"))
+        make_installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(make_installer)
+        with open(os.path.join(REPO, "java-logic-audit", ".claude-plugin", "plugin.json"), encoding="utf-8") as fh:
+            version = json.load(fh)["version"]
+        dist = os.path.join(REPO, "dist")
+        kept = sorted(n for n in os.listdir(dist) if n.endswith(".sh")) if os.path.isdir(dist) else []
+        self.assertEqual(["java-logic-audit-%s.sh" % version], kept,
+                         "dist/ must hold the installer of this version and no other: run python3 tools/make_installer.py")
+        with open(os.path.join(dist, kept[0]), "rb") as fh:
+            data = fh.read()
+        self.assertIsNone(make_installer.not_plain(data))
+        inside = make_installer.unpacked(data)
+        sources = {}
+        for name, path in make_installer.members():
+            with open(path, "rb") as fh:
+                sources[name] = fh.read()
+        self.assertEqual(sorted(sources), sorted(inside))
+        changed = [n for n in sources if sources[n] != inside[n]]
+        self.assertEqual([], changed, "the sources changed since the installer was built: run python3 tools/make_installer.py")
+
+
 class Endpoints(unittest.TestCase):
     def test_hosts_and_locality(self):
         cases = {
