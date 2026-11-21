@@ -66,7 +66,8 @@
     "testcontainers": false,
     "wiremock": false,
     "substitute_db": [],
-    "mocked_types": []
+    "mocked_types": [],
+    "database_source": "none"
   },
   "non_java_logic": {
     "drools_files": 0,
@@ -81,7 +82,8 @@
       "kind": "host",
       "host": "localhost",
       "local": true,
-      "placeholder": true
+      "placeholder": true,
+      "env_override": false
     }
   ],
   "support": {

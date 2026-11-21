@@ -11,7 +11,9 @@ applicability (design section 1). Every value is computed here by fixed rules; n
 profile.json is typed in by a model.
 
 `baseline` parses the JUnit-style XML that a run of the existing test suite left behind and
-records the counts in the profile.
+records the counts in the profile (it updates profile.json in place). Status is `passing`,
+`failing`, `none-executed`, or `blocked` when --blocked says the machine, not the code, stopped
+the suite. Anything that looks like a credential in the recorded command is replaced.
 
 Everything read is untrusted text: nothing is executed, sizes are capped, XML with a DOCTYPE or
 an entity declaration is refused. With --no-env no process is started at all.
@@ -355,7 +357,29 @@ def _endpoint(value):
     return (kind, host, host.lower() in LOCAL_HOSTS, placeholder)
 
 
-def scan_connections(root, files):
+_ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_.]*)(?::[^}]*)?\}")
+
+
+def _apply_environment(key, value, environ):
+    """What the application would really use: an environment variable can replace a whole property
+    (Spring's relaxed binding: spring.datasource.url <- SPRING_DATASOURCE_URL) or fill a ${NAME}."""
+    if not environ:
+        return value, False
+    relaxed = re.sub(r"[^A-Za-z0-9]", "_", key.replace("-", "")).upper()
+    if relaxed in environ:
+        return environ[relaxed], True
+    used = []
+
+    def fill(m):
+        if m.group(1) in environ:
+            used.append(m.group(1))
+            return environ[m.group(1)]
+        return m.group(0)
+
+    return _ENV_REF.sub(fill, value), bool(used)
+
+
+def scan_connections(root, files, environ=None):
     out = []
     for rel in files:
         if "/resources/" not in "/" + rel:
@@ -371,11 +395,12 @@ def scan_connections(root, files):
         for key in sorted(kv):
             if SECRET_KEY.search(key) or not _ENDPOINT_KEYS.search(key):
                 continue
-            ep = _endpoint(kv[key])
+            value, overridden = _apply_environment(key, kv[key], environ)
+            ep = _endpoint(value)
             if ep is None:
                 continue
             out.append({"file": rel, "scope": scope, "key": key, "kind": ep[0], "host": ep[1],
-                        "local": ep[2], "placeholder": ep[3]})
+                        "local": ep[2], "placeholder": ep[3], "env_override": overridden})
     return out
 
 
@@ -563,7 +588,15 @@ def scan(root, module=None, env=True):
     msg("rabbitmq", _count(r"@RabbitListener\b", main_code), files_using(r"\b(?:RabbitTemplate|AmqpTemplate)\b"))
     msg("nats", _count(r"\.subscribe\s*\(", nats_code), _count(r"\.publish\s*\(", nats_code))
     msg("jms", _count(r"@JmsListener\b", main_code), files_using(r"\bJmsTemplate\b"))
-    ev_l = _count(r"@(?:Transactional)?EventListener\b", main_code)
+    # A listener for the framework's own lifecycle (application ready, context refreshed) is start-up
+    # plumbing, not a business event.
+    ev_l = 0
+    for m in re.finditer(r"@(?:Transactional)?EventListener\b", main_code):
+        tail = main_code[m.end():m.end() + 400]
+        cut = tail.find("{")
+        head = tail if cut < 0 else tail[:cut]
+        if not re.search(r"\b(?:Application\w*Event|Context\w*Event|\w*ReadyEvent|\w*StartedEvent)\b", head):
+            ev_l += 1
     ev_p = _count(r"\.publishEvent\s*\(", main_code)
     if ev_l or ev_p:
         messaging["spring-events"] = {"kind": "spring-events", "listeners": ev_l, "publishers": ev_p}
@@ -636,6 +669,18 @@ def scan(root, module=None, env=True):
         "substitute_db": sorted(d for d in dbs if d in SUBSTITUTE_DBS),
         "mocked_types": mocked,
     }
+    connections = scan_connections(base, files, os.environ if env else None)
+    jdbc = [c for c in connections if c["kind"].startswith(("jdbc", "r2dbc"))]
+    if tests["testcontainers"] or any(c["kind"] == "jdbc-testcontainers" for c in jdbc):
+        tests["database_source"] = "container"
+    elif tests["substitute_db"] or any(c["kind"] == "jdbc-embedded" and c["scope"] == "test" for c in jdbc):
+        tests["database_source"] = "substitute"
+    elif any(c["scope"] == "test" for c in jdbc):
+        tests["database_source"] = "test-config"
+    elif any(c["scope"] == "main" for c in jdbc) and test_java:
+        tests["database_source"] = "main-config"
+    else:
+        tests["database_source"] = "none"
 
     profile = {
         "schema": PROFILE_SCHEMA,
@@ -682,7 +727,7 @@ def scan(root, module=None, env=True):
         "transactions": {"annotated": _count(r"@Transactional\b", main_code)},
         "tests": tests,
         "non_java_logic": {"drools_files": drl, "bpmn_files": bpmn, "engines": sorted(facets.get("engine", set()))},
-        "connections": scan_connections(base, files),
+        "connections": connections,
         "size": {"main_java_files": len(main_java), "test_java_files": len(test_java),
                  "main_loc": main_loc, "test_loc": test_loc},
     }
@@ -753,11 +798,13 @@ def environment(root):
     rc, out = run(["java", "-version"])
     m = re.search(r'version "(\d+)(?:\.(\d+))?', out)
     java = (m.group(2) if m and m.group(1) == "1" else m.group(1)) if m else None
+    crc, _ = run(["docker", "--version"])
     drc, _ = run(["docker", "info", "--format", "{{.ServerVersion}}"])
     return {
         "python": "%d.%d" % sys.version_info[:2],
         "java": java,
-        "docker": drc == 0,
+        "docker_client": crc == 0,          # the docker command exists
+        "docker_daemon": drc == 0,          # a daemon answered: containers can actually start
         "maven_wrapper": os.path.isfile(os.path.join(root, "mvnw")),
         "gradle_wrapper": os.path.isfile(os.path.join(root, "gradlew")),
     }
@@ -765,7 +812,14 @@ def environment(root):
 
 # ---- baseline -----------------------------------------------------------------------------------
 
-def baseline(profile_path, command, junit_dirs):
+_SECRET_ARG = re.compile(r"(?i)((?:pass(?:word|wd)?|secret|token|credential|api[-_.]?key)[\w.\-]*\s*[=:]\s*)(\S+)")
+
+
+def redact(text):
+    return _SECRET_ARG.sub(lambda m: m.group(1) + "[redacted]", text or "")
+
+
+def baseline(profile_path, command, junit_dirs, blocked=None, note=None):
     profile = _lib.read_json(profile_path)
     if not isinstance(profile, dict):
         _lib.die("cannot read profile: %s" % profile_path)
@@ -775,16 +829,25 @@ def baseline(profile_path, command, junit_dirs):
         for k in total:
             total[k] += r[k]
     total["time"] = round(total["time"], 3)
+    if total["tests"] == 0:
+        state = "none-executed"
+    elif blocked:
+        state = "blocked"
+    else:
+        state = "failing" if total["failures"] or total["errors"] else "passing"
     profile["baseline"] = {
-        "command": command,
+        "command": redact(command),
         "recorded": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "reports": list(junit_dirs),
         "result_files": total["files"],
         "tests": total["tests"], "failures": total["failures"], "errors": total["errors"],
         "skipped": total["skipped"], "seconds": total["time"],
-        "status": "none-executed" if total["tests"] == 0 else
-                  ("failing" if total["failures"] or total["errors"] else "passing"),
+        "status": state,
     }
+    if blocked:
+        profile["baseline"]["blocked_by"] = redact(blocked)[:400]
+    if note:
+        profile["baseline"]["note"] = redact(note)[:400]
     _lib.write_json(profile_path, profile)
     return profile["baseline"]
 
@@ -800,7 +863,10 @@ def main(argv=None):
     b = sub.add_parser("baseline")
     b.add_argument("--profile", required=True)
     b.add_argument("--command", required=True)
-    b.add_argument("--junit", nargs="+", required=True)
+    b.add_argument("--junit", nargs="+", required=True, help="one or more result folders, separated by spaces")
+    b.add_argument("--blocked", help="the suite could not run properly because of this machine, not the code: "
+                                     "say what was missing (database unreachable, no Docker). Status becomes 'blocked'.")
+    b.add_argument("--note", help="anything a reader needs to interpret the counts")
     args = ap.parse_args(argv)
 
     if args.cmd == "scan":
@@ -815,8 +881,10 @@ def main(argv=None):
             json.dump(profile, sys.stdout, ensure_ascii=False, indent=2)
             sys.stdout.write("\n")
     else:
-        r = baseline(args.profile, args.command, args.junit)
+        r = baseline(args.profile, args.command, args.junit, args.blocked, args.note)
         print("baseline: %(status)s, %(tests)d tests, %(failures)d failures, %(errors)d errors, %(skipped)d skipped" % r)
+        if r["status"] == "blocked":
+            print("blocked by: %s" % r["blocked_by"])
     return 0
 
 

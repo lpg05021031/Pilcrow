@@ -38,11 +38,6 @@
       "kind": "nats",
       "listeners": 1,
       "publishers": 1
-    },
-    {
-      "kind": "spring-events",
-      "listeners": 1,
-      "publishers": 0
     }
   ],
   "streaming": [],
@@ -160,7 +155,8 @@
     "mocked_types": [
       "Connection",
       "PricingClient"
-    ]
+    ],
+    "database_source": "container"
   },
   "non_java_logic": {
     "drools_files": 0,
@@ -175,7 +171,8 @@
       "kind": "nats",
       "host": "localhost",
       "local": true,
-      "placeholder": true
+      "placeholder": true,
+      "env_override": false
     },
     {
       "file": "src/main/resources/application.properties",
@@ -184,7 +181,8 @@
       "kind": "http",
       "host": "pricing.internal.example",
       "local": false,
-      "placeholder": false
+      "placeholder": false,
+      "env_override": false
     },
     {
       "file": "src/main/resources/application.properties",
@@ -193,7 +191,8 @@
       "kind": "jdbc:postgresql",
       "host": "localhost",
       "local": true,
-      "placeholder": true
+      "placeholder": true,
+      "env_override": false
     },
     {
       "file": "src/test/resources/application-test.properties",
@@ -202,7 +201,8 @@
       "kind": "nats",
       "host": "localhost",
       "local": true,
-      "placeholder": false
+      "placeholder": false,
+      "env_override": false
     },
     {
       "file": "src/test/resources/application-test.properties",
@@ -211,7 +211,8 @@
       "kind": "http",
       "host": "localhost",
       "local": true,
-      "placeholder": false
+      "placeholder": false,
+      "env_override": false
     }
   ],
   "support": {

@@ -23,7 +23,10 @@ SCHEMA_DIR = os.path.join(os.path.dirname(HERE), "schemas")
 ARTIFACTS = [
     ("profile.json", "profile.schema.json"),
     ("manifest.json", "manifest.schema.json"),
+    ("answers.json", "answers.schema.json"),
 ]
+INTENT_GOALS = ("understand", "audit", "spec", "rerun")
+INTENT_REQUIRED = ("system", "module", "goal", "language", "budget", "base_commit", "date")
 _TYPES = {
     "object": dict, "array": list, "string": str, "boolean": bool,
     "number": (int, float), "integer": int, "null": type(None),
@@ -77,6 +80,29 @@ def validate(value, schema, path="$"):
     return errors
 
 
+def validate_intent(path, system=None):
+    """INTENT.md must start with a `---` block that status.py and the commands can parse."""
+    import status as status_mod
+    text = _lib.read_text(path)
+    if text is None:
+        return ["cannot read %s" % path]
+    if not text.startswith("---"):
+        return ["$: the file must start with the line '---' (no code fence, no heading before it)"]
+    intent = status_mod.parse_intent(path)
+    if not intent:
+        return ["$: the opening block is not closed by a line '---'"]
+    errors = ["$: missing key %r in the opening block" % k for k in INTENT_REQUIRED if not intent.get(k)]
+    if intent.get("goal") and intent["goal"] not in INTENT_GOALS:
+        errors.append("$.goal: %r is not one of %s" % (intent["goal"], list(INTENT_GOALS)))
+    if intent.get("budget") and intent["budget"] not in ("quick", "deep"):
+        errors.append("$.budget: %r is not quick or deep" % intent["budget"])
+    if system and intent.get("system") and intent["system"] != system:
+        errors.append("$.system: %r does not match the folder name %r" % (intent["system"], system))
+    if intent.get("goal") == "spec" and not intent.get("prd"):
+        errors.append("$.prd: the spec goal needs the path of the PRD")
+    return errors
+
+
 def validate_file(artifact, schema_path):
     data = _lib.read_json(artifact, default=_lib)       # _lib is a sentinel no JSON value can equal
     if data is _lib:
@@ -110,8 +136,12 @@ def main(argv=None):
         _lib.die("give a system name, or --file with --schema")
 
     bad = 0
+    if args.system and not args.file:
+        intent = os.path.join(_lib.audit_dir(os.path.abspath(args.workspace), args.system), "INTENT.md")
+        if os.path.isfile(intent):
+            pairs.insert(0, (intent, None))
     for artifact, schema in pairs:
-        errors = validate_file(artifact, schema)
+        errors = validate_intent(artifact, args.system) if schema is None else validate_file(artifact, schema)
         if errors:
             bad += 1
             print("INVALID %s" % artifact)

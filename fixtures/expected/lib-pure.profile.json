@@ -56,7 +56,8 @@
     "testcontainers": false,
     "wiremock": false,
     "substitute_db": [],
-    "mocked_types": []
+    "mocked_types": [],
+    "database_source": "none"
   },
   "non_java_logic": {
     "drools_files": 0,

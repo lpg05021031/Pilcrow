@@ -164,6 +164,8 @@ def parse_junit_dir(path):
             continue
         total["files"] += 1
         for suite in suites:
+            # A class that fails in setup reports its time on the suite, not on its cases.
+            case_time = 0.0
             for case in suite.findall("testcase"):
                 status = "passed"
                 if case.find("failure") is not None:
@@ -180,7 +182,7 @@ def parse_junit_dir(path):
                 elif status == "skipped":
                     total["skipped"] += 1
                 try:
-                    total["time"] += float(case.get("time") or 0)
+                    case_time += float(case.get("time") or 0)
                 except ValueError:
                     pass
                 total["cases"].append({
@@ -188,5 +190,10 @@ def parse_junit_dir(path):
                     "name": case.get("name") or "",
                     "status": status,
                 })
+            try:
+                suite_time = float(suite.get("time") or 0)
+            except ValueError:
+                suite_time = 0.0
+            total["time"] += max(suite_time, case_time)
     total["time"] = round(total["time"], 3)
     return total

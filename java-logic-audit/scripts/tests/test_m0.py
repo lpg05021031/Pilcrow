@@ -216,7 +216,62 @@ class Endpoints(unittest.TestCase):
         self.assertIsNone(preflight_scan._endpoint("not a url at all"))
 
 
+class EnvironmentOverrides(unittest.TestCase):
+    def test_an_environment_variable_can_move_a_local_endpoint_elsewhere(self):
+        tmp = tempfile.mkdtemp(prefix="jla-test-")
+        try:
+            write(tmp, "src/main/resources/application.properties",
+                  "spring.datasource.url=jdbc:postgresql://${DB_HOST:localhost}:5432/app\n"
+                  "orders.nats.url=nats://localhost:4222\n")
+            files = ["src/main/resources/application.properties"]
+            plain = {c["key"]: c for c in preflight_scan.scan_connections(tmp, files)}
+            self.assertEqual((True, False), (plain["spring.datasource.url"]["local"],
+                                             plain["spring.datasource.url"]["env_override"]))
+            moved = {c["key"]: c for c in preflight_scan.scan_connections(
+                tmp, files, {"DB_HOST": "db.prod.example.com", "ORDERS_NATS_URL": "nats://nats.prod.example.com:4222"})}
+            self.assertEqual(("db.prod.example.com", False, True),
+                             tuple(moved["spring.datasource.url"][k] for k in ("host", "local", "env_override")))
+            self.assertEqual(("nats.prod.example.com", False, True),
+                             tuple(moved["orders.nats.url"][k] for k in ("host", "local", "env_override")))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
+class Listeners(unittest.TestCase):
+    def test_framework_lifecycle_listeners_are_not_business_events(self):
+        tmp = tempfile.mkdtemp(prefix="jla-test-")
+        try:
+            write(tmp, "pom.xml", "<project><modelVersion>4.0.0</modelVersion></project>")
+            write(tmp, "src/main/java/a/L.java", """package a;
+                class L {
+                    @EventListener(ApplicationReadyEvent.class) public void ready() {}
+                    @EventListener public void refreshed(ContextRefreshedEvent e) {}
+                    @TransactionalEventListener public void paid(OrderPaid e) {}
+                }""")
+            p = preflight_scan.scan(tmp, env=False)
+            self.assertEqual([{"kind": "spring-events", "listeners": 1, "publishers": 0}], p["messaging"])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 class Baseline(unittest.TestCase):
+    def test_a_blocked_run_is_not_a_failing_code_base_and_secrets_are_not_recorded(self):
+        tmp = tempfile.mkdtemp(prefix="jla-test-")
+        try:
+            profile = write(tmp, "profile.json", json.dumps({"schema": 1}))
+            write(tmp, "reports/TEST-a.xml", '<testsuite name="a" time="6.5"><testcase classname="a" name="x" time="0.01">'
+                                             '<error/></testcase></testsuite>')
+            r = preflight_scan.baseline(
+                profile, "mvn test -Dspring.datasource.password=hunter2 -Dspring.datasource.url=jdbc:x://h/db",
+                [os.path.join(tmp, "reports")], blocked="Connection to 127.0.0.1:54329 refused")
+            self.assertEqual("blocked", r["status"])
+            self.assertEqual(6.5, r["seconds"])
+            self.assertNotIn("hunter2", json.dumps(r))
+            self.assertIn("password=[redacted]", r["command"])
+            self.assertIn("jdbc:x://h/db", r["command"])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
     def test_counts_come_from_parsed_result_files(self):
         tmp = tempfile.mkdtemp(prefix="jla-test-")
         try:
@@ -372,6 +427,28 @@ class Status(unittest.TestCase):
     def test_system_name_is_checked(self):
         with self.assertRaises(SystemExit):
             status.status(self.tmp, "../etc")
+
+
+class IntentFile(unittest.TestCase):
+    GOOD = ("---\nsystem: sys\nmodule: .\ngoal: understand\nlanguage: auto\nbudget: quick\n"
+            "base_commit: abc1234\ndate: 2026-11-21\n---\n# Intent\n")
+
+    def check(self, text):
+        tmp = tempfile.mkdtemp(prefix="jla-test-")
+        try:
+            return validate.validate_intent(write(tmp, "INTENT.md", text), "sys")
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_a_well_formed_intent_is_valid(self):
+        self.assertEqual([], self.check(self.GOOD))
+
+    def test_common_mistakes_are_named(self):
+        self.assertTrue(self.check("```\n" + self.GOOD + "```\n"))                 # wrapped in a code fence
+        self.assertTrue(any("goal" in e for e in self.check(self.GOOD.replace("understand", "everything"))))
+        self.assertTrue(any("prd" in e for e in self.check(self.GOOD.replace("understand", "spec"))))
+        self.assertTrue(any("system" in e for e in self.check(self.GOOD.replace("system: sys", "system: other"))))
+        self.assertTrue(any("budget" in e for e in self.check(self.GOOD.replace("budget: quick\n", ""))))
 
 
 class Validator(unittest.TestCase):

@@ -121,7 +121,7 @@
     "transactions": { "type": "object" },
     "tests": {
       "type": "object",
-      "required": ["files", "frameworks", "testcontainers", "substitute_db", "mocked_types"],
+      "required": ["files", "frameworks", "testcontainers", "substitute_db", "mocked_types", "database_source"],
       "properties": {
         "files": { "type": "integer", "minimum": 0 },
         "frameworks": { "type": "array", "items": { "type": "string" } },
@@ -130,7 +130,8 @@
         "testcontainers": { "type": "boolean" },
         "wiremock": { "type": "boolean" },
         "substitute_db": { "type": "array", "items": { "type": "string" } },
-        "mocked_types": { "type": "array", "items": { "type": "string" } }
+        "mocked_types": { "type": "array", "items": { "type": "string" } },
+        "database_source": { "type": "string", "enum": ["container", "substitute", "test-config", "main-config", "none"] }
       }
     },
     "non_java_logic": {
@@ -154,7 +155,8 @@
           "kind": { "type": "string" },
           "host": { "type": "string" },
           "local": { "type": ["boolean", "null"] },
-          "placeholder": { "type": "boolean" }
+          "placeholder": { "type": "boolean" },
+          "env_override": { "type": "boolean" }
         }
       }
     },
@@ -180,7 +182,7 @@
       "type": "object",
       "required": ["command", "tests", "failures", "errors", "skipped", "status"],
       "properties": {
-        "status": { "type": "string", "enum": ["passing", "failing", "none-executed"] }
+        "status": { "type": "string", "enum": ["passing", "failing", "none-executed", "blocked"] }
       }
     },
     "capabilities": { "type": "object" }
