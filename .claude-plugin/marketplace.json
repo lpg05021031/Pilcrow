@@ -1,0 +1,14 @@
+{
+  "name": "java-logic-audit",
+  "description": "One plugin: java-logic-audit, an evidence-graded audit of the business logic in stateful Java backends.",
+  "owner": {
+    "name": "java-logic-audit contributors"
+  },
+  "plugins": [
+    {
+      "name": "java-logic-audit",
+      "source": "./java-logic-audit",
+      "description": "Rigorous, evidence-graded audit of the business logic in a stateful Java backend."
+    }
+  ]
+}

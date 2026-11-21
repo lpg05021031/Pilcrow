@@ -24,6 +24,14 @@ No command has been run on a real system yet.
 
 ## Try it
 
+Install it from this repository (Claude Code 2.1.275 or later):
+
+```
+/plugin install java-logic-audit --marketplace lpg05021031/Pilcrow
+```
+
+or load it from a checkout without installing:
+
 ```
 claude --plugin-dir /path/to/java-logic-audit
 ```

@@ -259,11 +259,30 @@ public final class Scenario {
             }
             for (JsonNode v : command.get("vars")) {
                 if (v.hasNonNull("sql")) {
-                    out.put(v.get("name").asText(), Sql.scalar(v.get("sql").asText(), named));
+                    out.put(v.get("name").asText(), asTheDomainSpellsIt(v, Sql.scalar(v.get("sql").asText(), named)));
                 }
             }
         }
         return out;
+    }
+
+    /**
+     * Some engines have no boolean: MySQL answers "select exists(...)" with 1 or 0. When the model says the
+     * variable is true or false and the query gives 1 or 0, the value is read as the model spells it.
+     */
+    static String asTheDomainSpellsIt(JsonNode variable, String value) {
+        if (!"1".equals(value) && !"0".equals(value)) {
+            return value;
+        }
+        boolean speaksOfTruth = false;
+        for (JsonNode d : variable.path("domain")) {
+            String word = d.asText();
+            if ("1".equals(word) || "0".equals(word)) {
+                return value;                       // the model counts: leave the number alone
+            }
+            speaksOfTruth = speaksOfTruth || "true".equals(word) || "false".equals(word);
+        }
+        return speaksOfTruth ? ("1".equals(value) ? "true" : "false") : value;
     }
 
     /** Calls the command once and records everything it did. */

@@ -80,7 +80,9 @@ A variable is something a check of this command looks at. Two kinds:
   then checks that the value used really is in the class. `:today` is the application's current date.
   Only top-level parameters can be named in a query; a class about a value nested in a list has no `sql`.
 
-`domain` lists every value the checks tell apart, as text (`"true"`, `"null"`). For a comparison with a
+`domain` lists every value the checks tell apart, as text (`"true"`, `"null"`). A query that answers 1 or 0
+on an engine without booleans (MySQL's `exists`) is read as `"true"` or `"false"` when the domain says so.
+For a comparison with a
 stored value, the classes are the boundaries: below, equal, above. `meaning` (optional) is an object that
 says in a few words what a value is: `{ "below-shipped": "less than what has shipped" }`.
 
