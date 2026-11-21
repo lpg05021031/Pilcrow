@@ -81,7 +81,8 @@ class RaceRunner {
         scenario = new Scenario(new SpringDriver(AuditContext.get()));
         File model = new File(AuditConfig.load().dir(), "model");
         int budget = Integer.parseInt(System.getProperty("audit.pairs", "10"));
-        List<Pair> pairs = choose(AuditConfig.JSON.readTree(new File(model, "matrix.json")), budget);
+        List<Pair> pairs = choose(AuditConfig.JSON.readTree(new File(model, "matrix.json")),
+                AuditConfig.JSON.readTree(new File(model, "commands.json")), budget);
         List<String[]> rules = confirmedRules(model);
         results.note("pairs", pairs.size());
         results.note("rules_checked", rules.size());
@@ -122,8 +123,33 @@ class RaceRunner {
         }
     }
 
-    /** Pairs of cases that start from the same situation and both change something; most overlap first. */
-    private static List<Pair> choose(JsonNode matrix, int budget) {
+    /** A command's name without the part that tells its forms apart: CMD-proposeChange.QTY is CMD-proposeChange. */
+    private static String root(JsonNode cell) {
+        String id = cell.get("command").asText();
+        return id.indexOf('.') > 0 ? id.substring(0, id.indexOf('.')) : id;
+    }
+
+    /** The ${...} expressions a case's parameters are built from: two cases that share one act on the same row. */
+    private static TreeSet<String> refersTo(JsonNode cell) {
+        TreeSet<String> out = new TreeSet<String>();
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("\\$\\{[^}]+\\}").matcher(cell.path("with").toString());
+        while (m.find()) {
+            out.add(m.group());
+        }
+        return out;
+    }
+
+    /**
+     * Pairs of cases that start from the same situation and both change something. Where a clash is
+     * most likely comes first: a call sent twice that creates the very row its command is about (nothing
+     * exists yet that a lock could be taken on), and two different commands whose parameters point at
+     * the same row.
+     */
+    private static List<Pair> choose(JsonNode matrix, JsonNode model, int budget) {
+        Map<String, String> target = new LinkedHashMap<String, String>();
+        for (JsonNode c : model.path("commands")) {
+            target.put(c.path("id").asText(), c.path("target").asText(""));
+        }
         Map<String, List<JsonNode>> bySituation = new LinkedHashMap<String, List<JsonNode>>();
         for (JsonNode cell : matrix.path("cells")) {
             JsonNode e = cell.path("expected");
@@ -159,8 +185,21 @@ class RaceRunner {
                     p.a = cells.get(i);
                     p.b = cells.get(j);
                     p.twice = i == j;
-                    // Of one command's cases, the usual one stands for it.
-                    p.shared = touched.size() + (p.twice && cells.get(i).path("deviation").isNull() ? 50 : 0);
+                    p.shared = touched.size();
+                    if (p.twice) {
+                        // Of one command's cases, the usual one stands for it.
+                        p.shared += cells.get(i).path("deviation").isNull() ? 50 : 0;
+                        String own = target.get(cells.get(i).get("command").asText());
+                        for (JsonNode created : cells.get(i).path("expected").path("created")) {
+                            if (own != null && !own.isEmpty() && created.asText().equals(own)) {
+                                p.shared += 1000;
+                            }
+                        }
+                    } else {
+                        TreeSet<String> same = refersTo(cells.get(i));
+                        same.retainAll(refersTo(cells.get(j)));
+                        p.shared += same.isEmpty() ? 0 : 1000;
+                    }
                     pairs.add(p);
                 }
             }
@@ -189,7 +228,7 @@ class RaceRunner {
             for (Pair p : pairs) {
                 boolean wanted = round == 2 || (round == 0) == p.twice;
                 boolean room = round == 2 || (p.twice ? twice < (budget + 1) / 2 : different < budget / 2);
-                String key = p.a.get("command").asText() + "+" + p.b.get("command").asText();
+                String key = root(p.a) + "+" + root(p.b);       // the forms of one command count once
                 if (wanted && room && chosen.size() < budget && !seen.contains(key)) {
                     seen.add(key);
                     chosen.add(p);

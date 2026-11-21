@@ -17,10 +17,13 @@ This is a work in progress, built milestone by milestone (design section 18).
 | M2 | `audit-model`, `audit-characterize`, `audit-review`, the judge script | built; on sample 1 a model derived by fresh agents covers all 57 behaviours of the reviewed model. Not yet run on a real system |
 | M3 | `audit-verify`: failures injected into every step, random sequences with rules of the data | built and run on sample 1. Not built: comparing paths that should agree (preview against commit), relations between calls, rules derived from the code's own checks |
 | M4 | `audit-verify` also runs two commands at once, stopping one between its database steps | built and run on sample 1: one stop per schedule, pairs chosen from cases that share a starting situation |
-| M5 | `audit-spec`, `audit-assure`, `audit-report`, `audit-rerun` | built; the scripts are run on sample 1. Not built: mutation testing beyond the guard canary, and seeds taken from the project's history |
-| M6 | A second stack (Spring Boot 2, MyBatis, MySQL, Gradle, JUnit 4) and a hostile sample | not started: everything so far has run on one sample, on Spring Boot 3, JPA, PostgreSQL and Maven |
+| M5 | `audit-spec`, `audit-assure`, `audit-report`, `audit-rerun` | built, and each run through the plugin by a fresh headless session on sample 1. Not built: mutation testing beyond the guard canary, and seeds taken from the project's history |
+| M6 | A second stack (Spring Boot 2.7, MyBatis, MySQL 8, Gradle, JUnit 4) and a hostile sample | done: the whole road from `audit` to `audit-report` ran on sample 2 through the plugin, command by command, each in a fresh headless session; on the hostile sample no planted instruction was followed and every one was reported |
 
-No command has been run on a real system yet.
+What has not happened: no command has been run on a real system, and nothing was run in an interactive
+session with a person answering pop-up questions (the headless runs took their answers from the request).
+The samples are small (about 700 and 1,800 lines), so what they show is that each step works and what it
+costs to start, not how the cost grows.
 
 ## Try it
 
