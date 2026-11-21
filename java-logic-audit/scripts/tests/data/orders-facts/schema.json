@@ -1,0 +1,347 @@
+{
+  "engine" : {
+    "product" : "PostgreSQL",
+    "version" : "16.15 (Ubuntu 16.15-0ubuntu0.24.04.1)",
+    "major" : 16,
+    "minor" : 15,
+    "default_isolation" : "READ_COMMITTED",
+    "connection_isolation" : "READ_COMMITTED"
+  },
+  "tables" : {
+    "change_request" : {
+      "columns" : [ {
+        "name" : "id",
+        "type" : "int8",
+        "size" : 19,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "line_id",
+        "type" : "int8",
+        "size" : 19,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "type",
+        "type" : "varchar",
+        "size" : 20,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "new_qty",
+        "type" : "int4",
+        "size" : 10,
+        "scale" : 0,
+        "nullable" : true,
+        "default" : null
+      }, {
+        "name" : "new_date",
+        "type" : "date",
+        "size" : 13,
+        "scale" : 0,
+        "nullable" : true,
+        "default" : null
+      }, {
+        "name" : "status",
+        "type" : "varchar",
+        "size" : 20,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "line_revision",
+        "type" : "int4",
+        "size" : 10,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "amount_delta",
+        "type" : "numeric",
+        "size" : 19,
+        "scale" : 2,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "created_at",
+        "type" : "timestamptz",
+        "size" : 35,
+        "scale" : 6,
+        "nullable" : false,
+        "default" : null
+      } ],
+      "primary_key" : [ "id" ],
+      "foreign_keys" : [ {
+        "column" : "line_id",
+        "references_table" : "order_line",
+        "references_column" : "id"
+      } ],
+      "unique" : [ [ "id" ] ]
+    },
+    "order_header" : {
+      "columns" : [ {
+        "name" : "id",
+        "type" : "int8",
+        "size" : 19,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "order_no",
+        "type" : "varchar",
+        "size" : 40,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "customer_id",
+        "type" : "varchar",
+        "size" : 40,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "status",
+        "type" : "varchar",
+        "size" : 20,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "total_amount",
+        "type" : "numeric",
+        "size" : 19,
+        "scale" : 2,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "version",
+        "type" : "int8",
+        "size" : 19,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "created_at",
+        "type" : "timestamptz",
+        "size" : 35,
+        "scale" : 6,
+        "nullable" : false,
+        "default" : null
+      } ],
+      "primary_key" : [ "id" ],
+      "foreign_keys" : [ ],
+      "unique" : [ [ "order_no" ], [ "id" ] ]
+    },
+    "order_line" : {
+      "columns" : [ {
+        "name" : "id",
+        "type" : "int8",
+        "size" : 19,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "header_id",
+        "type" : "int8",
+        "size" : 19,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "line_no",
+        "type" : "int4",
+        "size" : 10,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "sku",
+        "type" : "varchar",
+        "size" : 40,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "qty",
+        "type" : "int4",
+        "size" : 10,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "shipped_qty",
+        "type" : "int4",
+        "size" : 10,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "unit_price",
+        "type" : "numeric",
+        "size" : 19,
+        "scale" : 2,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "status",
+        "type" : "varchar",
+        "size" : 20,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "revision",
+        "type" : "int4",
+        "size" : 10,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "version",
+        "type" : "int8",
+        "size" : 19,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      } ],
+      "primary_key" : [ "id" ],
+      "foreign_keys" : [ {
+        "column" : "header_id",
+        "references_table" : "order_header",
+        "references_column" : "id"
+      } ],
+      "unique" : [ [ "header_id", "line_no" ], [ "id" ] ]
+    },
+    "outbox_event" : {
+      "columns" : [ {
+        "name" : "id",
+        "type" : "int8",
+        "size" : 19,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "type",
+        "type" : "varchar",
+        "size" : 60,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "aggregate_id",
+        "type" : "int8",
+        "size" : 19,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "payload",
+        "type" : "text",
+        "size" : 2147483647,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "status",
+        "type" : "varchar",
+        "size" : 20,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "created_at",
+        "type" : "timestamptz",
+        "size" : 35,
+        "scale" : 6,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "sent_at",
+        "type" : "timestamptz",
+        "size" : 35,
+        "scale" : 6,
+        "nullable" : true,
+        "default" : null
+      } ],
+      "primary_key" : [ "id" ],
+      "foreign_keys" : [ ],
+      "unique" : [ [ "id" ] ]
+    },
+    "processed_message" : {
+      "columns" : [ {
+        "name" : "message_id",
+        "type" : "varchar",
+        "size" : 80,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "processed_at",
+        "type" : "timestamptz",
+        "size" : 35,
+        "scale" : 6,
+        "nullable" : false,
+        "default" : null
+      } ],
+      "primary_key" : [ "message_id" ],
+      "foreign_keys" : [ ],
+      "unique" : [ [ "message_id" ] ]
+    },
+    "schedule_line" : {
+      "columns" : [ {
+        "name" : "id",
+        "type" : "int8",
+        "size" : 19,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "line_id",
+        "type" : "int8",
+        "size" : 19,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "seq_no",
+        "type" : "int4",
+        "size" : 10,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "qty",
+        "type" : "int4",
+        "size" : 10,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "delivery_date",
+        "type" : "date",
+        "size" : 13,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "status",
+        "type" : "varchar",
+        "size" : 20,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      } ],
+      "primary_key" : [ "id" ],
+      "foreign_keys" : [ {
+        "column" : "line_id",
+        "references_table" : "order_line",
+        "references_column" : "id"
+      } ],
+      "unique" : [ [ "line_id", "seq_no" ], [ "id" ] ]
+    }
+  }
+}

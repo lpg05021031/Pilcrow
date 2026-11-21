@@ -13,8 +13,7 @@ This is a work in progress, built milestone by milestone (design section 18).
 | Milestone | Contents | State |
 |---|---|---|
 | M0 | Plugin skeleton; `audit`, `audit-preflight`, `audit-status`; verification samples 1 and 3 | done |
-| M1 | auditkit core, `audit-harness` | done |
-| M1 | `audit-map` | not started |
+| M1 | auditkit core, `audit-harness`, `audit-map` | done |
 | M2 | `audit-model`, `audit-characterize`, `audit-review`, the judge script | not started |
 | M3–M6 | sequences, faults, concurrency, PRD trace, assurance, report, more stacks | not started |
 
@@ -44,6 +43,7 @@ exact next command.
 | `audit [system]` | Says what you want; writes `INTENT.md`; shows the road |
 | `audit-preflight <system>` | What this repository lets the audit prove: technical profile, whether the method applies, where tests would connect, a baseline of the existing tests, a manifest of the source |
 | `audit-harness <system>` | The test harness installed and shown to run on the application: six checks, the facts it extracts, and what the audit can prove here |
+| `audit-map <system>` | Entry points, entities, and every place each column is written, with the entry points that reach it and the transaction it runs in |
 | `audit-status <system>` | Progress, what is stale, the next command |
 
 Preflight writes four files under `audit/<system>/`:

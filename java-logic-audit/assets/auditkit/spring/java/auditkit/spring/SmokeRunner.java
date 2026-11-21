@@ -202,14 +202,17 @@ class SmokeRunner {
                 }
                 Map<String, Object> d = new LinkedHashMap<String, Object>();
                 d.put("doubles", doubles);
+                d.put("http_rules", config.nodes("http_doubles").size());
                 try {
                     Class<?> rest = Class.forName("auditkit.spring.restclient.RestClientDouble");
                     Method selfTest = rest.getMethod("selfTest", org.springframework.context.ApplicationContext.class);
-                    d.put("http_restclient", selfTest.invoke(null, context));
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> http = (Map<String, Object>) selfTest.invoke(null, context);
+                    d.put("http_restclient", http.get("reached"));
+                    d.put("http_examples", http.get("examples"));
                 } catch (ClassNotFoundException e) {
                     d.put("http_restclient", null);
                 }
-                d.put("http_rules", config.nodes("http_doubles").size());
                 for (Map<String, Object> row : doubles) {
                     // A type with no getter to probe is still the audit's double (checked above); that is enough.
                     if (row.get("probe") == null && hasGetter(Class.forName((String) row.get("type")))) {
@@ -218,6 +221,17 @@ class SmokeRunner {
                 }
                 if (Boolean.FALSE.equals(d.get("http_restclient"))) {
                     throw new IllegalStateException("a request sent through the application's RestClient builder did not reach the HTTP double");
+                }
+                if (d.get("http_examples") != null) {
+                    for (Object item : (List<?>) d.get("http_examples")) {
+                        Map<?, ?> row = (Map<?, ?>) item;
+                        if (row.get("example") == null) {
+                            throw new IllegalStateException("the HTTP rule " + row.get("url") + " has no example request to prove it with");
+                        }
+                        if (!Boolean.TRUE.equals(row.get("answered"))) {
+                            throw new IllegalStateException("the HTTP rule " + row.get("url") + " does not answer its own example " + row.get("example"));
+                        }
+                    }
                 }
                 return d;
             }

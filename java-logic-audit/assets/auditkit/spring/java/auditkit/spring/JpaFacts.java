@@ -23,6 +23,7 @@ public final class JpaFacts {
         Map<String, Object> out = new LinkedHashMap<String, Object>();
         Map<String, Object> entities = new TreeMap<String, Object>();
         out.put("entities", entities);
+        out.put("repositories", repositories(context));
         Class<?> emfType = firstPresent("jakarta.persistence.EntityManagerFactory", "javax.persistence.EntityManagerFactory");
         if (emfType == null || context.getBeanNamesForType(emfType).length == 0) {
             out.put("provider", null);
@@ -44,6 +45,64 @@ public final class JpaFacts {
         } catch (Exception e) {
             out.put("provider", "unknown");
             out.put("error", e.getClass().getName() + ": " + e.getMessage());
+        }
+        return out;
+    }
+
+    /** Every Spring Data repository bean: its interface, the entity it is for, and the queries it declares. */
+    private static List<Map<String, Object>> repositories(ApplicationContext context) {
+        List<Map<String, Object>> out = new ArrayList<Map<String, Object>>();
+        Class<?> root = firstPresent("org.springframework.data.repository.Repository");
+        if (root == null) {
+            return out;
+        }
+        String[] names = context.getBeanNamesForType(root, true, false);
+        Arrays.sort(names);
+        for (String name : names) {
+            Class<?> type = context.getType(name);
+            if (type == null) {
+                continue;
+            }
+            for (Class<?> iface : org.springframework.util.ClassUtils.getAllInterfacesForClass(type)) {
+                if (!root.isAssignableFrom(iface) || iface.getName().startsWith("org.springframework.")) {
+                    continue;
+                }
+                Class<?>[] args = org.springframework.core.GenericTypeResolver.resolveTypeArguments(iface, root);
+                Map<String, Object> row = new LinkedHashMap<String, Object>();
+                row.put("bean", name);
+                row.put("interface", iface.getName());
+                row.put("domain_type", args != null && args.length > 0 ? args[0].getName() : null);
+                List<Map<String, Object>> queries = new ArrayList<Map<String, Object>>();
+                Method[] methods = iface.getDeclaredMethods();
+                Arrays.sort(methods, new java.util.Comparator<Method>() {
+                    @Override
+                    public int compare(Method a, Method b) {
+                        return a.getName().compareTo(b.getName());
+                    }
+                });
+                for (Method m : methods) {
+                    Map<String, Object> q = new LinkedHashMap<String, Object>();
+                    q.put("name", m.getName());
+                    q.put("modifying", false);
+                    for (java.lang.annotation.Annotation a : m.getAnnotations()) {
+                        String simple = a.annotationType().getSimpleName();
+                        try {
+                            if (simple.equals("Query")) {
+                                q.put("query", String.valueOf(a.annotationType().getMethod("value").invoke(a)));
+                            } else if (simple.equals("Modifying")) {
+                                q.put("modifying", true);
+                            } else if (simple.equals("Lock")) {
+                                q.put("lock", String.valueOf(a.annotationType().getMethod("value").invoke(a)));
+                            }
+                        } catch (Exception e) {
+                            // an annotation of the same simple name from another library: ignore it
+                        }
+                    }
+                    queries.add(q);
+                }
+                row.put("queries", queries);
+                out.add(row);
+            }
         }
         return out;
     }

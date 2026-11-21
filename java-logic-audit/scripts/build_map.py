@@ -9,6 +9,9 @@ Reads audit/<system>/facts/{context,jpa,schema,bytecode}.json and writes:
     audit/<system>/MAP.md        the same for people
     audit/<system>/shards.json   the slices audit-model will read, one per entry group and one per entity
 
+If audit/<system>/map_resolved.json exists, the writes it settles are merged in: each row names a
+site and line from `unresolved`, the table and columns a reader found there, and the lines it cites.
+
 Everything here is mechanical: no judgement, the same facts always give the same map. The call graph
 comes from compiled classes with interface calls expanded to every implementation, so it
 over-approximates: a path shown here may never run, but a path that runs through ordinary calls is
@@ -270,7 +273,7 @@ def entity_mutators(graph, entities):
     return out
 
 
-def build_write_sites(graph, entities, mutators, repositories):
+def build_write_sites(graph, entities, mutators, repositories, resolved=None):
     sites, unresolved = [], []
     repo_domain = {r["interface"]: r.get("domain_type") for r in repositories}
     for cls in sorted(graph.types):
@@ -311,6 +314,19 @@ def build_write_sites(graph, entities, mutators, repositories):
                     if columns:
                         sites.append({"entity": ent["id"], "table": ent["table"], "kind": "update", "columns": sorted(columns),
                                       "via": "%s.%s (field)" % (simple(f["owner"]), f["name"]), "site": site, "line": f["line"]})
+    # Writes a reader settled: (site, line) -> table, columns, kind, cite.
+    by_place = {(r.get("site"), r.get("line")): r for r in resolved or [] if r.get("table")}
+    still = []
+    for u in unresolved:
+        r = by_place.get((u["site"], u["line"]))
+        ent = next((e for e in entities.values() if r and e["table"] == r["table"]), None)
+        if r:
+            sites.append({"entity": ent["id"] if ent else None, "table": r["table"],
+                          "kind": r.get("kind", "update"), "columns": sorted(r.get("columns", [])),
+                          "via": u["via"], "site": u["site"], "line": u["line"], "resolved_by": r.get("cite")})
+        else:
+            still.append(u)
+    unresolved = still
     sites.sort(key=lambda s: (s["table"] or "", s["kind"], s["site"], s["line"], s["via"]))
     for i, s in enumerate(sites, 1):
         s["id"] = "WS-%04d" % i
@@ -332,16 +348,40 @@ def attach_reachability(graph, sites, entries, transactions):
     for s in sites:
         up = graph.reach_up(s["site"])
         s["entries"] = sorted({ep for mid in up for ep in handler_to_entries.get(mid, [])})
-        # The transaction a write runs in is the nearest transactional method on the way up from it.
-        nearest = graph.reach_up(s["site"], stop=lambda mid: mid in tx)
-        inside = sorted({"%s#%s %s" % (simple(class_of(m)), name_of(m), tx[m]["propagation"] + (" read-only" if tx[m]["read_only"] else ""))
-                         for m in nearest if m in tx})
-        bare = sorted({ep for mid in nearest for ep in handler_to_entries.get(mid, []) if mid not in tx})
-        if s["site"] in tx:
-            bare = []
-        s["transaction"] = inside
-        s["outside_transaction_from"] = bare          # entries from which this write is reached with no transaction
+        inside, bare = effective_transactions(graph, s["site"], tx, handler_to_entries)
+        s["transaction"] = sorted("%s#%s %s%s" % (simple(class_of(m)), name_of(m), tx[m]["propagation"],
+                                                 " read-only" if tx[m]["read_only"] else "") for m in inside)
+        s["outside_transaction_from"] = sorted(bare)      # entries from which this write is reached with no transaction
     return sites
+
+
+def effective_transactions(graph, site, tx, handler_to_entries):
+    """Walk up from a write site and find the transaction it runs in on each path.
+
+    A method's transaction settings apply only when the method is entered through its proxy: from
+    another class, or as an entry point called by the framework. Called from a method of its own
+    class, they do not apply, and the walk goes on upward. Returns (transactional methods that do
+    take effect, entries from which the site is reached with no transaction at all).
+    """
+    inside, bare = set(), set()
+    seen = {site}
+    queue = collections.deque([site])
+    while queue:
+        cur = queue.popleft()
+        is_entry = cur in handler_to_entries
+        if is_entry:
+            if cur in tx:
+                inside.add(cur)
+            else:
+                bare.update(handler_to_entries[cur])
+        for caller, _line in graph.callers.get(cur, ()):
+            if cur in tx and class_of(caller) != class_of(cur):
+                inside.add(cur)                           # entered through the proxy: covered, stop here
+                continue
+            if caller not in seen:
+                seen.add(caller)
+                queue.append(caller)
+    return inside, bare
 
 
 def self_invocations(graph, transactions):
@@ -428,7 +468,8 @@ def build(workspace, system):
     entities = build_entities(jpa, schema, profile)
     mutators = entity_mutators(graph, entities)
     repositories = jpa.get("repositories", [])
-    sites, unresolved = build_write_sites(graph, entities, mutators, repositories)
+    resolved = (_lib.read_json(os.path.join(adir, "map_resolved.json"), {}) or {}).get("resolved", [])
+    sites, unresolved = build_write_sites(graph, entities, mutators, repositories, resolved)
     attach_reachability(graph, sites, entries, context.get("transactions", []))
 
     for e in entries:                                   # what each entry can write, statically

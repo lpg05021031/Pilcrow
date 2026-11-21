@@ -5,6 +5,9 @@ import com.tngtech.archunit.core.domain.JavaAnnotation;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaCodeUnit;
+import com.tngtech.archunit.core.domain.JavaConstructorCall;
+import com.tngtech.archunit.core.domain.JavaConstructorReference;
+import com.tngtech.archunit.core.domain.JavaMethodReference;
 import com.tngtech.archunit.core.domain.JavaFieldAccess;
 import com.tngtech.archunit.core.domain.JavaMethodCall;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
@@ -60,6 +63,16 @@ public final class BytecodeFacts {
                 List<Map<String, Object>> calls = new ArrayList<Map<String, Object>>();
                 for (JavaMethodCall call : unit.getMethodCallsFromSelf()) {
                     calls.add(access(call, call.getTargetOwner().getName(), call.getName(), null));
+                }
+                for (JavaConstructorCall call : unit.getConstructorCallsFromSelf()) {
+                    calls.add(access(call, call.getTargetOwner().getName(), "<init>", null));
+                }
+                // A method reference (OrderLine::getStatus) is a call that happens later; for reachability it counts.
+                for (JavaMethodReference ref : unit.getMethodReferencesFromSelf()) {
+                    calls.add(access(ref, ref.getTargetOwner().getName(), ref.getName(), "reference"));
+                }
+                for (JavaConstructorReference ref : unit.getConstructorReferencesFromSelf()) {
+                    calls.add(access(ref, ref.getTargetOwner().getName(), "<init>", "reference"));
                 }
                 m.put("calls", calls);
                 List<Map<String, Object>> fields = new ArrayList<Map<String, Object>>();

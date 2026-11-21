@@ -1,0 +1,378 @@
+{
+  "base_package" : "com.example.orders",
+  "http" : [ {
+    "methods" : [ "POST" ],
+    "patterns" : [ "/changes/{id}/commit" ],
+    "handler" : "com.example.orders.web.ChangeController#commit",
+    "parameters" : [ {
+      "type" : "java.lang.Long",
+      "name" : "id",
+      "annotations" : [ "PathVariable" ]
+    } ],
+    "returns" : "com.example.orders.web.dto.OrderView"
+  }, {
+    "methods" : [ "POST" ],
+    "patterns" : [ "/changes/{id}/confirm" ],
+    "handler" : "com.example.orders.web.ChangeController#confirm",
+    "parameters" : [ {
+      "type" : "java.lang.Long",
+      "name" : "id",
+      "annotations" : [ "PathVariable" ]
+    } ],
+    "returns" : "com.example.orders.web.dto.ChangeView"
+  }, {
+    "methods" : [ "POST" ],
+    "patterns" : [ "/changes/{id}/reject" ],
+    "handler" : "com.example.orders.web.ChangeController#reject",
+    "parameters" : [ {
+      "type" : "java.lang.Long",
+      "name" : "id",
+      "annotations" : [ "PathVariable" ]
+    } ],
+    "returns" : "com.example.orders.web.dto.ChangeView"
+  }, {
+    "methods" : [ "GET" ],
+    "patterns" : [ "/changes/{id}" ],
+    "handler" : "com.example.orders.web.ChangeController#get",
+    "parameters" : [ {
+      "type" : "java.lang.Long",
+      "name" : "id",
+      "annotations" : [ "PathVariable" ]
+    } ],
+    "returns" : "com.example.orders.web.dto.ChangeView"
+  }, {
+    "methods" : [ ],
+    "patterns" : [ "/error" ],
+    "handler" : "org.springframework.boot.autoconfigure.web.servlet.error.BasicErrorController#errorHtml",
+    "parameters" : [ {
+      "type" : "jakarta.servlet.http.HttpServletRequest",
+      "name" : "request",
+      "annotations" : [ ]
+    }, {
+      "type" : "jakarta.servlet.http.HttpServletResponse",
+      "name" : "response",
+      "annotations" : [ ]
+    } ],
+    "returns" : "org.springframework.web.servlet.ModelAndView"
+  }, {
+    "methods" : [ ],
+    "patterns" : [ "/error" ],
+    "handler" : "org.springframework.boot.autoconfigure.web.servlet.error.BasicErrorController#error",
+    "parameters" : [ {
+      "type" : "jakarta.servlet.http.HttpServletRequest",
+      "name" : "request",
+      "annotations" : [ ]
+    } ],
+    "returns" : "org.springframework.http.ResponseEntity"
+  }, {
+    "methods" : [ "POST" ],
+    "patterns" : [ "/orders/{id}/cancel" ],
+    "handler" : "com.example.orders.web.OrderController#cancel",
+    "parameters" : [ {
+      "type" : "java.lang.Long",
+      "name" : "id",
+      "annotations" : [ "PathVariable" ]
+    } ],
+    "returns" : "com.example.orders.web.dto.OrderView"
+  }, {
+    "methods" : [ "POST" ],
+    "patterns" : [ "/orders/{id}/confirm" ],
+    "handler" : "com.example.orders.web.OrderController#confirm",
+    "parameters" : [ {
+      "type" : "java.lang.Long",
+      "name" : "id",
+      "annotations" : [ "PathVariable" ]
+    } ],
+    "returns" : "com.example.orders.web.dto.OrderView"
+  }, {
+    "methods" : [ "GET" ],
+    "patterns" : [ "/orders/{id}" ],
+    "handler" : "com.example.orders.web.OrderController#get",
+    "parameters" : [ {
+      "type" : "java.lang.Long",
+      "name" : "id",
+      "annotations" : [ "PathVariable" ]
+    } ],
+    "returns" : "com.example.orders.web.dto.OrderView"
+  }, {
+    "methods" : [ "POST" ],
+    "patterns" : [ "/orders/{orderId}/lines/{lineId}/changes/preview" ],
+    "handler" : "com.example.orders.web.ChangeController#preview",
+    "parameters" : [ {
+      "type" : "java.lang.Long",
+      "name" : "orderId",
+      "annotations" : [ "PathVariable" ]
+    }, {
+      "type" : "java.lang.Long",
+      "name" : "lineId",
+      "annotations" : [ "PathVariable" ]
+    }, {
+      "type" : "com.example.orders.web.dto.ChangeCommand",
+      "name" : "command",
+      "annotations" : [ "Valid", "RequestBody" ]
+    } ],
+    "returns" : "com.example.orders.web.dto.ChangePreview"
+  }, {
+    "methods" : [ "POST" ],
+    "patterns" : [ "/orders/{orderId}/lines/{lineId}/changes" ],
+    "handler" : "com.example.orders.web.ChangeController#propose",
+    "parameters" : [ {
+      "type" : "java.lang.Long",
+      "name" : "orderId",
+      "annotations" : [ "PathVariable" ]
+    }, {
+      "type" : "java.lang.Long",
+      "name" : "lineId",
+      "annotations" : [ "PathVariable" ]
+    }, {
+      "type" : "com.example.orders.web.dto.ChangeCommand",
+      "name" : "command",
+      "annotations" : [ "Valid", "RequestBody" ]
+    } ],
+    "returns" : "com.example.orders.web.dto.ChangeView"
+  }, {
+    "methods" : [ "POST" ],
+    "patterns" : [ "/orders" ],
+    "handler" : "com.example.orders.web.OrderController#create",
+    "parameters" : [ {
+      "type" : "com.example.orders.web.dto.CreateOrderRequest",
+      "name" : "request",
+      "annotations" : [ "Valid", "RequestBody" ]
+    } ],
+    "returns" : "com.example.orders.web.dto.OrderView"
+  } ],
+  "scheduled" : [ {
+    "bean" : "orderClosingJob",
+    "method" : "com.example.orders.job.OrderClosingJob#closeCompleted",
+    "cron" : "${orders.closing.cron:0 0 2 * * *}",
+    "fixed_delay" : "-1",
+    "fixed_rate" : "-1"
+  }, {
+    "bean" : "outboxRelay",
+    "method" : "com.example.orders.messaging.OutboxRelay#relay",
+    "cron" : "",
+    "fixed_delay" : "${orders.outbox.delay-ms:1000}",
+    "fixed_rate" : "-1"
+  } ],
+  "listeners" : [ {
+    "bean" : "natsSubscriptions",
+    "method" : "com.example.orders.messaging.NatsSubscriptions#subscribe",
+    "annotation" : "org.springframework.context.event.EventListener",
+    "attributes" : {
+      "classes" : [ "org.springframework.boot.context.event.ApplicationReadyEvent" ],
+      "defaultExecution" : "true",
+      "value" : [ "org.springframework.boot.context.event.ApplicationReadyEvent" ]
+    },
+    "parameters" : [ ]
+  } ],
+  "transactions" : [ {
+    "method" : "com.example.orders.service.ChangeService#commit",
+    "propagation" : "REQUIRED",
+    "isolation" : "DEFAULT",
+    "read_only" : false,
+    "timeout" : -1,
+    "rolls_back_on_checked_exception" : false
+  }, {
+    "method" : "com.example.orders.service.ChangeService#get",
+    "propagation" : "REQUIRED",
+    "isolation" : "DEFAULT",
+    "read_only" : true,
+    "timeout" : -1,
+    "rolls_back_on_checked_exception" : false
+  }, {
+    "method" : "com.example.orders.service.ChangeService#preview",
+    "propagation" : "REQUIRED",
+    "isolation" : "DEFAULT",
+    "read_only" : true,
+    "timeout" : -1,
+    "rolls_back_on_checked_exception" : false
+  }, {
+    "method" : "com.example.orders.service.ChangeService#propose",
+    "propagation" : "REQUIRED",
+    "isolation" : "DEFAULT",
+    "read_only" : false,
+    "timeout" : -1,
+    "rolls_back_on_checked_exception" : false
+  }, {
+    "method" : "com.example.orders.service.ChangeService#confirm",
+    "propagation" : "REQUIRED",
+    "isolation" : "DEFAULT",
+    "read_only" : false,
+    "timeout" : -1,
+    "rolls_back_on_checked_exception" : false
+  }, {
+    "method" : "com.example.orders.service.ChangeService#reject",
+    "propagation" : "REQUIRED",
+    "isolation" : "DEFAULT",
+    "read_only" : false,
+    "timeout" : -1,
+    "rolls_back_on_checked_exception" : false
+  }, {
+    "method" : "com.example.orders.service.OrderService#get",
+    "propagation" : "REQUIRED",
+    "isolation" : "DEFAULT",
+    "read_only" : true,
+    "timeout" : -1,
+    "rolls_back_on_checked_exception" : false
+  }, {
+    "method" : "com.example.orders.service.OrderService#cancel",
+    "propagation" : "REQUIRED",
+    "isolation" : "DEFAULT",
+    "read_only" : false,
+    "timeout" : -1,
+    "rolls_back_on_checked_exception" : false
+  }, {
+    "method" : "com.example.orders.service.OrderService#create",
+    "propagation" : "REQUIRED",
+    "isolation" : "DEFAULT",
+    "read_only" : false,
+    "timeout" : -1,
+    "rolls_back_on_checked_exception" : false
+  }, {
+    "method" : "com.example.orders.service.OrderService#rollup",
+    "propagation" : "REQUIRED",
+    "isolation" : "DEFAULT",
+    "read_only" : false,
+    "timeout" : -1,
+    "rolls_back_on_checked_exception" : false
+  }, {
+    "method" : "com.example.orders.service.OrderService#confirm",
+    "propagation" : "REQUIRED",
+    "isolation" : "DEFAULT",
+    "read_only" : false,
+    "timeout" : -1,
+    "rolls_back_on_checked_exception" : false
+  }, {
+    "method" : "com.example.orders.messaging.OutboxRelay#relay",
+    "propagation" : "REQUIRED",
+    "isolation" : "DEFAULT",
+    "read_only" : false,
+    "timeout" : -1,
+    "rolls_back_on_checked_exception" : false
+  }, {
+    "method" : "com.example.orders.service.ShipmentService#apply",
+    "propagation" : "REQUIRED",
+    "isolation" : "DEFAULT",
+    "read_only" : false,
+    "timeout" : -1,
+    "rolls_back_on_checked_exception" : false
+  } ],
+  "beans" : {
+    "apiExceptionHandler" : {
+      "class" : "com.example.orders.web.ApiExceptionHandler",
+      "annotations" : [ "org.springframework.web.bind.annotation.RestControllerAdvice" ]
+    },
+    "changeController" : {
+      "class" : "com.example.orders.web.ChangeController",
+      "annotations" : [ "org.springframework.web.bind.annotation.RestController" ]
+    },
+    "changeRequestRepository" : {
+      "class" : "com.example.orders.repo.ChangeRequestRepository",
+      "annotations" : [ ]
+    },
+    "changeService" : {
+      "class" : "com.example.orders.service.ChangeService",
+      "annotations" : [ "org.springframework.stereotype.Service" ]
+    },
+    "clockConfig" : {
+      "class" : "com.example.orders.config.ClockConfig",
+      "annotations" : [ "org.springframework.context.annotation.Configuration" ]
+    },
+    "httpPricingClient" : {
+      "class" : "com.example.orders.pricing.HttpPricingClient",
+      "annotations" : [ "org.springframework.stereotype.Component" ]
+    },
+    "natsConfig" : {
+      "class" : "com.example.orders.config.NatsConfig",
+      "annotations" : [ "org.springframework.boot.autoconfigure.condition.ConditionalOnProperty", "org.springframework.context.annotation.Configuration" ]
+    },
+    "natsSubscriptions" : {
+      "class" : "com.example.orders.messaging.NatsSubscriptions",
+      "annotations" : [ "org.springframework.boot.autoconfigure.condition.ConditionalOnProperty", "org.springframework.stereotype.Component" ]
+    },
+    "orderClosingJob" : {
+      "class" : "com.example.orders.job.OrderClosingJob",
+      "annotations" : [ "org.springframework.stereotype.Component" ]
+    },
+    "orderController" : {
+      "class" : "com.example.orders.web.OrderController",
+      "annotations" : [ "org.springframework.web.bind.annotation.RequestMapping", "org.springframework.web.bind.annotation.RestController" ]
+    },
+    "orderEventPublisher" : {
+      "class" : "com.example.orders.messaging.OrderEventPublisher",
+      "annotations" : [ "org.springframework.stereotype.Component" ]
+    },
+    "orderHeaderRepository" : {
+      "class" : "com.example.orders.repo.OrderHeaderRepository",
+      "annotations" : [ ]
+    },
+    "orderLineRepository" : {
+      "class" : "com.example.orders.repo.OrderLineRepository",
+      "annotations" : [ ]
+    },
+    "orderService" : {
+      "class" : "com.example.orders.service.OrderService",
+      "annotations" : [ "org.springframework.stereotype.Service" ]
+    },
+    "ordersApplication" : {
+      "class" : "com.example.orders.OrdersApplication",
+      "annotations" : [ "org.springframework.boot.autoconfigure.SpringBootApplication" ]
+    },
+    "outboxEventRepository" : {
+      "class" : "com.example.orders.repo.OutboxEventRepository",
+      "annotations" : [ ]
+    },
+    "outboxRelay" : {
+      "class" : "com.example.orders.messaging.OutboxRelay",
+      "annotations" : [ "org.springframework.stereotype.Component" ]
+    },
+    "outboxWriter" : {
+      "class" : "com.example.orders.service.OutboxWriter",
+      "annotations" : [ "org.springframework.stereotype.Component" ]
+    },
+    "processedMessageRepository" : {
+      "class" : "com.example.orders.repo.ProcessedMessageRepository",
+      "annotations" : [ ]
+    },
+    "scheduleLineRepository" : {
+      "class" : "com.example.orders.repo.ScheduleLineRepository",
+      "annotations" : [ ]
+    },
+    "schedulingConfig" : {
+      "class" : "com.example.orders.config.SchedulingConfig",
+      "annotations" : [ "org.springframework.boot.autoconfigure.condition.ConditionalOnProperty", "org.springframework.context.annotation.Configuration", "org.springframework.scheduling.annotation.EnableScheduling" ]
+    },
+    "shipmentListener" : {
+      "class" : "com.example.orders.messaging.ShipmentListener",
+      "annotations" : [ "org.springframework.stereotype.Component" ]
+    },
+    "shipmentService" : {
+      "class" : "com.example.orders.service.ShipmentService",
+      "annotations" : [ "org.springframework.stereotype.Service" ]
+    }
+  },
+  "advised" : {
+    "changeService" : [ "org.springframework.transaction.interceptor.TransactionInterceptor" ],
+    "orderService" : [ "org.springframework.transaction.interceptor.TransactionInterceptor" ],
+    "outboxRelay" : [ "org.springframework.transaction.interceptor.TransactionInterceptor" ],
+    "shipmentService" : [ "org.springframework.transaction.interceptor.TransactionInterceptor" ]
+  },
+  "message_handlers" : [ {
+    "bean" : "shipmentListener",
+    "class" : "com.example.orders.messaging.ShipmentListener",
+    "interface" : "io.nats.client.MessageHandler",
+    "public_methods" : [ "handle[com.example.orders.messaging.ShipmentMessage]", "onMessage[io.nats.client.Message]" ]
+  } ],
+  "double_calls_at_startup" : [ {
+    "type" : "io.nats.client.Connection",
+    "kind" : "messaging",
+    "method" : "createDispatcher",
+    "args" : [ "(object) com.example.orders.messaging.ShipmentListener" ]
+  }, {
+    "type" : "io.nats.client.Dispatcher",
+    "kind" : "messaging",
+    "method" : "subscribe",
+    "args" : [ "orders.shipments" ]
+  } ],
+  "clock_bean" : true
+}

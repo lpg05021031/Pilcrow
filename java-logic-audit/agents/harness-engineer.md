@@ -10,8 +10,9 @@ code that is already installed; your job is the one file that tells it about thi
 list. Settle each item from the source, remove it from `todo` when it is settled, and leave in `todo`
 only what truly cannot be decided from the repository.
 
-You are given the system name and the module path. Read `audit/<system>/profile.json` and
-`audit/<system>/answers.json` before you start.
+You are given the system name, the module path, the list of what is left to settle, and where the
+harness's database comes from: the project's own test container, or a local database a person offered
+(with their words). Read `audit/<system>/profile.json` and `audit/<system>/answers.json` before you start.
 
 ## What you may touch
 
@@ -40,8 +41,11 @@ belong in this file at all: the harness takes them from the environment.
   "reuse_test_config": [],
   "profiles": [],
   "properties": {},
+  "database": { "source": "environment", "permission": "<the person's words offering it, secrets redacted>" },
   "doubles": [ { "type": "io.nats.client.Connection", "kind": "messaging" } ],
-  "http_doubles": [ { "method": "GET", "url": "^http://[^/]+/prices/.*", "status": 200, "body": { "unitPrice": "10.00" } } ],
+  "http_doubles": [ { "method": "GET", "url": "^http://[^/]+/prices/[^/?]+\\?qty=\\d+$",
+                      "example": "http://pricing.test/prices/SKU-1?qty=5",
+                      "status": 200, "body": { "unitPrice": "10.00" } } ],
   "rejections": ["com.example.BusinessException"],
   "base_data": [],
   "todo": []
@@ -51,11 +55,16 @@ belong in this file at all: the harness takes them from the environment.
 **`application`** — the class annotated `@SpringBootApplication` in the module being audited. The profile
 lists the candidates.
 
-**`reuse_test_config`** — test configuration classes the harness should load so that the database starts
-the way the project's own tests start it: typically a `@TestConfiguration` with a container bean. Use it
-only when the tests start a real database in a container. Leave it empty when the database address will
-come from the environment (`AUDIT_DB_URL`); the command that called you tells you which case applies. Do
-not list configuration that replaces application beans with mocks: the harness has its own doubles.
+**`database`** — where the harness's database comes from, as you were told. `source` is
+`project-container` or `environment`. For `environment`, put the person's own words offering the database
+in `permission`, with any password replaced by `[redacted]`: this is the record that a person allowed the
+harness to empty that database. The address and the credentials are never written here; the harness reads
+them from `AUDIT_DB_URL`, `AUDIT_DB_USER` and `AUDIT_DB_PASSWORD`.
+
+**`reuse_test_config`** — only for `project-container`: the test configuration classes the harness should
+load so that the database starts the way the project's own tests start it, typically a
+`@TestConfiguration` with a container bean. Leave it empty for `environment`. Never list configuration
+that replaces application beans with mocks: the harness has its own doubles.
 
 **`profiles`** and **`properties`** — Spring profiles to activate and properties to set. Add only what
 the application needs in order to start under test, with the reason in your reply. The harness already
@@ -76,23 +85,33 @@ tests often mock one layer too deep: find the client underneath.
 
 **`http_doubles`** — for outside HTTP services, do not double the application's client class. The harness
 replaces the network under `RestClient`, and answers each request from these rules: `method`, `url` (a
-regular expression matched against the whole URL), `status`, and `body` (JSON). Write one rule per call
-the application makes:
+regular expression matched against the whole URL), `example` (one concrete URL the rule must answer),
+`status`, and `body` (JSON). Write one rule per call the application makes:
 
 1. Find the client code and read the URL it builds and the type it reads the response into.
 2. Give a response that type can be read from, with realistic values. The stubs in the existing tests
    show what the project itself considers realistic; prefer those values.
-3. Keep the URL pattern as tight as the code allows.
+3. Make the path and the query as tight as the code allows. Leave the host open (`[^/]+`): it comes from
+   configuration, not from code.
+4. Give an `example` URL of the shape the code really builds. The smoke run sends it and fails the rule
+   if the rule does not answer it, so a wrong pattern is caught now and not as a puzzling result later.
 
 A request no rule covers is answered 501 and marked unconfigured, so a missing rule shows up later as a
 harness gap, not as a wrong result. If the application makes HTTP calls through something other than
 `RestClient` built from the shared builder, say so and put it in `todo`.
 
-**`rejections`** — the exception classes that mean "the business rules refuse this", as opposed to a
-defect. Find them where exceptions are mapped to responses (`@ExceptionHandler`, `@ResponseStatus`,
-`ResponseStatusException`): the ones mapped to a 4xx status because of a rule, not because the request was
-malformed. This list decides whether an outcome is read as a refusal or as an error, so include only
-classes you saw mapped.
+**`rejections`** — the exception classes that mean "the application refuses this on purpose", as opposed
+to a defect. This list decides whether an outcome is read as a refusal or as an error. Find them where
+exceptions are mapped to responses (`@ExceptionHandler`, `@ResponseStatus`, `ResponseStatusException`) and
+where message handlers catch them:
+
+- Include the application's **own** exception classes that are mapped to a 4xx status or deliberately
+  caught and dropped: a rule was broken, or the thing asked for does not exist.
+- Leave out exceptions for a malformed request (validation, unreadable body): the request never reached
+  the rules.
+- Do **not** include a framework or driver exception (`DataIntegrityViolationException`, `SQLException`)
+  even when a handler maps it to 4xx. Such a class also covers failures nobody intended, and listing it
+  would hide them. Put it in `todo` with the handler's `file:line`, for a person to decide.
 
 **`base_data`** — SQL files with reference data that must exist before any command can run (products,
 customers, code tables) when the application cannot create that data through its own entry points. Write

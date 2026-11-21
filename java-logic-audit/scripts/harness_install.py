@@ -266,16 +266,17 @@ def settings(workspace, system):
     todo = []
     if len(apps) != 1:
         todo.append("application: name the application class (%d candidates in the profile)" % len(apps))
-    todo.append("reuse_test_config: the existing test configuration classes that start the database, if the "
-                "harness should start it the same way; leave empty when the database address comes from AUDIT_DB_URL")
+    todo.append("database: 'project-container' (then name the test configuration that starts it in "
+                "reuse_test_config) or 'environment' (then record the person's words offering the database)")
     if http:
         todo.append("http_doubles: one rule per outside HTTP call the application makes (%s): method, a URL "
-                    "pattern, status and a response body the application can read" % ", ".join(http))
+                    "pattern, one example URL, status and a response body the application can read" % ", ".join(http))
     todo.append("rejections: the exception classes that mean a business refusal (the ones mapped to 4xx)")
     todo.append("base_data: SQL files with reference data that must exist before any command, if any")
     todo.append("properties: application properties the harness must set, if any")
     draft = {
         "application": apps[0] if len(apps) == 1 else None,
+        "database": {"source": None, "permission": None},
         "reuse_test_config": [],
         "profiles": [],
         "properties": {},

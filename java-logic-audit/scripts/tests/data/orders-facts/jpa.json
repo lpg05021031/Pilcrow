@@ -1,0 +1,346 @@
+{
+  "entities" : {
+    "com.example.orders.domain.ChangeRequest" : {
+      "table" : "change_request",
+      "id" : {
+        "property" : "id",
+        "columns" : [ "id" ]
+      },
+      "version" : null,
+      "properties" : {
+        "amountDelta" : {
+          "type" : "big_decimal",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "amount_delta" ]
+        },
+        "createdAt" : {
+          "type" : "instant",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "created_at" ]
+        },
+        "lineId" : {
+          "type" : "long",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "line_id" ]
+        },
+        "lineRevision" : {
+          "type" : "integer",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "line_revision" ]
+        },
+        "newDate" : {
+          "type" : "LocalDate",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "new_date" ]
+        },
+        "newQty" : {
+          "type" : "integer",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "new_qty" ]
+        },
+        "status" : {
+          "type" : "basicType@10(com.example.orders.domain.ChangeStatus,12)",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "status" ]
+        },
+        "type" : {
+          "type" : "basicType@11(com.example.orders.domain.ChangeType,12)",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "type" ]
+        }
+      }
+    },
+    "com.example.orders.domain.OrderHeader" : {
+      "table" : "order_header",
+      "id" : {
+        "property" : "id",
+        "columns" : [ "id" ]
+      },
+      "version" : "version",
+      "properties" : {
+        "createdAt" : {
+          "type" : "instant",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "created_at" ]
+        },
+        "customerId" : {
+          "type" : "string",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "customer_id" ]
+        },
+        "lines" : {
+          "type" : "java.util.Collection(com.example.orders.domain.OrderHeader.lines)",
+          "association" : true,
+          "collection" : true,
+          "columns" : [ ]
+        },
+        "orderNo" : {
+          "type" : "string",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "order_no" ]
+        },
+        "status" : {
+          "type" : "basicType@13(com.example.orders.domain.OrderStatus,12)",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "status" ]
+        },
+        "totalAmount" : {
+          "type" : "big_decimal",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "total_amount" ]
+        },
+        "version" : {
+          "type" : "long",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "version" ]
+        }
+      }
+    },
+    "com.example.orders.domain.OrderLine" : {
+      "table" : "order_line",
+      "id" : {
+        "property" : "id",
+        "columns" : [ "id" ]
+      },
+      "version" : "version",
+      "properties" : {
+        "header" : {
+          "type" : "com.example.orders.domain.OrderHeader",
+          "association" : true,
+          "collection" : false,
+          "columns" : [ "header_id" ]
+        },
+        "lineNo" : {
+          "type" : "integer",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "line_no" ]
+        },
+        "qty" : {
+          "type" : "integer",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "qty" ]
+        },
+        "revision" : {
+          "type" : "integer",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "revision" ]
+        },
+        "schedules" : {
+          "type" : "java.util.Collection(com.example.orders.domain.OrderLine.schedules)",
+          "association" : true,
+          "collection" : true,
+          "columns" : [ ]
+        },
+        "shippedQty" : {
+          "type" : "integer",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "shipped_qty" ]
+        },
+        "sku" : {
+          "type" : "string",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "sku" ]
+        },
+        "status" : {
+          "type" : "basicType@14(com.example.orders.domain.LineStatus,12)",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "status" ]
+        },
+        "unitPrice" : {
+          "type" : "big_decimal",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "unit_price" ]
+        },
+        "version" : {
+          "type" : "long",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "version" ]
+        }
+      }
+    },
+    "com.example.orders.domain.OutboxEvent" : {
+      "table" : "outbox_event",
+      "id" : {
+        "property" : "id",
+        "columns" : [ "id" ]
+      },
+      "version" : null,
+      "properties" : {
+        "aggregateId" : {
+          "type" : "long",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "aggregate_id" ]
+        },
+        "createdAt" : {
+          "type" : "instant",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "created_at" ]
+        },
+        "payload" : {
+          "type" : "string",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "payload" ]
+        },
+        "sentAt" : {
+          "type" : "instant",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "sent_at" ]
+        },
+        "status" : {
+          "type" : "basicType@15(com.example.orders.domain.OutboxStatus,12)",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "status" ]
+        },
+        "type" : {
+          "type" : "string",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "type" ]
+        }
+      }
+    },
+    "com.example.orders.domain.ProcessedMessage" : {
+      "table" : "processed_message",
+      "id" : {
+        "property" : "messageId",
+        "columns" : [ "message_id" ]
+      },
+      "version" : null,
+      "properties" : {
+        "processedAt" : {
+          "type" : "instant",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "processed_at" ]
+        }
+      }
+    },
+    "com.example.orders.domain.ScheduleLine" : {
+      "table" : "schedule_line",
+      "id" : {
+        "property" : "id",
+        "columns" : [ "id" ]
+      },
+      "version" : null,
+      "properties" : {
+        "deliveryDate" : {
+          "type" : "LocalDate",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "delivery_date" ]
+        },
+        "line" : {
+          "type" : "com.example.orders.domain.OrderLine",
+          "association" : true,
+          "collection" : false,
+          "columns" : [ "line_id" ]
+        },
+        "qty" : {
+          "type" : "integer",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "qty" ]
+        },
+        "seqNo" : {
+          "type" : "integer",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "seq_no" ]
+        },
+        "status" : {
+          "type" : "basicType@16(com.example.orders.domain.ScheduleStatus,12)",
+          "association" : false,
+          "collection" : false,
+          "columns" : [ "status" ]
+        }
+      }
+    }
+  },
+  "repositories" : [ {
+    "bean" : "changeRequestRepository",
+    "interface" : "com.example.orders.repo.ChangeRequestRepository",
+    "domain_type" : "com.example.orders.domain.ChangeRequest",
+    "queries" : [ {
+      "name" : "findByIdForUpdate",
+      "modifying" : false,
+      "lock" : "PESSIMISTIC_WRITE",
+      "query" : "select c from ChangeRequest c where c.id = :id"
+    } ]
+  }, {
+    "bean" : "orderHeaderRepository",
+    "interface" : "com.example.orders.repo.OrderHeaderRepository",
+    "domain_type" : "com.example.orders.domain.OrderHeader",
+    "queries" : [ {
+      "name" : "existsByOrderNo",
+      "modifying" : false
+    }, {
+      "name" : "findByIdForUpdate",
+      "modifying" : false,
+      "lock" : "PESSIMISTIC_WRITE",
+      "query" : "select h from OrderHeader h where h.id = :id"
+    }, {
+      "name" : "findIdsByStatus",
+      "modifying" : false,
+      "query" : "select h.id from OrderHeader h where h.status = :status order by h.id"
+    } ]
+  }, {
+    "bean" : "orderLineRepository",
+    "interface" : "com.example.orders.repo.OrderLineRepository",
+    "domain_type" : "com.example.orders.domain.OrderLine",
+    "queries" : [ {
+      "name" : "findHeaderId",
+      "modifying" : false,
+      "query" : "select l.header.id from OrderLine l where l.id = :id"
+    } ]
+  }, {
+    "bean" : "outboxEventRepository",
+    "interface" : "com.example.orders.repo.OutboxEventRepository",
+    "domain_type" : "com.example.orders.domain.OutboxEvent",
+    "queries" : [ {
+      "name" : "findTop100ByStatusOrderByIdAsc",
+      "modifying" : false
+    } ]
+  }, {
+    "bean" : "processedMessageRepository",
+    "interface" : "com.example.orders.repo.ProcessedMessageRepository",
+    "domain_type" : "com.example.orders.domain.ProcessedMessage",
+    "queries" : [ ]
+  }, {
+    "bean" : "scheduleLineRepository",
+    "interface" : "com.example.orders.repo.ScheduleLineRepository",
+    "domain_type" : "com.example.orders.domain.ScheduleLine",
+    "queries" : [ {
+      "name" : "findHeaderId",
+      "modifying" : false,
+      "query" : "select s.line.header.id from ScheduleLine s where s.id = :id"
+    } ]
+  } ],
+  "provider" : "hibernate"
+}
