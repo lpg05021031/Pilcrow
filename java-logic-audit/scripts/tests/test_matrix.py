@@ -192,6 +192,21 @@ class Build(unittest.TestCase):
         self.assertEqual(len(set(ids.values())), len(ids))
         self.assertEqual(ids["CMD-x|qty=huge"], 6)
 
+    def test_a_result_stays_valid_when_something_the_cell_does_not_use_changes(self):
+        build_matrix.build(self.tmp, "s")
+        before = {c["key"]: c["sha"] for c in self.read("matrix.json")["cells"]}
+        fixtures = dict(FIXTURES, other={"steps": [{"do": "CMD-x", "with": {"id": 7}}]})
+        self.write("fixtures.json", {"fixtures": fixtures})
+        build_matrix.build(self.tmp, "s")
+        self.assertEqual({c["key"]: c["sha"] for c in self.read("matrix.json")["cells"]}, before)
+        # a fixture the cells continue from does matter
+        fixtures["one"] = {"steps": [{"do": "CMD-x", "with": {"id": 8}}]}
+        self.write("fixtures.json", {"fixtures": fixtures})
+        build_matrix.build(self.tmp, "s")
+        after = {c["key"]: c["sha"] for c in self.read("matrix.json")["cells"]}
+        self.assertNotEqual(after["CMD-x|base"], before["CMD-x|base"])
+        self.assertNotEqual(after["CMD-x|status=DONE"], before["CMD-x|status=DONE"])      # "done" continues "one"
+
     def test_what_is_pinned_is_copied_into_the_cell(self):
         self.write("expected.json", {"cells": {"CMD-x|qty=zero": {"outcome": "rejected", "code": "BAD_QTY", "source": "observed"}}})
         stats = build_matrix.build(self.tmp, "s")

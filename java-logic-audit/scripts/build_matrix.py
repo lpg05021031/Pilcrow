@@ -259,6 +259,22 @@ def assign_ids(cells, registry):
     return registry
 
 
+def uses(cell, fixtures, bindings):
+    """The fixtures a cell runs (its own and the ones those continue) and the bindings of every command
+    its steps call. A change anywhere else does not change what running this cell means."""
+    chain, name, seen = [], cell.get("fixture"), set()
+    while name and name in fixtures and name not in seen:
+        seen.add(name)
+        chain.append({"name": name, "steps": fixtures[name].get("steps"), "from": fixtures[name].get("from")})
+        name = fixtures[name].get("from")
+    called = set()
+    for steps in [f["steps"] for f in chain] + [cell.get("steps")]:
+        for step in steps or []:
+            if step.get("do"):
+                called.add(step["do"])
+    return {"fixtures": chain, "bindings": {c: bindings.get(c) for c in sorted(called)}}
+
+
 def fingerprint(cell, command, shared):
     """A hash of everything that decides what running the cell means. A result is for one fingerprint."""
     parts = {k: cell.get(k) for k in ("command", "deviation", "given", "fixture", "steps", "with", "unreachable")}
@@ -304,14 +320,11 @@ def build(workspace, system):
         cells += cells_of(c, recipes)
     ids_path = os.path.join(model, "ids.json")
     _lib.write_json(ids_path, assign_ids(cells, _lib.read_json(ids_path, {}) or {}))
-    # Fixtures and the bindings of the commands they call are shared by every cell.
     by_id = {c["id"]: c for c in commands["commands"]}
-    shared = hashlib.sha256(json.dumps(
-        [fixtures, {cid: c.get("binding") for cid, c in by_id.items()}],
-        sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+    bindings = {cid: c.get("binding") for cid, c in by_id.items()}
     pinned = (_lib.read_json(os.path.join(model, "expected.json"), {}) or {}).get("cells", {})
     for cell in cells:
-        cell["sha"] = fingerprint(cell, by_id[cell["command"]], shared)
+        cell["sha"] = fingerprint(cell, by_id[cell["command"]], uses(cell, fixtures, bindings))
         if cell["key"] in pinned:
             cell["expected"] = pinned[cell["key"]]
     cells = [dict([("id", c["id"])] + [(k, v) for k, v in c.items() if k != "id"]) for c in cells]
