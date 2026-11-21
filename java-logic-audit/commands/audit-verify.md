@@ -1,5 +1,5 @@
 ---
-description: Go beyond one case at a time — make every step of every command fail in turn, run two commands at the same time, and call the commands in random order while checking rules of the data
+description: Go beyond one case at a time - make every step of every command fail in turn, run two commands at the same time, and call the commands in random order while checking rules of the data
 argument-hint: <system> [faults|races|sequences|all]
 arguments: [system, which]
 ---
@@ -29,7 +29,7 @@ Ground rules:
 
 `$which` empty or `all` does all three parts; `faults`, `races` or `sequences` does one.
 
-## 1 — Refresh the harness and propose rules
+## 1 - Refresh the harness and propose rules
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/harness_install.py" copy $system
@@ -41,7 +41,7 @@ the schema (one number never above another, a parent's number as a sum over its 
 lifecycle values that never occurs). Several hundred, nearly all false: the sequence run sorts them.
 Rules a person already confirmed or rejected are kept as they are.
 
-## 2 — Failures
+## 2 - Failures
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/harness_install.py" command $system --run faults
@@ -57,7 +57,7 @@ What it does not do: a failure *after* an outside system has done its part (the 
 was done), and failures of calls on replaced client types whose reads cannot be told from writes. Say so
 when you report.
 
-## 2b — Two calls at the same time
+## 2b - Two calls at the same time
 
 Skip this part, and say so, when `capabilities.database.real_engine` in `profile.json` is false: a
 stand-in database does not lock as the real one does, and its results would mislead.
@@ -78,7 +78,7 @@ and is noted, not reported.
 What it does not do: more than one stop per schedule, more than two calls at once, and races inside the
 application's memory rather than in the database.
 
-## 3 — Random sequences
+## 3 - Random sequences
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/harness_install.py" command $system --run sequences
@@ -90,7 +90,7 @@ minutes. The steps are the ones the model already uses to reach its cases, drawn
 call every rule is checked. A sequence that breaks a rule is cut down to its shortest form and replayed
 three times. The seed is recorded in the run; `--seed N` gives another draw.
 
-## 4 — Sort, ask, judge (scripts decide)
+## 4 - Sort, ask, judge (scripts decide)
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/invariants.py" assess $system
@@ -102,7 +102,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/manifest.py" check . --manifest audit/$sy
 
 The manifest check must answer `untouched`; on `changed`, list the files and stop.
 
-## 5 — Report
+## 5 - Report
 
 Show what each script of step 4 printed, unchanged. Then, in at most fifteen lines:
 

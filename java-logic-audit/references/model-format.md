@@ -84,10 +84,10 @@ say so in `binding_note` (a field of the command) with the lines.
 
 A variable is something a check of this command looks at. Two kinds:
 
-- **`state`** — a fact about the stored data, read by `sql`: one SELECT returning one value, with the
+- **`state`** - a fact about the stored data, read by `sql`: one SELECT returning one value, with the
   command's parameters as `:name`. No row gives `null`. Typical: the status of the row the command is
   about, the status of its parent, "has anything shipped", "is there another open line".
-- **`param`** — a class of a parameter value: `below-shipped`, `same`, `missing`. Give `sql` when the class
+- **`param`** - a class of a parameter value: `below-shipped`, `same`, `missing`. Give `sql` when the class
   can be computed from the parameter and the rows it is compared with (a `case` expression); the harness
   then checks that the value used really is in the class. `:today` is the application's current date and `:now`
   its current date and time (`2030-03-15 10:00:00`, UTC). Compare stored times with these, never with the

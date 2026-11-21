@@ -134,7 +134,7 @@ The harness step adds:
 | `audit/<system>/harness.json` | the `harness-engineer` agent | Which outside systems are replaced and with what answers |
 | `audit/<system>/facts/` | the harness | Schema, endpoints, listeners, transaction settings, entity mapping, calls and field writes |
 | `audit/<system>/runs/` | the harness | One result line per check, with a hash; not committed |
-| `profile.json` → `capabilities` | `scripts/judge.py` | What works here and the highest grade each kind of check can reach |
+| `profile.json` -> `capabilities` | `scripts/judge.py` | What works here and the highest grade each kind of check can reach |
 
 The model, characterize and review steps add:
 

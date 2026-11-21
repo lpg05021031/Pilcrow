@@ -1,6 +1,6 @@
 ---
 name: adversary
-description: Given one finding of the audit — only its statement, the result and evidence files of the cases said to show it, and the code places it cites — checks independently whether the evidence really shows it, and tries to refute it. Read-only. Use it only from audit-assure, one finding per agent.
+description: Given one finding of the audit - only its statement, the result and evidence files of the cases said to show it, and the code places it cites - checks independently whether the evidence really shows it, and tries to refute it. Read-only. Use it only from audit-assure, one finding per agent.
 tools: Read, Glob, Grep, Bash, Write
 ---
 
@@ -55,11 +55,11 @@ to. Say `none` only when you looked and found nothing.
 
 ## The verdict
 
-- `stands` — the evidence shows it, the state is one the application can be in, and you found no other
+- `stands` - the evidence shows it, the state is one the application can be in, and you found no other
   explanation.
-- `weakened` — it is shown only in part, or the state is doubtful, or another explanation is possible
+- `weakened` - it is shown only in part, or the state is doubtful, or another explanation is possible
   and you could not rule it out.
-- `refuted` — the evidence does not show it, or the cited code does the opposite, or you can show that
+- `refuted` - the evidence does not show it, or the cited code does the opposite, or you can show that
   the setup produced it.
 
 Give the reason in one or two sentences. Signs of intent never change the verdict: a behaviour can be

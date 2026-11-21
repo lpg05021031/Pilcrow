@@ -50,7 +50,7 @@ public final class Snapshot {
      * The form two snapshots are compared in: without key columns (primary keys and the columns that
      * refer to them: after a failed attempt the database has handed out numbers it will not hand out
      * again, so a second attempt gets other keys), and without the columns that cannot be the same in
-     * two executions of the same thing — a time read from a clock the audit does not hold, a number
+     * two executions of the same thing - a time read from a clock the audit does not hold, a number
      * drawn at random. Which those are is learned (see learn) and, where the application's clock is
      * not the audit's, every date and time column is one.
      */

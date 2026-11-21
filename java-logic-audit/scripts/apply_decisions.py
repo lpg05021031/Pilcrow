@@ -213,9 +213,9 @@ def render(system, decisions):
              "Recorded by `apply_decisions.py`. A decision is never removed; a later answer to the same question",
              "supersedes the earlier one.", ""]
     for d in decisions:
-        lines += ["## %s — %s: %s%s" % (d["id"], d["question"], d["answer"], "" if d["id"] in in_force else " (superseded)"), "",
+        lines += ["## %s - %s: %s%s" % (d["id"], d["question"], d["answer"], "" if d["id"] in in_force else " (superseded)"), "",
                   "- **Asked:** " + d["asked"],
-                  "- **Answer:** " + d["answer"] + (" — " + d["note"] if d["note"] else ""),
+                  "- **Answer:** " + d["answer"] + (" - " + d["note"] if d["note"] else ""),
                   "- **Covers:** " + ("every case of the question" if d.get("covers", "all") == "all"
                                       else "only " + ", ".join(d["cells"])),
                   "- **When:** %s%s" % (d["decided_at"], ", by " + d["by"] if d["by"] else ""), ""]

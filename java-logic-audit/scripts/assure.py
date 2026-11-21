@@ -125,7 +125,7 @@ def summary(workspace, system):
         signs = [(f["id"], s) for f in checked for s in f["recheck"].get("signs_of_intent") or []]
         if signs:
             lines += ["", "Signs that a behaviour may be intended, for the person who answers the question:", ""]
-            lines += ["- %s: `%s` — %s" % (fid, s.get("where"), s.get("what")) for fid, s in signs]
+            lines += ["- %s: `%s` - %s" % (fid, s.get("where"), s.get("what")) for fid, s in signs]
     lines += ["", "## Guard canary", ""]
     if not isinstance(canary, dict):
         lines.append("Not run.")

@@ -92,7 +92,7 @@ SUPPORTED = {
 SUBSTITUTE_DBS = {"h2", "hsqldb", "derby"}
 RELATIONAL = {"jpa-hibernate", "mybatis", "spring-jdbc", "jooq"}
 
-# status, orderStatus, order_status, STATUS, ORDER_STATUS — but not "estate" or "backstage".
+# status, orderStatus, order_status, STATUS, ORDER_STATUS - but not "estate" or "backstage".
 STATUS_NAME = re.compile(
     r"^(?:status|state|phase|stage)$|[a-z0-9](?:Status|State|Phase|Stage)$|_(?:status|state|phase|stage)$"
     r"|^(?:STATUS|STATE|PHASE|STAGE)$|_(?:STATUS|STATE|PHASE|STAGE)$")

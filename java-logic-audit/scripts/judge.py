@@ -509,7 +509,7 @@ def render_findings(system, r):
     if not r["findings"]:
         lines.append("No finding has execution evidence.")
     for f in r["findings"]:
-        lines += ["## %s — %s" % (f["id"], f["title"]), "",
+        lines += ["## %s - %s" % (f["id"], f["title"]), "",
                   "- **Class:** %s (basis %s)%s" % (f["class"], ", ".join(f["basis"]),
                                                     "; a person answered: not intended (%s)" % f["decision"] if f["answer"] == "not-intended" else
                                                     "; waiting for a person's answer to %s" % f["question"]),
@@ -519,9 +519,9 @@ def render_findings(system, r):
             lines.append("- **Reservations:** " + "; ".join(RESERVATIONS[m] for m in f["reservations"]))
         if f.get("recheck"):
             lines.append("- **Independent recheck:** %s%s" % (f["recheck"]["verdict"],
-                                                             " — " + " ".join(str(f["recheck"]["reason"]).split()) if f["recheck"].get("reason") else ""))
+                                                             " - " + " ".join(str(f["recheck"]["reason"]).split()) if f["recheck"].get("reason") else ""))
             for s in f["recheck"].get("signs_of_intent") or []:
-                lines.append("  - a sign that it may be intended: `%s` — %s" % (s.get("where"), " ".join(str(s.get("what")).split())))
+                lines.append("  - a sign that it may be intended: `%s` - %s" % (s.get("where"), " ".join(str(s.get("what")).split())))
         if f["cells"]:
             lines.append("- **Cells:** " + ", ".join(f["cells"]))
         if f.get("cases"):
@@ -535,7 +535,7 @@ def render_findings(system, r):
         lines.append("")
     if r["accepted"]:
         lines += ["## Accepted as intended", ""]
-        lines += ["- %s, %s: %s%s" % (a["question"], a["decision"], a["observed"], " — " + a["note"] if a["note"] else "")
+        lines += ["- %s, %s: %s%s" % (a["question"], a["decision"], a["observed"], " - " + a["note"] if a["note"] else "")
                   for a in r["accepted"]]
         lines.append("")
     return "\n".join(lines)
@@ -556,27 +556,27 @@ ITEMS = (
 VERDICT_RULES = """An entity is **reviewed completely** when all seven items pass, **reviewed in part** when none fails
 but at least one could not pass, and **reviewed insufficiently** when any item fails.
 
-1. Matrix executed — passes when every cell of the commands that change the entity has a result for its
+1. Matrix executed - passes when every cell of the commands that change the entity has a result for its
    present definition from a run made after the source was recorded, or is classed unreachable with a
    reason. Fails when a cell has no such result, or the harness could not answer an outside call.
    Could not pass when a state was not reached: no recipe was found for it, or the recipe did not get there.
-2. Model reconciled — passes when no difference between prediction and observation, and no case decided
+2. Model reconciled - passes when no difference between prediction and observation, and no case decided
    by no check, is left without a person's answer. Fails otherwise.
-3. Invariants checked — passes when every rule about the entity that a person confirmed was checked after
+3. Invariants checked - passes when every rule about the entity that a person confirmed was checked after
    every call of the random sequences. Fails when a confirmed rule was never exercised. Could not pass
    when no rule about the entity has been confirmed, or no sequence run was made.
-4. Faults injected — passes when every command that changes the entity had each step of a successful call
+4. Faults injected - passes when every command that changes the entity had each step of a successful call
    fail in turn. Fails when such a command had no failure injected. Could not pass when the harness
    cannot place a failure, when no fault run was made, or when some failure points could not be run.
-5. Concurrency explored — passes when pairs of overlapping calls involving a command of the entity were
+5. Concurrency explored - passes when pairs of overlapping calls involving a command of the entity were
    run on the real engine, confirmed to match production. Could not pass when no such run was made, no
    pair involved the entity, the engine is a stand-in or unconfirmed. Fails when a pair could not be run.
    Only pairs within the budget are explored, with one stop each; the item says how many.
-6. Guard canary — passes when every check of the entity's commands that refuses with a `throw` was removed
+6. Guard canary - passes when every check of the entity's commands that refuses with a `throw` was removed
    in a copy of the code, one at a time, and a pinned case noticed each time; a check the model already
    says decides no reachable case may go unnoticed. Fails when the removal of a check goes unnoticed
    otherwise. Could not pass when no canary run was made, it covered only part, or a copy did not build.
-7. Source untouched — passes when every source, test and build file matches the manifest. Fails otherwise.
+7. Source untouched - passes when every source, test and build file matches the manifest. Fails otherwise.
 
 Open questions and the missing sign-off belong to people; they are listed and do not change the verdict."""
 
@@ -745,7 +745,7 @@ def render_verdict(system, r):
              "| Entity | Verdict | Cells |", "|---|---|---|"]
     lines += ["| `%s` | %s | %d |" % (e["entity"], word[e["verdict"]], e["cells"]) for e in r["entities"]]
     for e in r["entities"]:
-        lines += ["", "## `%s` — %s" % (e["entity"], word[e["verdict"]]), "", "| Item | Result | Detail |", "|---|---|---|"]
+        lines += ["", "## `%s` - %s" % (e["entity"], word[e["verdict"]]), "", "| Item | Result | Detail |", "|---|---|---|"]
         lines += ["| %s | %s | %s |" % (i["label"], mark[i["result"]], i["detail"]) for i in e["items"]]
     w = r["waiting_for_people"]
     lines += ["", "## Waiting for people", "",

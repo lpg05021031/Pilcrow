@@ -1,5 +1,5 @@
 ---
-description: Derive the model — for every entry point, the states it depends on, the checks it applies in order, and what it writes
+description: Derive the model - for every entry point, the states it depends on, the checks it applies in order, and what it writes
 argument-hint: <system> [pattern]
 arguments: [system, pattern]
 ---
@@ -24,7 +24,7 @@ Ground rules:
 - Speak to the person in the language `INTENT.md` names (`auto`: the language they write in). The model
   files stay in English.
 
-## 1 — What will be modelled
+## 1 - What will be modelled
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_brief.py" shards $system --pattern "$pattern"
@@ -38,7 +38,7 @@ When more than 12 groups are to be modelled, ask before starting (a pop-up with 
 them, only a part chosen by a pattern, cancel), with the count of agents. In a headless run with more
 than 12 groups, model the first 12 in the listed order and say so.
 
-## 2 — Readers
+## 2 - Readers
 
 For each group, have its brief written to a file and hand that file to a `code-reader` agent as its
 whole task:
@@ -67,7 +67,7 @@ a saved reply are skipped, and only what is missing is done. Without subagents, 
 `${CLAUDE_PLUGIN_ROOT}/agents/code-reader.md` and do each brief yourself, one group at a time, saving each
 result before starting the next. "Without subagents" means that your tools hold nothing to launch an agent with. When they do, launch the plugin's agent (it is listed as `java-logic-audit:code-reader`); doing its work yourself in that case is not allowed. Say in your report which of the two happened.
 
-## 3 — Referees
+## 3 - Referees
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_store.py" collect $system
@@ -90,7 +90,7 @@ so on, each for another fresh agent. The replies go to `audit/$system/model_raw/
 that already has its verdict files is not refereed again, unless its reader's reply was redone. Run the
 referees in parallel, at most four at a time.
 
-## 4 — Build the model (scripts do it)
+## 4 - Build the model (scripts do it)
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_store.py" collect $system
@@ -106,7 +106,7 @@ For each command it left out, give the problems to the reader of that group once
 corrected command alone; save the reply as `audit/$system/model_raw/fix-<nn>.json` in the form
 `{ "commands": [ ... ] }` (`nn` counts up from 01), and run the two scripts again. One round only.
 
-## 5 — Report
+## 5 - Report
 
 Show the script's line of counts unchanged, then in at most ten lines:
 

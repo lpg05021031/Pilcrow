@@ -83,7 +83,7 @@ def build(workspace, system):
     if not fs:
         parts.append("<p>No finding has execution evidence.</p>")
     for f in fs:
-        parts.append("<h3>%s — %s</h3>" % (e(f["id"]), e(f["title"])))
+        parts.append("<h3>%s - %s</h3>" % (e(f["id"]), e(f["title"])))
         parts.append("<p><span class='tag %s'>%s</span><span class='tag'>basis %s</span><span class='tag'>%s%s</span></p>" % (
             e(f["class"]), e(f["class"]), e(", ".join(f.get("basis") or [])), e(f["status"]),
             ", grade " + e(f["grade"]) if f.get("grade") else ""))
@@ -99,7 +99,7 @@ def build(workspace, system):
             parts.append("<p>Reservations: %s</p>" % e("; ".join(judge.RESERVATIONS.get(m, m) for m in f["reservations"])))
         if f.get("recheck"):
             parts.append("<p class='muted'>Independent recheck: %s%s</p>" % (
-                e(f["recheck"]["verdict"]), " — " + e(f["recheck"].get("reason")) if f["recheck"].get("reason") else ""))
+                e(f["recheck"]["verdict"]), " - " + e(f["recheck"].get("reason")) if f["recheck"].get("reason") else ""))
         where = [("Code", ", ".join(f.get("cites") or [])), ("Cases", ", ".join((f.get("cells") or []) + (f.get("cases") or [])[:12]))]
         parts.append("<p class='muted'>%s</p>" % " &nbsp; ".join("%s: <code>%s</code>" % (k, e(v)) for k, v in where if v))
     if findings.get("unconfirmed"):
@@ -108,12 +108,12 @@ def build(workspace, system):
     if findings.get("accepted"):
         parts.append("<h3>Accepted as intended</h3><ul>%s</ul>" % "".join(
             "<li>%s, %s: %s%s</li>" % (e(a["question"]), e(a["decision"]), e(a["observed"]),
-                                       " — <i>%s</i>" % e(a["note"]) if a.get("note") else "") for a in findings["accepted"]))
+                                       " - <i>%s</i>" % e(a["note"]) if a.get("note") else "") for a in findings["accepted"]))
 
     # ---- per entity
     parts.append("<h2>The seven checks, entity by entity</h2>")
     for x in verdict["entities"]:
-        parts.append("<h3><code>%s</code> — %s</h3>" % (e(x["entity"]), e(WORD.get(x["verdict"], x["verdict"]))))
+        parts.append("<h3><code>%s</code> - %s</h3>" % (e(x["entity"]), e(WORD.get(x["verdict"], x["verdict"]))))
         parts.append(table(["Check", "Result", "Detail"],
                            [[e(i["label"]), "<span class='%s'>%s</span>" % (e(i["result"]), e(MARK.get(i["result"], i["result"]))), e(i["detail"])]
                             for i in x["items"]]))
@@ -126,7 +126,7 @@ def build(workspace, system):
                               ("sequences", "Random sequences", ("sequences", "steps", "states", "seed"))):
         note = latest_note(adir, kind)
         rows.append([label, "not run" if note is None else e(", ".join("%s %s" % (note.get(k), k) for k in keys if note.get(k) is not None))
-                     + (" — " + e(", ".join("%s %s" % (v, k) for k, v in (note.get("counts") or {}).items())) if kind != "sequences" else "")])
+                     + (" - " + e(", ".join("%s %s" % (v, k) for k, v in (note.get("counts") or {}).items())) if kind != "sequences" else "")])
     by_status = {}
     for r in rules.get("invariants", []):
         by_status[r.get("status")] = by_status.get(r.get("status"), 0) + 1

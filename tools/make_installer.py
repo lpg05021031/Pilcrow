@@ -145,6 +145,24 @@ def members():
     return sorted(out)
 
 
+def not_plain(data):
+    """Why a file is not plain ASCII text, or None. Line number and what was found.
+
+    Everything packed is meant to be read by whoever reviews the installer before running it: no byte
+    above 0x7E (so no character that looks like another, and none that cannot be seen), and no control
+    character except the line feed and the tab.
+    """
+    line = 1
+    for b in data:
+        if b == 0x0A:
+            line += 1
+        elif b > 0x7E:
+            return "line %d: a byte that is not ASCII (0x%02X)" % (line, b)
+        elif b < 0x20 and b != 0x09:
+            return "line %d: a control character (0x%02X)" % (line, b)
+    return None
+
+
 def archive(files):
     """A tar.gz with nothing in it that changes from one build to the next."""
     raw = io.BytesIO()
@@ -170,6 +188,14 @@ def main():
     with open(os.path.join(ROOT, PLUGIN, ".claude-plugin", "plugin.json"), encoding="utf-8") as fh:
         version = json.load(fh)["version"]
     files = members()
+    odd = []
+    for name, path in files:
+        with open(path, "rb") as fh:
+            why = not_plain(fh.read())
+        if why:
+            odd.append("  %s, %s" % (name, why))
+    if odd:
+        raise SystemExit("not packed: every file must be plain ASCII text\n" + "\n".join(odd))
     data = archive(files)
     name = "%s-%s.sh" % (PLUGIN, version)
     os.makedirs(args.out, exist_ok=True)

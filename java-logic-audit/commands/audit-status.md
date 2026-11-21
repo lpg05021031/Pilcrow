@@ -1,5 +1,5 @@
 ---
-description: Where am I? Progress, what is stale, and the exact next command — run it any time
+description: Where am I? Progress, what is stale, and the exact next command - run it any time
 argument-hint: <system>
 arguments: system
 ---

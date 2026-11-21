@@ -1,5 +1,5 @@
 ---
-description: Map the system from extracted facts — entry points, entities, and every place each column is written
+description: Map the system from extracted facts - entry points, entities, and every place each column is written
 argument-hint: <system>
 arguments: system
 ---
@@ -28,7 +28,7 @@ Ground rules:
 - Speak to the person in the language `INTENT.md` names (`auto`: the language they write in, English when
   there is nothing to go by). The map files themselves stay in English.
 
-## 1 — Build the map
+## 1 - Build the map
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/build_map.py" $system
@@ -37,26 +37,26 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/build_map.py" $system
 It reads `audit/$system/facts/` and writes `map.json`, `MAP.md` and `shards.json`, and prints one line of
 counts. What the words mean:
 
-- **Entry point** — a way into the application from outside: an HTTP endpoint, a message handler, a
+- **Entry point** - a way into the application from outside: an HTTP endpoint, a message handler, a
   scheduled method. The framework's own endpoints and start-up listeners are left out.
-- **Write site** — a place outside an entity class that changes a mapped column: a call to an entity
+- **Write site** - a place outside an entity class that changes a mapped column: a call to an entity
   method that assigns a mapped field, a constructor call (a row is created), a save or delete through a
   repository.
-- **Orphan** — a write site no known entry point can reach. It may be dead code, or it may be reached in a
+- **Orphan** - a write site no known entry point can reach. It may be dead code, or it may be reached in a
   way the compiled classes do not show (reflection, a configuration-driven dispatch).
-- **Outside a transaction** — an entry point from which a write is reached without passing a transactional
+- **Outside a transaction** - an entry point from which a write is reached without passing a transactional
   method that takes effect. A transactional method called from another method of its own class does not
   take effect, because the call does not go through the proxy.
-- **Unresolved** — a write the script could see but not read: SQL passed to `JdbcTemplate`, a native or
+- **Unresolved** - a write the script could see but not read: SQL passed to `JdbcTemplate`, a native or
   modifying query. Step 2 settles these.
-- **Line** — the line the compiled class reports for the call. For a call written over several lines it
+- **Line** - the line the compiled class reports for the call. For a call written over several lines it
   can be the last line of the call instead of the first.
 
 The call graph comes from compiled classes, with a call on an interface expanded to every implementation.
 It over-approximates: a path in the map may never run. It does not see reflection or dynamic proxies; the
 later steps observe the running application for that reason.
 
-## 2 — Settle what the script could not read
+## 2 - Settle what the script could not read
 
 Skip this step when the script reported `0 unresolved`.
 
@@ -78,7 +78,7 @@ Write the answers to `audit/$system/map_resolved.json`, exactly as the reader ga
 time from pieces it cannot follow) is left out; it stays under `unresolved`, which is the honest state.
 Then run the script of step 1 again: it merges the settled rows into the write-site table.
 
-## 3 — Tell the person what the map shows
+## 3 - Tell the person what the map shows
 
 Show the script's line of counts unchanged. Then say, in at most ten lines, what in `MAP.md` deserves a
 look. Report what is there; do not judge whether it is intended. That is asked later, with evidence.

@@ -50,7 +50,7 @@ class Recheck(System):
         self.assertEqual((f["status"], f["grade"], f["reservations"]), ("reproduced", "A", []))
         self.assertEqual(f["recheck"]["verdict"], "stands")
         text = self.text("FINDINGS.md")
-        self.assertIn("- **Independent recheck:** stands — because", text)
+        self.assertIn("- **Independent recheck:** stands - because", text)
         self.assertIn("a sign that it may be intended: `src/test/java/PayTest.java:40-52`", text)
 
     def test_a_reader_who_disagrees_lowers_the_grade_and_removes_nothing(self):

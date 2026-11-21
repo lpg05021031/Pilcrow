@@ -1,5 +1,5 @@
 ---
-description: The one-page report — findings with their evidence, what was checked for each entity, and what still waits for a person
+description: The one-page report - findings with their evidence, what was checked for each entity, and what still waits for a person
 argument-hint: <system>
 arguments: system
 ---
@@ -20,7 +20,7 @@ Ground rules:
 - Speak to the person in the language `INTENT.md` names (`auto`: the language they write in). The report
   itself is in English.
 
-## 1 — Recompute, then lay out
+## 1 - Recompute, then lay out
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/reconcile.py" $system
@@ -35,7 +35,7 @@ When the manifest check answers `changed`, the source is no longer what the resu
 so first, name the files, and point to `/java-logic-audit:audit-rerun $system`. The report is still
 written, and its verdict already shows the source item as failed.
 
-## 2 — Tell the person what it says
+## 2 - Tell the person what it says
 
 Give the path of `audit/$system/REPORT.html`, then in at most twelve lines:
 

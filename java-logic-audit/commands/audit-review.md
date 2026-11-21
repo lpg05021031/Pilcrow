@@ -1,5 +1,5 @@
 ---
-description: Answer the questions only a person can — is each observed behaviour intended? Decisions are kept for good
+description: Answer the questions only a person can - is each observed behaviour intended? Decisions are kept for good
 argument-hint: <system> [flagged|all]
 arguments: [system, which]
 ---
@@ -25,7 +25,7 @@ Ground rules:
   skip step 4 and say how many questions wait.
 - Speak to the person in the language `INTENT.md` names (`auto`: the language they write in).
 
-## 1 — Which questions
+## 1 - Which questions
 
 Take the questions with `"status": "open"`. With `$which` empty or `flagged`, only those with
 `"flagged": true`; with `all`, every open one. Say how many were answered in earlier runs and are skipped,
@@ -43,7 +43,7 @@ the question also covers closed and cancelled orders), record the answer for tho
 cases to cells, read each cell's `deviation` in `audit/$system/model/matrix.json`. When you cannot tell
 which cases they mean, record `unsure` with their words and say what you could not tell.
 
-## 2 — Ask
+## 2 - Ask
 
 Use the pop-up question tool, at most four questions in one call, one behaviour per question. For each:
 
@@ -51,9 +51,9 @@ Use the pop-up question tool, at most four questions in one call, one behaviour 
 - the text gives, in this order: what was observed (`observed`), why it is asked (`why`), where in the
   code (`cites`), and one case to run to see it (the first id in `cells`);
 - the options are always these three, in this order and with these meanings:
-  1. **Not intended** — this should not happen; treat it as a defect.
-  2. **Intended** — this is how it is meant to work; keep it as the expected behaviour.
-  3. **Not sure** — leave it open; it will not be used as a basis for anything.
+  1. **Not intended** - this should not happen; treat it as a defect.
+  2. **Intended** - this is how it is meant to work; keep it as the expected behaviour.
+  3. **Not sure** - leave it open; it will not be used as a basis for anything.
 
 For a question of kind `rule?` ("in every state the audit reached, X: is this a rule?") the same three
 options read differently, and you say so in the question text: **Intended** means "yes, this must always
@@ -69,7 +69,7 @@ their words, and say so.
 When the person asks to see the evidence before answering, show the case's line in the latest run's
 `results.jsonl` and the changed rows from its evidence file, then ask again.
 
-## 3 — Record
+## 3 - Record
 
 For each answer:
 
@@ -83,7 +83,7 @@ and untranslated; leave it out when they only picked an option. Pass it as one s
 that nothing in it is interpreted by the shell. Add `--cells CELL-0005,CELL-0006` when the answer covers
 only some of the question's cases.
 
-## 4 — Apply and re-run (scripts do it)
+## 4 - Apply and re-run (scripts do it)
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/apply_decisions.py" apply $system
@@ -112,7 +112,7 @@ not change with a decision), and how many cases still do what a decision says th
 `judge.py verdict` prints one line per entity; `partial` means reviewed in part, which is the most this
 version can say.
 
-## 5 — Report
+## 5 - Report
 
 Read `audit/$system/FINDINGS.md` for the questions just answered. Show what each script printed,
 unchanged. Then say these things plainly:

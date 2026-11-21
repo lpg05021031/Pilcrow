@@ -1,16 +1,16 @@
 ---
-description: Check the audit's own work — an independent reader for every finding, a canary for every check, and seeded defects if you have some
+description: Check the audit's own work - an independent reader for every finding, a canary for every check, and seeded defects if you have some
 argument-hint: <system> [recheck|canary|seeds <defects file>|all]
 arguments: [system, part, defects]
 ---
 
 Find out how far the audit of `$system` can be trusted, in three ways that do not depend on each other:
 
-- **recheck** — each finding is handed to a reader who is told only the statement and where the evidence
+- **recheck** - each finding is handed to a reader who is told only the statement and where the evidence
   is, and who tries to refute it;
-- **canary** — each check the model cites is switched off in a copy of the code, to see whether any case
+- **canary** - each check the model cites is switched off in a copy of the code, to see whether any case
   notices;
-- **seeds** — defects a person supplies are put into a copy of the code one at a time, to see which of
+- **seeds** - defects a person supplies are put into a copy of the code one at a time, to see which of
   the audit's checks notice.
 
 With `$part` empty or `all`: recheck and canary, and seeds when a defects file is named. Otherwise only
@@ -36,7 +36,7 @@ Ground rules:
   database that holds anything worth keeping.
 - Speak to the person in the language `INTENT.md` names (`auto`: the language they write in).
 
-## 1 — Recheck (one reader for each finding)
+## 1 - Recheck (one reader for each finding)
 
 Bring the findings up to date, then list them:
 
@@ -72,7 +72,7 @@ A finding whose saved reply carries the fingerprint the finding has now is not r
 If you cannot launch agents, skip this step and say so in the report: a session that produced the
 findings cannot be their independent reader.
 
-## 2 — Canary (a script does it)
+## 2 - Canary (a script does it)
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/canary.py" $system
@@ -84,12 +84,12 @@ run all of them now or a first part (`--limit 30`; the result is then marked inc
 says so). Extra arguments for the build tool, such as `-o` where there is no network, go in the
 environment variable `AUDIT_BUILD_ARGS`. Keep the console output under `audit/$system/logs/`.
 
-What the words mean: **killed** — some case gives another result with the check switched off;
-**survived** — none does; **expected** — none does, and the model already says no reachable case is
-decided by this check; **invalid** — the copy did not build without it; **no-mutant** — the cited lines
+What the words mean: **killed** - some case gives another result with the check switched off;
+**survived** - none does; **expected** - none does, and the model already says no reachable case is
+decided by this check; **invalid** - the copy did not build without it; **no-mutant** - the cited lines
 hold nothing the script can switch off.
 
-## 3 — Seeded defects (only when the person names a defects file)
+## 3 - Seeded defects (only when the person names a defects file)
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/seed_run.py" $system "$defects"
@@ -100,7 +100,7 @@ person, and you do not edit their file; if an entry's text to replace is not fou
 script stops and says which, and you report that. Each defect runs every check once, so this takes
 several minutes for each.
 
-## 4 — Bring the results together (scripts do it)
+## 4 - Bring the results together (scripts do it)
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/judge.py" findings $system
@@ -114,7 +114,7 @@ reservation that lowers the grade, and nothing is removed. `judge.py verdict` no
 item for every entity. `assure.py summary` writes `audit/$system/ASSURANCE.md`. The last line checks that
 no source file changed during this step; it must say `untouched`.
 
-## 5 — Report
+## 5 - Report
 
 Read `audit/$system/ASSURANCE.md`. Show what each script printed, unchanged, and then say plainly:
 

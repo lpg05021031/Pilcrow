@@ -46,11 +46,11 @@ If a line you would quote holds a password, a token or a key, cite `file:line` a
 
 For each row you were given (a method, a line, the API the SQL goes through), return:
 
-- `table` — the table written;
-- `columns` — the columns assigned, by their column names. For an `INSERT`, every column listed. For
+- `table` - the table written;
+- `columns` - the columns assigned, by their column names. For an `INSERT`, every column listed. For
   dynamic SQL, the columns that can be assigned on some path, and say that the set depends on a condition;
-- `kind` — `create`, `update` or `delete`;
-- `cite` — the lines that show it, the SQL included.
+- `kind` - `create`, `update` or `delete`;
+- `cite` - the lines that show it, the SQL included.
 
 Leave a row out, and say why, when the table or the columns cannot be determined.
 
@@ -60,9 +60,9 @@ You are given claims, each with the lines it cites (a brief with `"task": "refer
 several commands). For each claim, read **only** the cited lines and what you need around them, and
 re-derive the behavior yourself before you look at how the claim words it. Answer with one of:
 
-- `confirmed` — the cited code does what the claim says;
-- `wrong-citation` — the behavior exists, but elsewhere: give the right lines;
-- `refuted` — the code does not do it, or only a comment or a string says so.
+- `confirmed` - the cited code does what the claim says;
+- `wrong-citation` - the behavior exists, but elsewhere: give the right lines;
+- `refuted` - the code does not do it, or only a comment or a string says so.
 
 A claim about a branch is cited at the lines of its condition; the assignment it leads to may be in
 another method, and that is still `confirmed` when you followed it there.
@@ -141,14 +141,14 @@ each with the prediction, what happened, the recipe and the path of an evidence 
 call ran, the rows it changed). For each case decide which of these it is, by reading the code and the
 evidence:
 
-- **the recipe is wrong** — the steps do not bring the data to the case, or a parameter is not in the
+- **the recipe is wrong** - the steps do not bring the data to the case, or a parameter is not in the
   class it claims, or another variable necessarily differs. Return the corrected recipe entry of the
   command, whole.
-- **the model is wrong** — a check is missing, in the wrong order, has another code, or a variable's
+- **the model is wrong** - a check is missing, in the wrong order, has another code, or a variable's
   query does not read what the check reads. Return the corrected command, whole.
-- **the harness lacks something** — an outside call had no configured answer. Say what the stand-in
+- **the harness lacks something** - an outside call had no configured answer. Say what the stand-in
   must answer; do not change the model to hide it.
-- **left as found** — the model says what the code reads as, the recipe reaches the case, and the
+- **left as found** - the model says what the code reads as, the recipe reaches the case, and the
   application still does something else. You can point at the lines the prediction rests on and you
   cannot find, in the code, why the run went differently. Leave model and recipe as they are and say
   where you looked.

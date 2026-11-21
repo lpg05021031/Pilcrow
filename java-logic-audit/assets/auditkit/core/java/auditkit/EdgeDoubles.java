@@ -378,7 +378,7 @@ public final class EdgeDoubles {
         if (arg instanceof byte[]) {
             byte[] bytes = (byte[]) arg;
             String text = new String(bytes, StandardCharsets.UTF_8);
-            return text.length() > 2000 ? text.substring(0, 2000) + "…" : text;
+            return text.length() > 2000 ? text.substring(0, 2000) + "..." : text;
         }
         if (Mockito.mockingDetails(arg).isMock()) {
             return "(double)";
@@ -387,6 +387,6 @@ public final class EdgeDoubles {
         if (text.matches("^[\\w.$]+@[0-9a-f]+$")) {
             return "(object) " + arg.getClass().getName();      // the default toString: keep the class, drop the address
         }
-        return text.length() > 2000 ? text.substring(0, 2000) + "…" : text;
+        return text.length() > 2000 ? text.substring(0, 2000) + "..." : text;
     }
 }

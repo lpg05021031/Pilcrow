@@ -308,7 +308,7 @@ def trace(system, file, clauses, expectations, dropped, silent, contradictions=(
         for x in rows:
             says = c["quote"].replace("|", "\\|").replace("\n", " ")
             if x is None:
-                lines.append("| %s | %d-%d | %s | — | %s%s |" % (c["id"], c["lines"][0], c["lines"][1], says, c["status"],
+                lines.append("| %s | %d-%d | %s | - | %s%s |" % (c["id"], c["lines"][0], c["lines"][1], says, c["status"],
                                                                  ": " + c["note"].replace("|", "\\|") if c["note"] else ""))
             else:
                 want = "%s%s when %s" % (x["outcome"], " " + x["code"] if x.get("code") else "",

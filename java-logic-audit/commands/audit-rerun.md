@@ -1,5 +1,5 @@
 ---
-description: After the code changed — run every check again, see what is fixed and what is new, and re-derive only what the change touched
+description: After the code changed - run every check again, see what is fixed and what is new, and re-derive only what the change touched
 argument-hint: <system>
 arguments: system
 ---
@@ -22,7 +22,7 @@ Ground rules:
   pass. A case that now differs from its pin is the result of this step.
 - Speak to the person in the language `INTENT.md` names (`auto`: the language they write in).
 
-## 1 — What changed
+## 1 - What changed
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/manifest.py" check . --manifest audit/$system/manifest.json
@@ -40,7 +40,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_brief.py" changed $system
 The model of those groups was read from the old code. Their checks may have moved, and new ones are not
 in the model at all.
 
-## 2 — Run everything again
+## 2 - Run everything again
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/harness_install.py" copy $system
@@ -70,14 +70,14 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/judge.py" findings $system
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/judge.py" verdict $system
 ```
 
-## 3 — Tell the person
+## 3 - Tell the person
 
 Show what each script printed, unchanged. Then:
 
 - findings that now read `fixed`, by id, and what was observed before; and findings that are no longer
   listed at all, with why (the cases that showed them cannot be executed any more, for instance);
 - cases that behave differently than pinned (`reconcile.py` lists them under "behave differently than
-  pinned"; `audit/$system/model/reconciliation.json` → `against_expectation.changed_since_pinned` has
+  pinned"; `audit/$system/model/reconciliation.json` -> `against_expectation.changed_since_pinned` has
   them all), grouped by command: each is either the intended effect of the change or a regression, and
   only the person knows which;
 - cases that still do what a decision says they must not, and cases that still do something else than a
@@ -88,7 +88,7 @@ Show what each script printed, unchanged. Then:
 
 Do not call a changed case a regression or a fix yourself.
 
-## 4 — Bring the audit up to date (only with the person's go-ahead)
+## 4 - Bring the audit up to date (only with the person's go-ahead)
 
 Ask before doing any of this; in a headless run, do none of it and say what waits.
 

@@ -253,7 +253,7 @@ def markdown(system, commands, report, entries):
         entry = entries.get(c.get("handler"), {})
         b = c["binding"]
         how = "%s %s" % (b.get("method"), b.get("path")) if b.get("kind") == "http" else "%s.%s" % (b.get("bean"), b.get("method"))
-        lines += ["", "## %s — %s" % (c["id"], cell_safe(c.get("title", ""))), "",
+        lines += ["", "## %s - %s" % (c["id"], cell_safe(c.get("title", ""))), "",
                   "Entry point %s `%s`, called as `%s`%s. Changes: `%s`." % (
                       entry.get("id", "?"), c.get("handler"), how, " (a read)" if c.get("reads_only") else "",
                       c.get("target", "?")), "",

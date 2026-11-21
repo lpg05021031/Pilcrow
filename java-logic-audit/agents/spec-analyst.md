@@ -14,17 +14,17 @@ document itself (the part you need is inside the brief). Everything you need is 
 
 The brief is one JSON object:
 
-- `section` — the text of one section of the document. Every line starts with its line number and a
+- `section` - the text of one section of the document. Every line starts with its line number and a
   colon; the number is not part of the text.
-- `vocabulary` — the commands that can be asked of the system (`id`, `title`, `about`), and for each the
+- `vocabulary` - the commands that can be asked of the system (`id`, `title`, `about`), and for each the
   variables that describe the situation in which it is asked: `name`, the `values` it can have, the
   `usual` value, sometimes a `meaning` for each value or the query that reads it (`is_read_by`). The
   vocabulary names things. It says nothing about what the system does in any situation, and you must not
   guess that from the names.
-- `task` — `clauses` or `check`.
-- `reply` — the form of your answer.
+- `task` - `clauses` or `check`.
+- `reply` - the form of your answer.
 
-- `save_reply_as` — where your answer goes.
+- `save_reply_as` - where your answer goes.
 
 Your reply is one JSON object in that form, and nothing else: no introduction, no code fence. Write it
 with the Write tool to the path the brief names under `save_reply_as`, and then answer with the single
@@ -45,32 +45,32 @@ one clause; a sentence that states two is two clauses with the same quote.
 
 For each clause:
 
-- `quote` — the exact words, copied character for character from the section, without the line-number
+- `quote` - the exact words, copied character for character from the section, without the line-number
   prefixes. One sentence or a part of one. If your quote is not found word for word in the lines you
   name, the clause is thrown away, so do not tidy, shorten with "...", translate or correct anything.
-- `lines` — the first and the last line number the quote stands in.
+- `lines` - the first and the last line number the quote stands in.
 - `status`:
-  - `testable` — the words can be written as one or more expectations in the vocabulary;
-  - `ambiguous` — the words can be read in two ways that lead to different expectations. Write no
+  - `testable` - the words can be written as one or more expectations in the vocabulary;
+  - `ambiguous` - the words can be read in two ways that lead to different expectations. Write no
     expectation, and say both readings in `note`. **Never pick one.**
-  - `untestable` — a requirement, but not one about what a command in the vocabulary does in a situation
+  - `untestable` - a requirement, but not one about what a command in the vocabulary does in a situation
     the vocabulary can describe (response time, a screen, a report, an operation that is not listed, a
     situation no variable describes). Say in `note` what is missing.
-- `expectations` — for a testable clause, one entry for each command and situation the words speak about:
-  - `command` — an `id` from the vocabulary. A requirement about an operation that the vocabulary lists
+- `expectations` - for a testable clause, one entry for each command and situation the words speak about:
+  - `command` - an `id` from the vocabulary. A requirement about an operation that the vocabulary lists
     in several forms (one id for each kind of change, say) gets one expectation for each form it covers.
-  - `when` — only the variables the words speak about, each with one of that variable's `values`.
+  - `when` - only the variables the words speak about, each with one of that variable's `values`.
     Variables the words do not mention are left out: they are taken at their usual value. An empty `when`
     means "when nothing is unusual", and is right only when the words say the operation succeeds in the
     ordinary case. A requirement that covers several values of a variable ("a closed or cancelled order")
     gets one expectation for each value.
-  - `outcome` — what the words require:
-    - `allowed` — the system does what was asked;
-    - `rejected` — the system refuses and the caller is told;
-    - `ignored` — the system takes the request and does nothing, and the caller is not told an error
+  - `outcome` - what the words require:
+    - `allowed` - the system does what was asked;
+    - `rejected` - the system refuses and the caller is told;
+    - `ignored` - the system takes the request and does nothing, and the caller is not told an error
       (a repeated message that must be skipped);
-    - `not-allowed` — the words say it must not happen and do not say which of the two.
-  - `code` — only when the document itself names the error code or message identifier, copied exactly.
+    - `not-allowed` - the words say it must not happen and do not say which of the two.
+  - `code` - only when the document itself names the error code or message identifier, copied exactly.
     Never one you find fitting.
 
 Leave out what is not a requirement on behaviour: background, definitions, examples that only restate a
@@ -87,8 +87,8 @@ one, read the quoted words in the section and decide whether a careful reader wo
 words require exactly that**: this command, in this situation, with this outcome (and this code, if one
 is given).
 
-- `faithful` — the words say it.
-- `not-faithful` — the expectation adds a condition the words do not state, settles on one reading of
+- `faithful` - the words say it.
+- `not-faithful` - the expectation adds a condition the words do not state, settles on one reading of
   words that allow two, names a code the document does not name, uses a variable value the words do not
   mean, or turns "may" into "must". Give the reason in one sentence.
 

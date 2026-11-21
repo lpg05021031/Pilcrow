@@ -450,7 +450,7 @@ def render(system, questions):
         len(questions), len(open_flagged), sum(1 for q in questions if q["status"] == "open" and not q["flagged"]),
         sum(1 for q in questions if q["status"] == "answered")))
     for q in questions:
-        lines += ["", "## %s — %s" % (q["id"], q["title"]), "",
+        lines += ["", "## %s - %s" % (q["id"], q["title"]), "",
                   "- **Status:** %s%s%s" % (q["status"], " (%s: %s)" % (q["decision"], q["answer"]) if q.get("decision") else "",
                                             ", answered only for " + ", ".join(q["answered_for"]) if q.get("answered_for") else ""),
                   "- **Observed:** " + q["observed"],

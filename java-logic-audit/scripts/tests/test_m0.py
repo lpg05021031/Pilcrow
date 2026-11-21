@@ -257,6 +257,27 @@ class SyntheticProjects(unittest.TestCase):
             preflight_scan.scan(self.tmp, module="../elsewhere", env=False)
 
 
+class PlainText(unittest.TestCase):
+    """What the installer packs can be reviewed by eye: ASCII only, no hidden or look-alike characters."""
+
+    def test_every_packed_file_is_plain_ascii(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("make_installer", os.path.join(REPO, "tools", "make_installer.py"))
+        make_installer = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(make_installer)
+        odd = []
+        for name, path in make_installer.members():
+            with open(path, "rb") as fh:
+                why = make_installer.not_plain(fh.read())
+            if why:
+                odd.append("%s, %s" % (name, why))
+        self.assertEqual([], odd)
+        self.assertIsNone(make_installer.not_plain(b"plain\ttext\n"))
+        self.assertIn("not ASCII", make_installer.not_plain("a \u2014 b\n".encode("utf-8")))
+        self.assertIn("line 2", make_installer.not_plain(b"one\ntwo\x1b[0m\n"))
+        self.assertIn("not ASCII", make_installer.not_plain("warn\ufe0f\n".encode("utf-8")))     # a character that cannot be seen
+
+
 class Endpoints(unittest.TestCase):
     def test_hosts_and_locality(self):
         cases = {

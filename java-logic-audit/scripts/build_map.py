@@ -627,8 +627,8 @@ def render(m, shards):
     out += ["", "## Entities", "", "| Id | Class | Parent | Lifecycle candidates | Version |", "|---|---|---|---|---|"]
     for e in m["entities"]:
         out.append("| %s | `%s` | %s | %s | %s |" % (
-            e["id"], simple(e["class"]) if e["class"] else "(no class: the table alone)", e["parent"]["entity"] if e["parent"] else "—",
-            ", ".join(e["lifecycle_candidates"]) or "—", e["version_property"] or "—"))
+            e["id"], simple(e["class"]) if e["class"] else "(no class: the table alone)", e["parent"]["entity"] if e["parent"] else "-",
+            ", ".join(e["lifecycle_candidates"]) or "-", e["version_property"] or "-"))
     out += ["", "Tables with no mapped entity: " + (", ".join("`%s`" % t for t in m["tables_without_entity"]) or "none")]
     out += ["", "## Lifecycle columns and who writes them", "",
             "A column changed from more than one class is where the conditions checked before the change can differ.",
@@ -636,7 +636,7 @@ def render(m, shards):
     for w in m["lifecycle_writers"]:
         changed = "; ".join("`%s` (%s)" % (simple(c["class"]), ", ".join(c["write_sites"])) for c in w["changed_by"])
         out.append("| %s | %s | %s | %s |" % (
-            w["entity"], w["column"], ", ".join("`%s`" % simple(c) for c in w["set_at_creation_by"]) or "—",
+            w["entity"], w["column"], ", ".join("`%s`" % simple(c) for c in w["set_at_creation_by"]) or "-",
             changed or "nothing changes it after creation"))
     out += ["", "## Write sites", "",
             "One row per place outside an entity class that changes its columns. A row with no entry is an orphan:",
@@ -653,8 +653,8 @@ def render(m, shards):
             where = site + (", SQL at %s" % s["sql_at"].rsplit("/", 1)[-1] if s.get("sql_at") else "")
             out.append("| %s | %s | %s | `%s` | `%s` | %s | %s | %s |" % (
                 s["id"], s["kind"], (", ".join(s["columns"]) or "(row)") + (" (on some path)" if s.get("dynamic") else ""), s["via"], where,
-                ", ".join(s["entries"]) or "**orphan**", "; ".join(s["transaction"]) or "—",
-                ", ".join(s["outside_transaction_from"]) or "—"))
+                ", ".join(s["entries"]) or "**orphan**", "; ".join(s["transaction"]) or "-",
+                ", ".join(s["outside_transaction_from"]) or "-"))
         out.append("")
     out += ["## Transactional methods called from their own class", ""]
     if m["self_invocations"]:

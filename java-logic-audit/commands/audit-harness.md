@@ -1,5 +1,5 @@
 ---
-description: Install the test harness and prove it runs on this application — nothing that exists is edited
+description: Install the test harness and prove it runs on this application - nothing that exists is edited
 argument-hint: <system>
 arguments: system
 ---
@@ -32,7 +32,7 @@ Ground rules:
   variables only. When the person gave it in this session, it may appear in the one command line that
   sets those variables, and nowhere else.
 
-## 1 — Can a harness be installed here at all?
+## 1 - Can a harness be installed here at all?
 
 - `applicability.verdict` is `not-applicable`: stop. There is nothing to install; say why in one line.
 - `framework.name` is not `spring-boot`: stop. This version of the harness drives Spring Boot applications
@@ -45,7 +45,7 @@ to, or one called `main` or `master`), suggest `git switch -c audit/$system` bef
 step adds files to the repository; do not create the branch yourself, and do not wait for an answer in a
 headless run.
 
-## 2 — Install (a script does it)
+## 2 - Install (a script does it)
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/harness_install.py" plan $system
@@ -59,20 +59,20 @@ package `auditkit`, under `<module>/src/audit/java`: they hold no logic about th
 replaced as a whole on every run of `copy`. `build-entry` writes the build entry. Never edit either by
 hand: if the harness itself seems wrong, report it, do not patch it.
 
-## 3 — Which database will the harness use?
+## 3 - Which database will the harness use?
 
 **The harness empties every table of its database before every case.** Decide where that database comes
 from, in this order:
 
-1. **The project's own test database in a container** — when `environment.docker_daemon` is true and the
+1. **The project's own test database in a container** - when `environment.docker_daemon` is true and the
    project has a test configuration class that starts the database (`tests.database_source` is
    `container`). Nothing else is needed.
-2. **A local database a person offered for the audit** — its address is local (`localhost`, `127.0.0.1`),
+2. **A local database a person offered for the audit** - its address is local (`localhost`, `127.0.0.1`),
    and the person named it for the audit or called it a throwaway database. An offer that was only "for
    the existing tests" does not cover this: ask once (pop-up) whether the harness may use it too, or
    whether there is another one; in a headless run stop here and say what is needed. Recommend a database
    used for nothing else.
-3. **Neither** — stop. Say exactly what is needed: a running Docker daemon, or an empty local database of
+3. **Neither** - stop. Say exactly what is needed: a running Docker daemon, or an empty local database of
    the profile's engine with a user that may create tables.
 
 For an offered database, the harness reads the address and the credentials from three environment
@@ -81,7 +81,7 @@ them in front of the command in step 5 when the person gave them in this session
 already be in the environment. The harness refuses, in code, any address that is not local or a
 container; never work around that refusal.
 
-## 4 — Settings (the one part that needs judgement)
+## 4 - Settings (the one part that needs judgement)
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/harness_install.py" settings $system
@@ -95,7 +95,7 @@ case 2, and for case 2 the person's own words offering the database, with any se
 work yourself. "Without subagents" means that your tools hold nothing to launch an agent with. When they do, launch the plugin's agent (it is listed as `java-logic-audit:harness-engineer`); doing its work yourself in that case is not allowed. Say in your report which of the two happened. When it is done, the `todo` list in `harness.json` holds only what truly could not be
 settled.
 
-## 5 — Prove it runs
+## 5 - Prove it runs
 
 Get the exact command from the script (it also brings the build entry up to date), and run it:
 
@@ -119,7 +119,7 @@ When a check fails, read its `error` in `results.jsonl`, fix **`harness.json` on
 most three rounds. Never change application code, tests or build files to make a check pass, and never
 loosen a check. A check that still fails after three rounds is reported as it is.
 
-## 6 — What the audit can prove here (a script decides)
+## 6 - What the audit can prove here (a script decides)
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/judge.py" capabilities $system
@@ -139,7 +139,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/manifest.py" check . --manifest audit/$sy
 `untouched` is the only acceptable answer. On `changed`, list the files and stop: something edited the
 project's own files, and that has to be understood before the audit continues.
 
-## 7 — Report
+## 7 - Report
 
 Write `audit/$system/HARNESS.md`, for people:
 

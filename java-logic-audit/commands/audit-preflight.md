@@ -1,5 +1,5 @@
 ---
-description: Run this first — checks what this repository allows the audit to prove, whether the method applies at all, and what to fix before anything else runs
+description: Run this first - checks what this repository allows the audit to prove, whether the method applies at all, and what to fix before anything else runs
 argument-hint: <system>
 arguments: system
 ---
@@ -33,7 +33,7 @@ Ground rules for the whole command:
   words contain one, keep their words and replace the secret with `[redacted]`. A secret is used from the
   environment, or from what the person said in this session; it is never stored for later.
 
-## Check 1 — Record the source as it is (before anything runs)
+## Check 1 - Record the source as it is (before anything runs)
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/manifest.py" build . --out audit/$system/manifest.json
@@ -53,7 +53,7 @@ logs/
 *.local.*
 ```
 
-## Check 2 — Technical profile (a script decides, not you)
+## Check 2 - Technical profile (a script decides, not you)
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/preflight_scan.py" scan . --module <module from INTENT.md> --out audit/$system/profile.json
@@ -70,7 +70,7 @@ commands read the profile, so a wrong value must be visible, not silently correc
 read the source in order to second-guess the scan. Something that is true but incomplete (for example a
 second way the tests can get a database) is not a doubt: mention it in the check where it matters.
 
-## Check 3 — Does the method apply?
+## Check 3 - Does the method apply?
 
 Read `applicability` in the profile.
 
@@ -104,18 +104,18 @@ The script decides the verdict by fixed rules. If something you saw contradicts 
 lifecycle is held in a column the scan did not recognize), say so under **Profile doubts** and let the
 person decide; never continue past `not-applicable` on your own judgement.
 
-## Check 4 — Ask the person (these answers are not in the source)
+## Check 4 - Ask the person (these answers are not in the source)
 
-Ask **only** the five questions below — add none — and accept "don't know" for any of them.
+Ask **only** the five questions below - add none - and accept "don't know" for any of them.
 
-1. **Scope** — Is this repository the whole system, or does another system also write to the same
+1. **Scope** - Is this repository the whole system, or does another system also write to the same
    database (another service, a batch job, people running scripts)?
-2. **Production database** — Which database engine and version runs in production, and at which
+2. **Production database** - Which database engine and version runs in production, and at which
    transaction isolation level?
-3. **Build and test here** — Can this machine build the code and run its tests, Docker included?
-4. **Off limits** — Is there anything that must not be touched or must not be run here (a shared
+3. **Build and test here** - Can this machine build the code and run its tests, Docker included?
+4. **Off limits** - Is there anything that must not be touched or must not be run here (a shared
    environment, tests that really send messages or mail, a module another team owns)?
-5. **Where to look first** — Which entities or flows matter most?
+5. **Where to look first** - Which entities or flows matter most?
 
 How to ask:
 
@@ -141,7 +141,7 @@ An open answer means: nothing was said. For question 4 in particular it means no
 limits, so Check 6 is the only safeguard before tests run; say in the report that the suite ran without
 that answer. To fill open answers later, the person runs this command again: it asks only what is open.
 
-## Check 5 — Tools on this machine
+## Check 5 - Tools on this machine
 
 The profile's `environment` block holds the facts the scan measured: `java`, `docker_client` (the command
 exists), `docker_daemon` (a daemon answered, so containers can start), and whether a build wrapper is
@@ -155,7 +155,7 @@ give the one-line fix and what it blocks:
 | the build tool, or a JDK the build accepts | nothing can be executed; every result stays a claim (grade C) | install the JDK or tool the build names |
 | a Docker daemon, when `tests.database_source` is `container` | the existing tests and the harness cannot start their database here | start Docker, or the person offers a local database of the same engine (Check 7) |
 
-## Check 6 — Where would the tests connect? (before anything is run)
+## Check 6 - Where would the tests connect? (before anything is run)
 
 Read `connections` and `tests.database_source` in the profile. Each `connections` row is an endpoint found
 in the application's configuration: `scope` is `main` or `test`; `local` is true, false, or null when the
@@ -166,7 +166,7 @@ replaces what the file says, and the row already shows the value that would real
 tests), `substitute` (an in-memory stand-in), `test-config` (an address in the test configuration),
 `main-config` (the tests fall back to the application's own datasource), or `none`.
 
-- ❌ if any `test` row has `local: false` or `null`, or if the source is `main-config` and the `main`
+- FAIL if any `test` row has `local: false` or `null`, or if the source is `main-config` and the `main`
   datasource row is not local. The existing tests might talk to a shared system. **Do not run the test
   suite in Check 7** until the person says which environment that endpoint is (ask once, in a pop-up,
   naming the file and key; in a headless run leave it unrun and say why).
@@ -175,9 +175,9 @@ tests), `substitute` (an in-memory stand-in), `test-config` (an address in the t
   not local or a container.
 - Take answer 4 into account: anything the person named as off limits is not run.
 
-## Check 7 — Build and existing tests (prove it on this code)
+## Check 7 - Build and existing tests (prove it on this code)
 
-**7a — Find out how the project is built.** Look for the CI definition (`.github/workflows/`,
+**7a - Find out how the project is built.** Look for the CI definition (`.github/workflows/`,
 `.gitlab-ci.yml`, `Jenkinsfile`, `azure-pipelines.yml`) and the build configuration beside the source (a
 parent POM, `.mvn/`, `settings.xml`, `gradle.properties`, an internal repository). Quote the build and
 test commands CI uses and flag anything a newcomer would not guess (a private artifact repository, a code
@@ -185,11 +185,11 @@ generator, a required profile). With no CI definition and no documented command,
 standard ones and say that you did: Maven `mvn -B -DskipTests package` then `mvn -B test`; Gradle
 `gradle assemble` then `gradle test` (the wrapper, `./mvnw` or `./gradlew`, when the repository has one).
 
-**7b — Build once, without running tests.** The build in this step must not run the test suite: the
+**7b - Build once, without running tests.** The build in this step must not run the test suite: the
 guards for running tests come in 7c. A failed build is the most valuable output of this command: report
 the actual error and diagnose it. Never work around it by changing build files.
 
-**7c — Run the existing tests once**, unless Check 6 or answer 4 said not to. Use the project's own
+**7c - Run the existing tests once**, unless Check 6 or answer 4 said not to. Use the project's own
 command and keep the result files where the build writes them (`target/surefire-reports`,
 `target/failsafe-reports`, `build/test-results`).
 
@@ -220,7 +220,7 @@ Using an offered database:
 
 If no database can be used, do not run the suite: say so, and go on with the remaining checks.
 
-**7d — Record the counts from the result files**, never from your reading of the console:
+**7d - Record the counts from the result files**, never from your reading of the console:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/preflight_scan.py" baseline --profile audit/$system/profile.json \
@@ -242,7 +242,7 @@ anything that looks like a credential is replaced before it is stored. `baseline
   or tool failure, and quote that text.
 - A suite that ran no tests is `none-executed`. It is not a pass.
 
-**7e — Did building and testing change the source?**
+**7e - Did building and testing change the source?**
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/manifest.py" check . --manifest audit/$system/manifest.json
@@ -252,7 +252,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/manifest.py" check . --manifest audit/$sy
 formatter, a code generator that writes under `src/`): list the files. That is worth knowing before the
 audit starts, because every later "source untouched" check would fail for the same reason.
 
-## Check 8 — Scope boundary
+## Check 8 - Scope boundary
 
 Later commands assume that this repository is the only writer of its tables. This is a first look, not
 the model: use what the profile and the migrations show, and at most one quick search of the source.
@@ -266,15 +266,15 @@ the model: use what the profile and the migrations show, and at most one quick s
   only that system can produce will be built by writing data directly, which lowers the grade of anything
   proven from them.
 
-## Check 9 — Is the source protected from edits?
+## Check 9 - Is the source protected from edits?
 
 Read-only: never edit a settings file. Read the project's `.claude/settings.json` and
 `.claude/settings.local.json`, and the user's `~/.claude/settings.json` (or `settings.json` under
 `CLAUDE_CONFIG_DIR`), and look in `permissions.deny` for `Edit` rules covering the application's source
 and tests. Organization-managed settings are not read here; a rule set there would not show up.
 
-- ✅ — rules exist that cover `src/main` and `src/test`. Name the file and the rules, nothing else from it.
-- ⚠️ — none found. Show this, in the session and in the report, for the project's `.claude/settings.json`:
+- OK - rules exist that cover `src/main` and `src/test`. Name the file and the rules, nothing else from it.
+- WARN - none found. Show this, in the session and in the report, for the project's `.claude/settings.json`:
 
   ```json
   { "permissions": {
@@ -285,7 +285,7 @@ and tests. Organization-managed settings are not read here; a rule set there wou
 Say on either status that a permission rule covers Claude's file tools and the shell commands it
 recognizes, not a script that opens files itself. The check that counts is the manifest from Check 1.
 
-## Check 10 — Inside the supported range?
+## Check 10 - Inside the supported range?
 
 Read `support` in the profile. `supported` means every detected technology is one the harness can drive.
 `static-only` lists what is not (`out_of_scope`): for those parts the audit can still build the model by
@@ -303,23 +303,23 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/validate.py" $system
 Then write `audit/$system/PREFLIGHT.md`. It is for people: later commands read `profile.json`,
 `answers.json` and `manifest.json`, never this file. Use this outline.
 
-1. **Answers** — all five questions, each with the person's words or "open".
-2. **Scope boundary** — the Check 8 finding.
-3. **Checks** — a table with four columns (Check, Status, What was found, Fix for anything not green) and
+1. **Answers** - all five questions, each with the person's words or "open".
+2. **Scope boundary** - the Check 8 finding.
+3. **Checks** - a table with four columns (Check, Status, What was found, Fix for anything that is not OK) and
    one row per check, 1 to 10. Decide each status with this legend:
 
-   | Check | ✅ | ⚠️ | ❌ |
+   | Check | OK | WARN | FAIL |
    |---|---|---|---|
-   | 1 Source recorded | manifest written, or an earlier one still matches | — | an earlier manifest no longer matches |
+   | 1 Source recorded | manifest written, or an earlier one still matches | - | an earlier manifest no longer matches |
    | 2 Profile | written and valid | a profile doubt is listed | the scan failed |
-   | 3 Method applies | `full` | `partial` | — (`not-applicable` ended the command earlier) |
-   | 4 Answers | all five answered | any open | — |
+   | 3 Method applies | `full` | `partial` | - (`not-applicable` ended the command earlier) |
+   | 4 Answers | all five answered | any open | - |
    | 5 Tools | everything needed is present | no Docker daemon while the tests need a container (also when an offered database made the tests runnable) | the build tool, a usable JDK or `python3` is missing |
-   | 6 Test connections | every test endpoint is local or a container | — | a test endpoint is not local, or unknown |
+   | 6 Test connections | every test endpoint is local or a container | - | a test endpoint is not local, or unknown |
    | 7 Build and tests | build works, baseline `passing`, source untouched | baseline `failing` or `blocked`; tests not run for a stated reason | build fails; `none-executed` with no reason; the build changed tracked files |
-   | 8 Scope boundary | no sign of another writer, and answer 1 agrees | answer 1 open, or signs of another writer | — |
-   | 9 Source protection | deny rules found | none found | — |
-   | 10 Supported range | `supported` | `static-only` | — |
+   | 8 Scope boundary | no sign of another writer, and answer 1 agrees | answer 1 open, or signs of another writer | - |
+   | 9 Source protection | deny rules found | none found | - |
+   | 10 Supported range | `supported` | `static-only` | - |
 
 4. **What this repository lets the audit prove.** The lowest of these applies:
    - parts listed in `support.out_of_scope`: grade C at most;
@@ -339,14 +339,14 @@ Then write `audit/$system/PREFLIGHT.md`. It is for people: later commands read `
    List `tests.mocked_types`: the external systems the existing tests replace. Whether each is replaced at
    its outer edge is settled by `audit-harness`.
 5. **Ready / Ready with gaps / Not ready** for the commands that depend on the environment:
-   - `audit-harness`, `audit-characterize`, `audit-verify` — *Ready* when the build works and a database
+   - `audit-harness`, `audit-characterize`, `audit-verify` - *Ready* when the build works and a database
      of the real engine can be used on this machine: a container can start, or the person offered a local
      one for the audit. *Ready with gaps* when only a stand-in database is available, or when a local
      database was offered for the existing tests only (list "may the harness use it too?" under open
      items). *Not ready* when the build fails or no database can be used here.
-   - `audit-map`, `audit-model` — *Ready* when the build works; *Ready with gaps* when it does not (source
+   - `audit-map`, `audit-model` - *Ready* when the build works; *Ready with gaps* when it does not (source
      facts only, no bytecode or runtime facts).
-   - `audit-spec` — *Ready* when `INTENT.md` names a PRD; leave the row out otherwise.
+   - `audit-spec` - *Ready* when `INTENT.md` names a PRD; leave the row out otherwise.
 
    The other commands follow from these and need no row.
 6. **Profile doubts** and **Instruction-shaped content**, each "none" when empty.
@@ -354,8 +354,8 @@ Then write `audit/$system/PREFLIGHT.md`. It is for people: later commands read `
 
 In the session (not in the file), print your checks table, then end with two lines:
 
-- **Most important fix:** the one thing to fix first when any row is ❌ or anything is *Not ready*.
-  Otherwise write "none", and name the ⚠️ most worth settling, if there is one.
-- **Next step:** when a row is ❌, the next step is to fix it and run
+- **Most important fix:** the one thing to fix first when any row is FAIL or anything is *Not ready*.
+  Otherwise write "none", and name the WARN most worth settling, if there is one.
+- **Next step:** when a row is FAIL, the next step is to fix it and run
   `/java-logic-audit:audit-preflight $system` again. Otherwise it is
   `/java-logic-audit:audit-harness $system`.
