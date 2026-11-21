@@ -190,6 +190,8 @@ def run(workspace, system, only=None, limit=None):
         if changed is None:
             entry["result"] = "no-mutant"
             mutants.append(entry)
+            print("%s %-9s %-9s %s:%s  %s" % (entry["id"], "no-mutant", "-", place["file"].split("/")[-1], entry["lines"],
+                                             ", ".join(sorted({g["code"] or "?" for g in place["guards"]}))), flush=True)
             continue
         entry["how"] = how
         rest_on_it = sorted({g["command"] for g in place["guards"]})
