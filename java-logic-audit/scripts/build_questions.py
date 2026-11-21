@@ -16,6 +16,8 @@ show it. The kinds, each from one fixed rule:
   differs               running the code gave something else than reading it predicts
   dropped               a message was taken, had no effect at all, and its sender was not told
   unstable              the same call under the same conditions did not give the same result twice
+  answer-varies         (not flagged) only the body of the answer differed between runs: what the call did
+                        to the data, what it sent and how it ended were the same every time
   rule-broken           a rule a person confirmed was broken by a sequence of ordinary calls
   near-rule             a relation between numbers held in nearly every state and broke in a few
   error-in-sequence     a call ended in an error after a sequence of ordinary calls
@@ -49,11 +51,11 @@ import judge  # noqa: E402
 SCHEMA = 1
 FLAGGED = ("refused-but-changed", "read-wrote", "undecided", "error", "differs", "dropped", "unstable",
            "rule-broken", "near-rule", "error-in-sequence", "fault", "race", "against-spec", "one-lets-through")
-UNFLAGGED = ("never-decides", "rare-combination", "rule?")
+UNFLAGGED = ("never-decides", "rare-combination", "rule?", "answer-varies")
 BASIS = {"refused-but-changed": "N4", "read-wrote": "N4", "undecided": "N3", "error": "N4", "differs": "N3",
          "dropped": "N4", "unstable": "N4", "never-decides": "N3", "rule-broken": "N2", "near-rule": "N4",
          "error-in-sequence": "N4", "fault": "N4", "race": "N4", "rare-combination": "N4", "rule?": "N4",
-         "against-spec": "N1", "one-lets-through": "N3"}
+         "against-spec": "N1", "one-lets-through": "N3", "answer-varies": "N4"}
 
 
 def RACE_TEXT(differs, observed, expected):
@@ -220,6 +222,17 @@ def build(workspace, system):
                 q["cites"].update(cites(cell["command"], [guard]))
 
     for u in rec.get("unstable", []):
+        if u["parts"] == ["response_sha"]:
+            # Only the body of the answer differed: a time, a generated number or a token in it. One note for the
+            # command, not a question for every case; what the call did was the same each time and is pinned.
+            add("answer-varies", u["command"], {"parts": u["parts"]}, u["cell"],
+                title="The answer's body is not the same twice",
+                observed="%s answers with a body that differs between runs under the same conditions; the outcome, "
+                         "the data written and what was sent were the same every time." % u["command"],
+                why="Usually a time, a generated number or a token in the answer. It matters only if a caller is "
+                    "meant to get the same answer for the same request.",
+                if_not_intended=None)
+            continue
         add("unstable", u["command"], {"case": u["deviation"], "parts": u["parts"]}, u["cell"],
             title="The same call does not give the same result twice",
             observed="%s with %s gave different %s in runs under the same conditions." % (

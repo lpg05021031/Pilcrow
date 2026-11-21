@@ -160,6 +160,22 @@ class Chain(System):
         self.assertTrue(all(q["status"] == "open" for q in qs.values()))
         self.assertIn("## Q-001", self.text("QUESTIONS.md"))
 
+    def test_an_answer_whose_body_alone_varies_is_one_note_for_the_command_and_asks_nobody(self):
+        self.characterize()
+        rec = self.read("model/reconciliation.json")
+        cells = [c for c in self.cells if c["command"] == self.cells[0]["command"]][:2]
+        rec["unstable"] = [{"cell": c["id"], "key": c["key"], "command": c["command"], "deviation": c["deviation"],
+                            "parts": ["response_sha"], "runs": ["matrix-1", "matrix-2"]} for c in cells]
+        rec["unstable"].append({"cell": self.cells[-1]["id"], "key": self.cells[-1]["key"], "command": self.cells[-1]["command"],
+                                "deviation": self.cells[-1]["deviation"], "parts": ["written"], "runs": ["matrix-1", "matrix-2"]})
+        self.write("model/reconciliation.json", rec)
+        qs = build_questions.build(self.tmp, "s")["questions"]
+        varies = [q for q in qs if q["kind"] == "answer-varies"]
+        self.assertEqual(len(varies), 1)                                    # one for the command, not one for each case
+        self.assertEqual((varies[0]["cells"], varies[0]["flagged"]), ([c["id"] for c in cells], False))
+        unstable = [q for q in qs if q["kind"] == "unstable"]
+        self.assertEqual((len(unstable), unstable[0]["flagged"]), (1, True))   # what a call wrote differing is still asked
+
     def test_a_question_keeps_its_number_and_remembers_its_answer(self):
         before = {q["fingerprint"]: q["id"] for q in self.characterize()}
         q = [x for x in self.read("questions.json")["questions"] if x["kind"] == "dropped"][0]
