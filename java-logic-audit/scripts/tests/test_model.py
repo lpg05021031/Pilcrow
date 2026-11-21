@@ -269,3 +269,14 @@ class Model(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DatabaseClock(unittest.TestCase):
+    def test_a_query_that_asks_the_database_for_the_time_is_recognised_and_the_parameter_now_is_not(self):
+        import render_model
+        for sql in ("select expires_at < now() from r where id = :id", "select d < CURRENT_DATE from r",
+                    "select case when t < current_timestamp then 'due' else 'not' end from r", "select sysdate() > t from r"):
+            self.assertIsNotNone(render_model.DB_CLOCK.search(sql), sql)
+        for sql in ("select expires_at < :now from r where id = :id", "select d < :today from r",
+                    "select known_at, snow from r", "select now_playing from r"):
+            self.assertIsNone(render_model.DB_CLOCK.search(sql), sql)

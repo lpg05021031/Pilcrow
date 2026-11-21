@@ -58,6 +58,16 @@ public final class AuditClock extends Clock {
         return configured() == null ? LocalDate.now() : LocalDate.from(now.atZone(ZoneOffset.UTC));
     }
 
+    /**
+     * The date and time the application sees right now, as "2030-03-15 10:00:00" in UTC: what a
+     * variable's query compares a stored time with, in place of the database's own now().
+     */
+    public static String currentDateTime() {
+        java.time.LocalDateTime t = configured() == null
+                ? java.time.LocalDateTime.now(ZoneOffset.UTC) : java.time.LocalDateTime.ofInstant(now, ZoneOffset.UTC);
+        return t.truncatedTo(ChronoUnit.SECONDS).toString().replace('T', ' ');
+    }
+
     /** Back to the configured instant. */
     public static void reset() {
         if (base != null) {

@@ -77,7 +77,9 @@ A variable is something a check of this command looks at. Two kinds:
   about, the status of its parent, "has anything shipped", "is there another open line".
 - **`param`** — a class of a parameter value: `below-shipped`, `same`, `missing`. Give `sql` when the class
   can be computed from the parameter and the rows it is compared with (a `case` expression); the harness
-  then checks that the value used really is in the class. `:today` is the application's current date.
+  then checks that the value used really is in the class. `:today` is the application's current date and `:now`
+  its current date and time (`2030-03-15 10:00:00`, UTC). Compare stored times with these, never with the
+  database's own `now()` or `current_date`: the audit moves the application's clock, not the database's.
   Only top-level parameters can be named in a query; a class about a value nested in a list has no `sql`.
 
 `domain` lists every value the checks tell apart, as text (`"true"`, `"null"`). A query that answers 1 or 0

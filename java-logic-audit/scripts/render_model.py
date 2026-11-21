@@ -56,6 +56,10 @@ def check_cite(workspace, cite):
     return None
 
 
+DB_CLOCK = re.compile(r"(?<![:\w])(now|curdate|curtime|sysdate|getdate|current_date|current_timestamp|current_time|"
+                      r"localtimestamp|clock_timestamp|statement_timestamp)\b", re.I)
+
+
 def check_sql(sql):
     s = (sql or "").strip()
     if not s.lower().startswith("select"):
@@ -125,7 +129,7 @@ def render(workspace, system):
     for key in [k for k in verdicts if k[0] in corrected and k not in regiven]:
         del verdicts[key]
 
-    kept, left_out, dropped = [], [], []
+    kept, left_out, dropped, clock = [], [], [], []
     counts = {"confirmed": 0, "relocated": 0, "refuted": 0, "unverified": 0, "bad_citation": 0}
     for cid in sorted(proposed):
         c = proposed[cid]
@@ -142,6 +146,9 @@ def render(workspace, system):
                 bad = check_sql(v["sql"])
                 if bad:
                     problems.append("the query of variable %s %s" % (v.get("name"), bad))
+                elif DB_CLOCK.search(v["sql"]):
+                    # Not wrong in itself, but the audit moves the application's clock and not the database's.
+                    clock.append({"command": cid, "variable": v.get("name"), "uses": DB_CLOCK.search(v["sql"]).group(1)})
         for group in ("guards", "branches"):
             survivors = []
             for g in c.get(group, []):
@@ -184,7 +191,7 @@ def render(workspace, system):
              "entries": len(themap.get("entries", [])), "entries_without_command": len(uncovered)}
     _lib.write_json(os.path.join(adir, "model", "commands.json"), {"schema": SCHEMA, "commands": kept})
     report = {"schema": SCHEMA, "stats": stats, "left_out": left_out, "dropped": dropped,
-              "entries_without_command": uncovered, "gaps": result.get("gaps", []),
+              "entries_without_command": uncovered, "gaps": result.get("gaps", []), "database_clock": clock,
               "instruction_shaped": result.get("instruction_shaped", [])}
     _lib.write_json(os.path.join(adir, "model", "render.json"), report)
     with open(os.path.join(adir, "MODEL.md"), "w", encoding="utf-8") as fh:
@@ -226,6 +233,10 @@ def markdown(system, commands, report, entries):
         lines += ["- %s: %s" % (x["command"], "; ".join(x["problems"])) for x in report["left_out"]]
     if report["gaps"]:
         lines += ["", "**Gaps:**"] + ["- %s" % cell_safe(g) for g in report["gaps"]]
+    if report.get("database_clock"):
+        lines += ["", "**Variables whose query asks the database what time it is** (the audit moves the application's "
+                  "clock, not the database's: such a query should compare with `:now` or `:today`): " +
+                  "; ".join("%s `%s` (`%s`)" % (x["command"], x["variable"], x["uses"]) for x in report["database_clock"])]
     for c in commands:
         entry = entries.get(c.get("handler"), {})
         b = c["binding"]
@@ -265,6 +276,10 @@ def main(argv=None):
           "guards and branches: %d confirmed, %d re-located, %d refuted, %d with a citation that leads nowhere, %d not refereed" % (
               s["commands"], s["entries"], s["entries_without_command"], s["left_out"], s["guards"]["confirmed"],
               s["guards"]["relocated"], s["guards"]["refuted"], s["guards"]["bad_citation"], s["guards"]["unverified"]))
+    if r.get("database_clock"):
+        print("variables whose query asks the database for the time (the audit moves the application's clock, not the "
+              "database's; compare with :now or :today instead): " +
+              "; ".join("%s %s" % (x["command"], x["variable"]) for x in r["database_clock"]))
     return 0
 
 

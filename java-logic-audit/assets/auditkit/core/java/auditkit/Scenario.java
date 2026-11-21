@@ -257,6 +257,9 @@ public final class Scenario {
             if (!named.has("today")) {
                 named.put("today", AuditClock.currentDate().toString());      // the application's date at this moment
             }
+            if (!named.has("now")) {
+                named.put("now", AuditClock.currentDateTime());               // and its date and time
+            }
             for (JsonNode v : command.get("vars")) {
                 if (v.hasNonNull("sql")) {
                     out.put(v.get("name").asText(), asTheDomainSpellsIt(v, Sql.scalar(v.get("sql").asText(), named)));
