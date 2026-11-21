@@ -584,23 +584,27 @@ auditkit 是一組 Java 原始碼，複製到目標模組的 `src/audit/java/aud
 {
   "application": "com.example.OrderApplication",
   "reuse_test_config": ["com.example.test.PostgresContainerConfig"],
-  "datasource_bean": "dataSource",
-  "doubles": [
-    { "type": "io.nats.client.Connection", "kind": "messaging" },
-    { "type": "com.example.client.PricingClient", "kind": "external",
-      "responses": { "quote": { "unitPrice": "12.50", "currency": "TWD" } } }
-  ],
-  "auth": { "mode": "header", "headers": { "X-User": "audit" } },
+  "profiles": [],
+  "properties": {},
+  "database": { "source": "environment", "permission": "人提供資料庫時的原話，機密已遮蔽" },
+  "doubles": [ { "type": "io.nats.client.Connection", "kind": "messaging" } ],
+  "http_doubles": [ { "method": "GET", "url": "^http://[^/]+/prices/[^/?]+\\?qty=\\d+$",
+                      "example": "http://pricing.test/prices/SKU-1?qty=5",
+                      "status": 200, "body": { "unitPrice": "10.00" } } ],
+  "auth": { "headers": { "X-User": "audit" } },
   "rejections": ["com.example.BusinessException"],
-  "error_code_path": "$.code",
+  "error_code_path": "code",
   "base_data": ["fixtures/base.sql"],
-  "reset": "template-db",
-  "engine": { "name": "postgresql", "version": "15", "isolation": "READ_COMMITTED",
-              "matches_production": "confirmed" }
+  "clock": "2030-03-15T10:00:00Z",
+  "todo": []
 }
 ```
 
-`matches_production` 的值是 `confirmed`（人在 preflight 回答過且相符）、`unconfirmed` 或 `substitute`（替代引擎）。它是 B 級保留標記的來源之一。
+- `doubles` 取代的是第三方的 client 介面；外部 HTTP 服務以 `http_doubles` 的規則回應，不取代應用自己的 client 類別。
+- `rejections` 決定一個結果被讀成業務拒絕還是錯誤。只列應用自己的例外型別。
+- `error_code_path` 是錯誤回應中代碼欄位的名稱，預設 `code`。
+- `clock` 是每一格開始時應用看到的「現在」。應用從 `java.time.Clock` bean 取時間時才生效。
+- 資料庫的位址與帳密不在這個檔案裡，只經由環境變數傳入。引擎是否與正式環境一致由 `judge.py capabilities` 從煙霧測試的結果與人的回答算出，寫在 `profile.json`，是 B 級保留標記的來源之一。
 
 ### 9.3 結果的三種分類
 
