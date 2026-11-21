@@ -16,8 +16,10 @@ For dynamic SQL (<if>, <set>, <choose>, <foreach>, <trim>) the text of every bra
 columns are the ones that can be assigned on some path, and the statement is marked `dynamic`.
 
 A statement is returned without a table (and the map lists it as unresolved, for a reader) whenever
-reading it with certainty is not possible: text substituted at run time (${...}), an insert without a
-column list, a join in an update, a fragment that cannot be found, several statements in one.
+reading it with certainty is not possible: text substituted at run time (${...}) in the part that names
+the table or the columns, an insert without a column list, a join in an update, a fragment that cannot be
+found, several statements in one. Text substituted only in the condition (the WHERE clause that
+generated "by example" statements build) changes which rows are written, not which columns, and is read.
 """
 import json
 import os
@@ -68,7 +70,16 @@ def strip_tags(body, fragments):
         body = new
     if re.search(r"<(?:%s)\b" % "|".join(DYNAMIC_TAGS), body):
         dynamic = True
-    body = re.sub(r"<trim\b[^>]*\bprefix\s*=\s*\"([^\"]*)\"[^>]*>", r" \1 ", body, flags=re.S)
+    # <trim prefix="(" suffix=")"> ... </trim>: the text between, with what the tag puts around it. Innermost first.
+    def wrap(m):
+        pre = re.search(r"\bprefix\s*=\s*\"([^\"]*)\"", m.group(1))
+        suf = re.search(r"\bsuffix\s*=\s*\"([^\"]*)\"", m.group(1))
+        return " %s %s %s " % (pre.group(1) if pre else "", m.group(2), suf.group(1) if suf else "")
+    for _ in range(10):
+        new = re.sub(r"<trim\b([^>]*)>((?:(?!<trim\b).)*?)</trim\s*>", wrap, body, flags=re.S)
+        if new == body:
+            break
+        body = new
     body = re.sub(r"<set\b[^>]*>", " set ", body)
     body = re.sub(r"<where\b[^>]*>", " where ", body)
     body = re.sub(r"<[^>]+>", " ", body)
@@ -96,7 +107,7 @@ def column(name):
 
 def read_write(sql):
     """{"kind", "table", "columns"} of one write statement, or None when it cannot be read with certainty."""
-    if sql is None or "${" in sql:
+    if sql is None:
         return None
     sql = re.sub(r"#\{[^}]*\}", "?", sql).strip().rstrip(";").strip()
     if ";" in sql:
@@ -106,6 +117,8 @@ def read_write(sql):
     if m:
         columns = [column(c) for c in m.group(2).split(",") if c.strip()]
         again = re.search(r"\bon\s+duplicate\s+key\s+update\s+(.*)$", sql, re.I | re.S)
+        if "${" in m.group(0) or (again and "${" in again.group(1)):
+            return None                                  # the columns themselves are decided at run time
         if again:
             columns += [column(a.split("=", 1)[0]) for a in top_level(again.group(1)) if "=" in a]
         return {"kind": "create", "table": m.group(1).split(".")[-1].lower(), "columns": sorted(set(columns))}
@@ -113,11 +126,11 @@ def read_write(sql):
     if m:
         rest = re.split(r"\swhere\s", " " + m.group(2) + " ", maxsplit=1, flags=re.I)[0]
         columns = [column(a.split("=", 1)[0]) for a in top_level(rest) if "=" in a]
-        if not columns or re.search(r"\b(join|from)\b", rest, re.I):
+        if not columns or re.search(r"\b(join|from)\b", rest, re.I) or "${" in sql[:m.start(2)] + rest:
             return None
         return {"kind": "update", "table": m.group(1).split(".")[-1].lower(), "columns": sorted(set(columns))}
     m = re.match(r"delete\s+from\s+%s(?:\s|$)" % NAME, sql, re.I)
-    if m and " join " not in low:
+    if m and " join " not in low and "${" not in re.split(r"\swhere\s", " " + sql + " ", maxsplit=1, flags=re.I)[0]:
         return {"kind": "delete", "table": m.group(1).split(".")[-1].lower(), "columns": []}
     return None
 

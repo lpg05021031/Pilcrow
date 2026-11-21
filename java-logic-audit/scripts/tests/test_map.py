@@ -302,6 +302,64 @@ class Statements(unittest.TestCase):
                     "update a join b on a.id = b.id set a.x = b.x", "update t set a = 1; delete from u", "call do_it(#{id})"):
             self.assertIsNone(self.read(sql), sql)
 
+    def test_text_put_in_at_run_time_matters_only_where_the_columns_are_named(self):
+        self.assertEqual(self.read("update t set deleted = 1 where ( ${criterion.condition} )"),
+                         {"kind": "update", "table": "t", "columns": ["deleted"]})
+        self.assertEqual(self.read("delete from t where ${c}"), {"kind": "delete", "table": "t", "columns": []})
+        self.assertEqual(self.read("insert into t (a, b) values (${x}, #{y})")["columns"], ["a", "b"])
+        for sql in ("update t set ${col} = 1 where id = #{id}", "update t set a = 1 ${more} where id = 1",
+                    "insert into t (a, ${col}) values (1, 2)", "delete from ${t} where id = 1",
+                    "insert into t (a) values (1) on duplicate key update ${col} = 2"):
+            self.assertIsNone(self.read(sql), sql)
+
+    def test_statements_a_generator_writes(self):
+        import sql_statements
+        xml = """<?xml version="1.0"?>
+<mapper namespace="a.AdMapper">
+  <sql id="Update_By_Example_Where_Clause">
+    <where>
+      <foreach collection="example.oredCriteria" item="criteria" separator="or">
+        <trim prefix="(" prefixOverrides="and" suffix=")">
+          <foreach collection="criteria.criteria" item="criterion">
+            <choose><when test="criterion.noValue">and ${criterion.condition}</when></choose>
+          </foreach>
+        </trim>
+      </foreach>
+    </where>
+  </sql>
+  <insert id="insertSelective">
+    <selectKey keyProperty="id" order="AFTER" resultType="java.lang.Integer">SELECT LAST_INSERT_ID()</selectKey>
+    insert into shop_ad
+    <trim prefix="(" suffix=")" suffixOverrides=",">
+      <if test="name != null">`name`,</if>
+      <if test="link != null">link,</if>
+    </trim>
+    <trim prefix="values (" suffix=")" suffixOverrides=",">
+      <if test="name != null">#{name,jdbcType=VARCHAR},</if>
+      <if test="link != null">#{link,jdbcType=VARCHAR},</if>
+    </trim>
+  </insert>
+  <update id="updateByExampleSelective" parameterType="map">
+    update shop_ad
+    <set>
+      <if test="record.name != null">`name` = #{record.name,jdbcType=VARCHAR},</if>
+      <if test="record.enabled != null">enabled = #{record.enabled,jdbcType=BIT},</if>
+    </set>
+    <if test="_parameter != null"><include refid="Update_By_Example_Where_Clause" /></if>
+  </update>
+  <update id="logicalDeleteByExample" parameterType="map">
+    update shop_ad set deleted = 1
+    <if test="_parameter != null"><include refid="Update_By_Example_Where_Clause" /></if>
+  </update>
+</mapper>"""
+        got = {k[1]: v for k, v in sql_statements.from_xml(xml, "m/AdMapper.xml").items()}
+        self.assertEqual(("create", "shop_ad", ["link", "name"], True),
+                         tuple(got["insertSelective"][k] for k in ("kind", "table", "columns", "dynamic")))
+        self.assertEqual(("update", "shop_ad", ["enabled", "name"]),
+                         tuple(got["updateByExampleSelective"][k] for k in ("kind", "table", "columns")))
+        self.assertEqual(("update", "shop_ad", ["deleted"]),
+                         tuple(got["logicalDeleteByExample"][k] for k in ("kind", "table", "columns")))
+
     def test_mapper_xml_with_dynamic_sql_fragments_and_comments(self):
         import sql_statements
         xml = """<?xml version="1.0"?>
