@@ -106,6 +106,34 @@ public final class Snapshot {
         }
     }
 
+    /**
+     * Where two snapshots in the compared form differ, for a reader: "table.column" for a value, and
+     * "table (3 rows, 2 rows)" where the number of rows differs. At most twenty places.
+     */
+    public static List<String> differences(Map<String, List<Map<String, String>>> a, Map<String, List<Map<String, String>>> b) {
+        java.util.Set<String> out = new java.util.TreeSet<String>();
+        java.util.Set<String> tables = new java.util.TreeSet<String>(a.keySet());
+        tables.addAll(b.keySet());
+        for (String table : tables) {
+            List<Map<String, String>> x = a.get(table) == null ? new ArrayList<Map<String, String>>() : a.get(table);
+            List<Map<String, String>> y = b.get(table) == null ? new ArrayList<Map<String, String>>() : b.get(table);
+            if (x.size() != y.size()) {
+                out.add(table + " (" + x.size() + " rows, " + y.size() + " rows)");
+                continue;
+            }
+            for (int i = 0; i < x.size(); i++) {
+                for (Map.Entry<String, String> col : x.get(i).entrySet()) {
+                    String theirs = y.get(i).get(col.getKey());
+                    if (col.getValue() == null ? theirs != null : !col.getValue().equals(theirs)) {
+                        out.add(table + "." + col.getKey());
+                    }
+                }
+            }
+        }
+        List<String> list = new ArrayList<String>(out);
+        return list.size() > 20 ? new ArrayList<String>(list.subList(0, 20)) : list;
+    }
+
     /** What comparisons leave out besides keys, as "table.column". */
     public static java.util.Set<String> setAside() {
         synchronized (Snapshot.class) {

@@ -205,7 +205,8 @@ class FaultRunner {
 
         // Try again, undisturbed.
         Scenario.Observation again = scenario.observe(command, cell.get("with"), context);
-        boolean converges = Snapshot.withoutKeys(Snapshot.take()).equals(wanted);
+        Map<String, List<Map<String, String>>> afterRetry = Snapshot.withoutKeys(Snapshot.take());
+        boolean converges = afterRetry.equals(wanted);
         List<String> sentInAll = new ArrayList<String>(sent);
         sentInAll.addAll(goesOut(again));
 
@@ -243,6 +244,13 @@ class FaultRunner {
         observed.put("retry_outcome", again.kind);
         observed.put("retry_code", again.outcome.code);
         observed.put("retry_converges", converges);
+        // Where the data differs from what an undisturbed call leaves: what a reader needs to judge the difference.
+        if ("in-between".equals(state)) {
+            observed.put("after_failure_differs_in", Snapshot.differences(left, wanted));
+        }
+        if (!converges) {
+            observed.put("after_retry_differs_in", Snapshot.differences(afterRetry, wanted));
+        }
         observed.put("sent_on_retry", goesOut(again));
         observed.put("sent_by_success", cleanSent);
         detail.put("differs", differs);

@@ -615,7 +615,10 @@ def faults_item(own_cells, commands, rows, run, caps):
     points = sum(1 for c in changing for r in by_command.get(c, []) if r.get("result") in ("MATCH", "MISMATCH"))
     if broken:
         return ("could-not-pass", "%d failure points injected, %d could not be run" % (points, broken))
-    return ("pass", "%d failure points injected in %d commands" % (points, len(changing)))
+    differing = sum(1 for c in changing for r in by_command.get(c, []) if r.get("result") == "MISMATCH")
+    # The item says the check was made for every command that changes this entity; what it found is a finding.
+    return ("pass", "%d failure points injected in %d commands%s" % (
+        points, len(changing), "; %d of them left a difference, listed with the findings" % differing if differing else ""))
 
 
 def canary_item(own_cells, canary):
@@ -655,7 +658,9 @@ def races_item(own_cells, rows, run, caps):
     if caps.get("matches_production") != "confirmed":
         return ("could-not-pass", "%d schedules run, but the database was not confirmed to match production" % len(schedules))
     pairs = {(r["detail"].get("a"), r["detail"].get("b")) for r in schedules}
-    return ("pass", "%d schedules of %d pairs of overlapping calls, one stop each" % (len(schedules), len(pairs)))
+    differing = sum(1 for r in schedules if r.get("result") == "MISMATCH")
+    return ("pass", "%d schedules of %d pairs of overlapping calls, one stop each%s" % (
+        len(schedules), len(pairs), "; %d of them came out as neither order, listed with the findings" % differing if differing else ""))
 
 
 def verdict(workspace, system):

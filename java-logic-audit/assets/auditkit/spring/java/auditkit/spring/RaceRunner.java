@@ -384,6 +384,13 @@ class RaceRunner {
         observed.put("second", a2);
         observed.put("same_as", asFirstThenSecond ? "first-then-second" : asSecondThenFirst ? "second-then-first" : "neither");
         observed.put("rules_broken", broken);
+        if (differs.contains("data-of-no-order")) {
+            // Where the data differs from each of the two orders: what a reader needs to judge the difference.
+            Map<String, Object> from = new LinkedHashMap<String, Object>();
+            from.put("first_then_second", Snapshot.differences(state, stateOfFirstThenSecond));
+            from.put("second_then_first", Snapshot.differences(state, stateOfSecondThenFirst));
+            observed.put("data_differs_from", from);
+        }
         results.record(id, differs.isEmpty() ? ResultWriter.MATCH : ResultWriter.MISMATCH, expected, observed, detail, null);
     }
 }
