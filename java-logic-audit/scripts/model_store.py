@@ -8,7 +8,7 @@
 Every reply of a reader is saved, unchanged, as one file under audit/<system>/model_raw/:
 
     mine-<group>.json      { "group", "commands": [...], "could_not_model": [...], "instruction_shaped": [...] }
-    referee-<command>.json { "command", "verdicts": [ { "id", "verdict", "cite", "reason" } ] }
+    referee-<group>.json   { "verdicts": [ { "command", "id", "verdict", "cite", "reason" } ] }
     recipes-<group>.json   { "group", "fixtures": {...}, "recipes": {...} }
     fix-<nn>.json          { "commands": [...], "remove_commands": [...], "fixtures": {...}, "recipes": {...},
                              "remove_fixtures": [...], "harness": [...], "left_as_found": [...] }
@@ -76,7 +76,7 @@ def collect(workspace, system):
     for name, body in verdicts:
         for v in body.get("verdicts", []):
             if isinstance(v, dict):
-                referee.append(dict(v, command=body.get("command")))
+                referee.append(dict(v, command=v.get("command") or body.get("command")))
     fixes, bad = replies(adir, "fix")
     gaps += ["%s is not a JSON object and was not used" % b for b in bad]
     for name, body in fixes:

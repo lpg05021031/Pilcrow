@@ -44,6 +44,7 @@ command per value: `CMD-proposeChange.QTY`, `CMD-proposeChange.DATE`.
 | `target` | The table whose rows the command is mainly about. |
 | `reads_only` | `true` when the command is a read (a GET, a read-only transaction). The harness then reports any write. |
 | `variant` | For a variant: `{ "of": "CMD-proposeChange", "where": { "type": "QTY" } }`. |
+| `writes`, `sends` | What every allowed call writes and sends, whatever the case: `"writes": ["order_header.status", "outbox_event.type"]`, `"sends": ["/prices/"]`. Same form as in a branch (section 5), and checked the same way. Leave version and audit-timestamp columns out. |
 | `vars`, `base`, `guards`, `branches` | Sections 3 to 5. |
 
 ## 2. Binding
@@ -59,7 +60,7 @@ A message handler or a scheduled task: `{ "kind": "bean", "bean": "shipmentListe
 "args": [ { "messageId": "${messageId}", "scheduleId": "${scheduleId}" } ] }`. Each element of `args` is
 converted to the method's parameter type. Use the bean name and a method the entry point lists. When the
 entry method takes a broker's own message object, bind the method it hands the decoded payload to, and
-say so in `binding_note` with the lines.
+say so in `binding_note` (a field of the command) with the lines.
 
 ## 3. Variables
 
@@ -71,19 +72,22 @@ A variable is something a check of this command looks at. Two kinds:
 - **`param`** — a class of a parameter value: `below-shipped`, `same`, `missing`. Give `sql` when the class
   can be computed from the parameter and the rows it is compared with (a `case` expression); the harness
   then checks that the value used really is in the class. `:today` is the application's current date.
+  Only top-level parameters can be named in a query; a class about a value nested in a list has no `sql`.
 
 `domain` lists every value the checks tell apart, as text (`"true"`, `"null"`). For a comparison with a
 stored value, the classes are the boundaries: below, equal, above. `meaning` (optional) is an object that
 says in a few words what a value is: `{ "below-shipped": "less than what has shipped" }`.
 
-A command without parameters (a scheduled task) has no single row it is about. Its variables are facts
-about the data as a whole: "is there an event not yet sent", "is there a confirmed order with no open
-line".
+A command without parameters (a scheduled task) has no single row it is about. Either its variables
+are facts about the data as a whole ("is there an event not yet sent"), or, when the task walks over
+rows and treats each on its own, model it for **one row of interest**: name a parameter (`:orderId`)
+that only the queries use, and let the recipes give it. The binding does not pass it; that is allowed.
 
 Rules:
 
 - Include the lifecycle column of the target row, even when no check of this command reads it. A command
-  that changes a row without looking at its status is exactly what the audit wants to see.
+  that changes a row without looking at its status is exactly what the audit wants to see. A command
+  that creates the row has no target row yet: its variable is whether a conflicting row exists.
 - Include a parent's or child's status only when a check of this command reads it.
 - When two conditions only matter together (the last quantity of the last open line), write one variable
   with a value for each combination (`nothing`, `line`, `order`), not two booleans.
@@ -104,8 +108,8 @@ something must have shipped).
   (it fails in a way that is not a refusal).
 - `code`: the application's own code for the refusal, as the caller sees it. For an HTTP entry that is
   the code field of the error response; when there is none, the status as text (`"404"`).
-- `cite`: the lines of the check, `path/from/workspace/root/File.java:82-84`. Lines of executable code,
-  never a comment.
+- `cite`: the lines of the check, `path/from/workspace/root/File.java:82-84`: one range, the smallest
+  that holds the check. Lines of executable code or of a declared constraint, never a comment.
 - `swallowed`: for `ignored`, the refusal that was caught, when there is one.
 - `because`: one sentence, only when the outcome is not obvious from the cited lines (the refusal is
   raised in one place and turned into a response in another).
@@ -138,7 +142,11 @@ message is sent. `writes` names columns as `table.column` (for a created row, an
 `sends` (optional) names what goes out when the branch is taken: for each message or outside call, a
 piece of text that identifies it, such as the subject or the URL path (`"orders.events."`,
 `"/prices/"`). The harness checks that the columns were written and that something sent contains each
-text. `effect` is a sentence for people and is not checked.
+text. `effect` is a sentence for people and is not checked. A branch has one `cite`, the lines of its
+condition; when the write itself is elsewhere, say where in `effect`.
+
+A column is written only when its value changes. A branch that assigns a value which is usually the
+same (a total that is re-derived) is not a branch: leave it out.
 
 ## 6. Fixtures and recipes
 

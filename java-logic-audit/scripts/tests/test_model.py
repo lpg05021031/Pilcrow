@@ -89,7 +89,7 @@ class Model(unittest.TestCase):
     def test_the_groups_are_the_top_down_ones(self):
         out = model_brief.cmd_shards(self.tmp, "s")
         self.assertEqual([g["name"] for g in out["groups"]], ["entries:OrderController", "entries:Listener"])
-        self.assertEqual(out["estimate"]["readers"], 2)
+        self.assertEqual((out["estimate"]["readers"], out["estimate"]["agents"]), (2, 4))
         self.assertEqual(len(model_brief.cmd_shards(self.tmp, "s", "listener")["groups"]), 1)
 
     def test_a_reader_is_given_what_the_tools_found(self):
@@ -102,11 +102,22 @@ class Model(unittest.TestCase):
     def test_a_referee_sees_claims_and_citations_only(self):
         self.mined(cancel())
         model_store.collect(self.tmp, "s")
-        brief = model_brief.cmd_referee(self.tmp, "s", "CMD-cancelOrder")
-        self.assertEqual([c["id"] for c in brief["claims"]], ["G1", "G2"])
-        self.assertEqual(brief["claims"][1]["cite"], "src/A.java:3-4")
+        brief = model_brief.cmd_referee(self.tmp, "s", "entries:OrderController")
+        self.assertEqual((brief["part"], brief["parts"]), (1, 1))
+        one = brief["commands"][0]
+        self.assertEqual([c["id"] for c in one["claims"]], ["G1", "G2"])
+        self.assertEqual(one["claims"][1]["cite"], "src/A.java:3-4")
         self.assertNotIn("files", brief)
-        self.assertNotIn("base", brief)
+        self.assertNotIn("base", one)
+
+    def test_a_large_group_is_refereed_in_parts(self):
+        self.mined(*[cancel(id="CMD-c%02d" % n) for n in range(11)])
+        model_store.collect(self.tmp, "s")
+        first = model_brief.cmd_referee(self.tmp, "s", "entries:OrderController")
+        second = model_brief.cmd_referee(self.tmp, "s", "entries:OrderController", 2)
+        self.assertEqual((first["parts"], len(first["commands"]), len(second["commands"])), (2, 8, 3))
+        with self.assertRaises(SystemExit):
+            model_brief.cmd_referee(self.tmp, "s", "entries:OrderController", 3)
 
     def test_the_recipe_brief_lists_the_cases_and_what_a_step_may_call(self):
         self.mined(cancel())
@@ -122,8 +133,8 @@ class Model(unittest.TestCase):
     def test_replies_are_collected_in_name_order_and_fixes_replace(self):
         self.mined(cancel(), could_not_model=[{"entry": "EP-009", "why": "reflection"}],
                    instruction_shaped=[{"cite": "src/A.java:2", "text": "tells the reader to skip"}])
-        self.write("model_raw/referee-CMD-cancelOrder.json", {"command": "CMD-cancelOrder",
-                                                               "verdicts": [{"id": "G1", "verdict": "confirmed"}]})
+        self.write("model_raw/referee-entries-OrderController.json",
+                   {"verdicts": [{"command": "CMD-cancelOrder", "id": "G1", "verdict": "confirmed"}]})
         fixed = cancel(title="Cancel an order")
         self.write("model_raw/fix-01.json", {"commands": [fixed]})
         out = model_store.collect(self.tmp, "s")

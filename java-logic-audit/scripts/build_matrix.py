@@ -91,10 +91,13 @@ def static_outcome(command, valuation):
     taken = [b for b in command.get("branches", []) if holds(b["when"], valuation)]
     if taken:
         out["branches"] = [b["id"] for b in taken]
-        out["writes_include"] = sorted({w for b in taken for w in b.get("writes", [])})
-        sends = sorted({x for b in taken for x in b.get("sends", [])})
-        if sends:
-            out["sends_include"] = sends
+    # What every allowed call writes and sends, and what the branches taken add.
+    writes = sorted(set(command.get("writes", [])) | {w for b in taken for w in b.get("writes", [])})
+    sends = sorted(set(command.get("sends", [])) | {x for b in taken for x in b.get("sends", [])})
+    if writes:
+        out["writes_include"] = writes
+    if sends:
+        out["sends_include"] = sends
     return out
 
 
@@ -124,6 +127,9 @@ def check_command(command):
         for name in sorted(mentioned(g["when"])):
             if name not in names:
                 problems.append("%s: guard %s mentions %s, which is not a variable of the command" % (cid, g.get("id"), name))
+    for w in command.get("writes", []):
+        if "." not in w:
+            problems.append("%s: writes %r; name the column as table.column" % (cid, w))
     for b in command.get("branches", []):
         if b.get("id") in seen:
             problems.append("%s: id %s is used twice" % (cid, b.get("id")))
@@ -249,7 +255,7 @@ def assign_ids(cells, registry):
 def fingerprint(cell, command, shared):
     """A hash of everything that decides what running the cell means. A result is for one fingerprint."""
     parts = {k: cell.get(k) for k in ("command", "deviation", "given", "fixture", "steps", "with", "unreachable")}
-    parts["definition"] = {k: command.get(k) for k in ("binding", "vars", "reads_only")}
+    parts["definition"] = {k: command.get(k) for k in ("binding", "vars", "reads_only", "writes", "sends")}
     parts["predicted_writes"] = [cell.get("static", {}).get("writes_include"), cell.get("static", {}).get("sends_include")]
     parts["shared"] = shared
     return hashlib.sha256(json.dumps(parts, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]

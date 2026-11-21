@@ -3,7 +3,7 @@
 
     python3 model_brief.py shards  <system> [--pattern TEXT] [--workspace DIR]
     python3 model_brief.py mine    <system> <shard> [--workspace DIR]
-    python3 model_brief.py referee <system> <command-id> [--workspace DIR]
+    python3 model_brief.py referee <system> <group> [--part N] [--workspace DIR]
     python3 model_brief.py recipes <system> <shard> [--workspace DIR]
     python3 model_brief.py triage  <system> [--command CMD-x] [--workspace DIR]
 
@@ -13,7 +13,8 @@ what another reader said.
 
   shards    the groups of entry points to model, with a count of the agents the model step will start
   mine      one group: its entry points as the map has them, the files to read, the tables
-  referee   one proposed command: only its guards and branches with the lines they cite
+  referee   the commands proposed for one group, at most eight at a time: only their guards and
+            branches with the lines they cite. `parts` says how many briefs the group needs
   recipes   one group's commands, an index of every command that a step may call, the tables
   triage    the cells of the last run that were not executed or did not agree, each with what was
             expected, what happened and where the evidence is. Without --command: which commands
@@ -32,7 +33,7 @@ import _lib  # noqa: E402
 FORMAT = os.path.normpath(os.path.join(HERE, "..", "references", "model-format.md"))
 ENTRY_KEYS = ("id", "kind", "method", "path", "handler", "parameters", "body_type", "returns", "bean", "public_methods",
               "handler_methods", "schedule", "source", "destinations", "writes_tables")
-AGENTS_PER_SHARD = 1          # one reader; the referees are counted per command once the readers are back
+AGENTS_PER_SHARD = 2          # one reader and one referee; a group with more than eight commands needs more referees
 MAX_TABLES = 40
 
 
@@ -83,8 +84,8 @@ def cmd_shards(workspace, system, pattern=None):
         "groups": [{"name": s["name"], "entry_points": len(s.get("entries", [])), "files": len(s.get("files", [])),
                     "files_left_out": s.get("files_left_out", 0), "already_modelled": s["name"] in done} for s in chosen],
         "not_selected": len(shards) - len(chosen),
-        "estimate": {"readers": len(chosen) * AGENTS_PER_SHARD,
-                     "referees": "one for each command the readers return; expect one to three commands for an entry point",
+        "estimate": {"readers": len(chosen), "agents": len(chosen) * AGENTS_PER_SHARD,
+                     "referees": "one for each group, and one more for every eight commands beyond the first eight",
                      "entry_points": sum(len(s.get("entries", [])) for s in chosen)},
     }
 
@@ -106,16 +107,10 @@ def cmd_mine(workspace, system, name):
     }
 
 
-def cmd_referee(workspace, system, command_id):
-    adir = _lib.audit_dir(workspace, system)
-    result = _lib.read_json(os.path.join(adir, "model_result.json"), {}) or {}
-    proposed = {c.get("id"): c for c in result.get("commands", [])}
-    for fix in result.get("corrections", []):
-        if isinstance(fix.get("command"), dict):
-            proposed[fix["command"].get("id")] = fix["command"]
-    c = proposed.get(command_id)
-    if c is None:
-        _lib.die("model_result.json has no command %s" % command_id)
+REFEREE_BATCH = 8
+
+
+def claims_of(c):
     claims = []
     for g in c.get("guards", []):
         claims.append({"id": g.get("id"), "claim": "when %s the call is %s%s" % (
@@ -124,9 +119,29 @@ def cmd_referee(workspace, system, command_id):
     for b in c.get("branches", []):
         claims.append({"id": b.get("id"), "claim": "when %s an allowed call also writes %s" % (
             json.dumps(b.get("when"), ensure_ascii=False), ", ".join(b.get("writes", []))), "cite": b.get("cite")})
-    return {"task": "referee", "system": system, "command": command_id, "handler": c.get("handler"),
-            "variables": [{"name": v.get("name"), "meaning": v.get("meaning"), "sql": v.get("sql")} for v in c.get("vars", [])],
-            "claims": claims}
+    return claims
+
+
+def cmd_referee(workspace, system, group, part=1):
+    adir = _lib.audit_dir(workspace, system)
+    result = _lib.read_json(os.path.join(adir, "model_result.json"), {}) or {}
+    proposed = {c.get("id"): c for c in result.get("commands", [])}
+    for fix in result.get("corrections", []):
+        if isinstance(fix.get("command"), dict):
+            old = proposed.get(fix["command"].get("id"), {})
+            proposed[fix["command"].get("id")] = dict(fix["command"], shard=fix["command"].get("shard") or old.get("shard"))
+    own = sorted((c for c in proposed.values() if c.get("shard") == group or c.get("id") == group), key=lambda c: c["id"])
+    if not own:
+        _lib.die("model_result.json has no command of group %s" % group)
+    parts = (len(own) + REFEREE_BATCH - 1) // REFEREE_BATCH
+    if not 1 <= part <= parts:
+        _lib.die("group %s has %d part(s)" % (group, parts))
+    batch = own[(part - 1) * REFEREE_BATCH: part * REFEREE_BATCH]
+    return {"task": "referee", "system": system, "group": group, "part": part, "parts": parts,
+            "commands": [{"command": c["id"], "handler": c.get("handler"),
+                          "variables": [{"name": v.get("name"), "meaning": v.get("meaning"), "sql": v.get("sql")}
+                                        for v in c.get("vars", [])],
+                          "claims": claims_of(c)} for c in batch]}
 
 
 def cmd_recipes(workspace, system, name):
@@ -204,7 +219,7 @@ def cmd_triage(workspace, system, command_id=None):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name, extra in (("shards", None), ("mine", "shard"), ("referee", "command"), ("recipes", "shard"), ("triage", None)):
+    for name, extra in (("shards", None), ("mine", "shard"), ("referee", "shard"), ("recipes", "shard"), ("triage", None)):
         p = sub.add_parser(name)
         p.add_argument("system")
         if extra:
@@ -213,6 +228,8 @@ def main(argv=None):
             p.add_argument("--pattern")
         if name == "triage":
             p.add_argument("--command")
+        if name == "referee":
+            p.add_argument("--part", type=int, default=1)
         p.add_argument("--workspace", default=".")
     args = ap.parse_args(argv)
     workspace = os.path.abspath(args.workspace)
@@ -221,7 +238,7 @@ def main(argv=None):
     elif args.cmd == "mine":
         out = cmd_mine(workspace, args.system, args.shard)
     elif args.cmd == "referee":
-        out = cmd_referee(workspace, args.system, args.command)
+        out = cmd_referee(workspace, args.system, args.shard, args.part)
     elif args.cmd == "recipes":
         out = cmd_recipes(workspace, args.system, args.shard)
     else:

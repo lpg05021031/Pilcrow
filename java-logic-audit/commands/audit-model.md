@@ -31,7 +31,7 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_brief.py" shards $system --pattern 
 ```
 
 (Leave `--pattern` out when no pattern was given.) It lists the groups of entry points and how many
-readers the step starts: one per group, then one referee per command the readers return. A group marked
+agents the step starts: for each group one reader and then one referee. A group marked
 `already_modelled` has a saved reply; skip it unless the person asked to redo it.
 
 When more than 12 groups are to be modelled, ask before starting (a pop-up with three choices: all of
@@ -60,10 +60,10 @@ that is `audit/$system/model_raw/mine-<group>.json`. A reply that is not one JSO
 ask that reader once more for the object alone; if it fails again, leave the group out (it will be
 reported as a gap).
 
-Where the Workflow tool is available and the person started this command, you may run the readers and
-the referees of step 3 as the workflow `model-mine` of this plugin instead; save what it returns the
-same way. Without subagents, read `${CLAUDE_PLUGIN_ROOT}/agents/code-reader.md` and do each brief
-yourself, one group at a time, saving each result before starting the next.
+Because every reply is a file, the step can be interrupted and started again: groups that already have
+a saved reply are skipped, and only what is missing is done. Without subagents, read
+`${CLAUDE_PLUGIN_ROOT}/agents/code-reader.md` and do each brief yourself, one group at a time, saving each
+result before starting the next.
 
 ## 3 — Referees
 
@@ -71,18 +71,21 @@ yourself, one group at a time, saving each result before starting the next.
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_store.py" collect $system
 ```
 
-Then, for every command just collected (the ids are in `audit/$system/model_result.json`), get the
-referee's brief and hand it to a **fresh** `code-reader` agent, never the one that wrote the command:
+Then, for every group, get the referee's brief and hand it to a **fresh** `code-reader` agent, never the
+one that modelled the group:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_brief.py" referee $system <command id>
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_brief.py" referee $system "<group name>"
 ```
 
-preceded by: *"Referee these claims. Read only the cited lines and what you need around them. Reply with
-one JSON object: { "command": ..., "verdicts": [ { "id", "verdict": "confirmed" | "wrong-citation" |
-"refuted", "cite": the right lines when the citation was wrong, "reason" } ] }."* The referee is not
-shown the reader's reasoning, the other commands or the files list. Save each reply as
-`audit/$system/model_raw/referee-<command id>.json`.
+preceded by: *"Referee these claims. Read only the cited lines and what you need around them. Your reply
+is one JSON object as described under 'When you are asked to referee a claim'."* The brief holds only the
+claims and the lines they cite: the referee is not shown the reader's reasoning or the files list. When
+the brief says `"parts"` is more than 1, the group has more than eight commands: get `--part 2` and so
+on, each for another fresh agent. Save each reply as `audit/$system/model_raw/referee-<group>.json`
+(`referee-<group>-2.json` for a second part; the name comes from `model_store.py name referee "<group
+name>"`). A group that already has its verdict files is not refereed again, unless its reader's reply was
+redone. Run the referees in parallel, at most four at a time.
 
 ## 4 — Build the model (scripts do it)
 
