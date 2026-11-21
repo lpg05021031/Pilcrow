@@ -1,7 +1,7 @@
 {
   "name": "java-logic-audit",
   "version": "0.1.0",
-  "description": "Rigorous, evidence-graded audit of the business logic in a stateful Java backend: start with /java-logic-audit:audit, get a model of what the code actually does (entry points, entity states, a command-by-state matrix, invariants), have it executed against the real code, answer only the questions a person must answer, and receive findings whose grades are computed by a script from result files. This version holds milestone M0: the front door, preflight and status commands.",
+  "description": "Rigorous, evidence-graded audit of the business logic in a stateful Java backend: start with /java-logic-audit:audit, get a model of what the code actually does (entry points, entity states, a command-by-state matrix, invariants), have it executed against the real code, answer only the questions a person must answer, and receive findings whose grades are computed by a script from result files. This version goes from the front door through preflight, harness, map, model, characterization, review and verification (failures injected into every step, random sequences against rules of the data); concurrency, PRD tracing and the final report are not in it yet.",
   "author": {
     "name": "java-logic-audit contributors"
   }
