@@ -63,6 +63,11 @@ def read_json(path, default=None):
         return default
 
 
+def canonical(obj):
+    """One text for one value, whatever the order of its keys: for comparing and hashing."""
+    return json.dumps(obj, sort_keys=True, ensure_ascii=False)
+
+
 def write_json(path, obj):
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     tmp = path + ".tmp"

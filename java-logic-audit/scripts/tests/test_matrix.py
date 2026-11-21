@@ -218,10 +218,17 @@ class ReviewedModelOfSampleOne(unittest.TestCase):
 
     def test_every_cell_has_a_recipe_or_a_reason(self):
         self.assertEqual(self.stats["commands"], 19)
-        self.assertEqual(self.stats["cells"], 174)
+        self.assertEqual(self.stats["cells"], 179)
         self.assertEqual(self.stats["without_recipe"], 0)
         self.assertEqual(self.stats["unreachable"], 12)
         self.assertEqual(self.stats["unhandled"], 0)
+
+    def test_branches_predict_what_an_allowed_call_writes(self):
+        by = {c["key"]: c["static"] for c in self.matrix["cells"]}
+        self.assertEqual(by["CMD-shipment|completes=order"]["writes_include"], ["order_header.status", "order_line.status"])
+        self.assertEqual(by["CMD-shipment|completes=line"]["branches"], ["B1"])
+        self.assertNotIn("branches", by["CMD-shipment|base"])
+        self.assertEqual(by["CMD-commitChange.CANCEL|other_lines=all-cancelled"]["writes_include"], ["order_header.status"])
 
     def test_guards_that_never_decide(self):
         by = {k: v["guards_without_cell"] for k, v in self.matrix["commands"].items() if v["guards_without_cell"]}
@@ -232,7 +239,7 @@ class ReviewedModelOfSampleOne(unittest.TestCase):
     def test_every_guard_cites_lines_that_exist_and_hold_its_code(self):
         from_mapping = {"NOT_FOUND", "INVALID_REQUEST", "STALE_PREVIEW"}       # raised or named elsewhere than the check
         for c in self.commands:
-            for guard in c["guards"]:
+            for guard in c["guards"] + c.get("branches", []):
                 where = "%s %s" % (c["id"], guard["id"])
                 m = re.match(r"^(.+):(\d+)(?:-(\d+))?$", guard.get("cite", ""))
                 self.assertTrue(m, where + " has no citation")

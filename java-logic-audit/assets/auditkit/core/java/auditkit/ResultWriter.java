@@ -32,6 +32,7 @@ public final class ResultWriter {
     private final File results;
     private final Map<String, Integer> counts = new LinkedHashMap<String, Integer>();
     private final String started;
+    private final Map<String, Object> notes = new LinkedHashMap<String, Object>();
     private int total;
 
     private ResultWriter(String kind, File dir) {
@@ -52,6 +53,11 @@ public final class ResultWriter {
 
     public File dir() {
         return dir;
+    }
+
+    /** A fact about the run as a whole (its mode, what it was limited to), written into run.json. */
+    public synchronized void note(String key, Object value) {
+        notes.put(key, value);
     }
 
     /** Appends one case. detail and evidence may be null. */
@@ -95,6 +101,7 @@ public final class ResultWriter {
         run.put("kind", kind);
         run.put("started", started);
         run.put("finished", utc("yyyy-MM-dd'T'HH:mm:ss'Z'"));
+        run.putAll(notes);
         run.put("total", total);
         run.put("counts", counts);
         try {

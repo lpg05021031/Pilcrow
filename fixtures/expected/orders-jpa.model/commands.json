@@ -1337,13 +1337,15 @@
           "kind": "state",
           "domain": [
             "ok",
+            "at-shipped",
             "below-one",
             "below-shipped",
             "same"
           ],
-          "sql": "select case when c.new_qty is null or c.new_qty < 1 then 'below-one' when c.new_qty < l.shipped_qty then 'below-shipped' when c.new_qty = l.qty then 'same' else 'ok' end from change_request c join order_line l on l.id = c.line_id join order_header h on h.id = l.header_id where c.id = :changeId",
+          "sql": "select case when c.new_qty is null or c.new_qty < 1 then 'below-one' when c.new_qty < l.shipped_qty then 'below-shipped' when c.new_qty = l.qty then 'same' when c.new_qty = l.shipped_qty then 'at-shipped' else 'ok' end from change_request c join order_line l on l.id = c.line_id join order_header h on h.id = l.header_id where c.id = :changeId",
           "meaning": {
-            "ok": "the requested quantity is still a change the line allows"
+            "ok": "the requested quantity is still a change the line allows",
+            "at-shipped": "the requested quantity is exactly what has shipped, so nothing is left to deliver"
           }
         }
       ],
@@ -1465,6 +1467,21 @@
           "outcome": "rejected",
           "code": "NO_CHANGE",
           "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:50-52"
+        }
+      ],
+      "branches": [
+        {
+          "id": "B1",
+          "when": {
+            "var": "new_qty",
+            "is": "at-shipped"
+          },
+          "writes": [
+            "order_line.status",
+            "schedule_line.status"
+          ],
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:97-99",
+          "effect": "the line is closed and what was still planned on it is cancelled"
         }
       ]
     },
@@ -1742,6 +1759,21 @@
             "true"
           ],
           "sql": "select l.shipped_qty > 0 from change_request c join order_line l on l.id = c.line_id join order_header h on h.id = l.header_id where c.id = :changeId"
+        },
+        {
+          "name": "other_lines",
+          "kind": "state",
+          "domain": [
+            "some-open",
+            "all-cancelled",
+            "none-open"
+          ],
+          "sql": "select case when exists (select 1 from order_line o where o.header_id = l.header_id and o.id <> l.id and o.status = 'OPEN') then 'some-open' when not exists (select 1 from order_line o where o.header_id = l.header_id and o.id <> l.id and o.status <> 'CANCELLED') then 'all-cancelled' else 'none-open' end from change_request c join order_line l on l.id = c.line_id join order_header h on h.id = l.header_id where c.id = :changeId",
+          "meaning": {
+            "some-open": "another line of the order is open",
+            "all-cancelled": "every other line of the order is cancelled",
+            "none-open": "no other line is open and at least one is closed"
+          }
         }
       ],
       "base": {
@@ -1749,7 +1781,8 @@
         "stale": "false",
         "order": "CONFIRMED",
         "line": "OPEN",
-        "shipped": "false"
+        "shipped": "false",
+        "other_lines": "some-open"
       },
       "guards": [
         {
@@ -1843,6 +1876,32 @@
           "code": "LINE_ALREADY_SHIPPED",
           "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:69-71"
         }
+      ],
+      "branches": [
+        {
+          "id": "B1",
+          "when": {
+            "var": "other_lines",
+            "is": "all-cancelled"
+          },
+          "writes": [
+            "order_header.status"
+          ],
+          "cite": "src/main/java/com/example/orders/service/OrderTotals.java:35-38",
+          "effect": "the order becomes CANCELLED"
+        },
+        {
+          "id": "B2",
+          "when": {
+            "var": "other_lines",
+            "is": "none-open"
+          },
+          "writes": [
+            "order_header.status"
+          ],
+          "cite": "src/main/java/com/example/orders/service/OrderTotals.java:39-42",
+          "effect": "a confirmed order becomes CLOSED"
+        }
       ]
     },
     {
@@ -1908,14 +1967,59 @@
             "null"
           ],
           "sql": "select l.status from schedule_line s join order_line l on l.id = s.line_id join order_header h on h.id = l.header_id where s.id = :scheduleId"
+        },
+        {
+          "name": "completes",
+          "kind": "state",
+          "domain": [
+            "nothing",
+            "line",
+            "order"
+          ],
+          "sql": "select case when l.shipped_qty + s.qty <> l.qty then 'nothing' when exists (select 1 from order_line o where o.header_id = l.header_id and o.id <> l.id and o.status = 'OPEN') then 'line' else 'order' end from schedule_line s join order_line l on l.id = s.line_id join order_header h on h.id = l.header_id where s.id = :scheduleId",
+          "meaning": {
+            "nothing": "something is still to ship on the line afterwards",
+            "line": "this is the last quantity of the line; another line is still open",
+            "order": "this is the last quantity of the last open line"
+          }
         }
       ],
       "base": {
         "schedule": "PLANNED",
         "seen": "false",
         "order": "CONFIRMED",
-        "line": "OPEN"
+        "line": "OPEN",
+        "completes": "nothing"
       },
+      "branches": [
+        {
+          "id": "B1",
+          "when": {
+            "var": "completes",
+            "in": [
+              "line",
+              "order"
+            ]
+          },
+          "writes": [
+            "order_line.status"
+          ],
+          "cite": "src/main/java/com/example/orders/service/ShipmentService.java:75-77",
+          "effect": "the line becomes CLOSED"
+        },
+        {
+          "id": "B2",
+          "when": {
+            "var": "completes",
+            "is": "order"
+          },
+          "writes": [
+            "order_header.status"
+          ],
+          "cite": "src/main/java/com/example/orders/service/OrderTotals.java:39-42",
+          "effect": "the order becomes CLOSED"
+        }
+      ],
       "guards": [
         {
           "id": "G1",

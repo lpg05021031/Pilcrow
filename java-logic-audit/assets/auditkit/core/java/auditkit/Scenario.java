@@ -65,7 +65,7 @@ public final class Scenario {
                     Object args = e.more == null ? null : e.more.get("args");
                     if (args instanceof List) {
                         for (Object arg : (List<?>) args) {
-                            text.append(' ').append(arg);
+                            text.append(' ').append(sameForSameContent(String.valueOf(arg)));
                         }
                     }
                     out.add(text.toString());
@@ -74,6 +74,27 @@ public final class Scenario {
             return out;
         }
     }
+
+    /**
+     * A JSON object says the same thing whatever the order of its keys, and an application may
+     * write them in a different order on every start. Keys are sorted, so that the same content
+     * always reads the same.
+     */
+    static String sameForSameContent(String text) {
+        String t = text.trim();
+        if (!(t.startsWith("{") && t.endsWith("}")) && !(t.startsWith("[") && t.endsWith("]"))) {
+            return text;
+        }
+        try {
+            Object value = AuditConfig.JSON.readValue(t, Object.class);
+            return SORTED.writeValueAsString(value);
+        } catch (IOException e) {
+            return text;
+        }
+    }
+
+    private static final com.fasterxml.jackson.databind.ObjectMapper SORTED = new com.fasterxml.jackson.databind.ObjectMapper()
+            .configure(com.fasterxml.jackson.databind.SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true);
 
     private final SutDriver driver;
     private final LocalDate today;

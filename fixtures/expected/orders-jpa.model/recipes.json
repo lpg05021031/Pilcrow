@@ -926,6 +926,26 @@
           "also": {
             "stale": "true"
           }
+        },
+        "new_qty=at-shipped": {
+          "fixture": "partly-shipped",
+          "steps": [
+            {
+              "do": "CMD-proposeChange.QTY",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}",
+                "newQty": 6
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            }
+          ]
         }
       }
     },
@@ -1482,7 +1502,8 @@
             "stale": "null",
             "order": "null",
             "line": "null",
-            "shipped": "null"
+            "shipped": "null",
+            "other_lines": "null"
           }
         },
         "stale=true": {
@@ -1568,7 +1589,8 @@
           "also": {
             "stale": "true",
             "line": "CLOSED",
-            "shipped": "true"
+            "shipped": "true",
+            "other_lines": "none-open"
           }
         },
         "order=CANCELLED": {
@@ -1596,7 +1618,8 @@
           ],
           "also": {
             "stale": "true",
-            "line": "CANCELLED"
+            "line": "CANCELLED",
+            "other_lines": "all-cancelled"
           }
         },
         "order=null": {
@@ -1709,6 +1732,12 @@
           "also": {
             "stale": "true"
           }
+        },
+        "other_lines=all-cancelled": {
+          "fixture": "line2-cancelled"
+        },
+        "other_lines=none-open": {
+          "fixture": "line2-closed"
         }
       }
     },
@@ -1761,13 +1790,31 @@
           },
           "also": {
             "order": "null",
-            "line": "null"
+            "line": "null",
+            "completes": "null"
           }
         },
         "seen=true": {
           "fixture": "partly-shipped",
           "with": {
             "scheduleId": "${order.lines[0].schedules[1].id}"
+          },
+          "also": {
+            "completes": "line"
+          }
+        },
+        "completes=line": {
+          "fixture": "partly-shipped",
+          "with": {
+            "messageId": "M-2",
+            "scheduleId": "${order.lines[0].schedules[1].id}"
+          }
+        },
+        "completes=order": {
+          "fixture": "line1-closed",
+          "with": {
+            "messageId": "M-3",
+            "scheduleId": "${order.lines[1].schedules[0].id}"
           }
         },
         "order=DRAFT": {

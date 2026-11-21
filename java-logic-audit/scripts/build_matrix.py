@@ -15,15 +15,19 @@ and every parameter class that a guard distinguishes is executed at least once, 
 them with each other.
 
 For each cell the script works out what reading the code predicts ("static"): the first guard, in
-order, whose condition holds decides; if none holds the command is allowed. A cell whose deviating
-variable no guard of the command mentions is marked `unhandled`: the code makes no decision about
-it, so what happens there happens by default.
+order, whose condition holds decides; if none holds the command is allowed. A command may also list
+`branches`: conditions under which an allowed call writes something more (a line that closes when
+its last delivery ships). For an allowed cell the prediction names the branches that hold and the
+columns they write. A cell whose deviating variable no guard and no branch mentions is marked
+`unhandled`: the code makes no decision about it, so what happens there happens by default.
 
 Nothing here is judged. A recipe that is missing leaves the cell without one, and the runner
 reports it as not executed. For each command the script also lists the guards that decide none of
 its executable cells: code that, as far as the model can reach, never fires from that entry.
 """
 import argparse
+import hashlib
+import json
 import os
 import sys
 
@@ -83,7 +87,12 @@ def static_outcome(command, valuation):
             if guard.get("because"):
                 out["because"] = guard["because"]
             return out
-    return {"outcome": command.get("default_outcome", "allowed"), "guard": None}
+    out = {"outcome": command.get("default_outcome", "allowed"), "guard": None}
+    taken = [b for b in command.get("branches", []) if holds(b["when"], valuation)]
+    if taken:
+        out["branches"] = [b["id"] for b in taken]
+        out["writes_include"] = sorted({w for b in taken for w in b.get("writes", [])})
+    return out
 
 
 def check_command(command):
@@ -112,6 +121,16 @@ def check_command(command):
         for name in sorted(mentioned(g["when"])):
             if name not in names:
                 problems.append("%s: guard %s mentions %s, which is not a variable of the command" % (cid, g.get("id"), name))
+    for b in command.get("branches", []):
+        if b.get("id") in seen:
+            problems.append("%s: id %s is used twice" % (cid, b.get("id")))
+        seen.add(b.get("id"))
+        for name in sorted(mentioned(b["when"])):
+            if name not in names:
+                problems.append("%s: branch %s mentions %s, which is not a variable of the command" % (cid, b.get("id"), name))
+        for w in b.get("writes", []):
+            if "." not in w:
+                problems.append("%s: branch %s writes %r; name the column as table.column" % (cid, b.get("id"), w))
     base_valuation = {k: text(v) for k, v in base.items()}
     if not problems and static_outcome(command, base_valuation)["outcome"] not in ("allowed", command.get("default_outcome", "allowed")):
         problems.append("%s: in the base case a guard already refuses; the base must be a case every guard lets through" % cid)
@@ -179,7 +198,7 @@ def cells_of(command, recipes):
     cid = command["id"]
     base = {v["name"]: text(command["base"][v["name"]]) for v in command.get("vars", [])}
     guard_vars = set()
-    for g in command.get("guards", []):
+    for g in command.get("guards", []) + command.get("branches", []):
         guard_vars |= mentioned(g["when"])
 
     def cell(deviation, valuation, recipe, var=None):
@@ -224,14 +243,26 @@ def assign_ids(cells, registry):
     return registry
 
 
+def fingerprint(cell, command, shared):
+    """A hash of everything that decides what running the cell means. A result is for one fingerprint."""
+    parts = {k: cell.get(k) for k in ("command", "deviation", "given", "fixture", "steps", "with", "unreachable")}
+    parts["definition"] = {k: command.get(k) for k in ("binding", "vars", "reads_only")}
+    parts["predicted_writes"] = cell.get("static", {}).get("writes_include")
+    parts["shared"] = shared
+    return hashlib.sha256(json.dumps(parts, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
+
+
 def executable(cell):
     return "with" in cell and "unreachable" not in cell
 
 
 def guards_without_cell(command, cells):
-    """Guards that decide no executable cell of their command."""
-    deciding = {c["static"].get("guard") for c in cells if c["command"] == command["id"] and executable(c)}
-    return [g["id"] for g in command.get("guards", []) if g["id"] not in deciding]
+    """Guards that decide no executable cell of their command, and branches no executable cell takes."""
+    own = [c for c in cells if c["command"] == command["id"] and executable(c)]
+    deciding = {c["static"].get("guard") for c in own}
+    for c in own:
+        deciding |= set(c["static"].get("branches", []))
+    return [g["id"] for g in command.get("guards", []) + command.get("branches", []) if g["id"] not in deciding]
 
 
 def build(workspace, system):
@@ -257,8 +288,14 @@ def build(workspace, system):
         cells += cells_of(c, recipes)
     ids_path = os.path.join(model, "ids.json")
     _lib.write_json(ids_path, assign_ids(cells, _lib.read_json(ids_path, {}) or {}))
+    # Fixtures and the bindings of the commands they call are shared by every cell.
+    by_id = {c["id"]: c for c in commands["commands"]}
+    shared = hashlib.sha256(json.dumps(
+        [fixtures, {cid: c.get("binding") for cid, c in by_id.items()}],
+        sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
     pinned = (_lib.read_json(os.path.join(model, "expected.json"), {}) or {}).get("cells", {})
     for cell in cells:
+        cell["sha"] = fingerprint(cell, by_id[cell["command"]], shared)
         if cell["key"] in pinned:
             cell["expected"] = pinned[cell["key"]]
     cells = [dict([("id", c["id"])] + [(k, v) for k, v in c.items() if k != "id"]) for c in cells]

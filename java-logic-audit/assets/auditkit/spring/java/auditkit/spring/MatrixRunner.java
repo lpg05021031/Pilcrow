@@ -52,6 +52,10 @@ class MatrixRunner {
         JsonNode matrix = AuditConfig.JSON.readTree(new File(new File(AuditConfig.load().dir(), "model"), "matrix.json"));
         String onlyCase = System.getProperty("audit.case");
         String onlyCommand = System.getProperty("audit.command");
+        results.note("mode", verify ? "verify" : "record");
+        results.note("only_case", onlyCase);
+        results.note("only_command", onlyCommand);
+        results.note("matrix_cells", matrix.get("cells").size());
         List<DynamicTest> tests = new ArrayList<DynamicTest>();
         for (final JsonNode cell : matrix.get("cells")) {
             final String id = cell.get("id").asText();
@@ -80,13 +84,17 @@ class MatrixRunner {
         Map<String, Object> detail = new LinkedHashMap<String, Object>();
         detail.put("command", cell.get("command").asText());
         detail.put("deviation", cell.path("deviation").isNull() ? null : cell.path("deviation").asText(null));
+        detail.put("key", cell.path("key").asText(null));
+        detail.put("sha", cell.path("sha").asText(null));      // which definition of the cell this result is for
         try {
             if (cell.hasNonNull("unreachable")) {
+                detail.put("why", "unreachable");
                 detail.put("reason", "the model says this state cannot be reached: " + cell.get("unreachable").asText());
                 results.record(id, ResultWriter.SKIPPED, expected, null, detail, null);
                 return ResultWriter.SKIPPED;
             }
             if (!cell.hasNonNull("with")) {
+                detail.put("why", "no-recipe");
                 detail.put("reason", "no recipe: the model does not say how to reach this state");
                 results.record(id, ResultWriter.SKIPPED, expected, null, detail, null);
                 return ResultWriter.SKIPPED;
@@ -131,6 +139,7 @@ class MatrixRunner {
             }
             Map<String, Object> evidence = evidence(o);
             if (!off.isEmpty()) {
+                detail.put("why", "state-not-reached");
                 detail.put("reason", "state not reached: " + off);
                 results.record(id, ResultWriter.SKIPPED, expected, observed, detail, evidence);
                 return ResultWriter.SKIPPED;
@@ -143,15 +152,18 @@ class MatrixRunner {
             }
             if (ResultWriter.MISMATCH.equals(result) && Outcome.ERROR.equals(o.kind) && o.flags.contains("unconfigured-double")) {
                 result = ResultWriter.HARNESS_GAP;
+                detail.put("why", "unanswered-outside-call");
                 detail.put("reason", "an outside call had no configured answer; this says nothing about the application");
             }
             results.record(id, result, expected, observed, detail, evidence);
             return result;
         } catch (Scenario.NotReached e) {
+            detail.put("why", "steps-failed");
             detail.put("reason", e.getMessage());
             results.record(id, ResultWriter.SKIPPED, expected, null, detail, null);
             return ResultWriter.SKIPPED;
         } catch (Throwable e) {
+            detail.put("why", "runner-failed");
             detail.put("reason", "the runner failed: " + e.getClass().getName() + ": " + e.getMessage());
             results.record(id, ResultWriter.ERROR, expected, null, detail, null);
             return ResultWriter.ERROR;
@@ -176,10 +188,22 @@ class MatrixRunner {
         if (!expected.path("outcome").asText("").toUpperCase().equals(o.kind)) {
             out.add("outcome");
         }
-        if (expected.hasNonNull("code") && !expected.get("code").asText().equals(o.outcome.code)) {
-            out.add("code");
+        if (expected.has("code")) {
+            String want = expected.get("code").isNull() ? null : expected.get("code").asText();
+            if (want == null ? o.outcome.code != null : !want.equals(o.outcome.code)) {
+                out.add("code");
+            }
         }
         JsonNode seen = AuditConfig.JSON.valueToTree(observed);
+        // A branch the code is predicted to take names columns it must have written.
+        for (JsonNode column : expected.path("writes_include")) {
+            String name = column.asText();
+            String table = name.contains(".") ? name.substring(0, name.indexOf('.')) : name;
+            if (!o.written().contains(name) && !o.rows("added").contains(table)) {
+                out.add("writes");
+                break;
+            }
+        }
         for (String part : COMPARED) {
             if (expected.has(part) && !expected.get(part).equals(seen.get(part))) {
                 out.add(part);
@@ -188,10 +212,30 @@ class MatrixRunner {
         return out;
     }
 
+    private static String engine;
+
+    /** The database product as the connection reports it, e.g. "PostgreSQL 16.4". */
+    private static synchronized String engine() {
+        if (engine == null) {
+            try {
+                java.sql.Connection c = EffectRecorder.raw().getConnection();
+                try {
+                    engine = c.getMetaData().getDatabaseProductName() + " " + c.getMetaData().getDatabaseProductVersion();
+                } finally {
+                    c.close();
+                }
+            } catch (java.sql.SQLException e) {
+                engine = "unknown";
+            }
+        }
+        return engine;
+    }
+
     private static Map<String, Object> evidence(Scenario.Observation o) {
         Map<String, Object> e = new LinkedHashMap<String, Object>();
         e.put("params", o.params);
         e.put("database_host", ConnectionGuard.hostOf(ConnectionGuard.check(EffectRecorder.raw())));
+        e.put("database_engine", engine());
         e.put("database_offered", System.getenv("AUDIT_DB_URL") != null);
         e.put("time_controlled", AuditClock.controlled());
         e.put("state_built_by_commands_only", true);
