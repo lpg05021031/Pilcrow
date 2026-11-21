@@ -55,6 +55,13 @@ Use the pop-up question tool, at most four questions in one call, one behaviour 
   2. **Intended** — this is how it is meant to work; keep it as the expected behaviour.
   3. **Not sure** — leave it open; it will not be used as a basis for anything.
 
+For a question of kind `rule?` ("in every state the audit reached, X: is this a rule?") the same three
+options read differently, and you say so in the question text: **Intended** means "yes, this must always
+hold", and from then on a state that breaks it is a defect; **Not intended** means "no, it only happened
+to hold". For kinds `near-rule` and `rare-combination` (something held almost always and broke a few
+times), **Not intended** means the exceptions should not happen, which makes it a rule; **Intended**
+means the exceptions are fine.
+
 The person may type their own words instead: record the option that matches what they wrote and keep
 their words as the note. When what they wrote does not clearly match one option, record `unsure` with
 their words, and say so.

@@ -155,11 +155,13 @@ def apply(workspace, system):
         report["rules_confirmed"] = report["rules_rejected"] = 0
         for inv in inv_data.get("invariants", []):
             if inv["id"] in in_force:
+                if not inv.get("decision"):
+                    inv["before_decision"] = inv.get("status")
                 inv["status"], inv["decision"] = in_force[inv["id"]]
                 report["rules_" + inv["status"]] += 1
             elif inv.get("decision"):
                 inv.pop("decision")
-                inv["status"] = "candidate"          # the decision was superseded; the next assessment sorts it again
+                inv["status"] = inv.pop("before_decision", None) or "proposed"      # the decision was superseded
         _lib.write_json(inv_path, inv_data)
     return report
 

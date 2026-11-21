@@ -35,7 +35,7 @@ STAGES = [
     ("assure",       ["ASSURANCE.md"],                                      ["runs/"]),
     ("report",       ["VERDICT.md", "REPORT.html"],                         ["runs/", "DECISIONS.json", "spec/"]),
 ]
-VERIFY_KINDS = ("sequences", "relations", "faults", "concurrency")
+VERIFY_KINDS = ("faults", "sequences")          # what this version runs; relations and concurrency come later
 ROADS = {
     "understand": ["intent", "preflight", "harness", "map", "model", "characterize", "review"],
     "audit":      ["intent", "preflight", "harness", "map", "model", "characterize", "review", "verify",

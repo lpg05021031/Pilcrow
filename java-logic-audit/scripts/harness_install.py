@@ -203,7 +203,7 @@ allprojects {
             tasks.withType(Test).configureEach {
                 useJUnitPlatform()
                 filter { includeTestsMatching 'auditkit.*Runner' }
-                ['audit.dir', 'audit.run', 'audit.mode', 'audit.command', 'audit.case'].each { key ->
+                ['audit.dir', 'audit.run', 'audit.mode', 'audit.command', 'audit.case', 'audit.seed', 'audit.sequences', 'audit.steps'].each { key ->
                     if (System.getProperty(key) != null) { systemProperty key, System.getProperty(key) }
                 }
             }
@@ -295,7 +295,7 @@ def settings(workspace, system):
     return {"file": rel, "written": True, "todo": todo}
 
 
-def command(workspace, system, run, mode=None, case=None, only_command=None):
+def command(workspace, system, run, mode=None, case=None, only_command=None, seed=None, sequences=None, steps=None):
     if run not in RUNS:
         _lib.die("unknown run %r: one of %s" % (run, ", ".join(RUNS)))
     if mode is not None and mode not in MODES:
@@ -310,6 +310,9 @@ def command(workspace, system, run, mode=None, case=None, only_command=None):
     for key, value in (("mode", mode), ("case", case), ("command", only_command)):
         if value is not None:
             props += " -Daudit.%s=%s" % (key, value)
+    for key, value in (("seed", seed), ("sequences", sequences), ("steps", steps)):
+        if value is not None:
+            props += " -Daudit.%s=%d" % (key, int(value))
     if p["build_tool"] == "maven":
         tool = "./mvnw" if os.path.isfile(os.path.join(workspace, "mvnw")) else "mvn"
         return "%s -B -f %s -Paudit test %s" % (tool, entry["file"], props)
@@ -331,6 +334,9 @@ def main(argv=None):
                                           "or verify (compare with what is pinned, and fail on a difference)")
             s.add_argument("--case", help="run one cell, by id")
             s.add_argument("--only", help="run the cells of one command, by id")
+            s.add_argument("--seed", type=int, help="for sequences: the seed everything random follows from (default 1)")
+            s.add_argument("--sequences", type=int, help="for sequences: how many (default 50)")
+            s.add_argument("--steps", type=int, help="for sequences: calls in each (default 20)")
     args = ap.parse_args(argv)
     workspace = os.path.abspath(args.workspace)
 
@@ -351,7 +357,8 @@ def main(argv=None):
         for item in r["todo"]:
             print("  to settle: " + item)
     else:
-        print(command(workspace, args.system, args.run, args.mode, args.case, args.only))
+        print(command(workspace, args.system, args.run, args.mode, args.case, args.only,
+                      args.seed, args.sequences, args.steps))
     return 0
 
 

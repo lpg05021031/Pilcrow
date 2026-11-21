@@ -18,8 +18,8 @@ the lifecycle values the matrix runs observed. No model is involved, and no clai
   pair     a child row with one lifecycle value never sits under a parent with another
 
 Most candidates are false; that is expected. The sequence runner evaluates every one in every state
-it reaches and stops spending on those that break often. `assess` then reads the latest sequences
-run and gives each candidate a status:
+it reaches and stops spending on those that break often. Until a run has looked at it, a candidate
+is only `proposed`. `assess` then reads the latest sequences run and gives each one a status:
 
   candidate   held in every state it applied to (at least 20). Worth asking a person: is this a rule?
   near        held almost always and broke a few times (at most 1 in 20), and no stricter candidate
@@ -110,7 +110,7 @@ def generate(schema, themap, values, commands=()):
     def add(cls, statement, sql, applies, involved, anchor):
         out.append({"id": ident(sql), "class": cls, "statement": statement, "sql": " ".join(sql.split()),
                     "applies": " ".join(applies.split()), "tables": sorted(involved), "anchor": anchor,
-                    "source": "template", "status": "candidate"})
+                    "source": "template", "status": "proposed"})
 
     together = compared_together(commands)
     for name in sorted(tables):
@@ -172,7 +172,7 @@ def candidates(workspace, system):
         seen.add(inv["id"])
         before = old.get(inv["id"])
         if before:
-            for key in ("status", "support", "decision"):
+            for key in ("status", "support", "decision", "before_decision"):
                 if key in before:
                     inv[key] = before[key]
         merged.append(inv)
