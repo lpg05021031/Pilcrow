@@ -14,7 +14,7 @@ This is a work in progress, built milestone by milestone (design section 18).
 |---|---|---|
 | M0 | Plugin skeleton; `audit`, `audit-preflight`, `audit-status`; verification samples 1 and 3 | done |
 | M1 | auditkit core, `audit-harness`, `audit-map` | done |
-| M2 | `audit-model`, `audit-characterize`, `audit-review`, the judge script | built; proven on sample 1, not yet on a real system |
+| M2 | `audit-model`, `audit-characterize`, `audit-review`, the judge script | built; on sample 1 a model derived by fresh agents covers all 57 behaviours of the reviewed model. Not yet run on a real system |
 | M3–M6 | sequences, faults, concurrency, PRD trace, assurance, report, more stacks | not started |
 
 Commands that belong to a later milestone are named by `audit-status` as the next step but are not
