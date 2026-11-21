@@ -57,7 +57,7 @@ class Install(Workspace):
     def test_plan_follows_from_the_profile(self):
         p = harness_install.plan(self.ws, "orders")
         self.assertEqual(["core", "spring", "spring-restclient"], p["modules"])
-        self.assertEqual(["net.ttddyy:datasource-proxy", "com.tngtech.archunit:archunit"],
+        self.assertEqual(["net.ttddyy:datasource-proxy", "com.tngtech.archunit:archunit", "org.springframework:spring-test"],
                          [d["ga"] for d in p["dependencies"]])      # JUnit 5 and Mockito are already there
         self.assertEqual("./pom-audit.xml".lstrip("./"), p["build_entry"].lstrip("./"))
 

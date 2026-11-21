@@ -74,6 +74,11 @@ def plan(workspace, system):
         {"ga": "net.ttddyy:datasource-proxy", "version": table["net.ttddyy:datasource-proxy"], "why": "see every SQL statement and commit"},
         {"ga": "com.tngtech.archunit:archunit", "version": table["com.tngtech.archunit:archunit"], "why": "read calls and field writes from the compiled classes"},
     ]
+    if fw == "spring-boot":
+        # The harness calls HTTP entry points in-process through Spring's own test support. Most projects have it
+        # through spring-boot-starter-test; one that has no tests at all does not, and would not compile the harness.
+        deps.append({"ga": "org.springframework:spring-test", "version": None,
+                     "why": "call the application's HTTP entry points in-process"})
     tests = profile.get("tests", {})
     if "junit5" not in tests.get("frameworks", []):
         # Spring Boot before 2.2 manages JUnit 5.3, which has the api and the engine but not yet the one artifact

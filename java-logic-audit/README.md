@@ -80,6 +80,24 @@ It asks what you want (two short questions), writes your answers once to `audit/
 starts preflight. Run `/java-logic-audit:audit-status <system>` at any time to see where you are and the
 exact next command.
 
+## What it needs
+
+The plugin itself brings nothing to install: no packages, no services, no MCP servers.
+
+| Where | What | Why |
+|---|---|---|
+| The machine | Claude Code 2.1.275 or later, with subagents available | the steps are slash commands; readers, referees and rechecks are subagents |
+| The machine | `python3` 3.8 or later on the PATH | every script is Python, standard library only |
+| The audited project | the JDK and build tool it already builds with (JDK 8 to 21; Maven or Gradle), able to build | the audit compiles and runs the application |
+| The audited project | Spring Boot 2.x or 3.x with Spring MVC; JPA, MyBatis or Spring JDBC; PostgreSQL or MySQL | the supported range; anything else stops at the static model (preflight says so) |
+| A database | an instance of the project's real engine that **may be emptied**, on this machine or in a container | every case starts from a reset; the harness refuses an address that is not local. Either the project's own test container (needs Docker) or one you name in `AUDIT_DB_URL`, `AUDIT_DB_USER`, `AUDIT_DB_PASSWORD` |
+| The build's repository | `net.ttddyy:datasource-proxy` and `com.tngtech.archunit:archunit`, and when the project lacks them JUnit 5, Mockito and `spring-test`; for Maven also `build-helper-maven-plugin` | test-scope libraries of the harness, fetched by the project's own build tool the first time. Behind a company mirror they must be obtainable from it |
+
+Nothing is added to the project's own build files: the libraries are named in a generated build entry
+(`pom-audit.xml`, or a Gradle init script under `audit/`) that only the audit uses. Git is not required,
+but the audit is meant to run on a branch made for it. No outside system is called: message brokers and
+other services are replaced by recording doubles.
+
 ## What exists
 
 | Command | What you get |
