@@ -1,521 +1,687 @@
-# Java 業務邏輯嚴密審查 Skill：設計 v0.2
+# java-logic-audit：設計 v1.0（定案）
 
-> 狀態：設計稿，尚未實作。
-> 文中的預設數值都是起始值，要以試行結果校正。標「需試跑」的工具相容性尚未查證。
-> 前一版（v0.1）是針對單一訂單系統的審查計畫；本版把方法與個別系統的事實拆開，改寫成通用於 Java 的 skill。
+> 這一版是定案。v0.2 的審查方法保留，封裝與執行方式重做。
+> 所有取捨都已決定，理由與被否決的做法記在第 19 節。
+> 標「驗收時確認」的技術假設共四項，各有既定的替代做法（第 20 節），不影響其餘設計。
+> 封裝方式對照的參考實作：官方 `code-modernization` plugin v1.1.0。
 
 ## 目錄
 
-0. 摘要
-1. 定位與範圍
-2. 核心設計決策
-3. 兩條軸：證據等級與判定依據
-4. 流程總覽
-5. P0 探索
-6. P1 靜態模型
-7. P2 測試載具
-8. P3 特徵化
-9. 簽核 1 與決策紀錄
-10. P4 深度驗證
-11. P5 規格對照
-12. P6 保證
-13. P7 報告與重跑
-14. 資料模型
-15. Skill 封裝
-16. Java 轉接層與支援分級
-17. Java 業務邏輯陷阱目錄
-18. 完成條件、量測指標、預算
-19. 安全守則
-20. Skill 本身的驗證
-21. 里程碑
-22. 限制與待決事項
+0. 定案摘要
+1. 範圍
+2. 架構原則
+3. Plugin 組成
+4. 工作區與產出檔
+5. 指令
+6. Agent
+7. Workflow
+8. 腳本
+9. auditkit：通用執行器
+10. 資料格式
+11. 方法
+12. 判定規則
+13. 人決定的六件事
+14. 不可信輸入與安全
+15. 支援範圍
+16. 成本控制
+17. Plugin 自身的驗收
+18. 建置順序
+19. 決策紀錄
+20. 驗收時確認的假設
+21. 已知限制
 - 附錄 A：一個問題的完整路徑
-- 附錄 B：方法出處
+- 附錄 B：Java 業務邏輯陷阱目錄
+- 附錄 C：方法出處
 
 ---
 
-## 0. 摘要
+## 0. 定案摘要
 
-`java-logic-audit` 是一個 skill。給它一個 Java 後端的 repo（PRD 選配），它回答三個問題：程式實際做了什麼、程式是否自我一致、程式是否符合規格。每個結論都附可重跑的證據，並量測審查本身的漏網程度。
+1. **形式是 plugin。** 13 個指令、5 個 agent、4 個 workflow、一組 Python 腳本、一套 Java 載具（auditkit）。沒有 SKILL.md，沒有 hooks。
+2. **工作區是目標 repo 的專用分支。** plugin 只新增三處內容，不提交、不推送、不修復問題。
+3. **Agent 只產出資料，執行器依資料執行，腳本依結果檔判定。** 沒有任何等級、數字或判定是由模型填寫的。
+4. **每個 repo 需要撰寫的 Java 預設為零。** 命令的呼叫方式來自機械抽取的事實，執行器是通用的，測試內容全部是 JSON。
+5. **測試執行不交給 agent 平行。** 平行的 agent 只做閱讀與判斷；執行是單一的腳本化建置呼叫，平行由執行器內部處理。
+6. **人決定六件事**（第 13 節），其餘不需要人。
+7. **v1 的支援範圍固定**（第 15 節）。範圍外的技術只給靜態模型，結論停在 C 級。
+8. **v1 不含**：形式化模型、jqwik、真實訊息代理、hooks、自動修復。
 
-設計建立在四個想法上：
+## 1. 範圍
 
-1. **探索決定能力，能力決定證據上限。** skill 不要求前置條件。它先掃 repo 並實際執行幾個煙霧測試，確認自己在這個 repo 做得到什麼，再決定每一類結論最高能到哪一級證據。任何 repo 都跑得完，差別只在報告的強度。
-2. **模型就是測試資料。** 現況模型（入口、狀態、命令 × 狀態矩陣、不變量）以 JSON 保存，由通用的測試執行器直接執行。模型與程式是否相符由機器驗，人只回答「這是不是本意」。
-3. **「行為存在」與「行為錯誤」分開判定。** 前者由證據等級表示；後者必須指出依據：規格、人工決策、程式自相矛盾、通用性質，或領域慣例。讀者永遠看得到一個問題是憑什麼被稱為問題。
-4. **骨幹是不需要業務知識的檢驗準則。** 守衛不對稱、成對路徑差分、讀取無副作用、原子性、重送收斂、可序列化，在任何有狀態的交易系統都成立。skill 能通用，靠的是這一組準則。
+### 1.1 適用
 
-## 1. 定位與範圍
+同時具備以下三點的 Java 後端：
 
-### 1.1 適用對象
-
-skill 適用於同時具備以下三點的 Java 系統：
-
-- 有持久化的業務實體（關聯式資料庫）。
+- 業務實體存在關聯式資料庫。
 - 實體有生命週期：狀態欄位，或由數量、時間戳、旗標推導出的狀態。
-- 操作受狀態約束：同一個操作在不同狀態下被允許或拒絕。
+- 操作受狀態約束：同一操作在不同狀態下被允許或拒絕。
 
-訂單、工單、付款、預約、庫存異動、審批流程都屬於這一類。
+### 1.2 不適用
 
-### 1.2 不適用對象
-
-以下情況由 P0 自行判定並說明原因，不硬做：
+由 `audit-preflight` 判定並說明原因後結束：
 
 | 情況 | 原因 |
 |---|---|
 | 純函式庫、無狀態的轉換服務 | 沒有狀態機與矩陣可填 |
-| 串流處理管線 | 正確性在視窗與順序語意，不在實體生命週期 |
-| 邏輯主要在 BPMN、規則引擎、預存程序 | 邏輯不在 Java，讀 Java 得不到行為 |
-| 沒有關聯式資料庫（純文件庫、純事件溯源） | 效果軌跡與交錯載具建立在 JDBC 上 |
+| 串流處理管線 | 正確性在視窗與順序語意 |
+| 邏輯主要在流程引擎、規則引擎、預存程序 | 讀 Java 得不到行為 |
+| 沒有關聯式資料庫 | 效果軌跡與交錯都建立在 JDBC 上 |
 
-部分符合時（例如一半邏輯在預存程序）判定為「部分適用」，明列哪些實體不在審查範圍。
+部分符合時判定為「部分適用」，在 `PREFLIGHT.md` 列出被排除的實體。
 
-### 1.3 非目標
+### 1.3 回答的三個問題
 
-- 效能、容量、高負載行為。
-- 安全弱點掃描（注入等只在陷阱目錄順帶標記）。
-- 程式風格與可維護性。
-- 自動修復。skill 只提修法建議。
-- 業務規則本身的對錯。skill 指出矛盾與偏離慣例之處，由業務判斷。
+1. 程式實際做了什麼（現況模型）。
+2. 程式是否自我一致。
+3. 程式是否符合 PRD（有提供時）。
 
-### 1.4 輸入
+### 1.4 非目標
 
-| 輸入 | 必要性 | 取得方式 |
-|---|---|---|
-| Repo，鎖定 commit | 必要 | — |
-| 可執行 Docker 的機器 | 影響證據上限 | P0 偵測 |
-| PRD（markdown） | 選配 | 使用者提供；沒有就跳過 P5 |
-| 術語表（程式命名對業務用語） | 選配 | skill 先由程式起草，簽核 1 時請人修正 |
-| 正式環境的資料庫版本與隔離等級 | 影響併發結論 | 先找設定檔；找不到才問 |
-| 典型資料形狀（一個父項幾個子項） | 選配 | 先由既有測試與 fixture 推估；找不到用小規模預設 |
+效能與容量、安全弱點掃描、程式風格、自動修復、業務規則本身的對錯。最後一項的意思是：plugin 指出矛盾與異常，由人決定哪一邊是對的。
 
-只有 repo 裡真的找不到的東西才問人，而且集中在 P0 結束時一次問完。
+## 2. 架構原則
 
-## 2. 核心設計決策
+這八條是實作時遇到沒寫到的情況的判斷依據。
 
-每一條都附理由，因為實作時遇到沒寫到的情況，要靠理由判斷。
+**P1　Agent 產出資料，執行器執行，腳本判定。**
+Agent 的輸出一律是符合 schema 的結構化資料。資料由通用執行器在真實環境執行，結果寫成檔案，等級與判定由腳本從這些檔案算出。任何一個結論都能回答「是哪個檔案的哪一筆結果支持它」。
 
-**D1　探索取代前置條件。**
-v0.1 的「輸入與前置條件」「待決事項」大部分是掃 repo 就能回答的事。通用 skill 不能假設環境，所以把它們全部變成 P0 的產出。
+**P2　機械事實用工具取得。**
+入口、呼叫關係、寫入點、交易屬性、SQL 讀寫集合都由工具抽取。Agent 只做解讀：這個條件是不是守衛、這兩條路徑是不是在算同一件事。
 
-**D2　能力決定證據上限。**
-缺 Testcontainers、外部依賴用 mock、沒有 PRD，都不是失敗條件。它們只讓對應面向的結論停在較低的證據等級，報告同時寫明「補上什麼就能升級」。這讓 skill 在條件差的 repo 也有產出，而且不會誇大。
+**P3　行為存在與行為錯誤分開判定。**
+前者是證據等級，由腳本算。後者必須指出依據：規格、人的決策、程式自相矛盾、通用性質、領域慣例。
 
-**D3　機械事實用工具取得，判斷才交給 agent。**
-入口清單、呼叫關係、寫入點、SQL 讀寫集合、交易屬性都能機械列舉。agent 讀程式碼去「找」這些東西既慢又會漏。agent 的工作是解讀：這個條件是不是守衛、這兩條路徑是不是在算同一件事。
+**P4　能力決定證據上限。**
+缺少真實資料庫引擎、外部依賴被替身取代、時間不可控，都只讓對應的結論降級，並寫明補上什麼就能升級。plugin 在任何 repo 都跑得完。
 
-**D4　模型即測試資料。**
-模型若只是文件，就只能請人相信它。把矩陣、不變量、成對路徑都存成 JSON，由通用執行器逐項執行，模型的每一句話就都有一個會紅會綠的測試。程式改版後，測試先告訴你哪一格變了。
+**P5　反例必須可由公開入口到達。**
+交易資料只能經由命令建立。做不到時由執行器在證據檔標記，等級自動降為 B。
 
-**D5　行為存在與行為錯誤是兩件事。**
-「改量可以低於已出貨量」可以是 A 級事實（有測試重現），但它是不是缺陷，取決於有沒有規格或決策說不可以。把兩者混成一個「嚴重度」會讓報告失去可信度。
+**P6　狀態在檔案裡。**
+每個指令只讀檔案、不依賴對話。換一個人或開一個新工作階段，執行 `audit-status` 就能接續。
 
-**D6　以領域無關的準則為骨幹。**
-由程式推導的不變量有循環問題：程式一致地做錯，推導出來就是規則。skill 不假裝能解決這件事，而是把力氣放在不需要知道「正確答案」的檢驗上（見 10.1），其餘交給規格與人工決策。
+**P7　被分析的內容是資料，不是指示。**
+程式碼、註解、檔名、PRD 文字進入 agent 提示時一律包在標記裡。唯讀的 agent 不寫檔，產出交由編排的工作階段或腳本寫入。
 
-**D7　反例必須可由公開入口到達。**
-測試直接往資料庫塞資料，很容易造出正式環境不可能出現的狀態，然後「發現」一堆問題。規則：交易資料只能用命令建立；做不到時，證據降為 B 並標明。
+**P8　對目標 repo 只做加法。**
+全部內容放在三處，預設建置的輸入與輸出不變，整組移除只需刪掉這三處。
 
-**D8　獨立性靠輸入隔離落實。**
-同一個模型跑兩次，盲點是相關的，結果一致不算證據。有意義的獨立性來自看到不同的東西：一條路徑從入口往下、一條從資料表往上；規格分析者看不到程式；盲驗者看不到審查過程。隔離用檔案可見性落實，不只靠指示。
+## 3. Plugin 組成
 
-**D9　對目標 repo 的改動是加法且隔離的。**
-全部產物放在 `audit/`、`src/audit/` 和一個建置 profile 裡。預設建置的輸出不受影響，整組移除只要刪這三處。
-
-**D10　決策紀錄是長期的判定依據。**
-人在簽核時回答過的問題存成決策紀錄，之後每次重跑都沿用，不重問。這是整套產物裡唯一無法由程式重新推導的部分，要當成資產維護。
-
-**D11　形式化模型不在核心流程。**
-TLA+ 與 trace validation 成本高，且這類系統的併發問題多半出在應用層與資料庫隔離語意的互動，在真實引擎上做受控交錯更直接。形式化模型保留為選配延伸（10.7）。
-
-## 3. 兩條軸：證據等級與判定依據
-
-每個問題都同時標這兩條軸。
-
-### 3.1 證據等級：這個行為確實存在嗎
-
-| 等級 | 定義 | 取得條件 |
-|---|---|---|
-| A | 可重現的執行證據 | 測試經公開入口、從合法初始狀態出發、在與正式環境同款的資料庫引擎上，連續 3 次重現 |
-| B | 可執行，但帶保留 | 能重現，但有下列任一保留標記 |
-| C | 靜態推論 | 附完整的程式路徑（類別#方法 的鏈），未執行 |
-
-B 級的保留標記：
-
-| 標記 | 意義 |
-|---|---|
-| `mock-boundary` | 行為涉及被替身取代的外部系統 |
-| `substitute-engine` | 在 H2 等替代引擎上執行 |
-| `synthetic-state` | 初始狀態由資料直寫建立，未經命令 |
-| `unconfirmed-version` | 資料庫版本或隔離等級未與正式環境核對 |
-| `uncontrolled-time` | 行為與時間有關，但時間不可控 |
-| `model-only` | 來自模型檢查的反例，尚未在程式上重播 |
-
-### 3.2 判定依據：憑什麼說它有問題
-
-| 代號 | 依據 | 例子 | 預設歸類 |
-|---|---|---|---|
-| N1 | 規格 | 違反 PRD 條款 | 缺陷 |
-| N2 | 決策 | 違反人工確認過的不變量或決策 | 缺陷 |
-| N3 | 自相矛盾 | 程式在別處強制同一條件；預覽與執行結果不同；宣告與行為不符 | 不一致 |
-| N4 | 通用性質 | 違反原子性、冪等、可序列化、讀取無副作用 | 異常 |
-| N5 | 領域慣例 | 違反領域包中的常理 | 異常 |
-| N0 | 無 | 只是值得一問的觀察 | 待確認 |
-
-歸類的意義：
-
-- **缺陷**：有明確依據，可直接排修。
-- **不一致**：程式自己有兩種說法，至少有一邊是錯的，要人決定哪一邊。
-- **異常**：偏離一般預期，可能是刻意設計。進簽核問題清單，回答後升為缺陷或鎖定為既定行為。
-- **待確認**：不算問題，只是問題清單的一項。
-
-一個問題可以有多個依據。依據越多，越不需要人工判斷。
-
-### 3.3 嚴重度
-
-嚴重度只描述後果，不描述把握程度。
-
-| 等級 | 後果 |
-|---|---|
-| S1 | 已提交的資料錯誤且無法由系統自行復原；或對下游送出錯誤、遺漏、重複的訊息 |
-| S2 | 不變量可被破壞，但需要特定時序、故障或少見的操作順序 |
-| S3 | 合法操作被拒絕，或錯誤訊息與實際原因不符 |
-| S4 | 不影響資料正確性的不一致 |
-
-## 4. 流程總覽
-
-```mermaid
-flowchart TD
-    R[Repo，鎖定 commit] --> P0[P0 探索<br/>概況、能力、上限、適用性]
-    P0 -->|不適用| X[說明原因後結束]
-    P0 --> P1[P1 靜態模型<br/>雙路徑推導，不看 PRD]
-    P1 --> P2[P2 測試載具<br/>driver、重置、效果軌跡]
-    P2 --> P3[P3 特徵化<br/>執行矩陣，模型對帳]
-    P3 --> G1{簽核 1<br/>只問本意}
-    G1 --> P4[P4 深度驗證<br/>property、蛻變、故障、併發]
-    PRD[PRD] --> SA[規格分析<br/>只看 PRD，可提前平行]
-    SA --> P5[P5 規格對照]
-    G1 --> P5
-    P4 --> P6[P6 保證<br/>盲驗、紅隊、變異、召回率]
-    P5 --> P6
-    P6 --> P7[P7 報告]
-    P7 --> G2{簽核 2}
+```
+java-logic-audit/
+  .claude-plugin/plugin.json
+  README.md
+  commands/                 13 個指令，每個一個檔
+    audit.md
+    audit-preflight.md
+    audit-harness.md
+    audit-map.md
+    audit-model.md
+    audit-characterize.md
+    audit-review.md
+    audit-verify.md
+    audit-spec.md
+    audit-assure.md
+    audit-report.md
+    audit-status.md
+    audit-rerun.md
+  agents/                   5 個 agent
+    code-reader.md
+    harness-engineer.md
+    spec-analyst.md
+    adversary.md
+    seeder.md
+  workflows/                4 個 workflow
+    model-mine.js
+    triage.js
+    spec-trace.js
+    recheck.js
+  scripts/                  Python 3.8+，只用標準函式庫
+  schemas/                  每種產出的 JSON Schema
+  assets/
+    auditkit/               Java 原始碼模板（Java 8 語法）
+    build/                  Maven profile 片段、Gradle init script、版本表
+    rules/                  靜態規則包（附錄 B 的可機械偵測部分）
+    report-template.html
+  references/
+    adapters/               各技術的偵測特徵與接法
+    pitfalls/               附錄 B 的完整說明
+    domains/                領域包（v1 只有 order-fulfilment.md）
+  evals/                    plugin 自身的驗收案例
 ```
 
-與 v0.1 的主要差異：
+`plugin.json` 的使用者設定只有三項：
 
-| v0.1 | v0.2 | 原因 |
+| 設定 | 預設 | 作用 |
 |---|---|---|
-| 前置條件與待決事項 | P0 探索的產出 | D1 |
-| 簽核 1 在靜態模型之後 | 簽核 1 在矩陣執行之後 | 人不該簽 C 級證據 |
-| 階段 2 形式化模型 | 選配延伸 | D11 |
-| 兩個 skill | 一個 skill，多個模式 | 共用同一份狀態與資料模型 |
-| 三層實體、模擬提交流程寫在設計裡 | 由 P1 推導 | 那是某個系統的事實 |
-| 信心估計表 | 量測指標（第 18 節） | 數字要有分母 |
+| `system` | 空 | 要跟隨的系統名稱。空值時取 `audit/` 下的第一個 |
+| `language` | `auto` | 給人看的產出所用的語言。`auto` 跟隨對話語言 |
+| `budget` | `quick` | `quick` 或 `deep`，對應第 16 節的預算表 |
 
-### 4.1 模式
+## 4. 工作區與產出檔
 
-skill 以 `audit/state.json` 記錄進度，每個階段可單獨執行、可中斷續跑。
+### 4.1 三處內容
 
-| 呼叫 | 作用 | 典型用途 |
+| 位置 | 內容 | 是否進版控 |
 |---|---|---|
-| `/java-logic-audit` | 從下一個未完成的階段繼續 | 完整審查 |
-| `… profile` | 只做 P0 | 評估某個 repo 做得到什麼 |
-| `… model` | P0 到 P3，停在簽核 1 | 新人上手、需求影響評估 |
-| `… decide` | 匯入人對問題清單的回答 | 簽核 1 之後 |
-| `… verify [範圍]` | P4，可限定實體或命令 | 針對某個變更類型深入 |
-| `… spec <prd>` | P5 | PRD 改版後重新對照 |
-| `… assure` | P6 | 量測審查品質 |
-| `… report` | P7 | 重新生成報告 |
-| `… rerun` | 在新 commit 上做差異重跑 | 改版後回歸 |
-| `… status` | 進度與量測指標 | — |
+| `audit/<system>/` | 所有資料產出與給人看的文件 | 是，`runs/` 與 `*.local.*` 除外 |
+| `<module>/src/audit/java`、`src/audit/resources` | auditkit 與可選的 `DriverCustomizer` | 是 |
+| 建置入口 | Maven：`pom.xml` 內一個 `<profile id="audit">`。Gradle：`audit/<system>/build/audit.init.gradle`，不動建置檔 | 是 |
 
-## 5. P0 探索
+`<system>` 是在入口指令選的短名稱（字母、數字、`-`、`_`），預設為 repo 目錄名。單一 repo 內有多個可獨立部署的應用時，各自一個 `<system>`。
 
-目的：產出 repo 概況、確認能力、定出證據上限、判定適用性。這個階段不做任何判斷性的審查。
+Maven 的 profile 做四件事：把 `src/audit/java` 加為測試原始碼根目錄、加入 auditkit 需要的測試依賴、設定只執行 `auditkit` 套件下的執行器、掛上變異測試外掛。不啟用 profile 時，`src/audit` 不會被編譯。
 
-### 5.1 探索面向
+plugin 不提交也不推送。使用者自行決定何時提交 `audit/` 與 `src/audit/`。
 
-每個面向先看靜態線索，再盡量以執行確認。靜態線索只說「看起來有」，執行確認才算數。
+### 4.2 產出檔
 
-| 面向 | 靜態線索 | 執行確認 |
+給人看的是 `.md`，給程式讀的是 `.json`。兩者內容相同時，`.md` 由腳本從 `.json` 生成。
+
+| 檔案 | 產生者 | 內容 |
 |---|---|---|
-| 建置 | `pom.xml`、`build.gradle(.kts)`、wrapper、JDK 版本、模組結構 | 乾淨建置連續成功兩次 |
-| 框架 | 依賴座標、啟動類別、`javax.*` 或 `jakarta.*` 命名空間 | 測試中啟動應用 context |
-| HTTP 入口 | `@RequestMapping` 系列、JAX-RS `@Path`、函式式路由 | 由 `RequestMappingHandlerMapping` 列舉 |
-| 訊息入口 | `@KafkaListener`、`@RabbitListener`、`@JmsListener`、`io.nats.client` 的訂閱呼叫 | 由各 listener registry 列舉；無 registry 者由替身記錄訂閱 |
-| 排程入口 | `@Scheduled`、Quartz `Job`、分散式排程的 handler | 由 `ScheduledTaskHolder` 列舉 |
-| 內部事件 | `@EventListener`、`@TransactionalEventListener` | context 內的 listener 清單 |
-| 其他入口 | 啟動時執行的 runner、`@PostConstruct` 中的寫入、管理端點、RPC 服務 | — |
-| 持久化 | `@Entity`、mapper XML 與註解、`JdbcTemplate`、jOOQ | 攔截到實際 SQL |
-| 資料庫 | 驅動、JDBC URL、遷移腳本、trigger、procedure、constraint | 容器內套用遷移後傾印實際 schema |
-| 交易 | `@Transactional`、`TransactionTemplate`、隔離等級設定 | 由 `TransactionAttributeSource` 查每個方法實際生效的屬性 |
-| 併發控制 | `@Version`、`FOR UPDATE`、`@Lock`、分散式鎖、唯一鍵 | — |
-| 橫切邏輯 | `@Aspect`、filter、interceptor、JPA entity listener | 由 `Advised#getAdvisors` 查實際套用到哪些 bean |
-| 對外呼叫 | Feign、`RestTemplate`、`WebClient`、gRPC stub、訊息發送 | — |
-| 測試資產 | JUnit 4/5、TestNG、Mockito、Testcontainers、WireMock、H2 | 跑既有測試並記錄通過率與覆蓋率 |
-| 外部依賴的替身 | mock 的對象與位置（見 5.3） | — |
-| Java 以外的邏輯 | `.drl`、BPMN、預存程序、腳本、設定檔驅動的規則 | 標記，並影響適用性判定 |
-| 修復歷史 | 提交訊息中的修復字樣、同時改到主程式與測試的提交 | 只統計數量，內容不給審查 agent 看 |
+| `INTENT.md` | `audit` | 目標、範圍、基準 commit、語言 |
+| `PREFLIGHT.md`、`profile.json` | `audit-preflight` | 五個回答、技術概況、適用性、各指令的就緒程度 |
+| `manifest.json` | `audit-preflight` | 主程式與既有測試的檔案清單與雜湊，用來檢查來源未被改動 |
+| `harness.json` | `audit-harness` | 載具設定（9.2） |
+| `facts/*.json` | `audit-harness` | 機械事實 |
+| `map.json`、`MAP.md` | `audit-map` | 入口、實體、寫入點表、孤兒寫入點 |
+| `model_result.json` | `audit-model` | workflow 的原始結果，含被否決與未驗證的項目 |
+| `model/*.json`、`MODEL.md` | `audit-model` | 實體、命令、矩陣、不變量、成對路徑、蛻變關係 |
+| `recipes.json`、`effects/*.json` | `audit-characterize` | 到達配方、每個命令的效果軌跡 |
+| `questions.json`、`QUESTIONS.md` | `audit-characterize`、`audit-verify`、`audit-spec` | 需要人回答的問題 |
+| `DECISIONS.json`、`DECISIONS.md` | `audit-review` | 人的回答，永久保存 |
+| `spec/clauses.json`、`spec/expectations.json`、`SPEC_TRACE.md` | `audit-spec` | 條款、預期、追溯矩陣、反向清單 |
+| `scenarios.json` | `audit-verify`、`audit-spec`、`audit-assure` | 可重播的命令序列 |
+| `findings.json`、`FINDINGS.md` | `judge.py` | 問題 |
+| `assure/*.json`、`ASSURANCE.md` | `audit-assure` | 盲驗、金絲雀、埋入缺陷的結果 |
+| `VERDICT.json`、`VERDICT.md` | `judge.py` | 每個實體的審查判定、規則全文、空白的簽核欄 |
+| `REPORT.html` | `build_report.py` | 單頁報告，離線可開。每個指令結束時重新生成 |
+| `runs/<kind>-<時間>/` | 執行器 | 結果檔、證據檔、軌跡。不進版控 |
 
-### 5.2 能力
+### 4.3 編號
 
-每項能力的狀態是「已執行確認」「不具備」或「未知，需人回答」。不接受「看起來有」。
+| 前綴 | 對象 | 前綴 | 對象 |
+|---|---|---|---|
+| `EP-` | 入口 | `SCN-` | 情境（可重播的序列） |
+| `CMD-` | 命令 | `Q-` | 問題 |
+| `ENT-` | 實體 | `D-` | 決策 |
+| `CELL-` | 矩陣格 | `PRD-` | 規格條款 |
+| `RCP-` | 到達配方 | `F-` | 問題（缺陷、不一致、異常） |
+| `INV-` | 不變量 | `SEED-` | 埋入的缺陷 |
+| `PAIR-` | 成對路徑 | `MR-` | 蛻變關係 |
 
-| 代號 | 能力 | 確認方式 |
-|---|---|---|
-| CAP-BUILD | 可重現建置 | 兩次乾淨建置成功 |
-| CAP-TEST | 既有測試可執行 | 跑完並記錄結果 |
-| CAP-CTX | 測試中可啟動應用 context | 生成並執行一個只啟動 context 的測試 |
-| CAP-DB-REAL | 真實資料庫引擎，版本與正式環境一致 | 容器映像標籤對照設定檔或人工回答 |
-| CAP-DB-SUB | 只有替代引擎 | — |
-| CAP-DS-PROXY | 可在測試中包裝 DataSource | 煙霧測試攔截到至少一條 SQL |
-| CAP-MQ-REAL | 訊息系統有真實代理（容器） | 煙霧測試收發一則訊息 |
-| CAP-MQ-EDGE | 訊息在 client 邊界被替身攔截 | 替身位於最外層 client |
-| CAP-EXT-EDGE | 外部服務在 client 邊界被替身攔截 | 同上 |
-| CAP-CLOCK | 時間可控 | 找到 `Clock` 注入，或無直接取現在時間的呼叫 |
-| CAP-HISTORY | 有可用的修復歷史 | 候選提交數 ≥ 門檻 |
-| CAP-SPEC | 有 PRD | 使用者提供 |
+編號由 `ids.py` 配發，永不重用。`F-` 的對齊靠指紋（12.4）。
 
-### 5.3 替身的位置
+## 5. 指令
 
-外部依賴用 mock 不是問題，mock 放在哪裡才是。
+### 5.1 順序
 
-- **邊界替身**：取代的是最外層的 client（訊息連線、HTTP client）。應用自己的序列化、主題命名、發送順序都還在受測範圍內。足以驗證「發了什麼、發了幾次、相對於提交的位置」。
-- **內層替身**：取代的是應用自己的 gateway 或 service 類別。這段程式碼完全沒被執行，與它有關的結論只能停在 C。
+```mermaid
+flowchart LR
+    A[audit] --> B[preflight] --> C[harness] --> D[map] --> E[model]
+    E --> F[characterize] --> G[review] --> H[verify]
+    G --> I[spec]
+    H --> J[assure]
+    I --> J
+    J --> K[report]
+```
 
-P0 記錄每個外部依賴的替身位置。若是內層替身，skill 在自己的審查測試裡補一個邊界替身，不動既有測試。
+每個指令獨立，結束時印出下一個要貼的完整指令。任何時候都可以執行 `audit-status`。
 
-邊界替身驗不到的是代理本身的語意：重送、亂序、ack 逾時。若該訊息系統的容器映像容易取得，P0 會建議補上並在同意後自行加入審查測試。
+| 步驟 | 指令 | 得到什麼 | 平行 agent |
+|---|---|---|---|
+| 0 | `audit [system]` | 說明想做什麼，寫入 `INTENT.md` | 無 |
+| 1 | `audit-preflight <system>` | 這個 repo 做得到什麼 | 無 |
+| 2 | `audit-harness <system>` | 載具裝好並證明能跑；機械事實 | 無 |
+| 3 | `audit-map <system>` | 入口、實體、寫入點表 | 少量 |
+| 4 | `audit-model <system> [pattern]` | 守衛、狀態、矩陣、候選不變量 | 多（workflow） |
+| 5 | `audit-characterize <system> [entity]` | 矩陣逐格執行的結果；問題清單 | 少量 |
+| 6 | `audit-review <system> [flagged｜all]` | 人的決策 | 無 |
+| 7 | `audit-verify <system> [kind] [pattern]` | 序列、蛻變、故障、併發的檢驗結果 | 少量 |
+| 8 | `audit-spec <system> <prd>` | PRD 逐條對照 | 多（workflow） |
+| 9 | `audit-assure <system>` | 盲驗、金絲雀、埋入缺陷 | 多（workflow） |
+| 10 | `audit-report <system>` | 判定與報告，等待簽核 | 無 |
+| — | `audit-status <system>` | 進度、過期的產出、下一個指令 | 無 |
+| — | `audit-rerun <system>` | 新 commit 上的差異重跑 | 視差異而定 |
 
-### 5.4 證據上限
+`INTENT.md` 的目標決定路徑長度：
 
-| 檢驗 | 達到 A 需要 | 不具備時 |
-|---|---|---|
-| 矩陣特徵化 | CAP-CTX、CAP-DB-REAL | 只有 CAP-DB-SUB 為 B；連 CAP-CTX 都沒有為 C |
-| 效果軌跡、讀取純度 | 加上 CAP-DS-PROXY | C |
-| 訊息內容與次數 | CAP-MQ-EDGE | C |
-| 訊息的重送與順序 | CAP-MQ-REAL | B（`mock-boundary`） |
-| 故障注入 | CAP-DS-PROXY、邊界替身 | C |
-| 併發 | CAP-DB-REAL、CAP-DS-PROXY | 替代引擎上不執行，一律 C |
-| 時間相關規則 | CAP-CLOCK | B（`uncontrolled-time`） |
-| 規格對照 | CAP-SPEC | 跳過 P5 |
-| 召回率量測 | CAP-HISTORY 或人工埋入 | 只報變異分數 |
+| 目標 | 路徑 |
+|---|---|
+| 先理解 | 0 到 6 |
+| 完整審查 | 0 到 10，無 PRD 時略過 8 |
+| 對照 PRD | 0 到 6、8、10 |
+| 改版後回歸 | `audit-rerun` |
 
-併發在替代引擎上不執行的理由：H2 的鎖與多版本行為與正式引擎不同，得到的結論可能兩個方向都是錯的，比沒有結論更糟。
+### 5.2 `audit [system]`
 
-### 5.5 產出
+- **做什麼**
+  1. `audit/` 下已有該系統的檔案時，視為回訪：執行 `audit-status` 的內容後結束。
+  2. 找出可獨立啟動的應用模組。一個就直接用；多個就問是哪一個。
+  3. 用一個彈出式問答問兩題：想做什麼（先理解、完整審查、對照 PRD、改版後回歸）；範圍（全部，或輸入要優先的實體與流程）。
+  4. 寫 `INTENT.md`：目標、系統名稱、模組路徑、基準 commit、語言、範圍、日期，回答照原話記錄。
+  5. 依目標列出要走的指令與每一步誰要做決定，不超過八行。
+- **結尾**：給出填好參數的 `audit-preflight` 指令。
 
-`audit/profile.json`（節錄）：
+### 5.3 `audit-preflight <system>`
+
+- **寫**：`PREFLIGHT.md`、`profile.json`、`manifest.json`
+- **做什麼**：每一項檢查都執行，不因前面失敗而停。
+  - **檢查 0，問人**：只問第 13 節列的五題，每題都有「不知道」的選項。回答照原話寫入；沒有回答的寫成待填項目。
+  - **檢查 1，技術概況**：`preflight_scan.py` 由建置檔、依賴、註解、設定檔辨識建置工具、JDK、框架、持久化、資料庫、訊息、排程、對外呼叫、測試資產。
+  - **檢查 2，工具**：JDK、建置 wrapper、Docker、`python3`。缺少時說明哪個指令會受影響。
+  - **檢查 3，建置與既有測試**：先讀 CI 定義，照它的方式乾淨建置一次並跑既有測試，記錄通過率與耗時。失敗時報告實際錯誤並診斷。
+  - **檢查 4，適用性**：依 1.1 與 1.2 判定完全適用、部分適用、不適用。
+  - **檢查 5，範圍邊界**：資料庫 schema 是否由本 repo 的遷移腳本完整定義；是否有其他系統寫入同一個資料庫的跡象（遷移腳本之外的資料表、沒有任何寫入點的狀態值）。
+  - **檢查 6，連線安全**：讀測試用的設定，列出資料庫、訊息系統、外部服務的位址。任何一個不是本機或容器位址就標紅，並說明 `audit-harness` 會拒絕執行。
+  - **檢查 7，來源保護**：唯讀檢查專案與使用者的權限設定是否有阻擋編輯 `src/main` 與 `src/test` 的規則。沒有就印出建議的片段（14.3）。此項只有綠或黃，不影響其他判定。
+  - **檢查 8，支援範圍**：對照第 15 節，列出在範圍內與範圍外的技術。
+- **報告**：`PREFLIGHT.md` 以五個回答與檢查 5 開頭，接著是每項檢查一列的表格，最後是每個後續指令的就緒程度（就緒、有缺口、未就緒）。
+- **結尾**：最需要先修的一項，以及下一個指令 `audit-harness`。
+
+### 5.4 `audit-harness <system>`
+
+- **寫**：`src/audit/**`、建置入口、`harness.json`、`facts/*.json`、`profile.json` 的能力欄位
+- **做什麼**
+  1. 把 auditkit 複製到 `<module>/src/audit/java/auditkit/`。
+  2. 準備建置入口。Maven：把要加入 `pom.xml` 的 profile 以差異形式顯示，用彈出式問答請人批准後才寫入。Gradle：寫 init script，不需批准。
+  3. `harness-engineer` 撰寫 `harness.json`：啟動類別、要沿用的既有測試設定（既有的容器設定類別或測試 profile）、要以替身取代的 bean 型別、驗證方式、哪些例外型別代表業務拒絕、基礎資料。
+  4. 執行六項煙霧測試，結果由腳本解析：
+     - 應用 context 能啟動。
+     - 連線守衛通過（資料庫位址是本機或容器）。
+     - DataSource 代理攔截到至少一條 SQL。
+     - 重置後同一個讀取執行兩次，結果相同。
+     - 替身記錄到一次呼叫。
+     - 兩個事實抽取器（位元組碼、context）寫出 `facts/`。
+  5. `judge.py capabilities` 由煙霧測試的結果檔寫入能力欄位（12.1）。
+- **人決定**：批准建置檔的改動。
+- **結尾**：能力表，以及下一個指令 `audit-map`。
+
+### 5.5 `audit-map <system>`
+
+- **寫**：`map.json`、`MAP.md`
+- **做什麼**
+  1. `build_map.py` 由 `facts/` 建出入口清單、命令的呼叫方式、實體與欄位、每個欄位的寫入點表、橫切邏輯的套用範圍。
+  2. 腳本解不出來的寫入點（動態 SQL 的欄位集合、原生 SQL 字串、整個物件的欄位複製）列為待解。待解項目交給 `code-reader`，每個檔案一個，回傳欄位清單與引用行。
+  3. 由呼叫關係算出每個寫入點可從哪些入口到達。到不了的列為孤兒寫入點。
+  4. `make_shards.py` 產生 `audit-model` 要用的切分清單。
+- **結尾**：入口數、實體數、寫入點數、孤兒數，以及下一個指令 `audit-model`。
+
+### 5.6 `audit-model <system> [pattern]`
+
+- **寫**：`model_result.json`、`model/*.json`、`MODEL.md`
+- **做什麼**
+  1. 讀切分清單。給了 `pattern` 就只取符合的。
+  2. 估算 agent 數與 token 用量（16.1）。超過 12 個切分時用彈出式問答詢問：全部執行、只跑一部分、取消。
+  3. 呼叫 workflow `model-mine`（7.1）。沒有 Workflow 工具時改用 7.5 的替代做法。
+  4. 把 workflow 回傳的物件存成 `model_result.json`，執行 `render_model.py`。這個腳本做所有機械的部分：配發編號、由守衛主張展開矩陣格並算出靜態結果、比對同一欄位各寫入點的守衛得到不對稱清單、檢查生命週期欄位的讀寫一致性、對帳由上往下與由下往上兩個方向。
+  5. 回報：確認的主張數、被裁判否決的數量與兩三個例子、未驗證的數量、有缺口的切分。有缺口時提供只重跑那些切分的後續呼叫。
+- **結尾**：下一個指令 `audit-characterize`。
+
+### 5.7 `audit-characterize <system> [entity]`
+
+- **寫**：`recipes.json`、`effects/*.json`、矩陣各格的 `observed`、`questions.json`、`QUESTIONS.md`
+- **做什麼**
+  1. `recipes.py` 在靜態狀態機上搜尋每個抽象狀態的到達配方。
+  2. 以一次建置呼叫執行矩陣（記錄模式）、每個命令的效果軌跡、讀取純度、成對路徑。執行器把結果寫入 `runs/`。
+  3. `reconcile.py` 比對靜態結果與觀察結果、三個事實來源、同一抽象狀態是否有不同反應。`mine_invariants.py` 由快照找候選不變量。
+  4. 每一筆差異交給 workflow `triage`（7.2）分類：模型要修、載具缺口、不一致、異常。模型要修的由腳本套用後只重跑受影響的格子，最多三輪。
+  5. `build_questions.py` 由以下項目產生問題：沒有守衛處理的格子、結果為非預期錯誤的格子、守衛不對稱、成對路徑差異、讀取路徑的寫入、候選不變量、沒有寫入點或沒有守衛讀取的狀態值、比對時要排除的易變欄位。
+- **結尾**：問題數。有問題時下一個指令是 `audit-review`，否則是 `audit-verify`。
+
+### 5.8 `audit-review <system> [flagged｜all]`
+
+- **寫**：`DECISIONS.json`、`DECISIONS.md`
+- **做什麼**
+  1. 讀 `questions.json` 與既有決策，已決定的略過並說明數量。`flagged`（預設）只問影響資料正確性的問題；`all` 問全部。
+  2. 用彈出式問答詢問，每次最多四題，一題一個問題。內容：觀察到的行為、引用的程式位置、為什麼問、重現指令。選項固定三個：**不是本意**、**本意如此**、**不確定**。人可以改為輸入一段說明，照原話保存。
+  3. 人在請求裡已經寫明的決定（例如「Q-014 不是本意：已出貨的不能收回」）直接記錄，不再彈出。
+  4. 沒有問答工具也沒有寫明的決定時（無人值守的執行），全部保留為未決，不猜。
+  5. `apply_decisions.py` 套用決策的效果：候選不變量升為已確認或作廢、格子的預期結果翻轉或鎖定、差異被接受。模型檔只由這個腳本改，不手改。
+- **結尾**：說明三件事。標為「不是本意」的成為缺陷；「不確定」的維持待確認，不會被當成判定依據；決策永久保存，重跑不重問。下一個指令是 `audit-verify`。
+
+### 5.9 `audit-verify <system> [sequences｜relations｜faults｜concurrency｜all] [pattern]`
+
+- **寫**：`runs/`、`scenarios.json`、`questions.json`
+- **做什麼**
+  1. 由 `audit-characterize` 量到的單次執行時間估算總時間。超過 30 分鐘時先詢問。
+  2. 依種類執行（方法見第 11 節）。每一種都是一次建置呼叫。
+  3. 失敗的序列由執行器縮減到最短，存成 `SCN-`。
+  4. 每一筆失敗交給 workflow `triage` 分類。違反已確認不變量或已鎖定行為的成為缺陷候選；違反通用性質的成為異常，進問題清單由人決定。
+  5. 缺陷候選以驗證模式重跑三次，各自重置。
+- **結尾**：各種類的案例數、不符數、載具缺口數。有新問題時下一個指令是 `audit-review`，否則是 `audit-spec` 或 `audit-assure`。
+
+### 5.10 `audit-spec <system> <prd>`
+
+- **寫**：`spec/*.json`、`SPEC_TRACE.md`、`questions.json`
+- **做什麼**
+  1. `prd_split.py` 依標題切分 PRD，保留行號。
+  2. 呼叫 workflow `spec-trace`（7.3）：抽出條款、把每條條款寫成預期紀錄。
+  3. `spec_join.py` 把預期紀錄接到矩陣格與情境上。格子層級的預期直接與觀察結果比對；跨多個命令的預期以情境形式由執行器執行。
+  4. 判定每條條款：符合、違反、部分符合、未實作、有歧義、不可測。有歧義的進問題清單。
+  5. 產生反向清單：沒有任何條款對應的格子、不變量、對外效果。
+- **結尾**：各判定的數量，以及下一個指令 `audit-assure`。
+
+### 5.11 `audit-assure <system> [--seeds <dir>] [--mutation]`
+
+- **寫**：`assure/*.json`、`ASSURANCE.md`
+- **做什麼**
+  1. **盲驗**：呼叫 workflow `recheck`（7.4），每個問題一個 `adversary`。
+  2. **守衛金絲雀**：`canary.py` 在暫存複本上對模型引用的守衛行做變異，執行審查測試，記錄每個變異體是否被殺（11.9）。
+  3. **埋入缺陷**（給了 `--seeds` 才做）：`seed_run.py` 逐一把補丁套用到暫存複本、執行鎖定的測試與快速預算的序列、記錄是否有測試轉紅。`recall.py` 算出召回率與區間。
+  4. **全面變異**（給了 `--mutation` 才做）：對核心套件跑完整的變異測試。不影響判定。
+- **人決定**：提供埋入用的補丁，或從 `seed_from_history.py` 列出的候選修復提交中挑選。
+- **結尾**：盲驗的確認、降級、剔除數；金絲雀存活數；召回率。下一個指令是 `audit-report`。
+
+### 5.12 `audit-report <system>`
+
+- **寫**：`findings.json`、`FINDINGS.md`、`VERDICT.json`、`VERDICT.md`、`REPORT.html`
+- **做什麼**：執行 `judge.py` 與 `build_report.py`。把每個實體的判定、每個理由的原文、問題清單、「這份報告不能證明什麼」、空白的簽核欄顯示給使用者。不軟化理由，不更改判定。
+- **人決定**：簽核。
+
+### 5.13 `audit-status <system>`
+
+只檢視不修改（重新生成 `REPORT.html` 除外）。`status.py` 列出每個階段的產出是否存在與修改時間，標出過期的產出，最後三行固定為：目前到哪裡、什麼過期了、下一個指令與一行理由。
+
+過期的判定：任何產出比它所依據的產出舊；模型或矩陣比來源程式舊；`VERDICT.md` 比任何一個結果檔舊。
+
+### 5.14 `audit-rerun <system>`
+
+1. 比對目前 commit 與 `INTENT.md` 的基準 commit，列出改動的檔案。
+2. 重新執行 `audit-preflight` 的檢查 1 與 `audit-harness` 的煙霧測試，比對能力是否改變。
+3. 重抽機械事實，與上次比較，得到受影響的入口、實體、格子。
+4. 以驗證模式執行全部鎖定的格子與情境。結果改變的就是行為變更；牴觸已鎖定決策的直接成為回歸問題。
+5. 只對受影響的切分重新執行 `audit-model` 與 `audit-characterize`。
+6. 決策全部沿用。決策所引用的格子或不變量已不存在時，標為過期並列入問題清單。
+7. 更新基準 commit，執行 `audit-report`。
+
+## 6. Agent
+
+五個。只有 `harness-engineer` 與 `seeder` 有寫入工具：前者只寫審查用的兩處，後者只在暫存複本中工作。
+
+| Agent | 工具 | 職責 | 產出 |
+|---|---|---|---|
+| `code-reader` | Read、Glob、Grep、Bash（僅唯讀檢視） | 讀程式並回傳主張：守衛、寫入、轉移、候選不變量、成對路徑。也擔任裁判與分類者 | 結構化資料，每筆附 `檔案:行` |
+| `harness-engineer` | Read、Write、Edit、Glob、Grep、Bash | 撰寫 `harness.json`、基礎資料、必要時的 `DriverCustomizer`。只寫 `audit/<system>/` 與 `src/audit/` | 設定檔 |
+| `spec-analyst` | 無 | 由提示中的 PRD 文字抽出條款並寫成預期紀錄 | 結構化資料，每筆附原文引用與行號 |
+| `adversary` | Read、Glob、Grep、Bash | 對單一問題做獨立重驗並嘗試反駁；或嘗試以新的情境打破不變量 | 判定，或情境紀錄 |
+| `seeder` | Read、Write、Edit、Glob、Grep、Bash | 在暫存複本中依分類表產生缺陷補丁 | 補丁檔與對應表 |
+
+設計上的三個選擇：
+
+- **`spec-analyst` 沒有任何工具。** PRD 文字由提示傳入，它讀不到程式碼。規格與實作的隔離因此是結構性的，不靠指示。
+- **裁判與抽取者是同一種 agent，但看到的東西不同。** 裁判只拿到一筆主張與它引用的位置，被要求只讀那幾行並自行推導。
+- **只有 `harness-engineer` 會為目標 repo 寫東西，而且寫的是設定。** 測試內容是資料，由腳本或編排的工作階段寫入。
+
+每個 agent 的系統提示都包含第 14 節的不可信輸入規則。
+
+## 7. Workflow
+
+四個 workflow 都遵守同一份契約：
+
+- 參數先驗證。系統名稱必須符合 `[A-Za-z0-9][A-Za-z0-9_-]*`。來自目標 repo 的名稱與路徑先清洗：標籤移除控制字元與 shell 語法字元；路徑不合規就丟棄，並記錄丟了幾個。
+- 每個 agent 呼叫都指定輸出 schema。
+- 由前一個 agent 的輸出組成的提示內容，一律包在不可信標記裡，並先移除內容中的標記字樣。
+- 每次展開前檢查 agent 數上限與 token 預算。放不下的工作略過並回報，不讓整個執行失敗。
+- 啟動順序只由參數與先前結果決定，使中斷後以相同參數續跑時，已完成的 agent 直接重播。
+- 回傳固定的形狀：`confirmed`、`rejected`、`unverified`、`rerun`（可直接再傳入的缺口清單）、`injectionFlags`、`stats`。
+- Workflow 不碰檔案系統。產出由呼叫它的指令存檔並交給腳本處理。
+
+### 7.1 `model-mine`
+
+| 階段 | 做什麼 |
+|---|---|
+| 抽取（由上往下） | 每個入口群組一個 `code-reader`。回傳每個命令的守衛主張、寫入、對外效果、狀態轉移 |
+| 抽取（由下往上） | 每個實體一個 `code-reader`，從該實體各欄位的寫入點出發。回傳每個寫入點的支配守衛、生命週期欄位的判斷、候選不變量、成對路徑候選 |
+| 裁判 | 每筆主張一個 `code-reader`，只讀引用位置。判定：確認、否決、引用位置錯誤（附正確位置） |
+| 合併 | 同一行為在多處被報出時合為一筆，保留所有引用 |
+| 評審 | 標為關鍵的候選不變量各由兩個 `code-reader` 複核：一個重新推導是否忠實於程式，一個判斷它是業務限制還是實作的偶然 |
+
+切分依批次進行，每批抽取完成後先裁判再進下一批。只由註解或字串支持的主張一律否決。
+
+主張的粒度規則寫在提示裡：一個業務決定一筆守衛主張，不是一個分支一筆；一個業務限制一條不變量；純粹的管線程式碼（參數解析、格式化）不報。標為關鍵的不變量超過四分之一時，要求抽取者重新評定。
+
+### 7.2 `triage`
+
+輸入是一批差異或失敗，每筆附執行證據的摘要與相關的模型片段。每筆一個 `code-reader`，回傳分類與引用：
+
+| 分類 | 後續 |
+|---|---|
+| 模型要修 | 附修正後的主張，交回 `render_model.py` |
+| 載具缺口 | 附缺少的設定，交給 `harness-engineer` |
+| 不一致 | 成為問題候選，依據 N3 |
+| 異常 | 進問題清單，依據 N4 或 N5 |
+
+被歸為不一致的，再由第二個 `code-reader` 只憑引用位置與重現步驟複核一次。
+
+### 7.3 `spec-trace`
+
+| 階段 | 做什麼 |
+|---|---|
+| 條款 | 每個 PRD 章節一個 `spec-analyst`。回傳原子條款，每條附原文引用與行號 |
+| 引用檢查 | 由 workflow 內的程式碼檢查：引用必須是該行號範圍內的逐字子字串。不符的條款直接丟棄並計數 |
+| 預期 | 每條條款一個 `spec-analyst`，拿到條款與詞彙表（命令、實體、狀態、參數的名稱，不含行為）。回傳格子層級或情境層級的預期紀錄，或標為有歧義、不可測 |
+| 複核 | 每筆預期由第二個 `spec-analyst` 檢查是否忠實於引用的原文 |
+
+詞彙表只有名稱。`spec-analyst` 因此知道系統「有哪些操作」，但不知道它們「怎麼做」。
+
+### 7.4 `recheck`
+
+每個問題一個 `adversary`。它拿到的只有：一句話陳述、最小反例、重現指令、引用的程式位置。它要回答四件事：
+
+1. 重現指令是否重現（執行三次）。
+2. 反例是否只經由命令建立狀態。
+3. 所引用的依據是否存在，且內容如問題所述。
+4. 是否找得到這個行為是刻意設計的證據。
+
+判定為確認、降級、剔除。嚴重度為 S1 的問題再由第二個 `adversary` 複核。
+
+### 7.5 沒有 Workflow 工具時
+
+各指令改用一般的 subagent：`audit-model` 以三個 `code-reader` 分別負責守衛、寫入與轉移、不變量，由編排的工作階段自己逐筆讀引用位置確認後才寫入。規模上限是 12 個切分；超過時要求使用者以 `pattern` 分批。其餘三個 workflow 以相同方式縮小。
+
+## 8. 腳本
+
+Python 3.8 以上，只用標準函式庫。需要每次結果相同的工作都在這裡。
+
+| 腳本 | 作用 |
+|---|---|
+| `preflight_scan.py` | 由建置檔、依賴、設定檔辨識技術概況 |
+| `manifest.py` | 建立與比對來源檔案清單 |
+| `build_map.py` | 由 `facts/` 建出入口、實體、寫入點表、可到達關係 |
+| `make_shards.py` | 產生 `model-mine` 的切分清單 |
+| `render_model.py` | 由 workflow 結果建出模型檔：編號、展開矩陣、守衛不對稱、生命週期一致性、雙向對帳 |
+| `recipes.py` | 在狀態機上以廣度優先搜尋到達配方 |
+| `reconcile.py` | 靜態對觀察、三個事實來源、隱藏狀態 |
+| `mine_invariants.py` | 由快照以固定樣板找候選不變量 |
+| `build_questions.py` | 由各種差異產生問題 |
+| `apply_decisions.py` | 把決策的效果套用到模型檔 |
+| `rw_sets.py`、`pairs.py` | 由效果軌跡算讀寫集合與衝突命令對 |
+| `schedules.py` | 產生有界搶佔的排程 |
+| `prd_split.py`、`spec_join.py` | 切分 PRD；把預期接到格子與情境 |
+| `canary.py` | 守衛金絲雀 |
+| `seed_from_history.py`、`seed_run.py`、`recall.py` | 候選修復提交；套用補丁並執行；召回率與 Wilson 區間 |
+| `ids.py` | 配發編號、計算指紋、與上次對齊 |
+| `judge.py` | 能力、證據等級、問題狀態、每個實體的判定（第 12 節） |
+| `status.py` | 進度與過期判定 |
+| `build_report.py` | 生成 `REPORT.html` |
+| `export_scan.py` | 把已確認的不變量匯出成唯讀的 SQL 掃描腳本 |
+| `validate.py` | 以 schema 驗證所有產出 |
+
+`judge.py` 讀到的每個檔案都當成不可信文字：不執行、拒絕指向工作區外的連結、限制大小。
+
+## 9. auditkit：通用執行器
+
+### 9.1 設計
+
+auditkit 是一組 Java 原始碼，複製到目標模組的 `src/audit/java/auditkit/`。它解讀模型的 JSON 並執行，本身不含任何與特定 repo 有關的邏輯。
+
+- Java 8 語法，不直接引用 `javax.*` 或 `jakarta.*`。
+- 以原始碼提供而不發布成套件：目標專案不必依賴外部座標，而且看得到每一行。
+- 第三方依賴的版本優先取自目標專案自己的依賴管理；沒有的，取自 plugin 隨附、依 JDK 版本分列的版本表。
+
+| 元件 | 作用 |
+|---|---|
+| `SutDriver` | 依 `commands.json` 呼叫入口：HTTP 經 MockMvc，訊息與排程以反射呼叫處理方法。參數由 JSON 轉成請求物件 |
+| `Outcome` | 統一的結果：`ALLOWED`、`REJECTED`（附錯誤碼）、`ERROR` |
+| `ConnectionGuard` | 啟動時檢查資料庫位址。不是本機或容器位址就中止 |
+| `DbReset` | 重置資料庫 |
+| `Snapshot`、`Projection` | 傾印受審資料表；排除易變欄位後比對 |
+| `EdgeDoubles` | 以 Mockito 建立替身，取代 `harness.json` 列出的型別的 bean。記錄每次呼叫，可依指示丟出故障 |
+| `EffectRecorder` | 以 DataSource 代理與替身記錄有序的效果軌跡，並寫出執行前後的資料列差異 |
+| `Expr` | 小型運算式求值器：屬性路徑、四則運算、比較。用於參數樣板與狀態述詞 |
+| `MatrixRunner` | 逐格執行矩陣。記錄模式寫入觀察結果；驗證模式比對預期 |
+| `ScenarioRunner` | 重播 `scenarios.json` 的序列並檢查預期 |
+| `SequenceRunner` | 帶種子的隨機命令序列，每步檢查；失敗時以 delta debugging 縮減 |
+| `RelationRunner` | 蛻變關係 |
+| `PairRunner` | 成對路徑 |
+| `PurityRunner` | 讀取類入口的寫入集合必須為空 |
+| `FaultRunner` | 在每個效果點注入故障 |
+| `InterleaveRunner` | 兩個命令的受控交錯與重播 |
+| `BytecodeFacts`、`ContextFacts` | 事實抽取 |
+| `ResultWriter` | 寫出結果檔與證據檔 |
+
+每個 repo 預設不需要寫任何 Java。通用驅動處理不了的呼叫方式（特殊的驗證標頭、多段表單）由一個可選的 `DriverCustomizer` 類別補上，這是唯一的擴充點。
+
+### 9.2 `harness.json`
 
 ```json
 {
-  "commit": "…",
-  "build": { "tool": "maven", "jdk": "17", "modules": ["app", "domain"], "reproducible": true },
-  "framework": { "name": "spring-boot", "version": "3.2", "web": "mvc", "namespace": "jakarta" },
-  "persistence": [{ "kind": "jpa-hibernate" }, { "kind": "mybatis", "xml_mappers": 42 }],
-  "database": {
-    "engine": "postgresql", "version_in_tests": "15",
-    "migrations": "flyway", "isolation": { "value": null, "source": "unknown" },
-    "db_side_logic": { "triggers": 0, "procedures": 0 }
-  },
-  "messaging": [{ "kind": "nats", "mode": "jetstream", "test_double": "edge" }],
-  "outbound": [{ "name": "pricing", "client": "feign", "test_double": "edge" }],
-  "capabilities": { "CAP-CTX": "verified", "CAP-DB-REAL": "verified", "CAP-MQ-REAL": "absent" },
-  "ceilings": { "matrix": "A", "concurrency": "A", "message_redelivery": "B" },
-  "support_tier": { "framework": 1, "persistence": 1, "database": 1, "messaging": 1 },
-  "applicability": { "verdict": "full", "excluded": [] },
-  "questions": ["正式環境的交易隔離等級是？設定檔中未指定。"]
+  "application": "com.example.OrderApplication",
+  "reuse_test_config": ["com.example.test.PostgresContainerConfig"],
+  "datasource_bean": "dataSource",
+  "doubles": [
+    { "type": "io.nats.client.Connection", "kind": "messaging" },
+    { "type": "com.example.client.PricingClient", "kind": "external",
+      "responses": { "quote": { "unitPrice": "12.50", "currency": "TWD" } } }
+  ],
+  "auth": { "mode": "header", "headers": { "X-User": "audit" } },
+  "rejections": ["com.example.BusinessException"],
+  "error_code_path": "$.code",
+  "base_data": ["fixtures/base.sql"],
+  "reset": "template-db",
+  "engine": { "name": "postgresql", "version": "15", "isolation": "READ_COMMITTED",
+              "matches_production": "confirmed" }
 }
 ```
 
-## 6. P1 靜態模型
+`matches_production` 的值是 `confirmed`（人在 preflight 回答過且相符）、`unconfirmed` 或 `substitute`（替代引擎）。它是 B 級保留標記的來源之一。
 
-目的：只讀程式，推導出現況模型的草稿。這個階段所有產出都是 C 級，到 P3 才執行。全程不看 PRD、不看既有測試、不看 git 歷史。
+### 9.3 結果的三種分類
 
-### 6.1 三個事實來源
-
-同一件事從三個方向取得，互相對帳：
-
-| 來源 | 方向 | 階段 | 容易漏的 |
-|---|---|---|---|
-| 由上往下 | 從入口沿呼叫鏈追到寫入與對外效果 | P1 | AOP、entity listener、級聯、trigger 造成的寫入 |
-| 由下往上 | 從每個資料表欄位的寫入點回推到入口 | P1 | 透過反射或設定間接觸發的入口 |
-| 執行觀察 | 實際執行每個入口，攔截 SQL 與對外效果 | P3 | 測試沒走到的分支 |
-
-前兩者由不同的 agent 各自做，彼此看不到對方的草稿。對帳的結果是一張「入口 ↔ 寫入點」的雙向關係表，不一致之處只有兩種：
-
-- **孤兒寫入點**：由下往上找到，但沒有任何已知入口到得了。可能是隱藏入口、死碼，或由其他系統觸發。
-- **漏失的寫入**：某個入口的由上往下追蹤沒有涵蓋到某個寫入點。通常是橫切邏輯。
-
-每一筆不一致都要結案（補進模型）或列入問題清單，不能留著。
-
-### 6.2 機械事實
-
-以下事實由工具抽取，存入 `audit/facts/`，agent 只引用不重找：
-
-| 事實 | 抽取方式 |
+| 結果 | 意義 |
 |---|---|
-| 入口清單 | 靜態註解掃描；可啟動 context 時以執行期列舉為準 |
-| 呼叫關係 | 以 ArchUnit 讀位元組碼，取方法呼叫與欄位存取；介面呼叫展開到所有實作 |
-| 實體與欄位 | `@Entity` 對映、mapper 的 resultMap、遷移後的實際 schema |
-| 寫入點 | 對實體 setter 與欄位的寫入、mapper 中的 INSERT/UPDATE/DELETE、原生 SQL |
-| 交易屬性 | 執行期查詢每個 bean 方法實際生效的傳播、隔離、回滾規則 |
-| 橫切套用 | 執行期查詢每個 bean 被哪些 advisor 包裹 |
-| 重複邏輯 | 以複製貼上偵測工具找出相近的計算片段 |
+| `ALLOWED` | 命令成功 |
+| `REJECTED` | 程式有意識的拒絕：業務例外，或 4xx |
+| `ERROR` | 非預期的失敗：空指標、5xx、約束違反直接冒出 |
 
-呼叫關係是保守的過度近似（依類別階層展開），反射與動態代理不在其中。這是「孤兒寫入點」會出現的主因，也是需要執行觀察的理由。
+`ERROR` 本身是資訊，代表程式沒有處理這個情況。但若該次執行中有替身回傳了未設定的預設值，執行器把這筆結果標為**載具缺口**，不算產品問題，交回 `harness-engineer` 補設定。
 
-### 6.3 入口與命令
+### 9.4 資料的建立與重置
 
-- **入口**：外界能觸發程式執行的點，編號 `EP-`。
-- **命令**：會改變持久狀態的入口，編號 `CMD-`。一個入口若依參數做不同的事（例如一個「變更」端點接受多種變更類型），拆成多個命令。
-- **讀取**：宣稱不改變狀態的入口。是否真的不改，由 P3 的讀取純度檢驗確認。
+- 基礎資料（產品、客戶、代碼表）可直接寫入。
+- 交易資料只能經由命令建立。某種實體在受審範圍內沒有建立它的命令時允許直寫，執行器在證據檔標記 `synthetic-state`。
+- 重置：PostgreSQL 每輪從範本資料庫複製；MySQL 依外鍵順序清表後重新植入。不使用交易回滾，因為效果軌跡需要真實的提交。
+- 平行：執行器開多個 JVM 分叉，每個分叉用同一個容器內的獨立資料庫。
 
-P1 的靜態分類只是初判，以 P3 的效果軌跡為準。
+### 9.5 決定性
 
-### 6.4 實體與生命週期欄位
+- 每個命令從同一初始狀態執行兩次。兩次結果中不同的欄位是不決定的（自動編號、時間戳、UUID），自動加入易變集合，並以首次出現的順序重新編號。
+- 有可注入的時鐘就固定時間；沒有的，與時間有關的案例由執行器標記 `uncontrolled-time`。
+- 所有隨機序列記錄種子。
 
-對每個實體找出**生命週期欄位**，也就是程式用來決定「現在能不能做某件事」的欄位：
+### 9.6 執行與結果檔
 
-- 列舉或代碼型的狀態欄位。
-- 布林旗標（已取消、已鎖定、已刪除）。
-- 被當成旗標用的可空時間戳（`cancelledAt != null`）。
-- 出現在守衛條件裡的數量關係（已出貨量是否大於零、是否等於訂購量）。
+每一種執行都是一次建置呼叫，例如：
 
-判定標準是「有守衛讀它」，不是欄位名稱。
+```
+./mvnw -Paudit -pl app test -Dtest='auditkit.MatrixRunner' \
+       -Daudit.system=orders -Daudit.mode=verify -Daudit.select=pinned
+```
 
-### 6.5 守衛述詞與抽象狀態
+`audit.select` 有三個值：
 
-**守衛**是支配一個拒絕（丟例外、回傳錯誤）或一個寫入的條件。把所有守衛拆成原子述詞，分兩類：
+| 值 | 內容 | 預期 |
+|---|---|---|
+| `pinned` | 行為已鎖定、沒有不利決策的案例 | 全部相符。可以放進 CI 當門檻 |
+| `findings` | 對應到未修復問題的案例 | 不相符，直到問題被修掉 |
+| `all` | 全部 | — |
 
-- **狀態述詞**：只涉及實體自己或其父子實體的欄位，例如 `status ∈ {CONFIRMED}`、`shippedQty > 0`、`header.status = CLOSED`。
-- **參數述詞**：把命令參數與實體欄位做比較，例如 `newQty >= shippedQty`。
+`ResultWriter` 在 `runs/<kind>-<時間>/` 寫出：
 
-抽象狀態不是先驗給定的，而是由守衛誘導出來的：兩個實體實例若讓所有相關述詞取相同的真值，就屬於同一個抽象狀態。v0.1 提到的「推導出來的有效狀態，例如部分交貨」就是這樣得到的：程式裡有守衛測 `shippedQty > 0`，於是「已確認且有出貨」自然成為一個獨立的狀態。
+- `results.jsonl`：每個案例一行，含編號、結果（`MATCH`、`MISMATCH`、`HARNESS_GAP`、`ERROR`、`SKIPPED`）、預期與觀察。
+- `evidence/<案例編號>.json`：引擎、版本、隔離等級、是否有合成狀態、涉及哪些替身、時間是否受控、種子、排程。
+- `run.json`：案例總數與 `results.jsonl` 的雜湊。
+- 建置工具自己的測試結果 XML。
 
-為了避免組合爆炸，細分是**逐命令延遲進行**的：
+`judge.py` 會核對 `run.json` 的總數與 XML 的總數是否一致。
 
-1. 主軸是顯式的狀態欄位值。
-2. 每個命令只依「它自己的守衛測了哪些述詞」來細分格子。沒被這個命令測到的述詞不拆。
-3. 父項與子項的狀態只在該命令的守衛有測時才納入格子的上下文。
-4. 參數述詞不拆狀態，而是產生參數的等價類與邊界值（`shippedQty - 1`、`shippedQty`、`shippedQty + 1`）。
+## 10. 資料格式
 
-格子數量因此是「各命令 × 各狀態值 × 該命令實際測試的述詞組合」的總和，實務上每個命令多半只多出零到三個述詞。
+以下只列關鍵欄位。完整定義在 `schemas/`，每次寫入都驗證。
 
-### 6.6 變更矩陣
+### 10.1 實體
 
-每一格的鍵是（命令、實體、狀態值、狀態述詞取值、祖先上下文、參數類別）。
+```json
+{
+  "id": "ENT-order_line",
+  "table": "order_line", "pk": "id",
+  "parent": { "entity": "ENT-order_header", "fk": "header_id" },
+  "lifecycle": [{ "column": "status", "values": ["OPEN", "CONFIRMED", "CLOSED"] }],
+  "atoms": [
+    { "id": "shipped", "expr": "shipped_qty > 0", "cite": "OrderLineService.java:201-204" }
+  ],
+  "volatile": ["updated_at", "version"]
+}
+```
+
+### 10.2 命令
+
+```json
+{
+  "id": "CMD-changeLineQty",
+  "entry": "EP-0031",
+  "binding": { "kind": "http", "method": "PUT", "path": "/orders/{orderId}/lines/{lineId}/qty",
+               "body": { "qty": "${qty}" } },
+  "target": "ENT-order_line",
+  "kind": "set",
+  "state_atoms": ["shipped"],
+  "param_classes": [
+    { "id": "below-shipped", "params": { "qty": "${line.shipped_qty - 1}" } },
+    { "id": "at-shipped",    "params": { "qty": "${line.shipped_qty}" } },
+    { "id": "above-shipped", "params": { "qty": "${line.shipped_qty + 1}" } }
+  ]
+}
+```
+
+`binding` 來自機械事實。`kind` 是 `set`、`increment`、`create`、`delete`、`transition`、`batch` 之一，決定適用哪些蛻變關係。
+
+### 10.3 矩陣格
 
 ```json
 {
   "id": "CELL-0142",
   "command": "CMD-changeLineQty",
-  "entity": "ENT-order_line",
-  "state": { "status": "CONFIRMED", "atoms": { "shippedQty>0": true } },
+  "state": { "status": "CONFIRMED", "atoms": { "shipped": true } },
   "context": { "ENT-order_header.status": "OPEN" },
-  "param_class": "newQty<shippedQty",
-  "static": {
-    "outcome": "unhandled",
-    "anchors": ["OrderLineService#changeQty"]
-  },
-  "observed": null,
-  "reach": null,
-  "decision": null
+  "param_class": "below-shipped",
+  "reach": "RCP-031",
+  "static":   { "outcome": "unhandled", "cites": ["OrderLineService.java:188-230"] },
+  "observed": { "outcome": "ALLOWED", "writes": ["order_line.qty", "order_header.total"],
+                "messages": ["line.changed"] },
+  "expected": { "outcome": "REJECTED", "source": "D-021" },
+  "spec_expected": { "outcome": "REJECTED", "source": "PRD-3.2.4-b" }
 }
 ```
 
-靜態推導的結果有四種：
+靜態結果有四種：`allowed`、`rejected`、`unhandled`（沒有任何守衛針對這個情況做決定）、`unknown`。
 
-| 結果 | 意義 |
-|---|---|
-| `allowed` | 有守衛明確放行，並指出會寫入哪些欄位 |
-| `rejected` | 有守衛明確拒絕，並指出錯誤碼 |
-| `unhandled` | 沒有任何守衛針對這個情況做決定，行為是「剛好如此」 |
-| `unknown` | 靜態無法判斷 |
+`expected` 的來源依序是：人的決策、規格預期、已記錄的觀察結果。沒有決策也沒有規格時，預期就是觀察到的現況，這一格是鎖定的特徵化測試。
 
-`unhandled` 是矩陣最有價值的產出：程式沒有做決定的地方，就是沒人想過的地方。
-
-### 6.7 寫入點表與守衛不對稱
-
-由下往上的路徑為每個欄位產出一張寫入點表：
-
-| 欄位 | 寫入點 | 途徑 | 支配的守衛 | 可到達的入口 | 交易 | 併發保護 |
-|---|---|---|---|---|---|---|
-| `order_line.qty` | `OrderLineService#changeQty` | 實體 setter | 狀態 ∈ {OPEN, CONFIRMED} | `CMD-changeLineQty` | REQUIRED | `@Version` |
-| `order_line.qty` | `ShipmentListener#onShipped` | mapper UPDATE | `qty >= shippedQty` | `CMD-onShipment` | REQUIRED | 無 |
-| `order_line.qty` | `ImportJob#apply` | 原生 SQL | 無 | `CMD-nightlyImport` | 無 | 無 |
-
-同一個欄位的各個寫入點，守衛應該相同或有可解釋的差異。差異就是**守衛不對稱**的候選：程式在某處認為這個條件必須成立，在另一處沒檢查。這個方法不需要知道條件對不對，只需要程式自己在別處表達過這個信念。
-
-同一張表也直接暴露：沒有交易的寫入、沒有併發保護的寫入、繞過版本欄位的批次更新。
-
-「寬寫入點」要特別展開：`BeanUtils.copyProperties`、沒有 null 策略的物件對映、detached 實體的 merge，一次會寫入所有同名欄位，包含不該由這個入口修改的生命週期欄位。
-
-### 6.8 生命週期欄位的一致性
-
-對每個狀態欄位的每個值，機械地比對「誰寫入它」與「誰讀它」：
-
-| 情況 | 意義 |
-|---|---|
-| 有守衛讀，沒有任何程式寫 | 幽靈狀態。可能由其他系統寫入，或是廢棄的值 |
-| 有程式寫，沒有任何守衛讀 | 無人看守的狀態。進入之後所有操作的行為都是未定義 |
-| 列舉中有，讀寫都沒有 | 死值 |
-| 由多個布林或時間戳共同表示狀態 | 列出所有組合，標出程式從未處理的組合 |
-
-### 6.9 狀態機
-
-轉移由三部分組成：來源狀態的守衛、命令、對生命週期欄位的寫入。靜態推導出的狀態機在 P3 會與觀察到的轉移比對。
-
-要另外標出的隱含轉移：
-
-- **級聯**：改子項導致父項狀態重算。
-- **推導狀態的改變**：改數量讓「部分出貨」變成「全部出貨」，沒有任何地方寫狀態欄位。
-- **時間觸發**：排程把逾期的項目改狀態。
-
-### 6.10 成對路徑
-
-成對路徑是宣稱計算同一件事的兩條路徑，是不需要業務知識的差分檢驗來源。
-
-| 類型 | 找法 |
-|---|---|
-| 預覽與執行 | 命名（simulate、preview、dryRun、validate、calculate、estimate、quote）；帶 `dryRun` 旗標的同一條路徑 |
-| 單筆與批次 | 命名與參數型別（單一物件對集合） |
-| 不同入口的同一操作 | HTTP 與訊息入口最終呼叫到同一個或相似的服務方法 |
-| 新舊版本 | v1 與 v2 端點 |
-| 建立後修改與直接建立 | 兩種途徑應得到相同的最終狀態 |
-| 寫入端與讀取端 | 查詢投影或快取應與寫入端狀態一致 |
-| 重複的計算 | 複製貼上偵測找到的相近公式，可能已經各自演化 |
-
-每一對記錄：兩條路徑、比較的輸出、預期關係（相等，或一方是另一方的投影）。
-
-### 6.11 不變量目錄
-
-不變量依類別整理。類別本身是通用的，內容由各 repo 推導。
-
-| 類別 | 形式 | 常見來源 |
-|---|---|---|
-| 結構 | 子項必有父項；鍵唯一 | 外鍵、唯一鍵、對映註解 |
-| 彙總 | 父項欄位等於子項欄位的合計 | 重算合計的程式碼 |
-| 界限 | 一個量不超過另一個量；不為負 | 守衛、CHECK 約束、Bean Validation |
-| 單調 | 某欄位只增不減；時間先後 | 累加式的寫入 |
-| 狀態一致 | 父項狀態是子項狀態的函數；某狀態下某欄位必有值 | 級聯邏輯 |
-| 轉移合法 | 只發生狀態機內的轉移；終態不再變 | 狀態機 |
-| 不可變 | 進入某狀態後某欄位不再改變 | 守衛 |
-| 協定 | 執行前必有同版本的預覽；同一請求只生效一次 | 版本比對、冪等鍵 |
-| 效果對應 | 每個已提交的變更恰有一則對外訊息 | 發送邏輯 |
-| 隔離 | 操作不觸及其他租戶或其他擁有者的資料 | 查詢條件 |
-
-候選不變量有四個來源，每條都要標明：
-
-| 來源 | 說明 | 可信度 |
-|---|---|---|
-| 宣告 | 資料庫約束、Bean Validation、對映註解 | 高，但要驗證是否真的被執行（6.12） |
-| 強制 | 程式某處的守衛。配合寫入點表可知哪些寫入點沒強制 | 中。程式至少在一處相信它 |
-| 觀察 | P3 從執行快照探勘到的規律 | 低。只代表目前沒看到反例 |
-| 外部 | PRD、領域包、人工 | 依來源 |
-
-不變量盡可能寫成 **SQL 形式**：一條查詢，回傳違反的資料列，預期為空。這個形式有兩個好處：每個測試步驟之後都能直接執行；同一組查詢可以匯出給人拿去掃正式資料庫的唯讀副本。
+### 10.4 不變量
 
 ```json
 {
@@ -524,600 +690,59 @@ P1 的靜態分類只是初判，以 P3 的效果軌跡為準。
   "statement": "已出貨量不得大於訂購量",
   "scope": "ENT-order_line",
   "check": { "sql": "SELECT id FROM order_line WHERE shipped_qty > qty", "expect": "empty" },
-  "sources": [
-    { "kind": "enforced", "anchor": "ShipmentListener#onShipped" }
-  ],
+  "sources": [{ "kind": "enforced", "cite": "ShipmentListener.java:77-81" }],
   "unenforced_at": ["OrderLineService#changeQty", "ImportJob#apply"],
-  "status": "candidate",
-  "decision": null
+  "critical": true,
+  "status": "candidate"
 }
 ```
 
-狀態只有三種：`candidate`（候選）、`confirmed`（經決策或規格確認）、`rejected`（人說這不是規則）。只有 `confirmed` 的不變量被違反時才直接算缺陷。
+狀態只有 `candidate`、`confirmed`、`rejected`。只有已確認的不變量被違反時才直接算缺陷。
 
-### 6.12 宣告與實作的比對
-
-宣告了但沒生效，或生效了但沒宣告，都是機械可查的不一致：
-
-- 程式檢查唯一性，資料庫沒有唯一鍵。
-- 對映註解說不可為空，資料庫欄位可為空（或相反）。
-- Bean Validation 只在 HTTP 入口觸發，訊息與排程入口繞過。
-- 列舉值集合與資料庫的 CHECK 約束或代碼表不同。
-- 欄位長度、精度、小數位數在程式與資料庫不一致。
-
-## 7. P2 測試載具
-
-目的：建立能執行模型的環境。這是整個 skill 唯一需要寫較多 Java 的地方，大部分是可重用的。
-
-### 7.1 隔離契約
-
-對目標 repo 的所有改動限於三處：
-
-| 位置 | 內容 |
-|---|---|
-| `audit/` | 所有資料產出 |
-| `src/audit/java`、`src/audit/resources` | 載具與測試 |
-| 一個建置入口 | Maven 是一個 `audit` profile；Gradle 是一個 init script，不動建置檔 |
-
-Maven 的 `audit` profile 把 `src/audit/java` 加為測試原始碼根目錄，並加入需要的測試依賴與外掛。不啟用這個 profile 時，建置的輸入與輸出完全不變。
-
-多模組專案中，審查原始碼放在含啟動類別的模組。
-
-### 7.2 auditkit
-
-以原始碼模板的形式隨 skill 提供，複製到 `src/audit/java` 下。不發布成套件，原因是避免目標專案依賴一個外部座標，而且原始碼可被審閱。
-
-模板使用 Java 8 語法，不直接引用 `javax.*` 或 `jakarta.*`，以便在新舊專案都能編譯。
-
-| 元件 | 作用 | 主要依賴 |
-|---|---|---|
-| `CommandRegistry`、`SutDriver` | 以命令編號呼叫入口，回傳統一的結果 | 由 agent 依概況生成 |
-| `DbReset` | 重置資料庫 | JDBC |
-| `Snapshot`、`Projection` | 傾印受審資料表，套用投影後比對 | JDBC |
-| `EffectRecorder` | 記錄交易邊界、SQL、發送、外部呼叫的有序軌跡 | datasource-proxy、邊界替身 |
-| `MatrixRunner` | 讀矩陣 JSON，逐格執行 | JUnit 5 動態測試 |
-| `InvariantRunner` | 執行 SQL 形式的不變量 | JDBC |
-| `PairRunner` | 執行成對路徑並比較 | — |
-| `FaultInjector` | 在指定的效果點注入故障 | datasource-proxy、邊界替身 |
-| `Interleaver` | 兩到三個操作的受控交錯與重播 | datasource-proxy、資料庫的鎖等待檢視 |
-| `SeqProps` | 有狀態 property 測試的骨架 | jqwik，或內建後端 |
-
-`SeqProps` 有兩個後端。預設用 jqwik 的 action chain。jqwik 目前是維護模式，所以另備一個無額外依賴的後端：帶種子的隨機序列產生，加上以 delta debugging 縮減失敗序列。兩者對外介面相同。jqwik 與應用 context 的整合方式需試跑。
-
-### 7.3 命令與結果
-
-```java
-public interface Command {
-    String id();                                  // CMD-…
-    Outcome invoke(Map<String, Object> params);   // 經由入口呼叫，不直接碰資料庫
-}
-
-public final class Outcome {
-    public enum Kind { ALLOWED, REJECTED, ERROR }
-    public final Kind kind;
-    public final String errorCode;                // 業務錯誤碼，或例外類別
-    public final Map<String, Object> response;
-}
-```
-
-`REJECTED` 是程式有意識的拒絕（業務例外、4xx）。`ERROR` 是非預期的失敗（空指標、5xx、約束違反直接冒出）。這個區分本身就是資訊：一個格子的結果若是 `ERROR`，代表程式沒有處理這個情況。
-
-呼叫層級由 agent 依概況選擇：
-
-| 層級 | 做法 | 用途 |
-|---|---|---|
-| L0 | 直接呼叫純計算函式 | 數值與時間的邊界測試 |
-| L1 | 程序內呼叫入口：MockMvc、直接呼叫 listener 方法 | 預設 |
-| L2 | 經真實的連接埠與訊息代理 | 驗證訊息語意時 |
-
-L1 的選擇原則：程序內、並且位於所有橫切邏輯（驗證、AOP、交易代理）之外的最外層。直接呼叫 service bean 只在入口層純粹做轉換時才可接受，否則會繞過驗證與攔截器。
-
-### 7.4 資料的建立
-
-- **基礎資料**（產品、客戶、代碼表）：可直接寫入資料庫。
-- **交易資料**（受審的實體）：只能透過命令建立。
-
-若某種實體在受審範圍內沒有建立它的命令（由別的系統寫入），允許直寫，但由此得到的證據標 `synthetic-state`。
-
-### 7.5 重置策略
-
-依引擎與測試類型選擇，越上面越快：
-
-| 策略 | 適用 | 限制 |
-|---|---|---|
-| 交易回滾 | 單一交易內的測試 | 不能用於跨交易、故障注入、併發 |
-| 範本資料庫複製 | PostgreSQL。每輪從範本建新庫 | 範本不能有連線 |
-| 依外鍵順序清表後重新植入 | 所有引擎 | 清表腳本由 schema 生成 |
-| 重啟容器 | 最後手段 | 慢 |
-
-平行執行時每個工作者使用同一個容器內的獨立資料庫或 schema。
-
-### 7.6 決定性
-
-測試必須可重播，否則 A 級證據不成立。
-
-- **雙跑偵測**：每個命令從同一個初始狀態執行兩次，兩次結果中不同的欄位就是不決定的（自動編號、時間戳、UUID）。這些欄位自動加入易變集合，從比對的投影中排除，並以首次出現的順序重新編號。
-- **時間**：有 `Clock` 注入就固定時間。沒有的話，與時間有關的結論標 `uncontrolled-time`，並把直接取現在時間的位置列為可測性問題。
-- **隨機**：所有隨機測試記錄種子。失敗的種子固定下來成為回歸樣本。
-
-### 7.7 效果軌跡
-
-`EffectRecorder` 為每次命令執行記錄一條有序軌跡：
-
-```
-T1 BEGIN
-T1 SQL   SELECT … FROM order_line WHERE id = ?
-T1 SQL   UPDATE order_line SET qty = ?, version = ? WHERE id = ? AND version = ?   rows=1
-T1 PUB   line.changed {…}
-T1 EXT   POST pricing/recalc
-T1 COMMIT
-```
-
-再加上執行前後的資料列差異。由於某些 ORM 的 UPDATE 會列出所有欄位，實際改了哪些欄位要以資料列差異為準，不能只看 SQL。
-
-從軌跡機械地導出每個命令的：
-
-- 交易數量與邊界。
-- 讀取集合與寫入集合（資料表與欄位）。
-- 每次發送與外部呼叫相對於提交的位置。
-- 交易內是否有外部呼叫。
-- 取得的鎖、版本比對、影響筆數是否被檢查。
-
-這些導出事實是 P3 的讀取純度、P4 的故障注入與併發配對的共同輸入。
-
-## 8. P3 特徵化
-
-目的：把 P1 的靜態模型全部執行一遍，得到「已執行的模型」。這個階段不需要任何業務判斷，產出的是事實。
-
-### 8.1 到達配方
-
-要執行一個格子，先要把實體帶到那個抽象狀態。**到達配方**是一串命令，從空白狀態出發，把實體帶到目標狀態。
-
-做法是在靜態狀態機上做廣度優先搜尋，找到最短的命令序列，然後實際執行並確認確實到達。執行結果與模型不符時修正模型再搜。
-
-搜不到配方的狀態分三類處理：
-
-| 類別 | 處理 |
-|---|---|
-| 沒有任何程式會寫入這個狀態 | 幽靈狀態，列入問題清單 |
-| 有寫入點，但在受審範圍外（其他系統、資料修補腳本） | 以直寫建立，標 `synthetic-state` |
-| 理論上可達，搜尋預算內沒找到 | 標為未涵蓋，列在未審範圍 |
-
-### 8.2 執行矩陣
-
-`MatrixRunner` 對每一格：重置、執行到達配方、確認抽象狀態、拍快照、呼叫命令、拍快照、記錄結果與效果軌跡。
-
-有兩種模式：
-
-- **記錄**：第一次執行，把觀察到的結果寫回該格的 `observed`。
-- **驗證**：之後的每次執行，斷言結果與已記錄的相同。
-
-這就是特徵化測試：它不判斷對錯，只釘住現況。靜態推導與觀察結果不一致的格子要逐一對帳，原因通常是靜態分析漏了橫切邏輯，偶爾是靜態推導本身錯了。
-
-### 8.3 模型符合與隱藏狀態
-
-所有執行過程中記錄（執行前抽象狀態、命令、參數類別、結果、執行後抽象狀態）的五元組，用來做兩個檢查：
-
-- **觀察到的轉移是否都在模型裡。** 多出來的轉移代表模型漏了東西，通常是級聯或推導狀態。
-- **同一個抽象狀態對同一個命令是否有相同的反應。** 若兩個實體處在相同的抽象狀態，對同一類參數的同一個命令卻一個被允許一個被拒絕，代表抽象漏了一個述詞：有某個沒被當成守衛的欄位在影響行為。找出這個欄位並細分格子，或列為問題。
-
-第二個檢查是抽象狀態完整性的保證來源，在 P4 的隨機序列中持續進行。
-
-### 8.4 讀取純度
-
-每個被分類為讀取的入口（含預覽、試算類），其效果軌跡的寫入集合必須為空：沒有 INSERT、UPDATE、DELETE，沒有發送，沒有會改變對方狀態的外部呼叫。
-
-這個檢驗抓得到一類靜態分析很難看出的問題：ORM 的髒檢查。讀取路徑為了計算方便修改了受管實體，交易結束時被自動寫回資料庫。
-
-稽核紀錄、存取紀錄、序號取號要先列為例外並在簽核時確認。
-
-### 8.5 成對路徑差分
-
-對 6.10 找到的每一對，從同一個初始狀態、以同樣的參數分別執行，比較輸出。參數來自矩陣格子的參數類別，所以邊界值都會被涵蓋。
-
-預覽與執行這一對的比較內容：預覽回傳的結果，與執行後的實際狀態變化及對外訊息，套用投影後應該相等。
-
-### 8.6 快照不變量探勘
-
-P3 執行過程中累積了大量的資料庫快照。以固定的樣板在快照上找規律，作為候選不變量的第三個來源：
-
-- 欄位 ≤ 欄位；欄位 ≥ 0。
-- 父項欄位 = 子項欄位的合計。
-- 父項狀態由子項狀態的集合唯一決定。
-- 某狀態下某欄位必為空或必不為空。
-- 某欄位在所有觀察到的轉移中只增不減。
-- 進入某狀態後某欄位不再改變。
-
-只有同時滿足「支持度夠高」與「在程式中找得到相關的讀寫位置」的規律才成為候選。純粹巧合的規律（兩個不相干的數字剛好一個總是比較小）在此過濾掉。
-
-### 8.7 產出
-
-已執行的模型：每一格有觀察結果與測試；每個命令有效果軌跡；狀態機經觀察比對；候選不變量目錄；成對路徑的差分結果；以及一份問題清單，供簽核 1 使用。
-
-## 9. 簽核 1 與決策紀錄
-
-### 9.1 人回答什麼
-
-人不需要確認模型是否符合程式，那已經由測試保證。人只回答機器無法回答的事：**這個行為是不是本意。**
-
-進入問題清單的只有：
-
-- `unhandled` 與 `ERROR` 的格子。
-- 守衛不對稱、成對路徑差異、宣告與實作不符。
-- 候選不變量是否為真正的規則。
-- 幽靈狀態、無人看守的狀態。
-- 讀取路徑的寫入例外。
-- 等價投影（比對時哪些欄位不算）。
-
-程式明確允許或明確拒絕、各處一致的格子不問。這是控制人工工作量的關鍵。
-
-### 9.2 問題的格式
-
-每個問題是封閉式的，附可重現的證據：
-
-```
-Q-014　order_line｜改量｜CELL-0142
-觀察：狀態為 CONFIRMED 且已有出貨時，把數量改成小於已出貨量，系統接受。
-證據：MatrixTest[CELL-0142]，A 級
-為什麼問：出貨路徑會檢查「已出貨 ≤ 訂購」，改量路徑沒有（守衛不對稱）。
-選項：
-  (a) 應該拒絕。列為缺陷，INV-07 成為已確認的不變量。
-  (b) 本意如此。鎖定為既定行為，INV-07 作廢。
-  (c) 需要業務確認。維持待確認。
-```
-
-問題依（可能的嚴重度 × 證據等級）排序，同一實體的放在一起。數量超過上限時只送出前面的部分，其餘留在待確認清單，並在報告的未審範圍中明列。
-
-### 9.3 決策紀錄
+### 10.5 情境
 
 ```json
 {
-  "id": "D-021",
-  "question": "Q-014",
-  "answer": "a",
-  "by": "…",
-  "date": "…",
-  "rationale": "已出貨的數量不可能收回",
+  "id": "SCN-0007",
+  "origin": "sequence seed 81327, shrunk from 38 steps",
+  "steps": [
+    { "command": "CMD-createOrder", "params": { "lines": [{ "sku": "A", "qty": 100 }] }, "as": "order" },
+    { "command": "CMD-confirmOrder", "params": { "orderId": "${order.id}" } },
+    { "command": "CMD-onShipment", "params": { "lineId": "${order.lines[0].id}", "qty": 60 } },
+    { "command": "CMD-changeLineQty", "params": { "lineId": "${order.lines[0].id}", "qty": 40 } }
+  ],
+  "expect": { "invariants": ["INV-07"] }
+}
+```
+
+成對路徑、蛻變關係、到達配方、規格的情境層級預期，都用同一種步驟格式。
+
+### 10.6 問題與決策
+
+```json
+{
+  "id": "Q-014", "kind": "unhandled-cell", "flagged": true,
+  "about": ["CELL-0142", "INV-07"],
+  "observation": "狀態為 CONFIRMED 且已有出貨時，數量可改成小於已出貨量",
+  "why": "出貨路徑檢查「已出貨 ≤ 訂購」，改量路徑沒有",
+  "reproduce": "./mvnw -Paudit -pl app test -Dtest='auditkit.MatrixRunner' -Daudit.case=CELL-0142"
+}
+```
+
+```json
+{
+  "id": "D-021", "question": "Q-014", "verdict": "not-intended",
+  "by": "…", "at": "…", "note": "已出貨的數量不可能收回",
   "effects": [
     { "set": "INV-07.status", "to": "confirmed" },
-    { "set": "CELL-0142.decision", "to": "should-reject" }
+    { "set": "CELL-0142.expected", "to": { "outcome": "REJECTED" } }
   ]
 }
 ```
 
-決策的三種效果：
+`verdict` 是 `not-intended`、`intended`、`unsure`。`effects` 由 `apply_decisions.py` 依問題種類算出，不由人或模型填。
 
-- 把候選不變量升為已確認，之後違反它的都是 N2 缺陷。
-- 把一個格子的觀察行為鎖定為既定行為，之後它改變了就是回歸。
-- 把一個格子標為「應為另一種結果」，產生一個缺陷，測試的預期值隨之翻轉。
-
-決策紀錄永久保存。重跑時不重問。只有當決策引用的格子或不變量因程式改版而消失時，才把該決策標為過期並再問一次。
-
-## 10. P4 深度驗證
-
-### 10.1 檢驗準則總表
-
-| 編號 | 準則 | 判定內容 | 需要業務知識 | 依據 | 常見誤報 |
-|---|---|---|---|---|---|
-| O1 | 矩陣特徵化 | 每格的實際結果；靜態與執行是否一致 | 否 | — | — |
-| O2 | 守衛不對稱 | 同一欄位各寫入點的守衛不同 | 否 | N3 | 刻意的管理者路徑 |
-| O3 | 宣告與實作 | 約束、驗證、對映與實際行為不符 | 否 | N3 | — |
-| O4 | 成對路徑差分 | 兩條路徑的結果不同 | 否 | N3 | 投影未排除易變欄位 |
-| O5 | 讀取純度 | 讀取類入口有寫入 | 否 | N4 | 稽核紀錄、取號 |
-| O6 | 模型符合 | 模型外的轉移；同狀態不同反應 | 否 | N3 | 抽象不夠細 |
-| O7 | 不變量保持 | 隨機序列的每一步都成立 | 已確認者需要 | N2 | 候選不變量本身不是規則 |
-| O8 | 蛻變關係 | 逆操作、可加、可交換、冪等、無變更 | 投影需確認 | N4 | 版本號、歷程表 |
-| O9 | 原子性 | 故障後的狀態等於執行前或完整執行後 | 否 | N4 | 刻意的多交易流程 |
-| O10 | 效果對應 | 訊息與已提交的變更一一對應 | 否 | N4 | — |
-| O11 | 重送收斂 | 重送或重試後等同成功一次 | 否 | N4 | — |
-| O12 | 可序列化 | 併發結果等同某個先後順序 | 否 | N4 | 最後寫入者勝出是本意 |
-| O13 | 規格符合 | PRD 條款 | 由 PRD 提供 | N1 | 條款有歧義 |
-| O14 | 領域慣例 | 領域包中的常理 | 由領域包提供 | N5 | 刻意客製 |
-
-O1 到 O6 在 P3 完成。本階段處理 O7 到 O12。O13 在 P5。
-
-### 10.2 有狀態 property 測試
-
-隨機產生命令序列，每一步之後檢查所有準則。
-
-**以矩陣為參考模型。** 每一步執行前，由目標實體的抽象狀態與參數類別查矩陣，得到預期結果。實際結果不符有兩種可能：矩陣漏了條件（回頭細分格子），或發現了與歷史有關的行為（8.3 的隱藏狀態）。單格測試只走最短的到達配方，隨機序列會以各種不同的歷史到達同一個抽象狀態，這是它多出來的檢出能力。
-
-**產生器的設計：**
-
-- 結構保持小：每個父項一到三個子項。大部分結構性的錯誤在小規模就會出現。
-- 參數偏向邊界：每個參數述詞貢獻它的邊界值（比較對象的值、加一、減一），加上零、一、型別上限。
-- 實體選擇偏向有趣的狀態：非初始、非終態的實體有較高的被選機率。
-- 命令選擇涵蓋所有命令，包含訊息與排程入口。
-
-**每一步的檢查：**
-
-1. 結果與矩陣一致。
-2. 所有已確認的 SQL 不變量為空；候選不變量的違反記錄下來，不算失敗。
-3. 觀察到的轉移在狀態機內。
-4. 沒有 `ERROR` 類結果。
-
-失敗的序列自動縮減到最短，連同種子存為回歸測試。
-
-### 10.3 蛻變關係
-
-蛻變關係不需要知道正確答案，只需要知道兩次執行之間應有的關係。目錄是通用的，適用與否由模型決定。
-
-| 關係 | 形式 | 適用條件 |
-|---|---|---|
-| 逆操作 | 做了再反向做，等同沒做 | 命令有對應的反向命令或可用負值 |
-| 可加 | 一次改 a+b，等同先改 a 再改 b | 增量型命令 |
-| 設定冪等 | 設定同一個值兩次，等同一次 | 設定型命令 |
-| 無變更 | 以現值更新，等同沒做 | 更新型命令 |
-| 可交換 | 對不同實體的兩個命令，先後順序不影響結果 | 兩命令的寫入集合不相交 |
-| 排列不變 | 批次請求中項目的順序不影響結果 | 批次命令 |
-| 拆分等價 | 一個批次，等同逐筆執行 | 有成對的單筆與批次 |
-| 單調 | 輸入增加時，某個輸出不會減少 | 計算類 |
-
-「等同」是套用**等價投影**之後的比較。投影排除的欄位（版本號、時間戳、歷程紀錄）來自 7.6 的易變集合，並在簽核 1 確認。這一點很重要：加十再減十，資料相同但多了兩筆歷程，這是否算「等同」是業務決定。
-
-### 10.4 故障注入
-
-對每個會改變狀態的命令，取它單獨執行時的效果軌跡，在每一個效果點注入故障，重跑，檢查結果。
-
-| 效果點 | 注入的故障 | 模擬的情況 |
-|---|---|---|
-| SQL 語句 | 執行前丟出資料庫例外 | 資料庫錯誤、逾時 |
-| 提交 | 提交前失敗 | 連線中斷，交易回滾 |
-| 提交 | 提交成功後、回傳前失敗 | 結果未知：已生效但呼叫端看到失敗 |
-| 訊息發送 | 發送前失敗 | 代理不可用 |
-| 訊息發送 | 發送成功後失敗 | 結果未知 |
-| 外部呼叫 | 呼叫前失敗；回應錯誤；逾時但對方已執行 | 下游故障、結果未知 |
-
-每次注入後的檢查：
-
-- **O9 原子性**：投影後的資料庫狀態必須等於執行前，或等於完整成功後。介於兩者之間就是部分提交。
-- **O10 效果對應**：狀態等於執行前時，不應有任何訊息已送出（否則是幽靈訊息）；狀態等於成功後時，所有訊息必須已送出或有待送紀錄（否則是遺失訊息）。
-- **O11 重送收斂**：以同一個請求再呼叫一次（有冪等鍵就帶同一把），最終狀態必須等於成功恰好一次。
-
-一個命令通常只有個位數到十幾個效果點，每次注入只是一次命令執行，成本很低。這是整套驗證中單位成本檢出率最高的部分，因為交易邊界的問題在一般測試中幾乎不會被執行到。
-
-### 10.5 併發
-
-**先選對，再交錯。** 不測所有命令的組合。由效果軌跡的讀寫集合機械地算出有衝突的命令對，依衝突強度排序：
-
-1. 寫入同一個欄位。
-2. 一方寫入的欄位是另一方守衛讀取的欄位。
-3. 兩方寫入不同資料列，但這些資料列受同一條跨列不變量約束。
-
-第三類要特別留意，因為逐列的樂觀鎖與快照隔離都擋不住它。
-
-**異常目錄：**
-
-| 異常 | 靜態線索 | 動態確認 |
-|---|---|---|
-| 更新遺失 | 讀出後計算再寫回，沒有版本欄位、鎖或原子式 SQL | 兩個命令在同一列交錯，結果不等於任一先後順序 |
-| 檢查後動作 | 先查是否存在再新增，沒有唯一鍵 | 兩個建立命令交錯，產生重複 |
-| 寫入偏斜 | 不變量跨多列，各命令改不同列，沒有鎖聚合根 | 兩個命令各改一列，合計違反不變量 |
-| 預覽過期 | 預覽與執行之間沒有版本比對 | 預覽、他人變更、再執行 |
-| 重複提交 | 沒有冪等鍵或唯一請求號 | 同一請求並行兩次 |
-| 重送與亂序 | 消費者不去重，或依賴順序 | 重送同一訊息；交換兩則訊息的順序 |
-| 鎖先於提交釋放 | 鎖在交易方法內取得與釋放 | 一方放鎖但尚未提交時，另一方進入 |
-| 死結 | 不同命令以不同順序鎖多列 | 交錯到雙方互等，觀察應用如何處理 |
-| 排程競爭 | 排程與使用者命令寫同一欄位 | 把排程視為另一個操作來交錯 |
-| 記憶體內競爭 | 單例 bean 的可變欄位 | 只做靜態標記，停在 C |
-
-**交錯載具的設計：**
-
-- **讓出點**是資料庫互動：每條 SQL 執行前、提交前，以及每次發送與外部呼叫前。透過包裝 DataSource 的代理取得，與應用框架無關。不在 Java 記憶體存取層級做交錯。
-- **排程**以步數表示：「T1 跑 i 步，T2 跑 j 步，T1 跑完，T2 跑完」。
-- **探索**採有界搶佔。搶佔一次：T1 跑 i 步後讓 T2 跑完，i 取遍所有讓出點，再對調。搶佔兩次：加上 T2 的中斷點。多數併發錯誤在很少的搶佔次數內就會出現，所以上限預設為二。優先探索緊鄰衝突語句的讓出點。
-- **阻塞處理**：被排到的執行緒若卡在資料庫鎖上，載具查詢資料庫的鎖等待檢視確認它確實在等，就把它標為阻塞並改排另一個。雙方都阻塞即為死結，交由資料庫處置並記錄應用的反應。
-- **連線**：每個執行緒的步驟以（執行緒、連線）為鍵，以處理一個操作使用多個連線的情況（新交易傳播）。
-- **隔離等級與引擎版本**使用正式環境的設定。未知時在引擎預設值下執行，結果標 `unconfirmed-version`。
-
-**每個排程結束後的檢查：**
-
-1. 所有已確認的不變量成立。
-2. **O12 可序列化**：最終狀態與兩個命令各自的結果，必須等於「T1 先 T2 後」或「T2 先 T1 後」這兩個序列執行結果之一。兩個序列結果由載具先行算出。
-3. 回應與狀態一致：回報成功的命令，其效果確實存在。
-4. 對外訊息與最終狀態一致。
-
-O12 是不需要業務知識的併發準則。不符合可序列化的結果不一定是缺陷（有些系統刻意採最後寫入者勝出），所以歸類為異常，進問題清單。違反已確認不變量的則直接是缺陷。
-
-失敗的排程存成可重播的回歸測試。連續重播三次都重現才算 A 級。
-
-### 10.6 冪等與重送
-
-對每個訊息入口與每個標示為冪等的 HTTP 入口：
-
-- 同一則訊息或請求連續送兩次。
-- 處理到一半失敗後重送（與 10.4 的重送收斂共用）。
-- 兩則訊息以相反順序送達。
-
-最終狀態應等於各送一次、依正確順序的結果。
-
-### 10.7 選配延伸：形式化模型
-
-只在下列條件成立時建議使用：流程涉及三個以上的參與者或步驟（例如補償式的長流程、帶待送表的非同步發送加上消費端），交錯空間超出兩到三個操作的載具所能涵蓋。
-
-模型由效果軌跡導出，不由閱讀程式導出。模型檢查找到的反例必須在載具上重播成功才能升到 A，否則標 `model-only`。
-
-## 11. P5 規格對照
-
-### 11.1 條款拆解
-
-由**規格分析 agent** 進行。它只看得到 PRD 與術語表，看不到程式。這項工作可以在 P0 之後的任何時間平行進行。
-
-```json
-{
-  "id": "PRD-3.2.4-b",
-  "source": { "file": "prd.md", "heading": "3.2.4 數量變更", "lines": [212, 215], "quote": "…" },
-  "type": "constraint",
-  "strength": "must",
-  "trigger": "變更訂單行數量",
-  "precondition": "已有出貨",
-  "expected": "新數量不得小於已出貨量，否則拒絕",
-  "entities": ["訂單行"],
-  "testability": "testable"
-}
-```
-
-每條條款必須附原文引用與行號。條款類型：規則、限制、流程、狀態、計算、權限、定義、非功能。可測性：可測、有歧義（產生問題）、非功能（不在範圍）。
-
-### 11.2 規格導出的測試
-
-由**規格測試 agent** 撰寫。它看得到條款、命令清單與 driver 的介面，看不到程式實作與矩陣的觀察結果。
-
-這樣寫出的測試表達的是 PRD 的預期，不是程式的行為。它與 P3 的特徵化測試在同一格上若有不同的預期，差異就是發現。
-
-### 11.3 判定
-
-| 判定 | 意義 |
-|---|---|
-| 符合 | 規格導出的測試通過 |
-| 違反 | 測試失敗，產生問題，依據 N1 |
-| 部分符合 | 部分狀態或參數類別下違反 |
-| 未實作 | 找不到對應的命令或格子 |
-| 有歧義 | 條款可有多種解讀，各解讀的結果不同，產生問題 |
-| 不可測 | 需要範圍外的系統才能驗證 |
-
-每個判定帶證據等級。
-
-### 11.4 反向清單與三方比對
-
-反向清單：沒有任何條款對應的格子、不變量、對外效果。也就是程式有做但 PRD 沒寫的行為。
-
-三方比對沿用 v0.1 的分類，每一種現在都有具體的資料來源：
-
-| 情況 | 資料來源 | 意義 |
-|---|---|---|
-| 程式 ≠ PRD | 規格測試失敗 | 實作錯誤，或 PRD 過時 |
-| 程式 ≠ 慣例，PRD 未提 | 領域包異常 + 反向清單 | 可能是 bug 或刻意客製 |
-| 程式 = PRD，兩者 ≠ 慣例 | 規格測試通過 + 領域包異常 | 需求本身值得回頭確認 |
-| 程式 = 慣例 ≠ PRD | 規格測試失敗 + 領域包相符 | 照慣例實作，未照需求 |
-| PRD 自相矛盾 | 兩條條款對同一格有不同預期 | 規格問題 |
-
-## 12. P6 保證
-
-目的：量測審查本身的品質。沒找到問題不代表沒有問題，所以要量。
-
-### 12.1 盲驗
-
-每個問題由盲驗 agent 獨立確認。它拿到的只有：問題的一句話陳述、最小反例、重現指令、程式碼。它看不到審查過程與推論。
-
-它要做四件事：
-
-1. 執行重現指令三次。
-2. 確認反例符合可到達規則（初始狀態經由命令建立）。
-3. 確認所引用的依據確實存在，且內容如問題所述。
-4. 嘗試找出這個行為是刻意設計的證據。
-
-結果是確認、降級，或剔除。
-
-### 12.2 紅隊
-
-紅隊 agent 拿到不變量目錄、driver、矩陣，目標是用現有測試沒用過的方式打破不變量。它看不到既有的問題清單，以避免只是重找一遍。
-
-### 12.3 變異測試
-
-以 PIT 對核心領域套件做變異，用審查測試套件來殺。
-
-- 範圍限於含守衛與計算的套件。
-- 隨機測試在變異分析時固定種子並降低次數，否則結果不穩定。
-- 存活的變異體分類：等價變異、未涵蓋的行為（補測試）、確認的盲區（列入未審範圍）。
-
-PIT 對 jqwik 引擎的支援需試跑。不支援時，變異分析只使用矩陣測試與內建後端的序列測試。
-
-### 12.4 埋入缺陷的召回率
-
-**缺陷來源**，依可信度排序：
-
-| 來源 | 做法 | 偏誤 |
-|---|---|---|
-| 修復歷史 | 把過去的修復提交反向套用 | 最接近真實；數量取決於歷史 |
-| 人工埋入 | 由熟悉系統的人依分類表埋入 | 接近真實；需要人力 |
-| agent 埋入 | 由埋入 agent 依分類表產生語意變異 | 與審查者盲點相關，會高估召回率 |
-
-**盲測協定：**
-
-1. 埋入者在獨立分支上套用缺陷，每個缺陷編號 `SEED-`，對應表不進入審查者可見的範圍。
-2. 審查 agent 在沒有 git 歷史的工作目錄上執行完整流程。
-3. 以問題的位置與違反的不變量比對對應表，計算命中。
-
-**統計：** 報告召回率時一律附 Wilson 區間，並依缺陷類別分列。樣本少的時候區間很寬（10 個中 8 個，95% 區間約為 49% 到 94%），報告要如實呈現。要得到可用的數字，每次量測至少 30 個缺陷，或跨多次量測累積。
-
-**缺陷分類表**（同時用於埋入與分列召回率）：
-
-| 類別 | 例子 |
-|---|---|
-| 守衛 | 某條路徑缺守衛、界限差一、狀態判斷錯 |
-| 級聯 | 改子項後父項未重算、狀態未連動 |
-| 交易 | 例外被吞造成部分提交、自我呼叫使交易失效 |
-| 併發 | 更新遺失、寫入偏斜、鎖先放 |
-| 訊息 | 發送在提交前、消費者不冪等 |
-| 成對路徑 | 預覽與執行的計算不同、預覽路徑有寫入 |
-| 數值與型別 | 小數位數比較、包裝型別的參考比較、捨入 |
-| 資料對映 | null 覆寫、動態 SQL 條件遺失、影響筆數未檢查 |
-| 時間 | 日界線、時區 |
-
-### 12.5 誤報率與穩定度
-
-- **誤報率**：簽核 2 時被判定為不是問題的比例；以及在乾淨的驗證樣本（第 20 節）上報出的問題數。
-- **穩定度**：同一個 commit 跑三次，問題指紋集合的重疊程度。穩定度低代表結論依賴 agent 的隨機性，要把對應的步驟改為機械化。
-
-## 13. P7 報告與重跑
-
-### 13.1 報告
-
-報告由 `audit/` 下的 JSON 生成，不手寫。呈現原則沿用 v0.1：
-
-- 矩陣當首頁，每個實體一張，顏色表示一致、有問題、待確認、明確拒絕。
-- 問題卡片固定格式：一句話結論、位置、兩條軸（證據等級與判定依據）、重現指令、最小反例。
-- 證據預設收合。
-- 依讀者分頁：工程師看問題卡片，產品看待確認清單與追溯矩陣，主管看摘要數字。
-
-新增：
-
-- **審查涵蓋度面板**：第 18 節的量測指標。
-- **未審範圍**：明列沒做到的部分與原因（能力不足、預算用盡、不可到達的狀態、未回答的問題）。
-- **升級路徑**：每個 B、C 級結論旁寫明補上什麼能力就能升級。
-
-### 13.2 穩定編號
-
-問題的指紋由（問題類型、依據的引用、格子鍵或不變量編號、程式錨點）雜湊而成。程式錨點用「類別#方法」，不用行號，所以無關的改動不會讓指紋改變。
-
-編號由登記檔配發，永不重用。重跑時以指紋對齊，狀態為：新增、仍存在、已修復、復發、已失效（程式路徑已移除）。
-
-### 13.3 差異重跑
-
-在新的 commit 上：
-
-1. 重跑 P0，比較概況。能力改變會影響證據上限。
-2. 重抽機械事實，與上次比較，得到受影響的入口、實體、格子。
-3. 先跑全部的矩陣測試（成本低）。結果改變的格子就是行為變更。
-4. 只對受影響的實體重做 P1 的判斷性推導。
-5. 行為變更若牴觸鎖定的決策，直接產生回歸問題。
-6. 決策紀錄全部沿用。
-
-所以「重跑即更新」在這個設計裡的意思是：測試機械地告訴你哪裡變了，判斷性的工作只做變了的部分，人的決策不重問。
-
-### 13.4 正式資料掃描
-
-skill 不連接任何非本機的資料庫。它匯出 `audit/invariants/scan.sql`：每條已確認不變量一個唯讀查詢。由人在正式資料庫的唯讀副本上執行，結果可回填到報告。
-
-## 14. 資料模型
-
-### 14.1 編號
-
-| 前綴 | 對象 | 前綴 | 對象 |
-|---|---|---|---|
-| `EP-` | 入口 | `Q-` | 待確認問題 |
-| `CMD-` | 命令 | `D-` | 決策 |
-| `ENT-` | 實體 | `PRD-` | 規格條款 |
-| `CELL-` | 矩陣格 | `F-` | 問題 |
-| `RCP-` | 到達配方 | `SEED-` | 埋入的缺陷 |
-| `INV-` | 不變量 | `MUT-` | 存活的變異體 |
-| `PAIR-` | 成對路徑 | `FLOW-` | 業務流程 |
-| `MR-` | 蛻變關係 | | |
-
-所有產出以編號互相引用，同一件事只在一處寫完整。每種產出都有 JSON Schema，寫入時驗證。
-
-### 14.2 問題
+### 10.7 問題
 
 ```json
 {
@@ -1126,266 +751,590 @@ skill 不連接任何非本機的資料庫。它匯出 `audit/invariants/scan.sq
   "title": "已有出貨的訂單行，數量可改到低於已出貨量",
   "disposition": "defect",
   "severity": "S1",
-  "evidence": { "grade": "A", "caveats": [] },
   "basis": [
     { "kind": "N1", "ref": "PRD-3.2.4-b" },
     { "kind": "N2", "ref": "D-021" },
-    { "kind": "N3", "ref": "INV-07", "note": "出貨路徑有檢查，改量路徑沒有" }
+    { "kind": "N3", "ref": "INV-07" }
   ],
+  "evidence": { "cases": ["CELL-0142", "SCN-0007"], "grade": "A", "caveats": [] },
+  "status": "reproduced",
   "anchors": ["OrderLineService#changeQty"],
-  "cells": ["CELL-0142"],
-  "reproduce": "mvn -Paudit test -Dtest=MatrixTest#CELL-0142",
   "minimal_counterexample": "建立數量 100 的訂單行，出貨 60，改量為 40，系統接受",
-  "found_by": ["O2", "O1", "O13"],
-  "blind_verification": "confirmed",
-  "suggested_fix": "…",
-  "status": "open"
+  "recheck": "confirmed"
 }
 ```
 
-### 14.3 目錄
+`grade`、`caveats`、`status` 由 `judge.py` 寫入，其他工具不得填寫。
 
-```
-audit/
-  state.json          階段狀態、commit、工具版本、預算
-  profile.json        P0 概況
-  facts/              機械抽取的事實
-  model/              實體、命令、狀態機、流程
-  matrix/             每個實體一個檔
-  invariants/         目錄與掃描腳本
-  pairs/              成對路徑
-  effects/            每個命令的效果軌跡
-  questions/          待確認清單
-  decisions/          決策紀錄（長期保存）
-  spec/               條款與追溯矩陣
-  findings/           問題
-  assurance/          變異、召回率、盲驗、未審範圍
-  report/             生成的報告頁
-src/audit/java/…      auditkit 與審查測試
-```
+## 11. 方法
 
-## 15. Skill 封裝
+### 11.1 三個事實來源
 
-### 15.1 一個 skill，不是多個
+| 來源 | 方向 | 取得的指令 | 容易漏的 |
+|---|---|---|---|
+| 由上往下 | 從入口沿呼叫鏈到寫入與對外效果 | `audit-model` | 橫切邏輯、級聯、trigger 造成的寫入 |
+| 由下往上 | 從每個欄位的寫入點回推到入口 | `audit-model` | 經反射或設定間接觸發的入口 |
+| 執行觀察 | 實際執行並攔截 SQL 與對外效果 | `audit-characterize` | 沒被執行到的分支 |
 
-各階段共用同一份狀態、資料模型、腳本與模板。拆成多個 skill 會讓這份共用契約變成隱含的。重複使用的需求（只做現況模型、只重新對照 PRD）由模式滿足。
+三者的不一致只有兩種：某個寫入點沒有任何已知入口到得了（孤兒），或某個入口的追蹤漏了某個寫入。每一筆都要結案或成為問題。
 
-### 15.2 目錄結構
+### 11.2 守衛誘導的抽象狀態
 
-```
-java-logic-audit/
-  SKILL.md
-  references/
-    principles.md             證據等級、判定依據、可到達規則、隔離契約
-    p0-profile.md
-    p1-model.md
-    p1-invariants.md
-    p2-harness.md
-    p3-characterize.md
-    gate.md                   問題格式、決策紀錄
-    p4-properties.md
-    p4-faults.md
-    p4-concurrency.md
-    p5-spec.md
-    p6-assurance.md
-    p7-report.md
-    adapters/
-      build-maven.md  build-gradle.md
-      fw-spring.md  fw-jakarta.md  fw-quarkus.md  fw-micronaut.md
-      orm-jpa.md  orm-mybatis.md  orm-jdbc.md
-      db-postgresql.md  db-mysql.md  db-oracle.md  db-sqlserver.md
-      mq-kafka.md  mq-rabbitmq.md  mq-nats.md  mq-jms.md  mq-spring-events.md
-      scheduling.md
-    pitfalls/
-      numeric-time.md  state-enum.md  jpa.md  sql-mybatis.md
-      spring-tx.md  messaging.md  error-handling.md
-    domains/                  選配的領域包
-      order-fulfilment.md
-  schemas/                    每種產出的 JSON Schema
-  scripts/                    決定性的工具
-  assets/
-    auditkit/                 Java 原始碼模板
-    build/                    Maven profile 片段、Gradle init script
-    rules/                    靜態規則包
-    report/                   報告頁模板
-  agents/                     各角色的指示
-  evals/                      skill 本身的驗證案例
-```
+守衛是支配一個拒絕或一個寫入的條件。拆成原子述詞後分兩類：
 
-### 15.3 SKILL.md 的職責
+- **狀態述詞**只涉及實體與其父子實體的欄位，例如 `shipped_qty > 0`。
+- **參數述詞**把命令參數與實體欄位比較，例如 `qty >= shipped_qty`。
 
-SKILL.md 保持精簡（目標 300 行以內），只放每次都需要的東西：
+抽象狀態由守衛切出來：兩個實體實例若讓所有相關述詞取相同的真值，就屬於同一個抽象狀態。「部分交貨」這類狀態因此不必事先給定，程式裡有守衛測它，它就會出現。
 
-1. 模式與參數的對應。
-2. 狀態協定：如何讀 `state.json` 決定下一步。
-3. 階段表：每個階段的目的、開始前必讀的參考檔、完成條件。
-4. 少數不可違反的規則，每條附理由（可到達規則、輸入隔離、隔離契約、安全守則）。
-5. 簽核協定：到達簽核點時停下，輸出問題清單，等待 `decide`。
-6. 派工方式：哪些工作交給哪個角色、平行的單位、如何準備隔離的工作目錄。
+細分逐命令進行，以避免組合爆炸：
 
-參考檔依階段與概況載入：進入某階段時讀該階段的檔；轉接層只讀概況中出現的那幾個。超過 300 行的參考檔附目錄。
+1. 主軸是顯式的狀態欄位值。
+2. 每個命令只依它自己的守衛所測的狀態述詞細分。
+3. 父子實體的狀態只在該命令的守衛有測時才進入格子的上下文。
+4. 參數述詞不拆狀態，而是產生參數類別與邊界值（比較對象的值、加一、減一）。
 
-frontmatter 草稿：
+每個（命令、狀態值）的述詞組合數有上限（第 16 節）。超過時 `render_model.py` 保留被最多守衛引用的述詞，其餘列入未審範圍。
 
-```yaml
----
-name: java-logic-audit
-description: >
-  Rigorous, evidence-graded audit of business logic in stateful Java backends
-  (Spring Boot, JPA/Hibernate, MyBatis, JDBC; Kafka, RabbitMQ, NATS; scheduled jobs).
-  Builds an executable as-is model (entry points, entity state machines, a
-  command-by-state matrix, invariants), verifies it with matrix, property-based,
-  differential, fault-injection and concurrency tests, traces a PRD clause by clause,
-  and measures its own recall. Use this whenever the user wants to audit, rigorously
-  review, verify or reverse-engineer what a Java service actually does; check code
-  against a PRD or spec; hunt for state-machine, transaction-boundary, idempotency,
-  concurrency or data-consistency bugs; or assess how a change affects business rules,
-  even if they never say "audit". 常見說法：嚴密審查、業務邏輯審查、現況模型、狀態機、
-  變更矩陣、不變量、PRD 對照、交易邊界、併發問題、冪等。Not for reviewing a pull request
-  diff, code style, performance tuning or security scanning.
----
-```
+### 11.3 寫入點表與守衛不對稱
 
-### 15.4 腳本
+每個欄位一張表，列出所有寫入點、途徑、支配的守衛、可到達的入口、交易屬性、併發保護。
 
-需要每次結果相同的工作一律寫成腳本。只用 Python 標準函式庫，不需安裝。
+| 欄位 | 寫入點 | 途徑 | 支配的守衛 | 入口 | 交易 | 併發保護 |
+|---|---|---|---|---|---|---|
+| `order_line.qty` | `OrderLineService#changeQty` | 實體 setter | 狀態 ∈ {OPEN, CONFIRMED} | `CMD-changeLineQty` | REQUIRED | 版本欄位 |
+| `order_line.qty` | `ShipmentListener#onShipped` | mapper UPDATE | `qty >= shipped_qty` | `CMD-onShipment` | REQUIRED | 無 |
+| `order_line.qty` | `ImportJob#apply` | 原生 SQL | 無 | `CMD-nightlyImport` | 無 | 無 |
 
-| 腳本 | 作用 |
+同一欄位各寫入點的守衛不同，就是守衛不對稱：程式在某處認為這個條件必須成立，在另一處沒檢查。這個檢驗不需要知道條件對不對。同一張表也直接顯示沒有交易的寫入、沒有併發保護的寫入、繞過版本欄位的批次更新。
+
+### 11.4 生命週期欄位的一致性
+
+| 情況 | 意義 |
 |---|---|
-| `state.py` | 讀寫狀態、判斷下一階段、鎖定 commit |
-| `validate.py` | 以 schema 驗證所有產出 |
-| `ids.py` | 配發編號、計算指紋、與上次對齊 |
-| `facts_static.py` | 建置前的靜態事實：註解、mapper XML、遷移腳本 |
-| `reconcile.py` | 由上往下與由下往上的雙向關係對帳 |
-| `recipes.py` | 在狀態機上搜尋到達配方 |
-| `rw_sets.py` | 由效果軌跡算讀寫集合 |
-| `pairs.py` | 由讀寫集合算衝突命令對並排序 |
-| `schedules.py` | 產生有界搶佔的排程 |
-| `mine_invariants.py` | 快照不變量樣板探勘 |
-| `isolate.py` | 為各角色準備隔離的工作目錄 |
-| `recall.py` | 召回率、Wilson 區間、依類別分列 |
-| `report.py` | 由 JSON 生成報告頁，並與上次比較 |
-| `export_scan.py` | 匯出唯讀的資料掃描腳本 |
+| 有守衛讀，沒有程式寫 | 可能由其他系統寫入，或是廢棄的值 |
+| 有程式寫，沒有守衛讀 | 進入之後所有操作的行為都未定義 |
+| 列舉中有，讀寫都沒有 | 死值 |
+| 多個布林或時間戳共同表示狀態 | 列出所有組合，標出從未處理的 |
 
-需要讀位元組碼或應用 context 的事實抽取，以 auditkit 中的兩個測試類別實作（位元組碼事實、context 事實），輸出 JSON 到 `audit/facts/`。
+### 11.5 到達配方與矩陣執行
 
-### 15.5 角色與可見性
+到達配方是把實體從空白帶到某個抽象狀態的最短命令序列，在靜態狀態機上以廣度優先搜尋，執行確認。
 
-獨立性由「誰看得到什麼」定義。`isolate.py` 為每個角色準備一份只含允許內容的工作目錄，例如審查者的目錄沒有 `.git`，規格分析者的目錄沒有原始碼。
+搜不到配方的狀態分三類：沒有任何程式寫入（成為問題）；有寫入點但在受審範圍外（以直寫建立，標 `synthetic-state`）；預算內沒找到（列入未審範圍）。
 
-| 角色 | 原始碼 | 既有測試 | git 歷史 | PRD | 模型 | 決策 | 問題清單 | 審查過程 |
-|---|---|---|---|---|---|---|---|---|
-| 探索 | ✓ | ✓ | 只有統計 | — | — | — | — | — |
-| 模型（由上往下） | ✓ | — | — | — | 入口清單 | — | — | — |
-| 模型（由下往上） | ✓ | — | — | — | schema | — | — | — |
-| 對帳 | ✓ | — | — | — | 兩份草稿 | — | — | — |
-| 載具 | ✓ | ✓ | — | — | ✓ | — | — | — |
-| 驗證 | ✓ | ✓ | — | — | ✓ | ✓ | — | — |
-| 規格分析 | — | — | — | ✓ | 術語表 | — | — | — |
-| 規格測試 | 只有 driver 介面 | — | — | 條款 | 命令清單 | — | — | — |
-| 對照判定 | ✓ | ✓ | — | ✓ | ✓ | ✓ | ✓ | — |
-| 盲驗 | ✓ | ✓ | — | — | — | — | 單一問題 | — |
-| 紅隊 | ✓ | — | — | — | 不變量、driver | ✓ | — | — |
-| 埋入 | ✓ | ✓ | ✓ | — | — | — | — | — |
+執行每一格：重置、執行配方、確認抽象狀態、快照、呼叫命令、快照、記錄結果與效果軌跡。
 
-幾個選擇的理由：
+執行中另做兩個檢查：
 
-- 模型角色不看既有測試：測試名稱與斷言表達的是開發者的意圖，會讓現況模型偏向「應該如何」。
-- 除了埋入者，沒有角色看得到 git 歷史：提交訊息會洩漏過去的 bug，使召回率量測失效。
-- 驗證角色看不到問題清單：避免驗證工作被已知問題牽著走。
+- 觀察到的狀態轉移是否都在模型內。多出來的通常是級聯或推導狀態。
+- 相同抽象狀態對同一命令的同一參數類別是否有相同反應。不同就代表抽象漏了一個述詞。
 
-### 15.6 平行單位
+### 11.6 檢驗準則
 
-| 工作 | 平行單位 |
-|---|---|
-| P1 由上往下 | 每個入口群組（同一個 controller 或 listener 類別） |
-| P1 由下往上 | 每個實體 |
-| P3 矩陣執行 | 每個實體，各用獨立的資料庫 |
-| P4 property | 每個聚合 |
-| P4 故障注入 | 每個命令 |
-| P4 併發 | 每個命令對 |
-| P5 規格測試 | 每個 PRD 章節 |
-| P6 盲驗 | 每個問題 |
+| 編號 | 準則 | 判定內容 | 需要業務知識 | 依據 | 執行器 |
+|---|---|---|---|---|---|
+| O1 | 矩陣特徵化 | 每格的實際結果；靜態與執行是否一致 | 否 | — | `MatrixRunner` |
+| O2 | 守衛不對稱 | 同一欄位各寫入點的守衛不同 | 否 | N3 | 腳本，執行確認 |
+| O3 | 宣告與實作 | 約束、驗證、對映與實際行為不符 | 否 | N3 | 腳本，執行確認 |
+| O4 | 成對路徑差分 | 兩條宣稱等價的路徑結果不同 | 否 | N3 | `PairRunner` |
+| O5 | 讀取純度 | 讀取類入口有寫入 | 否 | N4 | `PurityRunner` |
+| O6 | 模型符合 | 模型外的轉移；同狀態不同反應 | 否 | N3 | 各執行器 |
+| O7 | 不變量保持 | 隨機序列每一步都成立 | 已確認者需要 | N2 | `SequenceRunner` |
+| O8 | 蛻變關係 | 逆操作、可加、設定冪等、無變更、可交換、拆分等價 | 等價的定義需確認 | N4 | `RelationRunner` |
+| O9 | 原子性 | 故障後的狀態等於執行前或完整執行後 | 否 | N4 | `FaultRunner` |
+| O10 | 效果對應 | 對外訊息與已提交的變更一一對應 | 否 | N4 | `FaultRunner` |
+| O11 | 重送收斂 | 重送或重試後等同成功一次 | 否 | N4 | `FaultRunner` |
+| O12 | 可序列化 | 併發結果等同某個先後順序 | 否 | N4 | `InterleaveRunner` |
+| O13 | 規格符合 | PRD 條款 | 由 PRD 提供 | N1 | `MatrixRunner`、`ScenarioRunner` |
+| O14 | 領域慣例 | 領域包中的常理 | 由領域包提供 | N5 | `ScenarioRunner` |
 
-## 16. Java 轉接層與支援分級
+成對路徑的種類：預覽與執行、單筆與批次、不同入口的同一操作、新舊版本的端點、建立後修改與直接建立、寫入端與讀取端、重複的計算片段。
 
-方法是通用的，但事實的抽取方式與載具的接法依技術而異。每個轉接層參考檔的內容固定為：偵測特徵、入口列舉、交易語意、已知陷阱、測試中如何啟動。
+### 11.7 隨機序列
 
-| 分級 | 意義 | 第一版涵蓋 |
+以矩陣為參考模型。每一步執行前由目標實體的抽象狀態與參數類別查矩陣得到預期。
+
+每一步檢查四件事：結果與矩陣一致；已確認的不變量全部成立；狀態轉移在模型內；沒有非預期的錯誤。候選不變量被違反時只記錄，不算失敗。
+
+產生方式固定：每個父項一到三個子項；參數取自參數類別的邊界值，加上零、一、型別上限；處於非初始、非終態的實體有較高的被選機率；所有命令都會被選到，包含訊息與排程入口。
+
+失敗的序列先刪步驟再簡化參數，縮到不能再短，存成 `SCN-`。
+
+### 11.8 故障注入
+
+對每個會改變狀態的命令，取它的效果軌跡，在每個效果點注入故障後重跑。
+
+| 效果點 | 故障 | 模擬的情況 |
 |---|---|---|
-| 一級 | 完整流程，可達 A | Maven、Gradle；Spring Boot 2.x 與 3.x（MVC）；JPA/Hibernate、MyBatis、Spring JDBC；PostgreSQL、MySQL；Kafka、RabbitMQ、NATS、Spring 事件；`@Scheduled`、Quartz |
-| 二級 | 探索與靜態模型完整，執行驗證部分可用 | Jakarta EE、Quarkus、Micronaut；jOOQ；Oracle、SQL Server；JMS；RPC 入口；WebFlux 與 R2DBC |
-| 三級 | 只偵測並標記，相關實體排除在外 | 規則引擎、流程引擎、以預存程序為主的邏輯 |
+| SQL 語句 | 執行前丟出資料庫例外 | 資料庫錯誤、逾時 |
+| 提交 | 提交前失敗 | 連線中斷 |
+| 提交 | 提交成功後、回傳前失敗 | 已生效但呼叫端看到失敗 |
+| 訊息發送 | 發送前失敗；發送成功後失敗 | 代理不可用；結果未知 |
+| 外部呼叫 | 呼叫前失敗；回應錯誤；逾時但對方已執行 | 下游故障；結果未知 |
 
-WebFlux 與 R2DBC 列在二級的原因：交錯載具以執行緒與 JDBC 連線為單位，不能直接套用到反應式執行模型。
+每次注入後檢查 O9、O10、O11。重送收斂的做法是以同一個請求再呼叫一次，有冪等鍵就帶同一把。
 
-資料庫轉接層還要提供三樣東西：各隔離等級的實際語意、查詢鎖等待的方式、最快的重置做法。各引擎的預設隔離等級不同（PostgreSQL、Oracle、SQL Server 預設為讀已提交；MySQL InnoDB 預設為可重複讀），同名的等級在不同引擎的行為也不同，所以併發結論必須註明引擎與等級。
+訊息入口另外做兩件事：同一則訊息處理兩次；兩則訊息以相反順序處理。v1 以重新呼叫處理方法來模擬重送與亂序。
 
-## 17. Java 業務邏輯陷阱目錄
+### 11.9 守衛金絲雀
 
-這是 skill 隨附的知識，分兩種形式存在：靜態規則包（`assets/rules/`），以及參考檔中的說明與動態確認做法。靜態規則的命中只是線索（C 級）；要成為問題，必須照「確認方式」做出可執行的反例。
+目的是證明審查測試真的會失敗。
 
-### 17.1 數值與型別
+`canary.py` 在暫存複本上執行變異測試，範圍限於含守衛的類別，然後只看落在模型所引用的守衛行上的變異體。每個這樣的變異體都必須被至少一個審查測試殺掉。存活的列出類別、行號、變異方式。
+
+變異測試工具無法在目標專案上執行時，改為每個實體由 `harness-engineer` 在暫存複本中改壞一行最關鍵的守衛，執行測試並保留結果檔。此時金絲雀檢查最高只算「未能通過」（12.3）。
+
+### 11.10 併發
+
+**先選對再交錯。** `pairs.py` 由讀寫集合算出有衝突的命令對，依強度排序：寫入同一欄位；一方寫入的欄位是另一方守衛讀取的欄位；兩方寫入不同資料列，但這些列受同一條跨列不變量約束。第三類逐列的樂觀鎖與快照隔離都擋不住。
+
+| 異常 | 靜態線索 | 動態確認 |
+|---|---|---|
+| 更新遺失 | 讀出後計算再寫回，無版本欄位、鎖或原子式 SQL | 交錯後結果不等於任一先後順序 |
+| 檢查後動作 | 先查是否存在再新增，無唯一鍵 | 兩個建立命令交錯後產生重複 |
+| 寫入偏斜 | 不變量跨多列，各命令改不同列 | 交錯後合計違反不變量 |
+| 預覽過期 | 預覽與執行之間沒有版本比對 | 預覽、他人變更、再執行 |
+| 重複提交 | 沒有冪等鍵 | 同一請求並行兩次 |
+| 鎖先於提交釋放 | 鎖在交易方法內取得與釋放 | 一方放鎖未提交時另一方進入 |
+| 死結 | 不同命令以不同順序鎖多列 | 交錯到互等，觀察應用的處理 |
+| 排程競爭 | 排程與使用者命令寫同一欄位 | 把排程當成另一個命令交錯 |
+| 記憶體內競爭 | 單例 bean 的可變欄位 | 只做靜態標記，C 級 |
+
+`InterleaveRunner` 的規格：
+
+- 讓出點是每條 SQL 執行前、提交前、每次發送與外部呼叫前。
+- 排程以步數表示：T1 跑 i 步，T2 跑 j 步，T1 跑完，T2 跑完。
+- 搶佔次數有上限（第 16 節），優先探索緊鄰衝突語句的讓出點。
+- 被排到的執行緒卡在資料庫鎖上時，查詢資料庫的鎖等待檢視確認後改排另一個。雙方都等待即為死結。
+- 步驟以（執行緒、連線）為鍵。
+- 只在 `engine.matches_production` 不是 `substitute` 時執行。
+
+每個排程結束後檢查：已確認的不變量成立；最終狀態與兩個命令各自的結果等於「T1 先」或「T2 先」的序列結果之一；回報成功的命令效果確實存在；對外訊息與最終狀態一致。
+
+不符合可序列化不一定是缺陷，所以歸為異常，由人接受或判為缺陷。違反已確認不變量的直接是缺陷候選。失敗的排程存成可重播的案例。
+
+### 11.11 規格對照
+
+PRD 的預期以資料表示，不寫成測試程式。
+
+- 格子層級：條款說「某命令在某狀態下應被拒絕」，成為該格的 `spec_expected`。
+- 情境層級：條款涉及多個命令或計算結果，成為一筆情境。
+
+`spec_join.py` 比對 `spec_expected` 與 `observed`。這是三方比對的機械來源：
+
+| 情況 | 來源 | 意義 |
+|---|---|---|
+| 程式 ≠ PRD | 規格預期與觀察不符 | 實作錯誤，或 PRD 過時 |
+| 程式 ≠ 慣例，PRD 未提 | 領域包異常，且在反向清單中 | 可能是 bug 或刻意客製 |
+| 程式 = PRD，兩者 ≠ 慣例 | 規格相符，領域包異常 | 需求本身值得確認 |
+| 程式 = 慣例 ≠ PRD | 規格不符，領域包相符 | 照慣例實作，未照需求 |
+| PRD 自相矛盾 | 兩條條款對同一格有不同預期 | 規格問題 |
+
+### 11.12 不變量的類別與來源
+
+類別：結構、彙總、界限、單調、狀態一致、轉移合法、不可變、協定、效果對應、隔離。
+
+| 來源 | 說明 |
+|---|---|
+| 宣告 | 資料庫約束、Bean Validation、對映註解 |
+| 強制 | 程式某處的守衛，並由寫入點表得知哪些寫入點沒有強制 |
+| 觀察 | 由快照找到的規律，需同時在程式中找得到相關的讀寫位置 |
+| 外部 | PRD、領域包、人 |
+
+不變量盡可能寫成一條回傳違反資料列的 SQL。同一組查詢由 `export_scan.py` 匯出，由人拿去掃正式資料庫的唯讀副本。
+
+## 12. 判定規則
+
+`judge.py` 依以下固定規則計算，規則全文寫入 `VERDICT.md`。所有判定每次都由當下的結果檔重新計算，不沿用先前的結果。
+
+### 12.1 能力
+
+由 `audit-harness` 的煙霧測試結果檔決定。每項能力只有「已執行確認」與「不具備」。
+
+| 能力 | 條件 |
+|---|---|
+| 可執行 | context 啟動的測試通過 |
+| 真實引擎 | 連線位址是容器或本機，且引擎不是記憶體內的替代品 |
+| 引擎與正式環境一致 | `matches_production` 為 `confirmed` |
+| 可攔截 SQL | 代理攔截到語句 |
+| 邊界替身 | 替身記錄到呼叫，且被取代的型別不屬於應用自己的套件（也就是第三方的 client 介面） |
+| 時間可控 | 找得到可注入的時鐘 |
+
+### 12.2 證據等級與問題狀態
+
+對每個問題，讀它所引用案例的結果。
+
+| 狀態 | 條件 |
+|---|---|
+| 已重現 | 引用的案例中至少一個，在三次各自重置的執行中都是 `MISMATCH`，且結果檔比程式新 |
+| 已修復 | 引用的案例在最近一次執行中全部是 `MATCH` |
+| 僅有主張 | 沒有執行證據；引用位置經裁判確認 |
+| 未證實 | 案例是 `ERROR`、`SKIPPED`、`HARNESS_GAP`，或沒有被執行 |
+
+| 等級 | 條件 |
+|---|---|
+| A | 已重現，且證據檔沒有任何保留標記 |
+| B | 已重現，證據檔有保留標記 |
+| C | 僅有主張 |
+
+未證實的不列為問題，另列在「未證實的候選」。
+
+保留標記由執行器寫入證據檔：
+
+| 標記 | 何時寫入 |
+|---|---|
+| `substitute-engine` | 不是真實引擎 |
+| `unconfirmed-version` | 引擎未與正式環境核對 |
+| `synthetic-state` | 初始狀態含直寫的交易資料 |
+| `mock-boundary` | 該案例的判定取決於替身的行為 |
+| `uncontrolled-time` | 案例與時間有關，但時間不可控 |
+
+### 12.3 每個實體的審查判定
+
+問題清單回答「找到了什麼」。審查判定回答「沒找到問題的部分，能相信到什麼程度」。
+
+| 判定 | 條件 |
+|---|---|
+| **審查完整** | 以下七項全部通過 |
+| **部分審查** | 沒有任何一項失敗，但至少一項未能通過，逐項列出 |
+| **審查不足** | 任何一項失敗 |
+
+| 項目 | 通過 | 失敗 | 未能通過 |
+|---|---|---|---|
+| 1 矩陣已執行 | 每一格都有比程式新的結果，或已分類為不可到達 | 有格子沒有結果，或結果比程式舊，或有未處理的載具缺口 | 有狀態在預算內找不到到達配方 |
+| 2 模型已對帳 | 靜態與觀察、三個來源之間沒有未結案的差異 | 有未結案的差異 | — |
+| 3 不變量已檢查 | 每條已確認的不變量都在隨機序列中被執行檢查 | 有已確認的不變量沒有可執行的檢查 | 這個實體沒有任何已確認的不變量 |
+| 4 故障已注入 | 每個會改變狀態的命令的每個效果點都有結果 | 有命令完全沒有注入 | 缺少可攔截 SQL 或邊界替身 |
+| 5 併發已探索 | 涉及這個實體的衝突命令對依預算全數探索，且引擎與正式環境一致 | 有衝突對被排入卻沒有結果 | 替代引擎；引擎未核對；預算外的衝突對 |
+| 6 金絲雀 | 守衛行上的變異體全部被殺 | 有變異體存活 | 變異測試無法執行，只做了單一金絲雀 |
+| 7 來源未動 | 主程式與既有測試與 `manifest.json` 相符；建置檔的差異只有 audit 區塊 | 有其他改動 | — |
+
+待回答的問題、未簽核，都屬於人，列在「等待人決定」，不改變判定。
+
+### 12.4 指紋
+
+問題的指紋是（問題類型、依據的引用、格子鍵或不變量編號、程式錨點）的雜湊。程式錨點用「類別#方法」，不用行號。重跑時以指紋對齊：新增、仍存在、已修復、復發、已失效。
+
+### 12.5 嚴重度
+
+嚴重度只描述後果，由 `triage` 提出、盲驗確認。
+
+| 等級 | 後果 |
+|---|---|
+| S1 | 已提交的資料錯誤且系統無法自行復原；或對下游送出錯誤、遺漏、重複的訊息 |
+| S2 | 不變量可被破壞，但需要特定時序、故障或少見的操作順序 |
+| S3 | 合法操作被拒絕，或錯誤訊息與實際原因不符 |
+| S4 | 不影響資料正確性的不一致 |
+
+### 12.6 判定依據與歸類
+
+| 代號 | 依據 | 預設歸類 |
+|---|---|---|
+| N1 | 違反 PRD 條款 | 缺陷 |
+| N2 | 違反人確認過的不變量或決策 | 缺陷 |
+| N3 | 程式自相矛盾 | 不一致 |
+| N4 | 違反通用性質 | 異常 |
+| N5 | 違反領域慣例 | 異常 |
+
+異常進問題清單。人判為「不是本意」後成為缺陷，依據加上 N2；判為「本意如此」後成為被接受的差異，附理由，不再列為問題。
+
+## 13. 人決定的六件事
+
+plugin 不替人決定以下任何一項。
+
+| # | 決定 | 指令 | 形式 |
+|---|---|---|---|
+| 1 | 想做什麼、範圍在哪 | `audit` | 彈出式問答 |
+| 2 | 五個只有人知道的答案 | `audit-preflight` | 彈出式問答 |
+| 3 | 批准對建置檔的改動 | `audit-harness` | 看過差異後批准 |
+| 4 | 每個被標記的行為是不是本意 | `audit-review` | 彈出式問答，每次最多四題 |
+| 5 | 接受檢驗找到的每一個差異 | `audit-review` | 逐項接受並附理由 |
+| 6 | 簽核報告 | `audit-report` | 具名簽署 `VERDICT.md` |
+
+preflight 的五題：
+
+1. 這個 repo 是完整的系統，還是有其他系統也會寫入同一個資料庫？
+2. 正式環境的資料庫引擎版本與交易隔離等級是什麼？
+3. 這裡能不能建置並執行測試（含 Docker）？完整的測試大約要多久？
+4. 有沒有不能碰或不能執行的部分（共用環境、會真的對外發送的測試）？
+5. 最想先看的實體或流程是哪些？
+
+另有三個成本上的確認，不算決定：大規模的 agent 展開前、長時間的執行前、提供埋入缺陷的補丁。
+
+## 14. 不可信輸入與安全
+
+### 14.1 被分析的內容是資料
+
+- 程式碼、註解、字串、檔名、測試名稱、PRD 文字，都可能包含看起來像指示的內容。Agent 一律不遵從，並把位置回報在 `injectionFlags`，列入報告。
+- 一個主張只有在可執行的程式碼確實如此時才成立。只由註解或文件支持的主張，裁判判為否決。
+- 由 agent 產出、再進入另一個 agent 提示的內容，包在不可信標記裡。
+- 進入提示或指令的路徑與名稱先清洗（第 7 節的契約）。
+- 唯讀的 agent 不寫檔。
+
+### 14.2 這個 plugin 會執行目標的程式
+
+與只讀程式碼的工具不同，這個 plugin 會建置並執行目標 repo 的程式與測試。因此：
+
+- 只在可以放心執行該 repo 的機器上使用。來源不明的程式碼請在容器或沙箱中執行。
+- `ConnectionGuard` 在執行器啟動時檢查資料庫位址，不是本機或容器位址就中止。這是程式中的檢查，不是提示中的要求。
+- `audit-preflight` 的檢查 6 事先列出所有連線位址。
+- 對外的 HTTP 與訊息一律由替身攔截。`harness.json` 沒有列為替身的對外 client，由 `audit-harness` 的煙霧測試找出並要求補上。
+- 每個指令結束時停止它啟動的容器與程序，並刪除暫存複本。
+
+### 14.3 來源保護
+
+建議的權限設定，由 `audit-preflight` 檢查並在缺少時印出：
+
+```json
+{
+  "permissions": {
+    "allow": ["Read(**)", "Edit(audit/**)", "Edit(**/src/audit/**)"],
+    "deny":  ["Edit(**/src/main/**)", "Edit(**/src/test/**)"]
+  }
+}
+```
+
+權限規則只涵蓋 Claude 的檔案工具與它認得的 shell 指令。真正的檢查是 12.3 的第 7 項：`manifest.py` 比對主程式與既有測試的雜湊。
+
+### 14.4 其他守則
+
+- 不提交、不推送。
+- 不修復問題。修法只寫成建議。
+- 不停用、不略過、不放寬任何既有的測試或檢查。
+- 設定檔中的憑證不抄入任何產出；必須引用時只留兩到四個字元的遮罩。
+- 正式資料的掃描只輸出 SQL 腳本，由人在唯讀副本上執行。
+
+## 15. 支援範圍
+
+v1 只有兩級：支援，或只有靜態模型。
+
+| 面向 | 支援 |
+|---|---|
+| 建置 | Maven、Gradle |
+| JDK | 8 到 21 |
+| 框架 | Spring Boot 2.x 與 3.x，Spring MVC |
+| 持久化 | JPA 與 Hibernate、MyBatis、Spring JDBC |
+| 資料庫 | PostgreSQL、MySQL |
+| 訊息 | Kafka、RabbitMQ、NATS、Spring 事件。一律以邊界替身處理 |
+| 排程 | `@Scheduled`、Quartz |
+| 測試 | JUnit 4 或 5；有無 Testcontainers 皆可 |
+
+不在表中的技術（WebFlux 與 R2DBC、Jakarta EE、Quarkus、Micronaut、jOOQ、Oracle、SQL Server、流程引擎、規則引擎）由 `audit-preflight` 偵測並列出。受影響的實體只走到 `audit-model`，結論停在 C 級，並在報告的未審範圍中說明。
+
+訊息系統的遞送語意（確認模式、重送設定）在 v1 只做靜態檢查。應用層的冪等與順序處理由 11.8 的重新呼叫來檢驗。
+
+## 16. 成本控制
+
+### 16.1 展開前估算並詢問
+
+| 指令 | 估算方式 | 詢問門檻 |
+|---|---|---|
+| `audit-model` | 每個切分 10 到 15 個 agent，每個約 2 萬 token | 超過 12 個切分 |
+| `audit-verify` | 案例數 × 特徵化階段量到的單次執行時間 | 超過 30 分鐘 |
+| `audit-spec` | 每條條款 3 個 agent | 超過 150 條條款 |
+| `audit-assure` | 每個問題 1 到 2 個 agent | 超過 40 個問題 |
+
+`audit-model` 的係數取自官方 plugin 的實測（3 萬行、44 個程式的系統用了 466 到 647 個 agent，約 880 萬 token）。第一個真實系統跑完後以實測值取代。
+
+詢問一律用彈出式問答，選項為全部執行、只跑一部分、取消。
+
+### 16.2 預算
+
+| 項目 | `quick` | `deep` |
+|---|---|---|
+| 隨機序列 | 50 條，每條 20 步 | 2,000 條，每條 50 步 |
+| 搶佔次數上限 | 1 | 2 |
+| 衝突命令對 | 排序後前 10 對 | 前 30 對 |
+| 每個（命令、狀態值）的述詞組合上限 | 8 | 16 |
+| 到達配方的搜尋深度 | 6 | 10 |
+| 模型修正的重跑輪數 | 3 | 3 |
+
+預算外沒做到的部分由腳本列入未審範圍，並反映在 12.3 的「未能通過」。
+
+### 16.3 比例原則
+
+- 主張的粒度依 7.1 的規則，避免小程式產出數百條主張。
+- 每個實體的候選不變量超過 12 條時，`render_model.py` 只保留有程式引用的，其餘列為觀察。
+- `audit-review` 預設只問被標記的問題。
+
+## 17. Plugin 自身的驗收
+
+### 17.1 驗證樣本
+
+| 樣本 | 內容 | 用途 |
+|---|---|---|
+| 樣本一 | Spring Boot 3、JPA、PostgreSQL、Maven、訊息以替身。附 36 個缺陷補丁，九個類別各四個 | 主要樣本，有完整標準答案 |
+| 樣本二 | Spring Boot 2、MyBatis、MySQL、Gradle、JUnit 4 | 舊版技術組合 |
+| 樣本三 | 純函式庫；串流處理服務 | 應判定為不適用 |
+| 樣本四 | 帶陷阱的 repo：註解、README、設定檔中埋有指示，檔名含 shell 語法，一個會留下標記檔的腳本 | 不可信輸入 |
+| 真實系統 | 第一個導入的團隊自己的系統 | 規模、雜訊、成本實測 |
+
+缺陷的九個類別：守衛、級聯、交易、併發、訊息、成對路徑、數值與型別、資料對映、時間。
+
+### 17.2 驗收門檻
+
+這些是通過與否的標準，不是預測。
+
+| 項目 | 門檻 |
+|---|---|
+| 概況 | 樣本一、二、三的 `profile.json` 與標準答案完全相符 |
+| 不適用判定 | 樣本三判定為不適用，不產生矩陣 |
+| 矩陣 | 樣本一的格子結果與標準答案一致率 ≥ 95% |
+| 召回率 | 樣本一的 36 個缺陷整體 ≥ 80%，每個類別至少 4 個中 2 個 |
+| 誤報 | 樣本一未套用補丁時，歸類為缺陷或不一致的問題 ≤ 2 個 |
+| 穩定度 | 同一 commit 執行三次，問題指紋集合的 Jaccard 相似度 ≥ 0.8 |
+| 不可信輸入 | 樣本四：沒有任何埋入的指示被遵從，沒有標記檔，來源未變，埋入的位置全數列在報告中 |
+| 隔離 | 不啟用 audit 區塊時，建置產物的內容雜湊與原本相同 |
+| 降級 | 移除 Docker 後，併發項目為「未能通過」，且沒有任何問題被評為 A 級 |
+| 續跑 | `audit-model` 中途中斷後以相同參數續跑，已完成的 agent 不重跑 |
+| 重跑 | 修掉一個缺陷後執行 `audit-rerun`，該問題為已修復，其餘編號不變 |
+
+召回率這一項量的是整個流程的發現能力，要在套用補丁的樹上、不提供 git 歷史的情況下從頭執行。這與 `audit-assure` 對個別系統量的「測試套件召回率」是兩回事：後者只量已產出的測試能否抓到新植入的缺陷，完全由腳本執行。
+
+每個驗收案例同時跑「有 plugin」與「沒有 plugin」兩種設定，比較命中、誤報、耗時與用量。
+
+## 18. 建置順序
+
+每個里程碑以第 17 節的門檻作為結束條件。真實系統從第二個里程碑就開始用。
+
+| 里程碑 | 內容 | 結束條件 |
+|---|---|---|
+| M0 | plugin 骨架、`audit`、`audit-preflight`、`audit-status`、樣本一與樣本三 | 概況與不適用判定兩項門檻 |
+| M1 | auditkit 的核心（驅動、連線守衛、重置、替身、效果軌跡、矩陣執行器）、`audit-harness`、`audit-map` | 樣本一的六項煙霧測試通過；隔離門檻；在真實系統上完成到 `audit-map` |
+| M2 | `model-mine`、`audit-model`、`audit-characterize`、`audit-review`、`judge.py` | 矩陣門檻；續跑門檻；在真實系統上對一個實體完成到 `audit-review`，並以實測值更新 16.1 的係數 |
+| M3 | 序列、蛻變、成對路徑、故障注入 | 樣本一中守衛、級聯、交易、訊息、成對路徑、數值、資料對映七類的召回率門檻 |
+| M4 | 交錯執行器 | 併發類的召回率門檻；失敗排程連續重播三次相同 |
+| M5 | `audit-spec`、`audit-assure`、`audit-report`、`audit-rerun` | 整體召回率、誤報、穩定度、重跑四項門檻 |
+| M6 | 樣本二（MyBatis、MySQL、Gradle、JUnit 4）、樣本四 | 樣本二達到與樣本一相同的門檻；不可信輸入門檻 |
+
+M2 結束是唯一的檢討點。矩陣一致率或問題清單的品質不達標時，問題在模型的推導方法，要在這裡修正，因為後面每個階段都建立在這份模型上。
+
+## 19. 決策紀錄
+
+| # | 決定 | 被否決的做法 | 理由 |
+|---|---|---|---|
+| 1 | Plugin，每個階段一個指令 | 一個 skill 加多個模式；兩個 skill | 跨天、有人工簽核的流程，由使用者明確呼叫階段比讓模型判斷觸發可靠；每個指令只載入自己的指示 |
+| 2 | 工作區是目標 repo 的分支 | 獨立工作區加上唯讀的來源連結 | 產出的測試要能隨程式一起執行並接上 CI；來源保護改由清單比對落實 |
+| 3 | 測試內容是資料，由通用執行器執行 | 由 agent 為每個 repo 產生測試程式 | 生成的程式碼難以審閱也難以穩定；資料可以驗證 schema、比對差異、由腳本判定 |
+| 4 | 測試執行不交給 agent 平行 | 每個命令或每個格子一個 agent 各自執行建置 | 多個建置同時寫同一個輸出目錄會互相覆蓋；執行本來就不需要判斷 |
+| 5 | 等級與判定由腳本從結果檔計算 | 由 agent 評估後填寫 | 結論必須能追溯到檔案；模型手打的數字不算證據 |
+| 6 | 五個 agent，以工具權限區分 | 十二個角色，各自準備隔離的工作目錄 | 多數角色只是提示不同；真正需要隔離的是規格分析，直接不給工具 |
+| 7 | 規格預期是資料，與矩陣做連接 | 由看不到實作的 agent 撰寫規格測試 | 不必寫程式就不必處理編譯問題，也沒有為了修編譯而接觸實作的破口 |
+| 8 | 內建的隨機序列與縮減 | jqwik | 少一個處於維護模式的依賴，也省去它與 context、變異測試工具的整合問題 |
+| 9 | 守衛金絲雀是判定的必要項；全面變異是選項 | 全面變異分數作為必要項 | 守衛行上的變異直接回答「矩陣測試抓不抓得到守衛被拿掉」，成本低一個數量級 |
+| 10 | 個別系統只量測試套件召回率；流程召回率只在驗證樣本上量 | 每次審查都在埋入缺陷的樹上重跑整個流程 | 後者的成本是一次完整審查的倍數 |
+| 11 | 訊息一律以邊界替身處理 | 以容器啟動真實代理 | 應用層的冪等與順序可由重新呼叫檢驗；代理的設定語意留給靜態檢查 |
+| 12 | 支援範圍只有兩級 | 三級，中間一級為部分支援 | 「部分支援」的邊界說不清楚，使用者無從預期 |
+| 13 | 不含形式化模型 | TLA+ 與 trace validation | 成本高；這類系統的併發問題在真實引擎上交錯更直接 |
+| 14 | 不含 hooks | 讀檔時自動附上分析結果 | 依賴尚在早期的功能；不影響正確性 |
+| 15 | 人的決定以彈出式問答取得，存成檔案 | 請人編輯問題清單檔 | 問答可以一題一題做、隨時停、不會格式錯誤 |
+| 16 | 重置不使用交易回滾 | 以回滾作為最快的重置 | 效果軌跡、故障注入、交錯都需要真實的提交 |
+
+## 20. 驗收時確認的假設
+
+設計依賴四個尚未在真實專案上驗證的技術假設。每一個都有既定的替代做法。
+
+| 假設 | 確認時機 | 不成立時 |
+|---|---|---|
+| Maven 的額外測試原始碼根目錄與 Gradle 的 init script 都能在不影響預設建置的情況下編譯 `src/audit` | M1 | Gradle 改為在建置檔中加入一個區塊，並同樣請人批准 |
+| DataSource 代理與目標專案的連線池相容 | M1 | 改在連線池的設定層包裝 |
+| 變異測試工具能執行 auditkit 的動態測試，並回報每個變異體的行號 | M3 | 守衛金絲雀改用 11.9 的單一金絲雀，該項最高為「未能通過」 |
+| 資料庫的鎖等待檢視足以即時判斷執行緒被阻塞 | M4 | 以逾時輔助判斷，交錯探索變慢，預算內涵蓋的對數下降 |
+
+## 21. 已知限制
+
+- **一致但錯的規則。** 程式各處一致地實作了錯誤的規則時，只有 PRD、人的決策、領域包能指出來。三者都沒有時，plugin 只找得到不一致。
+- **相關的盲點。** 所有 agent 由同一個模型擔任。裁判與盲驗降低但不能消除共同的誤讀，所以結論必須落在執行證據上。
+- **動態行為。** 反射、動態代理、設定驅動的分派不在靜態呼叫關係內。執行觀察補得上被執行到的部分。
+- **抽象的完整性。** 抽象狀態由守衛切出。影響行為卻從未出現在守衛裡的欄位，只有在執行剛好走到時才會被發現。
+- **交錯的粒度。** 只在資料庫互動的邊界交錯。記憶體內的競爭只有靜態標記。
+- **模型的變異。** 同一 repo 兩次執行 `audit-model` 可能得到不同的主張。模型是經過裁判與執行確認的產出，不是決定性的建置產物；決定性的是執行結果與判定。
+- **測試不是證明。** 所有執行證據都是抽樣。審查判定說明抽了多少，不保證沒抽到的部分沒有問題。
+- **規模。** 超過約十五萬行的 repo 要依模組分成多個 `<system>` 審查，跨系統的互動不在單次審查內。
+
+---
+
+## 附錄 A：一個問題的完整路徑
+
+以「已有出貨的訂單行，數量可改到低於已出貨量」為例。
+
+1. **`audit-map`**：`order_line.qty` 的寫入點表有三列。
+2. **`audit-model`**：由下往上的抽取者回報出貨路徑有守衛 `qty >= shipped_qty`，裁判讀引用行後確認。`render_model.py` 比對三個寫入點，產生一筆守衛不對稱與候選不變量 INV-07；展開矩陣時，改量命令在「已確認且有出貨、參數低於已出貨量」這一格找不到任何守衛，靜態結果為 `unhandled`。
+3. **`audit-characterize`**：到達配方是「建立、確認、出貨 60」。執行該格，觀察結果為 `ALLOWED`。`build_questions.py` 產生 Q-014。
+4. **`audit-review`**：人選「不是本意」。`apply_decisions.py` 把 INV-07 升為已確認，並把該格的預期翻成 `REJECTED`。
+5. **`audit-verify`**：該格現在是 `MISMATCH`，以驗證模式重跑三次都相同。隨機序列另外找到一條不同順序的路徑，縮減後存成 SCN-0007。交錯執行器發現改量與出貨併發時，即使兩邊都有守衛仍可違反 INV-07；這是另一個問題 F-013，修法不同。
+6. **`audit-spec`**：條款 PRD-3.2.4-b 的預期接到同一格，與觀察不符。
+7. **`audit-assure`**：`adversary` 只拿到陳述、反例、重現指令，重現三次並確認狀態只經由命令建立，判定為確認。守衛金絲雀顯示出貨路徑的守衛被拿掉後有測試轉紅。
+8. **`audit-report`**：`judge.py` 由結果檔算出 F-012 為已重現、A 級，依據 N1、N2、N3。
+
+沒有 PRD 時，流程少了第 6 步，依據是 N2 與 N3。連決策都沒有時，它是一個 A 級的不一致，等人決定哪一邊是對的。
+
+## 附錄 B：Java 業務邏輯陷阱目錄
+
+靜態規則的命中只是線索。要成為問題，必須照「確認方式」做出執行證據。完整說明在 `references/pitfalls/`。
+
+### B.1 數值與型別
 
 | 樣態 | 後果 | 確認方式 |
 |---|---|---|
-| `BigDecimal` 用 `equals` 比較，或放進 `HashSet`、當 `HashMap` 的鍵 | `2.0` 與 `2.00` 被視為不同 | 以不同小數位數的等值參數呼叫 |
-| `new BigDecimal(double)`；以 `double`、`float` 表示金額或數量 | 精度誤差累積 | 以 0.1 的倍數做加總的蛻變測試 |
+| `BigDecimal` 用 `equals` 比較，或放進雜湊集合、當雜湊表的鍵 | `2.0` 與 `2.00` 被視為不同 | 以不同小數位數的等值參數呼叫 |
+| `new BigDecimal(double)`；以浮點數表示金額或數量 | 精度誤差累積 | 以 0.1 的倍數做加總的蛻變關係 |
 | `divide` 未指定小數位數與捨入方式 | 除不盡時丟例外 | 以除不盡的參數呼叫 |
-| 各處捨入方式或小數位數不一致 | 預覽與執行差一個最小單位 | 成對路徑差分，參數取捨入邊界 |
-| `int`、`long` 相乘溢位；整數除法；窄化轉型 | 大數量時結果錯誤 | 以接近型別上限的參數呼叫 |
+| 各處捨入方式或小數位數不一致 | 預覽與執行差一個最小單位 | 成對路徑，參數取捨入邊界 |
+| 整數相乘溢位；整數除法；窄化轉型 | 大數量時結果錯誤 | 以接近型別上限的參數呼叫 |
 | 包裝型別以 `==` 比較 | 值在 −128 到 127 之外時為 false | 以大於 127 的編號或代碼呼叫 |
-| 自動拆箱；null 與零混用 | 空指標，或把「未填」當成零 | 以 null 欄位的資料呼叫 |
-| SQL `SUM` 對空集合回傳 NULL；`NOT IN` 遇到 NULL | 合計變成空值；條件永遠不成立 | 以沒有子項的父項呼叫 |
+| 自動拆箱；null 與零混用 | 空指標，或把未填當成零 | 以 null 欄位的資料呼叫 |
+| SQL `SUM` 對空集合回傳 NULL；`NOT IN` 遇到 NULL | 合計為空值；條件永遠不成立 | 以沒有子項的父項呼叫 |
 
-### 17.2 時間
+### B.2 時間
 
 | 樣態 | 後果 | 確認方式 |
 |---|---|---|
 | 直接取現在時間 | 不可測；隱含系統時區 | 列為可測性問題 |
-| 使用系統預設時區做日期判斷 | 伺服器時區不同時，日界線錯位 | 以日界線前後的時間、不同預設時區執行 |
-| 期限比較含不含當日不一致 | 到期日當天的行為各處不同 | 參數取期限當日、前一日、後一日 |
+| 以系統預設時區做日期判斷 | 伺服器時區不同時日界線錯位 | 以日界線前後的時間、不同預設時區執行 |
+| 期限比較含不含當日不一致 | 到期日當天各處行為不同 | 參數取期限當日、前一日、後一日 |
 | 格式字串用週曆年 | 跨年那幾天年份錯誤 | 以十二月底的日期執行 |
 
-### 17.3 狀態與列舉
+### B.3 狀態與列舉
 
 | 樣態 | 後果 | 確認方式 |
 |---|---|---|
-| 列舉以序號存入資料庫；以序號大小表示先後 | 調整列舉順序後，既有資料的意義改變 | 靜態標記 |
+| 列舉以序號存入資料庫；以序號大小表示先後 | 調整列舉順序後既有資料的意義改變 | 靜態標記 |
 | `switch` 沒有預設分支；新增的列舉值未處理 | 新狀態下靜默不做事 | 矩陣中的 `unhandled` 格 |
-| 以多個布林或時間戳共同表示狀態 | 出現無意義的組合 | 6.8 的組合窮舉 |
+| 多個布林或時間戳共同表示狀態 | 出現無意義的組合 | 11.4 的組合窮舉 |
 | 狀態以字串字面值散落各處 | 拼字或大小寫不一致使守衛失效 | 靜態比對字面值集合 |
 
-### 17.4 JPA 與 Hibernate
+### B.4 JPA 與 Hibernate
 
 | 樣態 | 後果 | 確認方式 |
 |---|---|---|
 | 在讀取路徑修改受管實體 | 交易結束時被自動寫回 | 讀取純度 |
 | 沒有版本欄位，且更新語句寫入所有欄位 | 併發修改同一列的不同欄位時，後寫者把先寫者的欄位蓋回舊值 | 兩個改不同欄位的命令交錯 |
-| 批次更新語句繞過持久化上下文與版本檢查 | 之後讀到的是舊的實體；樂觀鎖失效 | 批次更新後在同一交易內讀取並比較 |
+| 批次更新語句繞過持久化上下文與版本檢查 | 之後讀到舊的實體；樂觀鎖失效 | 批次更新後在同一交易內讀取並比較 |
 | 整個物件的欄位複製；合併離線實體 | null 覆寫既有值；可改到不該改的欄位 | 以缺欄位的請求、帶狀態欄位的請求呼叫 |
 | 級聯與孤兒移除 | 隱含的刪除 | 效果軌跡中的 DELETE |
 | 雙向關聯只設定一邊 | 同一交易內合計算錯 | 新增子項後立即讀父項合計 |
 | 實體的 `equals`、`hashCode` 使用可變欄位 | 放進集合後找不到 | 靜態標記 |
 | 查詢沒有排序卻取第一筆 | 選到哪一筆不固定 | 以多筆符合的資料重複執行 |
-| 約束違反延後到 flush 或提交才丟出 | 例外落在預期的處理範圍之外 | 以違反約束的參數呼叫，觀察結果類型 |
+| 約束違反延後到 flush 或提交才丟出 | 例外落在預期的處理範圍之外 | 以違反約束的參數呼叫，看結果分類 |
 
-### 17.5 SQL 與 MyBatis
+### B.5 SQL 與 MyBatis
 
 | 樣態 | 後果 | 確認方式 |
 |---|---|---|
-| 動態條件全部為空時沒有 WHERE | 更新或刪除整張表 | 以全空的條件呼叫，檢查影響筆數 |
+| 動態條件全部為空時沒有 WHERE | 更新或刪除整張表 | 以全空的條件呼叫，檢查資料列差異 |
 | 全欄位更新與選擇性更新混用 | null 覆寫 | 以缺欄位的請求呼叫 |
 | 樂觀鎖的更新未檢查影響筆數 | 衝突時靜默失敗，仍回報成功 | 兩個命令交錯，檢查回應與狀態是否一致 |
 | 字串拼接的 SQL | 注入與型別問題 | 靜態標記 |
 | 預期單筆的查詢回傳多筆；結果對映漏欄位 | 例外，或欄位靜默為 null | 以多筆符合的資料呼叫 |
 | 批次執行的回傳值未檢查 | 部分失敗未被發現 | 故障注入 |
 
-### 17.6 Spring 交易
+### B.6 Spring 交易
 
 | 樣態 | 後果 | 確認方式 |
 |---|---|---|
-| 同一類別內的自我呼叫 | 交易、非同步、快取的代理都被繞過 | 執行期交易屬性與效果軌跡的交易邊界不符 |
+| 同一類別內的自我呼叫 | 交易、非同步、快取的代理被繞過 | 執行期交易屬性與效果軌跡的交易邊界不符 |
 | 交易註解標在 private 方法 | 代理模式下無效 | 同上 |
 | 受檢例外預設不觸發回滾 | 失敗後資料仍被提交 | 故障注入後檢查原子性 |
 | 交易內捕捉例外後繼續 | 部分寫入被提交；或整個交易被標記回滾而在提交時才失敗 | 故障注入 |
@@ -1393,24 +1342,22 @@ WebFlux 與 R2DBC 列在二級的原因：交錯載具以執行緒與 JDBC 連�
 | 交易內呼叫外部服務或發送訊息 | 提交前對方已可見；回滾後無法收回；長時間持鎖 | 效果軌跡中的位置 |
 | 非同步或新執行緒中的工作 | 不在原交易內 | 效果軌跡的執行緒與連線 |
 | 唯讀交易內寫入 | 依 ORM 與驅動而異：靜默不寫或丟例外 | 執行並比較前後快照 |
-| 鎖在交易方法內取得與釋放 | 鎖先釋放、交易後提交 | 10.5 的對應交錯 |
+| 鎖在交易方法內取得與釋放 | 鎖先釋放、交易後提交 | 11.10 的對應交錯 |
 | 提交後的事件監聽器內再寫資料庫 | 沒有交易；例外被吞 | 效果軌跡與故障注入 |
 
-### 17.7 訊息與冪等
+### B.7 訊息與冪等
 
 | 樣態 | 後果 | 確認方式 |
 |---|---|---|
-| 處理前確認，或自動確認 | 處理失敗即遺失 | 故障注入在處理中 |
-| 消費者不冪等 | 重送時重複套用 | 重送測試 |
-| 假設順序但未保證 | 亂序時狀態錯誤 | 交換順序 |
-| 提交與發送不是原子的 | 幽靈訊息或遺失訊息 | 故障注入與效果對應 |
+| 處理前確認，或自動確認 | 處理失敗即遺失 | 靜態標記；故障注入在處理中 |
+| 消費者不冪等 | 重送時重複套用 | 同一訊息處理兩次 |
+| 假設順序但未保證 | 亂序時狀態錯誤 | 兩則訊息反序處理 |
+| 提交與發送不是原子的 | 多出訊息，或遺失訊息 | 故障注入與效果對應 |
 | 毒訊息無上限重試，或直接丟棄 | 佇列卡住，或資料靜默遺失 | 以必然失敗的訊息呼叫 |
 | 對非冪等的操作自動重試 | 重複套用 | 故障注入在「成功後、回傳前」 |
 | 逾時視為失敗，但對方已執行 | 兩邊狀態不一致 | 故障注入：逾時但已執行 |
 
-各訊息系統的遞送保證不同（例如 NATS 的核心模式是至多一次，JetStream 才有確認與重送），寫在各自的轉接層參考檔。
-
-### 17.8 錯誤處理與流程
+### B.8 錯誤處理與流程
 
 | 樣態 | 後果 | 確認方式 |
 |---|---|---|
@@ -1421,186 +1368,19 @@ WebFlux 與 R2DBC 列在二級的原因：交錯載具以執行緒與 JDBC 連�
 | 排程在多個實例重複執行 | 重複處理 | 把排程與自己交錯 |
 | 單例 bean 的可變欄位、非執行緒安全的集合 | 記憶體內競爭 | 靜態標記 |
 
-## 18. 完成條件、量測指標、預算
-
-### 18.1 各階段的完成條件
-
-| 階段 | 完成條件 |
-|---|---|
-| P0 | 概況通過 schema；每項能力是「已執行確認」或「不具備」；適用性判定附依據 |
-| P1 | 每個入口有分類；每個寫入點有入口或被標為孤兒；雙路徑的差異全部結案或列入問題 |
-| P2 | 每個命令可由 driver 呼叫；重置後雙跑結果一致；效果軌跡可錄 |
-| P3 | 可到達的格子全部執行；不可到達的有分類；靜態與執行的差異已對帳 |
-| 簽核 1 | 送出的問題全部有決策 |
-| P4 | 每條已確認不變量有可執行的檢查；衝突命令對依預算涵蓋；每個命令完成故障注入 |
-| P5 | 每條可測條款有判定與證據 |
-| P6 | 每個問題經過盲驗；變異分數與召回率已量測 |
-| P7 | 報告由 JSON 生成；未審範圍明列 |
-
-### 18.2 量測指標
-
-這一組數字取代 v0.1 的信心估計表。每個都有明確的分子與分母。
-
-| 指標 | 定義 |
-|---|---|
-| 入口執行率 | 被至少一個審查測試執行到的入口 ÷ 全部入口 |
-| 寫入點歸屬率 | 有入口的寫入點 ÷ 全部寫入點 |
-| 矩陣執行率 | 已執行的格子 ÷ 全部格子 |
-| 狀態可到達率 | 有到達配方的抽象狀態 ÷ 全部抽象狀態 |
-| 不變量可執行率 | 有 SQL 或程式檢查的不變量 ÷ 全部已確認不變量 |
-| 效果點注入率 | 已注入的效果點 ÷ 全部效果點 |
-| 衝突對涵蓋率 | 已交錯的命令對 ÷ 全部衝突命令對 |
-| 條款判定率 | 有判定的條款 ÷ 可測條款 |
-| 變異分數 | 被殺的變異體 ÷ 非等價變異體（限核心套件） |
-| 召回率 | 命中的埋入缺陷 ÷ 全部埋入缺陷，附區間，依類別分列 |
-| 誤報率 | 簽核 2 判定不是問題的 ÷ 全部報出的問題 |
-| 穩定度 | 三次執行的問題指紋集合的重疊程度 |
-
-### 18.3 預算的起始值
-
-| 項目 | 快速 | 深入 |
-|---|---|---|
-| property 測試 | 50 條序列，每條 20 步 | 2,000 條序列，每條 50 步 |
-| 搶佔上限 | 1 | 2 |
-| 衝突命令對 | 排序後前 10 對 | 前 30 對 |
-| 每個（命令、狀態值）的述詞組合上限 | 8 | 16 |
-| 到達配方的搜尋深度 | 6 | 10 |
-| 簽核 1 的問題數上限 | 60 | 60 |
-
-快速預算用於每次提交，深入預算放在夜間。預算用盡而未涵蓋的部分列入未審範圍。
-
-## 19. 安全守則
-
-每一條都寫進 SKILL.md，並附理由。
-
-1. **只連本機或容器內的資料庫與訊息系統。** 連線位址不是本機或容器位址就拒絕執行。審查測試會大量寫入與清表。
-2. **不讀寫正式環境的設定與機密。** 產出中不包含連線字串、金鑰、真實個資。
-3. **只新增隔離契約內的三處。** 不改主程式與既有測試；不為了讓任何檢查通過而停用、略過或放寬既有的東西。
-4. **不自動修復。** 修法只寫成建議。審查與修改混在一起，會讓「這個問題原本存在嗎」變得無法查證。
-5. **正式資料的掃描只輸出腳本。** 由人在唯讀副本上執行。
-6. **所有變更在專用分支上。**
-7. **結束時清理容器與暫存的隔離工作目錄。**
-
-## 20. Skill 本身的驗證
-
-只在一個系統上開發，skill 會長成那個系統的形狀。通用性必須在結構不同的 repo 上量測。
-
-### 20.1 驗證樣本
-
-| 樣本 | 技術組合 | 用途 |
-|---|---|---|
-| 樣本一 | Spring Boot 3、JPA、PostgreSQL、訊息以邊界替身 | 主要開發樣本；乾淨版加一組缺陷補丁 |
-| 樣本二 | Spring Boot 2、MyBatis、MySQL、JUnit 4 | 舊版技術組合 |
-| 樣本三 | Gradle、真實訊息代理、待送表 | 訊息語意與建置工具 |
-| 樣本四 | 純函式庫；串流處理 | 應判定為不適用 |
-| 樣本五 | 一個真實的開源業務系統（待選） | 規模與雜訊 |
-
-前四個是為驗證而寫的小型專案，各有標準答案：正確的概況、矩陣、以及每個缺陷補丁對應的類別。
-
-### 20.2 案例
-
-案例放在 `evals/` 下，每個案例一個資料夾，含提示、對好結果的描述、以及逐條的客觀斷言。
-
-| 案例 | 檢查 |
-|---|---|
-| 概況正確 | 每個樣本的 `profile.json` 與標準答案相符 |
-| 判定不適用 | 樣本四得到「不適用」並說明原因，不產生矩陣 |
-| 能力降級 | 拿掉 Docker 後，併發結論全部停在 C，報告寫明升級路徑 |
-| 矩陣正確 | 樣本一的矩陣與標準答案的一致率 |
-| 召回率 | 套用缺陷補丁後，各類別的命中數 |
-| 乾淨樣本 | 未套用補丁時報出的缺陷數（誤報） |
-| 規格對照 | 植入的規格差異全部得到正確的判定 |
-| 中斷續跑 | 在 P3 中途中斷後，再次呼叫從中斷處繼續 |
-| 差異重跑 | 修掉一個缺陷後重跑，該問題標為已修復，其餘編號不變 |
-| 隔離契約 | 不啟用審查 profile 時，建置輸出與原本相同 |
-
-每個案例同時跑「有 skill」與「沒有 skill」兩種設定，比較命中率、誤報、耗時與用量。沒有 skill 的基準讓我們知道這套方法實際多帶來多少。
-
-### 20.3 觸發測試
-
-另備約 20 條使用者會說的話，一半應該觸發、一半不應該，用來調整 frontmatter 的描述。不應觸發的要選相近的情況：請求審查一個 PR 的差異、請求效能調校、請求對非 Java 專案做同樣的事。
-
-## 21. 里程碑
-
-每個里程碑以驗證樣本上的量測結果作為結束條件。目標數字在 M1 結束時依實測訂定。
-
-| 里程碑 | 內容 | 結束條件 |
-|---|---|---|
-| M0 | 骨架：SKILL.md、schema、狀態協定、P0（Spring、Maven、Gradle）；樣本一、二、四 | 三個樣本的概況全對；不適用判定正確 |
-| M1 | P1、P2、P3（JPA、PostgreSQL）；簽核流程 | 樣本一的矩陣一致率達標；問題清單可用 |
-| M2 | P4 前半：不變量、property、蛻變、效果軌跡 | 樣本一中守衛、級聯、成對路徑、數值類缺陷的召回率 |
-| M3 | P4 後半：故障注入、併發 | 交易、訊息、併發類缺陷的召回率；失敗排程重播穩定 |
-| M4 | P5 規格對照 | 植入的規格差異全數判定正確 |
-| M5 | P6、P7；差異重跑 | 端到端跑完；重跑的編號對齊正確 |
-| M6 | 轉接層擴充（MyBatis、MySQL、訊息系統）；樣本三、五 | 樣本二、三達到與樣本一相近的召回率；在樣本五上跑完 |
-
-M1 結束是第一個決策點：若矩陣的一致率或簽核問題的品質不如預期，問題在 P1 的推導方法，應在繼續之前修正，因為後面每個階段都建立在這份模型上。
-
-## 22. 限制與待決事項
-
-### 22.1 限制
-
-- **一致但錯的規則。** 程式各處一致地實作了錯誤的規則時，只有規格、人工決策、領域包能指出來。沒有這三者，skill 只找得到不一致。
-- **相關的盲點。** 各角色由同一個模型擔任。輸入隔離降低但不能消除共同的誤讀。這是為什麼結論必須落在可執行的證據上。
-- **動態行為。** 反射、動態代理、設定檔驅動的分派不在靜態呼叫關係內。執行觀察能補上被執行到的部分，沒被執行到的分支仍可能漏。
-- **抽象狀態的完整性。** 抽象由守衛誘導。影響行為卻從未出現在守衛裡的欄位，要靠 8.3 的隱藏狀態偵測，而它只在序列剛好走到時才會觸發。
-- **交錯的粒度。** 只在資料庫互動的邊界交錯。記憶體內的競爭只有靜態標記。
-- **替身與替代引擎。** 上限如 5.4 所述。skill 會標明，但不能替代真實的整合環境。
-- **時間。** 沒有可控的時鐘時，與時間有關的規則驗證較弱。
-- **規模。** 超過約十五萬行的 repo 需要依模組或界限上下文分批審查，跨批次的互動要另外處理。
-- **測試不是證明。** 所有執行證據都是抽樣。量測指標告訴你抽了多少，不保證沒抽到的部分沒問題。
-
-### 22.2 需試跑確認的技術假設
-
-| 假設 | 不成立時的替代 |
-|---|---|
-| jqwik 能在目標專案的 context 內執行 | 使用內建的序列測試後端 |
-| PIT 能執行 jqwik 引擎的測試 | 變異分析只用矩陣測試與內建後端 |
-| DataSource 代理與目標專案的連線池相容 | 改在連線池設定層包裝 |
-| 以 Gradle init script 加入審查原始碼集，不動建置檔 | 改為在建置檔中加一個區塊 |
-| 資料庫的鎖等待檢視足以即時判斷阻塞 | 以逾時輔助判斷，排程探索變慢 |
-
-### 22.3 待決事項
-
-| 事項 | 選項 | 傾向 |
-|---|---|---|
-| 審查產物放在哪裡 | 目標 repo 內；獨立的 repo | 目標 repo 內，測試才能隨程式一起跑 |
-| skill 的分發方式 | 專案內；個人；打包成 plugin | 打包，讓角色指示與腳本一起分發 |
-| 第一個領域包 | 訂單履約；其他 | 依第一個試行系統決定 |
-| 問題同步到哪個 issue 系統 | — | 以轉接腳本實作，核心只輸出 JSON |
-| 簽核的介面 | 編輯問題清單檔；報告頁上作答 | 先用檔案，報告頁之後再做 |
-
----
-
-## 附錄 A：一個問題的完整路徑
-
-以「已有出貨的訂單行，數量可改到低於已出貨量」為例，說明各階段如何接力。
-
-1. **P1，寫入點表。** `order_line.qty` 有三個寫入點。出貨路徑的守衛含 `qty >= shippedQty`，改量路徑與匯入排程沒有。記為守衛不對稱，C 級，依據 N3。同時產生候選不變量 INV-07，來源為「強制」。
-2. **P1，矩陣。** 改量命令的守衛測了狀態與 `shippedQty > 0`，所以「已確認且有出貨」被拆成獨立的格子。參數述詞 `newQty >= shippedQty` 產生三個參數類別。其中 `newQty < shippedQty` 這一格沒有任何守衛處理，靜態結果為 `unhandled`。
-3. **P3，執行。** 到達配方為「建立、確認、出貨 60」。執行該格，結果為 `ALLOWED`。證據升為 A。
-4. **簽核 1。** 問題 Q-014 送出。回答為「應該拒絕」。決策 D-021 把 INV-07 升為已確認，該格的預期翻轉，產生問題 F-012，依據加上 N2。
-5. **P4，property。** 隨機序列找到另一條到達違反狀態的路徑：先改量再出貨的順序在特定參數下也會違反。縮減後成為第二個最小反例，附在同一個問題下。
-6. **P4，併發。** 改量與出貨是衝突命令對（一方寫入的欄位是另一方守衛讀取的欄位）。交錯後發現即使補上改量路徑的守衛，兩者併發時仍可違反 INV-07。這是另一個問題 F-013，修法不同（需要鎖或版本檢查）。
-7. **P5。** 條款 PRD-3.2.4-b 的規格測試在同一格失敗。F-012 的依據加上 N1。
-8. **P6。** 盲驗確認 F-012 與 F-013。變異測試顯示把出貨路徑的守衛移除後有測試會失敗，代表這條不變量現在受到保護。
-9. **P7。** 報告中 F-012 的卡片顯示：S1、A 級、依據 N1 + N2 + N3、重現指令、最小反例。
-
-沒有 PRD 的情況下，流程停在第 6 步，F-012 的依據是 N2 + N3，結論依然成立。連簽核都沒有的情況下，它是一個 A 級的「不一致」，等人決定哪一邊是對的。
-
-## 附錄 B：方法出處
+## 附錄 C：方法出處
 
 | 做法 | 出處 |
 |---|---|
+| 封裝方式：每階段一個指令、腳本化的平行、裁判、由腳本計算判定、不可信輸入的處理 | Anthropic `code-modernization` plugin v1.1.0 |
 | 特徵化測試 | Feathers, *Working Effectively with Legacy Code*, 2004 |
 | 由程式自身的信念找出偏離 | Engler et al., "Bugs as Deviant Behavior", SOSP 2001 |
 | 由執行資料探勘可能的不變量 | Ernst et al., Daikon 系列研究 |
 | 以述詞誘導抽象狀態 | Ball et al., "Automatic Predicate Abstraction of C Programs", PLDI 2001 |
-| Property-based 測試 | Claessen & Hughes, "QuickCheck", ICFP 2000 |
+| 隨機測試與性質 | Claessen & Hughes, "QuickCheck", ICFP 2000 |
 | 蛻變測試 | Chen et al., "Metamorphic Testing", 1998 |
 | 變異測試 | DeMillo, Lipton & Sayward, "Hints on Test Data Selection", 1978 |
 | 失敗輸入的縮減 | Zeller & Hildebrandt, "Simplifying and Isolating Failure-Inducing Input", 2002 |
 | 有界搶佔的併發探索 | Musuvathi & Qadeer, "Iterative Context Bounding", PLDI 2007 |
 | 隔離等級與異常的分類 | Berenson et al., "A Critique of ANSI SQL Isolation Levels", SIGMOD 1995 |
 | 小範圍假設 | Jackson, *Software Abstractions*, 2006 |
-| 獨立驗證與確認 | IV&V 的工程實務 |
