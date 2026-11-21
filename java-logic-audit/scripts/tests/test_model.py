@@ -128,6 +128,30 @@ class Model(unittest.TestCase):
         self.assertEqual(brief["fixture_prefix"], "OrderController")
         self.assertTrue(brief["time_can_be_moved"])
 
+    def test_briefs_say_who_can_call_how_a_refusal_reads_and_what_the_stand_ins_answer(self):
+        self.write("harness.json", {
+            "rejections": [], "clock": None,
+            "result_code": {"path": "errno", "allowed": ["0"], "error": ["502"]},
+            "auth": {"sessions": [{"name": "user", "paths": "^/wx/", "login": {"path": "/wx/auth/login",
+                                   "body": {"username": "u", "password": "${env.AUDIT_LOGIN_PASSWORD}"}},
+                                   "headers": {"X-Token": "${login.data.token}"}}]},
+            "doubles": [{"type": "p.PayClient", "kind": "external",
+                         "answers": [{"method": "parse", "returns": {"tradeNo": "${args[0].tradeNo}"}},
+                                     {"method": "close", "throws": "p.PayException", "message": "no"}]}]})
+        mine = model_brief.cmd_mine(self.tmp, "s", "entries:Listener")
+        self.assertEqual(mine["refusals"]["result_code"]["path"], "errno")
+        self.assertEqual(mine["signed_in_as"]["users"], [{"name": "user", "paths": "^/wx/"}])
+        self.assertIn("_session", mine["signed_in_as"]["how"])
+        self.assertNotIn("password", json.dumps(mine))                 # how a user signs in is not a reader's business
+        self.mined(cancel())
+        self.render()
+        recipes = model_brief.cmd_recipes(self.tmp, "s", "entries:OrderController")
+        self.assertEqual(recipes["signed_in_as"]["users"][0]["name"], "user")
+        self.assertEqual(recipes["stand_ins"]["answers"],
+                         [{"type": "p.PayClient", "method": "parse", "returns": {"tradeNo": "${args[0].tradeNo}"}},
+                          {"type": "p.PayClient", "method": "close", "throws": "p.PayException"}])
+        self.assertFalse(recipes["time_can_be_moved"])
+
     def test_a_group_with_many_cases_gets_its_recipes_in_parts_and_variants_stay_together(self):
         def variant(root, name, values):
             return cancel(id="CMD-%s.%s" % (root, name), variant={"of": "CMD-" + root},
