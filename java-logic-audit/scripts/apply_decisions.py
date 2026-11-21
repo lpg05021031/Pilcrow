@@ -75,6 +75,7 @@ def record(workspace, system, question_id, answer, note=None, by=None, now=None,
         "question": q["id"], "fingerprint": q["fingerprint"], "kind": q["kind"], "command": q["command"],
         "asked": q["observed"], "answer": answer, "note": note or "",
         "cells": covered, "covers": "all" if len(covered) == len(q["cells"]) else "part",
+        "invariants": q.get("invariants", []),
         "if_not_intended": q.get("if_not_intended"),
         "decided_at": now or datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "by": by or "",
@@ -138,6 +139,28 @@ def apply(workspace, system):
             report["cells_changed"] += 1
     pinned["schema"] = SCHEMA
     _lib.write_json(path, pinned)
+
+    # A decision about a rule of the data: "is this a rule?" answered yes confirms it; a relation that
+    # almost always held and whose exceptions a person calls not intended is a rule too.
+    inv_path = os.path.join(model, "invariants.json")
+    inv_data = _lib.read_json(inv_path)
+    if isinstance(inv_data, dict):
+        in_force = {}
+        for d in latest(load(adir)["decisions"]).values():
+            if d["answer"] == "unsure" or not d.get("invariants"):
+                continue
+            is_rule = (d["answer"] == "intended") if d.get("kind") == "rule?" else (d["answer"] == "not-intended")
+            for inv_id in d["invariants"]:
+                in_force[inv_id] = ("confirmed" if is_rule else "rejected", d["id"])
+        report["rules_confirmed"] = report["rules_rejected"] = 0
+        for inv in inv_data.get("invariants", []):
+            if inv["id"] in in_force:
+                inv["status"], inv["decision"] = in_force[inv["id"]]
+                report["rules_" + inv["status"]] += 1
+            elif inv.get("decision"):
+                inv.pop("decision")
+                inv["status"] = "candidate"          # the decision was superseded; the next assessment sorts it again
+        _lib.write_json(inv_path, inv_data)
     return report
 
 
@@ -181,6 +204,8 @@ def main(argv=None):
         rep = apply(workspace, args.system)
         print("decisions in force: %d not-intended, %d intended, %d unsure; %d cells now expect something else than observed" % (
             rep["not-intended"], rep["intended"], rep["unsure"], rep["cells_changed"]))
+        if rep.get("rules_confirmed") or rep.get("rules_rejected"):
+            print("rules of the data: %d confirmed, %d rejected" % (rep.get("rules_confirmed", 0), rep.get("rules_rejected", 0)))
         if rep["without_effect"]:
             print("recorded but with no expectation to set (the question says what was seen, not what should be): "
                   + ", ".join(rep["without_effect"]))

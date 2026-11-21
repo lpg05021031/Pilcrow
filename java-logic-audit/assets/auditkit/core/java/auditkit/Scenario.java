@@ -183,6 +183,49 @@ public final class Scenario {
     }
 
     /**
+     * One step outside a fixed recipe: fills the parameters from what earlier steps returned and
+     * calls the command. Returns null, having done nothing, when the parameters cannot be filled
+     * here (the step refers to something this sequence has not created). A result is kept under
+     * the step's name only when the call went through.
+     */
+    public Outcome tryStep(String commandId, JsonNode withTemplate, String as, ObjectNode context) throws Exception {
+        JsonNode params;
+        try {
+            params = Expr.fill(withTemplate, context, today);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+        Outcome outcome;
+        try {
+            outcome = driver.invoke(command(commandId), params);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+        if (as != null && outcome.response != null && Outcome.ALLOWED.equals(outcome.kind)) {
+            context.set(as, outcome.response);
+        }
+        lastParams = params;
+        return outcome;
+    }
+
+    /** The parameters the last tryStep call was made with. */
+    public JsonNode lastParams() {
+        return lastParams;
+    }
+
+    private JsonNode lastParams;
+
+    /** Moves the application's clock as a set_today step does. False when that is not possible here. */
+    public boolean moveToday(JsonNode template, ObjectNode context) {
+        try {
+            AuditClock.moveTo(LocalDate.parse(Expr.fill(template, context, today).asText()));
+            return true;
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    /**
      * The value of each variable of a command that has a query: a state variable read from the
      * database, or the class a parameter falls in, worked out from the parameter and the rows it is
      * compared with. The queries see the command's parameters by name, and :today, which is the

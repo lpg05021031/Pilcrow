@@ -16,10 +16,17 @@ show it. The kinds, each from one fixed rule:
   differs               running the code gave something else than reading it predicts
   dropped               a message was taken, had no effect at all, and its sender was not told
   unstable              the same call under the same conditions did not give the same result twice
+  rule-broken           a rule a person confirmed was broken by a sequence of ordinary calls
+  near-rule             a relation between numbers held in nearly every state and broke in a few
+  error-in-sequence     a call ended in an error after a sequence of ordinary calls
+  fault                 a failure in the middle of a call left the data in between, or something sent
+                        that was not kept, or a retry that does not converge
   never-decides         a check that, as far as the audit can reach, never fires from this entry
+  rare-combination      two lifecycle values that almost never occur together, with exceptions
+  rule?                 something that held in every state the audit reached: is it a rule?
 
-The first seven are flagged: they bear on whether the data is right. The last is asked only on
-request. A question keeps its id for as long as its fingerprint (kind, command, what was seen) is
+The last three are asked only on request; the others are flagged: they bear on whether the data is
+right. A question keeps its id for as long as its fingerprint (kind, command, what was seen) is
 produced; a decision already recorded for that fingerprint marks the question as answered.
 
 `if_not_intended` is what the cells must show instead if a person answers "not intended"; it is
@@ -34,11 +41,37 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.dont_write_bytecode = True      # importing the sibling scripts must not leave __pycache__ in the plugin folder
 sys.path.insert(0, HERE)
 import _lib  # noqa: E402
+import judge  # noqa: E402
 
 SCHEMA = 1
-FLAGGED = ("refused-but-changed", "read-wrote", "undecided", "error", "differs", "dropped", "unstable")
+FLAGGED = ("refused-but-changed", "read-wrote", "undecided", "error", "differs", "dropped", "unstable",
+           "rule-broken", "near-rule", "error-in-sequence", "fault")
+UNFLAGGED = ("never-decides", "rare-combination", "rule?")
 BASIS = {"refused-but-changed": "N4", "read-wrote": "N4", "undecided": "N3", "error": "N4", "differs": "N3",
-         "dropped": "N4", "unstable": "N4", "never-decides": "N3"}
+         "dropped": "N4", "unstable": "N4", "never-decides": "N3", "rule-broken": "N2", "near-rule": "N4",
+         "error-in-sequence": "N4", "fault": "N4", "rare-combination": "N4", "rule?": "N4"}
+
+
+def sentence(text):
+    return text[:1].upper() + text[1:]
+
+
+def FAULT_TEXT(differs, observed):
+    """What a failure left behind, in words."""
+    parts = []
+    if "atomicity" in differs:
+        parts.append("the data is left in between: neither as before nor as after a successful call")
+    if "sent-not-kept" in differs:
+        parts.append("something was already sent out although the change was rolled back")
+    if "kept-not-sent" in differs:
+        parts.append("the change was kept although what a successful call sends did not go out")
+    if "reported-success" in differs:
+        parts.append("the caller is told the call succeeded")
+    if "retry-diverges" in differs:
+        parts.append("calling again does not end where an undisturbed call ends")
+    if "sent-again-on-retry" in differs:
+        parts.append("calling again sends it a second time")
+    return "; ".join(parts) or "something differs"
 NOTHING_CHANGES = {"written": [], "created": [], "deleted": []}
 ANSWERS = ("not-intended", "intended", "unsure")
 
@@ -162,7 +195,7 @@ def build(workspace, system):
                         root(cell["command"]), " (the refusal %s is caught and only logged)" % swallowed if swallowed else ""),
                     why="A message that is dropped is not delivered again; if it was valid but early, it is lost.",
                     if_not_intended={"outcome_not": "ignored"})
-            q.setdefault("cases", []).append(case_text(cell))
+            q.setdefault("case_texts", []).append(case_text(cell))
             if guard:
                 q["cites"].update(cites(cell["command"], [guard]))
 
@@ -188,6 +221,74 @@ def build(workspace, system):
         if g["command"] not in q["variants"]:
             q["variants"].append(g["command"])
 
+    # ---- what the sequence runs showed about rules of the data
+    invariants = (_lib.read_json(os.path.join(model, "invariants.json"), {}) or {}).get("invariants", [])
+    for inv in invariants:
+        support = inv.get("support") or {}
+        applied, violated = support.get("applied", 0), support.get("violated", 0)
+        where = " The sequence that breaks it was cut down to %s steps and replayed (evidence of %s in %s)." % (
+            support.get("steps_to_reproduce", "?"), inv["id"], support.get("run")) if violated else ""
+        if inv.get("status") == "confirmed" and violated:
+            add("rule-broken", "(data)", {"rule": inv["id"]}, None, source="sequences", cases=[inv["id"]], invariants=[inv["id"]],
+                title="A confirmed rule is broken",
+                observed="A person confirmed this rule: %s. It was broken in %d of %d states.%s" % (inv["statement"], violated, applied, where),
+                why="A rule a person confirmed does not hold after some sequence of ordinary calls.",
+                if_not_intended=None)
+        elif inv.get("status") == "near" and inv.get("class") in ("sum", "bound"):
+            add("near-rule", "(data)", {"rule": inv["id"]}, None, source="sequences", cases=[inv["id"]], invariants=[inv["id"]],
+                title="Something that almost always holds was broken",
+                observed="%s: this held in %d of %d states and was broken in %d.%s" % (
+                    sentence(inv["statement"]), applied - violated, applied, violated, where),
+                why="A relation between numbers that holds nearly everywhere is usually a rule; the few states that break it "
+                    "are either a path that forgets it, or a sign that it is no rule.",
+                if_not_intended=None)
+        elif inv.get("status") == "near":
+            add("rare-combination", "(data)", {"rule": inv["id"]}, None, source="sequences", cases=[inv["id"]], invariants=[inv["id"]],
+                title="A combination of states that is rare",
+                observed="%s, with %d exceptions in %d states.%s" % (sentence(inv["statement"]), violated, applied, where),
+                why="A combination that almost never occurs may be one that was never meant to.",
+                if_not_intended=None)
+        elif inv.get("status") == "candidate":
+            group = inv.get("anchor") if inv.get("class") == "pair" else inv["id"]
+            q = add("rule?", "(data)", {"about": group}, None, source="sequences", cases=[], invariants=[],
+                    title="Is this a rule?",
+                    observed="In every state the audit reached: %s.",
+                    why="If it is a rule, later runs treat any state that breaks it as a defect. If it only happened to hold, say so.",
+                    if_not_intended=None)
+            q["cases"].append(inv["id"])
+            q["invariants"].append(inv["id"])
+            q.setdefault("statements", []).append("%s (%d states)" % (inv["statement"], applied))
+
+    # ---- errors met in sequences, and what failures left behind
+    for kind, prefix in (("sequences", "SEQERR-"), ("faults", "FAULT-")):
+        run_dir = judge.latest_run(adir, kind)
+        rows, problem = ({}, "none") if run_dir is None else judge.read_run(run_dir)
+        for rid, row in sorted(rows.items()):
+            if not rid.startswith(prefix) or row.get("result") != "MISMATCH":
+                continue
+            d, o = row.get("detail") or {}, row.get("observed") or {}
+            if kind == "sequences":
+                add("error-in-sequence", root(d.get("command")), {"code": d.get("code")}, None, source="sequences", cases=[rid],
+                    title="A call ends in an error after an ordinary sequence of calls",
+                    observed="%s ends in an error (%s) after a sequence of %s calls (evidence of %s in %s)." % (
+                        root(d.get("command")), d.get("code"), o.get("steps_to_reproduce", "?"), rid, os.path.basename(run_dir)),
+                    why="An error that is not one of the application's own refusals usually means a case nobody handled.",
+                    if_not_intended=None)
+                continue
+            differs = sorted(d.get("differs") or [])
+            target = d.get("fails", "")
+            target = target if d.get("step") in ("WRITE", "COMMIT") else d.get("step")
+            q = add("fault", root(d.get("command")), {"differs": differs}, None, source="faults", cases=[],
+                    title="A failure in the middle of a call leaves something behind",
+                    observed="When a step of %s fails (the step: %%s), %s." % (root(d.get("command")), FAULT_TEXT(differs, o)),
+                    why="After a failure the data should be as before or as after success, what was sent should match what "
+                        "was kept, and trying again should end where an undisturbed call ends.",
+                    if_not_intended=None)
+            q["cases"].append(rid)
+            q.setdefault("statements", [])
+            if target not in q["statements"]:
+                q["statements"].append(target)
+
     # Ids are kept by fingerprint; decisions are found the same way.
     old = _lib.read_json(os.path.join(adir, "questions.json"), {}) or {}
     ids = dict(old.get("ids", {}))
@@ -196,7 +297,7 @@ def build(workspace, system):
     for d in (_lib.read_json(os.path.join(adir, "DECISIONS.json"), {}) or {}).get("decisions", []):
         decided[d.get("fingerprint")] = d
     questions = []
-    order = {k: i for i, k in enumerate(FLAGGED + ("never-decides",))}
+    order = {k: i for i, k in enumerate(FLAGGED + UNFLAGGED)}
     for key in sorted(groups, key=lambda k: (order[k[0]], k[1], k[2])):
         q = groups[key]
         fp = fingerprint(q["kind"], q["command"], q["what"])
@@ -204,7 +305,12 @@ def build(workspace, system):
             ids[fp] = nxt
             nxt += 1
         decision = decided.get(fp)
-        observed = q["observed"] % "; ".join(q["cases"]) if q.get("cases") else q["observed"]
+        if q.get("statements"):
+            observed = q["observed"] % "; ".join(q["statements"])
+        elif q.get("case_texts"):
+            observed = q["observed"] % "; ".join(q["case_texts"])
+        else:
+            observed = q["observed"]
         entry = {
             "id": "Q-%03d" % ids[fp], "fingerprint": fp, "kind": q["kind"], "flagged": q["kind"] in FLAGGED,
             "basis": BASIS[q["kind"]], "command": q["command"], "title": q["title"], "observed": observed,
@@ -217,6 +323,9 @@ def build(workspace, system):
             entry["answered_for"] = sorted(set(decision.get("cells", [])) & set(q["cells"]))
         if q.get("variants"):
             entry["variants"] = sorted(q["variants"])
+        for key in ("source", "cases", "invariants"):
+            if q.get(key):
+                entry[key] = sorted(q[key]) if isinstance(q[key], list) else q[key]
         if decision:
             entry["decision"] = decision.get("id")
             entry["answer"] = decision.get("answer")

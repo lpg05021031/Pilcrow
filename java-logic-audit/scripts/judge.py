@@ -249,7 +249,9 @@ def render_capabilities(c):
 
 REPRODUCED_RUNS = 3
 CLASS_BY_BASIS = {"N3": "inconsistency", "N4": "anomaly", "N5": "anomaly"}
-FINDING_KINDS = ("refused-but-changed", "read-wrote", "undecided", "error", "differs", "dropped", "unstable")
+FINDING_KINDS = ("refused-but-changed", "read-wrote", "undecided", "error", "differs", "dropped", "unstable",
+                 "rule-broken", "near-rule", "error-in-sequence", "fault")
+CLASS_BY_KIND = {"rule-broken": "defect"}          # a rule a person confirmed: breaking it needs no further answer
 RESERVATIONS = {
     "substitute-engine": "the database is a stand-in, not the real engine",
     "unconfirmed-version": "the database was not confirmed to match production",
@@ -318,6 +320,78 @@ def reservations(adir, cell, command, run, caps):
     return out
 
 
+def cell_evidence(adir, q, decision, cells, commands, runs, caps):
+    """Status of a finding about matrix cells, from every believable run of those cells."""
+    per_cell, best, marks, last_run = {}, None, set(), None
+    for cell_id in q["cells"]:
+        cell = cells.get(cell_id)
+        if cell is None:
+            continue
+        verdicts = []
+        for name, _, rows in runs:
+            row = rows.get(cell_id)
+            if row and (row.get("detail") or {}).get("sha") == cell.get("sha"):
+                h = holds(q, decision, row)
+                if h is not None:
+                    verdicts.append((name, h))
+        recent = verdicts[-REPRODUCED_RUNS:]
+        per_cell[cell_id] = {"runs": len(verdicts), "shown_in_last": sum(1 for _, h in recent if h),
+                             "of_last": len(recent)}
+        if len(recent) == REPRODUCED_RUNS and all(h for _, h in recent):
+            best = "reproduced"
+            marks.update(reservations(adir, cell, commands.get(cell["command"], {}), recent[-1][0], caps))
+            last_run = max(last_run or "", recent[-1][0])
+    executed = [v for v in per_cell.values() if v["runs"]]
+    if q["kind"] == "unstable":
+        status = "reproduced" if executed else "unconfirmed"       # two runs that disagree are the evidence
+    elif best:
+        status = best
+    elif executed and all(v["shown_in_last"] == 0 for v in executed):
+        status = "fixed"
+    else:
+        status = "unconfirmed"
+    return status, per_cell, marks
+
+
+def run_evidence(adir, q, caps):
+    """Status of a finding from the sequence or fault runs. A sequence finding is reproduced when the
+    runner replayed its shortest sequence three times and it showed each time; a fault finding when the
+    last three fault runs all show it."""
+    kind = q["source"]
+    runs_dir = os.path.join(adir, "runs")
+    good = []
+    for name in sorted(d for d in (os.listdir(runs_dir) if os.path.isdir(runs_dir) else []) if d.startswith(kind + "-")):
+        rows, problem = read_run(os.path.join(runs_dir, name))
+        if not problem:
+            good.append((name, rows))
+    per_case, reproduced, seen, shown_latest = {}, False, False, False
+    for case in q.get("cases", []):
+        history = [(name, rows[case]) for name, rows in good if case in rows]
+        if not history:
+            continue
+        seen = True
+        if kind == "sequences":
+            row = history[-1][1]
+            shows = row.get("result") == "MISMATCH"
+            replays = (row.get("observed") or {}).get("replays_violating") or 0
+            per_case[case] = {"run": history[-1][0], "shows": shows, "replays_showing": replays}
+            reproduced = reproduced or (shows and replays >= REPRODUCED_RUNS)
+            shown_latest = shown_latest or shows
+        else:
+            recent = [r.get("result") == "MISMATCH" for _, r in history[-REPRODUCED_RUNS:]]
+            per_case[case] = {"runs": len(history), "shown_in_last": sum(recent), "of_last": len(recent)}
+            reproduced = reproduced or (len(recent) == REPRODUCED_RUNS and all(recent))
+            shown_latest = shown_latest or recent[-1]
+    marks = set()
+    database = (caps or {}).get("database") or {}
+    if database.get("real_engine") is False:
+        marks.add("substitute-engine")
+    if (caps or {}).get("matches_production") != "confirmed":
+        marks.add("unconfirmed-version")
+    status = "reproduced" if reproduced else ("fixed" if seen and not shown_latest else "unconfirmed")
+    return status, per_case, marks
+
+
 def findings(workspace, system):
     adir = _lib.audit_dir(workspace, system)
     model = os.path.join(adir, "model")
@@ -354,39 +428,15 @@ def findings(workspace, system):
             accepted.append({"question": q["id"], "decision": decision["id"], "title": q["title"], "observed": q["observed"],
                              "note": decision.get("note", "")})
             continue
-        per_cell, best, marks, last_run = {}, None, set(), None
-        for cell_id in q["cells"]:
-            cell = cells.get(cell_id)
-            if cell is None:
-                continue
-            verdicts = []
-            for name, _, rows in runs:
-                row = rows.get(cell_id)
-                if row and (row.get("detail") or {}).get("sha") == cell.get("sha"):
-                    h = holds(q, decision, row)
-                    if h is not None:
-                        verdicts.append((name, h))
-            recent = verdicts[-REPRODUCED_RUNS:]
-            per_cell[cell_id] = {"runs": len(verdicts), "shown_in_last": sum(1 for _, h in recent if h),
-                                 "of_last": len(recent)}
-            if len(recent) == REPRODUCED_RUNS and all(h for _, h in recent):
-                best = "reproduced"
-                marks.update(reservations(adir, cell, commands.get(cell["command"], {}), recent[-1][0], caps))
-                last_run = max(last_run or "", recent[-1][0])
-        executed = [v for v in per_cell.values() if v["runs"]]
-        if q["kind"] == "unstable":
-            status = "reproduced" if executed else "unconfirmed"       # two runs that disagree are the evidence
-        elif best:
-            status = best
-        elif executed and all(v["shown_in_last"] == 0 for v in executed):
-            status = "fixed"
+        if q.get("source") in ("sequences", "faults"):
+            status, per_cell, marks = run_evidence(adir, q, caps)
         else:
-            status = "unconfirmed"
-        cls = "defect" if answer == "not-intended" else CLASS_BY_BASIS.get(q["basis"], "anomaly")
+            status, per_cell, marks = cell_evidence(adir, q, decision, cells, commands, runs, caps)
+        cls = "defect" if answer == "not-intended" else CLASS_BY_KIND.get(q["kind"]) or CLASS_BY_BASIS.get(q["basis"], "anomaly")
         basis = [q["basis"]] + (["N2"] if answer == "not-intended" else [])
         handler = commands.get(q["cells"][0] and cells[q["cells"][0]]["command"], {}).get("handler") if q["cells"] else None
         fp = hashlib.sha256(_lib.canonical([q["kind"], q["cites"], sorted(cells[c]["key"] for c in q["cells"] if c in cells),
-                                            handler]).encode("utf-8")).hexdigest()[:16]
+                                            handler, q["fingerprint"] if not q["cells"] else None]).encode("utf-8")).hexdigest()[:16]
         if fp not in ids:
             ids[fp] = nxt
             nxt += 1
@@ -397,15 +447,17 @@ def findings(workspace, system):
             "status": status,
             "grade": None if status != "reproduced" else ("B" if marks else "A"),
             "reservations": sorted(marks),
-            "cells": q["cells"], "cites": q["cites"], "anchor": handler, "evidence": per_cell,
+            "cells": q["cells"], "cases": q.get("cases", []), "cites": q["cites"], "anchor": handler, "evidence": per_cell,
             "severity": None,
         }
         (unconfirmed if status == "unconfirmed" else out).append(entry)
     out.sort(key=lambda f: f["id"])
     result = {"schema": 1, "next": nxt, "ids": ids,
               "computed": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-              "rule": "reproduced = the last %d runs of one of the cells all show it; grade A = reproduced with no "
-                      "reservation; B = reproduced with a reservation; unconfirmed candidates are listed apart" % REPRODUCED_RUNS,
+              "rule": "reproduced = the last %d runs of one of the cells or failure points all show it, or the shortest "
+                      "sequence that shows it was replayed %d times and showed it each time; grade A = reproduced with no "
+                      "reservation; B = reproduced with a reservation; unconfirmed candidates are listed apart" % (
+                          REPRODUCED_RUNS, REPRODUCED_RUNS),
               "findings": out, "unconfirmed": unconfirmed, "accepted": accepted}
     _lib.write_json(os.path.join(adir, "findings.json"), result)
     with open(os.path.join(adir, "FINDINGS.md"), "w", encoding="utf-8") as fh:
@@ -427,7 +479,10 @@ def render_findings(system, r):
                   "- **What:** " + f["statement"]]
         if f["reservations"]:
             lines.append("- **Reservations:** " + "; ".join(RESERVATIONS[m] for m in f["reservations"]))
-        lines.append("- **Cells:** " + ", ".join(f["cells"]))
+        if f["cells"]:
+            lines.append("- **Cells:** " + ", ".join(f["cells"]))
+        if f.get("cases"):
+            lines.append("- **Cases:** " + ", ".join(f["cases"][:12]) + (" ..." if len(f["cases"]) > 12 else ""))
         if f["cites"]:
             lines.append("- **Code:** " + ", ".join("`%s`" % c for c in f["cites"]))
         lines.append("")
@@ -465,10 +520,53 @@ but at least one could not pass, and **reviewed insufficiently** when any item f
    Could not pass when a state was not reached: no recipe was found for it, or the recipe did not get there.
 2. Model reconciled — passes when no difference between prediction and observation, and no case decided
    by no check, is left without a person's answer. Fails otherwise.
-3–6. Invariants, faults, concurrency, guard canary — not in this version: they could not pass.
+3. Invariants checked — passes when every rule about the entity that a person confirmed was checked after
+   every call of the random sequences. Fails when a confirmed rule was never exercised. Could not pass
+   when no rule about the entity has been confirmed, or no sequence run was made.
+4. Faults injected — passes when every command that changes the entity had each step of a successful call
+   fail in turn. Fails when such a command had no failure injected. Could not pass when the harness
+   cannot place a failure, when no fault run was made, or when some failure points could not be run.
+5–6. Concurrency, guard canary — not in this version: they could not pass.
 7. Source untouched — passes when every source, test and build file matches the manifest. Fails otherwise.
 
 Open questions and the missing sign-off belong to people; they are listed and do not change the verdict."""
+
+
+def invariants_item(table, rules, rows, run):
+    confirmed = [r for r in rules if r.get("status") == "confirmed" and table in (r.get("tables") or [])]
+    if not confirmed:
+        return ("could-not-pass", "no rule about this entity has been confirmed by a person")
+    if not run:
+        return ("could-not-pass", "%d confirmed rules, but no sequence run has been made" % len(confirmed))
+    unchecked = [r["id"] for r in confirmed if rows.get(r["id"], {}).get("result") not in ("MATCH", "MISMATCH")]
+    if unchecked:
+        return ("fail", "confirmed rules that no sequence exercised: " + ", ".join(unchecked))
+    states = max((rows[r["id"]].get("observed") or {}).get("applied", 0) for r in confirmed)
+    return ("pass", "%d confirmed rules checked after every call, in up to %d states" % (len(confirmed), states))
+
+
+def faults_item(own_cells, commands, rows, run, caps):
+    def loses_something(cell):
+        e = cell.get("expected") or {}
+        return e.get("outcome") == "allowed" and any(e.get(k) for k in ("written", "created", "deleted", "published"))
+    changing = sorted({c["command"] for c in own_cells if "with" in c and "unreachable" not in c and loses_something(c)})
+    if not changing:
+        return ("pass", "no command changes this entity")
+    if caps.get("sql_interception") is False:
+        return ("could-not-pass", "statements are not seen by the harness here, so a failure cannot be placed")
+    if not run:
+        return ("could-not-pass", "no fault run has been made")
+    by_command = {}
+    for rid, row in rows.items():
+        by_command.setdefault((row.get("detail") or {}).get("command"), []).append(row)
+    untouched = [c for c in changing if not any(r.get("result") in ("MATCH", "MISMATCH") for r in by_command.get(c, []))]
+    if untouched:
+        return ("fail", "commands that change data and had no failure injected: " + ", ".join(untouched))
+    broken = sum(1 for c in changing for r in by_command.get(c, []) if r.get("result") == "ERROR")
+    points = sum(1 for c in changing for r in by_command.get(c, []) if r.get("result") in ("MATCH", "MISMATCH"))
+    if broken:
+        return ("could-not-pass", "%d failure points injected, %d could not be run" % (points, broken))
+    return ("pass", "%d failure points injected in %d commands" % (points, len(changing)))
 
 
 def verdict(workspace, system):
@@ -490,6 +588,12 @@ def verdict(workspace, system):
         if q["status"] == "open" and q["kind"] in ("differs", "undecided"):
             for c in q["cells"]:
                 open_by_cell[c] = q["id"]
+
+    rules = (_lib.read_json(os.path.join(model, "invariants.json"), {}) or {}).get("invariants", [])
+    caps = (_lib.read_json(os.path.join(adir, "profile.json"), {}) or {}).get("capabilities") or {}
+    seq_run, fault_run = latest_run(adir, "sequences"), latest_run(adir, "faults")
+    seq_rows = read_run(seq_run)[0] if seq_run else {}
+    fault_rows = read_run(fault_run)[0] if fault_run else {}
 
     entities = {}
     for cell in matrix["cells"]:
@@ -516,7 +620,9 @@ def verdict(workspace, system):
                 sum(1 for s in states.values() if s["state"] == "unreachable")))
         unresolved = sorted({open_by_cell[c] for c in states if c in open_by_cell})
         items["reconciled"] = ("fail", "open: " + ", ".join(unresolved)) if unresolved else ("pass", "no open difference")
-        for key in ("invariants", "faults", "concurrency", "canary"):
+        items["invariants"] = invariants_item(target, rules, seq_rows, seq_run)
+        items["faults"] = faults_item(own, commands, fault_rows, fault_run, caps)
+        for key in ("concurrency", "canary"):
             items[key] = ("could-not-pass", NOT_IN_THIS_VERSION)
         items["source"] = ("pass", "%d files match the manifest" % source["tracked"]) if source["status"] == "untouched" else (
             "fail", "%d added, %d removed, %d modified since the manifest" % (
