@@ -120,9 +120,13 @@ that brings the data to each case, and return fixtures and recipes.
   `stand_ins` says what the outside systems answer; when a case needs another answer than the one
   configured and the configured answer is built from the call's arguments, choose the arguments.
 - Claim `unreachable` only with the lines that make it so. When you simply did not find a way, leave the
-  case out.
+  case out. A situation that the application can be in, but that none of the commands listed under
+  `commands_a_step_may_call` produces (the entry point that would create the row is in a group that was
+  not modelled), is **not** unreachable: leave the case out and name the missing entry point in
+  `"needs": ["what is missing, with file:line"]` beside `fixtures` and `recipes` in your reply.
 
-Reply with one JSON object and nothing else: `{ "group": ..., "fixtures": {...}, "recipes": {...} }`.
+Reply with one JSON object and nothing else: `{ "group": ..., "fixtures": {...}, "recipes": {...} }`
+(and `"needs": [...]` when something was missing).
 
 ## When you are asked to triage
 

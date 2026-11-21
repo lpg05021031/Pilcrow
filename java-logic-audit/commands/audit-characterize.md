@@ -71,7 +71,9 @@ first and alone (when unsure, the one with the most entry points): its fixtures 
 others climb. Then the remaining groups in parallel, at most four at a time; fixture names carry the
 group's prefix, so they cannot collide.
 
-Skip a group whose reply is already saved, unless the model changed for it. Then build the matrix:
+Skip a group whose reply is already saved, unless the model changed for it, or its saved reply lists
+`needs` and a group modelled since then has the entry point it names: then delete that reply and have it
+written again. Then build the matrix:
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/build_matrix.py" $system
@@ -183,8 +185,13 @@ Show the printed line of each script of steps 4 and 5 unchanged. Then, in at mos
   one example of each kind. A model corrected by execution is the method working, say so plainly;
 - the flagged questions, one line each: what was observed, in the person's language, without judging it;
 - the checks that never fire, as a count, and that they are asked only on request;
-- the verdict per entity as the script printed it, and that "reviewed in part" is the most this version
-  can say, because four of the seven checks are not in it yet.
+- what the recipe writers listed under `needs` in their replies (`model_raw/recipes-*.json`): situations
+  no case could be brought to because the entry point that produces them is in a group that was not
+  modelled. Name the groups; modelling them (`/java-logic-audit:audit-model $system <pattern>`) and
+  running this step again reaches those cases;
+- the verdict per entity as the script printed it, and that "reviewed in part" is the most this step can
+  say: the checks beyond the matrix (rules of the data, failures, two calls at once, the canary) are run
+  by `audit-verify` and `audit-assure`.
 
 Never call an open question a bug. Until a person answers, it is an observation with evidence.
 
