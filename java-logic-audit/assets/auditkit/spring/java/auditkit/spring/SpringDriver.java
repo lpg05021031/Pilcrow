@@ -214,7 +214,17 @@ public final class SpringDriver implements SutDriver {
         return request;
     }
 
-    /** The parameters without the ones that only steer the harness (their names start with an underscore). */
+    /** The value a case gives a parameter that must not be in the request at all (as opposed to being sent as null). */
+    static final String ABSENT = "_absent";
+
+    private static boolean isAbsent(JsonNode value) {
+        return value != null && value.isTextual() && ABSENT.equals(value.asText());
+    }
+
+    /**
+     * The parameters that are sent: without the ones that only steer the harness (their names start
+     * with an underscore) and without the ones the case leaves out of the request.
+     */
     private static JsonNode withoutReserved(JsonNode params) {
         if (params == null || !params.isObject()) {
             return params;
@@ -223,9 +233,33 @@ public final class SpringDriver implements SutDriver {
         Iterator<Map.Entry<String, JsonNode>> fields = params.fields();
         while (fields.hasNext()) {
             Map.Entry<String, JsonNode> f = fields.next();
-            if (!f.getKey().startsWith("_")) {
+            if (!f.getKey().startsWith("_") && !isAbsent(f.getValue())) {
                 out.set(f.getKey(), f.getValue());
             }
+        }
+        return out;
+    }
+
+    /**
+     * A body template without the fields that stand for a parameter the case leaves out: the key is
+     * then not in the request, which a hand-written reader of the body tells from a key sent as null.
+     */
+    private static JsonNode withoutAbsent(JsonNode template, JsonNode params) {
+        if (template == null || !template.isObject() || params == null || !params.isObject()) {
+            return template;
+        }
+        ObjectNode out = AuditConfig.JSON.createObjectNode();
+        Iterator<Map.Entry<String, JsonNode>> fields = template.fields();
+        while (fields.hasNext()) {
+            Map.Entry<String, JsonNode> f = fields.next();
+            JsonNode v = f.getValue();
+            if (v.isTextual()) {
+                java.util.regex.Matcher one = java.util.regex.Pattern.compile("^\\$\\{([A-Za-z_][\\w]*)\\}$").matcher(v.asText());
+                if (one.matches() && isAbsent(params.get(one.group(1)))) {
+                    continue;
+                }
+            }
+            out.set(f.getKey(), v.isObject() ? withoutAbsent(v, params) : v);
         }
         return out;
     }
@@ -260,7 +294,7 @@ public final class SpringDriver implements SutDriver {
         }
         if (binding.hasNonNull("body")) {
             JsonNode body = binding.get("body").isTextual() && binding.get("body").asText().equals("$")
-                    ? sent : auditkit.Expr.fillLenient(binding.get("body"), sent);
+                    ? sent : auditkit.Expr.fillLenient(withoutAbsent(binding.get("body"), params), sent);
             request = request.contentType(MediaType.APPLICATION_JSON).content(AuditConfig.JSON.writeValueAsBytes(body));
         }
         MockHttpServletResponse response;

@@ -42,7 +42,9 @@ belong in this file at all: the harness takes them from the environment.
   "profiles": [],
   "properties": {},
   "database": { "source": "environment", "permission": "<the person's words offering it, secrets redacted>" },
-  "doubles": [ { "type": "io.nats.client.Connection", "kind": "messaging" } ],
+  "doubles": [ { "type": "io.nats.client.Connection", "kind": "messaging" },
+               { "type": "com.example.pay.PayClient", "kind": "external",
+                 "answers": [ { "method": "parseNotify", "returns": { "tradeNo": "${args[0].tradeNo}" } } ] } ],
   "http_doubles": [ { "method": "GET", "url": "^http://[^/]+/prices/[^/?]+\\?qty=\\d+$",
                       "example": "http://pricing.test/prices/SKU-1?qty=5",
                       "status": 200, "body": { "unitPrice": "10.00" } } ],
@@ -113,6 +115,30 @@ about it stops at grade C. `kind` is `messaging` for something that sends messag
 check each against how the application really obtains it, and add what is missing. The types the existing
 tests mock (`tests.mocked_types` in the profile) are a good list of *which systems* are outside, but the
 tests often mock one layer too deep: find the client underneath.
+
+A double answers nothing: `null`, zero, an empty collection. Where the application goes on to use what
+the outside system said (the parsed result of a payment notice, the price a client returns, an order
+number from a partner), give that method an answer, or every case behind it ends in a null failure that
+says nothing about the application:
+
+```json
+{ "type": "com.example.pay.PayClient", "kind": "external",
+  "answers": [
+    { "method": "parseNotify", "returns": { "tradeNo": "${args[0].tradeNo}", "result": "${args[0].result}", "fee": "${args[0].fee}" } },
+    { "method": "queryRate", "returns": "1.00" },
+    { "method": "close", "throws": "com.example.pay.PayException", "message": "closed already" } ] }
+```
+
+- `returns` is JSON that the method's return type is read from (its property names, as the class has
+  them; a plain value for a number, a text or a boolean). Read the return type's class to get the names
+  right: the smoke run fails the double when a method does not exist or its answer cannot be read.
+- `${args[0]}` is the call's first argument; an argument that is JSON text or an object is reached into
+  (`${args[0].tradeNo}`). Build an answer from the arguments wherever the outside system would echo or
+  judge what it was sent: a case can then decide what the outside system "says" by what it sends, and
+  one configuration serves the paid and the failed notice alike.
+- `throws` names an exception class to throw instead, for a method whose ordinary result is a failure.
+- Give answers only to methods the application's code reads the result of, with the `file:line` of that
+  use in your reply. Realistic values: prefer the ones the project's own tests stub.
 
 **`http_doubles`** — for outside HTTP services, do not double the application's client class. The harness
 replaces the network under `RestClient`, and answers each request from these rules: `method`, `url` (a

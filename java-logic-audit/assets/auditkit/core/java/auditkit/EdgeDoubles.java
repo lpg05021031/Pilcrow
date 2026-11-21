@@ -1,5 +1,8 @@
 package auditkit;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.nio.charset.StandardCharsets;
@@ -15,6 +18,11 @@ import org.mockito.stubbing.Answer;
 /**
  * Stand-ins for the systems outside the application (a message broker connection, an external
  * service client). Every call made on one is recorded as an effect, and a call can be told to fail.
+ *
+ * <p>A call answers nothing (null, zero, an empty collection) unless harness.json gives the method an
+ * answer under the double's "answers": a value the method's return type is read from, or an exception
+ * to throw. An answer may use the call's arguments ("${args[0].orderNo}"), so that a case decides what
+ * the outside system says by what it sends.
  */
 public final class EdgeDoubles {
 
@@ -81,16 +89,45 @@ public final class EdgeDoubles {
                 for (Object arg : invocation.getArguments()) {
                     args.add(render(arg));
                 }
-                CALLS.add(new Call(type.getName(), kind, m.getName(), args, returnsValue));
+                JsonNode configured = answerFor(type.getName(), m.getName());
+                Object answered = null;
+                Throwable thrown = null;
+                String unreadable = null;
+                if (configured != null) {
+                    try {
+                        if (configured.hasNonNull("throws")) {
+                            thrown = failure(configured.get("throws").asText(), configured.path("message").asText("refused by the audit's stand-in"));
+                        } else if (returnsValue) {
+                            answered = read(configured.get("returns"), invocation.getArguments(), m);
+                        }
+                    } catch (Exception e) {
+                        unreadable = String.valueOf(e.getMessage());
+                        configured = null;          // falls back to answering nothing, and says so
+                    }
+                }
+                boolean defaulted = returnsValue && configured == null;
+                CALLS.add(new Call(type.getName(), kind, m.getName(), args, defaulted));
                 Map<String, Object> more = new LinkedHashMap<String, Object>();
                 more.put("double", type.getName());
                 more.put("args", args);
-                if (returnsValue) {
+                if (defaulted) {
                     more.put("defaulted", true);
                 }
+                if (unreadable != null) {
+                    more.put("answer_unreadable", unreadable);
+                }
+                if (thrown != null) {
+                    more.put("answered", "throws " + thrown.getClass().getName());
+                }
                 EffectRecorder.add("messaging".equals(kind) ? "PUB" : "EXT", null, m.getName(), more);
+                if (thrown != null) {
+                    throw thrown;
+                }
                 if (!returnsValue) {
                     return null;
+                }
+                if (configured != null) {
+                    return answered;
                 }
                 if (java.util.concurrent.Future.class.isAssignableFrom(returns)) {
                     return java.util.concurrent.CompletableFuture.completedFuture(null);
@@ -109,6 +146,118 @@ public final class EdgeDoubles {
                 return Mockito.RETURNS_DEFAULTS.answer(invocation);
             }
         }));
+    }
+
+    /** The answer harness.json gives a method of a double, or null when it gives none. */
+    static JsonNode answerFor(String typeName, String method) {
+        for (JsonNode d : AuditConfig.load().nodes("doubles")) {
+            if (typeName.equals(d.path("type").asText())) {
+                for (JsonNode a : d.path("answers")) {
+                    if (method.equals(a.path("method").asText())) {
+                        return a;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /** The configured value, filled from the call's arguments and read as the method's return type. */
+    static Object read(JsonNode returns, Object[] arguments, Method m) {
+        if (returns == null || returns.isNull()) {
+            return answers().convertValue(AuditConfig.JSON.getNodeFactory().nullNode(),
+                    answers().getTypeFactory().constructType(m.getGenericReturnType()));
+        }
+        ObjectNode context = AuditConfig.JSON.createObjectNode();
+        ArrayNode args = context.putArray("args");
+        for (Object arg : arguments == null ? new Object[0] : arguments) {
+            args.add(asJson(arg));
+        }
+        JsonNode filled = Expr.fillLenient(returns, context);
+        return answers().convertValue(filled, answers().getTypeFactory().constructType(m.getGenericReturnType()));
+    }
+
+    private static com.fasterxml.jackson.databind.ObjectMapper answerMapper;
+
+    /** Reads answers into the application's types: with the date and time support the class path offers. */
+    private static synchronized com.fasterxml.jackson.databind.ObjectMapper answers() {
+        if (answerMapper == null) {
+            answerMapper = new com.fasterxml.jackson.databind.ObjectMapper().findAndRegisterModules();
+        }
+        return answerMapper;
+    }
+
+    /** An argument as the templates see it: text that is JSON is read as JSON, an object by its properties. */
+    static JsonNode asJson(Object arg) {
+        if (arg == null) {
+            return AuditConfig.JSON.getNodeFactory().nullNode();
+        }
+        if (arg instanceof byte[]) {
+            arg = new String((byte[]) arg, StandardCharsets.UTF_8);
+        }
+        if (arg instanceof CharSequence) {
+            String text = arg.toString().trim();
+            if (text.startsWith("{") || text.startsWith("[")) {
+                try {
+                    return AuditConfig.JSON.readTree(text);
+                } catch (Exception e) {
+                    // not JSON after all
+                }
+            }
+            return AuditConfig.JSON.getNodeFactory().textNode(arg.toString());
+        }
+        try {
+            return AuditConfig.JSON.valueToTree(arg);
+        } catch (RuntimeException e) {
+            return AuditConfig.JSON.getNodeFactory().textNode(String.valueOf(arg));
+        }
+    }
+
+    private static Throwable failure(String className, String message) throws Exception {
+        Class<?> type = Class.forName(className);
+        if (!Throwable.class.isAssignableFrom(type)) {
+            throw new IllegalArgumentException(className + " is not an exception");
+        }
+        try {
+            return (Throwable) type.getConstructor(String.class).newInstance(message);
+        } catch (NoSuchMethodException e) {
+            return (Throwable) type.getConstructor().newInstance();
+        }
+    }
+
+    /**
+     * What is wrong with the answers harness.json gives a double, or an empty list: a method the type
+     * does not have, a value its return type cannot be read from, an exception class that does not exist.
+     */
+    public static List<String> answerProblems(Class<?> type, JsonNode doubleNode) {
+        List<String> problems = new ArrayList<String>();
+        for (JsonNode a : doubleNode.path("answers")) {
+            String name = a.path("method").asText("");
+            List<Method> named = new ArrayList<Method>();
+            for (Method m : type.getMethods()) {
+                if (m.getName().equals(name)) {
+                    named.add(m);
+                }
+            }
+            if (named.isEmpty()) {
+                problems.add(type.getName() + " has no method " + name);
+                continue;
+            }
+            try {
+                if (a.hasNonNull("throws")) {
+                    failure(a.get("throws").asText(), "check");
+                } else {
+                    for (Method m : named) {
+                        if (m.getReturnType() != void.class) {
+                            read(a.get("returns"), new Object[m.getParameterTypes().length], m);
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                problems.add("the answer for " + type.getSimpleName() + "." + name + " cannot be used: " + e.getMessage());
+            }
+        }
+        return problems;
     }
 
     public static Map<String, Object> all() {

@@ -112,7 +112,7 @@ Keep the console output under `audit/$system/logs/` if you keep it. The run writ
 | SMOKE-2 | the database is local or a container | the address is not local: this is the guard working; go back to step 4 |
 | SMOKE-3 | statements and commits are seen | the application does not take its connections from the data source bean |
 | SMOKE-4 | two resets leave the same state, and every user named under `auth.sessions` can sign in from it | a table the reset must not empty (`keep_tables`), or data the application needs at start-up: add it to `base_data`; a user that does not exist after a reset, or a sign-in request that is not the application's |
-| SMOKE-5 | outside systems are replaced by recording doubles, and every HTTP rule answers its own example request | a type in `doubles` is not the one the application injects; an HTTP rule whose pattern does not match its example; HTTP clients not built from the shared builder |
+| SMOKE-5 | outside systems are replaced by recording doubles, and every HTTP rule answers its own example request | a type in `doubles` is not the one the application injects; an answer for a method the type does not have, or one its return type cannot be read from; an HTTP rule whose pattern does not match its example; HTTP clients not built from the shared builder |
 | SMOKE-6 | facts are extracted | usually follows from SMOKE-1 |
 
 When a check fails, read its `error` in `results.jsonl`, fix **`harness.json` only**, and run again. At

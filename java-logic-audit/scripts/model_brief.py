@@ -81,13 +81,21 @@ def stand_ins(harness):
     """What the outside systems answer during the audit, so that a reader knows what a call will see."""
     return {"http": [{k: r.get(k) for k in ("method", "url", "status", "body")} for r in harness.get("http_doubles", [])],
             "replaced_types": [d.get("type") for d in harness.get("doubles", [])],
-            "note": "a call to a replaced type is recorded and returns nothing; an HTTP call no rule covers fails"}
+            "answers": [{"type": d.get("type"), **{k: a[k] for k in ("method", "returns", "throws") if k in a}}
+                        for d in harness.get("doubles", []) for a in d.get("answers", [])],
+            "note": "a call to a replaced type is recorded; it returns what `answers` gives its method (filled from the "
+                    "call's arguments as ${args[0]...}) and nothing (null, zero, empty) for every other method; an HTTP "
+                    "call no rule covers fails"}
 
 
 def callers(harness):
     """Who the harness can send a call as: the users it signs in, by name, and the paths each is used for."""
     return [{"name": s.get("name", "default"), "paths": s.get("paths")}
             for s in (harness.get("auth") or {}).get("sessions", [])]
+
+
+CALLERS_NOTE = ("a call is sent as the user whose `paths` pattern matches the command's path; a recipe's `with` sends it "
+                "as someone else with \"_session\": \"<name>\", or as nobody (not signed in) with \"_session\": \"none\"")
 
 
 def cmd_shards(workspace, system, pattern=None):
@@ -135,7 +143,7 @@ def cmd_mine(workspace, system, name):
         "refusals": {"exception_types": harness.get("rejections", []),
                      "error_code_field": harness.get("error_code_path", "code"),
                      **({"result_code": harness["result_code"]} if harness.get("result_code") else {})},
-        **({"signed_in_as": callers(harness)} if callers(harness) else {}),
+        **({"signed_in_as": {"users": callers(harness), "how": CALLERS_NOTE}} if callers(harness) else {}),
         "database": (_lib.read_json(os.path.join(adir, "facts", "schema.json"), {}) or {}).get("engine"),
     }
 
@@ -232,7 +240,7 @@ def cmd_recipes(workspace, system, name, part=1):
         "time_can_be_moved": bool(harness.get("clock")),
         "today_is": (harness.get("clock") or "")[:10] or None,
         "stand_ins": stand_ins(harness),
-        **({"signed_in_as": callers(harness)} if callers(harness) else {}),
+        **({"signed_in_as": {"users": callers(harness), "how": CALLERS_NOTE}} if callers(harness) else {}),
     }
 
 

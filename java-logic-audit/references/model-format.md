@@ -60,11 +60,13 @@ Placeholders in the path are filled from the parameters of the same name; you ma
 (`{id}` to `{orderId}`) so that two ids in one scenario do not collide. `body` is a template filled from
 the parameters (`"newQty": "${newQty}"`; a parameter that is not given becomes `null`), or `"$"` when the
 parameters as a whole are the request body. Fixed fields of a variant are written literally
-(`"type": "QTY"`). `"headers": { "X-Tenant": "${tenant}" }` adds request headers, filled the same way; the
+(`"type": "QTY"`). A parameter a recipe gives the value `"_absent"` is left out of the request altogether:
+its body key or query parameter is not sent. Use it for a case about a missing field when the code tells
+a missing key from one sent as `null` (a body read by hand, key by key). `"headers": { "X-Tenant": "${tenant}" }` adds request headers, filled the same way; the
 headers that say who is signed in are not written here (see "Who the caller is" below).
 
-**Who the caller is.** When the brief lists `signed_in_as`, the harness has signed those users in with the
-application's own sign-in request, and sends each call as the user whose `paths` pattern matches the
+**Who the caller is.** When the brief has `signed_in_as`, the harness has signed the users it lists in with
+the application's own sign-in request, and sends each call as the user whose `paths` pattern matches the
 command's path. A case asks for someone else with the parameter `_session` in a recipe's `with`: the name
 of another listed user, or `"none"` for a caller who is not signed in
 (`"who=nobody": { "with": { "_session": "none" } }`). A parameter whose name starts with an underscore
@@ -186,7 +188,8 @@ situation: a list of steps, optionally continuing another fixture.
 }
 ```
 
-A step calls a command with parameters. `as` keeps what the call returned under a name; later templates
+A step calls a command with parameters; it is sent as the signed-in user whose paths the command's path
+matches (an administrator's command as the administrator), or as the one its `with` names with `_session`. `as` keeps what the call returned under a name; later templates
 read it with `${order.id}`, `${order.lines[0].schedules[1].id}`. Inside `${}`: a path, whole numbers,
 `+` and `-`, and `today` (`${today+10}` is a date). `"may_fail": true` lets a step be refused when that is
 the point (a commit that expires the request). `{ "set_today": "${today+2}" }` moves the application's
@@ -222,6 +225,10 @@ their base value. A deviation gives only what differs from the base recipe: anot
 - `note`: optional, one sentence on why the recipe is what it is, when that is not obvious (why `also`
   is needed, why this fixture and not a simpler one).
 - `with` may be left out for a command without parameters.
+- Three things a `with` can say besides the command's own parameters, when a case needs them:
+  `"_session": "none"` (the caller is not signed in) or `"_session": "<name>"` (another user the brief
+  lists under `signed_in_as`); and the value `"_absent"` for a parameter that must not be in the request
+  at all (section 2).
 - `"same_as": "CMD-other"`: the command has the same cases and recipes as another (preview and propose).
 - A case you could not work out is left out. It is then reported as not executed, which is the truth.
 - The base recipe itself may be `{ "unreachable": "..." }` when the working case of a command cannot

@@ -115,6 +115,10 @@ that brings the data to each case, and return fixtures and recipes.
 - Keep fixtures small and reuse them: a ladder of situations (created, confirmed, partly done, done,
   cancelled) serves most cases.
 - For every case think about what else must differ (`also`): a closed order has shipped lines.
+- A case about who is calling (nobody, another user) is reached with `_session` in `with`, and a case about
+  a field that is missing from the request with the value `"_absent"`: section 6 of `format` says how.
+  `stand_ins` says what the outside systems answer; when a case needs another answer than the one
+  configured and the configured answer is built from the call's arguments, choose the arguments.
 - Claim `unreachable` only with the lines that make it so. When you simply did not find a way, leave the
   case out.
 

@@ -225,6 +225,10 @@ class SmokeRunner {
                     if (bean != EdgeDoubles.all().get(typeName)) {
                         throw new IllegalStateException("the bean of type " + typeName + " is not the audit's double");
                     }
+                    List<String> wrong = EdgeDoubles.answerProblems(type, node);
+                    if (!wrong.isEmpty()) {
+                        throw new IllegalStateException(wrong.toString());
+                    }
                     String probed = EdgeDoubles.probe(bean, type);
                     Map<String, Object> row = new LinkedHashMap<String, Object>();
                     row.put("type", typeName);
@@ -232,6 +236,7 @@ class SmokeRunner {
                     row.put("edge", EdgeDoubles.isEdge(typeName, config.basePackage()));
                     row.put("probe", probed);
                     row.put("call_recorded", probed != null);
+                    row.put("answers", node.path("answers").size());
                     doubles.add(row);
                 }
                 Map<String, Object> d = new LinkedHashMap<String, Object>();
