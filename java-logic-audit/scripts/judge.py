@@ -81,12 +81,14 @@ def on_present_code(runs):
 
     Every run carries a mark of the compiled application (run.json "code"). A run with another mark is
     evidence about other code: a behaviour seen before a change says nothing about the code after it.
-    A run made by a harness that did not write the mark yet is kept: nothing says it is about other code.
+    Runs made by a harness that did not write the mark yet count as one code of their own: after the
+    harness is updated, the checks are run again once before anything is judged, which costs minutes and
+    is always right; keeping unmarked runs would mix evidence from before and after a change.
     """
     if not runs:
         return runs
     now = (runs[-1][1] or {}).get("code")
-    return [r for r in runs if now is None or (r[1] or {}).get("code") in (None, now)]
+    return [r for r in runs if (r[1] or {}).get("code") == now]
 
 
 def latest_run(adir, kind):
