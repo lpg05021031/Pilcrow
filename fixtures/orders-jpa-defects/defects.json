@@ -1,0 +1,125 @@
+{
+  "schema": 1,
+  "sample": "orders-jpa",
+  "about": "Defects seeded into sample 1 to measure what the audit's checks catch. Each is one edit of one file.",
+  "defects": [
+    {
+      "id": "guard-1",
+      "category": "guard",
+      "file": "src/main/java/com/example/orders/service/ChangeCalculator.java",
+      "find": "                if (newQty < line.getShippedQty()) {\n                    throw new BusinessException(\"QTY_BELOW_SHIPPED\");\n                }\n",
+      "replace": "",
+      "what": "A line's quantity can be changed to less than what has already shipped: the check is gone."
+    },
+    {
+      "id": "guard-2",
+      "category": "guard",
+      "file": "src/main/java/com/example/orders/service/OrderService.java",
+      "find": "        if (header.getLines().stream().anyMatch(l -> l.getShippedQty() > 0)) {\n            throw new BusinessException(\"ORDER_ALREADY_SHIPPED\");\n        }\n",
+      "replace": "",
+      "what": "An order can be cancelled as a whole although something on it has shipped."
+    },
+    {
+      "id": "cascade-1",
+      "category": "cascade",
+      "file": "src/main/java/com/example/orders/service/ShipmentService.java",
+      "find": "        OrderTotals.apply(header);\n        processed.save(",
+      "replace": "        processed.save(",
+      "what": "A shipment that closes the last open line no longer re-derives the order: it stays CONFIRMED."
+    },
+    {
+      "id": "cascade-2",
+      "category": "cascade",
+      "file": "src/main/java/com/example/orders/service/OrderService.java",
+      "find": "                for (ScheduleLine schedule : line.getSchedules()) {\n                    if (schedule.getStatus() == ScheduleStatus.PLANNED) {\n                        schedule.setStatus(ScheduleStatus.CANCELLED);\n                    }\n                }\n",
+      "replace": "",
+      "what": "Cancelling an order cancels its lines but leaves their planned deliveries planned."
+    },
+    {
+      "id": "transaction-1",
+      "category": "transaction",
+      "file": "src/main/java/com/example/orders/service/OutboxWriter.java",
+      "find": "    public void add(String type, Long aggregateId, Map<String, Object> payload) {",
+      "replace": "    @org.springframework.transaction.annotation.Transactional(\n            propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)\n    public void add(String type, Long aggregateId, Map<String, Object> payload) {",
+      "what": "The event is recorded in a transaction of its own, so it stays when the change it describes is rolled back."
+    },
+    {
+      "id": "transaction-2",
+      "category": "transaction",
+      "file": "src/main/java/com/example/orders/service/OrderService.java",
+      "find": "        outbox.add(\"order.confirmed\", header.getId(), Map.of(\"orderId\", header.getId(), \"orderNo\", header.getOrderNo()));",
+      "replace": "        try {\n            outbox.add(\"order.confirmed\", header.getId(), Map.of(\"orderId\", header.getId(), \"orderNo\", header.getOrderNo()));\n        } catch (RuntimeException e) {\n            // the order is confirmed either way\n        }",
+      "what": "Confirming an order swallows a failure to record its event: the order is confirmed and nobody is told."
+    },
+    {
+      "id": "messaging-1",
+      "category": "messaging",
+      "file": "src/main/java/com/example/orders/service/OrderService.java",
+      "find": "        header.setStatus(OrderStatus.CONFIRMED);",
+      "replace": "        header.setStatus(OrderStatus.CONFIRMED);\n        directPublisher.publish(\"order.confirmed\", \"{\\\"orderId\\\":\" + header.getId() + \"}\");",
+      "what": "Confirming an order publishes its event directly, before the transaction commits.",
+      "also": [
+        {
+          "find": "    private final Clock clock;\n",
+          "replace": "    private final Clock clock;\n    @org.springframework.beans.factory.annotation.Autowired\n    private com.example.orders.messaging.OrderEventPublisher directPublisher;\n"
+        }
+      ]
+    },
+    {
+      "id": "messaging-2",
+      "category": "messaging",
+      "file": "src/main/java/com/example/orders/service/ShipmentService.java",
+      "find": "        processed.save(new ProcessedMessage(messageId, clock.instant()));\n",
+      "replace": "",
+      "what": "An applied shipment message is no longer remembered, so its id does not protect against anything."
+    },
+    {
+      "id": "pair-1",
+      "category": "pair path",
+      "file": "src/main/java/com/example/orders/service/ChangeService.java",
+      "find": "        OrderLine line = lineOf(header, lineId);\n        return ChangePreview.of(evaluate(header, line, command.type(), command.newQty(), command.newDate()));",
+      "replace": "        OrderLine line = lineOf(header, lineId);\n        if (command.type() == ChangeType.CANCEL) {\n            return ChangePreview.of(ChangeCalculator.effect(header, line, command.type(), null, null, line.getUnitPrice()));\n        }\n        return ChangePreview.of(evaluate(header, line, command.type(), command.newQty(), command.newDate()));",
+      "what": "The preview of cancelling a line skips the checks: it shows a result where proposing and committing refuse."
+    },
+    {
+      "id": "pair-2",
+      "category": "pair path",
+      "file": "src/main/java/com/example/orders/web/dto/ChangePreview.java",
+      "find": "e.newLineStatus(), e.newLineAmount(), e.amountDelta(),",
+      "replace": "e.newLineStatus(), e.newLineAmount(), e.amountDelta().negate(),",
+      "what": "The preview reports the change of amount with the wrong sign; what is committed is right."
+    },
+    {
+      "id": "numeric-1",
+      "category": "numeric",
+      "file": "src/main/java/com/example/orders/service/OrderTotals.java",
+      "find": "            sum = sum.add(line.amount());",
+      "replace": "            sum = sum.add(line.getUnitPrice().multiply(BigDecimal.valueOf(line.getQty())).setScale(2));",
+      "what": "The order total counts cancelled lines too."
+    },
+    {
+      "id": "numeric-2",
+      "category": "numeric",
+      "file": "src/main/java/com/example/orders/service/ShipmentService.java",
+      "find": "        line.setShippedQty(line.getShippedQty() + schedule.getQty());",
+      "replace": "        line.setShippedQty(line.getShippedQty() + line.getQty());",
+      "what": "A shipment adds the whole line's quantity to what has shipped, not the delivery's."
+    },
+    {
+      "id": "mapping-1",
+      "category": "data mapping",
+      "file": "src/main/java/com/example/orders/service/OrderService.java",
+      "find": "            OrderLine line = new OrderLine(header, lineNo++, requested.sku(), requested.qty(), unitPrice);",
+      "replace": "            OrderLine line = new OrderLine(header, lineNo++, requested.sku(), requested.schedules().get(0).qty(), unitPrice);",
+      "what": "A new line takes its quantity from its first delivery only, not from all of them."
+    },
+    {
+      "id": "mapping-2",
+      "category": "data mapping",
+      "file": "src/main/java/com/example/orders/web/dto/OrderView.java",
+      "find": "        return new LineView(line.getId(), line.getLineNo(), line.getSku(), line.getQty(), line.getShippedQty(),",
+      "replace": "        return new LineView(line.getId(), line.getLineNo(), line.getSku(), line.getShippedQty(), line.getQty(),",
+      "what": "Reading an order shows a line's quantity and shipped quantity swapped; the stored data is right."
+    }
+  ]
+}
