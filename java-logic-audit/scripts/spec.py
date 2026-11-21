@@ -10,8 +10,9 @@ with its line numbers) and spec/vocabulary.json: the names of the commands, thei
 values of each, and nothing about what the code does with them. That vocabulary is all a spec analyst
 is given besides the section's text, so what it writes down comes from the document alone.
 
-`brief` prints what one analyst is given for one section: the section's text with its line numbers,
-the vocabulary, and the form of the reply. The reply is saved unchanged as
+`brief` writes what one analyst is given for one section to spec/briefs/<section>.json and prints that
+path: the section's text with its line numbers, the vocabulary, and the form of the reply. The analyst
+reads that one file itself, so nothing is retyped on the way to it. The reply is saved unchanged as
 spec/raw/clauses-<section>.json:
 
     { "clauses": [ { "quote": "the exact words", "lines": [12, 13], "status": "testable" | "ambiguous" | "untestable",
@@ -21,8 +22,8 @@ spec/raw/clauses-<section>.json:
 
 ("not-allowed": the words say it must not happen and do not say whether the caller is told.)
 
-`brief --check` prints what a second analyst is given: the same section, and every expectation the
-first one wrote, numbered. Its reply says of each whether the quoted words really say it, and is saved
+`brief --check` writes what a second analyst is given (spec/briefs/<section>-check.json): the same
+section, and every expectation the first one wrote, numbered. Its reply says of each whether the quoted words really say it, and is saved
 unchanged as spec/raw/check-<section>.json:
 
     { "verdicts": [ { "ref": "2.1", "verdict": "faithful" | "not-faithful", "reason": "..." } ] }
@@ -349,9 +350,14 @@ def main(argv=None):
         sections = split(workspace, args.system, args.prd)
         print("%d sections: %s" % (len(sections), ", ".join("%s (lines %d-%d)" % (x["id"], x["first_line"], x["last_line"]) for x in sections)))
     elif args.cmd == "brief":
-        import json
-        # One line: the vocabulary is long, and an analyst reads it as well without the white space.
-        print(json.dumps(brief(workspace, args.system, args.section, args.check), ensure_ascii=False, separators=(",", ":")))
+        out = brief(workspace, args.system, args.section, args.check)
+        path = os.path.join(_lib.audit_dir(workspace, args.system), "spec", "briefs",
+                            "%s%s.json" % (args.section, "-check" if args.check else ""))
+        _lib.write_json(path, out)
+        print("brief: %s" % os.path.relpath(path, workspace).replace(os.sep, "/"))
+        print("reply: %s" % out["save_reply_as"])
+        if args.check:
+            print("expectations to check: %d" % len(out["expectations"]))
     else:
         out = join(workspace, args.system)
         e = out["expectations"]

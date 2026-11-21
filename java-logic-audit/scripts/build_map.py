@@ -20,7 +20,11 @@ not missed. Reflection, dynamic proxies and SQL the script cannot read are liste
 
 A write site is a place outside an entity class that changes a mapped column: a call to an entity
 method that assigns a mapped field (a setter or a domain method), a constructor call (a row is
-created), or a call that saves or deletes through a repository.
+created), a call that saves or deletes through a repository, or a call to a MyBatis mapper method
+whose statement (in a mapper XML file or an annotation) inserts, updates or deletes.
+
+A table that statements write and no class is mapped to is still an entity here, known by its table
+alone: its columns, keys and lifecycle columns come from the schema.
 """
 import argparse
 import collections
@@ -32,6 +36,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.dont_write_bytecode = True      # importing the sibling scripts must not leave __pycache__ in the plugin folder
 sys.path.insert(0, HERE)
 import _lib  # noqa: E402
+import sql_statements  # noqa: E402
 import status as status_mod  # noqa: E402
 
 MAP_SCHEMA = 1
@@ -39,6 +44,7 @@ SHARD_FILE_CAP = 30
 REPOSITORY_ROOT = "org.springframework.data.repository.Repository"
 SAVE_NAMES = ("save", "saveAll", "saveAndFlush", "saveAllAndFlush", "persist", "merge")
 DELETE_NAMES = ("delete", "deleteAll", "deleteById", "deleteAllById", "deleteAllInBatch", "deleteInBatch", "remove")
+LIFECYCLE_NAME = re.compile(r"(?:^|_)(?:status|state|stage|phase)$", re.I)      # a column that names where a row is in its life
 LIFECYCLE_EVENTS = re.compile(r"(?:Application\w*Event|Context\w*Event|\w*ReadyEvent|\w*StartedEvent)$")
 # APIs through which SQL is written that this script cannot read the columns of.
 OPAQUE_WRITERS = {
@@ -246,6 +252,42 @@ def build_entities(jpa, schema, profile):
     return by_class
 
 
+def table_entities(schema, profile, wanted, entities):
+    """An entity for each wanted table that no class is mapped to, described by the schema alone.
+
+    Its lifecycle candidates are the columns the project's own DDL was seen to constrain to a set of
+    values, and character columns named like a status. They are keyed "table:<name>", which is no class.
+    """
+    tables = schema.get("tables", {})
+    mapped = {e["table"]: e for e in entities.values()}
+    declared = {t.get("table"): t.get("columns", []) for t in (profile.get("entities", {}).get("ddl_tables_with_lifecycle") or [])}
+    out = {}
+    for name in sorted(wanted):
+        t = tables.get(name)
+        if t is None or name in mapped:
+            continue
+        lifecycle = [c["name"] for c in t.get("columns", [])
+                     if c["name"] in declared.get(name, []) or
+                     (LIFECYCLE_NAME.search(c["name"]) and "char" in (c.get("type") or "").lower())]
+        out["table:" + name] = {
+            "id": "ENT-" + name, "class": None, "table": name,
+            "primary_key": t.get("primary_key", []), "version_property": None,
+            "columns": [{"name": c["name"], "property": None, "type": c["type"], "nullable": c["nullable"]} for c in t.get("columns", [])],
+            "unique": [u for u in t.get("unique", []) if u != t.get("primary_key")],
+            "references": [], "collections": [], "lifecycle_candidates": lifecycle,
+            "properties": {c["name"]: [c["name"]] for c in t.get("columns", [])},
+            "parent": None, "foreign_keys": t.get("foreign_keys", []),
+        }
+    known = dict({e["table"]: e["id"] for e in entities.values()}, **{e["table"]: e["id"] for e in out.values()})
+    for e in out.values():
+        for fk in e.pop("foreign_keys"):
+            if fk.get("references_table") in known:
+                e["references"].append({"property": None, "columns": [fk["column"]], "entity": known[fk["references_table"]]})
+        if len(e["references"]) == 1:           # the one row it belongs to
+            e["parent"] = {"entity": e["references"][0]["entity"], "columns": e["references"][0]["columns"]}
+    return out
+
+
 def entity_mutators(graph, entities):
     """entity class -> method name -> sorted list of properties the method assigns (directly or through
     another method of the same class). Constructors are under the name <init>."""
@@ -274,8 +316,10 @@ def entity_mutators(graph, entities):
     return out
 
 
-def build_write_sites(graph, entities, mutators, repositories, resolved=None):
+def build_write_sites(graph, entities, mutators, repositories, resolved=None, statements=None):
     sites, unresolved = [], []
+    statements = statements or {}
+    by_table = {e["table"]: e for e in entities.values()}
     repo_domain = {r["interface"]: r.get("domain_type") for r in repositories}
     for cls in sorted(graph.types):
         t = graph.types[cls]
@@ -303,6 +347,17 @@ def build_write_sites(graph, entities, mutators, repositories, resolved=None):
                              for r in repositories for q in r.get("queries", [])):
                         unresolved.append({"what": "modifying repository query", "via": "%s.%s" % (simple(owner), name),
                                            "site": site, "line": line})
+                st = statements.get((owner, name))
+                if st and st.get("table"):
+                    ent = by_table.get(st["table"])
+                    row = {"entity": ent["id"] if ent else None, "table": st["table"], "kind": st["kind"], "columns": st["columns"],
+                           "via": "%s.%s" % (simple(owner), name), "site": site, "line": line, "sql_at": st["cite"]}
+                    if st.get("dynamic"):
+                        row["dynamic"] = True         # the columns are those assigned on some path of the statement
+                    sites.append(row)
+                elif st:
+                    unresolved.append({"what": "SQL of a mapper statement the script could not read with certainty",
+                                       "via": "%s.%s" % (simple(owner), name), "site": site, "line": line, "sql_at": st["cite"]})
                 for api, names in OPAQUE_WRITERS.items():
                     if owner == api and name in names:
                         unresolved.append({"what": "SQL written through %s" % simple(api),
@@ -456,6 +511,12 @@ def build_shards(workspace, module, graph, entries, entities, sites):
                     reach[m] = min(d, reach.get(m, d))
         ordered = sorted(reach, key=lambda m: (reach[m], m))
         files = files_of(ordered)
+        # A statement kept outside the classes (a mapper XML file) belongs to the slice of every entry that reaches it.
+        ids = {e["id"] for e in group}
+        for s in sites:
+            path = (s.get("sql_at") or "").rsplit(":", 1)[0]
+            if path and path not in files and ids & set(s["entries"]):
+                files.append(path)
         shards.append({"name": "entries:" + simple(cls), "direction": "top-down", "entries": [e["id"] for e in group],
                        "files": files[:SHARD_FILE_CAP], "files_left_out": max(0, len(files) - SHARD_FILE_CAP)})
     for cls, ent in sorted(entities.items(), key=lambda kv: kv[1]["id"]):
@@ -465,6 +526,10 @@ def build_shards(workspace, module, graph, entries, entities, sites):
             mids.append(s["site"])
             mids += sorted(c for c, _l in graph.callers.get(s["site"], ()))
         files = files_of(mids)
+        for s in own:
+            path = (s.get("sql_at") or "").rsplit(":", 1)[0]
+            if path and path not in files:
+                files.append(path)
         shards.append({"name": "entity:" + ent["table"], "direction": "bottom-up", "entity": ent["id"],
                        "write_sites": [s["id"] for s in own],
                        "files": files[:SHARD_FILE_CAP], "files_left_out": max(0, len(files) - SHARD_FILE_CAP)})
@@ -488,10 +553,12 @@ def build(workspace, system):
     graph = Graph(bytecode["types"])
     entries = build_entries(context, graph, base)
     entities = build_entities(jpa, schema, profile)
+    statements = sql_statements.statements(workspace, module)
+    entities.update(table_entities(schema, profile, {s["table"] for s in statements.values() if s.get("table")}, entities))
     mutators = entity_mutators(graph, entities)
     repositories = jpa.get("repositories", [])
     resolved = (_lib.read_json(os.path.join(adir, "map_resolved.json"), {}) or {}).get("resolved", [])
-    sites, unresolved = build_write_sites(graph, entities, mutators, repositories, resolved)
+    sites, unresolved = build_write_sites(graph, entities, mutators, repositories, resolved, statements)
     attach_reachability(graph, sites, entries, context.get("transactions", []))
 
     for e in entries:                                   # what each entry can write, statically
@@ -509,6 +576,7 @@ def build(workspace, system):
         "entities": sorted(({k: v for k, v in e.items() if k != "properties"} for e in entities.values()),
                            key=lambda e: e["id"]),
         "mutators": {entities[c]["id"]: m for c, m in sorted(mutators.items())},
+        "statements": len(statements),
         "write_sites": sites,
         "orphan_write_sites": orphans,
         "unresolved": unresolved,
@@ -549,7 +617,7 @@ def render(m, shards):
     out += ["", "## Entities", "", "| Id | Class | Parent | Lifecycle candidates | Version |", "|---|---|---|---|---|"]
     for e in m["entities"]:
         out.append("| %s | `%s` | %s | %s | %s |" % (
-            e["id"], simple(e["class"]), e["parent"]["entity"] if e["parent"] else "—",
+            e["id"], simple(e["class"]) if e["class"] else "(no class: the table alone)", e["parent"]["entity"] if e["parent"] else "—",
             ", ".join(e["lifecycle_candidates"]) or "—", e["version_property"] or "—"))
     out += ["", "Tables with no mapped entity: " + (", ".join("`%s`" % t for t in m["tables_without_entity"]) or "none")]
     out += ["", "## Lifecycle columns and who writes them", "",
@@ -572,8 +640,9 @@ def render(m, shards):
                 "|---|---|---|---|---|---|---|---|"]
         for s in rows:
             site = "%s#%s:%s" % (simple(class_of(s["site"])), s["site"].split("#", 1)[1].split("(", 1)[0], s["line"])
+            where = site + (", SQL at %s" % s["sql_at"].rsplit("/", 1)[-1] if s.get("sql_at") else "")
             out.append("| %s | %s | %s | `%s` | `%s` | %s | %s | %s |" % (
-                s["id"], s["kind"], ", ".join(s["columns"]) or "(row)", s["via"], site,
+                s["id"], s["kind"], (", ".join(s["columns"]) or "(row)") + (" (on some path)" if s.get("dynamic") else ""), s["via"], where,
                 ", ".join(s["entries"]) or "**orphan**", "; ".join(s["transaction"]) or "—",
                 ", ".join(s["outside_transaction_from"]) or "—"))
         out.append("")

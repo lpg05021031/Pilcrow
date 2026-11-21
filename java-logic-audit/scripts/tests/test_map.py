@@ -216,3 +216,150 @@ class OpaqueWrites(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StockMap(unittest.TestCase):
+    """Sample 2: MyBatis instead of JPA. The facts under data/stock-facts/ were written by a real smoke
+    run of the harness on fixtures/stock-mybatis (Spring Boot 2.7, MySQL 8, Gradle)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="jla-test-")
+        cls.ws = os.path.join(cls.tmp, "stock")
+        shutil.copytree(os.path.join(REPO, "fixtures", "stock-mybatis"), cls.ws,
+                        ignore=shutil.ignore_patterns("target", "build", ".gradle"))
+        adir = os.path.join(cls.ws, "audit", "stock")
+        shutil.copytree(os.path.join(HERE, "data", "stock-facts"), os.path.join(adir, "facts"))
+        with open(os.path.join(adir, "INTENT.md"), "w", encoding="utf-8") as fh:
+            fh.write(INTENT.replace("orders", "stock"))
+        with open(os.path.join(adir, "profile.json"), "w", encoding="utf-8") as fh:
+            json.dump(preflight_scan.scan(cls.ws, env=False), fh)
+        cls.map, cls.shards = build_map.build(cls.ws, "stock")
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def sites(self, table, column=None):
+        return [s for s in self.map["write_sites"] if s["table"] == table and (column is None or column in s["columns"])]
+
+    def test_a_table_no_class_is_mapped_to_is_still_an_entity(self):
+        by = {e["id"]: e for e in self.map["entities"]}
+        self.assertEqual(sorted(by), ["ENT-reservation", "ENT-stock_item", "ENT-stock_movement"])
+        self.assertIsNone(by["ENT-reservation"]["class"])
+        self.assertEqual(by["ENT-reservation"]["lifecycle_candidates"], ["status"])
+        self.assertEqual(by["ENT-reservation"]["parent"], {"entity": "ENT-stock_item", "columns": ["sku"]})
+        self.assertEqual(by["ENT-stock_item"]["lifecycle_candidates"], [])
+        self.assertEqual(self.map["tables_without_entity"], [])
+
+    def test_every_call_of_a_mapper_statement_is_a_write_site_with_the_columns_its_sql_assigns(self):
+        self.assertEqual((self.map["stats"]["write_sites"], self.map["stats"]["unresolved"]), (15, 0))
+        reserved = self.sites("stock_item", "reserved")
+        self.assertEqual(sorted((s["via"], s["site"].split("#")[1].split("(")[0]) for s in reserved if s["kind"] == "update"),
+                         [("StockMapper.addReserved", "expireDue"), ("StockMapper.addReserved", "hold"),
+                          ("StockMapper.addReserved", "release"), ("StockMapper.ship", "confirm")])
+        dynamic = [s for s in self.map["write_sites"] if s.get("dynamic")]
+        self.assertEqual([(s["via"], s["columns"]) for s in dynamic], [("StockMapper.correct", ["note", "on_hand"])])
+        self.assertTrue(dynamic[0]["sql_at"].startswith("src/main/resources/mapper/StockMapper.xml:"))
+        created = [s for s in self.sites("reservation") if s["kind"] == "create"]
+        self.assertEqual(created[0]["sql_at"].split(":")[0], "src/main/java/com/example/stock/mapper/ReservationMapper.java")
+
+    def test_each_entry_knows_the_tables_it_can_write_and_runs_in_a_transaction(self):
+        by = {e["handler"].split("#")[1]: e for e in self.map["entries"] if e["kind"] == "http"}
+        self.assertEqual(by["confirm"]["writes_tables"], ["reservation", "stock_item", "stock_movement"])
+        self.assertEqual(by["get"]["writes_tables"], [])
+        job = [e for e in self.map["entries"] if e["kind"] == "scheduled"][0]
+        self.assertEqual(job["writes_tables"], ["reservation", "stock_item"])
+        self.assertEqual(self.map["stats"]["write_sites_outside_transaction"], 0)
+        status = [w for w in self.map["lifecycle_writers"] if w["column"] == "status"][0]
+        self.assertEqual(len(status["changed_by"][0]["write_sites"]), 4)
+
+    def test_a_statement_kept_in_an_xml_file_is_in_the_slice_of_what_reaches_it(self):
+        by = {s["name"]: s for s in self.shards}
+        xml = "src/main/resources/mapper/StockMapper.xml"
+        self.assertIn(xml, by["entries:ReservationController"]["files"])
+        self.assertIn(xml, by["entity:stock_item"]["files"])
+        self.assertNotIn(xml, by["entity:stock_movement"]["files"])
+
+
+class Statements(unittest.TestCase):
+    def read(self, sql):
+        import sql_statements
+        return sql_statements.read_write(sql)
+
+    def test_the_three_shapes_of_a_write(self):
+        self.assertEqual(self.read("insert into T_Order (id, `status`, total) values (#{id}, 'NEW', #{total})"),
+                         {"kind": "create", "table": "t_order", "columns": ["id", "status", "total"]})
+        self.assertEqual(self.read("UPDATE orders o SET o.status = #{s}, total = coalesce(#{t}, total) WHERE o.id = #{id}"),
+                         {"kind": "update", "table": "orders", "columns": ["status", "total"]})
+        self.assertEqual(self.read("delete from sales.order_line where order_id = #{id}"),
+                         {"kind": "delete", "table": "order_line", "columns": []})
+        self.assertEqual(self.read("insert into t (a, b) values (?, ?) on duplicate key update b = values(b), c = c + 1")["columns"],
+                         ["a", "b", "c"])
+
+    def test_what_cannot_be_read_with_certainty_is_not_guessed(self):
+        for sql in ("update ${table} set a = 1", "insert into t values (#{a}, #{b})", "insert into t select * from u",
+                    "update a join b on a.id = b.id set a.x = b.x", "update t set a = 1; delete from u", "call do_it(#{id})"):
+            self.assertIsNone(self.read(sql), sql)
+
+    def test_mapper_xml_with_dynamic_sql_fragments_and_comments(self):
+        import sql_statements
+        xml = """<?xml version="1.0"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="a.OrderMapper">
+  <sql id="cols">status, total</sql>
+  <!-- <update id="old">update gone set x = 1</update> -->
+  <insert id="add" useGeneratedKeys="true">
+    <selectKey keyProperty="id" order="BEFORE">select nextval('s')</selectKey>
+    insert into orders (id, <include refid="cols"/>) values (#{id}, #{status}, #{total})
+  </insert>
+  <update id="patch">
+    update orders
+    <set>
+      <if test="status != null">status = #{status},</if>
+      <if test="total != null and total &gt; 0">total = #{total},</if>
+    </set>
+    where id = #{id}
+  </update>
+  <update id="broken">update orders set <include refid="nowhere"/> where id = #{id}</update>
+  <select id="find" resultType="map">select * from orders</select>
+</mapper>"""
+        got = sql_statements.from_xml(xml, "m/OrderMapper.xml")
+        self.assertEqual(sorted(k[1] for k in got), ["add", "broken", "patch"])
+        self.assertEqual((got[("a.OrderMapper", "add")]["columns"], got[("a.OrderMapper", "add")]["dynamic"]),
+                         (["id", "status", "total"], False))
+        patch = got[("a.OrderMapper", "patch")]
+        self.assertEqual((patch["kind"], patch["columns"], patch["dynamic"], patch["cite"]),
+                         ("update", ["status", "total"], True, "m/OrderMapper.xml:10-17"))
+        self.assertIsNone(got[("a.OrderMapper", "broken")]["table"])          # listed as unresolved, for a reader
+
+    def test_annotations_with_concatenated_strings_scripts_and_text_blocks(self):
+        import sql_statements
+        java = '''package a;
+public interface PayMapper {
+    @Update("update payment set status = #{status} " +
+            "where id = #{id}")
+    int mark(@Param("id") long id, @Param("status") String status);
+
+    @Insert({"insert into payment (id, amount)", "values (#{id}, #{amount})"})
+    @Options(useGeneratedKeys = true)
+    int add(Payment p);
+
+    @Update("<script>update payment <set><if test='note != null'>note = #{note},</if></set> where id = #{id}</script>")
+    int note(Payment p);
+
+    @Delete("""
+        delete from payment
+        where id = #{id}
+        """)
+    int remove(long id);
+
+    @Select("select * from payment where id = #{id}")
+    Payment find(long id);
+}'''
+        got = sql_statements.from_java(java, "a/PayMapper.java")
+        self.assertEqual({k[1]: (v["kind"], v["table"], v["columns"]) for k, v in got.items()},
+                         {"mark": ("update", "payment", ["status"]), "add": ("create", "payment", ["amount", "id"]),
+                          "note": ("update", "payment", ["note"]), "remove": ("delete", "payment", [])})
+        self.assertTrue(got[("a.PayMapper", "note")]["dynamic"])
+        self.assertEqual(got[("a.PayMapper", "mark")]["cite"], "a/PayMapper.java:3-5")

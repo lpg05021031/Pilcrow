@@ -4,7 +4,8 @@
     python3 assure.py brief <system> <finding id> [--workspace DIR]
     python3 assure.py summary <system> [--workspace DIR]
 
-`brief` prints what one adversary is given about one finding: the statement, up to three of the cases
+`brief` writes what one adversary is given about one finding to assure/briefs/<finding id>.json and
+prints that path: the statement, up to three of the cases
 that are said to show it with where their result and evidence files are, how each case's state was
 reached, and the places in the code the finding cites. It leaves out everything that would tell the
 reader what to conclude: the class, the grade, why the question was asked, and what a person answered.
@@ -26,7 +27,6 @@ A finding is never removed because a reader disagreed.
 defects (seed_run.py). It computes nothing new.
 """
 import argparse
-import json
 import os
 import sys
 
@@ -176,7 +176,11 @@ def main(argv=None):
     args = ap.parse_args(argv)
     workspace = os.path.abspath(args.workspace)
     if args.cmd == "brief":
-        print(json.dumps(brief(workspace, args.system, args.finding), indent=1, ensure_ascii=False))
+        out = brief(workspace, args.system, args.finding)
+        path = os.path.join(_lib.audit_dir(workspace, args.system), "assure", "briefs", args.finding + ".json")
+        _lib.write_json(path, out)
+        print("brief: %s" % rel(workspace, path))
+        print("reply: %s" % out["save_reply_as"])
         return 0
     r = summary(workspace, args.system)
     v = r["verdicts"]

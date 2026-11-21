@@ -193,6 +193,8 @@ def audit_pom(text, p):
 
 
 GRADLE_INIT = """// Written by the java-logic-audit plugin. Used only when passed with --init-script; no build file is changed.
+// The harness runs in a task of its own, auditTest, so that what the project sets for its own tests
+// (JUnit 4, filters, forks) neither applies to the audit nor is changed by it.
 allprojects {
     plugins.withId('java') {
         if (project.projectDir == new File('%(module_dir)s')) {
@@ -200,11 +202,28 @@ allprojects {
             dependencies {
 %(deps)s
             }
-            tasks.withType(Test).configureEach {
-                useJUnitPlatform()
-                filter { includeTestsMatching 'auditkit.*Runner' }
-                ['audit.dir', 'audit.run', 'audit.mode', 'audit.command', 'audit.case', 'audit.seed', 'audit.sequences', 'audit.steps', 'audit.pairs'].each { key ->
-                    if (System.getProperty(key) != null) { systemProperty key, System.getProperty(key) }
+            def auditTest = tasks.register('auditTest', Test) {
+                description = 'Runs the java-logic-audit harness.'
+                group = 'verification'
+                testClassesDirs = sourceSets.test.output.classesDirs
+                classpath = sourceSets.test.runtimeClasspath
+                outputs.upToDateWhen { false }
+            }
+            // After the project's own build file has had its say: a block there that configures every Test task must not win.
+            afterEvaluate {
+                auditTest.configure {
+                    useJUnitPlatform()
+                    filter {
+                        includeTestsMatching 'auditkit.*'
+                        failOnNoMatchingTests = true
+                    }
+                    ignoreFailures = false
+                    ['audit.dir', 'audit.run', 'audit.mode', 'audit.command', 'audit.case', 'audit.seed', 'audit.sequences', 'audit.steps', 'audit.pairs'].each { key ->
+                        if (System.getProperty(key) != null) { systemProperty key, System.getProperty(key) }
+                    }
+                    ['AUDIT_DB_URL', 'AUDIT_DB_USER', 'AUDIT_DB_PASSWORD'].each { key ->
+                        if (System.getenv(key) != null) { environment key, System.getenv(key) }
+                    }
                 }
             }
         }
@@ -231,6 +250,9 @@ def build_entry(workspace, system):
     elif p["build_tool"] == "gradle":
         deps = "\n".join("                testImplementation '%s%s'" % (d["ga"], ":" + d["version"] if d.get("version") else "")
                          for d in p["dependencies"])
+        # Gradle starts the tests through the JUnit Platform launcher; it must be the one that fits the engine on the
+        # class path, not the one bundled with Gradle. Spring Boot's dependency management names the version.
+        deps += "\n                testRuntimeOnly 'org.junit.platform:junit-platform-launcher'"
         new = GRADLE_INIT % {"module_dir": module_dir.replace("\\", "/"), "deps": deps}
         path = os.path.join(adir, "build", "audit.init.gradle")
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -317,8 +339,8 @@ def command(workspace, system, run, mode=None, case=None, only_command=None, see
         tool = "./mvnw" if os.path.isfile(os.path.join(workspace, "mvnw")) else "mvn"
         return "%s -B -f %s -Paudit test %s" % (tool, entry["file"], props)
     tool = "./gradlew" if os.path.isfile(os.path.join(workspace, "gradlew")) else "gradle"
-    task = "test" if p["module"] == "." else ":%s:test" % p["module"].replace("/", ":")
-    return "%s --init-script %s %s --rerun-tasks %s" % (tool, entry["file"], task, props)
+    task = "auditTest" if p["module"] == "." else ":%s:auditTest" % p["module"].replace("/", ":")
+    return "%s --init-script %s %s %s" % (tool, entry["file"], task, props)
 
 
 def main(argv=None):

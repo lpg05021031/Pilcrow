@@ -37,15 +37,18 @@ Ground rules:
 ## 1 — How each case is reached
 
 For each group of entry points (the same groups as in the model step; list them with
-`model_brief.py shards $system`), get the brief and hand it to a `code-reader` agent as its whole task:
+`model_brief.py shards $system`), have its brief written to a file and hand that file to a `code-reader`
+agent as its whole task:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_brief.py" recipes $system "<group name>"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_brief.py" recipes $system "<group name>" --file
 ```
 
-preceded by: *"Work out how each case is reached. Your reply is one JSON object as described under 'When
-you are asked for recipes'."* When the brief says `"parts"` is more than 1, the group has too many cases
-for one reader: get `--part 2` and so on, each for another agent, one after the other. Save each reply as
+It prints `brief:` and the file's path. The agent's whole prompt is: *"Your brief is the file `<brief
+path>`. Read it first. Work out how each case is reached. Your reply is one JSON object as described under
+'When you are asked for recipes'."* You do not paste the brief. When a line `parts: N` is printed, the
+group has too many cases for one reader: get `--part 2` and so on, each for another agent, one after the
+other. Save each reply as
 `audit/$system/model_raw/recipes-<group>.json` (`recipes-<group>-2.json` for a second part; the name comes
 from `model_store.py name recipes "<group name>"`), and after each one run
 
@@ -94,14 +97,14 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_brief.py" triage $system
 ```
 
 lists the commands that have cases to look at. When there are none, go to step 4. Otherwise, for each
-such command, get its brief and hand it to a `code-reader` agent:
+such command, have its brief written to a file and hand that file to a `code-reader` agent:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_brief.py" triage $system --command <command id>
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_brief.py" triage $system --command <command id> --file
 ```
 
-preceded by: *"Triage these cases. Your reply is one JSON object as described under 'When you are asked
-to triage'."* Save each reply as the next `audit/$system/model_raw/fix-<nn>.json`. Then rebuild and run
+with the prompt: *"Your brief is the file `<brief path>`. Read it first. Triage these cases. Your reply is
+one JSON object as described under 'When you are asked to triage'."* Save each reply as the next `audit/$system/model_raw/fix-<nn>.json`. Then rebuild and run
 again:
 
 ```bash
@@ -115,7 +118,7 @@ and the run and `reconcile.py` of step 2. When a full run takes more than five m
 commands that changed: add `--only <command id>` to the `command` line, once per command.
 
 A command that a reply corrected carries checks no referee has seen. After the rebuild, get its referee
-brief with `model_brief.py referee $system <command id>` (a command id works where a group name does),
+brief with `model_brief.py referee $system <command id> --file` (a command id works where a group name does),
 hand it to a fresh `code-reader` as in the model step, save the reply as
 `audit/$system/model_raw/referee-fix-<nn>-<command id>.json` with the `nn` of the fix, and run the first
 two rebuild lines again. Verdicts given before a fix do not carry over to the corrected command.

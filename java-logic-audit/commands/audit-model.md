@@ -40,15 +40,18 @@ than 12 groups, model the first 12 in the listed order and say so.
 
 ## 2 — Readers
 
-For each group, get the brief and hand it to a `code-reader` agent as its whole task:
+For each group, have its brief written to a file and hand that file to a `code-reader` agent as its
+whole task:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_brief.py" mine $system "<group name>"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_brief.py" mine $system "<group name>" --file
 ```
 
-Give the agent the JSON exactly as printed, preceded by one line: *"Model these entry points. Your
-reply is one JSON object as described under 'When you are asked to model entry points'."* Add nothing
-about what you expect it to find. Run the groups in parallel, at most four at a time.
+It prints `brief:` and the file's path. The agent's whole prompt is: *"Your brief is the file `<brief
+path>`. Read it first. Model these entry points. Your reply is one JSON object as described under 'When
+you are asked to model entry points'."* You do not paste the brief: the agent reads it, so nothing is
+retyped on the way. Add nothing about what you expect it to find. Run the groups in parallel, at most
+four at a time.
 
 Save each reply as it came, under the name this prints:
 
@@ -75,14 +78,14 @@ Then, for every group, get the referee's brief and hand it to a **fresh** `code-
 one that modelled the group:
 
 ```bash
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_brief.py" referee $system "<group name>"
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/model_brief.py" referee $system "<group name>" --file
 ```
 
-preceded by: *"Referee these claims. Read only the cited lines and what you need around them. Your reply
-is one JSON object as described under 'When you are asked to referee a claim'."* The brief holds only the
-claims and the lines they cite: the referee is not shown the reader's reasoning or the files list. When
-the brief says `"parts"` is more than 1, the group has more than eight commands: get `--part 2` and so
-on, each for another fresh agent. Save each reply as `audit/$system/model_raw/referee-<group>.json`
+with the prompt: *"Your brief is the file `<brief path>`. Read it first. Referee these claims. Read only
+the cited lines and what you need around them. Your reply is one JSON object as described under 'When you
+are asked to referee a claim'."* The brief holds only the claims and the lines they cite: the referee is
+not shown the reader's reasoning or the files list. When a line `parts: N` is printed, the group has more
+than eight commands: get `--part 2` and so on, each for another fresh agent. Save each reply as `audit/$system/model_raw/referee-<group>.json`
 (`referee-<group>-2.json` for a second part; the name comes from `model_store.py name referee "<group
 name>"`). A group that already has its verdict files is not refereed again, unless its reader's reply was
 redone. Run the referees in parallel, at most four at a time.

@@ -1,0 +1,1692 @@
+{
+  "base_package" : "com.example.stock",
+  "types" : {
+    "com.example.stock.StockApplication" : {
+      "kind" : "class",
+      "source" : "StockApplication.java",
+      "annotations" : [ "org.springframework.boot.autoconfigure.SpringBootApplication" ],
+      "supertypes" : [ ],
+      "methods" : {
+        "<init>()" : {
+          "annotations" : [ ],
+          "calls" : [ {
+            "owner" : "java.lang.Object",
+            "name" : "<init>",
+            "line" : 7
+          } ],
+          "fields" : [ ]
+        },
+        "main(String[])" : {
+          "annotations" : [ ],
+          "calls" : [ {
+            "owner" : "org.springframework.boot.SpringApplication",
+            "name" : "run",
+            "line" : 10
+          } ],
+          "fields" : [ ]
+        }
+      }
+    },
+    "com.example.stock.config.ClockConfig" : {
+      "kind" : "class",
+      "source" : "ClockConfig.java",
+      "annotations" : [ "org.springframework.context.annotation.Configuration" ],
+      "supertypes" : [ ],
+      "methods" : {
+        "<init>()" : {
+          "annotations" : [ ],
+          "calls" : [ {
+            "owner" : "java.lang.Object",
+            "name" : "<init>",
+            "line" : 8
+          } ],
+          "fields" : [ ]
+        },
+        "clock()" : {
+          "annotations" : [ "org.springframework.context.annotation.Bean" ],
+          "calls" : [ {
+            "owner" : "java.time.Clock",
+            "name" : "systemUTC",
+            "line" : 12
+          } ],
+          "fields" : [ ]
+        }
+      }
+    },
+    "com.example.stock.config.SchedulingConfig" : {
+      "kind" : "class",
+      "source" : "SchedulingConfig.java",
+      "annotations" : [ "org.springframework.boot.autoconfigure.condition.ConditionalOnProperty", "org.springframework.context.annotation.Configuration", "org.springframework.scheduling.annotation.EnableScheduling" ],
+      "supertypes" : [ ],
+      "methods" : {
+        "<init>()" : {
+          "annotations" : [ ],
+          "calls" : [ {
+            "owner" : "java.lang.Object",
+            "name" : "<init>",
+            "line" : 10
+          } ],
+          "fields" : [ ]
+        }
+      }
+    },
+    "com.example.stock.domain.Reservation" : {
+      "kind" : "class",
+      "source" : "Reservation.java",
+      "annotations" : [ ],
+      "supertypes" : [ ],
+      "methods" : {
+        "<init>()" : {
+          "annotations" : [ ],
+          "calls" : [ {
+            "owner" : "java.lang.Object",
+            "name" : "<init>",
+            "line" : 14
+          } ],
+          "fields" : [ ]
+        },
+        "<init>(String,String,int,ReservationStatus,LocalDateTime)" : {
+          "annotations" : [ ],
+          "calls" : [ {
+            "owner" : "java.lang.Object",
+            "name" : "<init>",
+            "line" : 17
+          } ],
+          "fields" : [ {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "ref",
+            "mode" : "set",
+            "line" : 18
+          }, {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "qty",
+            "mode" : "set",
+            "line" : 20
+          }, {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "expiresAt",
+            "mode" : "set",
+            "line" : 22
+          }, {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "status",
+            "mode" : "set",
+            "line" : 21
+          }, {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "sku",
+            "mode" : "set",
+            "line" : 19
+          } ]
+        },
+        "getExpiresAt()" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "expiresAt",
+            "mode" : "get",
+            "line" : 66
+          } ]
+        },
+        "getId()" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "id",
+            "mode" : "get",
+            "line" : 26
+          } ]
+        },
+        "getQty()" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "qty",
+            "mode" : "get",
+            "line" : 50
+          } ]
+        },
+        "getRef()" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "ref",
+            "mode" : "get",
+            "line" : 34
+          } ]
+        },
+        "getSku()" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "sku",
+            "mode" : "get",
+            "line" : 42
+          } ]
+        },
+        "getStatus()" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "status",
+            "mode" : "get",
+            "line" : 58
+          } ]
+        },
+        "setExpiresAt(LocalDateTime)" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "expiresAt",
+            "mode" : "set",
+            "line" : 70
+          } ]
+        },
+        "setId(Long)" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "id",
+            "mode" : "set",
+            "line" : 30
+          } ]
+        },
+        "setQty(int)" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "qty",
+            "mode" : "set",
+            "line" : 54
+          } ]
+        },
+        "setRef(String)" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "ref",
+            "mode" : "set",
+            "line" : 38
+          } ]
+        },
+        "setSku(String)" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "sku",
+            "mode" : "set",
+            "line" : 46
+          } ]
+        },
+        "setStatus(ReservationStatus)" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "status",
+            "mode" : "set",
+            "line" : 62
+          } ]
+        }
+      }
+    },
+    "com.example.stock.domain.ReservationStatus" : {
+      "kind" : "enum",
+      "source" : "ReservationStatus.java",
+      "annotations" : [ ],
+      "supertypes" : [ "java.io.Serializable", "java.lang.Comparable", "java.lang.Enum", "java.lang.constant.Constable" ],
+      "methods" : {
+        "$values()" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.domain.ReservationStatus",
+            "name" : "HELD",
+            "mode" : "get",
+            "line" : 3
+          }, {
+            "owner" : "com.example.stock.domain.ReservationStatus",
+            "name" : "CONFIRMED",
+            "mode" : "get",
+            "line" : 3
+          }, {
+            "owner" : "com.example.stock.domain.ReservationStatus",
+            "name" : "EXPIRED",
+            "mode" : "get",
+            "line" : 3
+          }, {
+            "owner" : "com.example.stock.domain.ReservationStatus",
+            "name" : "RELEASED",
+            "mode" : "get",
+            "line" : 3
+          } ]
+        },
+        "<clinit>()" : {
+          "annotations" : [ ],
+          "calls" : [ {
+            "owner" : "com.example.stock.domain.ReservationStatus",
+            "name" : "$values",
+            "line" : 3
+          }, {
+            "owner" : "com.example.stock.domain.ReservationStatus",
+            "name" : "<init>",
+            "line" : 4
+          }, {
+            "owner" : "com.example.stock.domain.ReservationStatus",
+            "name" : "<init>",
+            "line" : 4
+          }, {
+            "owner" : "com.example.stock.domain.ReservationStatus",
+            "name" : "<init>",
+            "line" : 4
+          }, {
+            "owner" : "com.example.stock.domain.ReservationStatus",
+            "name" : "<init>",
+            "line" : 4
+          } ],
+          "fields" : [ {
+            "owner" : "com.example.stock.domain.ReservationStatus",
+            "name" : "HELD",
+            "mode" : "set",
+            "line" : 4
+          }, {
+            "owner" : "com.example.stock.domain.ReservationStatus",
+            "name" : "EXPIRED",
+            "mode" : "set",
+            "line" : 4
+          }, {
+            "owner" : "com.example.stock.domain.ReservationStatus",
+            "name" : "RELEASED",
+            "mode" : "set",
+            "line" : 4
+          }, {
+            "owner" : "com.example.stock.domain.ReservationStatus",
+            "name" : "$VALUES",
+            "mode" : "set",
+            "line" : 3
+          }, {
+            "owner" : "com.example.stock.domain.ReservationStatus",
+            "name" : "CONFIRMED",
+            "mode" : "set",
+            "line" : 4
+          } ]
+        },
+        "<init>(String,int)" : {
+          "annotations" : [ ],
+          "calls" : [ {
+            "owner" : "java.lang.Enum",
+            "name" : "<init>",
+            "line" : 3
+          } ],
+          "fields" : [ ]
+        },
+        "valueOf(String)" : {
+          "annotations" : [ ],
+          "calls" : [ {
+            "owner" : "java.lang.Enum",
+            "name" : "valueOf",
+            "line" : 3
+          } ],
+          "fields" : [ ]
+        },
+        "values()" : {
+          "annotations" : [ ],
+          "calls" : [ {
+            "owner" : "[Lcom.example.stock.domain.ReservationStatus;",
+            "name" : "clone",
+            "line" : 3
+          } ],
+          "fields" : [ {
+            "owner" : "com.example.stock.domain.ReservationStatus",
+            "name" : "$VALUES",
+            "mode" : "get",
+            "line" : 3
+          } ]
+        }
+      }
+    },
+    "com.example.stock.domain.StockItem" : {
+      "kind" : "class",
+      "source" : "StockItem.java",
+      "annotations" : [ ],
+      "supertypes" : [ ],
+      "methods" : {
+        "<init>()" : {
+          "annotations" : [ ],
+          "calls" : [ {
+            "owner" : "java.lang.Object",
+            "name" : "<init>",
+            "line" : 3
+          } ],
+          "fields" : [ ]
+        },
+        "available()" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.domain.StockItem",
+            "name" : "reserved",
+            "mode" : "get",
+            "line" : 12
+          }, {
+            "owner" : "com.example.stock.domain.StockItem",
+            "name" : "onHand",
+            "mode" : "get",
+            "line" : 12
+          } ]
+        },
+        "getNote()" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.domain.StockItem",
+            "name" : "note",
+            "mode" : "get",
+            "line" : 40
+          } ]
+        },
+        "getOnHand()" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.domain.StockItem",
+            "name" : "onHand",
+            "mode" : "get",
+            "line" : 24
+          } ]
+        },
+        "getReserved()" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.domain.StockItem",
+            "name" : "reserved",
+            "mode" : "get",
+            "line" : 32
+          } ]
+        },
+        "getSku()" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.domain.StockItem",
+            "name" : "sku",
+            "mode" : "get",
+            "line" : 16
+          } ]
+        },
+        "setNote(String)" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.domain.StockItem",
+            "name" : "note",
+            "mode" : "set",
+            "line" : 44
+          } ]
+        },
+        "setOnHand(int)" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.domain.StockItem",
+            "name" : "onHand",
+            "mode" : "set",
+            "line" : 28
+          } ]
+        },
+        "setReserved(int)" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.domain.StockItem",
+            "name" : "reserved",
+            "mode" : "set",
+            "line" : 36
+          } ]
+        },
+        "setSku(String)" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.domain.StockItem",
+            "name" : "sku",
+            "mode" : "set",
+            "line" : 20
+          } ]
+        }
+      }
+    },
+    "com.example.stock.job.ExpiryJob" : {
+      "kind" : "class",
+      "source" : "ExpiryJob.java",
+      "annotations" : [ "org.springframework.stereotype.Component" ],
+      "supertypes" : [ ],
+      "methods" : {
+        "<clinit>()" : {
+          "annotations" : [ ],
+          "calls" : [ {
+            "owner" : "org.slf4j.LoggerFactory",
+            "name" : "getLogger",
+            "line" : 12
+          } ],
+          "fields" : [ {
+            "owner" : "com.example.stock.job.ExpiryJob",
+            "name" : "log",
+            "mode" : "set",
+            "line" : 12
+          } ]
+        },
+        "<init>(ReservationService)" : {
+          "annotations" : [ ],
+          "calls" : [ {
+            "owner" : "java.lang.Object",
+            "name" : "<init>",
+            "line" : 16
+          } ],
+          "fields" : [ {
+            "owner" : "com.example.stock.job.ExpiryJob",
+            "name" : "reservations",
+            "mode" : "set",
+            "line" : 17
+          } ]
+        },
+        "run()" : {
+          "annotations" : [ "org.springframework.scheduling.annotation.Scheduled" ],
+          "calls" : [ {
+            "owner" : "java.lang.Integer",
+            "name" : "valueOf",
+            "line" : 24
+          }, {
+            "owner" : "org.slf4j.Logger",
+            "name" : "info",
+            "line" : 24
+          }, {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "expireDue",
+            "line" : 22
+          } ],
+          "fields" : [ {
+            "owner" : "com.example.stock.job.ExpiryJob",
+            "name" : "reservations",
+            "mode" : "get",
+            "line" : 22
+          }, {
+            "owner" : "com.example.stock.job.ExpiryJob",
+            "name" : "log",
+            "mode" : "get",
+            "line" : 24
+          } ]
+        }
+      }
+    },
+    "com.example.stock.mapper.MovementMapper" : {
+      "kind" : "interface",
+      "source" : "MovementMapper.java",
+      "annotations" : [ "org.apache.ibatis.annotations.Mapper" ],
+      "supertypes" : [ ],
+      "methods" : {
+        "insert(String,int,String,Long)" : {
+          "annotations" : [ "org.apache.ibatis.annotations.Insert" ],
+          "calls" : [ ],
+          "fields" : [ ]
+        }
+      }
+    },
+    "com.example.stock.mapper.ReservationMapper" : {
+      "kind" : "interface",
+      "source" : "ReservationMapper.java",
+      "annotations" : [ "org.apache.ibatis.annotations.Mapper" ],
+      "supertypes" : [ ],
+      "methods" : {
+        "findById(long)" : {
+          "annotations" : [ "org.apache.ibatis.annotations.Select" ],
+          "calls" : [ ],
+          "fields" : [ ]
+        },
+        "findByIdForUpdate(long)" : {
+          "annotations" : [ "org.apache.ibatis.annotations.Select" ],
+          "calls" : [ ],
+          "fields" : [ ]
+        },
+        "findByRef(String)" : {
+          "annotations" : [ "org.apache.ibatis.annotations.Select" ],
+          "calls" : [ ],
+          "fields" : [ ]
+        },
+        "findDue(LocalDateTime)" : {
+          "annotations" : [ "org.apache.ibatis.annotations.Select" ],
+          "calls" : [ ],
+          "fields" : [ ]
+        },
+        "insert(Reservation)" : {
+          "annotations" : [ "org.apache.ibatis.annotations.Insert", "org.apache.ibatis.annotations.Options" ],
+          "calls" : [ ],
+          "fields" : [ ]
+        },
+        "updateStatus(long,ReservationStatus)" : {
+          "annotations" : [ "org.apache.ibatis.annotations.Update" ],
+          "calls" : [ ],
+          "fields" : [ ]
+        }
+      }
+    },
+    "com.example.stock.mapper.StockMapper" : {
+      "kind" : "interface",
+      "source" : "StockMapper.java",
+      "annotations" : [ "org.apache.ibatis.annotations.Mapper" ],
+      "supertypes" : [ ],
+      "methods" : {
+        "addOnHand(String,int)" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ ]
+        },
+        "addReserved(String,int)" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ ]
+        },
+        "correct(String,Integer,String)" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ ]
+        },
+        "findBySku(String)" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ ]
+        },
+        "findBySkuForUpdate(String)" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ ]
+        },
+        "insert(String,int)" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ ]
+        },
+        "ship(String,int)" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ ]
+        }
+      }
+    },
+    "com.example.stock.service.BusinessException" : {
+      "kind" : "class",
+      "source" : "BusinessException.java",
+      "annotations" : [ ],
+      "supertypes" : [ "java.io.Serializable", "java.lang.Exception", "java.lang.RuntimeException", "java.lang.Throwable" ],
+      "methods" : {
+        "<init>(String)" : {
+          "annotations" : [ ],
+          "calls" : [ {
+            "owner" : "java.lang.RuntimeException",
+            "name" : "<init>",
+            "line" : 9
+          } ],
+          "fields" : [ {
+            "owner" : "com.example.stock.service.BusinessException",
+            "name" : "code",
+            "mode" : "set",
+            "line" : 10
+          } ]
+        },
+        "getCode()" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.service.BusinessException",
+            "name" : "code",
+            "mode" : "get",
+            "line" : 14
+          } ]
+        }
+      }
+    },
+    "com.example.stock.service.NotFoundException" : {
+      "kind" : "class",
+      "source" : "NotFoundException.java",
+      "annotations" : [ ],
+      "supertypes" : [ "java.io.Serializable", "java.lang.Exception", "java.lang.RuntimeException", "java.lang.Throwable" ],
+      "methods" : {
+        "<init>(String,Object)" : {
+          "annotations" : [ ],
+          "calls" : [ {
+            "owner" : "java.lang.String",
+            "name" : "valueOf",
+            "line" : 6
+          }, {
+            "owner" : "java.lang.RuntimeException",
+            "name" : "<init>",
+            "line" : 6
+          } ],
+          "fields" : [ ]
+        }
+      }
+    },
+    "com.example.stock.service.ReservationService" : {
+      "kind" : "class",
+      "source" : "ReservationService.java",
+      "annotations" : [ "org.springframework.stereotype.Service" ],
+      "supertypes" : [ ],
+      "methods" : {
+        "<init>(ReservationMapper,StockMapper,MovementMapper,Clock,long)" : {
+          "annotations" : [ ],
+          "calls" : [ {
+            "owner" : "java.lang.Object",
+            "name" : "<init>",
+            "line" : 26
+          } ],
+          "fields" : [ {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "reservations",
+            "mode" : "set",
+            "line" : 27
+          }, {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "stock",
+            "mode" : "set",
+            "line" : 28
+          }, {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "clock",
+            "mode" : "set",
+            "line" : 30
+          }, {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "holdMinutes",
+            "mode" : "set",
+            "line" : 31
+          }, {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "movements",
+            "mode" : "set",
+            "line" : 29
+          } ]
+        },
+        "confirm(long)" : {
+          "annotations" : [ "org.springframework.transaction.annotation.Transactional" ],
+          "calls" : [ {
+            "owner" : "java.time.LocalDateTime",
+            "name" : "now",
+            "line" : 67
+          }, {
+            "owner" : "java.lang.Long",
+            "name" : "valueOf",
+            "line" : 62
+          }, {
+            "owner" : "com.example.stock.mapper.StockMapper",
+            "name" : "ship",
+            "line" : 72
+          }, {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "getStatus",
+            "line" : 64
+          }, {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "setStatus",
+            "line" : 75
+          }, {
+            "owner" : "com.example.stock.mapper.ReservationMapper",
+            "name" : "updateStatus",
+            "line" : 69
+          }, {
+            "owner" : "com.example.stock.mapper.MovementMapper",
+            "name" : "insert",
+            "line" : 73
+          }, {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "getQty",
+            "line" : 73
+          }, {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "getSku",
+            "line" : 73
+          }, {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "getSku",
+            "line" : 72
+          }, {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "getQty",
+            "line" : 72
+          }, {
+            "owner" : "java.lang.Long",
+            "name" : "valueOf",
+            "line" : 73
+          }, {
+            "owner" : "com.example.stock.mapper.ReservationMapper",
+            "name" : "updateStatus",
+            "line" : 74
+          }, {
+            "owner" : "com.example.stock.mapper.ReservationMapper",
+            "name" : "findByIdForUpdate",
+            "line" : 60
+          }, {
+            "owner" : "java.time.LocalDateTime",
+            "name" : "isBefore",
+            "line" : 67
+          }, {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "getExpiresAt",
+            "line" : 67
+          }, {
+            "owner" : "com.example.stock.service.BusinessException",
+            "name" : "<init>",
+            "line" : 65
+          }, {
+            "owner" : "com.example.stock.service.NotFoundException",
+            "name" : "<init>",
+            "line" : 62
+          }, {
+            "owner" : "com.example.stock.service.BusinessException",
+            "name" : "<init>",
+            "line" : 70
+          } ],
+          "fields" : [ {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "reservations",
+            "mode" : "get",
+            "line" : 74
+          }, {
+            "owner" : "com.example.stock.domain.ReservationStatus",
+            "name" : "HELD",
+            "mode" : "get",
+            "line" : 64
+          }, {
+            "owner" : "com.example.stock.domain.ReservationStatus",
+            "name" : "CONFIRMED",
+            "mode" : "get",
+            "line" : 74
+          }, {
+            "owner" : "com.example.stock.domain.ReservationStatus",
+            "name" : "EXPIRED",
+            "mode" : "get",
+            "line" : 69
+          }, {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "stock",
+            "mode" : "get",
+            "line" : 72
+          }, {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "reservations",
+            "mode" : "get",
+            "line" : 69
+          }, {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "movements",
+            "mode" : "get",
+            "line" : 73
+          }, {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "clock",
+            "mode" : "get",
+            "line" : 67
+          }, {
+            "owner" : "com.example.stock.domain.ReservationStatus",
+            "name" : "CONFIRMED",
+            "mode" : "get",
+            "line" : 75
+          }, {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "reservations",
+            "mode" : "get",
+            "line" : 60
+          } ]
+        },
+        "expireDue()" : {
+          "annotations" : [ "org.springframework.transaction.annotation.Transactional" ],
+          "calls" : [ {
+            "owner" : "com.example.stock.mapper.ReservationMapper",
+            "name" : "updateStatus",
+            "line" : 110
+          }, {
+            "owner" : "java.time.LocalDateTime",
+            "name" : "now",
+            "line" : 107
+          }, {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "getSku",
+            "line" : 109
+          }, {
+            "owner" : "java.util.Iterator",
+            "name" : "hasNext",
+            "line" : 108
+          }, {
+            "owner" : "com.example.stock.mapper.ReservationMapper",
+            "name" : "findDue",
+            "line" : 107
+          }, {
+            "owner" : "java.lang.Long",
+            "name" : "longValue",
+            "line" : 110
+          }, {
+            "owner" : "java.util.List",
+            "name" : "size",
+            "line" : 112
+          }, {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "getId",
+            "line" : 110
+          }, {
+            "owner" : "java.util.List",
+            "name" : "iterator",
+            "line" : 108
+          }, {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "getQty",
+            "line" : 109
+          }, {
+            "owner" : "java.util.Iterator",
+            "name" : "next",
+            "line" : 108
+          }, {
+            "owner" : "com.example.stock.mapper.StockMapper",
+            "name" : "addReserved",
+            "line" : 109
+          } ],
+          "fields" : [ {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "stock",
+            "mode" : "get",
+            "line" : 109
+          }, {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "reservations",
+            "mode" : "get",
+            "line" : 110
+          }, {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "reservations",
+            "mode" : "get",
+            "line" : 107
+          }, {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "clock",
+            "mode" : "get",
+            "line" : 107
+          }, {
+            "owner" : "com.example.stock.domain.ReservationStatus",
+            "name" : "EXPIRED",
+            "mode" : "get",
+            "line" : 110
+          } ]
+        },
+        "get(long)" : {
+          "annotations" : [ "org.springframework.transaction.annotation.Transactional" ],
+          "calls" : [ {
+            "owner" : "com.example.stock.mapper.ReservationMapper",
+            "name" : "findById",
+            "line" : 97
+          }, {
+            "owner" : "java.lang.Long",
+            "name" : "valueOf",
+            "line" : 99
+          }, {
+            "owner" : "com.example.stock.service.NotFoundException",
+            "name" : "<init>",
+            "line" : 99
+          } ],
+          "fields" : [ {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "reservations",
+            "mode" : "get",
+            "line" : 97
+          } ]
+        },
+        "hold(String,String,int)" : {
+          "annotations" : [ "org.springframework.transaction.annotation.Transactional" ],
+          "calls" : [ {
+            "owner" : "com.example.stock.mapper.StockMapper",
+            "name" : "findBySkuForUpdate",
+            "line" : 40
+          }, {
+            "owner" : "com.example.stock.domain.StockItem",
+            "name" : "available",
+            "line" : 47
+          }, {
+            "owner" : "java.time.LocalDateTime",
+            "name" : "now",
+            "line" : 51
+          }, {
+            "owner" : "java.time.LocalDateTime",
+            "name" : "plusMinutes",
+            "line" : 51
+          }, {
+            "owner" : "com.example.stock.mapper.ReservationMapper",
+            "name" : "findByRef",
+            "line" : 44
+          }, {
+            "owner" : "com.example.stock.mapper.ReservationMapper",
+            "name" : "insert",
+            "line" : 52
+          }, {
+            "owner" : "com.example.stock.mapper.StockMapper",
+            "name" : "addReserved",
+            "line" : 53
+          }, {
+            "owner" : "com.example.stock.service.BusinessException",
+            "name" : "<init>",
+            "line" : 48
+          }, {
+            "owner" : "com.example.stock.service.BusinessException",
+            "name" : "<init>",
+            "line" : 38
+          }, {
+            "owner" : "com.example.stock.service.NotFoundException",
+            "name" : "<init>",
+            "line" : 42
+          }, {
+            "owner" : "com.example.stock.service.BusinessException",
+            "name" : "<init>",
+            "line" : 45
+          }, {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "<init>",
+            "line" : 51
+          } ],
+          "fields" : [ {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "clock",
+            "mode" : "get",
+            "line" : 50
+          }, {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "stock",
+            "mode" : "get",
+            "line" : 53
+          }, {
+            "owner" : "com.example.stock.domain.ReservationStatus",
+            "name" : "HELD",
+            "mode" : "get",
+            "line" : 50
+          }, {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "reservations",
+            "mode" : "get",
+            "line" : 44
+          }, {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "holdMinutes",
+            "mode" : "get",
+            "line" : 51
+          }, {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "reservations",
+            "mode" : "get",
+            "line" : 52
+          }, {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "stock",
+            "mode" : "get",
+            "line" : 40
+          } ]
+        },
+        "release(long)" : {
+          "annotations" : [ "org.springframework.transaction.annotation.Transactional" ],
+          "calls" : [ {
+            "owner" : "com.example.stock.mapper.ReservationMapper",
+            "name" : "updateStatus",
+            "line" : 90
+          }, {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "setStatus",
+            "line" : 91
+          }, {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "getQty",
+            "line" : 89
+          }, {
+            "owner" : "com.example.stock.mapper.StockMapper",
+            "name" : "addReserved",
+            "line" : 89
+          }, {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "getStatus",
+            "line" : 86
+          }, {
+            "owner" : "com.example.stock.mapper.ReservationMapper",
+            "name" : "findByIdForUpdate",
+            "line" : 82
+          }, {
+            "owner" : "com.example.stock.domain.Reservation",
+            "name" : "getSku",
+            "line" : 89
+          }, {
+            "owner" : "java.lang.Long",
+            "name" : "valueOf",
+            "line" : 84
+          }, {
+            "owner" : "com.example.stock.service.NotFoundException",
+            "name" : "<init>",
+            "line" : 84
+          }, {
+            "owner" : "com.example.stock.service.BusinessException",
+            "name" : "<init>",
+            "line" : 87
+          } ],
+          "fields" : [ {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "reservations",
+            "mode" : "get",
+            "line" : 90
+          }, {
+            "owner" : "com.example.stock.domain.ReservationStatus",
+            "name" : "RELEASED",
+            "mode" : "get",
+            "line" : 91
+          }, {
+            "owner" : "com.example.stock.domain.ReservationStatus",
+            "name" : "RELEASED",
+            "mode" : "get",
+            "line" : 90
+          }, {
+            "owner" : "com.example.stock.domain.ReservationStatus",
+            "name" : "HELD",
+            "mode" : "get",
+            "line" : 86
+          }, {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "stock",
+            "mode" : "get",
+            "line" : 89
+          }, {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "reservations",
+            "mode" : "get",
+            "line" : 82
+          } ]
+        }
+      }
+    },
+    "com.example.stock.service.StockService" : {
+      "kind" : "class",
+      "source" : "StockService.java",
+      "annotations" : [ "org.springframework.stereotype.Service" ],
+      "supertypes" : [ ],
+      "methods" : {
+        "<init>(StockMapper,MovementMapper)" : {
+          "annotations" : [ ],
+          "calls" : [ {
+            "owner" : "java.lang.Object",
+            "name" : "<init>",
+            "line" : 15
+          } ],
+          "fields" : [ {
+            "owner" : "com.example.stock.service.StockService",
+            "name" : "stock",
+            "mode" : "set",
+            "line" : 16
+          }, {
+            "owner" : "com.example.stock.service.StockService",
+            "name" : "movements",
+            "mode" : "set",
+            "line" : 17
+          } ]
+        },
+        "correct(String,Integer,String)" : {
+          "annotations" : [ "org.springframework.transaction.annotation.Transactional" ],
+          "calls" : [ {
+            "owner" : "com.example.stock.domain.StockItem",
+            "name" : "getOnHand",
+            "line" : 59
+          }, {
+            "owner" : "java.lang.Integer",
+            "name" : "intValue",
+            "line" : 48
+          }, {
+            "owner" : "com.example.stock.mapper.StockMapper",
+            "name" : "findBySkuForUpdate",
+            "line" : 51
+          }, {
+            "owner" : "com.example.stock.domain.StockItem",
+            "name" : "getOnHand",
+            "line" : 60
+          }, {
+            "owner" : "java.lang.Integer",
+            "name" : "intValue",
+            "line" : 59
+          }, {
+            "owner" : "com.example.stock.mapper.MovementMapper",
+            "name" : "insert",
+            "line" : 60
+          }, {
+            "owner" : "com.example.stock.mapper.StockMapper",
+            "name" : "findBySku",
+            "line" : 62
+          }, {
+            "owner" : "com.example.stock.mapper.StockMapper",
+            "name" : "correct",
+            "line" : 58
+          }, {
+            "owner" : "java.lang.Integer",
+            "name" : "intValue",
+            "line" : 60
+          }, {
+            "owner" : "com.example.stock.service.NotFoundException",
+            "name" : "<init>",
+            "line" : 53
+          }, {
+            "owner" : "com.example.stock.service.BusinessException",
+            "name" : "<init>",
+            "line" : 56
+          }, {
+            "owner" : "com.example.stock.service.BusinessException",
+            "name" : "<init>",
+            "line" : 49
+          } ],
+          "fields" : [ {
+            "owner" : "com.example.stock.service.StockService",
+            "name" : "stock",
+            "mode" : "get",
+            "line" : 51
+          }, {
+            "owner" : "com.example.stock.service.StockService",
+            "name" : "movements",
+            "mode" : "get",
+            "line" : 60
+          }, {
+            "owner" : "com.example.stock.service.StockService",
+            "name" : "stock",
+            "mode" : "get",
+            "line" : 62
+          }, {
+            "owner" : "com.example.stock.service.StockService",
+            "name" : "stock",
+            "mode" : "get",
+            "line" : 58
+          } ]
+        },
+        "get(String)" : {
+          "annotations" : [ "org.springframework.transaction.annotation.Transactional" ],
+          "calls" : [ {
+            "owner" : "com.example.stock.mapper.StockMapper",
+            "name" : "findBySku",
+            "line" : 22
+          }, {
+            "owner" : "com.example.stock.service.NotFoundException",
+            "name" : "<init>",
+            "line" : 24
+          } ],
+          "fields" : [ {
+            "owner" : "com.example.stock.service.StockService",
+            "name" : "stock",
+            "mode" : "get",
+            "line" : 22
+          } ]
+        },
+        "receive(String,int)" : {
+          "annotations" : [ "org.springframework.transaction.annotation.Transactional" ],
+          "calls" : [ {
+            "owner" : "com.example.stock.mapper.StockMapper",
+            "name" : "addOnHand",
+            "line" : 39
+          }, {
+            "owner" : "com.example.stock.mapper.StockMapper",
+            "name" : "insert",
+            "line" : 37
+          }, {
+            "owner" : "com.example.stock.mapper.StockMapper",
+            "name" : "findBySkuForUpdate",
+            "line" : 35
+          }, {
+            "owner" : "com.example.stock.mapper.StockMapper",
+            "name" : "findBySku",
+            "line" : 42
+          }, {
+            "owner" : "com.example.stock.mapper.MovementMapper",
+            "name" : "insert",
+            "line" : 41
+          }, {
+            "owner" : "com.example.stock.service.BusinessException",
+            "name" : "<init>",
+            "line" : 33
+          } ],
+          "fields" : [ {
+            "owner" : "com.example.stock.service.StockService",
+            "name" : "stock",
+            "mode" : "get",
+            "line" : 35
+          }, {
+            "owner" : "com.example.stock.service.StockService",
+            "name" : "movements",
+            "mode" : "get",
+            "line" : 41
+          }, {
+            "owner" : "com.example.stock.service.StockService",
+            "name" : "stock",
+            "mode" : "get",
+            "line" : 39
+          }, {
+            "owner" : "com.example.stock.service.StockService",
+            "name" : "stock",
+            "mode" : "get",
+            "line" : 42
+          }, {
+            "owner" : "com.example.stock.service.StockService",
+            "name" : "stock",
+            "mode" : "get",
+            "line" : 37
+          } ]
+        }
+      }
+    },
+    "com.example.stock.web.ApiExceptionHandler" : {
+      "kind" : "class",
+      "source" : "ApiExceptionHandler.java",
+      "annotations" : [ "org.springframework.web.bind.annotation.RestControllerAdvice" ],
+      "supertypes" : [ ],
+      "methods" : {
+        "<init>()" : {
+          "annotations" : [ ],
+          "calls" : [ {
+            "owner" : "java.lang.Object",
+            "name" : "<init>",
+            "line" : 15
+          } ],
+          "fields" : [ ]
+        },
+        "conflict(DuplicateKeyException)" : {
+          "annotations" : [ "org.springframework.web.bind.annotation.ExceptionHandler", "org.springframework.web.bind.annotation.ResponseStatus" ],
+          "calls" : [ {
+            "owner" : "java.util.Collections",
+            "name" : "singletonMap",
+            "line" : 38
+          } ],
+          "fields" : [ ]
+        },
+        "invalid(MethodArgumentNotValidException)" : {
+          "annotations" : [ "org.springframework.web.bind.annotation.ExceptionHandler", "org.springframework.web.bind.annotation.ResponseStatus" ],
+          "calls" : [ {
+            "owner" : "java.util.Collections",
+            "name" : "singletonMap",
+            "line" : 32
+          } ],
+          "fields" : [ ]
+        },
+        "notFound(NotFoundException)" : {
+          "annotations" : [ "org.springframework.web.bind.annotation.ExceptionHandler", "org.springframework.web.bind.annotation.ResponseStatus" ],
+          "calls" : [ {
+            "owner" : "java.util.Collections",
+            "name" : "singletonMap",
+            "line" : 26
+          } ],
+          "fields" : [ ]
+        },
+        "refused(BusinessException)" : {
+          "annotations" : [ "org.springframework.web.bind.annotation.ExceptionHandler", "org.springframework.web.bind.annotation.ResponseStatus" ],
+          "calls" : [ {
+            "owner" : "java.util.Collections",
+            "name" : "singletonMap",
+            "line" : 20
+          }, {
+            "owner" : "com.example.stock.service.BusinessException",
+            "name" : "getCode",
+            "line" : 20
+          } ],
+          "fields" : [ ]
+        }
+      }
+    },
+    "com.example.stock.web.ReservationController" : {
+      "kind" : "class",
+      "source" : "ReservationController.java",
+      "annotations" : [ "org.springframework.web.bind.annotation.RequestMapping", "org.springframework.web.bind.annotation.RestController" ],
+      "supertypes" : [ ],
+      "methods" : {
+        "<init>(ReservationService)" : {
+          "annotations" : [ ],
+          "calls" : [ {
+            "owner" : "java.lang.Object",
+            "name" : "<init>",
+            "line" : 22
+          } ],
+          "fields" : [ {
+            "owner" : "com.example.stock.web.ReservationController",
+            "name" : "reservations",
+            "mode" : "set",
+            "line" : 23
+          } ]
+        },
+        "confirm(long)" : {
+          "annotations" : [ "org.springframework.web.bind.annotation.PostMapping" ],
+          "calls" : [ {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "confirm",
+            "line" : 39
+          } ],
+          "fields" : [ {
+            "owner" : "com.example.stock.web.ReservationController",
+            "name" : "reservations",
+            "mode" : "get",
+            "line" : 39
+          } ]
+        },
+        "get(long)" : {
+          "annotations" : [ "org.springframework.web.bind.annotation.GetMapping" ],
+          "calls" : [ {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "get",
+            "line" : 34
+          } ],
+          "fields" : [ {
+            "owner" : "com.example.stock.web.ReservationController",
+            "name" : "reservations",
+            "mode" : "get",
+            "line" : 34
+          } ]
+        },
+        "hold(HoldRequest)" : {
+          "annotations" : [ "org.springframework.web.bind.annotation.PostMapping", "org.springframework.web.bind.annotation.ResponseStatus" ],
+          "calls" : [ {
+            "owner" : "com.example.stock.web.dto.HoldRequest",
+            "name" : "getRef",
+            "line" : 29
+          }, {
+            "owner" : "com.example.stock.web.dto.HoldRequest",
+            "name" : "getQty",
+            "line" : 29
+          }, {
+            "owner" : "com.example.stock.web.dto.HoldRequest",
+            "name" : "getSku",
+            "line" : 29
+          }, {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "hold",
+            "line" : 29
+          }, {
+            "owner" : "java.lang.Integer",
+            "name" : "intValue",
+            "line" : 29
+          } ],
+          "fields" : [ {
+            "owner" : "com.example.stock.web.ReservationController",
+            "name" : "reservations",
+            "mode" : "get",
+            "line" : 29
+          } ]
+        },
+        "release(long)" : {
+          "annotations" : [ "org.springframework.web.bind.annotation.PostMapping" ],
+          "calls" : [ {
+            "owner" : "com.example.stock.service.ReservationService",
+            "name" : "release",
+            "line" : 44
+          } ],
+          "fields" : [ {
+            "owner" : "com.example.stock.web.ReservationController",
+            "name" : "reservations",
+            "mode" : "get",
+            "line" : 44
+          } ]
+        }
+      }
+    },
+    "com.example.stock.web.StockController" : {
+      "kind" : "class",
+      "source" : "StockController.java",
+      "annotations" : [ "org.springframework.web.bind.annotation.RequestMapping", "org.springframework.web.bind.annotation.RestController" ],
+      "supertypes" : [ ],
+      "methods" : {
+        "<init>(StockService)" : {
+          "annotations" : [ ],
+          "calls" : [ {
+            "owner" : "java.lang.Object",
+            "name" : "<init>",
+            "line" : 22
+          } ],
+          "fields" : [ {
+            "owner" : "com.example.stock.web.StockController",
+            "name" : "stock",
+            "mode" : "set",
+            "line" : 23
+          } ]
+        },
+        "correct(String,CorrectionRequest)" : {
+          "annotations" : [ "org.springframework.web.bind.annotation.PutMapping" ],
+          "calls" : [ {
+            "owner" : "com.example.stock.service.StockService",
+            "name" : "correct",
+            "line" : 38
+          }, {
+            "owner" : "com.example.stock.web.dto.CorrectionRequest",
+            "name" : "getCounted",
+            "line" : 38
+          }, {
+            "owner" : "com.example.stock.web.dto.CorrectionRequest",
+            "name" : "getNote",
+            "line" : 38
+          } ],
+          "fields" : [ {
+            "owner" : "com.example.stock.web.StockController",
+            "name" : "stock",
+            "mode" : "get",
+            "line" : 38
+          } ]
+        },
+        "get(String)" : {
+          "annotations" : [ "org.springframework.web.bind.annotation.GetMapping" ],
+          "calls" : [ {
+            "owner" : "com.example.stock.service.StockService",
+            "name" : "get",
+            "line" : 28
+          } ],
+          "fields" : [ {
+            "owner" : "com.example.stock.web.StockController",
+            "name" : "stock",
+            "mode" : "get",
+            "line" : 28
+          } ]
+        },
+        "receive(String,ReceiveRequest)" : {
+          "annotations" : [ "org.springframework.web.bind.annotation.PostMapping" ],
+          "calls" : [ {
+            "owner" : "com.example.stock.web.dto.ReceiveRequest",
+            "name" : "getQty",
+            "line" : 33
+          }, {
+            "owner" : "com.example.stock.service.StockService",
+            "name" : "receive",
+            "line" : 33
+          }, {
+            "owner" : "java.lang.Integer",
+            "name" : "intValue",
+            "line" : 33
+          } ],
+          "fields" : [ {
+            "owner" : "com.example.stock.web.StockController",
+            "name" : "stock",
+            "mode" : "get",
+            "line" : 33
+          } ]
+        }
+      }
+    },
+    "com.example.stock.web.dto.CorrectionRequest" : {
+      "kind" : "class",
+      "source" : "CorrectionRequest.java",
+      "annotations" : [ ],
+      "supertypes" : [ ],
+      "methods" : {
+        "<init>()" : {
+          "annotations" : [ ],
+          "calls" : [ {
+            "owner" : "java.lang.Object",
+            "name" : "<init>",
+            "line" : 3
+          } ],
+          "fields" : [ ]
+        },
+        "getCounted()" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.web.dto.CorrectionRequest",
+            "name" : "counted",
+            "mode" : "get",
+            "line" : 9
+          } ]
+        },
+        "getNote()" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.web.dto.CorrectionRequest",
+            "name" : "note",
+            "mode" : "get",
+            "line" : 17
+          } ]
+        },
+        "setCounted(Integer)" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.web.dto.CorrectionRequest",
+            "name" : "counted",
+            "mode" : "set",
+            "line" : 13
+          } ]
+        },
+        "setNote(String)" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.web.dto.CorrectionRequest",
+            "name" : "note",
+            "mode" : "set",
+            "line" : 21
+          } ]
+        }
+      }
+    },
+    "com.example.stock.web.dto.HoldRequest" : {
+      "kind" : "class",
+      "source" : "HoldRequest.java",
+      "annotations" : [ ],
+      "supertypes" : [ ],
+      "methods" : {
+        "<init>()" : {
+          "annotations" : [ ],
+          "calls" : [ {
+            "owner" : "java.lang.Object",
+            "name" : "<init>",
+            "line" : 6
+          } ],
+          "fields" : [ ]
+        },
+        "getQty()" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.web.dto.HoldRequest",
+            "name" : "qty",
+            "mode" : "get",
+            "line" : 32
+          } ]
+        },
+        "getRef()" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.web.dto.HoldRequest",
+            "name" : "ref",
+            "mode" : "get",
+            "line" : 16
+          } ]
+        },
+        "getSku()" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.web.dto.HoldRequest",
+            "name" : "sku",
+            "mode" : "get",
+            "line" : 24
+          } ]
+        },
+        "setQty(Integer)" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.web.dto.HoldRequest",
+            "name" : "qty",
+            "mode" : "set",
+            "line" : 36
+          } ]
+        },
+        "setRef(String)" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.web.dto.HoldRequest",
+            "name" : "ref",
+            "mode" : "set",
+            "line" : 20
+          } ]
+        },
+        "setSku(String)" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.web.dto.HoldRequest",
+            "name" : "sku",
+            "mode" : "set",
+            "line" : 28
+          } ]
+        }
+      }
+    },
+    "com.example.stock.web.dto.ReceiveRequest" : {
+      "kind" : "class",
+      "source" : "ReceiveRequest.java",
+      "annotations" : [ ],
+      "supertypes" : [ ],
+      "methods" : {
+        "<init>()" : {
+          "annotations" : [ ],
+          "calls" : [ {
+            "owner" : "java.lang.Object",
+            "name" : "<init>",
+            "line" : 5
+          } ],
+          "fields" : [ ]
+        },
+        "getQty()" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.web.dto.ReceiveRequest",
+            "name" : "qty",
+            "mode" : "get",
+            "line" : 11
+          } ]
+        },
+        "setQty(Integer)" : {
+          "annotations" : [ ],
+          "calls" : [ ],
+          "fields" : [ {
+            "owner" : "com.example.stock.web.dto.ReceiveRequest",
+            "name" : "qty",
+            "mode" : "set",
+            "line" : 15
+          } ]
+        }
+      }
+    }
+  }
+}

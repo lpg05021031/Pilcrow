@@ -1,0 +1,224 @@
+{
+  "base_package" : "com.example.stock",
+  "http" : [ {
+    "methods" : [ ],
+    "patterns" : [ "/error" ],
+    "handler" : "org.springframework.boot.autoconfigure.web.servlet.error.BasicErrorController#errorHtml",
+    "parameters" : [ {
+      "type" : "javax.servlet.http.HttpServletRequest",
+      "name" : "request",
+      "annotations" : [ ]
+    }, {
+      "type" : "javax.servlet.http.HttpServletResponse",
+      "name" : "response",
+      "annotations" : [ ]
+    } ],
+    "returns" : "org.springframework.web.servlet.ModelAndView"
+  }, {
+    "methods" : [ ],
+    "patterns" : [ "/error" ],
+    "handler" : "org.springframework.boot.autoconfigure.web.servlet.error.BasicErrorController#error",
+    "parameters" : [ {
+      "type" : "javax.servlet.http.HttpServletRequest",
+      "name" : "request",
+      "annotations" : [ ]
+    } ],
+    "returns" : "org.springframework.http.ResponseEntity"
+  }, {
+    "methods" : [ "POST" ],
+    "patterns" : [ "/reservations/{id}/confirm" ],
+    "handler" : "com.example.stock.web.ReservationController#confirm",
+    "parameters" : [ {
+      "type" : "long",
+      "name" : "id",
+      "annotations" : [ "PathVariable" ]
+    } ],
+    "returns" : "com.example.stock.domain.Reservation"
+  }, {
+    "methods" : [ "POST" ],
+    "patterns" : [ "/reservations/{id}/release" ],
+    "handler" : "com.example.stock.web.ReservationController#release",
+    "parameters" : [ {
+      "type" : "long",
+      "name" : "id",
+      "annotations" : [ "PathVariable" ]
+    } ],
+    "returns" : "com.example.stock.domain.Reservation"
+  }, {
+    "methods" : [ "GET" ],
+    "patterns" : [ "/reservations/{id}" ],
+    "handler" : "com.example.stock.web.ReservationController#get",
+    "parameters" : [ {
+      "type" : "long",
+      "name" : "id",
+      "annotations" : [ "PathVariable" ]
+    } ],
+    "returns" : "com.example.stock.domain.Reservation"
+  }, {
+    "methods" : [ "POST" ],
+    "patterns" : [ "/reservations" ],
+    "handler" : "com.example.stock.web.ReservationController#hold",
+    "parameters" : [ {
+      "type" : "com.example.stock.web.dto.HoldRequest",
+      "name" : "request",
+      "annotations" : [ "Valid", "RequestBody" ]
+    } ],
+    "returns" : "com.example.stock.domain.Reservation"
+  }, {
+    "methods" : [ "PUT" ],
+    "patterns" : [ "/stock/{sku}/count" ],
+    "handler" : "com.example.stock.web.StockController#correct",
+    "parameters" : [ {
+      "type" : "java.lang.String",
+      "name" : "sku",
+      "annotations" : [ "PathVariable" ]
+    }, {
+      "type" : "com.example.stock.web.dto.CorrectionRequest",
+      "name" : "request",
+      "annotations" : [ "RequestBody" ]
+    } ],
+    "returns" : "com.example.stock.domain.StockItem"
+  }, {
+    "methods" : [ "POST" ],
+    "patterns" : [ "/stock/{sku}/receipts" ],
+    "handler" : "com.example.stock.web.StockController#receive",
+    "parameters" : [ {
+      "type" : "java.lang.String",
+      "name" : "sku",
+      "annotations" : [ "PathVariable" ]
+    }, {
+      "type" : "com.example.stock.web.dto.ReceiveRequest",
+      "name" : "request",
+      "annotations" : [ "Valid", "RequestBody" ]
+    } ],
+    "returns" : "com.example.stock.domain.StockItem"
+  }, {
+    "methods" : [ "GET" ],
+    "patterns" : [ "/stock/{sku}" ],
+    "handler" : "com.example.stock.web.StockController#get",
+    "parameters" : [ {
+      "type" : "java.lang.String",
+      "name" : "sku",
+      "annotations" : [ "PathVariable" ]
+    } ],
+    "returns" : "com.example.stock.domain.StockItem"
+  } ],
+  "scheduled" : [ {
+    "bean" : "expiryJob",
+    "method" : "com.example.stock.job.ExpiryJob#run",
+    "cron" : "${stock.expiry.cron}",
+    "fixed_delay" : "-1",
+    "fixed_rate" : "-1"
+  } ],
+  "listeners" : [ ],
+  "transactions" : [ {
+    "method" : "com.example.stock.service.ReservationService#get",
+    "propagation" : "REQUIRED",
+    "isolation" : "DEFAULT",
+    "read_only" : true,
+    "timeout" : -1,
+    "rolls_back_on_checked_exception" : false
+  }, {
+    "method" : "com.example.stock.service.ReservationService#release",
+    "propagation" : "REQUIRED",
+    "isolation" : "DEFAULT",
+    "read_only" : false,
+    "timeout" : -1,
+    "rolls_back_on_checked_exception" : false
+  }, {
+    "method" : "com.example.stock.service.ReservationService#expireDue",
+    "propagation" : "REQUIRED",
+    "isolation" : "DEFAULT",
+    "read_only" : false,
+    "timeout" : -1,
+    "rolls_back_on_checked_exception" : false
+  }, {
+    "method" : "com.example.stock.service.ReservationService#hold",
+    "propagation" : "REQUIRED",
+    "isolation" : "DEFAULT",
+    "read_only" : false,
+    "timeout" : -1,
+    "rolls_back_on_checked_exception" : false
+  }, {
+    "method" : "com.example.stock.service.ReservationService#confirm",
+    "propagation" : "REQUIRED",
+    "isolation" : "DEFAULT",
+    "read_only" : false,
+    "timeout" : -1,
+    "rolls_back_on_checked_exception" : false
+  }, {
+    "method" : "com.example.stock.service.StockService#get",
+    "propagation" : "REQUIRED",
+    "isolation" : "DEFAULT",
+    "read_only" : true,
+    "timeout" : -1,
+    "rolls_back_on_checked_exception" : false
+  }, {
+    "method" : "com.example.stock.service.StockService#receive",
+    "propagation" : "REQUIRED",
+    "isolation" : "DEFAULT",
+    "read_only" : false,
+    "timeout" : -1,
+    "rolls_back_on_checked_exception" : false
+  }, {
+    "method" : "com.example.stock.service.StockService#correct",
+    "propagation" : "REQUIRED",
+    "isolation" : "DEFAULT",
+    "read_only" : false,
+    "timeout" : -1,
+    "rolls_back_on_checked_exception" : false
+  } ],
+  "beans" : {
+    "apiExceptionHandler" : {
+      "class" : "com.example.stock.web.ApiExceptionHandler",
+      "annotations" : [ "org.springframework.web.bind.annotation.RestControllerAdvice" ]
+    },
+    "clockConfig" : {
+      "class" : "com.example.stock.config.ClockConfig",
+      "annotations" : [ "org.springframework.context.annotation.Configuration" ]
+    },
+    "expiryJob" : {
+      "class" : "com.example.stock.job.ExpiryJob",
+      "annotations" : [ "org.springframework.stereotype.Component" ]
+    },
+    "movementMapper" : {
+      "class" : "com.example.stock.mapper.MovementMapper",
+      "annotations" : [ "org.apache.ibatis.annotations.Mapper" ]
+    },
+    "reservationController" : {
+      "class" : "com.example.stock.web.ReservationController",
+      "annotations" : [ "org.springframework.web.bind.annotation.RequestMapping", "org.springframework.web.bind.annotation.RestController" ]
+    },
+    "reservationMapper" : {
+      "class" : "com.example.stock.mapper.ReservationMapper",
+      "annotations" : [ "org.apache.ibatis.annotations.Mapper" ]
+    },
+    "reservationService" : {
+      "class" : "com.example.stock.service.ReservationService",
+      "annotations" : [ "org.springframework.stereotype.Service" ]
+    },
+    "stockApplication" : {
+      "class" : "com.example.stock.StockApplication",
+      "annotations" : [ "org.springframework.boot.autoconfigure.SpringBootApplication" ]
+    },
+    "stockController" : {
+      "class" : "com.example.stock.web.StockController",
+      "annotations" : [ "org.springframework.web.bind.annotation.RequestMapping", "org.springframework.web.bind.annotation.RestController" ]
+    },
+    "stockMapper" : {
+      "class" : "com.example.stock.mapper.StockMapper",
+      "annotations" : [ "org.apache.ibatis.annotations.Mapper" ]
+    },
+    "stockService" : {
+      "class" : "com.example.stock.service.StockService",
+      "annotations" : [ "org.springframework.stereotype.Service" ]
+    }
+  },
+  "advised" : {
+    "reservationService" : [ "org.springframework.transaction.interceptor.TransactionInterceptor" ],
+    "stockService" : [ "org.springframework.transaction.interceptor.TransactionInterceptor" ]
+  },
+  "message_handlers" : [ ],
+  "double_calls_at_startup" : [ ],
+  "clock_bean" : true
+}

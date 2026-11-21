@@ -267,6 +267,9 @@ def main(argv=None):
             p.add_argument("--command")
         if name in ("referee", "recipes"):
             p.add_argument("--part", type=int, default=1)
+        if name != "shards":
+            p.add_argument("--file", action="store_true",
+                           help="write the brief to a file under model_raw/briefs/ and print its path, for an agent to read")
         p.add_argument("--workspace", default=".")
     args = ap.parse_args(argv)
     workspace = os.path.abspath(args.workspace)
@@ -280,6 +283,18 @@ def main(argv=None):
         out = cmd_recipes(workspace, args.system, args.shard, args.part)
     else:
         out = cmd_triage(workspace, args.system, args.command)
+    if getattr(args, "file", False):
+        # The agent reads the brief itself: nothing is retyped on the way, so nothing can change on the way.
+        import re
+        who = getattr(args, "shard", None) or getattr(args, "command", None) or "all"
+        part = "-%d" % args.part if getattr(args, "part", 1) > 1 else ""
+        path = os.path.join(_lib.audit_dir(workspace, args.system), "model_raw", "briefs",
+                            "%s-%s%s.json" % (args.cmd, re.sub(r"[^A-Za-z0-9_.-]+", "_", who), part))
+        _lib.write_json(path, out)
+        print("brief: %s" % os.path.relpath(path, workspace).replace(os.sep, "/"))
+        if isinstance(out, dict) and out.get("parts", 1) > 1:
+            print("parts: %d" % out["parts"])
+        return 0
     json.dump(out, sys.stdout, ensure_ascii=False, indent=1)
     sys.stdout.write("\n")
     return 0

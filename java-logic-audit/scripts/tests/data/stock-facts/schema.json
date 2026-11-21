@@ -1,0 +1,143 @@
+{
+  "engine" : {
+    "product" : "MySQL",
+    "version" : "8.0.46-0ubuntu0.24.04.5",
+    "major" : 8,
+    "minor" : 0,
+    "default_isolation" : "REPEATABLE_READ",
+    "connection_isolation" : "REPEATABLE_READ"
+  },
+  "tables" : {
+    "reservation" : {
+      "columns" : [ {
+        "name" : "id",
+        "type" : "BIGINT",
+        "size" : 19,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "ref",
+        "type" : "VARCHAR",
+        "size" : 60,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "sku",
+        "type" : "VARCHAR",
+        "size" : 40,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "qty",
+        "type" : "INT",
+        "size" : 10,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "status",
+        "type" : "VARCHAR",
+        "size" : 20,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "expires_at",
+        "type" : "DATETIME",
+        "size" : 26,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      } ],
+      "primary_key" : [ "id" ],
+      "foreign_keys" : [ {
+        "column" : "sku",
+        "references_table" : "stock_item",
+        "references_column" : "sku"
+      } ],
+      "unique" : [ [ "id" ], [ "ref" ] ]
+    },
+    "stock_item" : {
+      "columns" : [ {
+        "name" : "sku",
+        "type" : "VARCHAR",
+        "size" : 40,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "on_hand",
+        "type" : "INT",
+        "size" : 10,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "reserved",
+        "type" : "INT",
+        "size" : 10,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : "0"
+      }, {
+        "name" : "note",
+        "type" : "VARCHAR",
+        "size" : 200,
+        "scale" : 0,
+        "nullable" : true,
+        "default" : null
+      } ],
+      "primary_key" : [ "sku" ],
+      "foreign_keys" : [ ],
+      "unique" : [ [ "sku" ] ]
+    },
+    "stock_movement" : {
+      "columns" : [ {
+        "name" : "id",
+        "type" : "BIGINT",
+        "size" : 19,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "sku",
+        "type" : "VARCHAR",
+        "size" : 40,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "delta",
+        "type" : "INT",
+        "size" : 10,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "reason",
+        "type" : "VARCHAR",
+        "size" : 20,
+        "scale" : 0,
+        "nullable" : false,
+        "default" : null
+      }, {
+        "name" : "reservation_id",
+        "type" : "BIGINT",
+        "size" : 19,
+        "scale" : 0,
+        "nullable" : true,
+        "default" : null
+      } ],
+      "primary_key" : [ "id" ],
+      "foreign_keys" : [ {
+        "column" : "sku",
+        "references_table" : "stock_item",
+        "references_column" : "sku"
+      } ],
+      "unique" : [ [ "id" ] ]
+    }
+  }
+}

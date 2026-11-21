@@ -52,9 +52,11 @@ defect. For each:
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/assure.py" brief $system F-007
 ```
 
-Launch one `adversary` agent whose prompt is that output, whole and unchanged, and nothing more. Up to
-six at a time; they only read. Save each reply, unchanged, as the file the brief names in
-`save_reply_as` (`audit/$system/assure/recheck/F-007.json`). The reply must be one JSON object; when it
+It writes the brief to a file and prints two lines: `brief:` with that file's path and `reply:` with
+where the answer goes. Launch one `adversary` agent whose whole prompt is this sentence, with the path
+filled in: *"Your brief is the file `<brief path>`. Read it first, then do what it asks and reply with
+the JSON object it describes."* Add nothing else. Up to six at a time; they only read. Save each reply,
+unchanged, as the file named after `reply:` (`audit/$system/assure/recheck/F-007.json`). The reply must be one JSON object; when it
 is not, ask the same agent once to send only the object, and if that fails too leave the finding without
 a file. Never repair a reply, and never ask a reader to reconsider a verdict.
 
@@ -97,12 +99,13 @@ several minutes for each.
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/judge.py" findings $system
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/judge.py" verdict $system
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/assure.py" summary $system
-python3 "${CLAUDE_PLUGIN_ROOT}/scripts/manifest.py" $system
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/manifest.py" check . --manifest audit/$system/manifest.json
 ```
 
 `judge.py findings` shows each reader's verdict with its finding; "weakened" and "refuted" become a
 reservation that lowers the grade, and nothing is removed. `judge.py verdict` now computes the canary
-item for every entity. `assure.py summary` writes `audit/$system/ASSURANCE.md`.
+item for every entity. `assure.py summary` writes `audit/$system/ASSURANCE.md`. The last line checks that
+no source file changed during this step; it must say `untouched`.
 
 ## 5 — Report
 

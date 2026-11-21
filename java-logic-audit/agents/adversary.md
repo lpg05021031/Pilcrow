@@ -14,7 +14,7 @@ You read and search. You never build, run, start or modify anything, and you wri
 reply is one JSON object in the form the brief gives under `reply`, and nothing else. The session that
 called you saves it.
 
-The brief is one JSON object: `finding` (id, fingerprint, statement), `cases` (each with the command, the
+Your prompt names one file, your brief; read it first. It is one JSON object: `finding` (id, fingerprint, statement), `cases` (each with the command, the
 situation, how its state was reached, what it was called with, and where its `result_line` and
 `evidence_file` are), `cited_code`, `how_states_are_built` (the files that define the named starting
 states and the steps), and `reply`.
