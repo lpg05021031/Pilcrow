@@ -8,8 +8,8 @@
   },
   "summary": {
     "defects": 14,
-    "noticed": 11,
-    "noticed_without_pins": 8,
+    "noticed": 14,
+    "noticed_without_pins": 9,
     "by_category": {
       "guard": {
         "defects": 2,
@@ -23,8 +23,8 @@
       },
       "transaction": {
         "defects": 2,
-        "noticed": 1,
-        "without_pins": 1
+        "noticed": 2,
+        "without_pins": 2
       },
       "messaging": {
         "defects": 2,
@@ -33,7 +33,7 @@
       },
       "pair path": {
         "defects": 2,
-        "noticed": 1,
+        "noticed": 2,
         "without_pins": 0
       },
       "numeric": {
@@ -43,7 +43,7 @@
       },
       "data mapping": {
         "defects": 2,
-        "noticed": 1,
+        "noticed": 2,
         "without_pins": 1
       }
     }
@@ -134,7 +134,7 @@
       ],
       "did_not_run": [],
       "counts": {
-        "pins": 2,
+        "pins": 3,
         "rules": 1,
         "errors": 0,
         "faults": 0
@@ -142,7 +142,8 @@
       "examples": {
         "pins": [
           "CMD-cancelOrder|base",
-          "CMD-cancelOrder|order=CONFIRMED"
+          "CMD-cancelOrder|order=CONFIRMED",
+          "CMD-getOrder|order=CANCELLED"
         ],
         "rules": [
           "no schedule_line row with status PLANNED belongs to a order_line row with status CANCELLED"
@@ -175,17 +176,25 @@
     {
       "id": "transaction-2",
       "category": "transaction",
-      "what": "Confirming an order swallows a failure to record its event: the order is confirmed and nobody is told.",
-      "detected": false,
-      "routes": [],
+      "what": "Committing a change answers as if it had succeeded when it failed for a reason that is not a business refusal; nothing was changed.",
+      "detected": true,
+      "routes": [
+        "faults"
+      ],
       "did_not_run": [],
       "counts": {
         "pins": 0,
         "rules": 0,
         "errors": 0,
-        "faults": 0
+        "faults": 24
       },
-      "examples": {}
+      "examples": {
+        "faults": [
+          "CMD-commitChange.QTY COMMIT commit: reported-success",
+          "CMD-commitChange.QTY WRITE INSERT outbox_event: reported-success",
+          "CMD-commitChange.QTY WRITE UPDATE change_request: reported-success"
+        ]
+      }
     },
     {
       "id": "messaging-1",
@@ -264,16 +273,24 @@
       "id": "pair-2",
       "category": "pair path",
       "what": "The preview reports the change of amount with the wrong sign; what is committed is right.",
-      "detected": false,
-      "routes": [],
+      "detected": true,
+      "routes": [
+        "pins"
+      ],
       "did_not_run": [],
       "counts": {
-        "pins": 0,
+        "pins": 6,
         "rules": 0,
         "errors": 0,
         "faults": 0
       },
-      "examples": {}
+      "examples": {
+        "pins": [
+          "CMD-previewChange.CANCEL|base",
+          "CMD-previewChange.CANCEL|order=DRAFT",
+          "CMD-previewChange.QTY|base"
+        ]
+      }
     },
     {
       "id": "numeric-1",
@@ -286,7 +303,7 @@
       ],
       "did_not_run": [],
       "counts": {
-        "pins": 6,
+        "pins": 7,
         "rules": 1,
         "errors": 0,
         "faults": 0
@@ -313,14 +330,15 @@
       ],
       "did_not_run": [],
       "counts": {
-        "pins": 1,
+        "pins": 2,
         "rules": 2,
         "errors": 0,
         "faults": 0
       },
       "examples": {
         "pins": [
-          "CMD-applyShipment|base"
+          "CMD-applyShipment|base",
+          "CMD-getOrder|order=CLOSED"
         ],
         "rules": [
           "order_line.shipped_qty equals the sum of schedule_line.qty over its schedule_line rows whose status is SHIPPED",
@@ -334,16 +352,22 @@
       "what": "A new line takes its quantity from its first delivery only, not from all of them.",
       "detected": true,
       "routes": [
+        "pins",
         "rules"
       ],
       "did_not_run": [],
       "counts": {
-        "pins": 0,
+        "pins": 27,
         "rules": 2,
         "errors": 0,
         "faults": 0
       },
       "examples": {
+        "pins": [
+          "CMD-cancelOrder|base",
+          "CMD-cancelOrder|order=CONFIRMED",
+          "CMD-commitChange.CANCEL|base"
+        ],
         "rules": [
           "order_line.shipped_qty is never larger than order_line.qty",
           "no schedule_line row with status PLANNED belongs to a order_line row with status CLOSED"
@@ -354,16 +378,24 @@
       "id": "mapping-2",
       "category": "data mapping",
       "what": "Reading an order shows a line's quantity and shipped quantity swapped; the stored data is right.",
-      "detected": false,
-      "routes": [],
+      "detected": true,
+      "routes": [
+        "pins"
+      ],
       "did_not_run": [],
       "counts": {
-        "pins": 0,
+        "pins": 20,
         "rules": 0,
         "errors": 0,
         "faults": 0
       },
-      "examples": {}
+      "examples": {
+        "pins": [
+          "CMD-cancelOrder|base",
+          "CMD-cancelOrder|order=CONFIRMED",
+          "CMD-commitChange.CANCEL|base"
+        ]
+      }
     }
   ]
 }
