@@ -13,7 +13,8 @@ This is a work in progress, built milestone by milestone (design section 18).
 | Milestone | Contents | State |
 |---|---|---|
 | M0 | Plugin skeleton; `audit`, `audit-preflight`, `audit-status`; verification samples 1 and 3 | done |
-| M1 | auditkit core, `audit-harness`, `audit-map` | not started |
+| M1 | auditkit core, `audit-harness` | done |
+| M1 | `audit-map` | not started |
 | M2 | `audit-model`, `audit-characterize`, `audit-review`, the judge script | not started |
 | M3–M6 | sequences, faults, concurrency, PRD trace, assurance, report, more stacks | not started |
 
@@ -42,6 +43,7 @@ exact next command.
 |---|---|
 | `audit [system]` | Says what you want; writes `INTENT.md`; shows the road |
 | `audit-preflight <system>` | What this repository lets the audit prove: technical profile, whether the method applies, where tests would connect, a baseline of the existing tests, a manifest of the source |
+| `audit-harness <system>` | The test harness installed and shown to run on the application: six checks, the facts it extracts, and what the audit can prove here |
 | `audit-status <system>` | Progress, what is stale, the next command |
 
 Preflight writes four files under `audit/<system>/`:
@@ -53,13 +55,27 @@ Preflight writes four files under `audit/<system>/`:
 | `answers.json` | the command | The five answers only a person has, verbatim |
 | `PREFLIGHT.md` | the command | The report: answers, one row per check, what can be proven, readiness of later commands |
 
+The harness step adds:
+
+| Path | Written by | Contents |
+|---|---|---|
+| `<module>/src/audit/java/auditkit/` | `scripts/harness_install.py` | The harness: generic Java sources with no logic about your application |
+| `<module>/pom-audit.xml` | `scripts/harness_install.py` | Your `pom.xml` plus one profile, regenerated before every run. Your `pom.xml` is never edited, so the artifact of your normal build stays byte for byte the same |
+| `audit/<system>/harness.json` | the `harness-engineer` agent | Which outside systems are replaced and with what answers |
+| `audit/<system>/facts/` | the harness | Schema, endpoints, listeners, transaction settings, entity mapping, calls and field writes |
+| `audit/<system>/runs/` | the harness | One result line per check, with a hash; not committed |
+| `profile.json` → `capabilities` | `scripts/judge.py` | What works here and the highest grade each kind of check can reach |
+
 Settings live in `INTENT.md` (`language`, `budget`), not in plugin options: every command reads files, so
 a second person or a fresh session continues from the same state.
 
 ## Safety
 
-- The plugin writes only under `audit/<system>/` (from M1 also `src/audit/` and one marked block in the
-  build file). It never commits, pushes or fixes anything.
+- The plugin never edits a file that already exists. It adds files under `audit/<system>/`, and from the
+  harness step on under `src/audit/` plus a generated build entry (`pom-audit.xml`). It never commits,
+  pushes or fixes anything.
+- The harness empties every table of the database it runs on, and refuses, in code, any database address
+  that is not local or a container. Credentials reach it through environment variables only.
 - Preflight builds the project and runs its existing tests, so run it only where it is safe to execute
   that repository. Before running any test it lists where the test configuration would connect, and stops
   if an address is not local.
