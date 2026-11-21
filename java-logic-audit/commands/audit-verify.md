@@ -67,8 +67,9 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/harness_install.py" command $system --run
 ```
 
 Run the printed command **three times**. The harness picks pairs of cases that start from the same
-situation and both change something (a case with itself is the same request sent twice), ten pairs by
-default (`--pairs N` for more). Each pair is run one after the other in both orders; then one command
+situation and both change something, ten pairs by default (`--pairs N` for more): half of them the same
+request sent twice, half two different commands, each half starting where a clash is most likely (a call
+that creates the row its command is about; two commands whose parameters point at the same row). Each pair is run one after the other in both orders; then one command
 is stopped before each of its database steps in turn while the other runs. After each schedule: is the
 data, and are the answers to both callers, what one of the two orders gives; does every confirmed rule
 still hold; did both come back. A second call that has to wait for the first is a lock doing its work,
