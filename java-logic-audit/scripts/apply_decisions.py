@@ -2,13 +2,15 @@
 """Record a person's answers and apply what they mean for the cells.
 
     python3 apply_decisions.py record <system> --question Q-003 --answer not-intended|intended|unsure
-                               [--note "their words"] [--by NAME] [--workspace DIR]
+                               [--cells CELL-0005,CELL-0006] [--note "their words"] [--by NAME] [--workspace DIR]
     python3 apply_decisions.py apply <system> [--workspace DIR]
 
 `record` appends to DECISIONS.json and rewrites DECISIONS.md. A decision is kept for good and is tied
 to the question's fingerprint, not its number, so it still applies after the questions are rebuilt.
 A later answer to the same question is a new decision that supersedes the earlier one; nothing is
-erased. The note is the person's own words and is stored as given.
+erased. The note is the person's own words and is stored as given. A question may group several cases
+(a message dropped for a draft, a closed and a cancelled order); when the person's answer is about some
+of them only, --cells names those, and the question stays open for the rest.
 
 `apply` turns the latest decision of each question into expectations in model/expected.json:
 
@@ -52,7 +54,7 @@ def latest(decisions):
     return out
 
 
-def record(workspace, system, question_id, answer, note=None, by=None, now=None):
+def record(workspace, system, question_id, answer, note=None, by=None, now=None, cells=None):
     if answer not in ANSWERS:
         _lib.die("unknown answer %r: one of %s" % (answer, ", ".join(ANSWERS)))
     adir = _lib.audit_dir(workspace, system)
@@ -60,13 +62,20 @@ def record(workspace, system, question_id, answer, note=None, by=None, now=None)
     q = next((x for x in questions if x["id"] == question_id), None)
     if q is None:
         _lib.die("no question %s in audit/%s/questions.json" % (question_id, system))
+    covered = list(q["cells"])
+    if cells:
+        unknown = [c for c in cells if c not in q["cells"]]
+        if unknown:
+            _lib.die("%s is not about %s; its cases are %s" % (question_id, ", ".join(unknown), ", ".join(q["cells"])))
+        covered = [c for c in q["cells"] if c in cells]
     data = load(adir)
     earlier = latest(data["decisions"]).get(q["fingerprint"])
     decision = {
         "id": "D-%03d" % data["next"],
         "question": q["id"], "fingerprint": q["fingerprint"], "kind": q["kind"], "command": q["command"],
         "asked": q["observed"], "answer": answer, "note": note or "",
-        "cells": q["cells"], "if_not_intended": q.get("if_not_intended"),
+        "cells": covered, "covers": "all" if len(covered) == len(q["cells"]) else "part",
+        "if_not_intended": q.get("if_not_intended"),
         "decided_at": now or datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "by": by or "",
     }
@@ -141,6 +150,8 @@ def render(system, decisions):
         lines += ["## %s — %s: %s%s" % (d["id"], d["question"], d["answer"], "" if d["id"] in in_force else " (superseded)"), "",
                   "- **Asked:** " + d["asked"],
                   "- **Answer:** " + d["answer"] + (" — " + d["note"] if d["note"] else ""),
+                  "- **Covers:** " + ("every case of the question" if d.get("covers", "all") == "all"
+                                      else "only " + ", ".join(d["cells"])),
                   "- **When:** %s%s" % (d["decided_at"], ", by " + d["by"] if d["by"] else ""), ""]
     return "\n".join(lines)
 
@@ -152,6 +163,7 @@ def main(argv=None):
     r.add_argument("system")
     r.add_argument("--question", required=True)
     r.add_argument("--answer", required=True, choices=ANSWERS)
+    r.add_argument("--cells", help="comma-separated cell ids, when the answer is about some of the question's cases only")
     r.add_argument("--note")
     r.add_argument("--by")
     r.add_argument("--workspace", default=".")
@@ -161,11 +173,13 @@ def main(argv=None):
     args = ap.parse_args(argv)
     workspace = os.path.abspath(args.workspace)
     if args.cmd == "record":
-        d = record(workspace, args.system, args.question, args.answer, args.note, args.by)
-        print("recorded %s: %s is %s" % (d["id"], d["question"], d["answer"]))
+        cells = [c.strip() for c in args.cells.split(",") if c.strip()] if args.cells else None
+        d = record(workspace, args.system, args.question, args.answer, args.note, args.by, cells=cells)
+        print("recorded %s: %s is %s%s" % (d["id"], d["question"], d["answer"],
+                                           "" if d["covers"] == "all" else " for " + ", ".join(d["cells"])))
     else:
         rep = apply(workspace, args.system)
-        print("decisions in force: %d not intended, %d intended, %d unsure; %d cells now expect something else than observed" % (
+        print("decisions in force: %d not-intended, %d intended, %d unsure; %d cells now expect something else than observed" % (
             rep["not-intended"], rep["intended"], rep["unsure"], rep["cells_changed"]))
         if rep["without_effect"]:
             print("recorded but with no expectation to set (the question says what was seen, not what should be): "

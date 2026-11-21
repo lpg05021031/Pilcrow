@@ -101,7 +101,7 @@ class Chain(unittest.TestCase):
             behaviour["CELL-0002"] = seen("REJECTED", "STALE")
         rows = []
         for c in self.cells:
-            o = behaviour[c["id"]]
+            o = behaviour.get(c["id"]) or seen("IGNORED")          # a cell a test added: a dropped message
             expected = c.get("expected") if mode == "verify" and c.get("expected") else c["static"]
             differs = []
             if "outcome" in expected and expected["outcome"].upper() != o["outcome"]:
@@ -225,6 +225,43 @@ class Chain(unittest.TestCase):
         self.assertNotIn("decision", pinned)
         self.assertEqual(len(self.read("DECISIONS.json")["decisions"]), 2)
         self.assertIn("(superseded)", self.text("DECISIONS.md"))
+
+    def test_an_answer_about_some_cases_leaves_the_question_open_for_the_rest(self):
+        # the dropped-message question is given a second case
+        extra = dict(self.cells[3], id="CELL-0006", key="CMD-onEvent|ready=never", deviation="ready=never", sha="sha-6")
+        self.cells.append(extra)
+        self.save_matrix()
+        qs = {q["kind"]: q for q in self.characterize()}
+        dropped = qs["dropped"]
+        self.assertEqual(dropped["cells"], ["CELL-0004", "CELL-0006"])
+        with self.assertRaises(SystemExit):
+            apply_decisions.record(self.tmp, "s", dropped["id"], "not-intended", cells=["CELL-0001"])
+        d = apply_decisions.record(self.tmp, "s", dropped["id"], "not-intended", "an early event must not be lost", cells=["CELL-0004"])
+        self.assertEqual((d["covers"], d["cells"]), ("part", ["CELL-0004"]))
+        report = apply_decisions.apply(self.tmp, "s")
+        self.assertEqual(report["cells_changed"], 1)
+        pinned = self.read("model/expected.json")["cells"]
+        self.assertEqual(pinned["CMD-onEvent|ready=false"]["source"], "decision")
+        self.assertEqual(pinned["CMD-onEvent|ready=never"]["source"], "observed")
+        q = [x for x in build_questions.build(self.tmp, "s")["questions"] if x["kind"] == "dropped"][0]
+        self.assertEqual((q["status"], q["answered_for"]), ("open", ["CELL-0004"]))
+        found = [f for f in judge.findings(self.tmp, "s")["findings"] if f["kind"] == "dropped"]
+        self.assertEqual(sorted((f["class"], tuple(f["cells"])) for f in found),
+                         [("anomaly", ("CELL-0006",)), ("defect", ("CELL-0004",))])
+        self.assertNotEqual(found[0]["id"], found[1]["id"])
+        self.assertIn("only CELL-0004", self.text("DECISIONS.md"))
+
+    def test_reconcile_names_the_cells_that_do_not_meet_a_decision(self):
+        qs = {q["kind"]: q for q in self.characterize()}
+        apply_decisions.record(self.tmp, "s", qs["refused-but-changed"]["id"], "not-intended")
+        apply_decisions.apply(self.tmp, "s")
+        self.save_matrix()
+        self.run_matrix("verify")
+        out = reconcile.reconcile(self.tmp, "s")
+        against = out["against_expectation"]
+        self.assertEqual([(x["cell"], x["decision"]) for x in against["decided_otherwise"]], [("CELL-0002", "D-001")])
+        self.assertEqual(against["changed_since_pinned"], [])
+        self.assertIn("still do what a decision says they must not (D-001)", reconcile.summary(out))
 
     def test_an_answer_needs_a_known_question(self):
         self.characterize()

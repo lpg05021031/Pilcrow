@@ -206,6 +206,20 @@ def reconcile(workspace, system, pin=False, repin=False):
             dead.append({"command": cid, "guard": gid, "outcome": g.get("outcome", "allowed"),
                          "code": g.get("code") or g.get("swallowed"), "writes": g.get("writes"), "cite": g.get("cite")})
 
+    # Against the expectation (a pin or a decision): what the latest verify run of each cell showed.
+    decided_otherwise, changed_since_pinned = [], []
+    for cell in matrix["cells"]:
+        verify = [r for r in results_for(cell, runs) if r["mode"] == "verify"]
+        if not verify or verify[-1]["row"].get("result") != "MISMATCH":
+            continue
+        expected = verify[-1]["row"].get("expected") or {}
+        item = {"cell": cell["id"], "key": cell["key"], "run": verify[-1]["run"],
+                "differs": (verify[-1]["row"].get("detail") or {}).get("differs", [])}
+        if expected.get("source") == "decision":
+            decided_otherwise.append(dict(item, decision=expected.get("decision")))
+        else:
+            changed_since_pinned.append(item)
+
     moves, starts = transitions(adir, matrix["cells"], latest, lifecycle_columns(adir))
     out = {
         "schema": SCHEMA,
@@ -219,6 +233,7 @@ def reconcile(workspace, system, pin=False, repin=False):
         "unhandled": unhandled,
         "unstable": unstable,
         "guards_without_cell": dead,
+        "against_expectation": {"decided_otherwise": decided_otherwise, "changed_since_pinned": changed_since_pinned},
         "lifecycle": {"transitions": moves, "created_with": starts},
     }
 
@@ -271,12 +286,19 @@ def summary(out):
     c = out["counts"]
     order = ("agree", "differ", "unreachable", "no-recipe", "state-not-reached", "steps-failed", "harness-gap",
              "runner-failed", "not-run")
-    line = "%d cells: " % c["total"] + ", ".join("%d %s" % (c[k], k) for k in order if c.get(k))
+    line = "%d cells, prediction against observation: " % c["total"] + ", ".join("%d %s" % (c[k], k) for k in order if c.get(k))
     extra = []
-    for key, word in (("flags", "flagged"), ("unhandled", "decided by no guard"), ("unstable", "unstable between runs"),
-                      ("guards_without_cell", "guards that decide no executable cell")):
+    for key, word in (("flags", "cells where the runner raised a flag"), ("unhandled", "decided by no guard"),
+                      ("unstable", "unstable between runs"), ("guards_without_cell", "guards that decide no executable cell")):
         if out[key]:
             extra.append("%d %s" % (len(out[key]), word))
+    against = out.get("against_expectation") or {}
+    if against.get("decided_otherwise"):
+        extra.append("%d cells still do what a decision says they must not (%s)" % (
+            len(against["decided_otherwise"]), ", ".join(sorted({x["decision"] or "?" for x in against["decided_otherwise"]}))))
+    if against.get("changed_since_pinned"):
+        extra.append("%d cells behave differently than pinned: %s" % (
+            len(against["changed_since_pinned"]), ", ".join(x["cell"] for x in against["changed_since_pinned"][:10])))
     if out["runs_set_aside"]:
         extra.append("%d runs set aside as unreliable" % len(out["runs_set_aside"]))
     if "pin" in out:

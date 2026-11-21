@@ -70,7 +70,11 @@ class MatrixRunner {
                 public void execute() {
                     String result = run(scenario, cell, verify);
                     if (verify && ResultWriter.MISMATCH.equals(result)) {
-                        Assertions.fail(id + ": what the command did differs from what is pinned; see the run's results.jsonl");
+                        JsonNode expected = cell.path("expected");
+                        Assertions.fail("decision".equals(expected.path("source").asText())
+                                ? id + ": the command still does what decision " + expected.path("decision").asText()
+                                        + " says it must not; expected until the code changes"
+                                : id + ": what the command did differs from what was pinned; see the run's results.jsonl");
                     }
                 }
             }));

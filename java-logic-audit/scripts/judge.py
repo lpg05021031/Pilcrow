@@ -336,10 +336,19 @@ def findings(workspace, system):
     old = _lib.read_json(os.path.join(adir, "findings.json"), {}) or {}
     ids, nxt = dict(old.get("ids", {})), old.get("next", 1)
     out, accepted, unconfirmed = [], [], []
+    parts = []
     for q in questions:
         if q["kind"] not in FINDING_KINDS:
             continue
         decision = decisions.get(q["fingerprint"])
+        decided = set(decision.get("cells") or q["cells"]) & set(q["cells"]) if decision else set()
+        if decision and decision.get("answer") in ("intended", "not-intended") and decided and decided != set(q["cells"]):
+            # The person spoke about some of the cases: those are judged by the answer, the rest still wait.
+            parts.append((dict(q, cells=sorted(decided)), decision))
+            parts.append((dict(q, cells=sorted(set(q["cells"]) - decided)), None))
+        else:
+            parts.append((q, decision))
+    for q, decision in parts:
         answer = decision.get("answer") if decision else None
         if answer == "intended":
             accepted.append({"question": q["id"], "decision": decision["id"], "title": q["title"], "observed": q["observed"],

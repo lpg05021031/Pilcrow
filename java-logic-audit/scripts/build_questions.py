@@ -210,8 +210,11 @@ def build(workspace, system):
             "basis": BASIS[q["kind"]], "command": q["command"], "title": q["title"], "observed": observed,
             "why": q["why"], "cells": sorted(q["cells"]), "cites": sorted(q["cites"]),
             "if_not_intended": q.get("if_not_intended"),
-            "status": "answered" if decision and decision.get("answer") in ("not-intended", "intended") else "open",
+            "status": "answered" if decision and decision.get("answer") in ("not-intended", "intended")
+                      and set(decision.get("cells") or q["cells"]) >= set(q["cells"]) else "open",
         }
+        if decision and entry["status"] == "open" and decision.get("answer") in ("not-intended", "intended"):
+            entry["answered_for"] = sorted(set(decision.get("cells", [])) & set(q["cells"]))
         if q.get("variants"):
             entry["variants"] = sorted(q["variants"])
         if decision:
@@ -236,7 +239,8 @@ def render(system, questions):
         sum(1 for q in questions if q["status"] == "answered")))
     for q in questions:
         lines += ["", "## %s — %s" % (q["id"], q["title"]), "",
-                  "- **Status:** %s%s" % (q["status"], " (%s: %s)" % (q["decision"], q["answer"]) if q.get("decision") else ""),
+                  "- **Status:** %s%s%s" % (q["status"], " (%s: %s)" % (q["decision"], q["answer"]) if q.get("decision") else "",
+                                            ", answered only for " + ", ".join(q["answered_for"]) if q.get("answered_for") else ""),
                   "- **Observed:** " + q["observed"],
                   "- **Why it is asked:** " + q["why"],
                   "- **Kind:** %s%s" % (q["kind"], "" if q["flagged"] else " (not flagged: asked only with `all`)")]
