@@ -199,6 +199,9 @@ their base value. A deviation gives only what differs from the base recipe: anot
   value does occur, but only together with a value an earlier guard refuses (no open line, which only a
   cancelled order has), that is not unreachable: give the recipe with `also`. The case is executed, and
   the later guard is reported as one that never decides.
+- `note`: optional, one sentence on why the recipe is what it is, when that is not obvious (why `also`
+  is needed, why this fixture and not a simpler one).
+- `with` may be left out for a command without parameters.
 - `"same_as": "CMD-other"`: the command has the same cases and recipes as another (preview and propose).
 - A case you could not work out is left out. It is then reported as not executed, which is the truth.
 

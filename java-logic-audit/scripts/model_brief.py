@@ -77,6 +77,13 @@ def tables(adir, themap, wanted=None):
     return out
 
 
+def stand_ins(harness):
+    """What the outside systems answer during the audit, so that a reader knows what a call will see."""
+    return {"http": [{k: r.get(k) for k in ("method", "url", "status", "body")} for r in harness.get("http_doubles", [])],
+            "replaced_types": [d.get("type") for d in harness.get("doubles", [])],
+            "note": "a call to a replaced type is recorded and returns nothing; an HTTP call no rule covers fails"}
+
+
 def cmd_shards(workspace, system, pattern=None):
     adir, shards, themap = load(workspace, system)
     chosen = [s for s in shards if not pattern or pattern.lower() in s["name"].lower()]
@@ -199,6 +206,8 @@ def cmd_recipes(workspace, system, name, part=1):
         "files": shard.get("files", []),
         "tables": tables(adir, themap),
         "time_can_be_moved": bool(harness.get("clock")),
+        "today_is": (harness.get("clock") or "")[:10] or None,
+        "stand_ins": stand_ins(harness),
     }
 
 

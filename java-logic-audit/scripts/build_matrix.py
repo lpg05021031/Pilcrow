@@ -202,7 +202,7 @@ def recipe_for(recipes, cid, key):
     out = {"fixture": dev.get("fixture", base.get("fixture")),
            "steps": dev.get("steps", base.get("steps", [])),
            "with": dict(base.get("with") or {}, **(dev.get("with") or {}))}
-    for extra in ("also", "unreachable"):
+    for extra in ("also", "unreachable", "note"):
         if extra in dev:
             out[extra] = dev[extra]
     return out
@@ -231,6 +231,8 @@ def cells_of(command, recipes):
                 out["fixture"] = recipe.get("fixture")
                 out["steps"] = recipe.get("steps", [])
                 out["with"] = recipe.get("with") or {}
+            if recipe.get("note"):
+                out["note"] = recipe["note"]
         return out
 
     out = [cell(None, base, recipe_for(recipes, cid, None))]
