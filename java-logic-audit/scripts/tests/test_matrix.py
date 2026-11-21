@@ -207,6 +207,19 @@ class Build(unittest.TestCase):
         self.assertNotEqual(after["CMD-x|base"], before["CMD-x|base"])
         self.assertNotEqual(after["CMD-x|status=DONE"], before["CMD-x|status=DONE"])      # "done" continues "one"
 
+    def test_a_changed_prediction_needs_a_new_run(self):
+        build_matrix.build(self.tmp, "s")
+        before = {c["key"]: c["sha"] for c in self.read("matrix.json")["cells"]}
+        changed = command()
+        changed["guards"][2]["code"] = "QTY_INVALID"                     # the model now names another code
+        changed["guards"][0]["because"] = "explained at more length"      # wording alone changes nothing
+        self.write("commands.json", {"commands": [changed]})
+        build_matrix.build(self.tmp, "s")
+        after = {c["key"]: c["sha"] for c in self.read("matrix.json")["cells"]}
+        self.assertNotEqual(after["CMD-x|qty=zero"], before["CMD-x|qty=zero"])
+        self.assertEqual(after["CMD-x|status=null"], before["CMD-x|status=null"])
+        self.assertEqual(after["CMD-x|base"], before["CMD-x|base"])
+
     def test_what_is_pinned_is_copied_into_the_cell(self):
         self.write("expected.json", {"cells": {"CMD-x|qty=zero": {"outcome": "rejected", "code": "BAD_QTY", "source": "observed"}}})
         stats = build_matrix.build(self.tmp, "s")

@@ -279,7 +279,8 @@ def fingerprint(cell, command, shared):
     """A hash of everything that decides what running the cell means. A result is for one fingerprint."""
     parts = {k: cell.get(k) for k in ("command", "deviation", "given", "fixture", "steps", "with", "unreachable")}
     parts["definition"] = {k: command.get(k) for k in ("binding", "vars", "reads_only", "writes", "sends")}
-    parts["predicted_writes"] = [cell.get("static", {}).get("writes_include"), cell.get("static", {}).get("sends_include")]
+    # A result says "agrees" or "differs" against one prediction; when the prediction changes, it must be run again.
+    parts["predicted"] = {k: v for k, v in cell.get("static", {}).items() if k != "because"}
     parts["shared"] = shared
     return hashlib.sha256(json.dumps(parts, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()[:16]
 
