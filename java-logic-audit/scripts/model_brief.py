@@ -227,8 +227,8 @@ def cmd_triage(workspace, system, command_id=None):
                       "recipe": {k: cell.get(k) for k in ("fixture", "steps", "with")},
                       "evidence": "audit/%s/runs/%s/evidence/%s.json" % (system, d["run"], d["cell"])})
     for n in rec.get("not_executed", []):
-        if n["state"] in ("unreachable",):
-            continue
+        if n["state"] in ("unreachable", "no-recipe"):
+            continue            # a claim, or a case nobody wrote a recipe for: nothing here to explain
         cell = cells[n["cell"]]
         items.append({"cell": n["cell"], "command": n["command"], "case": n["deviation"] or "base", "what": n["state"],
                       "reason": n["reason"], "predicted": n["static"], "given": cell.get("given"),
