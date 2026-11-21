@@ -46,10 +46,11 @@
     {
       "id": "transaction-2",
       "category": "transaction",
-      "file": "src/main/java/com/example/orders/service/OrderService.java",
-      "find": "        outbox.add(\"order.confirmed\", header.getId(), Map.of(\"orderId\", header.getId(), \"orderNo\", header.getOrderNo()));",
-      "replace": "        try {\n            outbox.add(\"order.confirmed\", header.getId(), Map.of(\"orderId\", header.getId(), \"orderNo\", header.getOrderNo()));\n        } catch (RuntimeException e) {\n            // the order is confirmed either way\n        }",
-      "what": "Confirming an order swallows a failure to record its event: the order is confirmed and nobody is told."
+      "file": "src/main/java/com/example/orders/web/ChangeController.java",
+      "find": "        ChangeService.CommitOutcome outcome = changes.commit(id);\n",
+      "replace": "        ChangeService.CommitOutcome outcome;\n        try {\n            outcome = changes.commit(id);\n        } catch (RuntimeException e) {\n            if (e instanceof BusinessException || e instanceof com.example.orders.service.NotFoundException) {\n                throw e;\n            }\n            return null;\n        }\n",
+      "what": "Committing a change answers as if it had succeeded when it failed for a reason that is not a business refusal; nothing was changed.",
+      "note": "The first version of this defect swallowed a failure to record the event while confirming an order. It changed nothing observable: the framework marks the transaction for rollback once the write fails, so the order was not confirmed either way. No check noticed it, rightly; it was replaced."
     },
     {
       "id": "messaging-1",
