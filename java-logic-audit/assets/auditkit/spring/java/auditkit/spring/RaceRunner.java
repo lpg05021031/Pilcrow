@@ -53,6 +53,7 @@ class RaceRunner {
         JsonNode a;
         JsonNode b;
         int shared;
+        boolean twice;      // the same call sent twice
     }
 
     static final class Serial {
@@ -138,10 +139,17 @@ class RaceRunner {
             }
             list.add(cell);
         }
+        // Two kinds of pair: the same call sent twice (a double click, a retry that overlaps the first try), and
+        // two different commands on the same rows. Two different cases of one command are not paired: which other
+        // case happens to be allowed changes with the code, and the pair would come and go with it.
         List<Pair> pairs = new ArrayList<Pair>();
         for (List<JsonNode> cells : bySituation.values()) {
             for (int i = 0; i < cells.size(); i++) {
                 for (int j = i; j < cells.size(); j++) {
+                    boolean sameCommand = cells.get(i).get("command").asText().equals(cells.get(j).get("command").asText());
+                    if (sameCommand && i != j) {
+                        continue;
+                    }
                     TreeSet<String> touched = touches(cells.get(i));
                     touched.retainAll(touches(cells.get(j)));
                     if (touched.isEmpty()) {
@@ -150,7 +158,9 @@ class RaceRunner {
                     Pair p = new Pair();
                     p.a = cells.get(i);
                     p.b = cells.get(j);
-                    p.shared = touched.size() + (i == j ? 0 : 100);     // two different commands before one sent twice
+                    p.twice = i == j;
+                    // Of one command's cases, the usual one stands for it.
+                    p.shared = touched.size() + (p.twice && cells.get(i).path("deviation").isNull() ? 50 : 0);
                     pairs.add(p);
                 }
             }
@@ -162,12 +172,33 @@ class RaceRunner {
                         : (x.a.path("key").asText() + x.b.path("key").asText()).compareTo(y.a.path("key").asText() + y.b.path("key").asText());
             }
         });
-        // One pair for each pair of commands: the same two commands in another case teach little more.
+        // One pair for each pair of commands: the same two commands in another case teach little more. Half of the
+        // budget goes to calls sent twice, half to different commands; what one half does not use, the other may.
         List<Pair> chosen = new ArrayList<Pair>();
         TreeSet<String> seen = new TreeSet<String>();
-        for (Pair p : pairs) {
-            if (chosen.size() < budget && seen.add(p.a.get("command").asText() + "+" + p.b.get("command").asText())) {
-                chosen.add(p);
+        for (int round = 0; round < 3; round++) {
+            int twice = 0;
+            int different = 0;
+            for (Pair p : chosen) {
+                if (p.twice) {
+                    twice++;
+                } else {
+                    different++;
+                }
+            }
+            for (Pair p : pairs) {
+                boolean wanted = round == 2 || (round == 0) == p.twice;
+                boolean room = round == 2 || (p.twice ? twice < (budget + 1) / 2 : different < budget / 2);
+                String key = p.a.get("command").asText() + "+" + p.b.get("command").asText();
+                if (wanted && room && chosen.size() < budget && !seen.contains(key)) {
+                    seen.add(key);
+                    chosen.add(p);
+                    if (p.twice) {
+                        twice++;
+                    } else {
+                        different++;
+                    }
+                }
             }
         }
         return chosen;

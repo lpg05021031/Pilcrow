@@ -52,7 +52,12 @@ def load_runs(adir):
             bad.append({"run": name, "problem": problem})
             continue
         good.append((name, _lib.read_json(os.path.join(runs_dir, name, "run.json"), {}) or {}, rows))
-    return good, bad
+    # Results from before the application was changed are about other code: they are neither compared with the
+    # later ones (that would read a fix as an unstable case) nor used as what a case does now.
+    present = judge.on_present_code(good)
+    kept = {r[0] for r in present}
+    bad += [{"run": name, "problem": "made on the application as it was before it changed"} for name, _run, _rows in good if name not in kept]
+    return present, bad
 
 
 def results_for(cell, runs):
@@ -307,8 +312,11 @@ def summary(out):
     if against.get("changed_since_pinned"):
         extra.append("%d cells behave differently than pinned: %s" % (
             len(against["changed_since_pinned"]), ", ".join(x["cell"] for x in against["changed_since_pinned"][:10])))
-    if out["runs_set_aside"]:
-        extra.append("%d runs set aside as unreliable" % len(out["runs_set_aside"]))
+    earlier = [r for r in out["runs_set_aside"] if "before it changed" in r["problem"]]
+    if len(out["runs_set_aside"]) > len(earlier):
+        extra.append("%d runs set aside as unreliable" % (len(out["runs_set_aside"]) - len(earlier)))
+    if earlier:
+        extra.append("%d earlier runs not used: they ran the application as it was before it changed" % len(earlier))
     if "pin" in out:
         p = out["pin"]
         extra.append("pinned %d new, %d unchanged, %d kept from decisions, %d observed differently than pinned%s%s" % (

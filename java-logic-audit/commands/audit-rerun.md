@@ -39,11 +39,20 @@ code. Their checks may have moved, and new ones are not in the model at all.
 
 ```bash
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/harness_install.py" copy $system
+python3 "${CLAUDE_PLUGIN_ROOT}/scripts/harness_install.py" command $system --run matrix --mode record
 python3 "${CLAUDE_PLUGIN_ROOT}/scripts/harness_install.py" command $system --run matrix --mode verify
 ```
 
-Run the printed command once. It fails when a case differs from its pin or from a decision: that is the
-information wanted. A build that does not compile or start is a different failure; read the log.
+Run the first printed command once and the second one twice: three runs of every case on the code as it
+is now. The record run compares each case with what reading the old code predicted; the verify runs
+compare it with what was pinned, and fail when a case differs from its pin, from a decision or from the
+specification: that is the information wanted. A build that does not compile or start is a different
+failure; read the log.
+
+Every run carries a mark of the compiled application. The scripts below use only the runs made on the
+application as it is now: what a case did before the change is not evidence about the code after it. So
+a finding is `fixed` when none of the new runs shows it, `reproduced` when the last three all do, and a
+case that behaves differently than before is a changed case, not an unstable one.
 
 Then the three parts of `/java-logic-audit:audit-verify $system` exactly as that command describes them
 (failures three times, overlapping calls three times, sequences once), and:
@@ -60,7 +69,8 @@ python3 "${CLAUDE_PLUGIN_ROOT}/scripts/judge.py" verdict $system
 
 Show what each script printed, unchanged. Then:
 
-- findings that now read `fixed`, by id, and what was observed before;
+- findings that now read `fixed`, by id, and what was observed before; and findings that are no longer
+  listed at all, with why (the cases that showed them cannot be executed any more, for instance);
 - cases that behave differently than pinned (`reconcile.py` lists them under "behave differently than
   pinned"; `audit/$system/model/reconciliation.json` → `against_expectation.changed_since_pinned` has
   them all), grouped by command: each is either the intended effect of the change or a regression, and

@@ -76,6 +76,19 @@ def read_run(run_dir):
     return rows, None
 
 
+def on_present_code(runs):
+    """Of believable runs, oldest first, as (name, run.json, ...): those that ran the application as the latest one did.
+
+    Every run carries a mark of the compiled application (run.json "code"). A run with another mark is
+    evidence about other code: a behaviour seen before a change says nothing about the code after it.
+    Runs made by a harness that did not write the mark yet all count as one code.
+    """
+    if not runs:
+        return runs
+    now = (runs[-1][1] or {}).get("code")
+    return [r for r in runs if (r[1] or {}).get("code") == now]
+
+
 def latest_run(adir, kind):
     runs = os.path.join(adir, "runs")
     names = sorted(d for d in (os.listdir(runs) if os.path.isdir(runs) else []) if d.startswith(kind + "-"))
@@ -275,15 +288,15 @@ def recheck_of(adir, finding_id, fingerprint):
     return {k: reply[k] for k in RECHECK_KEPT if k in reply}
 
 
-def matrix_runs(adir):
-    """Believable matrix runs, oldest first, as (name, run.json, rows by id)."""
+def matrix_runs(adir, kind="matrix"):
+    """Believable runs of one kind on the application as it is now, oldest first, as (name, run.json, rows by id)."""
     runs_dir = os.path.join(adir, "runs")
     out = []
-    for name in sorted(d for d in (os.listdir(runs_dir) if os.path.isdir(runs_dir) else []) if d.startswith("matrix-")):
+    for name in sorted(d for d in (os.listdir(runs_dir) if os.path.isdir(runs_dir) else []) if d.startswith(kind + "-")):
         rows, problem = read_run(os.path.join(runs_dir, name))
         if not problem:
             out.append((name, _lib.read_json(os.path.join(runs_dir, name, "run.json"), {}) or {}, rows))
-    return out
+    return on_present_code(out)
 
 
 def holds(question, decision, row):
@@ -381,12 +394,7 @@ def run_evidence(adir, q, caps):
     runner replayed its shortest sequence three times and it showed each time; a fault finding when the
     last three fault runs all show it."""
     kind = q["source"]
-    runs_dir = os.path.join(adir, "runs")
-    good = []
-    for name in sorted(d for d in (os.listdir(runs_dir) if os.path.isdir(runs_dir) else []) if d.startswith(kind + "-")):
-        rows, problem = read_run(os.path.join(runs_dir, name))
-        if not problem:
-            good.append((name, rows))
+    good = [(name, rows) for name, _run, rows in matrix_runs(adir, kind)]
     per_case, reproduced, seen, shown_latest = {}, False, False, False
     for case in q.get("cases", []):
         history = [(name, rows[case]) for name, rows in good if case in rows]

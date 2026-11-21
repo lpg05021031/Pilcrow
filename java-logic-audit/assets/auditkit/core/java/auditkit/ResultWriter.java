@@ -48,7 +48,9 @@ public final class ResultWriter {
         if (!new File(dir, "evidence").mkdirs() && !new File(dir, "evidence").isDirectory()) {
             throw new IllegalStateException("cannot create " + dir);
         }
-        return new ResultWriter(kind, dir);
+        ResultWriter writer = new ResultWriter(kind, dir);
+        writer.note("code", CodeMark.ofApplication());      // which compiled application this run is evidence about
+        return writer;
     }
 
     public File dir() {

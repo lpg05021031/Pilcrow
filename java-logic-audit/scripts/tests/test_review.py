@@ -89,10 +89,11 @@ class System(unittest.TestCase):
                 c["expected"] = pinned[c["key"]]
         self.write("model/matrix.json", {"cells": self.cells, "commands": {"CMD-pay": {"guards_without_cell": ["G2"]}}})
 
-    def run_matrix(self, mode="record", fixed=()):
-        """What the application does: fixed names the cells whose behaviour has been corrected."""
+    def run_matrix(self, mode="record", fixed=(), code=None):
+        """What the application does: fixed names the cells whose behaviour has been corrected, code is the
+        mark of the compiled application the run was made on."""
         self.n += 1
-        name = "matrix-29990101-00000%d" % self.n
+        name = "matrix-29990101-%06d" % self.n
         behaviour = {
             "CELL-0001": seen("ALLOWED", written=["payment.status"]),
             "CELL-0002": seen("REJECTED", "STALE", written=["payment.status"], flags=["changed-although-rejected"]),
@@ -125,8 +126,10 @@ class System(unittest.TestCase):
         os.makedirs(os.path.join(d, "evidence"))
         with open(os.path.join(d, "results.jsonl"), "wb") as f:
             f.write(raw)
-        self.write("runs/%s/run.json" % name, {"kind": "matrix", "mode": mode, "total": len(rows),
-                                               "results_sha256": hashlib.sha256(raw).hexdigest()})
+        run = {"kind": "matrix", "mode": mode, "total": len(rows), "results_sha256": hashlib.sha256(raw).hexdigest()}
+        if code:
+            run["code"] = code
+        self.write("runs/%s/run.json" % name, run)
         for c in self.cells:
             self.write("runs/%s/evidence/%s.json" % (name, c["id"]),
                        {"database_engine": "PostgreSQL 16.4", "time_controlled": True, "state_built_by_commands_only": True,
@@ -286,6 +289,27 @@ class Chain(System):
         self.run_matrix("verify")
         f = [x for x in judge.findings(self.tmp, "s")["findings"] if x["kind"] == "one-lets-through"][0]
         self.assertEqual((f["class"], f["status"]), ("inconsistency", "reproduced"))
+
+    def test_after_the_code_changed_only_runs_on_the_new_code_are_evidence(self):
+        qs = {q["kind"]: q for q in self.characterize()}
+        self.assertEqual(self.finding(qs["refused-but-changed"])["status"], "reproduced")
+        # the refusal no longer writes: one run on the changed application
+        self.run_matrix("record", fixed=("CELL-0002",), code="after")
+        rec = reconcile.reconcile(self.tmp, "s")
+        self.assertEqual(rec["unstable"], [])                       # a changed case is not an unstable one
+        self.assertEqual(len([r for r in rec["runs_set_aside"] if "before it changed" in r["problem"]]), 3)
+        self.assertEqual([x["cell"] for x in rec["flags"] if x["cell"] == "CELL-0002"], [])
+        by = {f["kind"]: f for f in judge.findings(self.tmp, "s")["findings"] + judge.findings(self.tmp, "s")["unconfirmed"]}
+        self.assertEqual(by["refused-but-changed"]["status"], "fixed")
+        self.assertEqual(by["dropped"]["status"], "unconfirmed")    # still shown, but once is not three times
+        self.run_matrix("verify", fixed=("CELL-0002",), code="after")
+        self.run_matrix("verify", fixed=("CELL-0002",), code="after")
+        by = {f["kind"]: f for f in judge.findings(self.tmp, "s")["findings"]}
+        self.assertEqual((by["refused-but-changed"]["status"], by["dropped"]["status"]), ("fixed", "reproduced"))
+
+    def finding(self, question):
+        r = judge.findings(self.tmp, "s")
+        return [f for f in r["findings"] + r["unconfirmed"] if f["question"] == question["id"]][0]
 
     def test_reconcile_names_the_cells_that_do_not_meet_a_decision(self):
         qs = {q["kind"]: q for q in self.characterize()}
