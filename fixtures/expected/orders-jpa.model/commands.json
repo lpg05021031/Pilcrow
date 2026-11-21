@@ -1,0 +1,2060 @@
+{
+  "schema": 1,
+  "commands": [
+    {
+      "id": "CMD-createOrder",
+      "title": "Create an order",
+      "handler": "com.example.orders.web.OrderController#create",
+      "binding": {
+        "kind": "http",
+        "method": "POST",
+        "path": "/orders",
+        "body": "$"
+      },
+      "target": "order_header",
+      "vars": [
+        {
+          "name": "shape",
+          "kind": "param",
+          "domain": [
+            "valid",
+            "no-lines",
+            "no-schedules",
+            "zero-qty",
+            "no-date",
+            "blank-order-no",
+            "blank-customer",
+            "blank-sku"
+          ],
+          "meaning": {
+            "valid": "every declared constraint of the request holds",
+            "no-lines": "lines is empty",
+            "no-schedules": "a line has no schedule line",
+            "zero-qty": "a schedule line has qty 0",
+            "no-date": "a schedule line has no delivery date",
+            "blank-order-no": "orderNo is blank",
+            "blank-customer": "customerId is blank",
+            "blank-sku": "a line's sku is blank"
+          }
+        },
+        {
+          "name": "order_no_taken",
+          "kind": "state",
+          "domain": [
+            "false",
+            "true"
+          ],
+          "sql": "select exists(select 1 from order_header where order_no = :orderNo)"
+        },
+        {
+          "name": "delivery_date",
+          "kind": "param",
+          "domain": [
+            "future",
+            "today",
+            "past"
+          ],
+          "meaning": {
+            "future": "every delivery date is after today",
+            "today": "a delivery date is today",
+            "past": "a delivery date is before today"
+          }
+        }
+      ],
+      "base": {
+        "shape": "valid",
+        "order_no_taken": "false",
+        "delivery_date": "future"
+      },
+      "guards": [
+        {
+          "id": "G1",
+          "when": {
+            "var": "shape",
+            "not_in": [
+              "valid"
+            ]
+          },
+          "outcome": "rejected",
+          "code": "INVALID_REQUEST",
+          "cite": "src/main/java/com/example/orders/web/dto/CreateOrderRequest.java:11-25",
+          "because": "bean validation on the request body; mapped to 400 at src/main/java/com/example/orders/web/ApiExceptionHandler.java:29-33"
+        },
+        {
+          "id": "G2",
+          "when": {
+            "var": "order_no_taken",
+            "is": "true"
+          },
+          "outcome": "rejected",
+          "code": "DUPLICATE_ORDER_NO",
+          "cite": "src/main/java/com/example/orders/service/OrderService.java:37-39"
+        },
+        {
+          "id": "G3",
+          "when": {
+            "var": "delivery_date",
+            "is": "past"
+          },
+          "outcome": "rejected",
+          "code": "DATE_IN_PAST",
+          "cite": "src/main/java/com/example/orders/service/OrderService.java:44-46"
+        }
+      ]
+    },
+    {
+      "id": "CMD-getOrder",
+      "title": "Read an order",
+      "handler": "com.example.orders.web.OrderController#get",
+      "binding": {
+        "kind": "http",
+        "method": "GET",
+        "path": "/orders/{orderId}"
+      },
+      "target": "order_header",
+      "reads_only": true,
+      "vars": [
+        {
+          "name": "exists",
+          "kind": "state",
+          "domain": [
+            "true",
+            "false"
+          ],
+          "sql": "select exists(select 1 from order_header where id = :orderId)"
+        }
+      ],
+      "base": {
+        "exists": "true"
+      },
+      "guards": [
+        {
+          "id": "G1",
+          "when": {
+            "var": "exists",
+            "is": "false"
+          },
+          "outcome": "rejected",
+          "code": "NOT_FOUND",
+          "cite": "src/main/java/com/example/orders/service/OrderService.java:61"
+        }
+      ]
+    },
+    {
+      "id": "CMD-confirmOrder",
+      "title": "Confirm an order",
+      "handler": "com.example.orders.web.OrderController#confirm",
+      "binding": {
+        "kind": "http",
+        "method": "POST",
+        "path": "/orders/{orderId}/confirm"
+      },
+      "target": "order_header",
+      "vars": [
+        {
+          "name": "order",
+          "kind": "state",
+          "domain": [
+            "DRAFT",
+            "CONFIRMED",
+            "CLOSED",
+            "CANCELLED",
+            "null"
+          ],
+          "sql": "select status from order_header where id = :orderId"
+        },
+        {
+          "name": "has_open_line",
+          "kind": "state",
+          "domain": [
+            "true",
+            "false"
+          ],
+          "sql": "select exists(select 1 from order_line where header_id = :orderId and status = 'OPEN')"
+        }
+      ],
+      "base": {
+        "order": "DRAFT",
+        "has_open_line": "true"
+      },
+      "guards": [
+        {
+          "id": "G1",
+          "when": {
+            "var": "order",
+            "is": "null"
+          },
+          "outcome": "rejected",
+          "code": "NOT_FOUND",
+          "cite": "src/main/java/com/example/orders/service/OrderService.java:112"
+        },
+        {
+          "id": "G2",
+          "when": {
+            "var": "order",
+            "not_in": [
+              "DRAFT"
+            ]
+          },
+          "outcome": "rejected",
+          "code": "ORDER_NOT_DRAFT",
+          "cite": "src/main/java/com/example/orders/service/OrderService.java:67-69"
+        },
+        {
+          "id": "G3",
+          "when": {
+            "var": "has_open_line",
+            "is": "false"
+          },
+          "outcome": "rejected",
+          "code": "NO_OPEN_LINE",
+          "cite": "src/main/java/com/example/orders/service/OrderService.java:70-72"
+        }
+      ]
+    },
+    {
+      "id": "CMD-cancelOrder",
+      "title": "Cancel an order as a whole",
+      "handler": "com.example.orders.web.OrderController#cancel",
+      "binding": {
+        "kind": "http",
+        "method": "POST",
+        "path": "/orders/{orderId}/cancel"
+      },
+      "target": "order_header",
+      "vars": [
+        {
+          "name": "order",
+          "kind": "state",
+          "domain": [
+            "DRAFT",
+            "CONFIRMED",
+            "CLOSED",
+            "CANCELLED",
+            "null"
+          ],
+          "sql": "select status from order_header where id = :orderId"
+        },
+        {
+          "name": "shipped",
+          "kind": "state",
+          "domain": [
+            "false",
+            "true"
+          ],
+          "sql": "select exists(select 1 from order_line where header_id = :orderId and shipped_qty > 0)"
+        }
+      ],
+      "base": {
+        "order": "DRAFT",
+        "shipped": "false"
+      },
+      "guards": [
+        {
+          "id": "G1",
+          "when": {
+            "var": "order",
+            "is": "null"
+          },
+          "outcome": "rejected",
+          "code": "NOT_FOUND",
+          "cite": "src/main/java/com/example/orders/service/OrderService.java:112"
+        },
+        {
+          "id": "G2",
+          "when": {
+            "var": "order",
+            "not_in": [
+              "DRAFT",
+              "CONFIRMED"
+            ]
+          },
+          "outcome": "rejected",
+          "code": "ORDER_NOT_OPEN",
+          "cite": "src/main/java/com/example/orders/service/OrderService.java:82-84"
+        },
+        {
+          "id": "G3",
+          "when": {
+            "var": "shipped",
+            "is": "true"
+          },
+          "outcome": "rejected",
+          "code": "ORDER_ALREADY_SHIPPED",
+          "cite": "src/main/java/com/example/orders/service/OrderService.java:85-87"
+        }
+      ]
+    },
+    {
+      "id": "CMD-previewChange.QTY",
+      "title": "Preview a change to the quantity of a line",
+      "handler": "com.example.orders.web.ChangeController#preview",
+      "variant": {
+        "of": "CMD-previewChange",
+        "where": {
+          "type": "QTY"
+        }
+      },
+      "binding": {
+        "kind": "http",
+        "method": "POST",
+        "path": "/orders/{orderId}/lines/{lineId}/changes/preview",
+        "body": {
+          "type": "QTY",
+          "newQty": "${newQty}"
+        }
+      },
+      "target": "order_line",
+      "reads_only": true,
+      "vars": [
+        {
+          "name": "order",
+          "kind": "state",
+          "domain": [
+            "DRAFT",
+            "CONFIRMED",
+            "CLOSED",
+            "CANCELLED",
+            "null"
+          ],
+          "sql": "select status from order_header where id = :orderId"
+        },
+        {
+          "name": "line",
+          "kind": "state",
+          "domain": [
+            "OPEN",
+            "CLOSED",
+            "CANCELLED",
+            "null"
+          ],
+          "sql": "select status from order_line where id = :lineId and header_id = :orderId"
+        },
+        {
+          "name": "new_qty",
+          "kind": "param",
+          "domain": [
+            "increase",
+            "decrease",
+            "at-shipped",
+            "same",
+            "below-shipped",
+            "below-one",
+            "missing"
+          ],
+          "sql": "select case when cast(:newQty as integer) is null then 'missing' when cast(:newQty as integer) < 1 then 'below-one' when cast(:newQty as integer) < l.shipped_qty then 'below-shipped' when cast(:newQty as integer) = l.qty then 'same' when cast(:newQty as integer) = l.shipped_qty then 'at-shipped' when cast(:newQty as integer) < l.qty then 'decrease' else 'increase' end from order_line l where l.id = :lineId",
+          "meaning": {
+            "increase": "more than the line's quantity",
+            "decrease": "less than the line's quantity, more than what shipped",
+            "at-shipped": "exactly what has shipped (and something has)",
+            "same": "the line's quantity",
+            "below-shipped": "less than what has shipped",
+            "below-one": "zero or negative",
+            "missing": "not given"
+          }
+        }
+      ],
+      "base": {
+        "order": "CONFIRMED",
+        "line": "OPEN",
+        "new_qty": "increase"
+      },
+      "guards": [
+        {
+          "id": "G1",
+          "when": {
+            "var": "order",
+            "is": "null"
+          },
+          "outcome": "rejected",
+          "code": "NOT_FOUND",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:52"
+        },
+        {
+          "id": "G2",
+          "when": {
+            "var": "line",
+            "is": "null"
+          },
+          "outcome": "rejected",
+          "code": "NOT_FOUND",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:158-161"
+        },
+        {
+          "id": "G3",
+          "when": {
+            "var": "order",
+            "not_in": [
+              "DRAFT",
+              "CONFIRMED"
+            ]
+          },
+          "outcome": "rejected",
+          "code": "ORDER_NOT_OPEN",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:36-38"
+        },
+        {
+          "id": "G4",
+          "when": {
+            "var": "line",
+            "not_in": [
+              "OPEN"
+            ]
+          },
+          "outcome": "rejected",
+          "code": "LINE_NOT_OPEN",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:39-41"
+        },
+        {
+          "id": "G5",
+          "when": {
+            "var": "new_qty",
+            "in": [
+              "missing",
+              "below-one"
+            ]
+          },
+          "outcome": "rejected",
+          "code": "INVALID_QTY",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:44-46"
+        },
+        {
+          "id": "G6",
+          "when": {
+            "var": "new_qty",
+            "is": "below-shipped"
+          },
+          "outcome": "rejected",
+          "code": "QTY_BELOW_SHIPPED",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:47-49"
+        },
+        {
+          "id": "G7",
+          "when": {
+            "var": "new_qty",
+            "is": "same"
+          },
+          "outcome": "rejected",
+          "code": "NO_CHANGE",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:50-52"
+        }
+      ]
+    },
+    {
+      "id": "CMD-previewChange.DATE",
+      "title": "Preview a change to the delivery date of a line",
+      "handler": "com.example.orders.web.ChangeController#preview",
+      "variant": {
+        "of": "CMD-previewChange",
+        "where": {
+          "type": "DATE"
+        }
+      },
+      "binding": {
+        "kind": "http",
+        "method": "POST",
+        "path": "/orders/{orderId}/lines/{lineId}/changes/preview",
+        "body": {
+          "type": "DATE",
+          "newDate": "${newDate}"
+        }
+      },
+      "target": "order_line",
+      "reads_only": true,
+      "vars": [
+        {
+          "name": "order",
+          "kind": "state",
+          "domain": [
+            "DRAFT",
+            "CONFIRMED",
+            "CLOSED",
+            "CANCELLED",
+            "null"
+          ],
+          "sql": "select status from order_header where id = :orderId"
+        },
+        {
+          "name": "line",
+          "kind": "state",
+          "domain": [
+            "OPEN",
+            "CLOSED",
+            "CANCELLED",
+            "null"
+          ],
+          "sql": "select status from order_line where id = :lineId and header_id = :orderId"
+        },
+        {
+          "name": "new_date",
+          "kind": "param",
+          "domain": [
+            "later",
+            "today",
+            "same",
+            "past",
+            "missing"
+          ],
+          "sql": "select case when cast(:newDate as date) is null then 'missing' when cast(:newDate as date) < cast(:today as date) then 'past' when not exists (select 1 from schedule_line s where s.line_id = l.id and s.status = 'PLANNED' and s.delivery_date <> cast(:newDate as date)) then 'same' when cast(:newDate as date) = cast(:today as date) then 'today' else 'later' end from order_line l where l.id = :lineId",
+          "meaning": {
+            "later": "after today and different from a planned delivery date",
+            "today": "today",
+            "same": "the date every planned schedule line already has (also when none is planned)",
+            "past": "before today",
+            "missing": "not given"
+          }
+        }
+      ],
+      "base": {
+        "order": "CONFIRMED",
+        "line": "OPEN",
+        "new_date": "later"
+      },
+      "guards": [
+        {
+          "id": "G1",
+          "when": {
+            "var": "order",
+            "is": "null"
+          },
+          "outcome": "rejected",
+          "code": "NOT_FOUND",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:52"
+        },
+        {
+          "id": "G2",
+          "when": {
+            "var": "line",
+            "is": "null"
+          },
+          "outcome": "rejected",
+          "code": "NOT_FOUND",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:158-161"
+        },
+        {
+          "id": "G3",
+          "when": {
+            "var": "order",
+            "not_in": [
+              "DRAFT",
+              "CONFIRMED"
+            ]
+          },
+          "outcome": "rejected",
+          "code": "ORDER_NOT_OPEN",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:36-38"
+        },
+        {
+          "id": "G4",
+          "when": {
+            "var": "line",
+            "not_in": [
+              "OPEN"
+            ]
+          },
+          "outcome": "rejected",
+          "code": "LINE_NOT_OPEN",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:39-41"
+        },
+        {
+          "id": "G5",
+          "when": {
+            "var": "new_date",
+            "is": "missing"
+          },
+          "outcome": "rejected",
+          "code": "INVALID_DATE",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:55-57"
+        },
+        {
+          "id": "G6",
+          "when": {
+            "var": "new_date",
+            "is": "past"
+          },
+          "outcome": "rejected",
+          "code": "DATE_IN_PAST",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:58-60"
+        },
+        {
+          "id": "G7",
+          "when": {
+            "var": "new_date",
+            "is": "same"
+          },
+          "outcome": "rejected",
+          "code": "NO_CHANGE",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:61-66"
+        }
+      ]
+    },
+    {
+      "id": "CMD-previewChange.CANCEL",
+      "title": "Preview a change to cancelling a line",
+      "handler": "com.example.orders.web.ChangeController#preview",
+      "variant": {
+        "of": "CMD-previewChange",
+        "where": {
+          "type": "CANCEL"
+        }
+      },
+      "binding": {
+        "kind": "http",
+        "method": "POST",
+        "path": "/orders/{orderId}/lines/{lineId}/changes/preview",
+        "body": {
+          "type": "CANCEL"
+        }
+      },
+      "target": "order_line",
+      "reads_only": true,
+      "vars": [
+        {
+          "name": "order",
+          "kind": "state",
+          "domain": [
+            "DRAFT",
+            "CONFIRMED",
+            "CLOSED",
+            "CANCELLED",
+            "null"
+          ],
+          "sql": "select status from order_header where id = :orderId"
+        },
+        {
+          "name": "line",
+          "kind": "state",
+          "domain": [
+            "OPEN",
+            "CLOSED",
+            "CANCELLED",
+            "null"
+          ],
+          "sql": "select status from order_line where id = :lineId and header_id = :orderId"
+        },
+        {
+          "name": "shipped",
+          "kind": "state",
+          "domain": [
+            "false",
+            "true"
+          ],
+          "sql": "select shipped_qty > 0 from order_line where id = :lineId and header_id = :orderId"
+        }
+      ],
+      "base": {
+        "order": "CONFIRMED",
+        "line": "OPEN",
+        "shipped": "false"
+      },
+      "guards": [
+        {
+          "id": "G1",
+          "when": {
+            "var": "order",
+            "is": "null"
+          },
+          "outcome": "rejected",
+          "code": "NOT_FOUND",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:52"
+        },
+        {
+          "id": "G2",
+          "when": {
+            "var": "line",
+            "is": "null"
+          },
+          "outcome": "rejected",
+          "code": "NOT_FOUND",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:158-161"
+        },
+        {
+          "id": "G3",
+          "when": {
+            "var": "order",
+            "not_in": [
+              "DRAFT",
+              "CONFIRMED"
+            ]
+          },
+          "outcome": "rejected",
+          "code": "ORDER_NOT_OPEN",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:36-38"
+        },
+        {
+          "id": "G4",
+          "when": {
+            "var": "line",
+            "not_in": [
+              "OPEN"
+            ]
+          },
+          "outcome": "rejected",
+          "code": "LINE_NOT_OPEN",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:39-41"
+        },
+        {
+          "id": "G5",
+          "when": {
+            "var": "shipped",
+            "is": "true"
+          },
+          "outcome": "rejected",
+          "code": "LINE_ALREADY_SHIPPED",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:69-71"
+        }
+      ]
+    },
+    {
+      "id": "CMD-proposeChange.QTY",
+      "title": "Propose a change to the quantity of a line",
+      "handler": "com.example.orders.web.ChangeController#propose",
+      "variant": {
+        "of": "CMD-proposeChange",
+        "where": {
+          "type": "QTY"
+        }
+      },
+      "binding": {
+        "kind": "http",
+        "method": "POST",
+        "path": "/orders/{orderId}/lines/{lineId}/changes",
+        "body": {
+          "type": "QTY",
+          "newQty": "${newQty}"
+        }
+      },
+      "target": "change_request",
+      "vars": [
+        {
+          "name": "order",
+          "kind": "state",
+          "domain": [
+            "DRAFT",
+            "CONFIRMED",
+            "CLOSED",
+            "CANCELLED",
+            "null"
+          ],
+          "sql": "select status from order_header where id = :orderId"
+        },
+        {
+          "name": "line",
+          "kind": "state",
+          "domain": [
+            "OPEN",
+            "CLOSED",
+            "CANCELLED",
+            "null"
+          ],
+          "sql": "select status from order_line where id = :lineId and header_id = :orderId"
+        },
+        {
+          "name": "new_qty",
+          "kind": "param",
+          "domain": [
+            "increase",
+            "decrease",
+            "at-shipped",
+            "same",
+            "below-shipped",
+            "below-one",
+            "missing"
+          ],
+          "sql": "select case when cast(:newQty as integer) is null then 'missing' when cast(:newQty as integer) < 1 then 'below-one' when cast(:newQty as integer) < l.shipped_qty then 'below-shipped' when cast(:newQty as integer) = l.qty then 'same' when cast(:newQty as integer) = l.shipped_qty then 'at-shipped' when cast(:newQty as integer) < l.qty then 'decrease' else 'increase' end from order_line l where l.id = :lineId",
+          "meaning": {
+            "increase": "more than the line's quantity",
+            "decrease": "less than the line's quantity, more than what shipped",
+            "at-shipped": "exactly what has shipped (and something has)",
+            "same": "the line's quantity",
+            "below-shipped": "less than what has shipped",
+            "below-one": "zero or negative",
+            "missing": "not given"
+          }
+        }
+      ],
+      "base": {
+        "order": "CONFIRMED",
+        "line": "OPEN",
+        "new_qty": "increase"
+      },
+      "guards": [
+        {
+          "id": "G1",
+          "when": {
+            "var": "order",
+            "is": "null"
+          },
+          "outcome": "rejected",
+          "code": "NOT_FOUND",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:59"
+        },
+        {
+          "id": "G2",
+          "when": {
+            "var": "line",
+            "is": "null"
+          },
+          "outcome": "rejected",
+          "code": "NOT_FOUND",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:158-161"
+        },
+        {
+          "id": "G3",
+          "when": {
+            "var": "order",
+            "not_in": [
+              "DRAFT",
+              "CONFIRMED"
+            ]
+          },
+          "outcome": "rejected",
+          "code": "ORDER_NOT_OPEN",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:36-38"
+        },
+        {
+          "id": "G4",
+          "when": {
+            "var": "line",
+            "not_in": [
+              "OPEN"
+            ]
+          },
+          "outcome": "rejected",
+          "code": "LINE_NOT_OPEN",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:39-41"
+        },
+        {
+          "id": "G5",
+          "when": {
+            "var": "new_qty",
+            "in": [
+              "missing",
+              "below-one"
+            ]
+          },
+          "outcome": "rejected",
+          "code": "INVALID_QTY",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:44-46"
+        },
+        {
+          "id": "G6",
+          "when": {
+            "var": "new_qty",
+            "is": "below-shipped"
+          },
+          "outcome": "rejected",
+          "code": "QTY_BELOW_SHIPPED",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:47-49"
+        },
+        {
+          "id": "G7",
+          "when": {
+            "var": "new_qty",
+            "is": "same"
+          },
+          "outcome": "rejected",
+          "code": "NO_CHANGE",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:50-52"
+        }
+      ]
+    },
+    {
+      "id": "CMD-proposeChange.DATE",
+      "title": "Propose a change to the delivery date of a line",
+      "handler": "com.example.orders.web.ChangeController#propose",
+      "variant": {
+        "of": "CMD-proposeChange",
+        "where": {
+          "type": "DATE"
+        }
+      },
+      "binding": {
+        "kind": "http",
+        "method": "POST",
+        "path": "/orders/{orderId}/lines/{lineId}/changes",
+        "body": {
+          "type": "DATE",
+          "newDate": "${newDate}"
+        }
+      },
+      "target": "change_request",
+      "vars": [
+        {
+          "name": "order",
+          "kind": "state",
+          "domain": [
+            "DRAFT",
+            "CONFIRMED",
+            "CLOSED",
+            "CANCELLED",
+            "null"
+          ],
+          "sql": "select status from order_header where id = :orderId"
+        },
+        {
+          "name": "line",
+          "kind": "state",
+          "domain": [
+            "OPEN",
+            "CLOSED",
+            "CANCELLED",
+            "null"
+          ],
+          "sql": "select status from order_line where id = :lineId and header_id = :orderId"
+        },
+        {
+          "name": "new_date",
+          "kind": "param",
+          "domain": [
+            "later",
+            "today",
+            "same",
+            "past",
+            "missing"
+          ],
+          "sql": "select case when cast(:newDate as date) is null then 'missing' when cast(:newDate as date) < cast(:today as date) then 'past' when not exists (select 1 from schedule_line s where s.line_id = l.id and s.status = 'PLANNED' and s.delivery_date <> cast(:newDate as date)) then 'same' when cast(:newDate as date) = cast(:today as date) then 'today' else 'later' end from order_line l where l.id = :lineId",
+          "meaning": {
+            "later": "after today and different from a planned delivery date",
+            "today": "today",
+            "same": "the date every planned schedule line already has (also when none is planned)",
+            "past": "before today",
+            "missing": "not given"
+          }
+        }
+      ],
+      "base": {
+        "order": "CONFIRMED",
+        "line": "OPEN",
+        "new_date": "later"
+      },
+      "guards": [
+        {
+          "id": "G1",
+          "when": {
+            "var": "order",
+            "is": "null"
+          },
+          "outcome": "rejected",
+          "code": "NOT_FOUND",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:59"
+        },
+        {
+          "id": "G2",
+          "when": {
+            "var": "line",
+            "is": "null"
+          },
+          "outcome": "rejected",
+          "code": "NOT_FOUND",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:158-161"
+        },
+        {
+          "id": "G3",
+          "when": {
+            "var": "order",
+            "not_in": [
+              "DRAFT",
+              "CONFIRMED"
+            ]
+          },
+          "outcome": "rejected",
+          "code": "ORDER_NOT_OPEN",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:36-38"
+        },
+        {
+          "id": "G4",
+          "when": {
+            "var": "line",
+            "not_in": [
+              "OPEN"
+            ]
+          },
+          "outcome": "rejected",
+          "code": "LINE_NOT_OPEN",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:39-41"
+        },
+        {
+          "id": "G5",
+          "when": {
+            "var": "new_date",
+            "is": "missing"
+          },
+          "outcome": "rejected",
+          "code": "INVALID_DATE",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:55-57"
+        },
+        {
+          "id": "G6",
+          "when": {
+            "var": "new_date",
+            "is": "past"
+          },
+          "outcome": "rejected",
+          "code": "DATE_IN_PAST",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:58-60"
+        },
+        {
+          "id": "G7",
+          "when": {
+            "var": "new_date",
+            "is": "same"
+          },
+          "outcome": "rejected",
+          "code": "NO_CHANGE",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:61-66"
+        }
+      ]
+    },
+    {
+      "id": "CMD-proposeChange.CANCEL",
+      "title": "Propose a change to cancelling a line",
+      "handler": "com.example.orders.web.ChangeController#propose",
+      "variant": {
+        "of": "CMD-proposeChange",
+        "where": {
+          "type": "CANCEL"
+        }
+      },
+      "binding": {
+        "kind": "http",
+        "method": "POST",
+        "path": "/orders/{orderId}/lines/{lineId}/changes",
+        "body": {
+          "type": "CANCEL"
+        }
+      },
+      "target": "change_request",
+      "vars": [
+        {
+          "name": "order",
+          "kind": "state",
+          "domain": [
+            "DRAFT",
+            "CONFIRMED",
+            "CLOSED",
+            "CANCELLED",
+            "null"
+          ],
+          "sql": "select status from order_header where id = :orderId"
+        },
+        {
+          "name": "line",
+          "kind": "state",
+          "domain": [
+            "OPEN",
+            "CLOSED",
+            "CANCELLED",
+            "null"
+          ],
+          "sql": "select status from order_line where id = :lineId and header_id = :orderId"
+        },
+        {
+          "name": "shipped",
+          "kind": "state",
+          "domain": [
+            "false",
+            "true"
+          ],
+          "sql": "select shipped_qty > 0 from order_line where id = :lineId and header_id = :orderId"
+        }
+      ],
+      "base": {
+        "order": "CONFIRMED",
+        "line": "OPEN",
+        "shipped": "false"
+      },
+      "guards": [
+        {
+          "id": "G1",
+          "when": {
+            "var": "order",
+            "is": "null"
+          },
+          "outcome": "rejected",
+          "code": "NOT_FOUND",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:59"
+        },
+        {
+          "id": "G2",
+          "when": {
+            "var": "line",
+            "is": "null"
+          },
+          "outcome": "rejected",
+          "code": "NOT_FOUND",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:158-161"
+        },
+        {
+          "id": "G3",
+          "when": {
+            "var": "order",
+            "not_in": [
+              "DRAFT",
+              "CONFIRMED"
+            ]
+          },
+          "outcome": "rejected",
+          "code": "ORDER_NOT_OPEN",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:36-38"
+        },
+        {
+          "id": "G4",
+          "when": {
+            "var": "line",
+            "not_in": [
+              "OPEN"
+            ]
+          },
+          "outcome": "rejected",
+          "code": "LINE_NOT_OPEN",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:39-41"
+        },
+        {
+          "id": "G5",
+          "when": {
+            "var": "shipped",
+            "is": "true"
+          },
+          "outcome": "rejected",
+          "code": "LINE_ALREADY_SHIPPED",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:69-71"
+        }
+      ]
+    },
+    {
+      "id": "CMD-getChange",
+      "title": "Read a change request",
+      "handler": "com.example.orders.web.ChangeController#get",
+      "binding": {
+        "kind": "http",
+        "method": "GET",
+        "path": "/changes/{changeId}"
+      },
+      "target": "change_request",
+      "reads_only": true,
+      "vars": [
+        {
+          "name": "exists",
+          "kind": "state",
+          "domain": [
+            "true",
+            "false"
+          ],
+          "sql": "select exists(select 1 from change_request where id = :changeId)"
+        }
+      ],
+      "base": {
+        "exists": "true"
+      },
+      "guards": [
+        {
+          "id": "G1",
+          "when": {
+            "var": "exists",
+            "is": "false"
+          },
+          "outcome": "rejected",
+          "code": "NOT_FOUND",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:69"
+        }
+      ]
+    },
+    {
+      "id": "CMD-confirmChange",
+      "title": "Confirm a proposed change",
+      "handler": "com.example.orders.web.ChangeController#confirm",
+      "binding": {
+        "kind": "http",
+        "method": "POST",
+        "path": "/changes/{changeId}/confirm"
+      },
+      "target": "change_request",
+      "vars": [
+        {
+          "name": "change",
+          "kind": "state",
+          "domain": [
+            "PROPOSED",
+            "CONFIRMED",
+            "COMMITTED",
+            "REJECTED",
+            "EXPIRED",
+            "null"
+          ],
+          "sql": "select status from change_request where id = :changeId"
+        }
+      ],
+      "base": {
+        "change": "PROPOSED"
+      },
+      "guards": [
+        {
+          "id": "G1",
+          "when": {
+            "var": "change",
+            "is": "null"
+          },
+          "outcome": "rejected",
+          "code": "NOT_FOUND",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:155"
+        },
+        {
+          "id": "G2",
+          "when": {
+            "var": "change",
+            "not_in": [
+              "PROPOSED"
+            ]
+          },
+          "outcome": "rejected",
+          "code": "CHANGE_NOT_PROPOSED",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:75-77"
+        }
+      ]
+    },
+    {
+      "id": "CMD-rejectChange",
+      "title": "Reject a change that has not been committed",
+      "handler": "com.example.orders.web.ChangeController#reject",
+      "binding": {
+        "kind": "http",
+        "method": "POST",
+        "path": "/changes/{changeId}/reject"
+      },
+      "target": "change_request",
+      "vars": [
+        {
+          "name": "change",
+          "kind": "state",
+          "domain": [
+            "PROPOSED",
+            "CONFIRMED",
+            "COMMITTED",
+            "REJECTED",
+            "EXPIRED",
+            "null"
+          ],
+          "sql": "select status from change_request where id = :changeId"
+        }
+      ],
+      "base": {
+        "change": "PROPOSED"
+      },
+      "guards": [
+        {
+          "id": "G1",
+          "when": {
+            "var": "change",
+            "is": "null"
+          },
+          "outcome": "rejected",
+          "code": "NOT_FOUND",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:155"
+        },
+        {
+          "id": "G2",
+          "when": {
+            "var": "change",
+            "not_in": [
+              "PROPOSED",
+              "CONFIRMED"
+            ]
+          },
+          "outcome": "rejected",
+          "code": "CHANGE_NOT_OPEN",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:85-87"
+        }
+      ]
+    },
+    {
+      "id": "CMD-commitChange.QTY",
+      "title": "Commit a confirmed change to the quantity of a line",
+      "handler": "com.example.orders.web.ChangeController#commit",
+      "variant": {
+        "of": "CMD-commitChange",
+        "where": {
+          "change_request.type": "QTY"
+        }
+      },
+      "binding": {
+        "kind": "http",
+        "method": "POST",
+        "path": "/changes/{changeId}/commit"
+      },
+      "target": "order_line",
+      "vars": [
+        {
+          "name": "change",
+          "kind": "state",
+          "domain": [
+            "PROPOSED",
+            "CONFIRMED",
+            "COMMITTED",
+            "REJECTED",
+            "EXPIRED",
+            "null"
+          ],
+          "sql": "select status from change_request where id = :changeId"
+        },
+        {
+          "name": "stale",
+          "kind": "state",
+          "domain": [
+            "false",
+            "true"
+          ],
+          "sql": "select l.revision <> c.line_revision from change_request c join order_line l on l.id = c.line_id join order_header h on h.id = l.header_id where c.id = :changeId",
+          "meaning": {
+            "true": "the line changed after the change was proposed"
+          }
+        },
+        {
+          "name": "order",
+          "kind": "state",
+          "domain": [
+            "DRAFT",
+            "CONFIRMED",
+            "CLOSED",
+            "CANCELLED",
+            "null"
+          ],
+          "sql": "select h.status from change_request c join order_line l on l.id = c.line_id join order_header h on h.id = l.header_id where c.id = :changeId"
+        },
+        {
+          "name": "line",
+          "kind": "state",
+          "domain": [
+            "OPEN",
+            "CLOSED",
+            "CANCELLED",
+            "null"
+          ],
+          "sql": "select l.status from change_request c join order_line l on l.id = c.line_id join order_header h on h.id = l.header_id where c.id = :changeId"
+        },
+        {
+          "name": "new_qty",
+          "kind": "state",
+          "domain": [
+            "ok",
+            "below-one",
+            "below-shipped",
+            "same"
+          ],
+          "sql": "select case when c.new_qty is null or c.new_qty < 1 then 'below-one' when c.new_qty < l.shipped_qty then 'below-shipped' when c.new_qty = l.qty then 'same' else 'ok' end from change_request c join order_line l on l.id = c.line_id join order_header h on h.id = l.header_id where c.id = :changeId",
+          "meaning": {
+            "ok": "the requested quantity is still a change the line allows"
+          }
+        }
+      ],
+      "base": {
+        "change": "CONFIRMED",
+        "stale": "false",
+        "order": "CONFIRMED",
+        "line": "OPEN",
+        "new_qty": "ok"
+      },
+      "guards": [
+        {
+          "id": "G1",
+          "when": {
+            "var": "change",
+            "is": "null"
+          },
+          "outcome": "rejected",
+          "code": "NOT_FOUND",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:155"
+        },
+        {
+          "id": "G2",
+          "when": {
+            "var": "change",
+            "not_in": [
+              "CONFIRMED"
+            ]
+          },
+          "outcome": "rejected",
+          "code": "CHANGE_NOT_CONFIRMED",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:99-101"
+        },
+        {
+          "id": "G3",
+          "when": {
+            "var": "line",
+            "is": "null"
+          },
+          "outcome": "rejected",
+          "code": "NOT_FOUND",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:102-106"
+        },
+        {
+          "id": "G4",
+          "when": {
+            "var": "order",
+            "is": "null"
+          },
+          "outcome": "rejected",
+          "code": "NOT_FOUND",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:104-105"
+        },
+        {
+          "id": "G5",
+          "when": {
+            "var": "stale",
+            "is": "true"
+          },
+          "outcome": "rejected",
+          "code": "STALE_PREVIEW",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:108-111",
+          "because": "the request is set to EXPIRED and that is committed; the refusal is raised afterwards at src/main/java/com/example/orders/web/ChangeController.java:59-61",
+          "writes": [
+            "change_request.status"
+          ]
+        },
+        {
+          "id": "G6",
+          "when": {
+            "var": "order",
+            "not_in": [
+              "DRAFT",
+              "CONFIRMED"
+            ]
+          },
+          "outcome": "rejected",
+          "code": "ORDER_NOT_OPEN",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:36-38"
+        },
+        {
+          "id": "G7",
+          "when": {
+            "var": "line",
+            "not_in": [
+              "OPEN"
+            ]
+          },
+          "outcome": "rejected",
+          "code": "LINE_NOT_OPEN",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:39-41"
+        },
+        {
+          "id": "G8",
+          "when": {
+            "var": "new_qty",
+            "is": "below-one"
+          },
+          "outcome": "rejected",
+          "code": "INVALID_QTY",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:44-46"
+        },
+        {
+          "id": "G9",
+          "when": {
+            "var": "new_qty",
+            "is": "below-shipped"
+          },
+          "outcome": "rejected",
+          "code": "QTY_BELOW_SHIPPED",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:47-49"
+        },
+        {
+          "id": "G10",
+          "when": {
+            "var": "new_qty",
+            "is": "same"
+          },
+          "outcome": "rejected",
+          "code": "NO_CHANGE",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:50-52"
+        }
+      ]
+    },
+    {
+      "id": "CMD-commitChange.DATE",
+      "title": "Commit a confirmed change to the delivery date of a line",
+      "handler": "com.example.orders.web.ChangeController#commit",
+      "variant": {
+        "of": "CMD-commitChange",
+        "where": {
+          "change_request.type": "DATE"
+        }
+      },
+      "binding": {
+        "kind": "http",
+        "method": "POST",
+        "path": "/changes/{changeId}/commit"
+      },
+      "target": "order_line",
+      "vars": [
+        {
+          "name": "change",
+          "kind": "state",
+          "domain": [
+            "PROPOSED",
+            "CONFIRMED",
+            "COMMITTED",
+            "REJECTED",
+            "EXPIRED",
+            "null"
+          ],
+          "sql": "select status from change_request where id = :changeId"
+        },
+        {
+          "name": "stale",
+          "kind": "state",
+          "domain": [
+            "false",
+            "true"
+          ],
+          "sql": "select l.revision <> c.line_revision from change_request c join order_line l on l.id = c.line_id join order_header h on h.id = l.header_id where c.id = :changeId",
+          "meaning": {
+            "true": "the line changed after the change was proposed"
+          }
+        },
+        {
+          "name": "order",
+          "kind": "state",
+          "domain": [
+            "DRAFT",
+            "CONFIRMED",
+            "CLOSED",
+            "CANCELLED",
+            "null"
+          ],
+          "sql": "select h.status from change_request c join order_line l on l.id = c.line_id join order_header h on h.id = l.header_id where c.id = :changeId"
+        },
+        {
+          "name": "line",
+          "kind": "state",
+          "domain": [
+            "OPEN",
+            "CLOSED",
+            "CANCELLED",
+            "null"
+          ],
+          "sql": "select l.status from change_request c join order_line l on l.id = c.line_id join order_header h on h.id = l.header_id where c.id = :changeId"
+        },
+        {
+          "name": "new_date",
+          "kind": "state",
+          "domain": [
+            "ok",
+            "missing",
+            "past",
+            "same"
+          ],
+          "sql": "select case when c.new_date is null then 'missing' when c.new_date < cast(:today as date) then 'past' when not exists (select 1 from schedule_line s where s.line_id = l.id and s.status = 'PLANNED' and s.delivery_date <> c.new_date) then 'same' else 'ok' end from change_request c join order_line l on l.id = c.line_id join order_header h on h.id = l.header_id where c.id = :changeId",
+          "meaning": {
+            "past": "today has moved past the requested date since the change was proposed"
+          }
+        }
+      ],
+      "base": {
+        "change": "CONFIRMED",
+        "stale": "false",
+        "order": "CONFIRMED",
+        "line": "OPEN",
+        "new_date": "ok"
+      },
+      "guards": [
+        {
+          "id": "G1",
+          "when": {
+            "var": "change",
+            "is": "null"
+          },
+          "outcome": "rejected",
+          "code": "NOT_FOUND",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:155"
+        },
+        {
+          "id": "G2",
+          "when": {
+            "var": "change",
+            "not_in": [
+              "CONFIRMED"
+            ]
+          },
+          "outcome": "rejected",
+          "code": "CHANGE_NOT_CONFIRMED",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:99-101"
+        },
+        {
+          "id": "G3",
+          "when": {
+            "var": "line",
+            "is": "null"
+          },
+          "outcome": "rejected",
+          "code": "NOT_FOUND",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:102-106"
+        },
+        {
+          "id": "G4",
+          "when": {
+            "var": "order",
+            "is": "null"
+          },
+          "outcome": "rejected",
+          "code": "NOT_FOUND",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:104-105"
+        },
+        {
+          "id": "G5",
+          "when": {
+            "var": "stale",
+            "is": "true"
+          },
+          "outcome": "rejected",
+          "code": "STALE_PREVIEW",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:108-111",
+          "because": "the request is set to EXPIRED and that is committed; the refusal is raised afterwards at src/main/java/com/example/orders/web/ChangeController.java:59-61",
+          "writes": [
+            "change_request.status"
+          ]
+        },
+        {
+          "id": "G6",
+          "when": {
+            "var": "order",
+            "not_in": [
+              "DRAFT",
+              "CONFIRMED"
+            ]
+          },
+          "outcome": "rejected",
+          "code": "ORDER_NOT_OPEN",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:36-38"
+        },
+        {
+          "id": "G7",
+          "when": {
+            "var": "line",
+            "not_in": [
+              "OPEN"
+            ]
+          },
+          "outcome": "rejected",
+          "code": "LINE_NOT_OPEN",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:39-41"
+        },
+        {
+          "id": "G8",
+          "when": {
+            "var": "new_date",
+            "is": "missing"
+          },
+          "outcome": "rejected",
+          "code": "INVALID_DATE",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:55-57"
+        },
+        {
+          "id": "G9",
+          "when": {
+            "var": "new_date",
+            "is": "past"
+          },
+          "outcome": "rejected",
+          "code": "DATE_IN_PAST",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:58-60"
+        },
+        {
+          "id": "G10",
+          "when": {
+            "var": "new_date",
+            "is": "same"
+          },
+          "outcome": "rejected",
+          "code": "NO_CHANGE",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:61-66"
+        }
+      ]
+    },
+    {
+      "id": "CMD-commitChange.CANCEL",
+      "title": "Commit a confirmed change to cancelling a line",
+      "handler": "com.example.orders.web.ChangeController#commit",
+      "variant": {
+        "of": "CMD-commitChange",
+        "where": {
+          "change_request.type": "CANCEL"
+        }
+      },
+      "binding": {
+        "kind": "http",
+        "method": "POST",
+        "path": "/changes/{changeId}/commit"
+      },
+      "target": "order_line",
+      "vars": [
+        {
+          "name": "change",
+          "kind": "state",
+          "domain": [
+            "PROPOSED",
+            "CONFIRMED",
+            "COMMITTED",
+            "REJECTED",
+            "EXPIRED",
+            "null"
+          ],
+          "sql": "select status from change_request where id = :changeId"
+        },
+        {
+          "name": "stale",
+          "kind": "state",
+          "domain": [
+            "false",
+            "true"
+          ],
+          "sql": "select l.revision <> c.line_revision from change_request c join order_line l on l.id = c.line_id join order_header h on h.id = l.header_id where c.id = :changeId",
+          "meaning": {
+            "true": "the line changed after the change was proposed"
+          }
+        },
+        {
+          "name": "order",
+          "kind": "state",
+          "domain": [
+            "DRAFT",
+            "CONFIRMED",
+            "CLOSED",
+            "CANCELLED",
+            "null"
+          ],
+          "sql": "select h.status from change_request c join order_line l on l.id = c.line_id join order_header h on h.id = l.header_id where c.id = :changeId"
+        },
+        {
+          "name": "line",
+          "kind": "state",
+          "domain": [
+            "OPEN",
+            "CLOSED",
+            "CANCELLED",
+            "null"
+          ],
+          "sql": "select l.status from change_request c join order_line l on l.id = c.line_id join order_header h on h.id = l.header_id where c.id = :changeId"
+        },
+        {
+          "name": "shipped",
+          "kind": "state",
+          "domain": [
+            "false",
+            "true"
+          ],
+          "sql": "select l.shipped_qty > 0 from change_request c join order_line l on l.id = c.line_id join order_header h on h.id = l.header_id where c.id = :changeId"
+        }
+      ],
+      "base": {
+        "change": "CONFIRMED",
+        "stale": "false",
+        "order": "CONFIRMED",
+        "line": "OPEN",
+        "shipped": "false"
+      },
+      "guards": [
+        {
+          "id": "G1",
+          "when": {
+            "var": "change",
+            "is": "null"
+          },
+          "outcome": "rejected",
+          "code": "NOT_FOUND",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:155"
+        },
+        {
+          "id": "G2",
+          "when": {
+            "var": "change",
+            "not_in": [
+              "CONFIRMED"
+            ]
+          },
+          "outcome": "rejected",
+          "code": "CHANGE_NOT_CONFIRMED",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:99-101"
+        },
+        {
+          "id": "G3",
+          "when": {
+            "var": "line",
+            "is": "null"
+          },
+          "outcome": "rejected",
+          "code": "NOT_FOUND",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:102-106"
+        },
+        {
+          "id": "G4",
+          "when": {
+            "var": "order",
+            "is": "null"
+          },
+          "outcome": "rejected",
+          "code": "NOT_FOUND",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:104-105"
+        },
+        {
+          "id": "G5",
+          "when": {
+            "var": "stale",
+            "is": "true"
+          },
+          "outcome": "rejected",
+          "code": "STALE_PREVIEW",
+          "cite": "src/main/java/com/example/orders/service/ChangeService.java:108-111",
+          "because": "the request is set to EXPIRED and that is committed; the refusal is raised afterwards at src/main/java/com/example/orders/web/ChangeController.java:59-61",
+          "writes": [
+            "change_request.status"
+          ]
+        },
+        {
+          "id": "G6",
+          "when": {
+            "var": "order",
+            "not_in": [
+              "DRAFT",
+              "CONFIRMED"
+            ]
+          },
+          "outcome": "rejected",
+          "code": "ORDER_NOT_OPEN",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:36-38"
+        },
+        {
+          "id": "G7",
+          "when": {
+            "var": "line",
+            "not_in": [
+              "OPEN"
+            ]
+          },
+          "outcome": "rejected",
+          "code": "LINE_NOT_OPEN",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:39-41"
+        },
+        {
+          "id": "G8",
+          "when": {
+            "var": "shipped",
+            "is": "true"
+          },
+          "outcome": "rejected",
+          "code": "LINE_ALREADY_SHIPPED",
+          "cite": "src/main/java/com/example/orders/service/ChangeCalculator.java:69-71"
+        }
+      ]
+    },
+    {
+      "id": "CMD-shipment",
+      "title": "A shipment message for one schedule line",
+      "handler": "com.example.orders.messaging.ShipmentListener#onMessage",
+      "binding": {
+        "kind": "bean",
+        "bean": "shipmentListener",
+        "method": "handle",
+        "args": [
+          {
+            "messageId": "${messageId}",
+            "scheduleId": "${scheduleId}"
+          }
+        ]
+      },
+      "binding_note": "onMessage only reads the message body and calls handle (ShipmentListener.java:28-36); the audit calls handle",
+      "target": "schedule_line",
+      "vars": [
+        {
+          "name": "schedule",
+          "kind": "state",
+          "domain": [
+            "PLANNED",
+            "SHIPPED",
+            "CANCELLED",
+            "null"
+          ],
+          "sql": "select status from schedule_line where id = :scheduleId"
+        },
+        {
+          "name": "seen",
+          "kind": "state",
+          "domain": [
+            "false",
+            "true"
+          ],
+          "sql": "select exists(select 1 from processed_message where message_id = :messageId)",
+          "meaning": {
+            "true": "a message with this id has been applied before"
+          }
+        },
+        {
+          "name": "order",
+          "kind": "state",
+          "domain": [
+            "DRAFT",
+            "CONFIRMED",
+            "CLOSED",
+            "CANCELLED",
+            "null"
+          ],
+          "sql": "select h.status from schedule_line s join order_line l on l.id = s.line_id join order_header h on h.id = l.header_id where s.id = :scheduleId"
+        },
+        {
+          "name": "line",
+          "kind": "state",
+          "domain": [
+            "OPEN",
+            "CLOSED",
+            "CANCELLED",
+            "null"
+          ],
+          "sql": "select l.status from schedule_line s join order_line l on l.id = s.line_id join order_header h on h.id = l.header_id where s.id = :scheduleId"
+        }
+      ],
+      "base": {
+        "schedule": "PLANNED",
+        "seen": "false",
+        "order": "CONFIRMED",
+        "line": "OPEN"
+      },
+      "guards": [
+        {
+          "id": "G1",
+          "when": {
+            "var": "schedule",
+            "is": "null"
+          },
+          "outcome": "ignored",
+          "cite": "src/main/java/com/example/orders/service/ShipmentService.java:43-44",
+          "swallowed": "NOT_FOUND",
+          "because": "the listener catches the refusal and only logs it, so the message is dropped: src/main/java/com/example/orders/messaging/ShipmentListener.java:49-53"
+        },
+        {
+          "id": "G2",
+          "when": {
+            "var": "seen",
+            "is": "true"
+          },
+          "outcome": "ignored",
+          "cite": "src/main/java/com/example/orders/service/ShipmentService.java:47-49"
+        },
+        {
+          "id": "G3",
+          "when": {
+            "var": "order",
+            "not_in": [
+              "CONFIRMED"
+            ]
+          },
+          "outcome": "ignored",
+          "cite": "src/main/java/com/example/orders/service/ShipmentService.java:63-65",
+          "swallowed": "ORDER_NOT_CONFIRMED",
+          "because": "the listener catches the refusal and only logs it, so the message is dropped: src/main/java/com/example/orders/messaging/ShipmentListener.java:49-53"
+        },
+        {
+          "id": "G4",
+          "when": {
+            "var": "line",
+            "not_in": [
+              "OPEN"
+            ]
+          },
+          "outcome": "ignored",
+          "cite": "src/main/java/com/example/orders/service/ShipmentService.java:66-68",
+          "swallowed": "LINE_NOT_OPEN",
+          "because": "the listener catches the refusal and only logs it, so the message is dropped: src/main/java/com/example/orders/messaging/ShipmentListener.java:49-53"
+        },
+        {
+          "id": "G5",
+          "when": {
+            "var": "schedule",
+            "not_in": [
+              "PLANNED"
+            ]
+          },
+          "outcome": "ignored",
+          "cite": "src/main/java/com/example/orders/service/ShipmentService.java:69-71",
+          "swallowed": "SCHEDULE_NOT_PLANNED",
+          "because": "the listener catches the refusal and only logs it, so the message is dropped: src/main/java/com/example/orders/messaging/ShipmentListener.java:49-53"
+        }
+      ]
+    },
+    {
+      "id": "CMD-closeCompleted",
+      "title": "Nightly task: close confirmed orders that have no open line",
+      "handler": "com.example.orders.job.OrderClosingJob#closeCompleted",
+      "binding": {
+        "kind": "bean",
+        "bean": "orderClosingJob",
+        "method": "closeCompleted",
+        "args": []
+      },
+      "target": "order_header",
+      "vars": [
+        {
+          "name": "closable",
+          "kind": "state",
+          "domain": [
+            "true",
+            "false"
+          ],
+          "sql": "select exists(select 1 from order_header h where h.status = 'CONFIRMED' and not exists (select 1 from order_line l where l.header_id = h.id and l.status = 'OPEN'))",
+          "meaning": {
+            "true": "some confirmed order has no open line"
+          }
+        }
+      ],
+      "base": {
+        "closable": "true"
+      },
+      "guards": [
+        {
+          "id": "G1",
+          "when": {
+            "var": "closable",
+            "is": "false"
+          },
+          "outcome": "ignored",
+          "cite": "src/main/java/com/example/orders/service/OrderTotals.java:39-43",
+          "because": "the task re-derives every confirmed order; where a line is still open nothing changes"
+        }
+      ]
+    },
+    {
+      "id": "CMD-relayOutbox",
+      "title": "Recurring task: send recorded events",
+      "handler": "com.example.orders.messaging.OutboxRelay#relay",
+      "binding": {
+        "kind": "bean",
+        "bean": "outboxRelay",
+        "method": "relay",
+        "args": []
+      },
+      "target": "outbox_event",
+      "vars": [
+        {
+          "name": "pending",
+          "kind": "state",
+          "domain": [
+            "true",
+            "false"
+          ],
+          "sql": "select exists(select 1 from outbox_event where status = 'NEW')"
+        }
+      ],
+      "base": {
+        "pending": "true"
+      },
+      "guards": [
+        {
+          "id": "G1",
+          "when": {
+            "var": "pending",
+            "is": "false"
+          },
+          "outcome": "ignored",
+          "cite": "src/main/java/com/example/orders/messaging/OutboxRelay.java:31-34"
+        }
+      ]
+    }
+  ]
+}

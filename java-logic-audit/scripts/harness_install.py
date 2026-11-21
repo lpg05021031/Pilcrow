@@ -38,7 +38,8 @@ PLUGIN = os.path.dirname(HERE)
 KIT = os.path.join(PLUGIN, "assets", "auditkit")
 VERSIONS = os.path.join(PLUGIN, "assets", "build", "versions.json")
 AUDIT_POM = "pom-audit.xml"
-RUNS = ("smoke",)
+RUNS = ("smoke", "matrix")
+MODES = ("record", "verify")
 
 
 def load(workspace, system):
@@ -201,7 +202,7 @@ allprojects {
             tasks.withType(Test).configureEach {
                 useJUnitPlatform()
                 filter { includeTestsMatching 'auditkit.*Runner' }
-                ['audit.dir', 'audit.run', 'audit.mode', 'audit.select', 'audit.case'].each { key ->
+                ['audit.dir', 'audit.run', 'audit.mode', 'audit.command', 'audit.case'].each { key ->
                     if (System.getProperty(key) != null) { systemProperty key, System.getProperty(key) }
                 }
             }
@@ -290,13 +291,21 @@ def settings(workspace, system):
     return {"file": rel, "written": True, "todo": todo}
 
 
-def command(workspace, system, run):
+def command(workspace, system, run, mode=None, case=None, only_command=None):
     if run not in RUNS:
         _lib.die("unknown run %r: one of %s" % (run, ", ".join(RUNS)))
+    if mode is not None and mode not in MODES:
+        _lib.die("unknown mode %r: one of %s" % (mode, ", ".join(MODES)))
+    for value in (case, only_command):
+        if value is not None and not re.match(r"^[A-Za-z0-9_.\-]+$", value):
+            _lib.die("not an id: %r" % value)
     entry = build_entry(workspace, system)            # keep the build entry in step with the project's build file
     p = plan(workspace, system)
     adir = os.path.abspath(_lib.audit_dir(workspace, system))
     props = "-Daudit.dir=%s -Daudit.run=%s" % (adir, run)
+    for key, value in (("mode", mode), ("case", case), ("command", only_command)):
+        if value is not None:
+            props += " -Daudit.%s=%s" % (key, value)
     if p["build_tool"] == "maven":
         tool = "./mvnw" if os.path.isfile(os.path.join(workspace, "mvnw")) else "mvn"
         return "%s -B -f %s -Paudit test %s" % (tool, entry["file"], props)
@@ -313,7 +322,11 @@ def main(argv=None):
         s.add_argument("system")
         s.add_argument("--workspace", default=".")
         if name == "command":
-            s.add_argument("--run", required=True)
+            s.add_argument("--run", required=True, help="one of: " + ", ".join(RUNS))
+            s.add_argument("--mode", help="for the matrix: record (compare with what reading the code predicts) "
+                                          "or verify (compare with what is pinned, and fail on a difference)")
+            s.add_argument("--case", help="run one cell, by id")
+            s.add_argument("--only", help="run the cells of one command, by id")
     args = ap.parse_args(argv)
     workspace = os.path.abspath(args.workspace)
 
@@ -334,7 +347,7 @@ def main(argv=None):
         for item in r["todo"]:
             print("  to settle: " + item)
     else:
-        print(command(workspace, args.system, args.run))
+        print(command(workspace, args.system, args.run, args.mode, args.case, args.only))
     return 0
 
 

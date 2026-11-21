@@ -1,5 +1,6 @@
 package auditkit.spring;
 
+import auditkit.AuditClock;
 import auditkit.AuditConfig;
 import auditkit.ConnectionGuard;
 import auditkit.EdgeDoubles;
@@ -35,6 +36,16 @@ public class AuditSpringConfig {
                 BeanDefinitionRegistry registry = (BeanDefinitionRegistry) beanFactory;
                 if (registry.containsBeanDefinition(SCHEDULED_PROCESSOR)) {
                     registry.removeBeanDefinition(SCHEDULED_PROCESSOR);
+                }
+                // Time stands still at the instant harness.json names, wherever the application asks a Clock,
+                // and moves only when a scenario step says so.
+                final java.time.Clock clock = AuditClock.configured();
+                if (clock != null) {
+                    for (String name : beanFactory.getBeanNamesForType(java.time.Clock.class, true, false)) {
+                        registry.removeBeanDefinition(name);
+                        registry.registerBeanDefinition(name, definition(java.time.Clock.class, clock));
+                        AuditClock.markInstalled();
+                    }
                 }
                 for (JsonNode node : AuditConfig.load().nodes("doubles")) {
                     final Class<?> type = AuditContext.forName(node.get("type").asText());

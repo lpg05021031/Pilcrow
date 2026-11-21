@@ -1,0 +1,247 @@
+{
+  "schema": 1,
+  "fixtures": {
+    "draft": {
+      "about": "an order with two open lines: line 1 for 10 in two deliveries (6 and 4), line 2 for 5 in one",
+      "steps": [
+        {
+          "do": "CMD-createOrder",
+          "with": {
+            "orderNo": "A-1",
+            "customerId": "C-1",
+            "lines": [
+              {
+                "sku": "SKU-1",
+                "schedules": [
+                  {
+                    "qty": 6,
+                    "deliveryDate": "${today+10}"
+                  },
+                  {
+                    "qty": 4,
+                    "deliveryDate": "${today+20}"
+                  }
+                ]
+              },
+              {
+                "sku": "SKU-2",
+                "schedules": [
+                  {
+                    "qty": 5,
+                    "deliveryDate": "${today+10}"
+                  }
+                ]
+              }
+            ]
+          },
+          "as": "order"
+        }
+      ]
+    },
+    "confirmed": {
+      "from": "draft",
+      "steps": [
+        {
+          "do": "CMD-confirmOrder",
+          "with": {
+            "orderId": "${order.id}"
+          }
+        }
+      ]
+    },
+    "cancelled": {
+      "from": "draft",
+      "steps": [
+        {
+          "do": "CMD-cancelOrder",
+          "with": {
+            "orderId": "${order.id}"
+          }
+        }
+      ]
+    },
+    "partly-shipped": {
+      "about": "line 1 has shipped 6 of 10 and is still open",
+      "from": "confirmed",
+      "steps": [
+        {
+          "do": "CMD-shipment",
+          "with": {
+            "messageId": "M-1",
+            "scheduleId": "${order.lines[0].schedules[0].id}"
+          }
+        }
+      ]
+    },
+    "line1-closed": {
+      "about": "line 1 shipped in full; line 2 is open, so the order stays confirmed",
+      "from": "partly-shipped",
+      "steps": [
+        {
+          "do": "CMD-shipment",
+          "with": {
+            "messageId": "M-2",
+            "scheduleId": "${order.lines[0].schedules[1].id}"
+          }
+        }
+      ]
+    },
+    "closed": {
+      "about": "every line shipped in full",
+      "from": "line1-closed",
+      "steps": [
+        {
+          "do": "CMD-shipment",
+          "with": {
+            "messageId": "M-3",
+            "scheduleId": "${order.lines[1].schedules[0].id}"
+          }
+        }
+      ]
+    },
+    "line2-closed": {
+      "from": "confirmed",
+      "steps": [
+        {
+          "do": "CMD-shipment",
+          "with": {
+            "messageId": "M-1",
+            "scheduleId": "${order.lines[1].schedules[0].id}"
+          }
+        }
+      ]
+    },
+    "line1-cancelled": {
+      "from": "confirmed",
+      "steps": [
+        {
+          "do": "CMD-proposeChange.CANCEL",
+          "with": {
+            "orderId": "${order.id}",
+            "lineId": "${order.lines[0].id}"
+          },
+          "as": "cancelled"
+        },
+        {
+          "do": "CMD-confirmChange",
+          "with": {
+            "changeId": "${cancelled.id}"
+          }
+        },
+        {
+          "do": "CMD-commitChange.CANCEL",
+          "with": {
+            "changeId": "${cancelled.id}"
+          }
+        }
+      ]
+    },
+    "line2-cancelled": {
+      "from": "confirmed",
+      "steps": [
+        {
+          "do": "CMD-proposeChange.CANCEL",
+          "with": {
+            "orderId": "${order.id}",
+            "lineId": "${order.lines[1].id}"
+          },
+          "as": "cancelled"
+        },
+        {
+          "do": "CMD-confirmChange",
+          "with": {
+            "changeId": "${cancelled.id}"
+          }
+        },
+        {
+          "do": "CMD-commitChange.CANCEL",
+          "with": {
+            "changeId": "${cancelled.id}"
+          }
+        }
+      ]
+    },
+    "change-proposed": {
+      "about": "a proposal to raise line 1 from 10 to 12",
+      "from": "confirmed",
+      "steps": [
+        {
+          "do": "CMD-proposeChange.QTY",
+          "with": {
+            "orderId": "${order.id}",
+            "lineId": "${order.lines[0].id}",
+            "newQty": 12
+          },
+          "as": "change"
+        }
+      ]
+    },
+    "change-confirmed": {
+      "from": "change-proposed",
+      "steps": [
+        {
+          "do": "CMD-confirmChange",
+          "with": {
+            "changeId": "${change.id}"
+          }
+        }
+      ]
+    },
+    "change-committed": {
+      "from": "change-confirmed",
+      "steps": [
+        {
+          "do": "CMD-commitChange.QTY",
+          "with": {
+            "changeId": "${change.id}"
+          }
+        }
+      ]
+    },
+    "change-rejected": {
+      "from": "change-proposed",
+      "steps": [
+        {
+          "do": "CMD-rejectChange",
+          "with": {
+            "changeId": "${change.id}"
+          }
+        }
+      ]
+    },
+    "change-expired": {
+      "about": "the line changed between the proposal and its commit, so the commit expired the request",
+      "from": "change-confirmed",
+      "steps": [
+        {
+          "do": "CMD-proposeChange.DATE",
+          "with": {
+            "orderId": "${order.id}",
+            "lineId": "${order.lines[0].id}",
+            "newDate": "${today+30}"
+          },
+          "as": "other"
+        },
+        {
+          "do": "CMD-confirmChange",
+          "with": {
+            "changeId": "${other.id}"
+          }
+        },
+        {
+          "do": "CMD-commitChange.DATE",
+          "with": {
+            "changeId": "${other.id}"
+          }
+        },
+        {
+          "do": "CMD-commitChange.QTY",
+          "with": {
+            "changeId": "${change.id}"
+          },
+          "may_fail": true
+        }
+      ]
+    }
+  }
+}

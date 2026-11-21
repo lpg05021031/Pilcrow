@@ -1,0 +1,1839 @@
+{
+  "schema": 1,
+  "recipes": {
+    "CMD-createOrder": {
+      "base": {
+        "with": {
+          "orderNo": "A-1",
+          "customerId": "C-1",
+          "lines": [
+            {
+              "sku": "SKU-1",
+              "schedules": [
+                {
+                  "qty": 6,
+                  "deliveryDate": "${today+10}"
+                },
+                {
+                  "qty": 4,
+                  "deliveryDate": "${today+20}"
+                }
+              ]
+            },
+            {
+              "sku": "SKU-2",
+              "schedules": [
+                {
+                  "qty": 5,
+                  "deliveryDate": "${today+10}"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "deviations": {
+        "shape=no-lines": {
+          "with": {
+            "lines": []
+          }
+        },
+        "shape=no-schedules": {
+          "with": {
+            "lines": [
+              {
+                "sku": "SKU-1",
+                "schedules": []
+              }
+            ]
+          }
+        },
+        "shape=zero-qty": {
+          "with": {
+            "lines": [
+              {
+                "sku": "SKU-1",
+                "schedules": [
+                  {
+                    "qty": 0,
+                    "deliveryDate": "${today+10}"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "shape=no-date": {
+          "with": {
+            "lines": [
+              {
+                "sku": "SKU-1",
+                "schedules": [
+                  {
+                    "qty": 1
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "shape=blank-order-no": {
+          "with": {
+            "orderNo": " "
+          }
+        },
+        "shape=blank-customer": {
+          "with": {
+            "customerId": ""
+          }
+        },
+        "shape=blank-sku": {
+          "with": {
+            "lines": [
+              {
+                "sku": "",
+                "schedules": [
+                  {
+                    "qty": 1,
+                    "deliveryDate": "${today+10}"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "order_no_taken=true": {
+          "fixture": "draft"
+        },
+        "delivery_date=today": {
+          "with": {
+            "lines": [
+              {
+                "sku": "SKU-1",
+                "schedules": [
+                  {
+                    "qty": 1,
+                    "deliveryDate": "${today}"
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "delivery_date=past": {
+          "with": {
+            "lines": [
+              {
+                "sku": "SKU-1",
+                "schedules": [
+                  {
+                    "qty": 1,
+                    "deliveryDate": "${today-1}"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      }
+    },
+    "CMD-getOrder": {
+      "base": {
+        "fixture": "draft",
+        "with": {
+          "orderId": "${order.id}"
+        }
+      },
+      "deviations": {
+        "exists=false": {
+          "with": {
+            "orderId": 999999
+          }
+        }
+      }
+    },
+    "CMD-confirmOrder": {
+      "base": {
+        "fixture": "draft",
+        "with": {
+          "orderId": "${order.id}"
+        }
+      },
+      "deviations": {
+        "order=CONFIRMED": {
+          "fixture": "confirmed"
+        },
+        "order=CLOSED": {
+          "fixture": "closed",
+          "also": {
+            "has_open_line": "false"
+          }
+        },
+        "order=CANCELLED": {
+          "fixture": "cancelled",
+          "also": {
+            "has_open_line": "false"
+          }
+        },
+        "order=null": {
+          "with": {
+            "orderId": 999999
+          },
+          "also": {
+            "has_open_line": "false"
+          }
+        },
+        "has_open_line=false": {
+          "unreachable": "a draft order whose lines are all cancelled is set to CANCELLED in the same transaction (OrderTotals.java:35-38), and a line can close only after a shipment, which a draft order refuses (ShipmentService.java:63-65)"
+        }
+      }
+    },
+    "CMD-cancelOrder": {
+      "base": {
+        "fixture": "draft",
+        "with": {
+          "orderId": "${order.id}"
+        }
+      },
+      "deviations": {
+        "order=CONFIRMED": {
+          "fixture": "confirmed"
+        },
+        "order=CLOSED": {
+          "fixture": "closed",
+          "also": {
+            "shipped": "true"
+          }
+        },
+        "order=CANCELLED": {
+          "fixture": "cancelled"
+        },
+        "order=null": {
+          "with": {
+            "orderId": 999999
+          }
+        },
+        "shipped=true": {
+          "fixture": "partly-shipped",
+          "also": {
+            "order": "CONFIRMED"
+          }
+        }
+      }
+    },
+    "CMD-previewChange.QTY": {
+      "base": {
+        "fixture": "partly-shipped",
+        "with": {
+          "orderId": "${order.id}",
+          "lineId": "${order.lines[0].id}",
+          "newQty": 12
+        }
+      },
+      "deviations": {
+        "order=DRAFT": {
+          "fixture": "draft"
+        },
+        "order=CLOSED": {
+          "fixture": "closed",
+          "also": {
+            "line": "CLOSED"
+          }
+        },
+        "order=CANCELLED": {
+          "fixture": "cancelled",
+          "also": {
+            "line": "CANCELLED"
+          }
+        },
+        "order=null": {
+          "with": {
+            "orderId": 999999
+          },
+          "also": {
+            "line": "null"
+          }
+        },
+        "line=CLOSED": {
+          "fixture": "line1-closed"
+        },
+        "line=CANCELLED": {
+          "fixture": "line1-cancelled"
+        },
+        "line=null": {
+          "with": {
+            "lineId": 999999
+          }
+        },
+        "new_qty=decrease": {
+          "with": {
+            "newQty": 8
+          }
+        },
+        "new_qty=at-shipped": {
+          "with": {
+            "newQty": 6
+          }
+        },
+        "new_qty=same": {
+          "with": {
+            "newQty": 10
+          }
+        },
+        "new_qty=below-shipped": {
+          "with": {
+            "newQty": 5
+          }
+        },
+        "new_qty=below-one": {
+          "with": {
+            "newQty": 0
+          }
+        },
+        "new_qty=missing": {
+          "with": {
+            "newQty": null
+          }
+        }
+      }
+    },
+    "CMD-proposeChange.QTY": {
+      "same_as": "CMD-previewChange.QTY"
+    },
+    "CMD-previewChange.DATE": {
+      "base": {
+        "fixture": "confirmed",
+        "with": {
+          "orderId": "${order.id}",
+          "lineId": "${order.lines[1].id}",
+          "newDate": "${today+30}"
+        }
+      },
+      "deviations": {
+        "order=DRAFT": {
+          "fixture": "draft"
+        },
+        "order=CLOSED": {
+          "fixture": "closed",
+          "also": {
+            "line": "CLOSED",
+            "new_date": "same"
+          }
+        },
+        "order=CANCELLED": {
+          "fixture": "cancelled",
+          "also": {
+            "line": "CANCELLED",
+            "new_date": "same"
+          }
+        },
+        "order=null": {
+          "with": {
+            "orderId": 999999
+          },
+          "also": {
+            "line": "null"
+          }
+        },
+        "line=CLOSED": {
+          "fixture": "line2-closed",
+          "also": {
+            "new_date": "same"
+          }
+        },
+        "line=CANCELLED": {
+          "fixture": "line2-cancelled",
+          "also": {
+            "new_date": "same"
+          }
+        },
+        "line=null": {
+          "with": {
+            "lineId": 999999
+          }
+        },
+        "new_date=today": {
+          "with": {
+            "newDate": "${today}"
+          }
+        },
+        "new_date=same": {
+          "with": {
+            "newDate": "${today+10}"
+          }
+        },
+        "new_date=past": {
+          "with": {
+            "newDate": "${today-1}"
+          }
+        },
+        "new_date=missing": {
+          "with": {
+            "newDate": null
+          }
+        }
+      }
+    },
+    "CMD-proposeChange.DATE": {
+      "same_as": "CMD-previewChange.DATE"
+    },
+    "CMD-previewChange.CANCEL": {
+      "base": {
+        "fixture": "confirmed",
+        "with": {
+          "orderId": "${order.id}",
+          "lineId": "${order.lines[0].id}"
+        }
+      },
+      "deviations": {
+        "order=DRAFT": {
+          "fixture": "draft"
+        },
+        "order=CLOSED": {
+          "fixture": "closed",
+          "also": {
+            "line": "CLOSED",
+            "shipped": "true"
+          }
+        },
+        "order=CANCELLED": {
+          "fixture": "cancelled",
+          "also": {
+            "line": "CANCELLED"
+          }
+        },
+        "order=null": {
+          "with": {
+            "orderId": 999999
+          },
+          "also": {
+            "line": "null",
+            "shipped": "null"
+          }
+        },
+        "line=CLOSED": {
+          "fixture": "line1-closed",
+          "also": {
+            "shipped": "true"
+          }
+        },
+        "line=CANCELLED": {
+          "fixture": "line1-cancelled"
+        },
+        "line=null": {
+          "with": {
+            "lineId": 999999
+          },
+          "also": {
+            "shipped": "null"
+          }
+        },
+        "shipped=true": {
+          "fixture": "partly-shipped"
+        }
+      }
+    },
+    "CMD-proposeChange.CANCEL": {
+      "same_as": "CMD-previewChange.CANCEL"
+    },
+    "CMD-getChange": {
+      "base": {
+        "fixture": "change-proposed",
+        "with": {
+          "changeId": "${change.id}"
+        }
+      },
+      "deviations": {
+        "exists=false": {
+          "with": {
+            "changeId": 999999
+          }
+        }
+      }
+    },
+    "CMD-confirmChange": {
+      "base": {
+        "fixture": "change-proposed",
+        "with": {
+          "changeId": "${change.id}"
+        }
+      },
+      "deviations": {
+        "change=CONFIRMED": {
+          "fixture": "change-confirmed"
+        },
+        "change=COMMITTED": {
+          "fixture": "change-committed"
+        },
+        "change=REJECTED": {
+          "fixture": "change-rejected"
+        },
+        "change=EXPIRED": {
+          "fixture": "change-expired"
+        },
+        "change=null": {
+          "with": {
+            "changeId": 999999
+          }
+        }
+      }
+    },
+    "CMD-rejectChange": {
+      "base": {
+        "fixture": "change-proposed",
+        "with": {
+          "changeId": "${change.id}"
+        }
+      },
+      "deviations": {
+        "change=CONFIRMED": {
+          "fixture": "change-confirmed"
+        },
+        "change=COMMITTED": {
+          "fixture": "change-committed"
+        },
+        "change=REJECTED": {
+          "fixture": "change-rejected"
+        },
+        "change=EXPIRED": {
+          "fixture": "change-expired"
+        },
+        "change=null": {
+          "with": {
+            "changeId": 999999
+          }
+        }
+      }
+    },
+    "CMD-commitChange.QTY": {
+      "base": {
+        "fixture": "confirmed",
+        "steps": [
+          {
+            "do": "CMD-proposeChange.QTY",
+            "with": {
+              "orderId": "${order.id}",
+              "lineId": "${order.lines[0].id}",
+              "newQty": 12
+            },
+            "as": "change"
+          },
+          {
+            "do": "CMD-confirmChange",
+            "with": {
+              "changeId": "${change.id}"
+            }
+          }
+        ],
+        "with": {
+          "changeId": "${change.id}"
+        }
+      },
+      "deviations": {
+        "change=PROPOSED": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.QTY",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}",
+                "newQty": 12
+              },
+              "as": "change"
+            }
+          ]
+        },
+        "change=COMMITTED": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.QTY",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}",
+                "newQty": 12
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            },
+            {
+              "do": "CMD-commitChange.QTY",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            }
+          ],
+          "also": {
+            "stale": "true",
+            "new_qty": "same"
+          }
+        },
+        "change=REJECTED": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.QTY",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}",
+                "newQty": 12
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-rejectChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            }
+          ]
+        },
+        "change=EXPIRED": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.QTY",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}",
+                "newQty": 12
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            },
+            {
+              "do": "CMD-proposeChange.DATE",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}",
+                "newDate": "${today+40}"
+              },
+              "as": "other"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${other.id}"
+              }
+            },
+            {
+              "do": "CMD-commitChange.DATE",
+              "with": {
+                "changeId": "${other.id}"
+              }
+            },
+            {
+              "do": "CMD-commitChange.QTY",
+              "with": {
+                "changeId": "${change.id}"
+              },
+              "may_fail": true
+            }
+          ],
+          "also": {
+            "stale": "true"
+          }
+        },
+        "change=null": {
+          "with": {
+            "changeId": 999999
+          },
+          "also": {
+            "stale": "null",
+            "order": "null",
+            "line": "null",
+            "new_qty": "null"
+          }
+        },
+        "stale=true": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.QTY",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}",
+                "newQty": 12
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            },
+            {
+              "do": "CMD-proposeChange.DATE",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}",
+                "newDate": "${today+40}"
+              },
+              "as": "other"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${other.id}"
+              }
+            },
+            {
+              "do": "CMD-commitChange.DATE",
+              "with": {
+                "changeId": "${other.id}"
+              }
+            }
+          ]
+        },
+        "order=DRAFT": {
+          "fixture": "draft"
+        },
+        "order=CLOSED": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.QTY",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}",
+                "newQty": 12
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            },
+            {
+              "do": "CMD-shipment",
+              "with": {
+                "messageId": "M-1",
+                "scheduleId": "${order.lines[0].schedules[0].id}"
+              }
+            },
+            {
+              "do": "CMD-shipment",
+              "with": {
+                "messageId": "M-2",
+                "scheduleId": "${order.lines[0].schedules[1].id}"
+              }
+            },
+            {
+              "do": "CMD-shipment",
+              "with": {
+                "messageId": "M-3",
+                "scheduleId": "${order.lines[1].schedules[0].id}"
+              }
+            }
+          ],
+          "also": {
+            "stale": "true",
+            "line": "CLOSED"
+          }
+        },
+        "order=CANCELLED": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.QTY",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}",
+                "newQty": 12
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            },
+            {
+              "do": "CMD-cancelOrder",
+              "with": {
+                "orderId": "${order.id}"
+              }
+            }
+          ],
+          "also": {
+            "stale": "true",
+            "line": "CANCELLED"
+          }
+        },
+        "order=null": {
+          "unreachable": "a change request always names a line and the line an order (foreign keys in V1__init.sql:13 and 37), and nothing deletes either"
+        },
+        "line=CLOSED": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.QTY",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}",
+                "newQty": 12
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            },
+            {
+              "do": "CMD-shipment",
+              "with": {
+                "messageId": "M-1",
+                "scheduleId": "${order.lines[0].schedules[0].id}"
+              }
+            },
+            {
+              "do": "CMD-shipment",
+              "with": {
+                "messageId": "M-2",
+                "scheduleId": "${order.lines[0].schedules[1].id}"
+              }
+            }
+          ],
+          "also": {
+            "stale": "true"
+          }
+        },
+        "line=CANCELLED": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.QTY",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}",
+                "newQty": 12
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            },
+            {
+              "do": "CMD-proposeChange.CANCEL",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}"
+              },
+              "as": "other"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${other.id}"
+              }
+            },
+            {
+              "do": "CMD-commitChange.CANCEL",
+              "with": {
+                "changeId": "${other.id}"
+              }
+            }
+          ],
+          "also": {
+            "stale": "true"
+          }
+        },
+        "line=null": {
+          "unreachable": "a change request always names a line and the line an order (foreign keys in V1__init.sql:13 and 37), and nothing deletes either"
+        },
+        "new_qty=below-one": {
+          "unreachable": "a request with such a value is refused when it is proposed (ChangeCalculator.java:44-46), and the stored value never changes"
+        },
+        "new_qty=below-shipped": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.QTY",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}",
+                "newQty": 5
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            },
+            {
+              "do": "CMD-shipment",
+              "with": {
+                "messageId": "M-1",
+                "scheduleId": "${order.lines[0].schedules[0].id}"
+              }
+            }
+          ],
+          "also": {
+            "stale": "true"
+          }
+        },
+        "new_qty=same": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.QTY",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}",
+                "newQty": 12
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            },
+            {
+              "do": "CMD-proposeChange.QTY",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}",
+                "newQty": 12
+              },
+              "as": "other"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${other.id}"
+              }
+            },
+            {
+              "do": "CMD-commitChange.QTY",
+              "with": {
+                "changeId": "${other.id}"
+              }
+            }
+          ],
+          "also": {
+            "stale": "true"
+          }
+        }
+      }
+    },
+    "CMD-commitChange.DATE": {
+      "base": {
+        "fixture": "confirmed",
+        "steps": [
+          {
+            "do": "CMD-proposeChange.DATE",
+            "with": {
+              "orderId": "${order.id}",
+              "lineId": "${order.lines[1].id}",
+              "newDate": "${today+30}"
+            },
+            "as": "change"
+          },
+          {
+            "do": "CMD-confirmChange",
+            "with": {
+              "changeId": "${change.id}"
+            }
+          }
+        ],
+        "with": {
+          "changeId": "${change.id}"
+        }
+      },
+      "deviations": {
+        "change=PROPOSED": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.DATE",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[1].id}",
+                "newDate": "${today+30}"
+              },
+              "as": "change"
+            }
+          ]
+        },
+        "change=COMMITTED": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.DATE",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[1].id}",
+                "newDate": "${today+30}"
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            },
+            {
+              "do": "CMD-commitChange.DATE",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            }
+          ],
+          "also": {
+            "stale": "true",
+            "new_date": "same"
+          }
+        },
+        "change=REJECTED": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.DATE",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[1].id}",
+                "newDate": "${today+30}"
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-rejectChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            }
+          ]
+        },
+        "change=EXPIRED": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.DATE",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[1].id}",
+                "newDate": "${today+30}"
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            },
+            {
+              "do": "CMD-proposeChange.DATE",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[1].id}",
+                "newDate": "${today+40}"
+              },
+              "as": "other"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${other.id}"
+              }
+            },
+            {
+              "do": "CMD-commitChange.DATE",
+              "with": {
+                "changeId": "${other.id}"
+              }
+            },
+            {
+              "do": "CMD-commitChange.DATE",
+              "with": {
+                "changeId": "${change.id}"
+              },
+              "may_fail": true
+            }
+          ],
+          "also": {
+            "stale": "true"
+          }
+        },
+        "change=null": {
+          "with": {
+            "changeId": 999999
+          },
+          "also": {
+            "stale": "null",
+            "order": "null",
+            "line": "null",
+            "new_date": "null"
+          }
+        },
+        "stale=true": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.DATE",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[1].id}",
+                "newDate": "${today+30}"
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            },
+            {
+              "do": "CMD-proposeChange.DATE",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[1].id}",
+                "newDate": "${today+40}"
+              },
+              "as": "other"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${other.id}"
+              }
+            },
+            {
+              "do": "CMD-commitChange.DATE",
+              "with": {
+                "changeId": "${other.id}"
+              }
+            }
+          ]
+        },
+        "order=DRAFT": {
+          "fixture": "draft"
+        },
+        "order=CLOSED": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.DATE",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[1].id}",
+                "newDate": "${today+30}"
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            },
+            {
+              "do": "CMD-shipment",
+              "with": {
+                "messageId": "M-1",
+                "scheduleId": "${order.lines[0].schedules[0].id}"
+              }
+            },
+            {
+              "do": "CMD-shipment",
+              "with": {
+                "messageId": "M-2",
+                "scheduleId": "${order.lines[0].schedules[1].id}"
+              }
+            },
+            {
+              "do": "CMD-shipment",
+              "with": {
+                "messageId": "M-3",
+                "scheduleId": "${order.lines[1].schedules[0].id}"
+              }
+            }
+          ],
+          "also": {
+            "stale": "true",
+            "line": "CLOSED",
+            "new_date": "same"
+          }
+        },
+        "order=CANCELLED": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.DATE",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[1].id}",
+                "newDate": "${today+30}"
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            },
+            {
+              "do": "CMD-cancelOrder",
+              "with": {
+                "orderId": "${order.id}"
+              }
+            }
+          ],
+          "also": {
+            "stale": "true",
+            "line": "CANCELLED",
+            "new_date": "same"
+          }
+        },
+        "order=null": {
+          "unreachable": "a change request always names a line and the line an order (foreign keys in V1__init.sql:13 and 37), and nothing deletes either"
+        },
+        "line=CLOSED": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.DATE",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[1].id}",
+                "newDate": "${today+30}"
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            },
+            {
+              "do": "CMD-shipment",
+              "with": {
+                "messageId": "M-1",
+                "scheduleId": "${order.lines[1].schedules[0].id}"
+              }
+            }
+          ],
+          "also": {
+            "stale": "true",
+            "new_date": "same"
+          }
+        },
+        "line=CANCELLED": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.DATE",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[1].id}",
+                "newDate": "${today+30}"
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            },
+            {
+              "do": "CMD-proposeChange.CANCEL",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[1].id}"
+              },
+              "as": "other"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${other.id}"
+              }
+            },
+            {
+              "do": "CMD-commitChange.CANCEL",
+              "with": {
+                "changeId": "${other.id}"
+              }
+            }
+          ],
+          "also": {
+            "stale": "true",
+            "new_date": "same"
+          }
+        },
+        "line=null": {
+          "unreachable": "a change request always names a line and the line an order (foreign keys in V1__init.sql:13 and 37), and nothing deletes either"
+        },
+        "new_date=missing": {
+          "unreachable": "a request with such a value is refused when it is proposed (ChangeCalculator.java:55-57), and the stored value never changes"
+        },
+        "new_date=past": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.DATE",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[1].id}",
+                "newDate": "${today+1}"
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            },
+            {
+              "set_today": "${today+2}"
+            }
+          ]
+        },
+        "new_date=same": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.DATE",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[1].id}",
+                "newDate": "${today+30}"
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            },
+            {
+              "do": "CMD-proposeChange.DATE",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[1].id}",
+                "newDate": "${today+30}"
+              },
+              "as": "other"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${other.id}"
+              }
+            },
+            {
+              "do": "CMD-commitChange.DATE",
+              "with": {
+                "changeId": "${other.id}"
+              }
+            }
+          ],
+          "also": {
+            "stale": "true"
+          }
+        }
+      }
+    },
+    "CMD-commitChange.CANCEL": {
+      "base": {
+        "fixture": "confirmed",
+        "steps": [
+          {
+            "do": "CMD-proposeChange.CANCEL",
+            "with": {
+              "orderId": "${order.id}",
+              "lineId": "${order.lines[0].id}"
+            },
+            "as": "change"
+          },
+          {
+            "do": "CMD-confirmChange",
+            "with": {
+              "changeId": "${change.id}"
+            }
+          }
+        ],
+        "with": {
+          "changeId": "${change.id}"
+        }
+      },
+      "deviations": {
+        "change=PROPOSED": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.CANCEL",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}"
+              },
+              "as": "change"
+            }
+          ]
+        },
+        "change=COMMITTED": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.CANCEL",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}"
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            },
+            {
+              "do": "CMD-commitChange.CANCEL",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            }
+          ],
+          "also": {
+            "stale": "true",
+            "line": "CANCELLED"
+          }
+        },
+        "change=REJECTED": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.CANCEL",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}"
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-rejectChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            }
+          ]
+        },
+        "change=EXPIRED": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.CANCEL",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}"
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            },
+            {
+              "do": "CMD-proposeChange.DATE",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}",
+                "newDate": "${today+40}"
+              },
+              "as": "other"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${other.id}"
+              }
+            },
+            {
+              "do": "CMD-commitChange.DATE",
+              "with": {
+                "changeId": "${other.id}"
+              }
+            },
+            {
+              "do": "CMD-commitChange.CANCEL",
+              "with": {
+                "changeId": "${change.id}"
+              },
+              "may_fail": true
+            }
+          ],
+          "also": {
+            "stale": "true"
+          }
+        },
+        "change=null": {
+          "with": {
+            "changeId": 999999
+          },
+          "also": {
+            "stale": "null",
+            "order": "null",
+            "line": "null",
+            "shipped": "null"
+          }
+        },
+        "stale=true": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.CANCEL",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}"
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            },
+            {
+              "do": "CMD-proposeChange.DATE",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}",
+                "newDate": "${today+40}"
+              },
+              "as": "other"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${other.id}"
+              }
+            },
+            {
+              "do": "CMD-commitChange.DATE",
+              "with": {
+                "changeId": "${other.id}"
+              }
+            }
+          ]
+        },
+        "order=DRAFT": {
+          "fixture": "draft"
+        },
+        "order=CLOSED": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.CANCEL",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}"
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            },
+            {
+              "do": "CMD-shipment",
+              "with": {
+                "messageId": "M-1",
+                "scheduleId": "${order.lines[0].schedules[0].id}"
+              }
+            },
+            {
+              "do": "CMD-shipment",
+              "with": {
+                "messageId": "M-2",
+                "scheduleId": "${order.lines[0].schedules[1].id}"
+              }
+            },
+            {
+              "do": "CMD-shipment",
+              "with": {
+                "messageId": "M-3",
+                "scheduleId": "${order.lines[1].schedules[0].id}"
+              }
+            }
+          ],
+          "also": {
+            "stale": "true",
+            "line": "CLOSED",
+            "shipped": "true"
+          }
+        },
+        "order=CANCELLED": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.CANCEL",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}"
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            },
+            {
+              "do": "CMD-cancelOrder",
+              "with": {
+                "orderId": "${order.id}"
+              }
+            }
+          ],
+          "also": {
+            "stale": "true",
+            "line": "CANCELLED"
+          }
+        },
+        "order=null": {
+          "unreachable": "a change request always names a line and the line an order (foreign keys in V1__init.sql:13 and 37), and nothing deletes either"
+        },
+        "line=CLOSED": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.CANCEL",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}"
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            },
+            {
+              "do": "CMD-shipment",
+              "with": {
+                "messageId": "M-1",
+                "scheduleId": "${order.lines[0].schedules[0].id}"
+              }
+            },
+            {
+              "do": "CMD-shipment",
+              "with": {
+                "messageId": "M-2",
+                "scheduleId": "${order.lines[0].schedules[1].id}"
+              }
+            }
+          ],
+          "also": {
+            "stale": "true",
+            "shipped": "true"
+          }
+        },
+        "line=CANCELLED": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.CANCEL",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}"
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            },
+            {
+              "do": "CMD-proposeChange.CANCEL",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}"
+              },
+              "as": "other"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${other.id}"
+              }
+            },
+            {
+              "do": "CMD-commitChange.CANCEL",
+              "with": {
+                "changeId": "${other.id}"
+              }
+            }
+          ],
+          "also": {
+            "stale": "true"
+          }
+        },
+        "line=null": {
+          "unreachable": "a change request always names a line and the line an order (foreign keys in V1__init.sql:13 and 37), and nothing deletes either"
+        },
+        "shipped=true": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.CANCEL",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}"
+              },
+              "as": "change"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${change.id}"
+              }
+            },
+            {
+              "do": "CMD-shipment",
+              "with": {
+                "messageId": "M-1",
+                "scheduleId": "${order.lines[0].schedules[0].id}"
+              }
+            }
+          ],
+          "also": {
+            "stale": "true"
+          }
+        }
+      }
+    },
+    "CMD-shipment": {
+      "base": {
+        "fixture": "confirmed",
+        "with": {
+          "messageId": "M-1",
+          "scheduleId": "${order.lines[0].schedules[0].id}"
+        }
+      },
+      "deviations": {
+        "schedule=SHIPPED": {
+          "fixture": "partly-shipped",
+          "with": {
+            "messageId": "M-9"
+          }
+        },
+        "schedule=CANCELLED": {
+          "steps": [
+            {
+              "do": "CMD-proposeChange.QTY",
+              "with": {
+                "orderId": "${order.id}",
+                "lineId": "${order.lines[0].id}",
+                "newQty": 6
+              },
+              "as": "other"
+            },
+            {
+              "do": "CMD-confirmChange",
+              "with": {
+                "changeId": "${other.id}"
+              }
+            },
+            {
+              "do": "CMD-commitChange.QTY",
+              "with": {
+                "changeId": "${other.id}"
+              }
+            }
+          ],
+          "with": {
+            "scheduleId": "${order.lines[0].schedules[1].id}"
+          }
+        },
+        "schedule=null": {
+          "with": {
+            "scheduleId": 999999
+          },
+          "also": {
+            "order": "null",
+            "line": "null"
+          }
+        },
+        "seen=true": {
+          "fixture": "partly-shipped",
+          "with": {
+            "scheduleId": "${order.lines[0].schedules[1].id}"
+          }
+        },
+        "order=DRAFT": {
+          "fixture": "draft"
+        },
+        "order=CLOSED": {
+          "fixture": "closed",
+          "with": {
+            "messageId": "M-9"
+          },
+          "also": {
+            "line": "CLOSED",
+            "schedule": "SHIPPED"
+          }
+        },
+        "order=CANCELLED": {
+          "fixture": "cancelled",
+          "also": {
+            "line": "CANCELLED",
+            "schedule": "CANCELLED"
+          }
+        },
+        "line=CLOSED": {
+          "fixture": "line1-closed",
+          "with": {
+            "messageId": "M-9"
+          },
+          "also": {
+            "schedule": "SHIPPED"
+          }
+        },
+        "line=CANCELLED": {
+          "fixture": "line1-cancelled",
+          "also": {
+            "schedule": "CANCELLED"
+          }
+        },
+        "line=null": {
+          "unreachable": "a schedule line always belongs to a line (foreign key in V1__init.sql:27); a schedule line that does not exist is the case schedule=null"
+        },
+        "order=null": {
+          "unreachable": "a line always belongs to an order (foreign key in V1__init.sql:13); a schedule line that does not exist is the case schedule=null"
+        }
+      }
+    },
+    "CMD-closeCompleted": {
+      "base": {
+        "unreachable": "every command that closes or cancels a line re-derives the order in the same transaction (ChangeService.java:116, ShipmentService.java:79, OrderService.java:99-100), so a confirmed order never keeps only closed or cancelled lines"
+      },
+      "deviations": {
+        "closable=false": {
+          "fixture": "confirmed",
+          "with": {}
+        }
+      }
+    },
+    "CMD-relayOutbox": {
+      "base": {
+        "fixture": "confirmed",
+        "with": {}
+      },
+      "deviations": {
+        "pending=false": {
+          "fixture": null
+        }
+      }
+    }
+  }
+}
