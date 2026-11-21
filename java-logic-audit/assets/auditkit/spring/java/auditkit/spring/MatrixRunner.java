@@ -185,7 +185,11 @@ class MatrixRunner {
             out.add("nothing was expected for this cell");
             return out;
         }
-        if (!expected.path("outcome").asText("").toUpperCase().equals(o.kind)) {
+        if (expected.hasNonNull("outcome") && !expected.get("outcome").asText().toUpperCase().equals(o.kind)) {
+            out.add("outcome");
+        }
+        // A person may have decided only what must not happen ("this must not end in an error").
+        if (expected.hasNonNull("outcome_not") && expected.get("outcome_not").asText().toUpperCase().equals(o.kind)) {
             out.add("outcome");
         }
         if (expected.has("code")) {

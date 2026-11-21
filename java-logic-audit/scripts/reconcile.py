@@ -38,6 +38,7 @@ SCHEMA = 1
 PINNED_PARTS = ("outcome", "code", "after", "written", "created", "deleted", "published", "external")
 EXECUTED = ("MATCH", "MISMATCH")
 KEPT_SOURCES = ("decision", "spec")          # a pin from one of these is never replaced by an observation
+NOTES = ("source", "run", "left_out", "accepted_by", "decision", "observed")      # about the pin, not part of it
 
 
 def load_runs(adir):
@@ -166,6 +167,9 @@ def reconcile(workspace, system, pin=False, repin=False):
             entry["run"] = hit["run"]
         row = hit["row"] if hit else {}
         observed = row.get("observed") or {}
+        if row.get("result") in EXECUTED:
+            entry["outcome"] = (observed.get("outcome") or "").lower()
+            entry["code"] = observed.get("code")
         if state == "differ":
             differences.append(dict(base, static=cell["static"], given=cell["given"],
                                     observed={k: observed.get(k) for k in ("outcome", "code", "status", "error")
@@ -230,18 +234,20 @@ def reconcile(workspace, system, pin=False, repin=False):
                 continue
             if old is None:
                 report["new"] += 1
-            elif {k: old.get(k) for k in now} == now and not (set(old) - set(now) - {"source", "run", "left_out"}):
+            elif {k: old.get(k) for k in now} == now and not (set(old) - set(now) - set(NOTES)):
                 report["same"] += 1
                 continue
             else:
                 report["changed"].append({"cell": cell["id"], "key": cell["key"],
-                                          "parts": sorted(k for k in set(now) | (set(old) - {"source", "run", "left_out"})
+                                          "parts": sorted(k for k in set(now) | (set(old) - set(NOTES))
                                                           if old.get(k) != now.get(k))})
                 if not repin:
                     continue
             entry = dict(now, source="observed", run=hit["run"])
             if skip:
                 entry["left_out"] = skip
+            if old and old.get("accepted_by"):
+                entry["accepted_by"] = old["accepted_by"]
             known[cell["key"]] = entry
         pinned["schema"] = SCHEMA
         _lib.write_json(path, pinned)
