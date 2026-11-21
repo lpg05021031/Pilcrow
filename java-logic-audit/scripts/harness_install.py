@@ -38,6 +38,7 @@ PLUGIN = os.path.dirname(HERE)
 KIT = os.path.join(PLUGIN, "assets", "auditkit")
 VERSIONS = os.path.join(PLUGIN, "assets", "build", "versions.json")
 AUDIT_POM = "pom-audit.xml"
+DEFAULT_CLOCK = "2030-03-15T10:00:00Z"    # a fixed "now" for every case: a Friday, far from a month or year end
 RUNS = ("smoke", "matrix")
 MODES = ("record", "verify")
 
@@ -275,6 +276,8 @@ def settings(workspace, system):
     todo.append("rejections: the exception classes that mean a business refusal (the ones mapped to 4xx)")
     todo.append("base_data: SQL files with reference data that must exist before any command, if any")
     todo.append("properties: application properties the harness must set, if any")
+    todo.append("clock: keep the instant below when the application reads time from a java.time.Clock bean; "
+                "set it to null when the business rules need a particular date to start from, and name that date")
     draft = {
         "application": apps[0] if len(apps) == 1 else None,
         "database": {"source": None, "permission": None},
@@ -285,6 +288,7 @@ def settings(workspace, system):
         "http_doubles": [],
         "rejections": [],
         "base_data": [],
+        "clock": DEFAULT_CLOCK,
         "todo": todo,
     }
     _lib.write_json(path, draft)

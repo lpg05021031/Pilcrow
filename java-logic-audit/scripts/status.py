@@ -27,11 +27,11 @@ STAGES = [
     ("preflight",    ["PREFLIGHT.md", "profile.json", "manifest.json"],     ["INTENT.md"]),
     ("harness",      ["harness.json", "facts/"],                            ["profile.json"]),
     ("map",          ["map.json", "MAP.md"],                                ["facts/"]),
-    ("model",        ["model_result.json", "model/", "MODEL.md"],           ["map.json"]),
-    ("characterize", ["recipes.json", "questions.json"],                    ["model/"]),
+    ("model",        ["model_result.json", "model/commands.json", "MODEL.md"], ["map.json"]),
+    ("characterize", ["model/recipes.json", "model/reconciliation.json", "questions.json"], ["model/commands.json"]),
     ("review",       ["DECISIONS.json"],                                    []),
-    ("verify",       ["runs/"],                                             ["model/", "DECISIONS.json"]),
-    ("spec",         ["spec/clauses.json", "SPEC_TRACE.md"],                ["model/"]),
+    ("verify",       ["runs/"],                                             ["model/commands.json", "DECISIONS.json"]),
+    ("spec",         ["spec/clauses.json", "SPEC_TRACE.md"],                ["model/commands.json"]),
     ("assure",       ["ASSURANCE.md"],                                      ["runs/"]),
     ("report",       ["VERDICT.md", "REPORT.html"],                         ["runs/", "DECISIONS.json", "spec/"]),
 ]
@@ -124,21 +124,29 @@ def inventory(adir, has_prd):
 
 
 def review_counts(adir):
+    """How many flagged questions still wait. A question is settled by the latest decision for its
+    fingerprint when that decision says intended or not intended; "unsure" leaves it open."""
     questions = _lib.read_json(os.path.join(adir, "questions.json"), {})
     decisions = _lib.read_json(os.path.join(adir, "DECISIONS.json"), {})
     qs = questions.get("questions", []) if isinstance(questions, dict) else []
-    ds = decisions.get("decisions", {}) if isinstance(decisions, dict) else {}
-    decided = set()
+    ds = decisions.get("decisions", []) if isinstance(decisions, dict) else []
     if isinstance(ds, dict):
-        decided = {d.get("question") for d in ds.values() if isinstance(d, dict)}
-    elif isinstance(ds, list):
-        decided = {d.get("question") for d in ds if isinstance(d, dict)}
+        ds = list(ds.values())
+    settled = {}
+    for d in ds:
+        if isinstance(d, dict):
+            for key in (d.get("fingerprint"), d.get("question")):
+                if key:
+                    settled[key] = d.get("answer", "intended") in ("intended", "not-intended")
     flagged = [q for q in qs if isinstance(q, dict) and q.get("flagged")]
+
+    def is_open(q):
+        return not (settled.get(q.get("fingerprint")) or settled.get(q.get("id")))
     return {
         "questions": len(qs),
         "flagged": len(flagged),
-        "flagged_open": sum(1 for q in flagged if q.get("id") not in decided),
-        "decided": len(decided),
+        "flagged_open": sum(1 for q in flagged if is_open(q)),
+        "decided": sum(1 for v in settled.values() if v),
     }
 
 

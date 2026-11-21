@@ -378,9 +378,10 @@ class Status(unittest.TestCase):
         self.put("map.json", age=70)
         self.put("MAP.md", "x", age=70)
         self.put("model_result.json", age=60)
-        self.put("model/entities.json", age=60)
+        self.put("model/commands.json", age=60)
         self.put("MODEL.md", "x", age=60)
-        self.put("recipes.json", age=50)
+        self.put("model/recipes.json", age=50)
+        self.put("model/reconciliation.json", age=50)
 
     def test_open_flagged_questions_wait_for_a_person(self):
         self._through_characterize()

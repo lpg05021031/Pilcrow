@@ -23,6 +23,11 @@ public final class Sql {
      * Booleans come back as "true" or "false" whatever the engine calls them.
      */
     public static String scalar(String sql, JsonNode params) {
+        // The queries come from a model written after reading untrusted code: only a single SELECT is run.
+        String shape = sql == null ? "" : sql.trim().toLowerCase(java.util.Locale.ROOT);
+        if (!shape.startsWith("select") || shape.indexOf(';') >= 0) {
+            throw new IllegalArgumentException("a variable's query must be one SELECT: " + sql);
+        }
         List<String> names = new ArrayList<String>();
         Matcher m = NAMED.matcher(sql);
         StringBuffer jdbc = new StringBuffer();

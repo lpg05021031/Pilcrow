@@ -48,6 +48,7 @@ belong in this file at all: the harness takes them from the environment.
                       "status": 200, "body": { "unitPrice": "10.00" } } ],
   "rejections": ["com.example.BusinessException"],
   "base_data": [],
+  "clock": "2030-03-15T10:00:00Z",
   "todo": []
 }
 ```
@@ -99,6 +100,13 @@ regular expression matched against the whole URL), `example` (one concrete URL t
 A request no rule covers is answered 501 and marked unconfigured, so a missing rule shows up later as a
 harness gap, not as a wrong result. If the application makes HTTP calls through something other than
 `RestClient` built from the shared builder, say so and put it in `todo`.
+
+**`clock`** — the instant that is "now" for the application in every case, so that rules about dates give
+the same result on every run, and so that a case can let days pass between two commands. It takes effect
+only when the application reads time from a `java.time.Clock` bean; code that calls `LocalDate.now()` or
+`new Date()` directly is not affected, and you list the places you see doing that in `todo`
+(`file:line`), because their cases cannot be made repeatable. Keep the drafted instant unless the
+application's rules need a start date in a particular period.
 
 **`rejections`** — the exception classes that mean "the application refuses this on purpose", as opposed
 to a defect. This list decides whether an outcome is read as a refusal or as an error. Find them where
