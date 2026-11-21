@@ -264,6 +264,32 @@ class Verify(unittest.TestCase):
         self.write("profile.json", {"capabilities": {"matches_production": "confirmed", "database": {"real_engine": False}}})
         self.assertIn("stand-in", self.items()["concurrency"]["detail"])
 
+    def test_the_report_lays_out_what_the_files_say_and_treats_their_text_as_text(self):
+        import build_report
+        self.write("INTENT.md", "x")
+        with open(os.path.join(self.adir, "INTENT.md"), "w") as f:
+            f.write("---\nsystem: s\ngoal: audit\nbase_commit: abc123\n---\n")
+        rows = [self.fault_row("FAULT-0001-WRITE-1", ["atomicity"])]
+        for _ in range(3):
+            self.run_of("faults", rows)
+        qs = build_questions.build(self.tmp, "s")["questions"]
+        qs[0]["observed"] = "<script>alert(1)</script> said the code"
+        self.write("questions.json", {"questions": qs})
+        judge.findings(self.tmp, "s")
+        self.write("model/reconciliation.json", dict(RECONCILIATION, counts={"agree": 1, "total": 1},
+                                                     cells={"CELL-0001": {"state": "agree", "run": "matrix-29990101-000001"}}))
+        judge.verdict(self.tmp, "s")
+        path = build_report.build(self.tmp, "s")
+        with open(path) as f:
+            page = f.read()
+        self.assertIn("Audit of the business logic: s", page)
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", page)
+        self.assertNotIn("<script>", page)
+        self.assertIn("abc123", page)
+        self.assertIn("reviewed in part", page)
+        self.assertIn("Sign-off", page)
+        self.assertNotIn("http://", page.replace("http://www.w3.org", ""))      # no outside resources
+
     def test_the_canary_item(self):
         self.assertIn("no canary run", self.items()["canary"]["detail"])
         def canary(*results, **more):
