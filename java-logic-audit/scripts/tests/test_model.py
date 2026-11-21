@@ -128,6 +128,17 @@ class Model(unittest.TestCase):
         self.assertEqual(brief["fixture_prefix"], "OrderController")
         self.assertTrue(brief["time_can_be_moved"])
 
+    def test_a_group_with_many_cases_gets_its_recipes_in_parts_and_variants_stay_together(self):
+        def variant(root, name, values):
+            return cancel(id="CMD-%s.%s" % (root, name), variant={"of": "CMD-" + root},
+                          vars=[{"name": "order", "kind": "state", "domain": ["OPEN"] + ["V%d" % i for i in range(values)],
+                                 "sql": "select status from orders where id = :orderId"}], guards=[])
+        own = [variant("a", "X", 20), variant("a", "Y", 20), variant("b", "X", 30), cancel(id="CMD-c")]
+        parts = model_brief.recipe_parts(own)
+        self.assertEqual([[c["id"] for c in p] for p in parts],
+                         [["CMD-a.X", "CMD-a.Y"], ["CMD-b.X", "CMD-c"]])
+        self.assertEqual(len(model_brief.recipe_parts([cancel()])), 1)
+
     # ---- the store
 
     def test_replies_are_collected_in_name_order_and_fixes_replace(self):
