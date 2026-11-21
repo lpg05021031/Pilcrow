@@ -264,6 +264,45 @@ class Verify(unittest.TestCase):
         self.write("profile.json", {"capabilities": {"matches_production": "confirmed", "database": {"real_engine": False}}})
         self.assertIn("stand-in", self.items()["concurrency"]["detail"])
 
+    def test_the_canary_item(self):
+        self.assertIn("no canary run", self.items()["canary"]["detail"])
+        def canary(*results, **more):
+            self.write("assure/canary.json", dict({"complete": True, "mutants": [
+                {"id": "CAN-%03d" % i, "file": "src/A.java", "lines": "%d-%d" % (i, i), "result": r,
+                 "guards": [{"command": "CMD-ship", "id": "G%d" % i}]} for i, r in enumerate(results, 1)]}, **more))
+            return self.items()["canary"]
+        item = canary("killed", "killed", "expected", "no-mutant")
+        self.assertEqual(item["result"], "pass")
+        self.assertIn("2 checks removed one at a time", item["detail"])
+        self.assertIn("1 more decide no reachable case", item["detail"])
+        item = canary("killed", "survived")
+        self.assertEqual((item["result"], "A.java:2-2" in item["detail"]), ("fail", True))
+        self.assertEqual(canary("killed", complete=False)["result"], "could-not-pass")
+        self.assertEqual(canary("killed", "invalid")["result"], "could-not-pass")
+        self.assertEqual(canary("no-mutant")["result"], "pass")
+        # a check of another entity's command does not count here
+        self.write("assure/canary.json", {"complete": True, "mutants": [
+            {"id": "CAN-001", "file": "src/B.java", "lines": "1-1", "result": "survived", "guards": [{"command": "CMD-other", "id": "G1"}]}]})
+        self.assertEqual(self.items()["canary"]["result"], "pass")
+
+    def test_removing_a_throw(self):
+        import canary as canary_mod
+        text = "class A {\n  void a(int q) {\n    if (q < 1) {\n      throw new IllegalArgumentException(\n          \"bad\");\n    }\n    go();\n  }\n}\n"
+        out = canary_mod.without_throw(text, 3, 5)
+        self.assertNotIn("throw new", out)
+        self.assertIn("if (q < 1) {", out)
+        self.assertIn("go();", out)
+        self.assertIsNone(canary_mod.without_throw(text, 7, 7))             # the cited lines hold no throw
+        places = canary_mod.places(
+            [{"id": "CMD-a", "guards": [{"id": "G1", "outcome": "rejected", "code": "X", "cite": "src/A.java:3-5"},
+                                         {"id": "G2", "outcome": "rejected", "cite": "src/A.java:9"}]},
+             {"id": "CMD-b", "guards": [{"id": "G1", "outcome": "rejected", "code": "X", "cite": "src/A.java:3-5"}]}],
+            {"commands": {"CMD-a": {"guards_without_cell": ["G1", "G2"]}, "CMD-b": {"guards_without_cell": []}}})
+        by = {p["first"]: p for p in places}
+        self.assertEqual(len(by[3]["guards"]), 2)
+        self.assertFalse(by[3]["all_never_decide"])       # CMD-b's cases can reach it
+        self.assertTrue(by[9]["all_never_decide"])
+
     # ---- the verdict's items 3 and 4
 
     def items(self):

@@ -510,7 +510,6 @@ ITEMS = (
     ("canary", "Guard canary"),
     ("source", "Source untouched"),
 )
-NOT_IN_THIS_VERSION = "this check is not in this version of the plugin yet"
 VERDICT_RULES = """An entity is **reviewed completely** when all seven items pass, **reviewed in part** when none fails
 but at least one could not pass, and **reviewed insufficiently** when any item fails.
 
@@ -530,7 +529,10 @@ but at least one could not pass, and **reviewed insufficiently** when any item f
    run on the real engine, confirmed to match production. Could not pass when no such run was made, no
    pair involved the entity, the engine is a stand-in or unconfirmed. Fails when a pair could not be run.
    Only pairs within the budget are explored, with one stop each; the item says how many.
-6. Guard canary — not in this version: it could not pass.
+6. Guard canary — passes when every check of the entity's commands that refuses with a `throw` was removed
+   in a copy of the code, one at a time, and a pinned case noticed each time; a check the model already
+   says decides no reachable case may go unnoticed. Fails when the removal of a check goes unnoticed
+   otherwise. Could not pass when no canary run was made, it covered only part, or a copy did not build.
 7. Source untouched — passes when every source, test and build file matches the manifest. Fails otherwise.
 
 Open questions and the missing sign-off belong to people; they are listed and do not change the verdict."""
@@ -571,6 +573,27 @@ def faults_item(own_cells, commands, rows, run, caps):
     if broken:
         return ("could-not-pass", "%d failure points injected, %d could not be run" % (points, broken))
     return ("pass", "%d failure points injected in %d commands" % (points, len(changing)))
+
+
+def canary_item(own_cells, canary):
+    if not isinstance(canary, dict):
+        return ("could-not-pass", "no canary run has been made")
+    commands = {c["command"] for c in own_cells}
+    mine = [m for m in canary.get("mutants", []) if any(g.get("command") in commands for g in m.get("guards", []))]
+    count = {}
+    for m in mine:
+        count[m["result"]] = count.get(m["result"], 0) + 1
+    survived = ["%s:%s" % (m["file"].split("/")[-1], m["lines"]) for m in mine if m["result"] == "survived"]
+    if survived:
+        return ("fail", "checks whose removal no pinned case notices: " + ", ".join(survived))
+    if not canary.get("complete"):
+        return ("could-not-pass", "the canary run covered only some of the checks")
+    if count.get("invalid"):
+        return ("could-not-pass", "%d checks could not be removed without breaking the build" % count["invalid"])
+    if not count.get("killed") and not count.get("expected"):
+        return ("pass", "no check of these commands refuses with a statement that can be removed")
+    extra = "; %d more decide no reachable case, as the model says" % count["expected"] if count.get("expected") else ""
+    return ("pass", "%d checks removed one at a time, each noticed by a pinned case%s" % (count.get("killed", 0), extra))
 
 
 def races_item(own_cells, rows, run, caps):
@@ -615,6 +638,7 @@ def verdict(workspace, system):
     rules = (_lib.read_json(os.path.join(model, "invariants.json"), {}) or {}).get("invariants", [])
     caps = (_lib.read_json(os.path.join(adir, "profile.json"), {}) or {}).get("capabilities") or {}
     seq_run, fault_run = latest_run(adir, "sequences"), latest_run(adir, "faults")
+    canary = _lib.read_json(os.path.join(adir, "assure", "canary.json"))
     race_run = latest_run(adir, "races")
     race_rows = read_run(race_run)[0] if race_run else {}
     seq_rows = read_run(seq_run)[0] if seq_run else {}
@@ -648,7 +672,7 @@ def verdict(workspace, system):
         items["invariants"] = invariants_item(target, rules, seq_rows, seq_run)
         items["faults"] = faults_item(own, commands, fault_rows, fault_run, caps)
         items["concurrency"] = races_item(own, race_rows, race_run, caps)
-        items["canary"] = ("could-not-pass", NOT_IN_THIS_VERSION)
+        items["canary"] = canary_item(own, canary)
         items["source"] = ("pass", "%d files match the manifest" % source["tracked"]) if source["status"] == "untouched" else (
             "fail", "%d added, %d removed, %d modified since the manifest" % (
                 len(source["added"]), len(source["removed"]), len(source["modified"])))
